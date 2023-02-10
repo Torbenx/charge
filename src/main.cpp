@@ -1,9 +1,29 @@
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fmt/format.h>
 #include <string_view>
 
+void verify_failed(const char* condStr, const char* file, const char* func, int line) {
+    fmt::println("VERIFY failed {}:{}: {}(): {}", file, line, func, condStr);
+}
+
+constexpr bool verify(bool cond, const char* condStr, const char* file, const char* func, int line) {
+    if (!cond)
+        verify_failed(condStr, file, func, line);
+    return cond;
+}
+template<typename L, typename R>
+constexpr bool expect_eq(const L& lhs, const R& rhs, const char* lhsStr, const char* rhsStr, const char* file, const char* func, int line) {
+    bool b = lhs != rhs;
+    if (b)
+        fmt::println("EXPECT failed {}:{}: {}(): {} {{{}}} == {} {{{}}}", file, line, func, lhsStr, lhs, rhsStr, rhs);
+    return b;
+}
+
+#define VERIFY(cond) verify(cond, #cond, __FILE__, __func__, __LINE__)
+#define EXPECT_EQ(lhs, rhs) expect_eq(lhs, rhs, #lhs, #rhs, __FILE__, __func__, __LINE__)
 
 enum TokenKind : uint32_t {
     Invalid,
@@ -68,6 +88,7 @@ enum TokenKind : uint32_t {
 
     Comma, // ,
     Point, // .
+    Colon, // :
     SemiColon, // ;
     Word, // abc123
     COUNT,
@@ -118,12 +139,20 @@ constexpr const char* toShortString(TokenKind kind) {
     case GreaterGreaterEqual: return ">>=";
     case Comma: return ",";
     case Point: return ".";
+    case Colon: return ":";
     case SemiColon: return ";";
     case Word: return "word";
     default: return "????";
     }
     // clang-format on
 }
+template<>
+struct fmt::formatter<TokenKind> : formatter<string_view> {
+    template<typename FormatContext>
+    auto format(TokenKind kind, FormatContext& ctx) const {
+        return formatter<string_view>::format(toShortString(kind), ctx);
+    }
+};
 
 constexpr bool isOperator(TokenKind kind) {
     return kind >= TokenKind::FirstOperator && kind <= TokenKind::LastBinaryOp;
@@ -135,6 +164,10 @@ constexpr bool isUnaryOp(TokenKind kind) {
 
 constexpr bool isBinaryOp(TokenKind kind) {
     return kind >= TokenKind::FirstBinaryOp && kind <= TokenKind::LastBinaryOp;
+}
+
+constexpr bool isGoodToken(TokenKind kind) {
+    return kind >= 1 && kind < TokenKind::COUNT && kind != TokenKind::DummyOp1 && kind != TokenKind::DummyOp2;
 }
 
 enum TokenFlags : uint32_t {
@@ -169,7 +202,7 @@ struct CharacterTable {
         constexpr Entry(u8 c, T value)
             : first(c), last(c), value(value) { }
     };
-    std::array<T, 256> table = {};
+    std::array<T, 128> table = {};
     constexpr CharacterTable(T defaultValue, std::initializer_list<Entry> entries) {
         table.fill(defaultValue);
         for (Entry e : entries) {
@@ -216,6 +249,7 @@ struct HeadInfoTable {
             { '~', { Tilde, SingleCharacterOnly } },
             { ',', { Comma, SingleCharacterOnly } },
             { '.', { Point, SingleCharacterOnly } },
+            { ':', { Colon, SingleCharacterOnly } },
             { ';', { SemiColon, SingleCharacterOnly } },
 
             { '^', { Hat, SubsequentEqual } },
@@ -291,14 +325,28 @@ uint32_t Lexer::nextNonWhiteSpace(uint32_t pos) const {
 }
 
 void Lexer::advance() {
+    auto makeInvalidToken = [this]() {
+        lastToken = {
+            .start = pos(),
+            .length = 0,
+            .kind = TokenKind::Invalid,
+            .flags = 0,
+        };
+    };
+
     u8 head = buffer[pos()];
+    if (head >= 128) [[unlikely]] {
+        return makeInvalidToken();
+    }
     auto headInfo = HeadInfoTable::table[head];
 
     uint32_t end = pos() + 1;
     uint32_t kind = headInfo.kind();
     if (kind == TokenKind::Invalid) [[unlikely]] {
+        return makeInvalidToken();
+    }
 
-    } else if (kind == TokenKind::Word) {
+    if (kind == TokenKind::Word) {
         while (isBulkWordChar(buffer[end])) {
             end += 1;
         }
@@ -330,7 +378,7 @@ void Lexer::advance() {
             end += hasRepeat ? 1 : 0;
 
             bool hasEqual = buffer[end] == '=';
-            kind += hasRepeat ? 2 : 0;
+            kind += hasEqual ? 2 : 0;
             end += hasEqual ? 1 : 0;
             break;
         }
@@ -362,8 +410,25 @@ void dumpTokens(Lexer& lex) {
     }
 }
 
+void test() {
+    auto testSingleToken = [](TokenKind kind) {
+        Lexer lex((const u8*)toShortString(kind));
+        lex.advance();
+        EXPECT_EQ((TokenKind)lex.currentToken().kind, kind);
+        lex.advance();
+        EXPECT_EQ((TokenKind)lex.currentToken().kind, TokenKind::Invalid);
+    };
+
+    for (uint32_t kind = 1; kind < TokenKind::COUNT; kind++) {
+        if (isGoodToken((TokenKind)kind))
+            testSingleToken((TokenKind)kind);
+    }
+}
+
 int main() {
-    const char* text = "afd_2 +*+= b ==  - - c";
-    Lexer lex((const u8*)text);
-    dumpTokens(lex);
+    test();
+
+    Lexer lex((const u8*)"ö");
+    lex.advance();
+    EXPECT_EQ((TokenKind)lex.currentToken().kind, TokenKind::Invalid);
 }
