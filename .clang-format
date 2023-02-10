@@ -1,0 +1,5 @@
+---
+BasedOnStyle: Webkit
+BreakBeforeBraces: Attach
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+SpaceAfterTemplateKeyword: false
