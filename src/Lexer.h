@@ -48,12 +48,12 @@ enum class TokenKind : uint32_t {
     Equal, // =
     PlusEqual, // +=
     MinusEqual, // -=
-    HatEqual, // ^=
-    PercentEqual, // %=
     AmpEqual, // &=
-    SlashEqual, // /=
-    StarEqual, // *=
+    HatEqual, // ^=
     VertEqual, // |=
+    StarEqual, // *=
+    SlashEqual, // /=
+    PercentEqual, // %=
     LessLessEqual, // <<=
     GreaterGreaterEqual, // >>=
     // end assign
@@ -134,11 +134,6 @@ struct Token {
     constexpr bool hasTrailingWhiteSpace() const {
         return flags & HasTrailingWhiteSpace;
     }
-
-    constexpr bool isUnaryOp() { return ::isUnaryOp(kind()); }
-    constexpr bool isBinaryOp() { return ::isBinaryOp(kind()); }
-    constexpr bool isAssignOp() { return ::isAssignOp(kind()); }
-    constexpr bool isGoodToken() { return ::isGoodToken(kind()); }
 };
 
 struct SourceBuffer {

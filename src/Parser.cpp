@@ -83,6 +83,23 @@ int precedenceOf(BinaryOperator op) {
         default: VERIFY_NOT_REACHED();
     }
 }
+const char* toShortString(AssignOperator op) {
+    using enum AssignOperator;
+    switch (op) {
+    case None: return "=";
+    case Plus: return "+=";
+    case Minus: return "-=";
+    case BitwiseAnd: return "&=";
+    case BitwiseXor: return "^=";
+    case BitwiseOr: return "|=";
+    case Multiply: return "*=";
+    case Divide: return "/=";
+    case Remainder: return "%=";
+    case ShiftLeft: return "<<=";
+    case ShiftRight: return ">>=";
+    default: return "???";
+    }
+}
 // clang-format on
 
 uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
@@ -126,7 +143,7 @@ void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
 
 void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // unary op
-    if (tok.isUnaryOp()) {
+    if (isUnaryOp(tok.kind())) {
         auto& e = makeSet<UnaryOperatorExpr>(out, tokenKindToUnaryOp(tok.kind()));
         advance();
         return parseLeafExpr(e.subExpr);
@@ -188,6 +205,9 @@ void Parser::parseBinaryExpr(Ptr<Expr>& out, int precedence) {
     Ptr<Expr> left;
     parseLeafExpr(left);
 
+    parseBinaryExprAfterFirstExpr(out, left, precedence);
+}
+void Parser::parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int precedence) {
     while (isBinaryOp(tok.kind())) {
         BinaryOperator op2 = tokenKindToBinaryOp(tok.kind());
         int precedence2 = precedenceOf(op2);
@@ -197,12 +217,14 @@ void Parser::parseBinaryExpr(Ptr<Expr>& out, int precedence) {
         // op2 must be evaluated first
         advance();
         Ptr<Expr> right;
-        parseBinaryExpr(right, precedence2);
+        parseLeafExpr(right);
+
+        parseBinaryExprAfterFirstExpr(right, right, precedence2);
         left = make<BinaryOperatorExpr>(op2, left, right);
     }
 
     out = left;
-}
+} 
 
 void Parser::parseArgumentContext(Arguments& out) {
     TokenKind leftKind = tok.kind();
@@ -239,6 +261,40 @@ void Parser::parseArgument(Arguments::Arg& out) {
     parseBinaryExpr(out.source);
 }
 
+void Parser::parseStmt(Ptr<Stmt>& out) {
+    if (tok.kind() == TokenKind::SemiColon) {
+        // stray semicolon -> ignore
+        fmt::println("ignoreing ';'");
+        advance();
+        return;
+    }
+    if (tok.kind() == TokenKind::LeftBrace) {
+        // this is nested context not an ImmediateBraceExpr!
+        VERIFY_NOT_REACHED();
+        return;
+    }
+    if (tok.kind() == TokenKind::Word) {
+        // check keywords...
+    }
+    Ptr<Expr> expr;
+    parseLeafExpr(expr);
+    if (isAssignOp(tok.kind())) {
+        // AssignStmt
+        auto& stmt = makeSet<AssignStmt>(out, tokenKindToAssignOp(tok.kind()), expr);
+        advance();
+        parseBinaryExpr(stmt.right);
+        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+        advance();
+        return;
+    }
+    // expression statement
+    parseBinaryExprAfterFirstExpr(expr, expr);
+    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+    advance();
+    out = expr;
+}
+
+namespace {
 struct Name {
     std::string_view name = {};
     bool withdot = false;
@@ -251,7 +307,7 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     std::ostream& out;
     std::vector<char> prefix = {};
 
-    void dump(Ptr<Expr> e, Name name) {
+    void dump(Ptr<Node> e, Name name) {
         if (name.name.length() > 0) {
             if (name.withdot)
                 out << '.';
@@ -264,7 +320,7 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         dispatchChildren(e, {});
     }
 
-    void child(Ptr<Expr> e, IsLastChild last, Name name) {
+    void child(Ptr<Node> e, IsLastChild last, Name name) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
             out << "'-";
@@ -308,9 +364,13 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     void visitBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
     }
+    void visitAssignStmt(Ptr<AssignStmt> e) {
+        out << '\'' << toShortString(at(e).op) << '\'';
+    }
 };
+}
 
-void dump(STContext context, Ptr<Expr> e) {
+void dump(STContext context, Ptr<Node> e) {
     STDumper dumper { context, {}, {}, std::cout };
     dumper.dump(e, {});
 }

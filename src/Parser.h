@@ -11,14 +11,14 @@ struct Ptr {
     uint32_t offsetAlign4 = 0;
 
     Ptr() = default;
-    Ptr(uint32_t off)
+    explicit Ptr(uint32_t off)
         : offsetAlign4(off) { }
     template<typename E2>
     explicit Ptr(const Ptr<E2>& p) requires std::derived_from<E, E2>
         : offsetAlign4(p.offsetAlign4) { }
 
     template<typename E2>
-    operator Ptr<E2>() requires std::derived_from<E, E2> { return { offsetAlign4 }; }
+    operator Ptr<E2>() requires std::derived_from<E, E2> { return Ptr<E2> { offsetAlign4 }; }
 };
 
 template<typename T>
@@ -48,7 +48,8 @@ struct Word {
     callback(ImmediateBraceExpr) \
     callback(CallExpr) \
     callback(IdentifierExpr) \
-    callback(BinaryOperatorExpr)
+    callback(BinaryOperatorExpr) \
+    callback(AssignStmt)
 // clang-format on
 
 #define NODE_KIND(kind) kind,
@@ -58,10 +59,18 @@ enum class NodeKind : uint8_t {
 };
 #undef NODE_KIND
 
-struct Expr {
+struct Node {
     NodeKind kind = NodeKind::Invalid;
-    Expr(NodeKind kind)
+    Node(NodeKind kind)
         : kind(kind) { }
+};
+struct Stmt : Node {
+    Stmt(NodeKind kind)
+        : Node(kind) { }
+};
+struct Expr : Stmt {
+    Expr(NodeKind kind)
+        : Stmt(kind) { }
 };
 
 struct Arguments {
@@ -185,6 +194,36 @@ constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
     return (v + alignment - 1) & ~(alignment - 1);
 }
 
+enum class AssignOperator : uint8_t {
+    // this must match the order of TokenKind
+    // TODO: test this
+    None, // =
+    Plus, // +=
+    Minus, // -=
+    BitwiseAnd, // &=
+    BitwiseXor, // ^=
+    BitwiseOr, // |=
+    Multiply, // *=
+    Divide, // /=
+    Remainder, // %=
+    ShiftLeft, // <<=
+    ShiftRight, // >>=
+
+    COUNT,
+};
+constexpr AssignOperator tokenKindToAssignOp(TokenKind kind) {
+    VERIFY(isAssignOp(kind));
+    return (AssignOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstAssignOp));
+}
+const char* toShortString(AssignOperator op);
+struct AssignStmt : Stmt {
+    AssignOperator op;
+    Ptr<Expr> left;
+    Ptr<Expr> right;
+    AssignStmt(AssignOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
+        : Stmt(NodeKind::AssignStmt), op(op), left(left), right(right) { }
+};
+
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
 
@@ -252,11 +291,15 @@ struct STChildren {
         impl()->child(Iat(e).left, IsLastChild::No, args...);
         impl()->child(Iat(e).right, IsLastChild::Yes, args...);
     }
+    void childrenAssignStmt(Ptr<AssignStmt> e, Args... args) {
+        impl()->child(Iat(e).left, IsLastChild::No, args...);
+        impl()->child(Iat(e).right, IsLastChild::Yes, args...);
+    }
 
-    void child(Ptr<Expr>, IsLastChild, Args...) { }
+    void child(Ptr<Node>, IsLastChild, Args...) { }
     void child(Arguments, IsLastChild, Args...) { }
 
-    void dispatchChildren(Ptr<Expr> e, Args... args) {
+    void dispatchChildren(Ptr<Node> e, Args... args) {
 #define NODE_KIND(kind)                                \
     case NodeKind::kind:                               \
         impl()->children##kind((Ptr<kind>)e, args...); \
@@ -283,7 +326,7 @@ struct STVisitor {
     ENUMERATE_NODE_KINDS(NODE_KIND)
 #undef NODE_KIND
 
-    void dispatchVisit(Ptr<Expr> e, Args... args) {
+    void dispatchVisit(Ptr<Node> e, Args... args) {
 #define NODE_KIND(kind)                             \
     case NodeKind::kind:                            \
         impl()->visit##kind((Ptr<kind>)e, args...); \
@@ -302,11 +345,11 @@ struct STVisitor {
 struct Parser : Lexer, STStorage {
     using Lexer::Lexer;
 
-    uint32_t storageEndAlign4 = 0;
+    uint32_t storageEndAlign4 = 16;
     uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
     template<typename T>
     Ptr<T> allocate(uint32_t count = 1) {
-        return { allocate(alignof(T), sizeof(T), count) };
+        return Ptr<T> { allocate(alignof(T), sizeof(T), count) };
     }
 
     Word asWord(Token token) const {
@@ -359,12 +402,14 @@ struct Parser : Lexer, STStorage {
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
+    void parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int precedence = 100);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
+    void parseStmt(Ptr<Stmt>& out);
 
     STContext context() {
         return { *this, buffer };
     }
 };
 
-void dump(STContext context, Ptr<Expr> e);
+void dump(STContext context, Ptr<Node> e);

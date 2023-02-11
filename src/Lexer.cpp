@@ -155,6 +155,7 @@ Lexer::Lexer(SourceBuffer buffer, bool dump)
     uint32_t firstToken = nextNonWhiteSpace(0);
     m_position = firstToken;
     tok.flags |= firstToken > 0 ? TokenFlags::HasLeadingWhiteSpace : 0;
+    advance();
 }
 
 uint32_t Lexer::nextNonWhiteSpace(uint32_t pos) const {
