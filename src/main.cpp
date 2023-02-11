@@ -28,5 +28,6 @@ int main() {
     par.advance();
     par.parseLeafExpr(e);
     fmt::println("used storage {} * 4 bytes", par.storageEndAlign4);
-    par.dumpTree(e);
+    
+    dump(par.context(), e);
 }

@@ -162,7 +162,7 @@ constexpr bool isWhiteSpace(u8 c) {
 
 }
 
-Lexer::Lexer(const u8* buffer, bool dump)
+Lexer::Lexer(SourceBuffer buffer, bool dump)
     : buffer(buffer), dumpTokens(dump) {
     uint32_t firstToken = nextNonWhiteSpace(0);
     m_position = firstToken;
@@ -253,12 +253,12 @@ void Lexer::advance() {
     };
     m_position = spaceEnd;
     if (dumpTokens)
-        fmt::println("'{:4}': \"{}\"", toShortString(tok.kind()), sourceCode(tok));
+        fmt::println("'{:4}': \"{}\"", toShortString(tok.kind()), buffer.sourceCode(tok));
 }
 
 void dumpTokens(Lexer& lex) {
     do {
         lex.advance();
-        fmt::println("'{:4}': \"{}\"", toShortString(lex.tok.kind()), lex.sourceCode(lex.tok));
+        fmt::println("'{:4}': \"{}\"", toShortString(lex.tok.kind()), lex.buffer.sourceCode(lex.tok));
     } while (lex.tok.kind() != TokenKind::Invalid);
 }

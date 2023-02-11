@@ -1,4 +1,46 @@
 #include "Parser.h"
+#include <iostream>
+#include <vector>
+
+const char* toString(NodeKind kind) {
+#define NODE_KIND(kind)  \
+    case NodeKind::kind: \
+        return #kind;
+
+    switch (kind) {
+    case NodeKind::Invalid:
+        return "Invalid";
+        ENUMERATE_NODE_KINDS(NODE_KIND)
+    default:
+        return "???";
+    }
+
+#undef NODE_KIND
+};
+
+const char* toShortString(UnaryOperator op) {
+    using enum UnaryOperator;
+    switch (op) {
+    case BitwiseNot:
+        return "~";
+    case PreInc:
+        return "++x";
+    case PreDec:
+        return "--x";
+    case LogicalNot:
+        return "!";
+    case Plus:
+        return "+";
+    case Minus:
+        return "-";
+    case PostInc:
+        return "x++";
+    case PostDec:
+        return "x--";
+    default:
+        return "???";
+    }
+}
 
 uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
     uint32_t sizeAlign4 = alignmentCeil(sizeof(uint32_t), itemCount * itemSize) / sizeof(uint32_t);
@@ -26,7 +68,6 @@ void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
     }
 }
 
-// trailing binary operators do not belong to us
 void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // unary op
     if (tok.isOperator()) {
@@ -69,7 +110,6 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
 
 void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
     if (tok.kind() == TokenKind::LeftParen || tok.kind() == TokenKind::LeftAngle) {
-        TokenKind kind = tok.kind();
         auto& e = makeSet<CallExpr>(base, tok.kind() == TokenKind::LeftParen ? CallKind::Paren : CallKind::Angle, base);
         parseArgumentContext(e.args);
     } else if (tok.kind() == TokenKind::Point) {
@@ -128,41 +168,75 @@ void Parser::parseArgument(Arguments::Arg& out) {
     parseBinaryExpr(out.source);
 }
 
-void Parser::dumpTree(Ptr<Expr> e, int indent) {
-    using enum ExprKind;
-    auto toString = [](ExprKind kind) {
-        switch (kind) {
-        case Invalid:
-            return "InvalidExpr";
-        case UnaryOperator:
-            return "UnaryOperatorExpr";
-        case Paren:
-            return "ParenExpr";
-        case Access:
-            return "AccessExpr";
-        case ImmediateBrace:
-            return "ImmediateBraceExpr";
-        case Call:
-            return "CallExpr";
-        case Identifier:
-            return "IdentifierExpr";
+struct Name {
+    std::string_view name = {};
+    bool withdot = false;
+
+    Name withName(std::string_view name, bool withdot) {
+        return { name, withdot };
+    }
+};
+struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
+    std::ostream& out;
+    std::vector<char> prefix;
+
+    void dump(Ptr<Expr> e, Name name) {
+        if (name.name.length() > 0) {
+            if (name.withdot)
+                out << '.';
+            out << name.name << " = ";
         }
-    };
-    fmt::println("{:{}}{}", "", indent * 2, toString(at(e).kind));
-    if (at(e).kind == UnaryOperator)
-        dumpTree(as<UnaryOperatorExpr>(e).subExpr, indent + 1);
-    if (at(e).kind == Paren)
-        dumpTree(as<ParenExpr>(e).subExpr, indent + 1);
-    if (at(e).kind == Access)
-        dumpTree(as<AccessExpr>(e).subExpr, indent + 1);
-    if (at(e).kind == ImmediateBrace) {
-        auto& imm = as<ImmediateBraceExpr>(e);
-        for (uint32_t i = 0; i < imm.args.args.count; i++)
-            dumpTree(at(imm.args.args, i).source, indent + 1);
+        out << toString(at(e).kind) << ' ';
+        dispatchVisit(e);
+        out << '\n';
+
+        dispatchChildren(e, {});
     }
-    if (at(e).kind == Call) {
-        auto& call = as<CallExpr>(e);
-        for (uint32_t i = 0; i < call.args.args.count; i++)
-            dumpTree(at(call.args.args, i).source, indent + 1);
+
+    void child(Ptr<Expr> e, IsLastChild last, Name name) {
+        out << std::string_view { prefix.data(), prefix.size() };
+        if ((bool)last) {
+            out << "'-";
+            prefix.push_back(' ');
+        } else {
+            out << "|-";
+            prefix.push_back('|');
+        }
+        prefix.push_back(' ');
+
+        dump(e, name);
+
+        prefix.resize(prefix.size() - 2);
     }
+    void child(Arguments args, IsLastChild last, Name) {
+        for (uint32_t i = 0; i < args.args.count; i++) {
+            auto arg = at(args.args, i);
+            child(arg.source, (IsLastChild)((bool)last && i == args.args.count - 1), { sview(arg.target), true });
+        }
+    }
+
+    void visitUnaryOperatorExpr(Ptr<UnaryOperatorExpr> e) {
+        out << '\'' << toShortString(at(e).op) << '\'';
+    }
+    void visitAccessExpr(Ptr<AccessExpr> e) {
+        out << "'." << sview(at(e).member) << '\'';
+    }
+    void visitCallExpr(Ptr<CallExpr> e) {
+        out << '\'' << (at(e).callKind == CallKind::Paren ? "()" : "[]") << '\'';
+    }
+    void visitIdentifierExpr(Ptr<IdentifierExpr> e) {
+        out << '\'';
+        auto ident = at(e).identifier;
+        if (ident.global)
+            out << "::";
+        out << sview(at(ident.elements, 0));
+        for (uint32_t i = 1; i < ident.elements.count; i++)
+            out << "::" << sview(at(ident.elements, i));
+        out << '\'';
+    }
+};
+
+void dump(STContext context, Ptr<Expr> e) {
+    STDumper dumper { context, {}, {}, std::cout };
+    dumper.dump(e, {});
 }

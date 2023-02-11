@@ -145,24 +145,34 @@ struct Token {
     constexpr bool isGoodToken() { return ::isGoodToken(kind()); }
 };
 
-struct Lexer {
+struct SourceBuffer {
     const uint8_t* buffer = nullptr;
+    SourceBuffer(const uint8_t* buffer)
+        : buffer(buffer) { }
+    SourceBuffer(const char* buffer)
+        : SourceBuffer((const uint8_t*)buffer) { }
+
+    constexpr const uint8_t& operator[](uint32_t i) const {
+        return buffer[i];
+    }
+    
+    std::string_view sourceCode(Token t) const {
+        return { (const char*)(&buffer[t.start]), t.length };
+    }
+};
+
+struct Lexer {
+    SourceBuffer buffer;
     uint32_t m_position = 0;
     uint32_t pos() const { return m_position; }
     bool dumpTokens = false;
 
-    Lexer(const uint8_t* buffer, bool dump = false);
-    Lexer(const char* buffer, bool dump = false)
-        : Lexer((const uint8_t*)buffer, dump) { }
+    Lexer(SourceBuffer, bool dump = false);
 
     void advance();
     uint32_t nextNonWhiteSpace(uint32_t pos) const;
 
     Token tok = {};
-
-    std::string_view sourceCode(Token t) const {
-        return { (const char*)(buffer + t.start), t.length };
-    }
 };
 
 void dumpTokens(Lexer&);

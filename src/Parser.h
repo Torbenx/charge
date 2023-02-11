@@ -25,6 +25,10 @@ template<typename T>
 struct Span {
     Ptr<T> begin;
     uint32_t count = 0;
+
+    constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
+        return { begin.offsetAlign4 + i * sizeof(T) / sizeof(uint32_t) };
+    }
 };
 template<typename T>
 struct SpanBuilder {
@@ -36,21 +40,27 @@ struct Word {
     uint32_t length = 0;
 };
 
-enum class ExprKind : uint32_t {
+// clang-format off
+#define ENUMERATE_NODE_KINDS(callback) \
+    callback(UnaryOperatorExpr) \
+    callback(ParenExpr) \
+    callback(AccessExpr) \
+    callback(ImmediateBraceExpr) \
+    callback(CallExpr) \
+    callback(IdentifierExpr)
+// clang-format on
+
+#define NODE_KIND(kind) kind,
+enum class NodeKind : uint8_t {
     Invalid,
-    UnaryOperator,
-    Paren,
-    Access,
-    ImmediateBrace,
-    Call,
-    Identifier,
+    ENUMERATE_NODE_KINDS(NODE_KIND)
 };
+#undef NODE_KIND
 
 struct Expr {
-    ExprKind kind = ExprKind::Invalid;
-    uint32_t payload = 0;
-    Expr(ExprKind kind, uint32_t payload = 0)
-        : kind(kind), payload(payload) { }
+    NodeKind kind = NodeKind::Invalid;
+    Expr(NodeKind kind)
+        : kind(kind) { }
 };
 
 struct Arguments {
@@ -61,7 +71,7 @@ struct Arguments {
     Span<Arg> args;
 };
 
-enum class UnaryOperator : uint32_t {
+enum class UnaryOperator : uint8_t {
     // this must match the order of TokenKind
     // TODO: test this
     BitwiseNot,
@@ -79,41 +89,43 @@ constexpr UnaryOperator tokenKindToUnaryOp(TokenKind kind) {
     VERIFY(isUnaryOp(kind));
     return (UnaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstUnaryOp));
 }
+const char* toShortString(UnaryOperator op);
 struct UnaryOperatorExpr : Expr {
+    UnaryOperator op;
     Ptr<Expr> subExpr;
     UnaryOperatorExpr(UnaryOperator op, Ptr<Expr> subExpr = {})
-        : Expr(ExprKind::UnaryOperator, std::to_underlying(op))
-        , subExpr(subExpr) { }
+        : Expr(NodeKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
 };
 
 struct ParenExpr : Expr {
     Ptr<Expr> subExpr;
     ParenExpr(Ptr<Expr> subExpr = {})
-        : Expr(ExprKind::Paren), subExpr(subExpr) { }
+        : Expr(NodeKind::ParenExpr), subExpr(subExpr) { }
 };
 
 struct AccessExpr : Expr {
-    Ptr<Expr> subExpr;
+    Ptr<Expr> base;
     Word member;
-    AccessExpr(Ptr<Expr> subExpr = {}, Word member = {})
-        : Expr(ExprKind::Access), subExpr(subExpr), member(member) { }
+    AccessExpr(Ptr<Expr> base = {}, Word member = {})
+        : Expr(NodeKind::AccessExpr), base(base), member(member) { }
 };
 
 struct ImmediateBraceExpr : Expr {
     Arguments args;
     ImmediateBraceExpr(Arguments args = {})
-        : Expr(ExprKind::ImmediateBrace), args(args) { }
+        : Expr(NodeKind::ImmediateBraceExpr), args(args) { }
 };
 
-enum class CallKind : uint32_t {
+enum class CallKind : uint8_t {
     Paren,
     Angle,
 };
 struct CallExpr : Expr {
+    CallKind callKind;
     Ptr<Expr> base;
     Arguments args;
     CallExpr(CallKind callKind, Ptr<Expr> base = {}, Arguments args = {})
-        : Expr(ExprKind::Call, std::to_underlying(callKind)), base(base), args(args) { }
+        : Expr(NodeKind::CallExpr), callKind(callKind), base(base), args(args) { }
 };
 
 struct Identifier {
@@ -127,20 +139,15 @@ struct ParametricIdentifier : Identifier {
 struct IdentifierExpr : Expr {
     ParametricIdentifier identifier;
     IdentifierExpr(ParametricIdentifier identifier = {})
-        : Expr(ExprKind::Identifier), identifier(identifier) { }
+        : Expr(NodeKind::IdentifierExpr), identifier(identifier) { }
 };
 
 constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
     return (v + alignment - 1) & ~(alignment - 1);
 }
 
-struct Parser : Lexer {
-    using Lexer::Lexer;
-
+struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
-    uint32_t storageEndAlign4 = 0;
-    std::byte* spanStorage = new std::byte[400] {};
-    uint32_t spanBuilderEnd = 0;
 
     template<typename E>
     E& at(Ptr<E> e) {
@@ -151,11 +158,120 @@ struct Parser : Lexer {
         return *(T*)((std::byte*)&at(s.begin) + i * sizeof(T));
     }
 
+    template<typename E1, typename E2>
+    E1& as(Ptr<E2> e) requires std::derived_from<E1, E2> {
+        return at(Ptr<E1>(e));
+    }
+};
+
+struct STContext : STStorage {
+    SourceBuffer buffer;
+
+    std::string_view sview(Word word) {
+        return { (const char*)(&buffer[word.start]), word.length };
+    }
+};
+
+const char* toString(NodeKind);
+
+enum class IsLastChild : bool {
+    No = false,
+    Yes = true,
+};
+
+template<typename Impl, typename... Args>
+struct STChildren {
+    Impl* impl() { return static_cast<Impl*>(this); }
+    template<typename T>
+    T& Iat(Ptr<T> p) { return impl()->at(p); }
+
+    void childrenUnaryOperatorExpr(Ptr<UnaryOperatorExpr> e, Args... args) {
+        impl()->child(Iat(e).subExpr, IsLastChild::Yes, args...);
+    }
+    void childrenParenExpr(Ptr<ParenExpr> e, Args... args) {
+        impl()->child(Iat(e).subExpr, IsLastChild::Yes, args...);
+    }
+    void childrenAccessExpr(Ptr<AccessExpr> e, Args... args) {
+        impl()->child(Iat(e).base, IsLastChild::Yes, args...);
+    }
+    void childrenImmediateBraceExpr(Ptr<ImmediateBraceExpr> e, Args... args) {
+        impl()->child(Iat(e).args, IsLastChild::Yes, args...);
+    }
+    void childrenCallExpr(Ptr<CallExpr> e, Args... args) {
+        if (Iat(e).args.args.count == 0) {
+            impl()->child(Iat(e).base, IsLastChild::Yes, args...);
+            impl()->child(Iat(e).args, IsLastChild::Yes, args...);
+        } else {
+            impl()->child(Iat(e).base, IsLastChild::No, args...);
+            impl()->child(Iat(e).args, IsLastChild::Yes, args...);
+        }
+    }
+    void childrenIdentifierExpr(Ptr<IdentifierExpr> e, Args... args) {
+        impl()->child(Iat(e).identifier.args, IsLastChild::Yes, args...);
+    }
+
+    void child(Ptr<Expr>, IsLastChild, Args...) { }
+    void child(Arguments, IsLastChild, Args...) { }
+
+    void dispatchChildren(Ptr<Expr> e, Args... args) {
+#define NODE_KIND(kind)                                \
+    case NodeKind::kind:                               \
+        impl()->children##kind((Ptr<kind>)e, args...); \
+        break;
+
+        switch (Iat(e).kind) {
+            ENUMERATE_NODE_KINDS(NODE_KIND)
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+#undef NODE_KIND
+    }
+};
+
+template<typename Impl, typename... Args>
+struct STVisitor {
+    Impl* impl() { return static_cast<Impl*>(this); }
+    template<typename T>
+    T& Iat(Ptr<T> p) { return impl()->at(p); }
+
+#define NODE_KIND(kind) \
+    void visit##kind(Ptr<kind>, Args...) { }
+    ENUMERATE_NODE_KINDS(NODE_KIND)
+#undef NODE_KIND
+
+    void dispatchVisit(Ptr<Expr> e, Args... args) {
+#define NODE_KIND(kind)                             \
+    case NodeKind::kind:                            \
+        impl()->visit##kind((Ptr<kind>)e, args...); \
+        break;
+
+        switch (Iat(e).kind) {
+            ENUMERATE_NODE_KINDS(NODE_KIND)
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+#undef NODE_KIND
+    }
+};
+
+struct Parser : Lexer, STStorage {
+    using Lexer::Lexer;
+
+    uint32_t storageEndAlign4 = 0;
     uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
     template<typename T>
     Ptr<T> allocate(uint32_t count = 1) {
         return { allocate(alignof(T), sizeof(T), count) };
     }
+
+    Word asWord(Token token) const {
+        return { token.start, token.length };
+    }
+
+    std::byte* spanStorage = new std::byte[400] {};
+    uint32_t spanBuilderEnd = 0;
 
     template<typename T>
     SpanBuilder<T> beginSpan() {
@@ -182,11 +298,6 @@ struct Parser : Lexer {
         return { outSpan, count };
     }
 
-    template<typename E1, typename E2>
-    E1& as(Ptr<E2> e) requires std::derived_from<E1, E2> {
-        return at(Ptr<E1>(e));
-    }
-
     template<typename E, typename... Args>
     Ptr<E> make(Args&&... args) {
         Ptr<E> p = allocate<E>();
@@ -200,10 +311,6 @@ struct Parser : Lexer {
         return at(p);
     }
 
-    Word asWord(Token token) const {
-        return { token.start, token.length };
-    }
-
     void parseSimpleIdentifier(Identifier& out);
     void parseParametricIdentifier(ParametricIdentifier& out);
     void parseLeafExpr(Ptr<Expr>& out);
@@ -212,5 +319,9 @@ struct Parser : Lexer {
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
 
-    void dumpTree(Ptr<Expr>, int = 0);
+    STContext context() {
+        return { *this, buffer };
+    }
 };
+
+void dump(STContext context, Ptr<Expr> e);
