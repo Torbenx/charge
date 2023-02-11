@@ -47,7 +47,8 @@ struct Word {
     callback(AccessExpr) \
     callback(ImmediateBraceExpr) \
     callback(CallExpr) \
-    callback(IdentifierExpr)
+    callback(IdentifierExpr) \
+    callback(BinaryOperatorExpr)
 // clang-format on
 
 #define NODE_KIND(kind) kind,
@@ -74,12 +75,12 @@ struct Arguments {
 enum class UnaryOperator : uint8_t {
     // this must match the order of TokenKind
     // TODO: test this
-    BitwiseNot,
-    PreInc,
-    PreDec,
-    LogicalNot,
-    Plus,
-    Minus,
+    LogicalNot, // !
+    BitwiseNot, // ~
+    PreInc, // ++
+    PreDec, // --
+    Plus, // +
+    Minus, // -
 
     PostInc,
     PostDec,
@@ -140,6 +141,44 @@ struct IdentifierExpr : Expr {
     ParametricIdentifier identifier;
     IdentifierExpr(ParametricIdentifier identifier = {})
         : Expr(NodeKind::IdentifierExpr), identifier(identifier) { }
+};
+
+enum class BinaryOperator : uint8_t {
+    // this must match the order of TokenKind
+    // TODO: test this
+    Plus, // +
+    Minus, // -
+    NotEqual, // !=
+    Equal, // ==
+    BitwiseAnd, // &
+    LogicalAnd, // &&
+    BitwiseXor, // ^
+    BitwiseOr, // |
+    LogicalOr, // ||
+    Multiply, // *
+    Divide, // /
+    Remainder, // %
+    Less, // <
+    ShiftLeft, // <<
+    LessEqual, // <=
+    Greater, // >
+    ShiftRight, // >>
+    GreaterEqual, // >=
+
+    COUNT,
+};
+constexpr BinaryOperator tokenKindToBinaryOp(TokenKind kind) {
+    VERIFY(isBinaryOp(kind));
+    return (BinaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstBinaryOp));
+}
+const char* toShortString(BinaryOperator op);
+int precedenceOf(BinaryOperator op);
+struct BinaryOperatorExpr : Expr {
+    BinaryOperator op;
+    Ptr<Expr> left;
+    Ptr<Expr> right;
+    BinaryOperatorExpr(BinaryOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
+        : Expr(NodeKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
 };
 
 constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
@@ -208,6 +247,10 @@ struct STChildren {
     }
     void childrenIdentifierExpr(Ptr<IdentifierExpr> e, Args... args) {
         impl()->child(Iat(e).identifier.args, IsLastChild::Yes, args...);
+    }
+    void childrenBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e, Args... args) {
+        impl()->child(Iat(e).left, IsLastChild::No, args...);
+        impl()->child(Iat(e).right, IsLastChild::Yes, args...);
     }
 
     void child(Ptr<Expr>, IsLastChild, Args...) { }
@@ -315,7 +358,7 @@ struct Parser : Lexer, STStorage {
     void parseParametricIdentifier(ParametricIdentifier& out);
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
-    void parseBinaryExpr(Ptr<Expr>& out);
+    void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
 

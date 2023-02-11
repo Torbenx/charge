@@ -2,8 +2,9 @@
 
 #include <fmt/format.h>
 
-void handle_failure();
-void verify_failed(const char* condStr, const char* file, const char* func, int line);
+[[noreturn]] void handle_failure();
+[[noreturn]] void verify_failed(const char* condStr, const char* file, const char* func, int line);
+[[noreturn]] void verify_not_reached(const char* file, const char* func, int line);
 
 constexpr bool verify(bool cond, const char* condStr, const char* file, const char* func, int line) {
     if (!cond)
@@ -22,4 +23,4 @@ constexpr bool expect_eq(const L& lhs, const R& rhs, const char* lhsStr, const c
 
 #define VERIFY(cond) verify(cond, #cond, __FILE__, __func__, __LINE__)
 #define EXPECT_EQ(lhs, rhs) expect_eq(lhs, rhs, #lhs, #rhs, __FILE__, __func__, __LINE__)
-#define VERIFY_NOT_REACHED() VERIFY(false)
+#define VERIFY_NOT_REACHED() verify_not_reached(__FILE__, __func__, __LINE__);

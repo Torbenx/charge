@@ -19,56 +19,51 @@ enum class TokenKind : uint32_t {
     LastBracket = RightBrace,
 
     // begin unary
+    Exclaim, // !
     Tilde, // ~
-
     PlusPlus, // ++
     MinusMinus, // --
-    Exclaim, // !
     // begin binary
     Plus, // +
     Minus, // -
     // end unary
     ExclaimEqual, // !=
-    PlusEqual, // +=
-    MinusEqual, // -=
-
+    EqualEqual, // ==
+    Amp, // &
     AmpAmp, // &&
     Hat, // ^
-    Percent, // %
-    Amp, // &
-    HatEqual, // ^=
-    PercentEqual, // %=
-    AmpEqual, // &=
-
-    VertVert, // ||
-    Slash, // /
-    Star, // *
     Vert, // |
-    SlashEqual, // /=
-    StarEqual, // *=
-    VertEqual, // |=
-
-    Equal, // =
-    DummyOp1,
-    DummyOp2,
-    EqualEqual, // ==
-
+    VertVert, // ||
+    Star, // *
+    Slash, // /
+    Percent, // %
     Less, // <
     LessLess, // <<
     LessEqual, // <=
-    LessLessEqual, // <<=
     Greater, // >
     GreaterGreater, // >>
     GreaterEqual, // >=
-    GreaterGreaterEqual, // >>=
     // end binary
+    // begin assign
+    Equal, // =
+    PlusEqual, // +=
+    MinusEqual, // -=
+    HatEqual, // ^=
+    PercentEqual, // %=
+    AmpEqual, // &=
+    SlashEqual, // /=
+    StarEqual, // *=
+    VertEqual, // |=
+    LessLessEqual, // <<=
+    GreaterGreaterEqual, // >>=
+    // end assign
 
-    FirstUnaryOp = Tilde,
+    FirstUnaryOp = Exclaim,
     FirstBinaryOp = Plus,
     LastUnaryOp = Minus,
-    LastBinaryOp = GreaterGreaterEqual,
-    FirstOperator = FirstUnaryOp,
-    LastOperator = LastBinaryOp,
+    LastBinaryOp = GreaterEqual,
+    FirstAssignOp = Equal,
+    LastAssignOp = GreaterGreaterEqual,
 
     Comma, // ,
     Point, // .
@@ -87,17 +82,17 @@ struct fmt::formatter<TokenKind> : formatter<string_view> {
     }
 };
 
-constexpr bool isOperator(TokenKind kind) {
-    return kind >= TokenKind::FirstOperator && kind <= TokenKind::LastBinaryOp;
-}
 constexpr bool isUnaryOp(TokenKind kind) {
     return kind >= TokenKind::FirstUnaryOp && kind <= TokenKind::LastUnaryOp;
 }
 constexpr bool isBinaryOp(TokenKind kind) {
     return kind >= TokenKind::FirstBinaryOp && kind <= TokenKind::LastBinaryOp;
 }
+constexpr bool isAssignOp(TokenKind kind) {
+    return kind >= TokenKind::FirstAssignOp && kind <= TokenKind::LastAssignOp;
+}
 constexpr bool isGoodToken(TokenKind kind) {
-    return kind != TokenKind::Invalid && kind < TokenKind::COUNT && kind != TokenKind::DummyOp1 && kind != TokenKind::DummyOp2;
+    return kind != TokenKind::Invalid && kind < TokenKind::COUNT;
 }
 constexpr bool isBracket(TokenKind kind) {
     return kind >= TokenKind::FirstBracket && kind <= TokenKind::LastBracket;
@@ -139,9 +134,9 @@ struct Token {
         return flags & HasTrailingWhiteSpace;
     }
 
-    constexpr bool isOperator() { return ::isOperator(kind()); }
     constexpr bool isUnaryOp() { return ::isUnaryOp(kind()); }
     constexpr bool isBinaryOp() { return ::isBinaryOp(kind()); }
+    constexpr bool isAssignOp() { return ::isAssignOp(kind()); }
     constexpr bool isGoodToken() { return ::isGoodToken(kind()); }
 };
 

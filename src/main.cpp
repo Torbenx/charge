@@ -23,7 +23,7 @@ int main() {
     lex.advance();
     EXPECT_EQ(lex.tok.kind(), TokenKind::Invalid);
 
-    Parser par("-+(+{ a, { c, q, }[.a = { .c = z }], b, c, d, }++)", true);
+    Parser par("-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, c, d, }++)", true);
     Ptr<Expr> e;
     par.advance();
     par.parseLeafExpr(e);

@@ -18,29 +18,72 @@ const char* toString(NodeKind kind) {
 #undef NODE_KIND
 };
 
+// clang-format off
 const char* toShortString(UnaryOperator op) {
     using enum UnaryOperator;
     switch (op) {
-    case BitwiseNot:
-        return "~";
-    case PreInc:
-        return "++x";
-    case PreDec:
-        return "--x";
-    case LogicalNot:
-        return "!";
-    case Plus:
-        return "+";
-    case Minus:
-        return "-";
-    case PostInc:
-        return "x++";
-    case PostDec:
-        return "x--";
-    default:
-        return "???";
+    case BitwiseNot: return "~";
+    case PreInc: return "++x";
+    case PreDec: return "--x";
+    case LogicalNot: return "!";
+    case Plus: return "+";
+    case Minus: return "-";
+    case PostInc: return "x++";
+    case PostDec: return "x--";
+    default: return "???";
     }
 }
+
+const char* toShortString(BinaryOperator op) {
+    using enum BinaryOperator;
+    switch (op) {
+    case Plus: return "+";
+    case Minus: return "-";
+    case NotEqual: return "!=";
+    case Equal: return "==";
+    case BitwiseAnd: return "&";
+    case LogicalAnd: return "&&";
+    case BitwiseXor: return "^";
+    case BitwiseOr: return "|";
+    case LogicalOr: return "||";
+    case Multiply: return "*";
+    case Divide: return "/";
+    case Remainder: return "%";
+    case Less: return "<";
+    case ShiftLeft: return "<<";
+    case LessEqual: return "<=";
+    case Greater: return ">";
+    case ShiftRight: return ">>";
+    case GreaterEqual: return ">=";
+    default: return "???";
+    }
+}
+
+int precedenceOf(BinaryOperator op) {
+    using enum BinaryOperator;
+    switch (op) {
+        case Multiply: return 1;
+        case Divide: return 1;
+        case Remainder: return 1;
+        case Plus: return 2;
+        case Minus: return 2;
+        case ShiftLeft: return 3;
+        case ShiftRight: return 3;
+        case Less: return 4;
+        case LessEqual: return 4;
+        case Greater: return 4;
+        case GreaterEqual: return 4;
+        case NotEqual: return 5;
+        case Equal: return 5;
+        case BitwiseAnd: return 6;
+        case BitwiseXor: return 7;
+        case BitwiseOr: return 8;
+        case LogicalAnd: return 9;
+        case LogicalOr: return 10;
+        default: VERIFY_NOT_REACHED();
+    }
+}
+// clang-format on
 
 uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
     uint32_t sizeAlign4 = alignmentCeil(sizeof(uint32_t), itemCount * itemSize) / sizeof(uint32_t);
@@ -70,8 +113,7 @@ void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
 
 void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // unary op
-    if (tok.isOperator()) {
-        VERIFY(tok.isUnaryOp());
+    if (tok.isUnaryOp()) {
         auto& e = makeSet<UnaryOperatorExpr>(out, tokenKindToUnaryOp(tok.kind()));
         advance();
         return parseLeafExpr(e.subExpr);
@@ -129,8 +171,24 @@ void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
     return wrapWithPostfixes(out, base);
 }
 
-void Parser::parseBinaryExpr(Ptr<Expr>& out) {
-    parseLeafExpr(out);
+void Parser::parseBinaryExpr(Ptr<Expr>& out, int precedence) {
+    Ptr<Expr> left;
+    parseLeafExpr(left);
+
+    while (isBinaryOp(tok.kind())) {
+        BinaryOperator op2 = tokenKindToBinaryOp(tok.kind());
+        int precedence2 = precedenceOf(op2);
+        if (precedence <= precedence2)
+            break;
+
+        // op2 must be evaluated first
+        advance();
+        Ptr<Expr> right;
+        parseBinaryExpr(right, precedence2);
+        left = make<BinaryOperatorExpr>(op2, left, right);
+    }
+
+    out = left;
 }
 
 void Parser::parseArgumentContext(Arguments& out) {
@@ -178,7 +236,7 @@ struct Name {
 };
 struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     std::ostream& out;
-    std::vector<char> prefix;
+    std::vector<char> prefix = {};
 
     void dump(Ptr<Expr> e, Name name) {
         if (name.name.length() > 0) {
@@ -233,6 +291,9 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         for (uint32_t i = 1; i < ident.elements.count; i++)
             out << "::" << sview(at(ident.elements, i));
         out << '\'';
+    }
+    void visitBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
+        out << '\'' << toShortString(at(e).op) << '\'';
     }
 };
 
