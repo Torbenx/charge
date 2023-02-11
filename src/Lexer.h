@@ -155,7 +155,7 @@ struct SourceBuffer {
     constexpr const uint8_t& operator[](uint32_t i) const {
         return buffer[i];
     }
-    
+
     std::string_view sourceCode(Token t) const {
         return { (const char*)(&buffer[t.start]), t.length };
     }

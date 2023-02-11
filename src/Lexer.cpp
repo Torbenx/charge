@@ -59,87 +59,74 @@ namespace {
 
 using u8 = uint8_t;
 
-template<typename T>
-struct CharacterTable {
-    struct Entry {
-        u8 first;
-        u8 last;
-        T value;
-        constexpr Entry(u8 first, u8 last, T value)
-            : first(first), last(last), value(value) { }
-        constexpr Entry(u8 c, T value)
-            : first(c), last(c), value(value) { }
+struct Table {
+    struct Input {
+        TokenKind bare;
+        TokenKind repeat = bare;
+        TokenKind equal = bare;
+        TokenKind repeatEqual = repeat;
     };
-    std::array<T, 128> table = {};
-    constexpr CharacterTable(T defaultValue, std::initializer_list<Entry> entries) {
-        table.fill(defaultValue);
-        for (Entry e : entries) {
-            for (u8 c = e.first; c <= e.last; c++)
-                table[c] = e.value;
+    struct InputRange : Input {
+        char first, last;
+        constexpr InputRange(char target, Input input)
+            : Input(input), first(target), last(target) { }
+        constexpr InputRange(char first, char last, Input input)
+            : Input(input), first(first), last(last) { }
+    };
+    struct Output {
+        uint8_t kind : 6 = 0;
+        uint8_t advance : 2 = 0;
+        constexpr Output() = default;
+        constexpr Output(TokenKind kind, int advance)
+            : kind((uint8_t)kind), advance(advance) { }
+    };
+    std::array<Output, 0x60 * 4> table;
+    constexpr Table(std::initializer_list<InputRange> inputs) {
+        for (auto input : inputs) {
+            for (char c = input.first; c <= input.last; c++) {
+                table[c - 0x20 + 0x60 * 0] = { input.bare, 1 };
+                table[c - 0x20 + 0x60 * 1] = { input.repeat, input.repeat != input.bare ? 2 : 1 };
+                table[c - 0x20 + 0x60 * 2] = { input.equal, input.equal != input.bare ? 2 : 1 };
+                table[c - 0x20 + 0x60 * 3] = { input.repeatEqual, input.repeatEqual != input.repeat ? 3 : (input.repeatEqual != input.bare ? 2 : 1) };
+            }
         }
     }
-
-    constexpr T operator[](u8 c) const {
-        return table[c];
-    }
 };
 
-struct HeadInfo {
-    enum PunctuationMode {
-        SingleCharacterOnly, // ()[]{}~,.;
-        SubsequentEqual, // ^!%/*=
-        RepeatOnceOrSubsequentEqual, // +-&|
-        RepeatOnceAndSubsequentEqual, // <>
-    };
-    static_assert((int)TokenKind::COUNT < 64);
-    uint8_t m_kind : 6 = 0;
-    uint8_t mode : 2 = 0;
-    constexpr HeadInfo() = default;
-    constexpr HeadInfo(TokenKind kind, PunctuationMode mode)
-        : m_kind(std::to_underlying(kind)), mode(mode) { }
-
-    TokenKind kind() const { return (TokenKind)m_kind; }
-    PunctuationMode punctuationMode() const { return (PunctuationMode)mode; }
-};
-
-struct HeadInfoTable {
+struct TableHolder {
     using enum TokenKind;
-    using enum HeadInfo::PunctuationMode;
-    static constexpr CharacterTable<HeadInfo> table {
-        { Invalid, /*does not apply*/ SingleCharacterOnly },
-        {
-            { '(', { LeftParen, SingleCharacterOnly } },
-            { ')', { RightParen, SingleCharacterOnly } },
-            { '[', { LeftAngle, SingleCharacterOnly } },
-            { ']', { RightAngle, SingleCharacterOnly } },
-            { '{', { LeftBrace, SingleCharacterOnly } },
-            { '}', { RightBrace, SingleCharacterOnly } },
-            { '~', { Tilde, SingleCharacterOnly } },
-            { ',', { Comma, SingleCharacterOnly } },
-            { '.', { Point, SingleCharacterOnly } },
-            { ':', { Colon, SingleCharacterOnly } },
-            { ';', { SemiColon, SingleCharacterOnly } },
+    static constexpr Table table {
+        { '(', { LeftParen } },
+        { ')', { RightParen } },
+        { '[', { LeftAngle } },
+        { ']', { RightAngle } },
+        { '{', { LeftBrace } },
+        { '}', { RightBrace } },
+        { '~', { Tilde } },
+        { ',', { Comma } },
+        { '.', { Point } },
+        { ':', { Colon } },
+        { ';', { SemiColon } },
 
-            { '^', { Hat, SubsequentEqual } },
-            { '!', { Exclaim, SubsequentEqual } },
-            { '%', { Percent, SubsequentEqual } },
-            { '/', { Slash, SubsequentEqual } },
-            { '*', { Star, SubsequentEqual } },
-            { '=', { Equal, SubsequentEqual } },
+        { '^', { .bare = Hat, .equal = HatEqual } },
+        { '!', { .bare = Exclaim, .equal = ExclaimEqual } },
+        { '%', { .bare = Percent, .equal = PercentEqual } },
+        { '/', { .bare = Slash, .equal = SlashEqual } },
+        { '*', { .bare = Star, .equal = StarEqual } },
+        { '=', { .bare = Equal, .repeat = EqualEqual } },
 
-            { '+', { Plus, RepeatOnceOrSubsequentEqual } },
-            { '-', { Minus, RepeatOnceOrSubsequentEqual } },
-            { '&', { Amp, RepeatOnceOrSubsequentEqual } },
-            { '|', { Vert, RepeatOnceOrSubsequentEqual } },
+        { '+', { .bare = Plus, .repeat = PlusPlus, .equal = PlusEqual } },
+        { '-', { .bare = Minus, .repeat = MinusMinus, .equal = MinusEqual } },
+        { '&', { .bare = Amp, .repeat = AmpAmp, .equal = AmpEqual } },
+        { '|', { .bare = Vert, .repeat = VertVert, .equal = VertEqual } },
 
-            { '<', { Less, RepeatOnceAndSubsequentEqual } },
-            { '>', { Greater, RepeatOnceAndSubsequentEqual } },
+        { '<', { .bare = Less, .repeat = LessLess, .equal = LessEqual, .repeatEqual = LessLessEqual } },
+        { '>', { .bare = Greater, .repeat = GreaterGreater, .equal = GreaterEqual, .repeatEqual = GreaterGreaterEqual } },
 
-            { 'a', 'z', { Word, /*does not apply*/ SingleCharacterOnly } },
-            { 'A', 'Z', { Word, /*does not apply*/ SingleCharacterOnly } },
-            { '_', { Word, /*does not apply*/ SingleCharacterOnly } },
-            { '$', { Word, /*does not apply*/ SingleCharacterOnly } },
-        },
+        { 'a', 'z', { Word } },
+        { 'A', 'Z', { Word } },
+        { '_', { Word } },
+        { '$', { Word } },
     };
 };
 
@@ -189,53 +176,19 @@ void Lexer::advance() {
     };
 
     u8 head = buffer[pos()];
-    if (head >= 128) [[unlikely]] {
-        return makeInvalidToken();
-    }
-    auto headInfo = HeadInfoTable::table[head];
-
-    uint32_t end = pos() + 1;
-    uint32_t kind = std::to_underlying(headInfo.kind());
-    if ((TokenKind)kind == TokenKind::Invalid) [[unlikely]] {
+    if (head >= 0x80 || head < 0x20) [[unlikely]] {
         return makeInvalidToken();
     }
 
+    bool repeat = buffer[pos() + 1] == head;
+    bool equal = buffer[pos() + (repeat ? 2 : 1)] == '=';
+    uint32_t idx = (uint32_t)head - 0x20 + (repeat ? 0x60 : 0) + (equal ? 0x60 * 2 : 0);
+    auto [kind, advance] = TableHolder::table.table[idx];
+    uint32_t end = pos() + advance;
     if ((TokenKind)kind == TokenKind::Word) {
+        // advance is 1 in this case
         while (isBulkWordChar(buffer[end])) {
             end += 1;
-        }
-    } else {
-        using enum HeadInfo::PunctuationMode;
-        switch (headInfo.punctuationMode()) {
-        case SingleCharacterOnly: {
-            break;
-        }
-        case SubsequentEqual: {
-            bool hasEqual = buffer[pos() + 1] == '=';
-            kind += hasEqual ? 3 : 0;
-            end += hasEqual ? 1 : 0;
-            break;
-        }
-        case RepeatOnceOrSubsequentEqual: {
-            bool hasEqual = buffer[pos() + 1] == '=';
-            kind += hasEqual ? 3 : 0;
-            end += hasEqual ? 1 : 0;
-
-            bool hasRepeat = buffer[pos() + 1] == head;
-            kind -= hasRepeat ? 3 : 0;
-            end += hasRepeat ? 1 : 0;
-            break;
-        }
-        case RepeatOnceAndSubsequentEqual: {
-            bool hasRepeat = buffer[pos() + 1] == head;
-            kind += hasRepeat ? 1 : 0;
-            end += hasRepeat ? 1 : 0;
-
-            bool hasEqual = buffer[end] == '=';
-            kind += hasEqual ? 2 : 0;
-            end += hasEqual ? 1 : 0;
-            break;
-        }
         }
     }
 
