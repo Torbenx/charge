@@ -48,6 +48,7 @@ const char* toShortString(TokenKind kind) {
     case Comma: return ",";
     case Point: return ".";
     case Colon: return ":";
+    case ColonColon: return "::";
     case SemiColon: return ";";
     case Word: return "word";
     default: return "????";
@@ -105,8 +106,8 @@ struct TableHolder {
         { '~', { Tilde } },
         { ',', { Comma } },
         { '.', { Point } },
-        { ':', { Colon } },
         { ';', { SemiColon } },
+        { ':', { .bare = Colon, .repeat = ColonColon } },
 
         { '^', { .bare = Hat, .equal = HatEqual } },
         { '!', { .bare = Exclaim, .equal = ExclaimEqual } },

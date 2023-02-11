@@ -68,6 +68,7 @@ enum class TokenKind : uint32_t {
     Comma, // ,
     Point, // .
     Colon, // :
+    ColonColon, // ::
     SemiColon, // ;
     Word, // abc123
     COUNT,

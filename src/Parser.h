@@ -3,7 +3,7 @@
 #include "Lexer.h"
 
 constexpr bool isWordOrGlobal(TokenKind kind) {
-    return kind == TokenKind::Word;
+    return kind == TokenKind::Word || kind == TokenKind::ColonColon;
 }
 
 template<typename E>

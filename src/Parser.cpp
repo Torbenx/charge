@@ -95,11 +95,24 @@ uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCo
 }
 
 void Parser::parseSimpleIdentifier(Identifier& out) {
+    out.global = false;
+    if (tok.kind() == TokenKind::ColonColon) {
+        out.global = true;
+        advance();
+    }
+
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     auto elems = beginSpan<Word>();
     append(elems, asWord(tok));
     advance();
-    out.global = false;
+
+    while (tok.kind() == TokenKind::ColonColon) {
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Word);
+        append(elems, asWord(tok));
+        advance();
+    }
+
     out.elements = finalizeSpan(elems);
 }
 void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
