@@ -23,9 +23,10 @@ int main() {
     lex.advance();
     EXPECT_EQ((TokenKind)lex.tok.kind(), TokenKind::Invalid);
 
-    Parser par("-+(+a.b++)", true);
+    Parser par("-+(+{ a, { c, q, }[.a = { .c = z }], b, c, d, }++)", true);
     Ptr<Expr> e;
     par.advance();
     par.parseLeafExpr(e);
+    fmt::println("used storage {} * 4 bytes", par.storageEndAlign4);
     par.dumpTree(e);
 }

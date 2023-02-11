@@ -116,20 +116,28 @@ struct CallExpr : Expr {
         : Expr(ExprKind::Call, std::to_underlying(callKind)), base(base), args(args) { }
 };
 
+struct Identifier {
+    Span<Word> elements;
+    bool global = false;
+};
+struct ParametricIdentifier : Identifier {
+    bool hasBraces = false;
+    Arguments args;
+};
 struct IdentifierExpr : Expr {
-    Word identifier;
-    IdentifierExpr(Word identifier = {})
+    ParametricIdentifier identifier;
+    IdentifierExpr(ParametricIdentifier identifier = {})
         : Expr(ExprKind::Identifier), identifier(identifier) { }
 };
 
 constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
-    return (v + alignment - 1) & -alignment;
+    return (v + alignment - 1) & ~(alignment - 1);
 }
 
 struct Parser : Lexer {
     using Lexer::Lexer;
 
-    uint32_t* storage = new uint32_t[100] {};
+    uint32_t* storage = new uint32_t[512] {};
     uint32_t storageEndAlign4 = 0;
     std::byte* spanStorage = new std::byte[400] {};
     uint32_t spanBuilderEnd = 0;
@@ -140,7 +148,7 @@ struct Parser : Lexer {
     }
     template<typename T>
     T& at(Span<T> s, uint32_t i) {
-        return (T*)((std::byte*)(storage + s.beginAlign4) + i * sizeof(T));
+        return *(T*)((std::byte*)&at(s.begin) + i * sizeof(T));
     }
 
     uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
@@ -168,8 +176,9 @@ struct Parser : Lexer {
         T* beginPtr = (T*)(spanStorage + alignedBegin);
 
         Ptr<T> outSpan = allocate<T>(count);
-        std::uninitialized_move_n(beginPtr, count, (T*)(storage + outSpan));
+        std::uninitialized_move_n(beginPtr, count, &at(outSpan));
         std::destroy_n(beginPtr, count);
+        spanBuilderEnd = s.begin;
         return { outSpan, count };
     }
 
@@ -195,11 +204,13 @@ struct Parser : Lexer {
         return { token.start, token.length };
     }
 
-    void parseNestedNameOrType(Ptr<Expr>& out);
+    void parseSimpleIdentifier(Identifier& out);
+    void parseParametricIdentifier(ParametricIdentifier& out);
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out);
     void parseArgumentContext(Arguments& out);
+    void parseArgument(Arguments::Arg& out);
 
     void dumpTree(Ptr<Expr>, int = 0);
 };

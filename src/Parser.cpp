@@ -9,10 +9,21 @@ uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCo
     return ret;
 }
 
-void Parser::parseNestedNameOrType(Ptr<Expr>& out) {
+void Parser::parseSimpleIdentifier(Identifier& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    makeSet<IdentifierExpr>(out, asWord(tok));
+    auto elems = beginSpan<Word>();
+    append(elems, asWord(tok));
     advance();
+    out.global = false;
+    out.elements = finalizeSpan(elems);
+}
+void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
+    parseSimpleIdentifier(out);
+    bool hasBraces = tok.kind() == TokenKind::LeftBrace;
+    out.hasBraces = hasBraces;
+    if (hasBraces) {
+        parseArgumentContext(out.args);
+    }
 }
 
 // trailing binary operators do not belong to us
@@ -38,14 +49,13 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // brace
     else if (tok.kind() == TokenKind::LeftBrace) {
         auto& e = makeSet<ImmediateBraceExpr>(base);
-        advance();
         parseArgumentContext(e.args);
-        EXPECT_EQ(tok.kind(), TokenKind::RightBrace);
-        advance();
+
     }
     // identifier
     else if (isWordOrGlobal(tok.kind())) {
-        parseNestedNameOrType(base);
+        auto& e = makeSet<IdentifierExpr>(base);
+        parseParametricIdentifier(e.identifier);
     }
     //
     else {
@@ -60,11 +70,8 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
 void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
     if (tok.kind() == TokenKind::LeftParen || tok.kind() == TokenKind::LeftAngle) {
         TokenKind kind = tok.kind();
-        advance();
         auto& e = makeSet<CallExpr>(base, tok.kind() == TokenKind::LeftParen ? CallKind::Paren : CallKind::Angle, base);
         parseArgumentContext(e.args);
-        EXPECT_EQ(tok.kind(), leftToRightBracket(kind));
-        advance();
     } else if (tok.kind() == TokenKind::Point) {
         advance();
         EXPECT_EQ(tok.kind(), TokenKind::Word);
@@ -86,8 +93,39 @@ void Parser::parseBinaryExpr(Ptr<Expr>& out) {
     parseLeafExpr(out);
 }
 
-void Parser::parseArgumentContext(Arguments&) {
-    VERIFY_NOT_REACHED();
+void Parser::parseArgumentContext(Arguments& out) {
+    TokenKind leftKind = tok.kind();
+    VERIFY(isLeftBracket(leftKind));
+    TokenKind rightKind = leftToRightBracket(leftKind);
+
+    advance();
+    if (tok.kind() == rightKind) {
+        advance();
+        return;
+    }
+
+    auto args = beginSpan<Arguments::Arg>();
+    do {
+        auto& arg = append(args, {});
+        parseArgument(arg);
+        VERIFY(tok.kind() == TokenKind::Comma || tok.kind() == rightKind);
+        if (tok.kind() == TokenKind::Comma)
+            advance();
+    } while (tok.kind() != rightKind);
+    advance();
+    out.args = finalizeSpan(args);
+}
+
+void Parser::parseArgument(Arguments::Arg& out) {
+    if (tok.kind() == TokenKind::Point) {
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Word);
+        out.target = asWord(tok);
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Equal);
+        advance();
+    }
+    parseBinaryExpr(out.source);
 }
 
 void Parser::dumpTree(Ptr<Expr> e, int indent) {
@@ -117,4 +155,14 @@ void Parser::dumpTree(Ptr<Expr> e, int indent) {
         dumpTree(as<ParenExpr>(e).subExpr, indent + 1);
     if (at(e).kind == Access)
         dumpTree(as<AccessExpr>(e).subExpr, indent + 1);
+    if (at(e).kind == ImmediateBrace) {
+        auto& imm = as<ImmediateBraceExpr>(e);
+        for (uint32_t i = 0; i < imm.args.args.count; i++)
+            dumpTree(at(imm.args.args, i).source, indent + 1);
+    }
+    if (at(e).kind == Call) {
+        auto& call = as<CallExpr>(e);
+        for (uint32_t i = 0; i < call.args.args.count; i++)
+            dumpTree(at(call.args.args, i).source, indent + 1);
+    }
 }

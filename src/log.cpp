@@ -6,5 +6,5 @@ void verify_failed(const char* condStr, const char* file, const char* func, int 
 }
 
 void handle_failure() {
-    std::exit(1);
+    std::abort();
 }
