@@ -27,7 +27,7 @@ struct Span {
     uint32_t count = 0;
 
     constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
-        return { begin.offsetAlign4 + i * sizeof(T) / sizeof(uint32_t) };
+        return Ptr<T> { begin.offsetAlign4 + i * (uint32_t)(sizeof(T) / sizeof(uint32_t)) };
     }
 };
 template<typename T>
@@ -49,7 +49,9 @@ struct Word {
     callback(CallExpr) \
     callback(IdentifierExpr) \
     callback(BinaryOperatorExpr) \
-    callback(AssignStmt)
+    callback(AssignStmt) \
+    callback(NullStmt) \
+    callback(CompoundStmt)
 // clang-format on
 
 #define NODE_KIND(kind) kind,
@@ -224,6 +226,17 @@ struct AssignStmt : Stmt {
         : Stmt(NodeKind::AssignStmt), op(op), left(left), right(right) { }
 };
 
+struct NullStmt : Stmt {
+    NullStmt()
+        : Stmt(NodeKind::NullStmt) { }
+};
+
+struct CompoundStmt : Stmt {
+    Span<Ptr<Stmt>> body;
+    CompoundStmt()
+        : Stmt(NodeKind::CompoundStmt) { }
+};
+
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
 
@@ -294,6 +307,13 @@ struct STChildren {
     void childrenAssignStmt(Ptr<AssignStmt> e, Args... args) {
         impl()->child(Iat(e).left, IsLastChild::No, args...);
         impl()->child(Iat(e).right, IsLastChild::Yes, args...);
+    }
+    void childrenNullStmt(Ptr<NullStmt>, Args...) { }
+    void childrenCompoundStmt(Ptr<CompoundStmt> p, Args... args) {
+        CompoundStmt& e = Iat(p);
+        for (uint32_t i = 0; i < e.body.count; i++) {
+            impl()->child(Iat(e.body[i]), (IsLastChild)(i == e.body.count - 1), args...);
+        }
     }
 
     void child(Ptr<Node>, IsLastChild, Args...) { }
@@ -406,6 +426,7 @@ struct Parser : Lexer, STStorage {
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
     void parseStmt(Ptr<Stmt>& out);
+    void parseCompoundStmt(Ptr<CompoundStmt>& out);
 
     STContext context() {
         return { *this, buffer };

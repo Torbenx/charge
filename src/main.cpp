@@ -30,20 +30,13 @@ int main() {
         dump(par.context(), e);
     }
     {
-        Parser par(R"str(
+        Parser par(R"str({
             x = a + b;
             y * y;
             x *= x[.a = c];
-        )str", true);
-        Ptr<Stmt> out[3] = {};
-        par.parseStmt(out[0]);
-        par.parseStmt(out[1]);
-        par.parseStmt(out[2]);
-        fmt::println("============ 1 ============");
-        dump(par.context(), out[0]);
-        fmt::println("============ 2 ============");
-        dump(par.context(), out[1]);
-        fmt::println("============ 3 ============");
-        dump(par.context(), out[2]);
+        })str", true);
+        Ptr<CompoundStmt> out = {};
+        par.parseCompoundStmt(out);
+        dump(par.context(), out);
     }
 }

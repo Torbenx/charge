@@ -205,9 +205,6 @@ void Parser::parseBinaryExpr(Ptr<Expr>& out, int precedence) {
     Ptr<Expr> left;
     parseLeafExpr(left);
 
-    parseBinaryExprAfterFirstExpr(out, left, precedence);
-}
-void Parser::parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int precedence) {
     while (isBinaryOp(tok.kind())) {
         BinaryOperator op2 = tokenKindToBinaryOp(tok.kind());
         int precedence2 = precedenceOf(op2);
@@ -217,14 +214,12 @@ void Parser::parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int p
         // op2 must be evaluated first
         advance();
         Ptr<Expr> right;
-        parseLeafExpr(right);
-
-        parseBinaryExprAfterFirstExpr(right, right, precedence2);
+        parseBinaryExpr(right, precedence2);
         left = make<BinaryOperatorExpr>(op2, left, right);
     }
 
     out = left;
-} 
+}
 
 void Parser::parseArgumentContext(Arguments& out) {
     TokenKind leftKind = tok.kind();
@@ -263,35 +258,39 @@ void Parser::parseArgument(Arguments::Arg& out) {
 
 void Parser::parseStmt(Ptr<Stmt>& out) {
     if (tok.kind() == TokenKind::SemiColon) {
-        // stray semicolon -> ignore
-        fmt::println("ignoreing ';'");
+        out = make<NullStmt>();
         advance();
-        return;
-    }
-    if (tok.kind() == TokenKind::LeftBrace) {
-        // this is nested context not an ImmediateBraceExpr!
-        VERIFY_NOT_REACHED();
         return;
     }
     if (tok.kind() == TokenKind::Word) {
         // check keywords...
     }
     Ptr<Expr> expr;
-    parseLeafExpr(expr);
+    parseBinaryExpr(expr);
     if (isAssignOp(tok.kind())) {
         // AssignStmt
         auto& stmt = makeSet<AssignStmt>(out, tokenKindToAssignOp(tok.kind()), expr);
         advance();
         parseBinaryExpr(stmt.right);
-        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
-        advance();
-        return;
+    } else {
+        // expression statement
+        out = expr;
     }
-    // expression statement
-    parseBinaryExprAfterFirstExpr(expr, expr);
     EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
     advance();
-    out = expr;
+}
+
+void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+    advance();
+    auto& e = makeSet<CompoundStmt>(out);
+    auto body = beginSpan<Ptr<Stmt>>();
+    while (tok.kind() != TokenKind::RightBrace) {
+        auto& stmt = append(body, {});
+        parseStmt(stmt);
+    }
+    advance();
+    e.body = finalizeSpan(body);
 }
 
 namespace {
