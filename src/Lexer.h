@@ -71,6 +71,7 @@ enum class TokenKind : uint32_t {
     ColonColon, // ::
     SemiColon, // ;
     Word, // abc123
+    IntegerLiteral,
     EOS,
 
     COUNT,
@@ -147,13 +148,13 @@ struct SourceBuffer {
         return buffer[i];
     }
 
-    std::string_view sourceCode(Token t) const {
+    std::string_view view(Token t) const {
         return { (const char*)(&buffer[t.start]), t.length };
     }
 };
 
 struct Lexer {
-    SourceBuffer buffer;
+    SourceBuffer source;
     uint32_t m_position = 0;
     uint32_t pos() const { return m_position; }
     bool dumpTokens = false;
@@ -165,5 +166,3 @@ struct Lexer {
 
     Token tok = {};
 };
-
-void dumpTokens(Lexer&);

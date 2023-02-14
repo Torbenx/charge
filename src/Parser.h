@@ -40,24 +40,23 @@ struct Word {
     uint32_t length = 0;
 };
 
-// clang-format off
-#define ENUMERATE_NODE_KINDS(callback) \
-    callback(UnaryOperatorExpr) \
-    callback(ParenExpr) \
-    callback(AccessExpr) \
-    callback(ImmediateBraceExpr) \
-    callback(CallExpr) \
-    callback(IdentifierExpr) \
-    callback(BinaryOperatorExpr) \
-    callback(AssignStmt) \
-    callback(NullStmt) \
-    callback(CompoundStmt)
-// clang-format on
+#define ENUMERATE_NODE_KINDS      \
+    NODE_KIND(UnaryOperatorExpr)  \
+    NODE_KIND(ParenExpr)          \
+    NODE_KIND(AccessExpr)         \
+    NODE_KIND(ImmediateBraceExpr) \
+    NODE_KIND(CallExpr)           \
+    NODE_KIND(IdentifierExpr)     \
+    NODE_KIND(BinaryOperatorExpr) \
+    NODE_KIND(AssignStmt)         \
+    NODE_KIND(NullStmt)           \
+    NODE_KIND(CompoundStmt)       \
+    NODE_KIND(IntLiteralExpr)
 
 #define NODE_KIND(kind) kind,
 enum class NodeKind : uint8_t {
     Invalid,
-    ENUMERATE_NODE_KINDS(NODE_KIND)
+    ENUMERATE_NODE_KINDS
 };
 #undef NODE_KIND
 
@@ -237,6 +236,12 @@ struct CompoundStmt : Stmt {
         : Stmt(NodeKind::CompoundStmt) { }
 };
 
+struct IntLiteralExpr : Expr {
+    uint64_t value;
+    IntLiteralExpr(uint64_t value)
+        : Expr(NodeKind::IntLiteralExpr), value(value) { }
+};
+
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
 
@@ -315,6 +320,7 @@ struct STChildren {
             impl()->child(Iat(e.body[i]), (IsLastChild)(i == e.body.count - 1), args...);
         }
     }
+    void childrenIntLiteralExpr(Ptr<IntLiteralExpr>, Args...) { }
 
     void child(Ptr<Node>, IsLastChild, Args...) { }
     void child(Arguments, IsLastChild, Args...) { }
@@ -326,7 +332,7 @@ struct STChildren {
         break;
 
         switch (Iat(e).kind) {
-            ENUMERATE_NODE_KINDS(NODE_KIND)
+            ENUMERATE_NODE_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
@@ -343,7 +349,7 @@ struct STVisitor {
 
 #define NODE_KIND(kind) \
     void visit##kind(Ptr<kind>, Args...) { }
-    ENUMERATE_NODE_KINDS(NODE_KIND)
+    ENUMERATE_NODE_KINDS
 #undef NODE_KIND
 
     void dispatchVisit(Ptr<Node> e, Args... args) {
@@ -353,7 +359,7 @@ struct STVisitor {
         break;
 
         switch (Iat(e).kind) {
-            ENUMERATE_NODE_KINDS(NODE_KIND)
+            ENUMERATE_NODE_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
@@ -429,7 +435,7 @@ struct Parser : Lexer, STStorage {
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
 
     STContext context() {
-        return { *this, buffer };
+        return { *this, source };
     }
 };
 

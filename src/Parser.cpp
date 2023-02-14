@@ -10,7 +10,7 @@ const char* toString(NodeKind kind) {
     switch (kind) {
     case NodeKind::Invalid:
         return "Invalid";
-        ENUMERATE_NODE_KINDS(NODE_KIND)
+        ENUMERATE_NODE_KINDS
     default:
         return "???";
     }
@@ -141,6 +141,41 @@ void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
     }
 }
 
+static uint64_t parseInteger(std::string_view range) {
+    auto characterValue = [](uint8_t c) -> uint64_t {
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        VERIFY_NOT_REACHED();
+    };
+
+    uint64_t base = 10;
+    uint64_t pos = 0;
+    if (range[0] == '0') {
+        if (range.length() == 1)
+            return 0;
+        if (range[1] == 'x' || range[1] == 'X')
+            base = 16;
+        else if (range[1] == 'b' || range[1] == 'B')
+            base = 2;
+        else
+            VERIFY_NOT_REACHED();
+        pos = 2;
+    }
+    uint64_t value = 0;
+    for (;pos < range.length(); pos += 1) {
+        if (range[pos] == '\'')
+            continue;
+        uint64_t v = characterValue(range[pos]);
+        VERIFY(v < base);
+        value = v + value * base;
+    }
+    return value;
+}
+
 void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // unary op
     if (isUnaryOp(tok.kind())) {
@@ -169,6 +204,11 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     else if (isWordOrGlobal(tok.kind())) {
         auto& e = makeSet<IdentifierExpr>(base);
         parseParametricIdentifier(e.identifier);
+    }
+    // IntegerLiteral
+    else if (tok.kind() == TokenKind::IntegerLiteral) {
+        base = make<IntLiteralExpr>(parseInteger(source.view(tok)));
+        advance();
     }
     //
     else {
@@ -365,6 +405,9 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     }
     void visitAssignStmt(Ptr<AssignStmt> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
+    }
+    void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
+        out << '\'' << at(e).value << '\'';
     }
 };
 }

@@ -51,6 +51,7 @@ const char* toShortString(TokenKind kind) {
     case ColonColon: return "::";
     case SemiColon: return ";";
     case Word: return "word";
+    case IntegerLiteral: return "int";
     case EOS: return "EOS";
     default: return "????";
     }
@@ -59,6 +60,8 @@ const char* toShortString(TokenKind kind) {
 const char* exampleString(TokenKind kind) {
     if (kind == TokenKind::EOS)
         return "";
+    if (kind == TokenKind::IntegerLiteral)
+        return "123";
     return toShortString(kind);
 }
 
@@ -130,6 +133,8 @@ struct TableHolder {
         { '<', { .bare = Less, .repeat = LessLess, .equal = LessEqual, .repeatEqual = LessLessEqual } },
         { '>', { .bare = Greater, .repeat = GreaterGreater, .equal = GreaterEqual, .repeatEqual = GreaterGreaterEqual } },
 
+        { '0', '9', { IntegerLiteral } },
+
         { 'a', 'z', { Word } },
         { 'A', 'Z', { Word } },
         { '_', { Word } },
@@ -153,11 +158,14 @@ constexpr bool isBulkWordChar(u8 c) {
 constexpr bool isWhiteSpace(u8 c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
+constexpr bool isIntLiteralChar(u8 c) {
+    return isLetter(c) || isNumber(c) || c == '\'';
+}
 
 }
 
 Lexer::Lexer(SourceBuffer buffer, bool dump)
-    : buffer(buffer), dumpTokens(dump) {
+    : source(buffer), dumpTokens(dump) {
     uint32_t firstToken = nextNonWhiteSpace(0);
     m_position = firstToken;
     tok.flags |= firstToken > 0 ? TokenFlags::HasLeadingWhiteSpace : 0;
@@ -165,14 +173,14 @@ Lexer::Lexer(SourceBuffer buffer, bool dump)
 }
 
 uint32_t Lexer::nextNonWhiteSpace(uint32_t pos) const {
-    while (isWhiteSpace(buffer[pos])) {
+    while (isWhiteSpace(source[pos])) {
         pos += 1;
     }
     return pos;
 }
 
 void Lexer::advance() {
-    u8 head = buffer[pos()];
+    u8 head = source[pos()];
     if (head == '\0') [[unlikely]] {
         tok = {
             .start = pos(),
@@ -186,14 +194,17 @@ void Lexer::advance() {
         VERIFY_NOT_REACHED();
     }
 
-    bool repeat = buffer[pos() + 1] == head;
-    bool equal = buffer[pos() + (repeat ? 2 : 1)] == '=';
+    bool repeat = source[pos() + 1] == head;
+    bool equal = source[pos() + (repeat ? 2 : 1)] == '=';
     uint32_t idx = (uint32_t)head - 0x20 + (repeat ? 0x60 : 0) + (equal ? 0x60 * 2 : 0);
     auto [kind, advance] = TableHolder::table.table[idx];
     uint32_t end = pos() + advance;
     if ((TokenKind)kind == TokenKind::Word) {
-        // advance is 1 in this case
-        while (isBulkWordChar(buffer[end])) {
+        while (isBulkWordChar(source[end])) {
+            end += 1;
+        }
+    } else if ((TokenKind)kind == TokenKind::IntegerLiteral) {
+        while (isIntLiteralChar(source[end])) {
             end += 1;
         }
     }
@@ -212,12 +223,5 @@ void Lexer::advance() {
     };
     m_position = spaceEnd;
     if (dumpTokens)
-        fmt::println("'{:4}': \"{}\"", toShortString(tok.kind()), buffer.sourceCode(tok));
-}
-
-void dumpTokens(Lexer& lex) {
-    do {
-        lex.advance();
-        fmt::println("'{:4}': \"{}\"", toShortString(lex.tok.kind()), lex.buffer.sourceCode(lex.tok));
-    } while (lex.tok.kind() != TokenKind::Invalid);
+        fmt::println("'{:4}': \"{}\"", toShortString(tok.kind()), source.view(tok));
 }

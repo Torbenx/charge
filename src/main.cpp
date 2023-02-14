@@ -29,7 +29,7 @@ int main() {
         Parser par(R"str({
             x = a + b;
             y * y;
-            x *= x[.a = c];
+            x *= x[.a = c] + 0b0111100111001000110111001010100110000010111001001100000101100001;
         })str",
             true);
         Ptr<CompoundStmt> out = {};
