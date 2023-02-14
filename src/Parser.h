@@ -244,12 +244,18 @@ struct IntLiteralExpr : Expr {
 };
 
 struct LetStmt : Stmt {
+    enum Qualifier : uint8_t {
+        None,
+        Const,
+        Mut,
+    };
     bool hasExplicitType = false;
+    Qualifier qual;
     Word target;
     ParametricIdentifier typeIdent;
     Ptr<Expr> initializer;
-    LetStmt(Word target)
-        : Stmt(NodeKind::LetStmt), target(target) { }
+    LetStmt(Qualifier qual, Word target)
+        : Stmt(NodeKind::LetStmt), qual(qual), target(target) { }
 };
 
 struct STStorage {
@@ -444,6 +450,7 @@ struct Parser : Lexer, STStorage {
     void parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int precedence = 100);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
+    void parseLetStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
 

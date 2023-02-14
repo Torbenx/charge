@@ -296,27 +296,44 @@ void Parser::parseArgument(Arguments::Arg& out) {
     parseBinaryExpr(out.source);
 }
 
+void Parser::parseLetStmt(Ptr<Stmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    if (source.view(tok) == "let")
+        advance();
+
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    auto qual = LetStmt::Qualifier::None;
+    if (source.view(tok) == "const") {
+        qual = LetStmt::Qualifier::Const;
+        advance();
+    } else if (source.view(tok) == "mut") {
+        qual = LetStmt::Qualifier::Mut;
+        advance();
+    }
+    
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    auto& e = makeSet<LetStmt>(out, qual, asWord(tok));
+
+    advance();
+    if (tok.kind() == TokenKind::Colon) {
+        e.hasExplicitType = true;
+        advance();
+        parseParametricIdentifier(e.typeIdent);
+    }
+    EXPECT_EQ(tok.kind(), TokenKind::Equal);
+    advance();
+    parseBinaryExpr(e.initializer);
+}
+
 void Parser::parseStmt(Ptr<Stmt>& out) {
     if (tok.kind() == TokenKind::SemiColon) {
         out = make<NullStmt>();
         return;
     }
     if (tok.kind() == TokenKind::Word) {
-        if (source.view(tok) == "let") {
-            advance();
-            EXPECT_EQ(tok.kind(), TokenKind::Word);
-            auto& e = makeSet<LetStmt>(out, asWord(tok));
-            advance();
-            if (tok.kind() == TokenKind::Colon) {
-                e.hasExplicitType = true;
-                advance();
-                parseParametricIdentifier(e.typeIdent);
-            }
-            EXPECT_EQ(tok.kind(), TokenKind::Equal);
-            advance();
-            parseBinaryExpr(e.initializer);
-            return;
-        }
+        auto view = source.view(tok);
+        if (view == "let" || view == "const" || view == "mut")
+            return parseLetStmt(out);
     }
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
@@ -425,6 +442,10 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         out << '\'' << at(e).value << '\'';
     }
     void visitLetStmt(Ptr<LetStmt> e) {
+        if (at(e).qual == LetStmt::Qualifier::Const)
+            out << "const ";
+        else if(at(e).qual == LetStmt::Qualifier::Mut)
+            out << "mut ";
         out << '\'' << sview(at(e).target) << '\'';
         if (at(e).hasExplicitType) {
             out << ": ";

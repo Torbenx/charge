@@ -27,9 +27,11 @@ int main() {
     }
     {
         Parser par(R"str({
-            let x: foo{1} = a + b;
-            y * y;
-            x *= x[.a = c] + 0b0111100111001000110111001010100110000010111001001100000101100001;
+            let x = a + b;
+            let const x = a + b;
+            let mut x = a + b;
+            const x = a + b;
+            mut x = a + b;
         })str",
             true);
         Ptr<CompoundStmt> out = {};
