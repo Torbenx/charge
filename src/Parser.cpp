@@ -166,7 +166,7 @@ static uint64_t parseInteger(std::string_view range) {
         pos = 2;
     }
     uint64_t value = 0;
-    for (;pos < range.length(); pos += 1) {
+    for (; pos < range.length(); pos += 1) {
         if (range[pos] == '\'')
             continue;
         uint64_t v = characterValue(range[pos]);
@@ -299,11 +299,24 @@ void Parser::parseArgument(Arguments::Arg& out) {
 void Parser::parseStmt(Ptr<Stmt>& out) {
     if (tok.kind() == TokenKind::SemiColon) {
         out = make<NullStmt>();
-        advance();
         return;
     }
     if (tok.kind() == TokenKind::Word) {
-        // check keywords...
+        if (source.view(tok) == "let") {
+            advance();
+            EXPECT_EQ(tok.kind(), TokenKind::Word);
+            auto& e = makeSet<LetStmt>(out, asWord(tok));
+            advance();
+            if (tok.kind() == TokenKind::Colon) {
+                e.hasExplicitType = true;
+                advance();
+                parseParametricIdentifier(e.typeIdent);
+            }
+            EXPECT_EQ(tok.kind(), TokenKind::Equal);
+            advance();
+            parseBinaryExpr(e.initializer);
+            return;
+        }
     }
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
@@ -316,8 +329,6 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
         // expression statement
         out = expr;
     }
-    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
-    advance();
 }
 
 void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
@@ -328,6 +339,8 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     while (tok.kind() != TokenKind::RightBrace) {
         auto& stmt = append(body, {});
         parseStmt(stmt);
+        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+        advance();
     }
     advance();
     e.body = finalizeSpan(body);
@@ -390,15 +403,17 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     void visitCallExpr(Ptr<CallExpr> e) {
         out << '\'' << (at(e).callKind == CallKind::Paren ? "()" : "[]") << '\'';
     }
-    void visitIdentifierExpr(Ptr<IdentifierExpr> e) {
+    void printIdentifier(const ParametricIdentifier& ident) {
         out << '\'';
-        auto ident = at(e).identifier;
         if (ident.global)
             out << "::";
         out << sview(at(ident.elements, 0));
         for (uint32_t i = 1; i < ident.elements.count; i++)
             out << "::" << sview(at(ident.elements, i));
         out << '\'';
+    }
+    void visitIdentifierExpr(Ptr<IdentifierExpr> e) {
+        printIdentifier(at(e).identifier);
     }
     void visitBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
@@ -408,6 +423,13 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     }
     void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
         out << '\'' << at(e).value << '\'';
+    }
+    void visitLetStmt(Ptr<LetStmt> e) {
+        out << '\'' << sview(at(e).target) << '\'';
+        if (at(e).hasExplicitType) {
+            out << ": ";
+            printIdentifier(at(e).typeIdent);
+        }
     }
 };
 }

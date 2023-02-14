@@ -51,7 +51,8 @@ struct Word {
     NODE_KIND(AssignStmt)         \
     NODE_KIND(NullStmt)           \
     NODE_KIND(CompoundStmt)       \
-    NODE_KIND(IntLiteralExpr)
+    NODE_KIND(IntLiteralExpr)     \
+    NODE_KIND(LetStmt)
 
 #define NODE_KIND(kind) kind,
 enum class NodeKind : uint8_t {
@@ -242,6 +243,15 @@ struct IntLiteralExpr : Expr {
         : Expr(NodeKind::IntLiteralExpr), value(value) { }
 };
 
+struct LetStmt : Stmt {
+    bool hasExplicitType = false;
+    Word target;
+    ParametricIdentifier typeIdent;
+    Ptr<Expr> initializer;
+    LetStmt(Word target)
+        : Stmt(NodeKind::LetStmt), target(target) { }
+};
+
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
 
@@ -321,6 +331,9 @@ struct STChildren {
         }
     }
     void childrenIntLiteralExpr(Ptr<IntLiteralExpr>, Args...) { }
+    void childrenLetStmt(Ptr<LetStmt> e, Args... args) {
+        impl()->child(Iat(e).initializer, IsLastChild::Yes, args...);
+    }
 
     void child(Ptr<Node>, IsLastChild, Args...) { }
     void child(Arguments, IsLastChild, Args...) { }
