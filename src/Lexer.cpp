@@ -51,9 +51,15 @@ const char* toShortString(TokenKind kind) {
     case ColonColon: return "::";
     case SemiColon: return ";";
     case Word: return "word";
+    case EOS: return "EOS";
     default: return "????";
     }
     // clang-format on
+}
+const char* exampleString(TokenKind kind) {
+    if (kind == TokenKind::EOS)
+        return "";
+    return toShortString(kind);
 }
 
 namespace {
@@ -166,20 +172,18 @@ uint32_t Lexer::nextNonWhiteSpace(uint32_t pos) const {
 }
 
 void Lexer::advance() {
-    auto makeInvalidToken = [this]() {
+    u8 head = buffer[pos()];
+    if (head == '\0') [[unlikely]] {
         tok = {
             .start = pos(),
             .length = 0,
-            .m_kind = std::to_underlying(TokenKind::Invalid),
+            .m_kind = (uint32_t)TokenKind::EOS,
             .flags = 0,
         };
-        if (dumpTokens)
-            fmt::println("making invalid token");
-    };
-
-    u8 head = buffer[pos()];
+        return;
+    }
     if (head >= 0x80 || head < 0x20) [[unlikely]] {
-        return makeInvalidToken();
+        VERIFY_NOT_REACHED();
     }
 
     bool repeat = buffer[pos() + 1] == head;

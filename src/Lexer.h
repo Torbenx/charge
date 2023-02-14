@@ -71,10 +71,13 @@ enum class TokenKind : uint32_t {
     ColonColon, // ::
     SemiColon, // ;
     Word, // abc123
+    EOS,
+
     COUNT,
 };
 
 const char* toShortString(TokenKind);
+const char* exampleString(TokenKind);
 template<>
 struct fmt::formatter<TokenKind> : formatter<string_view> {
     template<typename FormatContext>
@@ -91,9 +94,6 @@ constexpr bool isBinaryOp(TokenKind kind) {
 }
 constexpr bool isAssignOp(TokenKind kind) {
     return kind >= TokenKind::FirstAssignOp && kind <= TokenKind::LastAssignOp;
-}
-constexpr bool isGoodToken(TokenKind kind) {
-    return kind != TokenKind::Invalid && kind < TokenKind::COUNT;
 }
 constexpr bool isBracket(TokenKind kind) {
     return kind >= TokenKind::FirstBracket && kind <= TokenKind::LastBracket;

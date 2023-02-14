@@ -3,14 +3,14 @@
 
 void test() {
     auto testSingleToken = [](TokenKind kind) {
-        Lexer lex(toShortString(kind));
+        Lexer lex(exampleString(kind));
         EXPECT_EQ(lex.tok.kind(), kind);
         lex.advance();
-        EXPECT_EQ(lex.tok.kind(), TokenKind::Invalid);
+        EXPECT_EQ(lex.tok.kind(), TokenKind::EOS);
     };
 
     for (uint32_t kind = 1; kind < std::to_underlying(TokenKind::COUNT); kind++) {
-        if (isGoodToken((TokenKind)kind))
+        if ((TokenKind)kind != TokenKind::Invalid)
             testSingleToken((TokenKind)kind);
     }
 }
@@ -18,10 +18,6 @@ void test() {
 int main() {
     test();
 
-    {
-        Lexer lex("ö");
-        EXPECT_EQ(lex.tok.kind(), TokenKind::Invalid);
-    }
     {
         Parser par("-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, c, d, }++)", true);
         Ptr<Expr> e;
@@ -34,7 +30,8 @@ int main() {
             x = a + b;
             y * y;
             x *= x[.a = c];
-        })str", true);
+        })str",
+            true);
         Ptr<CompoundStmt> out = {};
         par.parseCompoundStmt(out);
         dump(par.context(), out);
