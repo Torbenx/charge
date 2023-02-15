@@ -1,6 +1,4 @@
 #include "Parser.h"
-#include <iostream>
-#include <vector>
 
 const char* toString(StmtKind kind) {
 #define STMT_KIND(kind)  \
@@ -16,6 +14,22 @@ const char* toString(StmtKind kind) {
     }
 
 #undef STMT_KIND
+};
+
+const char* toString(DeclKind kind) {
+#define DECL_KIND(kind)  \
+    case DeclKind::kind: \
+        return #kind;
+
+    switch (kind) {
+    case DeclKind::Invalid:
+        return "Invalid";
+        ENUMERATE_DECL_KINDS
+    default:
+        return "???";
+    }
+
+#undef DECL_KIND
 };
 
 // clang-format off
@@ -101,6 +115,10 @@ const char* toShortString(AssignOperator op) {
     }
 }
 // clang-format on
+
+constexpr bool isWordOrGlobal(TokenKind kind) {
+    return kind == TokenKind::Word || kind == TokenKind::ColonColon;
+}
 
 uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
     uint32_t sizeAlign4 = alignmentCeil(sizeof(uint32_t), itemCount * itemSize) / sizeof(uint32_t);
@@ -302,27 +320,30 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
         advance();
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto qual = LetStmt::Qualifier::None;
+    auto qual = VarDecl::Qualifier::None;
     if (source.view(tok) == "const") {
-        qual = LetStmt::Qualifier::Const;
+        qual = VarDecl::Qualifier::Const;
         advance();
     } else if (source.view(tok) == "mut") {
-        qual = LetStmt::Qualifier::Mut;
+        qual = VarDecl::Qualifier::Mut;
         advance();
     }
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto& e = makeSet<LetStmt>(out, qual, asWord(tok));
+    auto d = make<VarDecl>(asWord(tok), qual);
 
     advance();
     if (tok.kind() == TokenKind::Colon) {
-        e.hasExplicitType = true;
+        at(d).hasExplicitType = true;
         advance();
-        parseParametricIdentifier(e.typeIdent);
+        parseParametricIdentifier(at(d).typeIdent);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
-    parseBinaryExpr(e.initializer);
+    parseBinaryExpr(at(d).initializer);
+
+    emitDecl(d);
+    out = make<LetStmt>(d);
 }
 
 void Parser::parseStmt(Ptr<Stmt>& out) {
@@ -352,6 +373,7 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
     advance();
     auto& e = makeSet<CompoundStmt>(out);
+    auto decls = beginDeclSpan();
     auto body = beginSpan<Ptr<Stmt>>();
     while (tok.kind() != TokenKind::RightBrace) {
         auto& stmt = append(body, {});
@@ -361,4 +383,22 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     }
     advance();
     e.body = finalizeSpan(body);
+    e.decls = finalizeSpan(decls);
+}
+
+void Parser::parseStructDecl(Ptr<StructDecl>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    EXPECT_EQ(source.view(tok), "struct");
+    advance();
+
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    // struct name
+    advance();
+
+    EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+    advance();
+
+    while (tok.kind() != TokenKind::RightBrace) {
+    }
+    advance();
 }

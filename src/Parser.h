@@ -1,10 +1,7 @@
 #pragma once
 
 #include "statement.h"
-
-constexpr bool isWordOrGlobal(TokenKind kind) {
-    return kind == TokenKind::Word || kind == TokenKind::ColonColon;
-}
+#include <array>
 
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
@@ -35,7 +32,7 @@ struct STContext : STStorage {
 struct Parser : Lexer, STStorage {
     using Lexer::Lexer;
 
-    template<typename T>
+    template<typename T, int I>
     struct SpanBuilder {
         uint32_t begin = 0;
     };
@@ -51,32 +48,38 @@ struct Parser : Lexer, STStorage {
         return { token.start, token.length };
     }
 
-    std::byte* spanStorage = new std::byte[400] {};
-    uint32_t spanBuilderEnd = 0;
+    std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
+    std::array<uint32_t, 2> spanBuilderEnd = {};
 
-    template<typename T>
-    SpanBuilder<T> beginSpan() {
-        uint32_t oldEnd = spanBuilderEnd;
-        spanBuilderEnd = alignmentCeil(alignof(T), oldEnd);
+    template<typename T, int I = 0>
+    SpanBuilder<T, I> beginSpan() {
+        uint32_t oldEnd = spanBuilderEnd[I];
+        spanBuilderEnd[I] = alignmentCeil(alignof(T), oldEnd);
         return { oldEnd };
     }
-    template<typename T>
-    T& append(SpanBuilder<T>, const T& item) {
-        T* ret = new (spanStorage + spanBuilderEnd) T { item };
-        spanBuilderEnd += sizeof(T);
+    SpanBuilder<Ptr<Decl>, 1> beginDeclSpan() {
+        return beginSpan<Ptr<Decl>, 1>();
+    }
+    template<typename T, int I>
+    T& append(SpanBuilder<T, I>, const T& item) {
+        T* ret = new (spanStorage[I] + spanBuilderEnd[I]) T { item };
+        spanBuilderEnd[I] += sizeof(T);
         return *ret;
     }
-    template<typename T>
-    Span<T> finalizeSpan(SpanBuilder<T> s) {
+    template<typename T, int I>
+    Span<T> finalizeSpan(SpanBuilder<T, I> s) {
         uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
-        uint32_t count = (spanBuilderEnd - alignedBegin) / sizeof(T);
-        T* beginPtr = (T*)(spanStorage + alignedBegin);
+        uint32_t count = (spanBuilderEnd[I] - alignedBegin) / sizeof(T);
+        T* beginPtr = (T*)(spanStorage[I] + alignedBegin);
 
         Ptr<T> outSpan = allocate<T>(count);
         std::uninitialized_move_n(beginPtr, count, &at(outSpan));
         std::destroy_n(beginPtr, count);
-        spanBuilderEnd = s.begin;
+        spanBuilderEnd[I] = s.begin;
         return { outSpan, count };
+    }
+    Ptr<Decl>& emitDecl(Ptr<Decl> decl) {
+        return append<Ptr<Decl>, 1>({}, decl);
     }
 
     template<typename E, typename... Args>
@@ -97,12 +100,13 @@ struct Parser : Lexer, STStorage {
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
-    void parseBinaryExprAfterFirstExpr(Ptr<Expr>& out, Ptr<Expr> left, int precedence = 100);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
     void parseLetStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
+
+    void parseStructDecl(Ptr<StructDecl>& out);
 
     STContext context() {
         return { *this, source };

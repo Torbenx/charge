@@ -16,20 +16,29 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     std::ostream& out;
     std::vector<char> prefix = {};
 
-    void dump(Ptr<Stmt> e, Name name) {
+    template<typename T> // T = { Stmt, Decl, DeclContext }
+    void dump(Ptr<T> e, Name name) {
         if (name.name.length() > 0) {
             if (name.withdot)
                 out << '.';
             out << name.name << " = ";
         }
-        out << toString(at(e).kind) << ' ';
-        dispatchVisit(e);
-        out << '\n';
-
-        dispatchChildren(e, {});
+        if constexpr (std::is_same_v<T, DeclContext>) {
+            out << "DeclContext\n";
+            auto decls = at(e).decls;
+            for (uint32_t i = 0; i < decls.count; i++) {
+                child(at(decls, i), (IsLastChild)(i == decls.count - 1), {});
+            }
+        } else {
+            out << toString(at(e).kind) << ' ';
+            dispatchVisit(e);
+            out << '\n';
+            dispatchChildren(e, {});
+        }
     }
 
-    void child(Ptr<Stmt> e, IsLastChild last, Name name) {
+    template<typename T> // T = { Stmt, Decl, DeclContext }
+    void child(Ptr<T> e, IsLastChild last, Name name) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
             out << "'-";
@@ -81,12 +90,12 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
         out << '\'' << at(e).value << '\'';
     }
-    void visitLetStmt(Ptr<LetStmt> e) {
-        if (at(e).qual == LetStmt::Qualifier::Const)
+    void visitVarDecl(Ptr<VarDecl> e) {
+        if (at(e).qual == VarDecl::Qualifier::Const)
             out << "const ";
-        else if (at(e).qual == LetStmt::Qualifier::Mut)
+        else if (at(e).qual == VarDecl::Qualifier::Mut)
             out << "mut ";
-        out << '\'' << sview(at(e).target) << '\'';
+        out << '\'' << sview(at(e).name) << '\'';
         if (at(e).hasExplicitType) {
             out << ": ";
             printIdentifier(at(e).typeIdent);

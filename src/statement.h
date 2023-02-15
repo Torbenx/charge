@@ -4,34 +4,24 @@
 #include <concepts>
 #include <cstdint>
 
-template<typename E>
-struct Ptr {
-    uint32_t offsetAlign4 = 0;
+// Basics
+#define ENUMERATE_DECL_KINDS \
+    DECL_KIND(StructDecl)    \
+    DECL_KIND(VarDecl)       \
+    DECL_KIND(FnDecl)
 
-    Ptr() = default;
-    explicit Ptr(uint32_t off)
-        : offsetAlign4(off) { }
-    template<typename E2>
-    explicit Ptr(const Ptr<E2>& p) requires std::derived_from<E, E2>
-        : offsetAlign4(p.offsetAlign4) { }
-
-    template<typename E2>
-    operator Ptr<E2>() requires std::derived_from<E, E2> { return Ptr<E2> { offsetAlign4 }; }
+#define DECL_KIND(kind) kind,
+enum class DeclKind : uint8_t {
+    Invalid,
+    ENUMERATE_DECL_KINDS
 };
+#undef DECL_KIND
+const char* toString(DeclKind);
 
-template<typename T>
-struct Span {
-    Ptr<T> begin;
-    uint32_t count = 0;
-
-    constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
-        return Ptr<T> { begin.offsetAlign4 + i * (uint32_t)(sizeof(T) / sizeof(uint32_t)) };
-    }
-};
-struct Word {
-    uint32_t start = 0;
-    uint32_t length = 0;
-};
+struct Decl;
+#define DECL_KIND(kind) struct kind;
+ENUMERATE_DECL_KINDS
+#undef DECL_KIND
 
 #define ENUMERATE_STMT_KINDS      \
     STMT_KIND(UnaryOperatorExpr)  \
@@ -55,6 +45,110 @@ enum class StmtKind : uint8_t {
 #undef STMT_KIND
 const char* toString(StmtKind);
 
+struct Stmt;
+struct Expr;
+#define STMT_KIND(kind) struct kind;
+ENUMERATE_STMT_KINDS
+#undef STMT_KIND
+
+template<typename Derived, typename Base>
+inline std::ptrdiff_t computeOffsetInBase() {
+    auto base = (const Base*)1;
+    auto derived = static_cast<const Derived*>(base);
+    return (const std::byte*)derived - (const std::byte*)base;
+}
+
+template<typename E>
+struct Ptr {
+    uint32_t offsetAlign4 = 0;
+
+    Ptr() = default;
+    explicit Ptr(uint32_t off)
+        : offsetAlign4(off) { }
+    template<typename Base>
+    explicit Ptr(const Ptr<Base>& p) requires std::derived_from<E, Base>
+        : offsetAlign4(p.offsetAlign4 + computeOffsetInBase<E, Base>() / sizeof(uint32_t)) { }
+
+    template<typename Base>
+    operator Ptr<Base>() requires std::derived_from<E, Base> {
+        return Ptr<Base> { (uint32_t)(offsetAlign4 - computeOffsetInBase<E, Base>() / sizeof(uint32_t)) };
+    }
+};
+
+template<typename T>
+struct Span {
+    Ptr<T> begin;
+    uint32_t count = 0;
+
+    constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
+        return Ptr<T> { begin.offsetAlign4 + i * (uint32_t)(sizeof(T) / sizeof(uint32_t)) };
+    }
+};
+struct Word {
+    uint32_t start = 0;
+    uint32_t length = 0;
+};
+struct Arguments {
+    struct Arg {
+        Word target;
+        Ptr<Expr> source;
+    };
+    Span<Arg> args;
+};
+struct Identifier {
+    Span<Word> elements;
+    bool global = false;
+};
+struct ParametricIdentifier : Identifier {
+    bool hasBraces = false;
+    Arguments args;
+};
+
+// Declarations
+struct Decl {
+    DeclKind kind = DeclKind::Invalid;
+    Word name;
+    Decl(DeclKind kind, Word name = {})
+        : kind(kind), name(name) { }
+};
+
+enum class DeclContextKind : uint8_t {
+    StructDecl,
+    CompoundStmt,
+};
+struct DeclContext {
+    Span<Ptr<Decl>> decls;
+    DeclContextKind contextKind;
+    DeclContext(DeclContextKind kind)
+        : contextKind(kind) { }
+};
+
+struct StructDecl : Decl, DeclContext {
+    StructDecl(Word name = {})
+        : Decl(DeclKind::StructDecl, name)
+        , DeclContext(DeclContextKind::StructDecl) { }
+};
+
+struct VarDecl : Decl {
+    enum Qualifier : uint8_t {
+        None,
+        Const,
+        Mut,
+    };
+    bool hasExplicitType = false;
+    Qualifier qual;
+    ParametricIdentifier typeIdent;
+    Ptr<Expr> initializer;
+    VarDecl(Word name = {}, Qualifier qual = Qualifier::None)
+        : Decl(DeclKind::VarDecl, name), qual(qual) { }
+};
+
+struct FnDecl : Decl {
+    FnDecl(Word name = {})
+        : Decl(DeclKind::FnDecl, name) { }
+};
+
+// Statements
 struct Stmt {
     StmtKind kind = StmtKind::Invalid;
     Stmt(StmtKind kind)
@@ -63,14 +157,6 @@ struct Stmt {
 struct Expr : Stmt {
     Expr(StmtKind kind)
         : Stmt(kind) { }
-};
-
-struct Arguments {
-    struct Arg {
-        Word target;
-        Ptr<Expr> source;
-    };
-    Span<Arg> args;
 };
 
 enum class UnaryOperator : uint8_t {
@@ -130,14 +216,6 @@ struct CallExpr : Expr {
         : Expr(StmtKind::CallExpr), callKind(callKind), base(base), args(args) { }
 };
 
-struct Identifier {
-    Span<Word> elements;
-    bool global = false;
-};
-struct ParametricIdentifier : Identifier {
-    bool hasBraces = false;
-    Arguments args;
-};
 struct IdentifierExpr : Expr {
     ParametricIdentifier identifier;
     IdentifierExpr(ParametricIdentifier identifier = {})
@@ -221,10 +299,11 @@ struct NullStmt : Stmt {
         : Stmt(StmtKind::NullStmt) { }
 };
 
-struct CompoundStmt : Stmt {
+struct CompoundStmt : Stmt, DeclContext {
     Span<Ptr<Stmt>> body;
     CompoundStmt()
-        : Stmt(StmtKind::CompoundStmt) { }
+        : Stmt(StmtKind::CompoundStmt)
+        , DeclContext(DeclContextKind::CompoundStmt) { }
 };
 
 struct IntLiteralExpr : Expr {
@@ -234,16 +313,7 @@ struct IntLiteralExpr : Expr {
 };
 
 struct LetStmt : Stmt {
-    enum Qualifier : uint8_t {
-        None,
-        Const,
-        Mut,
-    };
-    bool hasExplicitType = false;
-    Qualifier qual;
-    Word target;
-    ParametricIdentifier typeIdent;
-    Ptr<Expr> initializer;
-    LetStmt(Qualifier qual, Word target)
-        : Stmt(StmtKind::LetStmt), qual(qual), target(target) { }
+    Ptr<VarDecl> decl;
+    LetStmt(Ptr<VarDecl> decl = {})
+        : Stmt(StmtKind::LetStmt), decl(decl) { }
 };
