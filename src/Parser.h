@@ -40,38 +40,34 @@ struct Word {
     uint32_t length = 0;
 };
 
-#define ENUMERATE_NODE_KINDS      \
-    NODE_KIND(UnaryOperatorExpr)  \
-    NODE_KIND(ParenExpr)          \
-    NODE_KIND(AccessExpr)         \
-    NODE_KIND(ImmediateBraceExpr) \
-    NODE_KIND(CallExpr)           \
-    NODE_KIND(IdentifierExpr)     \
-    NODE_KIND(BinaryOperatorExpr) \
-    NODE_KIND(AssignStmt)         \
-    NODE_KIND(NullStmt)           \
-    NODE_KIND(CompoundStmt)       \
-    NODE_KIND(IntLiteralExpr)     \
-    NODE_KIND(LetStmt)
+#define ENUMERATE_STMT_KINDS      \
+    STMT_KIND(UnaryOperatorExpr)  \
+    STMT_KIND(ParenExpr)          \
+    STMT_KIND(AccessExpr)         \
+    STMT_KIND(ImmediateBraceExpr) \
+    STMT_KIND(CallExpr)           \
+    STMT_KIND(IdentifierExpr)     \
+    STMT_KIND(BinaryOperatorExpr) \
+    STMT_KIND(AssignStmt)         \
+    STMT_KIND(NullStmt)           \
+    STMT_KIND(CompoundStmt)       \
+    STMT_KIND(IntLiteralExpr)     \
+    STMT_KIND(LetStmt)
 
-#define NODE_KIND(kind) kind,
-enum class NodeKind : uint8_t {
+#define STMT_KIND(kind) kind,
+enum class StmtKind : uint8_t {
     Invalid,
-    ENUMERATE_NODE_KINDS
+    ENUMERATE_STMT_KINDS
 };
-#undef NODE_KIND
+#undef STMT_KIND
 
-struct Node {
-    NodeKind kind = NodeKind::Invalid;
-    Node(NodeKind kind)
+struct Stmt {
+    StmtKind kind = StmtKind::Invalid;
+    Stmt(StmtKind kind)
         : kind(kind) { }
 };
-struct Stmt : Node {
-    Stmt(NodeKind kind)
-        : Node(kind) { }
-};
 struct Expr : Stmt {
-    Expr(NodeKind kind)
+    Expr(StmtKind kind)
         : Stmt(kind) { }
 };
 
@@ -106,26 +102,26 @@ struct UnaryOperatorExpr : Expr {
     UnaryOperator op;
     Ptr<Expr> subExpr;
     UnaryOperatorExpr(UnaryOperator op, Ptr<Expr> subExpr = {})
-        : Expr(NodeKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
+        : Expr(StmtKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
 };
 
 struct ParenExpr : Expr {
     Ptr<Expr> subExpr;
     ParenExpr(Ptr<Expr> subExpr = {})
-        : Expr(NodeKind::ParenExpr), subExpr(subExpr) { }
+        : Expr(StmtKind::ParenExpr), subExpr(subExpr) { }
 };
 
 struct AccessExpr : Expr {
     Ptr<Expr> base;
     Word member;
     AccessExpr(Ptr<Expr> base = {}, Word member = {})
-        : Expr(NodeKind::AccessExpr), base(base), member(member) { }
+        : Expr(StmtKind::AccessExpr), base(base), member(member) { }
 };
 
 struct ImmediateBraceExpr : Expr {
     Arguments args;
     ImmediateBraceExpr(Arguments args = {})
-        : Expr(NodeKind::ImmediateBraceExpr), args(args) { }
+        : Expr(StmtKind::ImmediateBraceExpr), args(args) { }
 };
 
 enum class CallKind : uint8_t {
@@ -137,7 +133,7 @@ struct CallExpr : Expr {
     Ptr<Expr> base;
     Arguments args;
     CallExpr(CallKind callKind, Ptr<Expr> base = {}, Arguments args = {})
-        : Expr(NodeKind::CallExpr), callKind(callKind), base(base), args(args) { }
+        : Expr(StmtKind::CallExpr), callKind(callKind), base(base), args(args) { }
 };
 
 struct Identifier {
@@ -151,7 +147,7 @@ struct ParametricIdentifier : Identifier {
 struct IdentifierExpr : Expr {
     ParametricIdentifier identifier;
     IdentifierExpr(ParametricIdentifier identifier = {})
-        : Expr(NodeKind::IdentifierExpr), identifier(identifier) { }
+        : Expr(StmtKind::IdentifierExpr), identifier(identifier) { }
 };
 
 enum class BinaryOperator : uint8_t {
@@ -189,7 +185,7 @@ struct BinaryOperatorExpr : Expr {
     Ptr<Expr> left;
     Ptr<Expr> right;
     BinaryOperatorExpr(BinaryOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
-        : Expr(NodeKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
+        : Expr(StmtKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
 };
 
 constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
@@ -223,24 +219,24 @@ struct AssignStmt : Stmt {
     Ptr<Expr> left;
     Ptr<Expr> right;
     AssignStmt(AssignOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
-        : Stmt(NodeKind::AssignStmt), op(op), left(left), right(right) { }
+        : Stmt(StmtKind::AssignStmt), op(op), left(left), right(right) { }
 };
 
 struct NullStmt : Stmt {
     NullStmt()
-        : Stmt(NodeKind::NullStmt) { }
+        : Stmt(StmtKind::NullStmt) { }
 };
 
 struct CompoundStmt : Stmt {
     Span<Ptr<Stmt>> body;
     CompoundStmt()
-        : Stmt(NodeKind::CompoundStmt) { }
+        : Stmt(StmtKind::CompoundStmt) { }
 };
 
 struct IntLiteralExpr : Expr {
     uint64_t value;
     IntLiteralExpr(uint64_t value)
-        : Expr(NodeKind::IntLiteralExpr), value(value) { }
+        : Expr(StmtKind::IntLiteralExpr), value(value) { }
 };
 
 struct LetStmt : Stmt {
@@ -255,7 +251,7 @@ struct LetStmt : Stmt {
     ParametricIdentifier typeIdent;
     Ptr<Expr> initializer;
     LetStmt(Qualifier qual, Word target)
-        : Stmt(NodeKind::LetStmt), qual(qual), target(target) { }
+        : Stmt(StmtKind::LetStmt), qual(qual), target(target) { }
 };
 
 struct STStorage {
@@ -284,7 +280,7 @@ struct STContext : STStorage {
     }
 };
 
-const char* toString(NodeKind);
+const char* toString(StmtKind);
 
 enum class IsLastChild : bool {
     No = false,
@@ -341,22 +337,22 @@ struct STChildren {
         impl()->child(Iat(e).initializer, IsLastChild::Yes, args...);
     }
 
-    void child(Ptr<Node>, IsLastChild, Args...) { }
+    void child(Ptr<Stmt>, IsLastChild, Args...) { }
     void child(Arguments, IsLastChild, Args...) { }
 
-    void dispatchChildren(Ptr<Node> e, Args... args) {
-#define NODE_KIND(kind)                                \
-    case NodeKind::kind:                               \
+    void dispatchChildren(Ptr<Stmt> e, Args... args) {
+#define STMT_KIND(kind)                                \
+    case StmtKind::kind:                               \
         impl()->children##kind((Ptr<kind>)e, args...); \
         break;
 
         switch (Iat(e).kind) {
-            ENUMERATE_NODE_KINDS
+            ENUMERATE_STMT_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
 
-#undef NODE_KIND
+#undef STMT_KIND
     }
 };
 
@@ -366,24 +362,24 @@ struct STVisitor {
     template<typename T>
     T& Iat(Ptr<T> p) { return impl()->at(p); }
 
-#define NODE_KIND(kind) \
+#define STMT_KIND(kind) \
     void visit##kind(Ptr<kind>, Args...) { }
-    ENUMERATE_NODE_KINDS
-#undef NODE_KIND
+    ENUMERATE_STMT_KINDS
+#undef STMT_KIND
 
-    void dispatchVisit(Ptr<Node> e, Args... args) {
-#define NODE_KIND(kind)                             \
-    case NodeKind::kind:                            \
+    void dispatchVisit(Ptr<Stmt> e, Args... args) {
+#define STMT_KIND(kind)                             \
+    case StmtKind::kind:                            \
         impl()->visit##kind((Ptr<kind>)e, args...); \
         break;
 
         switch (Iat(e).kind) {
-            ENUMERATE_NODE_KINDS
+            ENUMERATE_STMT_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
 
-#undef NODE_KIND
+#undef STMT_KIND
     }
 };
 
@@ -459,4 +455,4 @@ struct Parser : Lexer, STStorage {
     }
 };
 
-void dump(STContext context, Ptr<Node> e);
+void dump(STContext context, Ptr<Stmt> e);

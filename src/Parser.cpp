@@ -2,20 +2,20 @@
 #include <iostream>
 #include <vector>
 
-const char* toString(NodeKind kind) {
-#define NODE_KIND(kind)  \
-    case NodeKind::kind: \
+const char* toString(StmtKind kind) {
+#define STMT_KIND(kind)  \
+    case StmtKind::kind: \
         return #kind;
 
     switch (kind) {
-    case NodeKind::Invalid:
+    case StmtKind::Invalid:
         return "Invalid";
-        ENUMERATE_NODE_KINDS
+        ENUMERATE_STMT_KINDS
     default:
         return "???";
     }
 
-#undef NODE_KIND
+#undef STMT_KIND
 };
 
 // clang-format off
@@ -376,7 +376,7 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     std::ostream& out;
     std::vector<char> prefix = {};
 
-    void dump(Ptr<Node> e, Name name) {
+    void dump(Ptr<Stmt> e, Name name) {
         if (name.name.length() > 0) {
             if (name.withdot)
                 out << '.';
@@ -389,7 +389,7 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         dispatchChildren(e, {});
     }
 
-    void child(Ptr<Node> e, IsLastChild last, Name name) {
+    void child(Ptr<Stmt> e, IsLastChild last, Name name) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
             out << "'-";
@@ -455,7 +455,7 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
 };
 }
 
-void dump(STContext context, Ptr<Node> e) {
+void dump(STContext context, Ptr<Stmt> e) {
     STDumper dumper { context, {}, {}, std::cout };
     dumper.dump(e, {});
 }
