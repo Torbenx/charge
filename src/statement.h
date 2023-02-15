@@ -1,0 +1,249 @@
+#pragma once
+
+#include "Lexer.h"
+#include <concepts>
+#include <cstdint>
+
+template<typename E>
+struct Ptr {
+    uint32_t offsetAlign4 = 0;
+
+    Ptr() = default;
+    explicit Ptr(uint32_t off)
+        : offsetAlign4(off) { }
+    template<typename E2>
+    explicit Ptr(const Ptr<E2>& p) requires std::derived_from<E, E2>
+        : offsetAlign4(p.offsetAlign4) { }
+
+    template<typename E2>
+    operator Ptr<E2>() requires std::derived_from<E, E2> { return Ptr<E2> { offsetAlign4 }; }
+};
+
+template<typename T>
+struct Span {
+    Ptr<T> begin;
+    uint32_t count = 0;
+
+    constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
+        return Ptr<T> { begin.offsetAlign4 + i * (uint32_t)(sizeof(T) / sizeof(uint32_t)) };
+    }
+};
+struct Word {
+    uint32_t start = 0;
+    uint32_t length = 0;
+};
+
+#define ENUMERATE_STMT_KINDS      \
+    STMT_KIND(UnaryOperatorExpr)  \
+    STMT_KIND(ParenExpr)          \
+    STMT_KIND(AccessExpr)         \
+    STMT_KIND(ImmediateBraceExpr) \
+    STMT_KIND(CallExpr)           \
+    STMT_KIND(IdentifierExpr)     \
+    STMT_KIND(BinaryOperatorExpr) \
+    STMT_KIND(AssignStmt)         \
+    STMT_KIND(NullStmt)           \
+    STMT_KIND(CompoundStmt)       \
+    STMT_KIND(IntLiteralExpr)     \
+    STMT_KIND(LetStmt)
+
+#define STMT_KIND(kind) kind,
+enum class StmtKind : uint8_t {
+    Invalid,
+    ENUMERATE_STMT_KINDS
+};
+#undef STMT_KIND
+const char* toString(StmtKind);
+
+struct Stmt {
+    StmtKind kind = StmtKind::Invalid;
+    Stmt(StmtKind kind)
+        : kind(kind) { }
+};
+struct Expr : Stmt {
+    Expr(StmtKind kind)
+        : Stmt(kind) { }
+};
+
+struct Arguments {
+    struct Arg {
+        Word target;
+        Ptr<Expr> source;
+    };
+    Span<Arg> args;
+};
+
+enum class UnaryOperator : uint8_t {
+    // this must match the order of TokenKind
+    // TODO: test this
+    LogicalNot, // !
+    BitwiseNot, // ~
+    PreInc, // ++
+    PreDec, // --
+    Plus, // +
+    Minus, // -
+
+    PostInc,
+    PostDec,
+    COUNT,
+};
+constexpr UnaryOperator tokenKindToUnaryOp(TokenKind kind) {
+    VERIFY(isUnaryOp(kind));
+    return (UnaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstUnaryOp));
+}
+const char* toShortString(UnaryOperator op);
+struct UnaryOperatorExpr : Expr {
+    UnaryOperator op;
+    Ptr<Expr> subExpr;
+    UnaryOperatorExpr(UnaryOperator op, Ptr<Expr> subExpr = {})
+        : Expr(StmtKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
+};
+
+struct ParenExpr : Expr {
+    Ptr<Expr> subExpr;
+    ParenExpr(Ptr<Expr> subExpr = {})
+        : Expr(StmtKind::ParenExpr), subExpr(subExpr) { }
+};
+
+struct AccessExpr : Expr {
+    Ptr<Expr> base;
+    Word member;
+    AccessExpr(Ptr<Expr> base = {}, Word member = {})
+        : Expr(StmtKind::AccessExpr), base(base), member(member) { }
+};
+
+struct ImmediateBraceExpr : Expr {
+    Arguments args;
+    ImmediateBraceExpr(Arguments args = {})
+        : Expr(StmtKind::ImmediateBraceExpr), args(args) { }
+};
+
+enum class CallKind : uint8_t {
+    Paren,
+    Angle,
+};
+struct CallExpr : Expr {
+    CallKind callKind;
+    Ptr<Expr> base;
+    Arguments args;
+    CallExpr(CallKind callKind, Ptr<Expr> base = {}, Arguments args = {})
+        : Expr(StmtKind::CallExpr), callKind(callKind), base(base), args(args) { }
+};
+
+struct Identifier {
+    Span<Word> elements;
+    bool global = false;
+};
+struct ParametricIdentifier : Identifier {
+    bool hasBraces = false;
+    Arguments args;
+};
+struct IdentifierExpr : Expr {
+    ParametricIdentifier identifier;
+    IdentifierExpr(ParametricIdentifier identifier = {})
+        : Expr(StmtKind::IdentifierExpr), identifier(identifier) { }
+};
+
+enum class BinaryOperator : uint8_t {
+    // this must match the order of TokenKind
+    // TODO: test this
+    Plus, // +
+    Minus, // -
+    NotEqual, // !=
+    Equal, // ==
+    BitwiseAnd, // &
+    LogicalAnd, // &&
+    BitwiseXor, // ^
+    BitwiseOr, // |
+    LogicalOr, // ||
+    Multiply, // *
+    Divide, // /
+    Remainder, // %
+    Less, // <
+    ShiftLeft, // <<
+    LessEqual, // <=
+    Greater, // >
+    ShiftRight, // >>
+    GreaterEqual, // >=
+
+    COUNT,
+};
+constexpr BinaryOperator tokenKindToBinaryOp(TokenKind kind) {
+    VERIFY(isBinaryOp(kind));
+    return (BinaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstBinaryOp));
+}
+const char* toShortString(BinaryOperator op);
+int precedenceOf(BinaryOperator op);
+struct BinaryOperatorExpr : Expr {
+    BinaryOperator op;
+    Ptr<Expr> left;
+    Ptr<Expr> right;
+    BinaryOperatorExpr(BinaryOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
+        : Expr(StmtKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
+};
+
+constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
+    return (v + alignment - 1) & ~(alignment - 1);
+}
+
+enum class AssignOperator : uint8_t {
+    // this must match the order of TokenKind
+    // TODO: test this
+    None, // =
+    Plus, // +=
+    Minus, // -=
+    BitwiseAnd, // &=
+    BitwiseXor, // ^=
+    BitwiseOr, // |=
+    Multiply, // *=
+    Divide, // /=
+    Remainder, // %=
+    ShiftLeft, // <<=
+    ShiftRight, // >>=
+
+    COUNT,
+};
+constexpr AssignOperator tokenKindToAssignOp(TokenKind kind) {
+    VERIFY(isAssignOp(kind));
+    return (AssignOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstAssignOp));
+}
+const char* toShortString(AssignOperator op);
+struct AssignStmt : Stmt {
+    AssignOperator op;
+    Ptr<Expr> left;
+    Ptr<Expr> right;
+    AssignStmt(AssignOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
+        : Stmt(StmtKind::AssignStmt), op(op), left(left), right(right) { }
+};
+
+struct NullStmt : Stmt {
+    NullStmt()
+        : Stmt(StmtKind::NullStmt) { }
+};
+
+struct CompoundStmt : Stmt {
+    Span<Ptr<Stmt>> body;
+    CompoundStmt()
+        : Stmt(StmtKind::CompoundStmt) { }
+};
+
+struct IntLiteralExpr : Expr {
+    uint64_t value;
+    IntLiteralExpr(uint64_t value)
+        : Expr(StmtKind::IntLiteralExpr), value(value) { }
+};
+
+struct LetStmt : Stmt {
+    enum Qualifier : uint8_t {
+        None,
+        Const,
+        Mut,
+    };
+    bool hasExplicitType = false;
+    Qualifier qual;
+    Word target;
+    ParametricIdentifier typeIdent;
+    Ptr<Expr> initializer;
+    LetStmt(Qualifier qual, Word target)
+        : Stmt(StmtKind::LetStmt), qual(qual), target(target) { }
+};
