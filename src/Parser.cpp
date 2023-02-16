@@ -129,34 +129,26 @@ uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCo
     return ret;
 }
 
-void Parser::parseSimpleIdentifier(Identifier& out) {
-    out.global = false;
+void Parser::parseIdentifier(Ptr<Identifier>& out) {
     if (tok.kind() == TokenKind::ColonColon) {
-        out.global = true;
+        // base = global;
+        VERIFY_NOT_REACHED();
         advance();
     }
 
-    EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto elems = beginSpan<Word>();
-    append(elems, asWord(tok));
-    advance();
-
-    while (tok.kind() == TokenKind::ColonColon) {
-        advance();
+    while (true) {
         EXPECT_EQ(tok.kind(), TokenKind::Word);
-        append(elems, asWord(tok));
+        out = make<Identifier>(out, asWord(tok));
         advance();
+        if (tok.kind() == TokenKind::LeftBrace)
+            parseArgumentContext(at(out).args);
+        
+        if (tok.kind() == TokenKind::ColonColon)
+            advance();
+        else
+            break;
     }
 
-    out.elements = finalizeSpan(elems);
-}
-void Parser::parseParametricIdentifier(ParametricIdentifier& out) {
-    parseSimpleIdentifier(out);
-    bool hasBraces = tok.kind() == TokenKind::LeftBrace;
-    out.hasBraces = hasBraces;
-    if (hasBraces) {
-        parseArgumentContext(out.args);
-    }
 }
 
 static uint64_t parseInteger(std::string_view range) {
@@ -221,7 +213,7 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // identifier
     else if (isWordOrGlobal(tok.kind())) {
         auto& e = makeSet<IdentifierExpr>(base);
-        parseParametricIdentifier(e.identifier);
+        parseIdentifier(e.identifier);
     }
     // IntegerLiteral
     else if (tok.kind() == TokenKind::IntegerLiteral) {
@@ -330,7 +322,7 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseParametricIdentifier(at(d).type);
+        parseIdentifier(at(d).type);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
@@ -401,7 +393,7 @@ void Parser::parseParameter(Parameters::Param& out) {
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseParametricIdentifier(out.type);
+        parseIdentifier(out.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();
@@ -439,7 +431,7 @@ void Parser::parseDecl(Ptr<Decl>& out) {
         auto& d = makeSet<VarDecl>(out);
         if (tok.kind() == TokenKind::Colon) {
             advance();
-            parseParametricIdentifier(d.type);
+            parseIdentifier(d.type);
         }
         EXPECT_EQ(tok.kind(), TokenKind::Equal);
         advance();

@@ -39,9 +39,7 @@ struct STChildren {
             impl()->child(Iat(e).args, IsLastChild::Yes, args...);
         }
     }
-    void childrenIdentifierExpr(Ptr<IdentifierExpr> e, Args... args) {
-        impl()->child(Iat(e).identifier.args, IsLastChild::Yes, args...);
-    }
+    void childrenIdentifierExpr(Ptr<IdentifierExpr>, Args...) { }
     void childrenBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e, Args... args) {
         impl()->child(Iat(e).left, IsLastChild::No, args...);
         impl()->child(Iat(e).right, IsLastChild::Yes, args...);

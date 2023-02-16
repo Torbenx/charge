@@ -73,6 +73,8 @@ struct Ptr {
     operator Ptr<Base>() requires std::derived_from<E, Base> {
         return Ptr<Base> { (uint32_t)(offsetAlign4 - computeOffsetInBase<E, Base>() / sizeof(uint32_t)) };
     }
+
+    explicit operator bool() const { return offsetAlign4 != 0; }
 };
 
 template<typename T>
@@ -98,21 +100,18 @@ struct Arguments {
 };
 
 struct Identifier {
-    Span<Word> elements;
-    bool global = false;
-
-    bool valid() const { return elements.count != 0; }
-    explicit operator bool() const { return valid(); }
-};
-struct ParametricIdentifier : Identifier {
-    bool hasBraces = false;
+    Ptr<Identifier> base;
+    Word name;
     Arguments args;
+
+    Identifier(Ptr<Identifier> base = {}, Word name = {})
+        : base(base), name(name) { }
 };
 
 struct Parameters {
     struct Param {
         Word name;
-        ParametricIdentifier type;
+        Ptr<Identifier> type;
         Ptr<Expr> initializer;
     };
     Span<Param> params;
@@ -145,7 +144,7 @@ struct VarDecl : Decl {
         Mut,
     };
     Qualifier qual;
-    ParametricIdentifier type;
+    Ptr<Identifier> type;
     Ptr<Expr> initializer;
     VarDecl(Word name = {}, Qualifier qual = Qualifier::None)
         : Decl(DeclKind::VarDecl, name), qual(qual) { }
@@ -227,8 +226,8 @@ struct CallExpr : Expr {
 };
 
 struct IdentifierExpr : Expr {
-    ParametricIdentifier identifier;
-    IdentifierExpr(ParametricIdentifier identifier = {})
+    Ptr<Identifier> identifier;
+    IdentifierExpr(Ptr<Identifier> identifier = {})
         : Expr(StmtKind::IdentifierExpr), identifier(identifier) { }
 };
 

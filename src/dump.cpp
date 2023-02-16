@@ -61,14 +61,12 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     void visitCallExpr(Ptr<CallExpr> e) {
         out << '\'' << (at(e).callKind == CallKind::Paren ? "()" : "[]") << '\'';
     }
-    void printIdentifier(const ParametricIdentifier& ident) {
-        out << '\'';
-        if (ident.global)
+    void printIdentifier(Ptr<Identifier> ident) {
+        if (at(ident).base) {
+            printIdentifier(at(ident).base);
             out << "::";
-        out << sview(at(ident.elements, 0));
-        for (uint32_t i = 1; i < ident.elements.count; i++)
-            out << "::" << sview(at(ident.elements, i));
-        out << '\'';
+        }
+        out << '\'' << sview(at(ident).name) << '\'';
     }
     void visitIdentifierExpr(Ptr<IdentifierExpr> e) {
         printIdentifier(at(e).identifier);

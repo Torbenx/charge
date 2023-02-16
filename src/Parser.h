@@ -2,6 +2,7 @@
 
 #include "statement.h"
 #include <array>
+#include <span>
 
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
@@ -14,6 +15,10 @@ struct STStorage {
     T& at(Span<T> s, uint32_t i) {
         return *(T*)((std::byte*)&at(s.begin) + i * sizeof(T));
     }
+    template<typename T>
+    std::span<T> at(Span<T> s) {
+        return { at(s.begin), s.count };
+    }
 
     template<typename E1, typename E2>
     E1& as(Ptr<E2> e) requires std::derived_from<E1, E2> {
@@ -22,10 +27,10 @@ struct STStorage {
 };
 
 struct STContext : STStorage {
-    SourceBuffer buffer;
+    SourceBuffer source;
 
     std::string_view sview(Word word) {
-        return { (const char*)(&buffer[word.start]), word.length };
+        return { (const char*)(&source[word.start]), word.length };
     }
 };
 
@@ -110,8 +115,7 @@ struct Parser : Lexer, STStorage {
         return at(p);
     }
 
-    void parseSimpleIdentifier(Identifier& out);
-    void parseParametricIdentifier(ParametricIdentifier& out);
+    void parseIdentifier(Ptr<Identifier>& out);
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
