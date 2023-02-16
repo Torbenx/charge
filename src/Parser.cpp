@@ -283,21 +283,16 @@ void Parser::parseArgumentContext(Arguments& out) {
     TokenKind leftKind = tok.kind();
     VERIFY(isLeftBracket(leftKind));
     TokenKind rightKind = leftToRightBracket(leftKind);
-
     advance();
-    if (tok.kind() == rightKind) {
-        advance();
-        return;
-    }
 
     auto args = beginSpan<Arguments::Arg>();
-    do {
+    while (tok.kind() != rightKind) {
         auto& arg = append(args, {});
         parseArgument(arg);
         VERIFY(tok.kind() == TokenKind::Comma || tok.kind() == rightKind);
         if (tok.kind() == TokenKind::Comma)
             advance();
-    } while (tok.kind() != rightKind);
+    }
     advance();
     out.args = finalizeSpan(args);
 }
@@ -334,15 +329,13 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
 
     advance();
     if (tok.kind() == TokenKind::Colon) {
-        at(d).hasExplicitType = true;
         advance();
-        parseParametricIdentifier(at(d).typeIdent);
+        parseParametricIdentifier(at(d).type);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
     parseBinaryExpr(at(d).initializer);
 
-    emitDecl(d);
     out = make<LetStmt>(d);
 }
 
@@ -373,7 +366,6 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
     advance();
     auto& e = makeSet<CompoundStmt>(out);
-    auto decls = beginDeclSpan();
     auto body = beginSpan<Ptr<Stmt>>();
     while (tok.kind() != TokenKind::RightBrace) {
         auto& stmt = append(body, {});
@@ -383,22 +375,101 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     }
     advance();
     e.body = finalizeSpan(body);
-    e.decls = finalizeSpan(decls);
 }
 
-void Parser::parseStructDecl(Ptr<StructDecl>& out) {
-    EXPECT_EQ(tok.kind(), TokenKind::Word);
-    EXPECT_EQ(source.view(tok), "struct");
+void Parser::parseParameterContext(Parameters& out) {
+    TokenKind leftKind = tok.kind();
+    VERIFY(isLeftBracket(leftKind));
+    TokenKind rightKind = leftToRightBracket(leftKind);
     advance();
 
-    EXPECT_EQ(tok.kind(), TokenKind::Word);
-    // struct name
-    advance();
-
-    EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
-    advance();
-
-    while (tok.kind() != TokenKind::RightBrace) {
+    auto params = beginSpan<Parameters::Param>();
+    while (tok.kind() != rightKind) {
+        auto& param = append(params, {});
+        parseParameter(param);
+        VERIFY(tok.kind() == TokenKind::Comma || tok.kind() == rightKind);
+        if (tok.kind() == TokenKind::Comma)
+            advance();
     }
     advance();
+    out.params = finalizeSpan(params);
+}
+
+void Parser::parseParameter(Parameters::Param& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    out.name = asWord(tok);
+    advance();
+    if (tok.kind() == TokenKind::Colon) {
+        advance();
+        parseParametricIdentifier(out.type);
+    }
+    if (tok.kind() == TokenKind::Equal) {
+        advance();
+        parseBinaryExpr(out.initializer);
+    }
+}
+
+void Parser::parseWithClause(WithClause& out) {
+    EXPECT_EQ(source.view(tok), "with");
+    advance();
+    parseParameterContext(out.params);
+}
+
+void Parser::parseDecl(Ptr<Decl>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    WithClause with;
+    if (source.view(tok) == "with")
+        parseWithClause(with);
+
+    auto attributes = beginSpan<Word>();
+    while (tok.kind() == TokenKind::Word) {
+        append(attributes, asWord(tok));
+        advance();
+    }
+    VERIFY(spanSize(attributes) > 0);
+    Word name = *(spanEnd(attributes) - 1);
+
+    Parameters parametric;
+    if (tok.kind() == TokenKind::LeftBrace) {
+        parseParameterContext(parametric);
+    }
+
+    // variable
+    if (tok.kind() == TokenKind::Colon || tok.kind() == TokenKind::Equal) {
+        auto& d = makeSet<VarDecl>(out);
+        if (tok.kind() == TokenKind::Colon) {
+            advance();
+            parseParametricIdentifier(d.type);
+        }
+        EXPECT_EQ(tok.kind(), TokenKind::Equal);
+        advance();
+        parseBinaryExpr(d.initializer);
+        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+        advance();
+    }
+    // function
+    else if (tok.kind() == TokenKind::LeftParen) {
+        auto& d = makeSet<FnDecl>(out);
+        parseParameterContext(d.params);
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        parseCompoundStmt(d.body);
+    }
+    // struct
+    else if (tok.kind() == TokenKind::LeftBrace) {
+        advance();
+        auto& d = makeSet<StructDecl>(out);
+        auto decls = beginSpan<Ptr<Decl>>();
+        while (tok.kind() != TokenKind::RightBrace) {
+            auto& decl = append(decls, {});
+            parseDecl(decl);
+        }
+        advance();
+        d.decls = finalizeSpan(decls);
+    }
+
+    at(out).name = name;
+    at(out).with = with;
+    at(out).parametric = parametric;
+
+    discardSpan(attributes);
 }

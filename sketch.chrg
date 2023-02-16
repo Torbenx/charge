@@ -1,0 +1,45 @@
+struct Foo {
+    add: num = 0;
+    vals: array{num} = { 1, 2, 3 };
+
+    function get(i: num) -> num {
+        return vals[i] + add;
+    }
+    function get(const transform: num -> num, idx: num) -> num {
+        return transform(vals[idx]) + add;
+    }
+}
+struct Bar{T: Type} {
+    add: T = 0;
+    vals: array{T} = { 1, 2, 3 };
+    
+    fuction get(i: num) -> T {
+        return vals[i] + add;
+    }
+}
+let const Foo2 = Bar{num};
+struct Foo2 -> Bar{num};
+
+function appendTo{T: Type}(v&: array{T}, item: T) {
+    v.append(item);
+}
+
+const sizeOf{T: Type}: num = sizeof(T);
+
+with {cparams: array{TupleElement}, cargs: Tuple{cparams}, params: array{TupleElement}, RetT: Type}
+function call{f{cargs...}: (params...) -> RetT}(args: Tuple{params}) -> Ret {
+    return f{cargs...}(args...);
+}
+
+function test{T: Type, size: num}(defaultValue: T = {}, table: FixedArray{T, num});
+call{test}({}, { 1, 2, 3 }); // -> call{test{T = num, size = 3}}
+call{test{T = num}}(table = {}); // -> call{test{T = num, size = 0}}
+
+with {T: Type}
+struct Specialize{Base: {T} -> Type, Arg: T} -> Base{Arg};
+
+with {b}
+isSpecializationOf{special: b{_}, base: b}: bool = true;
+isSpecializationOf{spacial, base}: bool = false;
+
+function doStuff{b,c}(first: b{c}, second: b);

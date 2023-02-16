@@ -13,6 +13,11 @@ struct STChildren {
     template<typename T>
     T& Iat(Ptr<T> p) { return impl()->at(p); }
 
+    template<typename T>
+    void childrenSpan(Span<T> s, IsLastChild isLast, Args... args) {
+        for (uint32_t i = 0; i < s.count; i++)
+            impl()->child(Iat(s[i]), (IsLastChild)((bool)isLast && i == s.count - 1), args...);
+    }
     void childrenUnaryOperatorExpr(Ptr<UnaryOperatorExpr> e, Args... args) {
         impl()->child(Iat(e).subExpr, IsLastChild::Yes, args...);
     }
@@ -46,27 +51,26 @@ struct STChildren {
         impl()->child(Iat(e).right, IsLastChild::Yes, args...);
     }
     void childrenNullStmt(Ptr<NullStmt>, Args...) { }
-    void childrenCompoundStmt(Ptr<CompoundStmt> p, Args... args) {
-        CompoundStmt& e = Iat(p);
-        impl()->child((Ptr<DeclContext>)p, (IsLastChild)(e.body.count == 0), args...);
-        for (uint32_t i = 0; i < e.body.count; i++) {
-            impl()->child(Iat(e.body[i]), (IsLastChild)(i == e.body.count - 1), args...);
-        }
+    void childrenCompoundStmt(Ptr<CompoundStmt> e, Args... args) {
+        childrenSpan(Iat(e).body, IsLastChild::Yes, args...);
     }
     void childrenIntLiteralExpr(Ptr<IntLiteralExpr>, Args...) { }
     void childrenLetStmt(Ptr<LetStmt> e, Args... args) {
         impl()->child(Iat(e).decl, IsLastChild::Yes, args...);
     }
 
-    void childrenStructDecl(Ptr<StructDecl>, Args...) { }
-    void childrenVarDecl(Ptr<VarDecl> d, Args... args) {
-        impl()->child(Iat(d).initializer, IsLastChild::Yes, args...);
+    void childrenStructDecl(Ptr<StructDecl> e, Args... args) {
+        childrenSpan(Iat(e).decls, IsLastChild::Yes, args...);
     }
-    void childrenFnDecl(Ptr<FnDecl>, Args...) { }
+    void childrenVarDecl(Ptr<VarDecl> e, Args... args) {
+        impl()->child(Iat(e).initializer, IsLastChild::Yes, args...);
+    }
+    void childrenFnDecl(Ptr<FnDecl> e, Args... args) {
+        impl()->child(Iat(e).body, IsLastChild::Yes, args...);
+    }
 
     void child(Ptr<Stmt>, IsLastChild, Args...) { }
     void child(Ptr<Decl>, IsLastChild, Args...) { }
-    void child(Ptr<DeclContext>, IsLastChild, Args...) { }
     void child(Arguments, IsLastChild, Args...) { }
 
     void dispatchChildren(Ptr<Stmt> e, Args... args) {

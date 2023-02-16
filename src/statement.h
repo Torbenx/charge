@@ -88,6 +88,7 @@ struct Word {
     uint32_t start = 0;
     uint32_t length = 0;
 };
+
 struct Arguments {
     struct Arg {
         Word target;
@@ -95,38 +96,46 @@ struct Arguments {
     };
     Span<Arg> args;
 };
+
 struct Identifier {
     Span<Word> elements;
     bool global = false;
+
+    bool valid() const { return elements.count != 0; }
+    explicit operator bool() const { return valid(); }
 };
 struct ParametricIdentifier : Identifier {
     bool hasBraces = false;
     Arguments args;
 };
 
+struct Parameters {
+    struct Param {
+        Word name;
+        ParametricIdentifier type;
+        Ptr<Expr> initializer;
+    };
+    Span<Param> params;
+};
+
+struct WithClause {
+    Parameters params;
+};
+
 // Declarations
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
     Word name;
+    WithClause with;
+    Parameters parametric;
     Decl(DeclKind kind, Word name = {})
         : kind(kind), name(name) { }
 };
 
-enum class DeclContextKind : uint8_t {
-    StructDecl,
-    CompoundStmt,
-};
-struct DeclContext {
+struct StructDecl : Decl {
     Span<Ptr<Decl>> decls;
-    DeclContextKind contextKind;
-    DeclContext(DeclContextKind kind)
-        : contextKind(kind) { }
-};
-
-struct StructDecl : Decl, DeclContext {
     StructDecl(Word name = {})
-        : Decl(DeclKind::StructDecl, name)
-        , DeclContext(DeclContextKind::StructDecl) { }
+        : Decl(DeclKind::StructDecl, name) { }
 };
 
 struct VarDecl : Decl {
@@ -135,15 +144,16 @@ struct VarDecl : Decl {
         Const,
         Mut,
     };
-    bool hasExplicitType = false;
     Qualifier qual;
-    ParametricIdentifier typeIdent;
+    ParametricIdentifier type;
     Ptr<Expr> initializer;
     VarDecl(Word name = {}, Qualifier qual = Qualifier::None)
         : Decl(DeclKind::VarDecl, name), qual(qual) { }
 };
 
 struct FnDecl : Decl {
+    Parameters params;
+    Ptr<CompoundStmt> body;
     FnDecl(Word name = {})
         : Decl(DeclKind::FnDecl, name) { }
 };
@@ -299,11 +309,10 @@ struct NullStmt : Stmt {
         : Stmt(StmtKind::NullStmt) { }
 };
 
-struct CompoundStmt : Stmt, DeclContext {
+struct CompoundStmt : Stmt {
     Span<Ptr<Stmt>> body;
     CompoundStmt()
-        : Stmt(StmtKind::CompoundStmt)
-        , DeclContext(DeclContextKind::CompoundStmt) { }
+        : Stmt(StmtKind::CompoundStmt) { }
 };
 
 struct IntLiteralExpr : Expr {

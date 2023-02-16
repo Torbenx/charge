@@ -38,4 +38,21 @@ int main() {
         par.parseCompoundStmt(out);
         dump(par.context(), out);
     }
+    {
+        Parser par(R"str(
+            struct Foo{X: Type} {
+                x: list{X} = 5;
+
+                const foo{Y: Type}: Y = 5;
+
+                function bar{Z: Type}(z: Z = 3) {
+                    let y: X = z + x;
+                }
+            }
+        )str",
+            true);
+        Ptr<Decl> out = {};
+        par.parseDecl(out);
+        dump(par.context(), out);
+    }
 }

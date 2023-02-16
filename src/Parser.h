@@ -48,8 +48,8 @@ struct Parser : Lexer, STStorage {
         return { token.start, token.length };
     }
 
-    std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
-    std::array<uint32_t, 2> spanBuilderEnd = {};
+    std::array<std::byte*, 1> spanStorage = { new std::byte[400] {} };
+    std::array<uint32_t, 1> spanBuilderEnd = {};
 
     template<typename T, int I = 0>
     SpanBuilder<T, I> beginSpan() {
@@ -57,20 +57,16 @@ struct Parser : Lexer, STStorage {
         spanBuilderEnd[I] = alignmentCeil(alignof(T), oldEnd);
         return { oldEnd };
     }
-    SpanBuilder<Ptr<Decl>, 1> beginDeclSpan() {
-        return beginSpan<Ptr<Decl>, 1>();
-    }
     template<typename T, int I>
-    T& append(SpanBuilder<T, I>, const T& item) {
-        T* ret = new (spanStorage[I] + spanBuilderEnd[I]) T { item };
+    T& append(SpanBuilder<T, I> s, const T& item) {
+        T* ret = new (spanEnd(s)) T { item };
         spanBuilderEnd[I] += sizeof(T);
         return *ret;
     }
     template<typename T, int I>
     Span<T> finalizeSpan(SpanBuilder<T, I> s) {
-        uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
-        uint32_t count = (spanBuilderEnd[I] - alignedBegin) / sizeof(T);
-        T* beginPtr = (T*)(spanStorage[I] + alignedBegin);
+        uint32_t count = spanSize(s);
+        T* beginPtr = spanBegin(s);
 
         Ptr<T> outSpan = allocate<T>(count);
         std::uninitialized_move_n(beginPtr, count, &at(outSpan));
@@ -78,8 +74,27 @@ struct Parser : Lexer, STStorage {
         spanBuilderEnd[I] = s.begin;
         return { outSpan, count };
     }
-    Ptr<Decl>& emitDecl(Ptr<Decl> decl) {
-        return append<Ptr<Decl>, 1>({}, decl);
+    template<typename T, int I>
+    T* spanBegin(SpanBuilder<T, I> s) {
+        uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
+        return (T*)(spanStorage[I] + alignedBegin);
+    }
+    template<typename T, int I>
+    T* spanEnd(SpanBuilder<T, I>) {
+        return (T*)(spanStorage[I] + spanBuilderEnd[I]);
+    }
+    template<typename T, int I>
+    uint32_t spanSize(SpanBuilder<T, I> s) {
+        uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
+        return (spanBuilderEnd[I] - alignedBegin) / sizeof(T);
+    }
+    template<typename T, int I>
+    T& get(SpanBuilder<T, I> s, uint32_t i) {
+        return *(spanBegin(s) + i);
+    }
+    template<typename T, int I>
+    void discardSpan(SpanBuilder<T, I> s) {
+        spanBuilderEnd[I] = s.begin;
     }
 
     template<typename E, typename... Args>
@@ -106,7 +121,10 @@ struct Parser : Lexer, STStorage {
     void parseStmt(Ptr<Stmt>& out);
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
 
-    void parseStructDecl(Ptr<StructDecl>& out);
+    void parseParameterContext(Parameters& out);
+    void parseParameter(Parameters::Param& out);
+    void parseWithClause(WithClause& out);
+    void parseDecl(Ptr<Decl>& out);
 
     STContext context() {
         return { *this, source };
@@ -114,3 +132,4 @@ struct Parser : Lexer, STStorage {
 };
 
 void dump(STContext context, Ptr<Stmt> e);
+void dump(STContext context, Ptr<Decl> e);

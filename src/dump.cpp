@@ -16,28 +16,20 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
     std::ostream& out;
     std::vector<char> prefix = {};
 
-    template<typename T> // T = { Stmt, Decl, DeclContext }
+    template<typename T> // T = { Stmt, Decl }
     void dump(Ptr<T> e, Name name) {
         if (name.name.length() > 0) {
             if (name.withdot)
                 out << '.';
             out << name.name << " = ";
         }
-        if constexpr (std::is_same_v<T, DeclContext>) {
-            out << "DeclContext\n";
-            auto decls = at(e).decls;
-            for (uint32_t i = 0; i < decls.count; i++) {
-                child(at(decls, i), (IsLastChild)(i == decls.count - 1), {});
-            }
-        } else {
-            out << toString(at(e).kind) << ' ';
-            dispatchVisit(e);
-            out << '\n';
-            dispatchChildren(e, {});
-        }
+        out << toString(at(e).kind) << ' ';
+        dispatchVisit(e);
+        out << '\n';
+        dispatchChildren(e, {});
     }
 
-    template<typename T> // T = { Stmt, Decl, DeclContext }
+    template<typename T> // T = { Stmt, Decl }
     void child(Ptr<T> e, IsLastChild last, Name name) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
@@ -96,15 +88,19 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         else if (at(e).qual == VarDecl::Qualifier::Mut)
             out << "mut ";
         out << '\'' << sview(at(e).name) << '\'';
-        if (at(e).hasExplicitType) {
+        if (at(e).type) {
             out << ": ";
-            printIdentifier(at(e).typeIdent);
+            printIdentifier(at(e).type);
         }
     }
 };
 }
 
 void dump(STContext context, Ptr<Stmt> e) {
+    STDumper dumper { context, {}, {}, std::cout };
+    dumper.dump(e, {});
+}
+void dump(STContext context, Ptr<Decl> e) {
     STDumper dumper { context, {}, {}, std::cout };
     dumper.dump(e, {});
 }
