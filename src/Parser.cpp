@@ -375,7 +375,7 @@ void Parser::parseParameterContext(Parameters& out) {
     TokenKind rightKind = leftToRightBracket(leftKind);
     advance();
 
-    auto params = beginSpan<Parameters::Param>();
+    auto params = beginSpan<Ptr<VarDecl>>();
     while (tok.kind() != rightKind) {
         auto& param = append(params, {});
         parseParameter(param);
@@ -387,17 +387,17 @@ void Parser::parseParameterContext(Parameters& out) {
     out.params = finalizeSpan(params);
 }
 
-void Parser::parseParameter(Parameters::Param& out) {
+void Parser::parseParameter(Ptr<VarDecl>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    out.name = asWord(tok);
+    auto& e = makeSet<VarDecl>(out, asWord(tok));
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseIdentifier(out.type);
+        parseIdentifier(e.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();
-        parseBinaryExpr(out.initializer);
+        parseBinaryExpr(e.initializer);
     }
 }
 

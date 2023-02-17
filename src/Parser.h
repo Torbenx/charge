@@ -17,7 +17,7 @@ struct STStorage {
     }
     template<typename T>
     std::span<T> at(Span<T> s) {
-        return { at(s.begin), s.count };
+        return { &at(s.begin), s.count };
     }
 
     template<typename E1, typename E2>
@@ -126,7 +126,7 @@ struct Parser : Lexer, STStorage {
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
 
     void parseParameterContext(Parameters& out);
-    void parseParameter(Parameters::Param& out);
+    void parseParameter(Ptr<VarDecl>& out);
     void parseWithClause(WithClause& out);
     void parseDecl(Ptr<Decl>& out);
 

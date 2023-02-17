@@ -75,6 +75,7 @@ struct Ptr {
     }
 
     explicit operator bool() const { return offsetAlign4 != 0; }
+    bool operator==(const Ptr& other) const { return offsetAlign4 == other.offsetAlign4; }
 };
 
 template<typename T>
@@ -85,10 +86,16 @@ struct Span {
     constexpr Ptr<T> operator[](uint32_t i) const requires(sizeof(T) % sizeof(uint32_t) == 0) {
         return Ptr<T> { begin.offsetAlign4 + i * (uint32_t)(sizeof(T) / sizeof(uint32_t)) };
     }
+    template<typename Base>
+    explicit operator Span<Ptr<Base>>() const
+        requires(std::is_convertible_v<T, Ptr<Base>> && sizeof(T) == sizeof(Ptr<Base>)) {
+        return { Ptr<Ptr<Base>>(begin.offsetAlign4), count };
+    }
 };
 struct Word {
     uint32_t start = 0;
     uint32_t length = 0;
+    explicit operator bool() const { return length != 0; }
 };
 
 struct Arguments {
@@ -109,12 +116,7 @@ struct Identifier {
 };
 
 struct Parameters {
-    struct Param {
-        Word name;
-        Ptr<Identifier> type;
-        Ptr<Expr> initializer;
-    };
-    Span<Param> params;
+    Span<Ptr<VarDecl>> params;
 };
 
 struct WithClause {

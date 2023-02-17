@@ -6,6 +6,7 @@ add_executable(test
     Lexer.cpp
     Parser.cpp
     dump.cpp
+    Interpreter.cpp
 )
 target_compile_options(test PRIVATE "-Wall;-Wextra;-Wno-invalid-offsetof;-Wsuggest-override")
 target_link_libraries(test PRIVATE fmt)

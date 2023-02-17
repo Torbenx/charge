@@ -15,6 +15,8 @@ void test() {
     }
 }
 
+void testInterpreter();
+
 int main() {
     test();
 
@@ -55,4 +57,6 @@ int main() {
         par.parseDecl(out);
         dump(par.context(), out);
     }
+
+    testInterpreter();
 }
