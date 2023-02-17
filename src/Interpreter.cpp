@@ -17,6 +17,12 @@ struct Interpreter : Parser {
     struct Value {
         int64_t intValue = 0;
     };
+    struct PositionalValue : Value {
+        uint32_t index = 0;
+    };
+    struct NamedValue : Value {
+        Word name = {};
+    };
 
     std::string_view sview(Word w) {
         return context().sview(w);
@@ -28,9 +34,6 @@ struct Interpreter : Parser {
         return l.intValue == r.intValue;
     }
 
-    struct PositionalValue : Value {
-        uint32_t index = 0;
-    };
     struct ParameterizedDecl {
         Ptr<Decl> decl = {};
         std::vector<PositionalValue> args = {};
@@ -61,15 +64,14 @@ struct Interpreter : Parser {
         std::span<const PositionalValue> inArgs,
         std::span<const uint32_t> inParams,
         LookupContext& argsCtx,
-        Arguments args) {
+        std::span<NamedValue> args) {
 
-        auto a = at(args.args);
         ParameterizedDecl out { inDecl };
         uint32_t ai = 0;
         auto p = at(at(inDecl).parametric.params);
         for (uint32_t pi : inParams) {
-            if (!a[ai].target || cmpWord(at(p[pi]).name, a[ai].target)) {
-                Value sourceVal = evaluateExpr(argsCtx, a[ai].source);
+            if (!args[ai].name || cmpWord(at(p[pi]).name, args[ai].name)) {
+                Value sourceVal = args[ai];
                 Ptr<Identifier> targetTypeId = at(p[pi]).type;
                 if (targetTypeId)
                     sourceVal = convert(argsCtx, lookupType(declCtx, at(targetTypeId)), sourceVal);
@@ -79,20 +81,29 @@ struct Interpreter : Parser {
                 out.params.push_back(pi);
             }
         }
-        if (ai != a.size())
+        if (ai != args.size())
             return {};
         out.args.insert(out.args.end(), inArgs.begin(), inArgs.end());
         std::sort(out.args.begin(), out.args.end(), [](const PositionalValue& l, const PositionalValue& r) { return l.index < r.index; });
         return std::move(out);
     }
+    std::vector<NamedValue> evaluateArguments(LookupContext& ctx, Arguments& a) {
+        std::vector<NamedValue> out;
+        auto args = at(a.args);
+        for (auto& arg : args) {
+            out.push_back({ evaluateExpr(ctx, arg.source), arg.target });
+        }
+        return out;
+    }
     LookupResult findInCtx(LookupContext& context, LookupContext& identCtx, Identifier& ident) {
         LookupResult out;
+        auto args = evaluateArguments(identCtx, ident.args);
         for (Ptr<Decl> decl : at(context.decls)) {
             auto& d = at(decl);
             fmt::println("comparing {} and {}", sview(d.name), sview(ident.name));
             if (cmpWord(d.name, ident.name)) {
                 out.context = &context;
-                auto sub = substitute(context, decl, {}, std::span(INDICES).subspan(0, d.parametric.params.count), identCtx, ident.args);
+                auto sub = substitute(context, decl, {}, std::span(INDICES).subspan(0, d.parametric.params.count), identCtx, args);
                 if (sub.has_value())
                     out.decls.push_back(sub.value());
             }
@@ -190,6 +201,7 @@ struct Interpreter : Parser {
     }
     Value evaluate(LookupContext& ctx, Ptr<Stmt> p) {
         auto& e = at(p);
+        fmt::println("evalutating {}", toString(e.kind));
 
 #define STMT_KIND(kind)  \
     case StmtKind::kind: \
