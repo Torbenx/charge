@@ -59,6 +59,11 @@ struct Interpreter : Parser {
         Word name = {};
     };
 
+    struct HomogeneousDeclSet {
+        std::vector<ParameterizedDecl> decls;
+        DeclKind declKind = DeclKind::Invalid;
+    };
+
     struct LookupContext {
         struct DeclValue {
             CompleteDecl decl;
@@ -68,10 +73,8 @@ struct Interpreter : Parser {
         std::span<Ptr<Decl>> decls = {};
         std::vector<DeclValue> completeDeclVals = {};
     };
-
-    struct LookupResult {
+    struct LookupResult : HomogeneousDeclSet {
         LookupContext* context = nullptr;
-        std::vector<ParameterizedDecl> decls;
 
         bool valid() const { return context != nullptr; }
     };
@@ -82,8 +85,8 @@ struct Interpreter : Parser {
 
     Interpreter(SourceBuffer buffer)
         : Parser(buffer)
-        , numType { make<Decl>(DeclKind::Builtin, Word { 0, 3, 1 }) }
-        , typeType { make<Decl>(DeclKind::Builtin, Word { 4, 4, 1 }) } {
+        , numType { make<Decl>(DeclKind::StructDecl, Word { 0, 3, 1 }) }
+        , typeType { make<Decl>(DeclKind::StructDecl, Word { 4, 4, 1 }) } {
         auto decls = beginSpan<Ptr<Decl>>();
         append(decls, numType.decl);
         append(decls, typeType.decl);
@@ -125,7 +128,7 @@ struct Interpreter : Parser {
         return true;
     }
 
-    std::optional<ParameterizedDecl> substitute(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<NamedValue> subArgs) {
+    std::optional<ParameterizedDecl> substitute(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
         ParameterizedDecl out { inDecl };
         auto params = at(at(inDecl).parametric.params);
         uint32_t inOff = 0;
@@ -164,7 +167,6 @@ struct Interpreter : Parser {
                 Value v = evaluateExpr(paramCtx, param.type);
                 VERIFY(v.isTypeValue);
                 arg = convert(paramCtx, v.asType(), arg);
-                
             }
 
             out.args.push_back({ arg, (uint16_t)i });
@@ -182,25 +184,33 @@ struct Interpreter : Parser {
         }
         return out;
     }
-    LookupResult findInCtx(LookupContext& context, LookupContext& identCtx, ParameterizedWord name) {
+    LookupResult findInCtx(LookupContext& context, Word name, std::span<const NamedValue> args) {
         LookupResult out;
-        auto args = evaluateArguments(identCtx, name);
         for (Ptr<Decl> decl : context.decls) {
             auto& d = at(decl);
-            if (cmpWord(d.name, name.word)) {
-                out.context = &context;
-                auto sub = substitute(decl, {}, args);
-                if (sub.has_value())
-                    out.decls.push_back(sub.value());
+            if (!cmpWord(d.name, name))
+                continue;
+            
+            out.context = &context;
+            auto sub = substitute(decl, {}, args);
+            if (!sub.has_value())
+                continue;
+            
+            if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
+                out.decls.clear();
+                break;
             }
+            out.declKind = at(decl).kind;
+            out.decls.push_back(sub.value());
         }
         return out;
     }
-    LookupResult lookupIdentifier(LookupContext& identCtx, ParameterizedWord ident) {
+    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier ident) {
         fmt::println("looking up '{}'", sview(ident.word));
+        auto args = evaluateArguments(identCtx, ident);
         LookupContext* context = &identCtx;
         while (context) {
-            LookupResult r = findInCtx(*context, identCtx, ident);
+            LookupResult r = findInCtx(*context, ident.word, args);
             if (r.valid()) {
                 VERIFY(r.decls.size() > 0);
                 return r;

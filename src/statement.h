@@ -13,7 +13,6 @@
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
     Invalid,
-    Builtin,
     ENUMERATE_DECL_KINDS
 };
 #undef DECL_KIND
@@ -116,7 +115,7 @@ struct WithClause {
     Parameters params;
 };
 
-struct ParameterizedWord : Arguments {
+struct Identifier : Arguments {
     Word word;
 };
 
@@ -202,7 +201,7 @@ struct ParenExpr : Expr {
 struct AccessExpr : Expr {
     bool isStatic = false;
     Ptr<Expr> base;
-    ParameterizedWord member;
+    Identifier member;
     AccessExpr(bool isStatic, Ptr<Expr> base = {}, Word member = {})
         : Expr(StmtKind::AccessExpr), isStatic(isStatic), base(base), member { {}, member } { }
 };
@@ -226,7 +225,7 @@ struct CallExpr : Expr {
 };
 
 struct IdentifierExpr : Expr {
-    ParameterizedWord identifier;
+    Identifier identifier;
     IdentifierExpr(Word identifier = {})
         : Expr(StmtKind::IdentifierExpr), identifier { {}, identifier } { }
 };
