@@ -136,7 +136,7 @@ struct StructDecl : Decl {
 };
 
 struct VarDecl : Decl {
-    enum Qualifier : uint8_t {
+    enum class Qualifier : uint8_t {
         None,
         Const,
         Mut,

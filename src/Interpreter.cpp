@@ -13,16 +13,25 @@ struct Interpreter : Parser {
 
     static constexpr char BUILTIN_NAMES[] = "num Type";
 
-    struct PositionalValue;
     struct Value;
+    struct NamedValue;
+    struct PositionalValue;
     struct ParameterizedDecl {
         Ptr<Decl> decl = {};
         std::vector<PositionalValue> args = {};
 
+        ParameterizedDecl(Ptr<Decl> decl, std::vector<PositionalValue> args = {})
+            : decl(decl), args(std::move(args)) { }
+
         bool valid() const { return (bool)decl; }
     };
-    struct CompleteDecl : ParameterizedDecl { };
-    struct Type : CompleteDecl { };
+    struct CompleteDecl : ParameterizedDecl {
+        using ParameterizedDecl::ParameterizedDecl;
+        std::vector<PositionalValue> withArgs;
+    };
+    struct Type : CompleteDecl {
+        using CompleteDecl::CompleteDecl;
+    };
     struct ValueArrayHead {
         uint32_t refCnt = 0;
         uint32_t size = 0;
@@ -36,6 +45,7 @@ struct Interpreter : Parser {
         Decl,
         Builtin,
         Struct,
+        Dependent,
     };
     struct Value {
         std::vector<PositionalValue> typeArgs = {};
@@ -43,6 +53,7 @@ struct Interpreter : Parser {
             ValueArrayHead* memberValues = nullptr;
             int64_t builtinValue;
             Ptr<Decl> declType;
+            Ptr<VarDecl> dependentDecl;
         };
         Ptr<Decl> typeDecl = {};
         ValueKind kind = ValueKind::Invalid;
@@ -52,6 +63,12 @@ struct Interpreter : Parser {
             : typeArgs(std::move(type.args)), builtinValue(value), typeDecl(type.decl), kind(ValueKind::Builtin) { }
         Value(Ptr<Decl> type, ParameterizedDecl decl)
             : typeArgs(std::move(decl.args)), declType(type), typeDecl(decl.decl), kind(ValueKind::Decl) { }
+        Value(Ptr<VarDecl> depDecl, ParameterizedDecl type)
+            : typeArgs(std::move(type.args)), dependentDecl(depDecl), kind(ValueKind::Dependent) { }
+
+        ParameterizedDecl asDecl() const {
+            return { typeDecl, typeArgs };
+        }
     };
     struct PositionalValue : Value {
         uint16_t index = 0;
@@ -71,7 +88,7 @@ struct Interpreter : Parser {
             Value value;
         };
         LookupContext* parent = nullptr;
-        std::span<Ptr<Decl>> decls = {};
+        std::span<const Ptr<Decl>> decls = {};
         std::vector<DeclValue> completeDeclVals = {};
     };
     struct LookupResult : HomogeneousDeclSet {
@@ -98,7 +115,8 @@ struct Interpreter : Parser {
         switch (value.kind) {
         case ValueKind::Struct:
         case ValueKind::Builtin:
-            return { value.typeDecl, std::move(value.typeArgs) };
+        case ValueKind::Dependent:
+            return { value.typeDecl, value.typeArgs };
         case ValueKind::Decl:
             return { value.declType, {} };
         default:
@@ -138,7 +156,7 @@ struct Interpreter : Parser {
         }
     }
 
-    std::optional<ParameterizedDecl> substitute(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
+    std::optional<ParameterizedDecl> bindArguments(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
         ParameterizedDecl out { inDecl };
         auto params = at(at(inDecl).parametric.params);
         uint32_t inOff = 0;
@@ -156,12 +174,70 @@ struct Interpreter : Parser {
             return out;
         return {};
     }
+    Value makeDependentValue(Ptr<VarDecl> decl, ParameterizedDecl type) {
+        return { decl, std::move(type) };
+    }
+    Value makeTypeValue(Type type) {
+        return { typeType.decl, std::move(type) };
+    }
+    struct Deduction {
+        Ptr<VarDecl> param;
+        Value value;
+    };
+    bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
+        VERIFY_NOT_REACHED();
+        // deduceParameters(typeOf(source), );
+        if (target.kind == ValueKind::Dependent) {
+            deductions.push_back({ target.dependentDecl, source });
+            return true;
+        } else {
+            // compare source and target
+            VERIFY_NOT_REACHED();
+        }
+    }
+    bool deduceParameters(const Type& source, const Value& target, std::vector<Deduction>& deductions) {
+        switch (target.kind) {
+        case ValueKind::Dependent:
+            fmt::println("target is dependent");
+            deductions.push_back({ target.dependentDecl, makeTypeValue(source) });
+            return true;
+        case ValueKind::Decl:
+            VERIFY(target.declType == typeType.decl);
+            fmt::println("target is decl");
+            if (source.decl != target.typeDecl)
+                return false;
+            if (target.typeArgs.size() != source.args.size())
+                return false;
+            for (uint32_t i = 0; i < source.args.size(); i++) {
+                if (!deduceParameters(source.args[i], target.typeArgs[i], deductions))
+                    return false;
+            }
+            return true;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
     std::optional<CompleteDecl> completeDecl(LookupContext& declCtx, const ParameterizedDecl& decl) {
         auto params = at(at(decl.decl).parametric.params);
+
+        auto with = at(at(decl.decl).with.params.params);
+        LookupContext withCtx { &declCtx };
+        std::vector<Ptr<Decl>> withDecls;
+        for (Ptr<VarDecl> withDecl : with) {
+            withDecls.push_back(withDecl);
+            auto& d = at(withDecl);
+            Value type = evaluateExpr(withCtx, d.type);
+            VERIFY(type.kind == ValueKind::Decl);
+            VERIFY(type.declType == typeType.decl);
+            withCtx.completeDeclVals.push_back({ { withDecl }, makeDependentValue(withDecl, type.asDecl()) });
+            withCtx.decls = withDecls;
+        }
+
         CompleteDecl out { decl.decl };
-        uint32_t argOff = 0;
-        LookupContext paramCtx { &declCtx };
         std::vector<Ptr<Decl>> decls;
+        LookupContext paramCtx { &withCtx };
+        std::vector<Deduction> deductions;
+        uint32_t argOff = 0;
         for (uint32_t i = 0; i < params.size(); i++) {
             auto& param = at(params[i]);
             Value arg;
@@ -174,10 +250,10 @@ struct Interpreter : Parser {
                 return {};
 
             if (param.type) {
-                Value v = evaluateExpr(paramCtx, param.type);
-                VERIFY(v.kind == ValueKind::Decl);
-                VERIFY(v.declType == typeType.decl);
-                // arg = convert(paramCtx, v.asType(), arg);
+                auto target = evaluateExpr(paramCtx, param.type);
+                auto source = typeOf(arg);
+                if (!deduceParameters(source, target, deductions))
+                    return {};
             }
 
             out.args.push_back({ arg, (uint16_t)i });
@@ -185,6 +261,20 @@ struct Interpreter : Parser {
             paramCtx.decls = decls;
             paramCtx.completeDeclVals.push_back({ CompleteDecl { params[i] }, arg });
         }
+
+        for (uint32_t i = 0; i < with.size(); i++) {
+            for (const Deduction& deduct : deductions) {
+                if (deduct.param != with[i])
+                    continue;
+                if (out.withArgs.size() <= i)
+                    out.withArgs.push_back({ deduct.value, (uint16_t)i });
+                else if (!cmpValue(out.withArgs[i], deduct.value))
+                    return {};
+            }
+            if (out.withArgs.size() != i + 1)
+                return {};
+        }
+
         return out;
     }
     std::vector<NamedValue> evaluateArguments(LookupContext& ctx, Arguments& a) {
@@ -203,7 +293,7 @@ struct Interpreter : Parser {
                 continue;
 
             out.context = &context;
-            auto sub = substitute(decl, {}, args);
+            auto sub = bindArguments(decl, {}, args);
             if (!sub.has_value())
                 continue;
 
@@ -247,6 +337,7 @@ struct Interpreter : Parser {
         return cmpCompleteDecls(l.decl, l.args, r.decl, r.args);
     }
     Value getValue(LookupContext& context, const CompleteDecl& decl) {
+        VERIFY(at(decl.decl).kind == DeclKind::VarDecl);
         for (auto& v : context.completeDeclVals) {
             if (!cmpCompleteDecls(v.decl, decl))
                 continue;
@@ -256,40 +347,31 @@ struct Interpreter : Parser {
         context.completeDeclVals.push_back({ decl, v });
         return v;
     }
-    Value initialize(LookupContext& parent, const CompleteDecl& decl) {
-        const Decl& d = at(decl.decl);
-        LookupContext context { .parent = &parent, .decls = at((Span<Ptr<Decl>>)d.parametric.params) };
-        auto parameters = at(d.parametric.params);
-        EXPECT_EQ(parameters.size(), decl.args.size());
-        for (uint32_t i = 0; i < parameters.size(); i++) {
-            context.completeDeclVals.push_back({ { parameters[i] }, decl.args[i] });
-        }
-
-#define DECL_KIND(kind)  \
-    case DeclKind::kind: \
-        return init##kind(context, (kind&)d);
-        switch (d.kind) {
-            ENUMERATE_DECL_KINDS
-        default:
-            VERIFY_NOT_REACHED();
-        }
-#undef DECL_KIND
+    LookupContext makeParameterContext(LookupContext& parent, Span<Ptr<VarDecl>> decls, std::span<const PositionalValue> args) {
+        return makeParameterContext(parent, at((Span<Ptr<Decl>>)decls), args);
     }
-    Value initVarDecl(LookupContext& ctx, VarDecl& d) {
-        Value source = evaluateExpr(ctx, d.initializer);
+    LookupContext makeParameterContext(LookupContext& parent, std::span<const Ptr<Decl>> decls, std::span<const PositionalValue> args) {
+        LookupContext context { .parent = &parent, .decls = decls };
+        EXPECT_EQ(decls.size(), args.size());
+        for (uint32_t i = 0; i < decls.size(); i++) {
+            EXPECT_EQ(args[i].index, i);
+            context.completeDeclVals.push_back({{ decls[i] }, args[i] });
+        }
+        return context;
+    }
+    Value initialize(LookupContext& parent, const CompleteDecl& decl) {
+        const VarDecl& d = (VarDecl&)at(decl.decl);
+        LookupContext withCtx = makeParameterContext(parent, d.with.params.params, decl.withArgs);
+        LookupContext paramCtx = makeParameterContext(withCtx, d.parametric.params, decl.args);
+
+        Value source = evaluateExpr(paramCtx, d.initializer);
         if (d.type) {
-            Value v = evaluateExpr(ctx, d.type);
+            Value v = evaluateExpr(paramCtx, d.type);
             VERIFY(v.kind == ValueKind::Decl);
             VERIFY(v.declType == typeType.decl);
             // source = convert(ctx, v.asType(), source);
         }
         return source;
-    }
-    Value initStructDecl(LookupContext&, StructDecl&) {
-        VERIFY_NOT_REACHED();
-    }
-    Value initFnDecl(LookupContext&, FnDecl&) {
-        VERIFY_NOT_REACHED();
     }
 
     Value convert(LookupContext&, Type, Value val) {
@@ -375,13 +457,10 @@ struct Interpreter : Parser {
 void testInterpreter() {
     Interpreter it { R"str(
     {
-        x{T: Type, y: T}: T = y;
-
-        struct Foo {} {
-            x: num = 0;
-        }
+        with {T: Type}
+        x{y: T}: T = y;
     }
-    Foo
+    x{3}
     )str" };
 
     EXPECT_EQ(it.tok.kind(), TokenKind::LeftBrace);
