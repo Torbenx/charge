@@ -31,26 +31,27 @@ struct Interpreter : Parser {
             return { (Value*)(this + 1), size };
         }
     };
+    enum class ValueKind : uint8_t {
+        Invalid,
+        Decl,
+        Builtin,
+        Struct,
+    };
     struct Value {
         std::vector<PositionalValue> typeArgs = {};
         union {
-            ValueArrayHead* memberValues;
-            int64_t intValue;
+            ValueArrayHead* memberValues = nullptr;
+            int64_t builtinValue;
+            Ptr<Decl> declType;
         };
         Ptr<Decl> typeDecl = {};
-        bool isTypeValue = false;
+        ValueKind kind = ValueKind::Invalid;
 
-        Value()
-            : memberValues(nullptr) { }
+        Value() { }
         Value(Type type, int64_t value)
-            : typeArgs(std::move(type.args)), intValue(value), typeDecl(type.decl) { }
-        Value(Type type)
-            : typeArgs(std::move(type.args)), typeDecl(type.decl), isTypeValue(true) { }
-
-        Type asType() const {
-            VERIFY(isTypeValue);
-            return { typeDecl, typeArgs };
-        }
+            : typeArgs(std::move(type.args)), builtinValue(value), typeDecl(type.decl), kind(ValueKind::Builtin) { }
+        Value(Ptr<Decl> type, ParameterizedDecl decl)
+            : typeArgs(std::move(decl.args)), declType(type), typeDecl(decl.decl), kind(ValueKind::Decl) { }
     };
     struct PositionalValue : Value {
         uint16_t index = 0;
@@ -85,20 +86,24 @@ struct Interpreter : Parser {
 
     Interpreter(SourceBuffer buffer)
         : Parser(buffer)
-        , numType { make<Decl>(DeclKind::StructDecl, Word { 0, 3, 1 }) }
-        , typeType { make<Decl>(DeclKind::StructDecl, Word { 4, 4, 1 }) } {
+        , numType { make<StructDecl>(Word { 0, 3, 1 }) }
+        , typeType { make<StructDecl>(Word { 4, 4, 1 }) } {
         auto decls = beginSpan<Ptr<Decl>>();
         append(decls, numType.decl);
         append(decls, typeType.decl);
         builtinContext.decls = at(finalizeSpan(decls));
-        builtinContext.completeDeclVals.push_back({ numType, Value(numType) });
-        builtinContext.completeDeclVals.push_back({ typeType, Value(typeType) });
     }
 
-    Type typeOf(Value value) {
-        if (value.isTypeValue)
-            return typeType;
-        return { value.typeDecl, std::move(value.typeArgs) };
+    Type typeOf(const Value& value) {
+        switch (value.kind) {
+        case ValueKind::Struct:
+        case ValueKind::Builtin:
+            return { value.typeDecl, std::move(value.typeArgs) };
+        case ValueKind::Decl:
+            return { value.declType, {} };
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 
     Value makeNum(int64_t value) { return { numType, value }; }
@@ -111,21 +116,26 @@ struct Interpreter : Parser {
     bool cmpWord(Word l, Word r) { return sview(l) == sview(r); }
 
     bool cmpValue(const Value& l, const Value& r) {
-        EXPECT_EQ(l.isTypeValue, r.isTypeValue);
-        if (l.isTypeValue)
-            return cmpCompleteDecls(l.typeDecl, l.typeArgs, r.typeDecl, r.typeArgs);
-
-        VERIFY(l.typeDecl == r.typeDecl);
-        if (l.typeDecl == numType.decl)
-            return l.intValue == r.intValue;
-
-        EXPECT_EQ(l.memberValues->size, r.memberValues->size);
-        uint32_t size = l.memberValues->size;
-        for (uint32_t i = 0; i < size; i++) {
-            if (!cmpValue(l.memberValues->array()[i], r.memberValues->array()[i]))
-                return false;
+        VERIFY(l.kind == r.kind);
+        switch (l.kind) {
+        case ValueKind::Builtin:
+            VERIFY(l.typeDecl == r.typeDecl);
+            return l.builtinValue == r.builtinValue;
+        case ValueKind::Struct: {
+            VERIFY(l.typeDecl == r.typeDecl);
+            EXPECT_EQ(l.memberValues->size, r.memberValues->size);
+            uint32_t size = l.memberValues->size;
+            for (uint32_t i = 0; i < size; i++) {
+                if (!cmpValue(l.memberValues->array()[i], r.memberValues->array()[i]))
+                    return false;
+            }
+            return true;
         }
-        return true;
+        case ValueKind::Decl:
+            return cmpCompleteDecls(l.typeDecl, l.typeArgs, r.typeDecl, r.typeArgs);
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 
     std::optional<ParameterizedDecl> substitute(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
@@ -165,8 +175,9 @@ struct Interpreter : Parser {
 
             if (param.type) {
                 Value v = evaluateExpr(paramCtx, param.type);
-                VERIFY(v.isTypeValue);
-                arg = convert(paramCtx, v.asType(), arg);
+                VERIFY(v.kind == ValueKind::Decl);
+                VERIFY(v.declType == typeType.decl);
+                // arg = convert(paramCtx, v.asType(), arg);
             }
 
             out.args.push_back({ arg, (uint16_t)i });
@@ -184,18 +195,18 @@ struct Interpreter : Parser {
         }
         return out;
     }
-    LookupResult findInCtx(LookupContext& context, Word name, std::span<const NamedValue> args) {
+    LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedValue> args) {
         LookupResult out;
         for (Ptr<Decl> decl : context.decls) {
             auto& d = at(decl);
             if (!cmpWord(d.name, name))
                 continue;
-            
+
             out.context = &context;
             auto sub = substitute(decl, {}, args);
             if (!sub.has_value())
                 continue;
-            
+
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
                 out.decls.clear();
                 break;
@@ -210,7 +221,7 @@ struct Interpreter : Parser {
         auto args = evaluateArguments(identCtx, ident);
         LookupContext* context = &identCtx;
         while (context) {
-            LookupResult r = findInCtx(*context, ident.word, args);
+            LookupResult r = lookupIdentifierIn(*context, ident.word, args);
             if (r.valid()) {
                 VERIFY(r.decls.size() > 0);
                 return r;
@@ -232,10 +243,10 @@ struct Interpreter : Parser {
         }
         return true;
     }
-    bool cmpCompleteDecls(CompleteDecl& l, CompleteDecl& r) {
+    bool cmpCompleteDecls(const CompleteDecl& l, const CompleteDecl& r) {
         return cmpCompleteDecls(l.decl, l.args, r.decl, r.args);
     }
-    Value getValue(LookupContext& context, CompleteDecl& decl) {
+    Value getValue(LookupContext& context, const CompleteDecl& decl) {
         for (auto& v : context.completeDeclVals) {
             if (!cmpCompleteDecls(v.decl, decl))
                 continue;
@@ -245,8 +256,8 @@ struct Interpreter : Parser {
         context.completeDeclVals.push_back({ decl, v });
         return v;
     }
-    Value initialize(LookupContext& parent, CompleteDecl& decl) {
-        Decl& d = at(decl.decl);
+    Value initialize(LookupContext& parent, const CompleteDecl& decl) {
+        const Decl& d = at(decl.decl);
         LookupContext context { .parent = &parent, .decls = at((Span<Ptr<Decl>>)d.parametric.params) };
         auto parameters = at(d.parametric.params);
         EXPECT_EQ(parameters.size(), decl.args.size());
@@ -268,8 +279,9 @@ struct Interpreter : Parser {
         Value source = evaluateExpr(ctx, d.initializer);
         if (d.type) {
             Value v = evaluateExpr(ctx, d.type);
-            VERIFY(v.isTypeValue);
-            source = convert(ctx, v.asType(), source);
+            VERIFY(v.kind == ValueKind::Decl);
+            VERIFY(v.declType == typeType.decl);
+            // source = convert(ctx, v.asType(), source);
         }
         return source;
     }
@@ -307,11 +319,26 @@ struct Interpreter : Parser {
     Value evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
         LookupResult r = lookupIdentifier(ctx, e.identifier);
 
-        // hack
-        VERIFY(r.decls.size() == 1);
-        CompleteDecl decl = completeDecl(*r.context, r.decls[0]).value();
-        VERIFY(at(decl.decl).kind != DeclKind::FnDecl);
-        return getValue(*r.context, decl);
+        switch (r.declKind) {
+        case DeclKind::VarDecl: {
+            if (r.decls.size() != 1)
+                return {};
+            auto opt = completeDecl(*r.context, r.decls[0]);
+            if (!opt.has_value())
+                return {};
+            return getValue(*r.context, opt.value());
+        }
+        case DeclKind::StructDecl: {
+            if (r.decls.size() != 1)
+                return {};
+            auto opt = completeDecl(*r.context, r.decls[0]);
+            if (!opt.has_value())
+                return {};
+            return { typeType.decl, std::move(opt.value()) };
+        }
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 
     Value evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
@@ -330,6 +357,20 @@ struct Interpreter : Parser {
     DECLARE_EVAL_STUB(NullStmt)
     DECLARE_EVAL_STUB(CompoundStmt)
     DECLARE_EVAL_STUB(LetStmt)
+
+    void dumpValue(const Value& value) {
+        switch (value.kind) {
+        case ValueKind::Builtin:
+            fmt::println("{}: {}", sview(at(value.typeDecl).name), value.builtinValue);
+            break;
+        case ValueKind::Decl:
+            fmt::println("{}:", sview(at(value.declType).name));
+            dump(context(), value.typeDecl);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
 };
 
 void testInterpreter() {
@@ -360,5 +401,6 @@ void testInterpreter() {
     dump(it.context(), e);
 
     Interpreter::Value v = it.evaluateExpr(context, e);
-    fmt::println("eval: {}", v.intValue);
+    fmt::println("eval:");
+    it.dumpValue(v);
 }
