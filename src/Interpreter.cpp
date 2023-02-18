@@ -46,6 +46,11 @@ struct Interpreter : Parser {
             : typeArgs(std::move(type.args)), intValue(value), typeDecl(type.decl) { }
         Value(Type type)
             : typeArgs(std::move(type.args)), typeDecl(type.decl), isTypeValue(true) { }
+
+        Type asType() const {
+            VERIFY(isTypeValue);
+            return { typeDecl, typeArgs };
+        }
     };
     struct PositionalValue : Value {
         uint16_t index = 0;
@@ -155,8 +160,12 @@ struct Interpreter : Parser {
             } else
                 return {};
 
-            if (param.type)
-                arg = convert(paramCtx, lookupType(paramCtx, at(param.type)), arg);
+            if (param.type) {
+                Value v = evaluateExpr(paramCtx, param.type);
+                VERIFY(v.isTypeValue);
+                arg = convert(paramCtx, v.asType(), arg);
+                
+            }
 
             out.args.push_back({ arg, (uint16_t)i });
             decls.push_back(params[i]);
@@ -173,12 +182,12 @@ struct Interpreter : Parser {
         }
         return out;
     }
-    LookupResult findInCtx(LookupContext& context, LookupContext& identCtx, Identifier& ident) {
+    LookupResult findInCtx(LookupContext& context, LookupContext& identCtx, ParameterizedWord name) {
         LookupResult out;
-        auto args = evaluateArguments(identCtx, ident.args);
+        auto args = evaluateArguments(identCtx, name);
         for (Ptr<Decl> decl : context.decls) {
             auto& d = at(decl);
-            if (cmpWord(d.name, ident.name)) {
+            if (cmpWord(d.name, name.word)) {
                 out.context = &context;
                 auto sub = substitute(decl, {}, args);
                 if (sub.has_value())
@@ -187,34 +196,18 @@ struct Interpreter : Parser {
         }
         return out;
     }
-    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier& ident) {
-        if (ident.base) {
-            auto base = lookupIdentifier(identCtx, at(ident.base));
-            EXPECT_EQ(base.decls.size(), 1u);
-            auto decl = completeDecl(*base.context, base.decls[0]).value();
-            Value baseValue = getValue(*base.context, decl);
-            VERIFY_NOT_REACHED(); // TODO: check baseValue is a Type and continue lookup
-        } else {
-            fmt::println("looking up '{}'", sview(ident.name));
-            LookupContext* context = &identCtx;
-            while (context) {
-                LookupResult r = findInCtx(*context, identCtx, ident);
-                if (r.valid()) {
-                    VERIFY(r.decls.size() > 0);
-                    return r;
-                }
-                context = context->parent;
+    LookupResult lookupIdentifier(LookupContext& identCtx, ParameterizedWord ident) {
+        fmt::println("looking up '{}'", sview(ident.word));
+        LookupContext* context = &identCtx;
+        while (context) {
+            LookupResult r = findInCtx(*context, identCtx, ident);
+            if (r.valid()) {
+                VERIFY(r.decls.size() > 0);
+                return r;
             }
-            VERIFY_NOT_REACHED();
+            context = context->parent;
         }
-    }
-    Type lookupType(LookupContext& ctx, Identifier& ident) {
-        LookupResult r = lookupIdentifier(ctx, ident);
-        EXPECT_EQ(r.decls.size(), 1u);
-        auto decl = completeDecl(*r.context, r.decls[0]).value();
-        auto val = getValue(*r.context, decl);
-        VERIFY(val.isTypeValue);
-        return { decl.decl, std::move(decl.args) };
+        VERIFY_NOT_REACHED();
     }
 
     bool cmpCompleteDecls(Ptr<Decl> lDecl, std::span<const PositionalValue> lArgs, Ptr<Decl> rDecl, std::span<const PositionalValue> rArgs) {
@@ -263,8 +256,11 @@ struct Interpreter : Parser {
     }
     Value initVarDecl(LookupContext& ctx, VarDecl& d) {
         Value source = evaluateExpr(ctx, d.initializer);
-        if (d.type)
-            return convert(ctx, lookupType(ctx, at(d.type)), source);
+        if (d.type) {
+            Value v = evaluateExpr(ctx, d.type);
+            VERIFY(v.isTypeValue);
+            source = convert(ctx, v.asType(), source);
+        }
         return source;
     }
     Value initStructDecl(LookupContext&, StructDecl&) {
@@ -299,8 +295,7 @@ struct Interpreter : Parser {
     }
 
     Value evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
-        auto& ident = at(e.identifier);
-        LookupResult r = lookupIdentifier(ctx, ident);
+        LookupResult r = lookupIdentifier(ctx, e.identifier);
 
         // hack
         VERIFY(r.decls.size() == 1);

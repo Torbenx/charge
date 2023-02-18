@@ -61,7 +61,10 @@ struct STChildren {
         childrenSpan(Iat(e).decls, IsLastChild::Yes, args...);
     }
     void childrenVarDecl(Ptr<VarDecl> e, Args... args) {
-        impl()->child(Iat(e).initializer, IsLastChild::Yes, args...);
+        if (Iat(e).type)
+            impl()->child(Iat(e).type, (IsLastChild)(bool)(Iat(e).initializer), args...);
+        if (Iat(e).initializer)
+            impl()->child(Iat(e).initializer, IsLastChild::Yes, args...);
     }
     void childrenFnDecl(Ptr<FnDecl> e, Args... args) {
         impl()->child(Iat(e).body, IsLastChild::Yes, args...);
@@ -133,8 +136,8 @@ struct STVisitor {
 #undef DECL_KIND
 
     void dispatchVisit(Ptr<Decl> d, Args... args) {
-#define DECL_KIND(kind)                                \
-    case DeclKind::kind:                               \
+#define DECL_KIND(kind)                             \
+    case DeclKind::kind:                            \
         impl()->visit##kind((Ptr<kind>)d, args...); \
         break;
 

@@ -108,21 +108,16 @@ struct Arguments {
     Span<Arg> args;
 };
 
-struct Identifier {
-    Ptr<Identifier> base;
-    Word name;
-    Arguments args;
-
-    Identifier(Ptr<Identifier> base = {}, Word name = {})
-        : base(base), name(name) { }
-};
-
 struct Parameters {
     Span<Ptr<VarDecl>> params;
 };
 
 struct WithClause {
     Parameters params;
+};
+
+struct ParameterizedWord : Arguments {
+    Word word;
 };
 
 // Declarations
@@ -148,7 +143,7 @@ struct VarDecl : Decl {
         Mut,
     };
     Qualifier qual;
-    Ptr<Identifier> type;
+    Ptr<Expr> type;
     Ptr<Expr> initializer;
     VarDecl(Word name = {}, Qualifier qual = Qualifier::None)
         : Decl(DeclKind::VarDecl, name), qual(qual) { }
@@ -205,10 +200,11 @@ struct ParenExpr : Expr {
 };
 
 struct AccessExpr : Expr {
+    bool isStatic = false;
     Ptr<Expr> base;
-    Word member;
-    AccessExpr(Ptr<Expr> base = {}, Word member = {})
-        : Expr(StmtKind::AccessExpr), base(base), member(member) { }
+    ParameterizedWord member;
+    AccessExpr(bool isStatic, Ptr<Expr> base = {}, Word member = {})
+        : Expr(StmtKind::AccessExpr), isStatic(isStatic), base(base), member { {}, member } { }
 };
 
 struct ImmediateBraceExpr : Expr {
@@ -230,9 +226,9 @@ struct CallExpr : Expr {
 };
 
 struct IdentifierExpr : Expr {
-    Ptr<Identifier> identifier;
-    IdentifierExpr(Ptr<Identifier> identifier = {})
-        : Expr(StmtKind::IdentifierExpr), identifier(identifier) { }
+    ParameterizedWord identifier;
+    IdentifierExpr(Word identifier = {})
+        : Expr(StmtKind::IdentifierExpr), identifier { {}, identifier } { }
 };
 
 enum class BinaryOperator : uint8_t {

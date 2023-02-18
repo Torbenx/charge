@@ -56,20 +56,13 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         out << '\'' << toShortString(at(e).op) << '\'';
     }
     void visitAccessExpr(Ptr<AccessExpr> e) {
-        out << "'." << sview(at(e).member) << '\'';
+        out << '\'' << (at(e).isStatic ? "::" : ".") << sview(at(e).member.word) << '\'';
     }
     void visitCallExpr(Ptr<CallExpr> e) {
         out << '\'' << (at(e).callKind == CallKind::Paren ? "()" : "[]") << '\'';
     }
-    void printIdentifier(Ptr<Identifier> ident) {
-        if (at(ident).base) {
-            printIdentifier(at(ident).base);
-            out << "::";
-        }
-        out << '\'' << sview(at(ident).name) << '\'';
-    }
     void visitIdentifierExpr(Ptr<IdentifierExpr> e) {
-        printIdentifier(at(e).identifier);
+        out << '\'' << sview(at(e).identifier.word) << '\'';
     }
     void visitBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
@@ -86,10 +79,6 @@ struct STDumper : STContext, STChildren<STDumper, Name>, STVisitor<STDumper> {
         else if (at(e).qual == VarDecl::Qualifier::Mut)
             out << "mut ";
         out << '\'' << sview(at(e).name) << '\'';
-        if (at(e).type) {
-            out << ": ";
-            printIdentifier(at(e).type);
-        }
     }
 };
 }

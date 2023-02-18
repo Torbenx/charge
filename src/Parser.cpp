@@ -129,28 +129,6 @@ uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCo
     return ret;
 }
 
-void Parser::parseIdentifier(Ptr<Identifier>& out) {
-    if (tok.kind() == TokenKind::ColonColon) {
-        // base = global;
-        VERIFY_NOT_REACHED();
-        advance();
-    }
-
-    while (true) {
-        EXPECT_EQ(tok.kind(), TokenKind::Word);
-        out = make<Identifier>(out, asWord(tok));
-        advance();
-        if (tok.kind() == TokenKind::LeftBrace)
-            parseArgumentContext(at(out).args);
-        
-        if (tok.kind() == TokenKind::ColonColon)
-            advance();
-        else
-            break;
-    }
-
-}
-
 static uint64_t parseInteger(std::string_view range) {
     auto characterValue = [](uint8_t c) -> uint64_t {
         if (c >= 'a' && c <= 'f')
@@ -208,12 +186,13 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     else if (tok.kind() == TokenKind::LeftBrace) {
         auto& e = makeSet<ImmediateBraceExpr>(base);
         parseArgumentContext(e.args);
-
     }
     // identifier
-    else if (isWordOrGlobal(tok.kind())) {
-        auto& e = makeSet<IdentifierExpr>(base);
-        parseIdentifier(e.identifier);
+    else if (tok.kind() == TokenKind::Word) {
+        auto& e = makeSet<IdentifierExpr>(base, asWord(tok));
+        advance();
+        if (tok.kind() == TokenKind::LeftBrace)
+            parseArgumentContext(e.identifier);
     }
     // IntegerLiteral
     else if (tok.kind() == TokenKind::IntegerLiteral) {
@@ -234,11 +213,14 @@ void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
     if (tok.kind() == TokenKind::LeftParen || tok.kind() == TokenKind::LeftAngle) {
         auto& e = makeSet<CallExpr>(base, tok.kind() == TokenKind::LeftParen ? CallKind::Paren : CallKind::Angle, base);
         parseArgumentContext(e.args);
-    } else if (tok.kind() == TokenKind::Point) {
+    } else if (tok.kind() == TokenKind::Point || tok.kind() == TokenKind::ColonColon) {
+        bool isStatic = tok.kind() == TokenKind::ColonColon;
         advance();
         EXPECT_EQ(tok.kind(), TokenKind::Word);
-        base = make<AccessExpr>(base, asWord(tok));
+        auto& e = makeSet<AccessExpr>(base, isStatic, base, asWord(tok));
         advance();
+        if (tok.kind() == TokenKind::LeftBrace)
+            parseArgumentContext(e.member);
     } else if (tok.kind() == TokenKind::PlusPlus || tok.kind() == TokenKind::MinusMinus) {
         UnaryOperator op = tok.kind() == TokenKind::PlusPlus ? UnaryOperator::PostInc : UnaryOperator::PostDec;
         base = make<UnaryOperatorExpr>(op, base);
@@ -322,7 +304,7 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseIdentifier(at(d).type);
+        parseBinaryExpr(at(d).type);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
@@ -393,7 +375,7 @@ void Parser::parseParameter(Ptr<VarDecl>& out) {
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseIdentifier(e.type);
+        parseBinaryExpr(e.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();
@@ -431,7 +413,7 @@ void Parser::parseDecl(Ptr<Decl>& out) {
         auto& d = makeSet<VarDecl>(out);
         if (tok.kind() == TokenKind::Colon) {
             advance();
-            parseIdentifier(d.type);
+            parseBinaryExpr(d.type);
         }
         EXPECT_EQ(tok.kind(), TokenKind::Equal);
         advance();

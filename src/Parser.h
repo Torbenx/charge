@@ -115,7 +115,6 @@ struct Parser : Lexer, STStorage {
         return at(p);
     }
 
-    void parseIdentifier(Ptr<Identifier>& out);
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
