@@ -364,8 +364,7 @@ struct Interpreter : Parser {
             fmt::println("{}: {}", sview(at(value.typeDecl).name), value.builtinValue);
             break;
         case ValueKind::Decl:
-            fmt::println("{}:", sview(at(value.declType).name));
-            dump(context(), value.typeDecl);
+            dump(context(), value.typeDecl, sview(at(value.declType).name));
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -377,8 +376,12 @@ void testInterpreter() {
     Interpreter it { R"str(
     {
         x{T: Type, y: T}: T = y;
+
+        struct Foo {} {
+            x: num = 0;
+        }
     }
-    x{num, 3}
+    Foo
     )str" };
 
     EXPECT_EQ(it.tok.kind(), TokenKind::LeftBrace);

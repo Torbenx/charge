@@ -9,34 +9,29 @@ enum class IsLastChild : bool {
     Yes = true,
 };
 
-struct Name {
-    std::string_view name = {};
-    bool withdot = false;
-
-    Name withName(std::string_view name, bool withdot) {
-        return { name, withdot };
-    }
-};
-
 struct STDumper : STContext {
     std::ostream& out;
     std::vector<char> prefix = {};
 
     template<typename T> // T = { Stmt, Decl }
-    void dump(Ptr<T> e, Name name) {
-        if (name.name.length() > 0) {
-            if (name.withdot)
-                out << '.';
-            out << name.name << " = ";
+    void dump(Ptr<T> e, std::string_view name) {
+        auto oldPrefixSize = prefix.size();
+        if (name.length() > 0) {
+            out << name << ": ";
+            for (uint32_t i = 0; i < name.length() + 2; i++)
+                prefix.push_back(' ');
         }
+
         out << toString(at(e).kind) << ' ';
         dispatchVisit(e);
         out << '\n';
+
         dispatchChildren(e);
+        prefix.resize(oldPrefixSize);
     }
 
     template<typename T> // T = { Stmt, Decl }
-    void child(Ptr<T> e, IsLastChild last) {
+    void child(Ptr<T> e, IsLastChild last, std::string_view name = {}) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
             out << "'-";
@@ -47,14 +42,14 @@ struct STDumper : STContext {
         }
         prefix.push_back(' ');
 
-        dump(e, {});
+        dump(e, name);
 
         prefix.resize(prefix.size() - 2);
     }
     void child(Arguments args, IsLastChild last) {
         for (uint32_t i = 0; i < args.args.count; i++) {
             auto arg = at(args.args, i);
-            child(arg.source, (IsLastChild)((bool)last && i == args.args.count - 1));
+            child(arg.source, (IsLastChild)((bool)last && i == args.args.count - 1), { sview(arg.target) });
         }
     }
 
@@ -107,7 +102,8 @@ struct STDumper : STContext {
         child(at(e).subExpr, IsLastChild::Yes);
     }
     void childrenAccessExpr(Ptr<AccessExpr> e) {
-        child(at(e).base, IsLastChild::Yes);
+        child(at(e).base, (IsLastChild)(at(e).member.args.count == 0));
+        child(at(e).member, IsLastChild::Yes);
     }
     void childrenImmediateBraceExpr(Ptr<ImmediateBraceExpr> e) {
         child(at(e).args, IsLastChild::Yes);
@@ -121,7 +117,9 @@ struct STDumper : STContext {
             child(at(e).args, IsLastChild::Yes);
         }
     }
-    void childrenIdentifierExpr(Ptr<IdentifierExpr>) { }
+    void childrenIdentifierExpr(Ptr<IdentifierExpr> e) {
+        child(at(e).identifier, IsLastChild::Yes);
+    }
     void childrenBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
         child(at(e).left, IsLastChild::No);
         child(at(e).right, IsLastChild::Yes);
@@ -144,7 +142,7 @@ struct STDumper : STContext {
     }
     void childrenVarDecl(Ptr<VarDecl> e) {
         if (at(e).type)
-            child(at(e).type, (IsLastChild)(bool)(at(e).initializer));
+            child(at(e).type, (IsLastChild) !(bool)(at(e).initializer));
         if (at(e).initializer)
             child(at(e).initializer, IsLastChild::Yes);
     }
@@ -213,11 +211,11 @@ struct STDumper : STContext {
 };
 }
 
-void dump(STContext context, Ptr<Stmt> e) {
+void dump(STContext context, Ptr<Stmt> e, std::string_view name) {
     STDumper dumper { context, std::cout };
-    dumper.dump(e, {});
+    dumper.dump(e, name);
 }
-void dump(STContext context, Ptr<Decl> e) {
+void dump(STContext context, Ptr<Decl> e, std::string_view name) {
     STDumper dumper { context, std::cout };
-    dumper.dump(e, {});
+    dumper.dump(e, name);
 }

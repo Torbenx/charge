@@ -134,5 +134,5 @@ struct Parser : Lexer, STStorage {
     }
 };
 
-void dump(STContext context, Ptr<Stmt> e);
-void dump(STContext context, Ptr<Decl> e);
+void dump(STContext context, Ptr<Stmt> e, std::string_view name = {});
+void dump(STContext context, Ptr<Decl> e, std::string_view name = {});
