@@ -50,7 +50,7 @@ struct Parser : Lexer, STStorage {
     }
 
     Word asWord(Token token) const {
-        return { token.start, token.length };
+        return { token.start, (uint16_t)token.length };
     }
 
     std::array<std::byte*, 1> spanStorage = { new std::byte[400] {} };

@@ -13,6 +13,7 @@
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
     Invalid,
+    Builtin,
     ENUMERATE_DECL_KINDS
 };
 #undef DECL_KIND
@@ -94,7 +95,8 @@ struct Span {
 };
 struct Word {
     uint32_t start = 0;
-    uint32_t length = 0;
+    uint16_t length = 0;
+    uint16_t bufferId = 0;
     explicit operator bool() const { return length != 0; }
 };
 

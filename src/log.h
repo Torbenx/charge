@@ -7,14 +7,14 @@
 [[noreturn]] void verify_not_reached(const char* file, const char* func, int line);
 
 constexpr bool verify(bool cond, const char* condStr, const char* file, const char* func, int line) {
-    if (!cond)
+    if (!cond) [[unlikely]]
         verify_failed(condStr, file, func, line);
     return cond;
 }
 template<typename L, typename R>
 constexpr bool expect_eq(const L& lhs, const R& rhs, const char* lhsStr, const char* rhsStr, const char* file, const char* func, int line) {
     bool b = lhs != rhs;
-    if (b) {
+    if (b) [[unlikely]] {
         fmt::println("EXPECT failed {}:{}: {}(): {} {{{}}} == {} {{{}}}", file, line, func, lhsStr, lhs, rhsStr, rhs);
         handle_failure();
     }
