@@ -70,7 +70,7 @@ struct Ptr {
         : offsetAlign4(p.offsetAlign4 + computeOffsetInBase<E, Base>() / sizeof(uint32_t)) { }
 
     template<typename Base>
-    operator Ptr<Base>() requires std::derived_from<E, Base> {
+    operator Ptr<Base>() const requires std::derived_from<E, Base> {
         return Ptr<Base> { (uint32_t)(offsetAlign4 - computeOffsetInBase<E, Base>() / sizeof(uint32_t)) };
     }
 

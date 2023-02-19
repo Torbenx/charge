@@ -80,7 +80,9 @@ struct STDumper : STContext {
     }
     void visitLetStmt(Ptr<LetStmt>) { }
 
-    void visitStructDecl(Ptr<StructDecl>) { }
+    void visitStructDecl(Ptr<StructDecl> e) {
+        out << '\'' << sview(at(e).name) << '\'';
+    }
     void visitVarDecl(Ptr<VarDecl> e) {
         if (at(e).qual == VarDecl::Qualifier::Const)
             out << "const ";
