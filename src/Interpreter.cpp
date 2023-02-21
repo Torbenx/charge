@@ -235,13 +235,13 @@ struct Interpreter : Parser {
     bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
         if (!deduceParameters(typeOf(source), typeOf(target), deductions))
             return false;
+
         if (target.kind == ValueKind::Dependent) {
             deductions.push_back({ target.dependentDecl, source });
             return true;
-        } else {
-            // compare source and target
-            VERIFY_NOT_REACHED();
         }
+
+        return cmpValue(source, target);
     }
     bool deduceParameters(const Type& source, const Type& target, std::vector<Deduction>& deductions) {
         if (target.dependend) {
@@ -282,10 +282,10 @@ struct Interpreter : Parser {
             if (i == decl.args[argOff].index) {
                 arg = decl.args[argOff];
                 argOff += 1;
-                fmt::println("argument to '{}':", sview(param.name));
+                fmt::print("argument to '{}': ", sview(param.name));
                 dumpValue(arg);
             } else if (param.initializer) {
-                fmt::println("default argument for '{}':", sview(param.name));
+                fmt::print("default argument for '{}': ", sview(param.name));
                 arg = evaluateExpr(paramCtx, param.initializer);
                 dumpValue(arg);
             } else {
@@ -295,7 +295,7 @@ struct Interpreter : Parser {
 
             if (param.type) {
                 auto target = evaluateExpr(paramCtx, param.type);
-                fmt::println("target:");
+                fmt::print("target: ");
                 dumpValue(target);
                 if (!deduceParameters(typeOf(arg), asTypeValue(target), deductions)) {
                     fmt::println("matching failed");
@@ -518,12 +518,12 @@ struct Interpreter : Parser {
 void testInterpreter() {
     Interpreter it { R"str(
     {
-        struct constant{Tc: Type, vc: Tc} { }
+        struct constant{T: Type, v: T} { }
 
-        with {Tx: Type, vx: Tx}
-        x{y: constant{Tx, vx}}: Tx = vx;
+        with {Q: Type, a: Q, A: Type, b: constant{A, a}, B: Type}
+        x{c: constant{B, b}}: A = a;
     }
-    x{constant{num, 3}()}
+    x{constant{constant{num, 3}, constant{num, 3}()}()}
     )str" };
 
     EXPECT_EQ(it.tok.kind(), TokenKind::LeftBrace);
@@ -546,6 +546,6 @@ void testInterpreter() {
     dump(it.context(), e);
 
     Interpreter::Value v = it.evaluateExpr(context, e);
-    fmt::println("eval:");
+    fmt::print("eval: ");
     it.dumpValue(v);
 }
