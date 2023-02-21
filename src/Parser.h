@@ -3,6 +3,7 @@
 #include "statement.h"
 #include <array>
 #include <span>
+#include <vector>
 
 struct STStorage {
     uint32_t* storage = new uint32_t[512] {};
@@ -27,15 +28,27 @@ struct STStorage {
 };
 
 struct STContext : STStorage {
-    SourceBuffer source;
+    std::span<SourceBuffer> sources;
 
     std::string_view sview(Word word) {
-        return { (const char*)(&source[word.start]), word.length };
+        return { (const char*)&sources[word.bufferId][word.start], word.length };
     }
 };
 
 struct Parser : Lexer, STStorage {
-    using Lexer::Lexer;
+    Parser() = default;
+    Parser(SourceBuffer buffer, bool dump) {
+        dumpTokens = dump;
+        setSourceBuffer(buffer);
+    }
+
+    uint32_t sourceId = 0;
+    std::vector<SourceBuffer> sourceBuffers;
+    void setSourceBuffer(SourceBuffer buffer) {
+        sourceId = sourceBuffers.size();
+        sourceBuffers.push_back(buffer);
+        Lexer::reset(buffer);
+    }
 
     template<typename T, int I>
     struct SpanBuilder {
@@ -50,7 +63,7 @@ struct Parser : Lexer, STStorage {
     }
 
     Word asWord(Token token) const {
-        return { token.start, (uint16_t)token.length };
+        return { token.start, (uint16_t)token.length, (uint16_t)sourceId };
     }
 
     std::array<std::byte*, 1> spanStorage = { new std::byte[400] {} };
@@ -130,7 +143,7 @@ struct Parser : Lexer, STStorage {
     void parseDecl(Ptr<Decl>& out);
 
     STContext context() {
-        return { *this, source };
+        return { *this, sourceBuffers };
     }
 };
 

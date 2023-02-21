@@ -11,8 +11,6 @@ struct Interpreter : Parser {
         return out;
     }();
 
-    static constexpr char BUILTIN_NAMES[] = "num Type";
-
     /*
      * We destingluish between parameterized and completed declarations:
      * - Parameterized decls are a source level declarations with a list of arguments
@@ -128,18 +126,32 @@ struct Interpreter : Parser {
         bool valid() const { return context != nullptr; }
     };
 
-    Type numType;
+    LookupContext* globalContext = nullptr;
     Type typeType;
-    LookupContext builtinContext;
+    Type numType;
 
-    Interpreter(SourceBuffer buffer)
-        : Parser(buffer)
-        , numType { make<StructDecl>(Word { 0, 3, 1 }) }
-        , typeType { make<StructDecl>(Word { 4, 4, 1 }) } {
+    Interpreter() = default;
+
+    void interpretDecls(SourceBuffer buffer) {
+        setSourceBuffer(buffer);
         auto decls = beginSpan<Ptr<Decl>>();
-        append(decls, numType.decl);
-        append(decls, typeType.decl);
-        builtinContext.decls = at(finalizeSpan(decls));
+        while (tok.kind() != TokenKind::EOS) {
+            auto& d = append(decls, {});
+            parseDecl(d);
+        }
+        globalContext = new LookupContext { globalContext };
+        globalContext->decls = at(finalizeSpan(decls));
+    }
+    Value interpretExpr(SourceBuffer buffer) {
+        setSourceBuffer(buffer);
+        Ptr<Expr> e;
+        parseBinaryExpr(e);
+        return evaluateExpr(*globalContext, e);
+    }
+
+    void findBuiltins() {
+        numType = asTypeValue(interpretExpr("num"));
+        typeType = asTypeValue(interpretExpr("Type"));
     }
 
     Type typeOf(const Value& value) {
@@ -175,8 +187,7 @@ struct Interpreter : Parser {
     Value makeNum(int64_t value) { return { numType, value }; }
 
     std::string_view sview(Word w) {
-        const char* buffer = w.bufferId == 0 ? (const char*)source.buffer : BUILTIN_NAMES;
-        return { buffer + w.start, w.length };
+        return { (const char*)&sourceBuffers[w.bufferId][w.start], w.length };
     }
 
     bool cmpWord(Word l, Word r) { return sview(l) == sview(r); }
@@ -516,36 +527,22 @@ struct Interpreter : Parser {
 };
 
 void testInterpreter() {
-    Interpreter it { R"str(
-    {
+    Interpreter it;
+    it.interpretDecls(R"str(
+        struct Type{} {}
+        struct num{} {}
+        struct Array{T: Type} {}
+    )str");
+    it.findBuiltins();
+    it.interpretDecls(R"str(
         struct constant{T: Type, v: T} { }
 
         with {Q: Type, a: Q, A: Type, b: constant{A, a}, B: Type}
         x{c: constant{B, b}}: A = a;
-    }
-    x{constant{constant{num, 3}, constant{num, 3}()}()}
-    )str" };
+    )str");
 
-    EXPECT_EQ(it.tok.kind(), TokenKind::LeftBrace);
-    it.advance();
-
-    auto decls = it.beginSpan<Ptr<Decl>>();
-    while (it.tok.kind() != TokenKind::RightBrace) {
-        auto& d = it.append(decls, {});
-        it.parseDecl(d);
-    }
-    it.advance();
-    Interpreter::LookupContext context { &it.builtinContext };
-    context.decls = it.at(it.finalizeSpan(decls));
-
-    Ptr<Expr> e;
-    it.parseBinaryExpr(e);
-
-    for (Ptr<Decl> d : context.decls)
-        dump(it.context(), d);
-    dump(it.context(), e);
-
-    Interpreter::Value v = it.evaluateExpr(context, e);
+    Interpreter::Value v = it.interpretExpr(
+        "x{constant{constant{num, 3}, constant{num, 3}()}()}");
     fmt::print("eval: ");
     it.dumpValue(v);
 }

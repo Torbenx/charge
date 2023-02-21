@@ -164,8 +164,8 @@ constexpr bool isIntLiteralChar(u8 c) {
 
 }
 
-Lexer::Lexer(SourceBuffer buffer, bool dump)
-    : source(buffer), dumpTokens(dump) {
+void Lexer::reset(SourceBuffer buffer) {
+    source = buffer;
     uint32_t firstToken = nextNonWhiteSpace(0);
     m_position = firstToken;
     tok.flags |= firstToken > 0 ? TokenFlags::HasLeadingWhiteSpace : 0;

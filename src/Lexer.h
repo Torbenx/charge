@@ -139,6 +139,7 @@ struct Token {
 
 struct SourceBuffer {
     const uint8_t* buffer = nullptr;
+    SourceBuffer() = default;
     SourceBuffer(const uint8_t* buffer)
         : buffer(buffer) { }
     SourceBuffer(const char* buffer)
@@ -159,7 +160,10 @@ struct Lexer {
     uint32_t pos() const { return m_position; }
     bool dumpTokens = false;
 
-    Lexer(SourceBuffer, bool dump = false);
+    Lexer() = default;
+    Lexer(SourceBuffer buffer, bool dump = false)
+        : dumpTokens(dump) { reset(buffer); }
+    void reset(SourceBuffer);
 
     void advance();
     uint32_t nextNonWhiteSpace(uint32_t pos) const;
