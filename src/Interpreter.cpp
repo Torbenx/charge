@@ -59,7 +59,9 @@ struct Interpreter : Parser {
 
         CompleteDecl() = default;
         CompleteDecl(Ptr<Decl> decl, std::vector<PositionalValue> args = {}, std::vector<PositionalValue> withArgs = {}, bool dependend = false)
-            : ParameterizedDecl(decl, args, dependend), withArgs(withArgs) { }
+            : ParameterizedDecl(decl, std::move(args), dependend), withArgs(std::move(withArgs)) { }
+        CompleteDecl(ParameterizedDecl decl, std::vector<PositionalValue> withArgs = {})
+            : ParameterizedDecl(std::move(decl)), withArgs(std::move(withArgs)) { }
     };
     struct Type : CompleteDecl {
         using CompleteDecl::CompleteDecl;
@@ -77,6 +79,7 @@ struct Interpreter : Parser {
     enum class ValueKind : uint8_t {
         Invalid,
         CompleteDecl,
+        ParameterizedDecl,
         Builtin,
         Struct,
         Dependent,
@@ -84,20 +87,74 @@ struct Interpreter : Parser {
     struct Value {
         CompleteDecl type;
         union {
-            ValueArrayHead* memberValues = nullptr;
+            ValueArrayHead* memberValues;
             int64_t builtinValue;
             Ptr<Decl> declType;
             Ptr<VarDecl> dependentDecl;
-        };
+        } u;
         ValueKind kind = ValueKind::Invalid;
 
-        Value() { }
+        Value()
+            : u { .memberValues = nullptr } { }
         Value(Type type, int64_t value)
-            : type(std::move(type)), builtinValue(value), kind(ValueKind::Builtin) { }
+            : type(std::move(type)), u { .builtinValue = value }, kind(ValueKind::Builtin) { }
         Value(Ptr<Decl> type, CompleteDecl decl)
-            : type(std::move(decl)), declType(type), kind(ValueKind::CompleteDecl) { }
+            : type(std::move(decl)), u { .declType = type }, kind(ValueKind::CompleteDecl) { }
         Value(Type type, Ptr<VarDecl> depDecl)
-            : type(std::move(type)), dependentDecl(depDecl), kind(ValueKind::Dependent) { }
+            : type(std::move(type)), u { .dependentDecl = depDecl }, kind(ValueKind::Dependent) { }
+        Value(Type type, uint32_t memberCount)
+            : type(std::move(type))
+            , u { .memberValues = (ValueArrayHead*)::operator new(memberCount * sizeof(Value) + sizeof(ValueArrayHead)) }
+            , kind(ValueKind::Struct) {
+            u.memberValues->refCnt = 1;
+            u.memberValues->size = memberCount;
+            for (Value& v : u.memberValues->array())
+                std::construct_at(&v);
+        }
+        Value(Ptr<Decl> type, ParameterizedDecl decl)
+            : type(std::move(decl)), u { .declType = type }, kind(ValueKind::ParameterizedDecl) { }
+
+        Value(const Value& other)
+            : type(other.type), u(other.u), kind(other.kind) {
+        }
+        Value& operator=(const Value& other) {
+            deref();
+            type = other.type;
+            u = other.u;
+            kind = other.kind;
+            ref();
+            return *this;
+        }
+        Value(Value&& other)
+            : type(std::move(other.type)), u(other.u), kind(other.kind) {
+            other.kind = ValueKind::Invalid;            
+        }
+        Value& operator=(Value&& other) {
+            deref();
+            type = std::move(other.type);
+            u = other.u;
+            kind = other.kind;
+            other.kind = ValueKind::Invalid;
+            return *this;
+        }
+
+        void ref() {
+            if (kind == ValueKind::Struct && u.memberValues)
+                u.memberValues->refCnt += 1;
+        }
+        void deref() {
+            if (kind == ValueKind::Struct && u.memberValues) {
+                u.memberValues->refCnt -= 1;
+                if (u.memberValues->refCnt > 0)
+                    return;
+                for (Value& v : u.memberValues->array())
+                    std::destroy_at(&v);
+                ::operator delete(u.memberValues);
+            }
+        }
+        ~Value() {
+            deref();
+        }
     };
     struct PositionalValue : Value {
         uint16_t index = 0;
@@ -129,6 +186,9 @@ struct Interpreter : Parser {
     LookupContext* globalContext = nullptr;
     Type typeType;
     Type numType;
+    Ptr<Decl> arrayDecl;
+    Type overloadSetType;
+    Type overloadType;
 
     Interpreter() = default;
 
@@ -152,6 +212,19 @@ struct Interpreter : Parser {
     void findBuiltins() {
         numType = asTypeValue(interpretExpr("num"));
         typeType = asTypeValue(interpretExpr("Type"));
+        overloadSetType = asTypeValue(interpretExpr("OverloadSet"));
+        overloadType = asTypeValue(interpretExpr("Overload"));
+
+        {
+            setSourceBuffer("Array");
+            Ptr<Expr> e;
+            parseBinaryExpr(e);
+            VERIFY(at(e).kind == StmtKind::IdentifierExpr);
+            LookupResult r = lookupIdentifier(*globalContext, as<IdentifierExpr>(e).identifier);
+            VERIFY(r.declKind == DeclKind::StructDecl);
+            EXPECT_EQ(r.decls.size(), 1u);
+            arrayDecl = r.decls[0].decl;
+        }
     }
 
     Type typeOf(const Value& value) {
@@ -161,7 +234,7 @@ struct Interpreter : Parser {
         case ValueKind::Dependent:
             return value.type;
         case ValueKind::CompleteDecl:
-            return { value.declType };
+            return { value.u.declType };
         default:
             VERIFY_NOT_REACHED();
         }
@@ -169,13 +242,13 @@ struct Interpreter : Parser {
     Type asTypeValue(const Value& value) {
         switch (value.kind) {
         case ValueKind::CompleteDecl:
-            VERIFY(value.declType == typeType.decl);
+            VERIFY(value.u.declType == typeType.decl);
             return value.type;
         case ValueKind::Dependent: {
             VERIFY(value.type.decl == typeType.decl);
             VERIFY(value.type.args.empty());
             VERIFY(value.type.withArgs.empty());
-            Type ret = { (Ptr<Decl>)value.dependentDecl };
+            Type ret = { (Ptr<Decl>)value.u.dependentDecl };
             ret.dependend = true;
             return ret;
         }
@@ -185,6 +258,18 @@ struct Interpreter : Parser {
     }
 
     Value makeNum(int64_t value) { return { numType, value }; }
+    Value makeDependentValue(Ptr<VarDecl> decl, Type type) {
+        return { std::move(type), decl };
+    }
+    Value makeTypeValue(Type type) {
+        return { typeType.decl, std::move(type) };
+    }
+    Value makeStructValue(Type type, uint32_t memberCount) {
+        return Value { std::move(type), memberCount };
+    }
+    Value makeParameterizedDeclValue(Ptr<Decl> type, ParameterizedDecl decl) {
+        return Value { type, std::move(decl) };
+    }
 
     std::string_view sview(Word w) {
         return { (const char*)&sourceBuffers[w.bufferId][w.start], w.length };
@@ -197,17 +282,19 @@ struct Interpreter : Parser {
         switch (l.kind) {
         case ValueKind::Builtin:
             VERIFY(cmpCompleteDecls(l.type, r.type));
-            return l.builtinValue == r.builtinValue;
+            return l.u.builtinValue == r.u.builtinValue;
         case ValueKind::Struct: {
             VERIFY(cmpCompleteDecls(l.type, r.type));
-            EXPECT_EQ(l.memberValues->size, r.memberValues->size);
-            uint32_t size = l.memberValues->size;
+            EXPECT_EQ(l.u.memberValues->size, r.u.memberValues->size);
+            uint32_t size = l.u.memberValues->size;
             for (uint32_t i = 0; i < size; i++) {
-                if (!cmpValue(l.memberValues->array()[i], r.memberValues->array()[i]))
+                if (!cmpValue(l.u.memberValues->array()[i], r.u.memberValues->array()[i]))
                     return false;
             }
             return true;
         }
+        case ValueKind::ParameterizedDecl:
+            VERIFY_NOT_REACHED();
         case ValueKind::CompleteDecl:
             return cmpCompleteDecls(l.type, r.type);
         default:
@@ -233,12 +320,6 @@ struct Interpreter : Parser {
             return out;
         return {};
     }
-    Value makeDependentValue(Ptr<VarDecl> decl, Type type) {
-        return { std::move(type), decl };
-    }
-    Value makeTypeValue(Type type) {
-        return { typeType.decl, std::move(type) };
-    }
     struct Deduction {
         Ptr<VarDecl> param;
         Value value;
@@ -248,7 +329,7 @@ struct Interpreter : Parser {
             return false;
 
         if (target.kind == ValueKind::Dependent) {
-            deductions.push_back({ target.dependentDecl, source });
+            deductions.push_back({ target.u.dependentDecl, source });
             return true;
         }
 
@@ -423,7 +504,7 @@ struct Interpreter : Parser {
         if (d.type) {
             Value v = evaluateExpr(paramCtx, d.type);
             VERIFY(v.kind == ValueKind::CompleteDecl);
-            VERIFY(v.declType == typeType.decl);
+            VERIFY(v.u.declType == typeType.decl);
             // source = convert(ctx, v.asType(), source);
         }
         return source;
@@ -472,6 +553,14 @@ struct Interpreter : Parser {
                 return {};
             return { typeType.decl, std::move(opt.value()) };
         }
+        case DeclKind::FnDecl: {
+            if (r.decls.size() == 0)
+                return {};
+            Value v = makeStructValue(overloadSetType, r.decls.size());
+            for (uint32_t i = 0; i < r.decls.size(); i++)
+                v.u.memberValues->array()[i] = makeParameterizedDeclValue(overloadType.decl, std::move(r.decls[i]));
+            return v;
+        }
         default:
             VERIFY_NOT_REACHED();
         }
@@ -511,14 +600,21 @@ struct Interpreter : Parser {
             fmt::println("Invalid Value");
             break;
         case ValueKind::Builtin:
-            fmt::println("[{}] {}", sview(at(value.type.decl).name), value.builtinValue);
+            fmt::println("[{}] {}", sview(at(value.type.decl).name), value.u.builtinValue);
             break;
+        case ValueKind::ParameterizedDecl:
         case ValueKind::CompleteDecl:
-            // dump(context(), value.type.decl, sview(at(value.declType).name));
-            fmt::println("[{}] {}", sview(at(value.declType).name), sview(at(value.type.decl).name));
+            fmt::println("[{}] {}", sview(at(value.u.declType).name), sview(at(value.type.decl).name));
             break;
         case ValueKind::Dependent:
-            fmt::println("[{}] dependend {}", sview(at(value.type.decl).name), sview(at(value.dependentDecl).name));
+            fmt::println("[{}] dependend {}", sview(at(value.type.decl).name), sview(at(value.u.dependentDecl).name));
+            break;
+        case ValueKind::Struct:
+            fmt::println("[{}] struct with {} members", sview(at(value.type.decl).name), value.u.memberValues->size);
+            for (const Value& member : value.u.memberValues->array()) {
+                fmt::print("  ");
+                dumpValue(member);
+            }
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -532,17 +628,17 @@ void testInterpreter() {
         struct Type{} {}
         struct num{} {}
         struct Array{T: Type} {}
+        struct Overload{} {}
+        struct OverloadSet{} {}
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        struct constant{T: Type, v: T} { }
-
-        with {Q: Type, a: Q, A: Type, b: constant{A, a}, B: Type}
-        x{c: constant{B, b}}: A = a;
+        foo(x: num, y: num) { }
+        foo(z: num) { }
     )str");
 
     Interpreter::Value v = it.interpretExpr(
-        "x{constant{constant{num, 3}, constant{num, 3}()}()}");
+        "foo");
     fmt::print("eval: ");
     it.dumpValue(v);
 }
