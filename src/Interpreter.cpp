@@ -336,23 +336,31 @@ struct Interpreter : Parser {
         }
     }
 
-    std::optional<ParameterizedDecl> bindArguments(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
-        ParameterizedDecl out { inDecl };
-        auto params = at(at(inDecl).parametric.params);
+    std::optional<std::vector<PositionalValue>> positionArguments(Parameters& parameters, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
+        std::vector<PositionalValue> out;
+        auto params = at(parameters.params);
         uint32_t inOff = 0;
         uint32_t subOff = 0;
         for (uint32_t i = 0; i < params.size(); i++) {
             if (inOff < inArgs.size() && inArgs[inOff].index == i) {
-                out.args.push_back(inArgs[inOff]);
+                out.push_back(inArgs[inOff]);
                 inOff += 1;
             } else if (subOff < subArgs.size() && (!subArgs[subOff].name || cmpWord(at(params[i]).name, subArgs[subOff].name))) {
-                out.args.push_back({ subArgs[subOff], (uint16_t)i });
+                out.push_back({ subArgs[subOff], (uint16_t)i });
                 subOff += 1;
             }
         }
         if (subOff == subArgs.size())
             return out;
         return {};
+    }
+    std::optional<ParameterizedDecl> bindArguments(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
+        ParameterizedDecl out { inDecl };
+        auto args = positionArguments(at(inDecl).parametric, inArgs, subArgs);
+        if (!args.has_value())
+            return {};
+        out.args = std::move(args.value());
+        return out;
     }
     bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
         if (!deduceParameters(typeOf(source), typeOf(target), deductions))
@@ -654,25 +662,30 @@ struct Interpreter : Parser {
         CompleteDecl target;
         std::vector<PositionalValue> args;
     };
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, LookupContext& fnDeclCtx, std::span<const PositionalValue> fnArguments) {
+    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, LookupContext& fnDeclCtx, std::span<const NamedValue> namedFnArgs) {
         auto& fn = as<FnDecl>(fnDecl.decl);
-        std::vector<Deduction> deductions;
 
-        auto withCtx = makeParameterContext(fnDeclCtx, fn.with.params, {}, deductions);
+        auto posFnArgs = positionArguments(fn.params, {}, namedFnArgs);
+        if (!posFnArgs.has_value())
+            return {};
+
+        DependentScope depScope { this };
+
+        auto withCtx = makeParameterContext(fnDeclCtx, fn.with.params, {}, depScope.deductions);
         if (!withCtx.has_value())
             return {};
 
-        auto parametricCtx = makeParameterContext(withCtx.value(), fn.parametric, fnDecl.args, deductions);
+        auto parametricCtx = makeParameterContext(withCtx.value(), fn.parametric, fnDecl.args, depScope.deductions);
         if (!parametricCtx.has_value())
             return {};
 
-        auto fnCtx = makeParameterContext(parametricCtx.value(), fn.params, fnArguments, deductions);
+        auto fnCtx = makeParameterContext(parametricCtx.value(), fn.params, posFnArgs.value(), depScope.deductions);
         if (!fnCtx.has_value())
             return {};
 
-        applyDeductions(withCtx.value(), deductions);
-        applyDeductions(parametricCtx.value(), deductions);
-        applyDeductions(fnCtx.value(), deductions);
+        applyDeductions(withCtx.value(), depScope.deductions);
+        applyDeductions(parametricCtx.value(), depScope.deductions);
+        applyDeductions(fnCtx.value(), depScope.deductions);
 
         auto withArgs = completeParameterContext(fn.with.params, withCtx.value());
         if (!withArgs.has_value())
@@ -699,9 +712,17 @@ struct Interpreter : Parser {
         } else if (cmpCompleteDecls(baseType, overloadSetType)) {
             auto args = evaluateArguments(ctx, e.args);
             VERIFY(base.kind == ValueKind::Struct);
-            CompleteCall call;
+            std::optional<CompleteCall> call;
             for (Value& overload : base.u.memberValues->array()) {
+                // FIXME: don't hard code the globalContext
+                auto c = completeCall(overload.type, *globalContext, args);
+                if (c.has_value()) {
+                    VERIFY(!call.has_value());
+                    call = std::move(c.value());
+                }
             }
+            VERIFY(call.has_value());
+            return {};
         }
         VERIFY_NOT_REACHED();
     }
@@ -761,16 +782,14 @@ void testInterpreter() {
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        foo(x: num, y: num) { }
-        foo(z: num) { }
-        
-        struct constant{T: Type, v: T} { }
-        with {Q: Type, a: Q, A: Type, b: constant{A, a}, B: Type}
-        x{c: constant{B, b}}: A = a;
+        with {A: Type, B: Type}
+        foo(x: A, y: B) { }
+        with {T: Type}
+        foo(a: T, a: T) { }
     )str");
 
     Interpreter::Value v = it.interpretExpr(
-        "x{constant{constant{num, 3}, constant{num, 3}()}()}");
+        "foo(1, 2)");
     fmt::print("eval: ");
     it.dumpValue(v);
 }
