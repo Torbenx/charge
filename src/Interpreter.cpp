@@ -38,14 +38,17 @@ struct Interpreter : Parser {
     struct NamedValue;
     struct PositionalValue;
     struct LookupContext;
+    struct CompleteDecl;
+    struct StaticLookupContext;
     struct ParameterizedDecl {
         Ptr<Decl> decl = {};
         uint32_t dependentNestLevel = 0;
+        StaticLookupContext* staticContext = nullptr;
         std::vector<PositionalValue> args = {};
 
         ParameterizedDecl() = default;
-        ParameterizedDecl(Ptr<Decl> decl, std::vector<PositionalValue> args = {}, uint32_t dependentNestLevel = 0)
-            : decl(decl), dependentNestLevel(dependentNestLevel), args(std::move(args)) { }
+        ParameterizedDecl(Ptr<Decl> decl, StaticLookupContext* staticContext, std::vector<PositionalValue> args = {}, uint32_t dependentNestLevel = 0)
+            : decl(decl), dependentNestLevel(dependentNestLevel), staticContext(staticContext), args(std::move(args)) { }
 
         bool valid() const { return (bool)decl; }
         bool dependentIn(uint32_t nestLevel) const {
@@ -58,8 +61,10 @@ struct Interpreter : Parser {
         std::vector<PositionalValue> withArgs;
 
         CompleteDecl() = default;
-        CompleteDecl(Ptr<Decl> decl, std::vector<PositionalValue> args = {}, std::vector<PositionalValue> withArgs = {}, uint32_t dependentNestLevel = 0)
-            : ParameterizedDecl(decl, std::move(args), dependentNestLevel), withArgs(std::move(withArgs)) { }
+        CompleteDecl(
+            Ptr<Decl> decl, StaticLookupContext* staticContext = nullptr, std::vector<PositionalValue> args = {},
+            std::vector<PositionalValue> withArgs = {}, uint32_t dependentNestLevel = 0)
+            : ParameterizedDecl(decl, staticContext, std::move(args), dependentNestLevel), withArgs(std::move(withArgs)) { }
         CompleteDecl(ParameterizedDecl decl, std::vector<PositionalValue> withArgs = {})
             : ParameterizedDecl(std::move(decl)), withArgs(std::move(withArgs)) { }
     };
@@ -68,6 +73,7 @@ struct Interpreter : Parser {
         Type(CompleteDecl decl)
             : CompleteDecl(std::move(decl)) { }
     };
+
     struct ValueArrayHead {
         uint32_t refCnt = 0;
         uint32_t size = 0;
@@ -188,18 +194,31 @@ struct Interpreter : Parser {
             Value value;
         };
         LookupContext* parent = nullptr;
+        bool isStaticContext = false;
         std::span<const Ptr<Decl>> decls = {};
         std::vector<DeclValue> completeDeclVals = {};
         LookupContext(LookupContext* parent)
             : parent(parent) { }
     };
+    struct StaticLookupContext : LookupContext {
+        CompleteDecl staticDecl;
+
+        StaticLookupContext(StaticLookupContext* parent, CompleteDecl staticDecl)
+            : LookupContext(parent), staticDecl(std::move(staticDecl)) { isStaticContext = true; }
+    };
+    StaticLookupContext* asStaticContext(LookupContext& context) {
+        if (context.isStaticContext)
+            return static_cast<StaticLookupContext*>(&context);
+        return nullptr;
+    }
+
     struct LookupResult : HomogeneousDeclSet {
         LookupContext* context = nullptr;
 
         bool valid() const { return context != nullptr; }
     };
 
-    LookupContext* globalContext = nullptr;
+    StaticLookupContext* globalContext = nullptr;
 
     Type typeType;
     Type numType;
@@ -233,7 +252,8 @@ struct Interpreter : Parser {
             auto& d = append(decls, {});
             parseDecl(d);
         }
-        globalContext = new LookupContext { globalContext };
+        Ptr<StaticLookupContext> ctx = make<StaticLookupContext>(globalContext, CompleteDecl {});
+        globalContext = &at(ctx);
         globalContext->decls = at(finalizeSpan(decls));
     }
     Value interpretExpr(SourceBuffer buffer) {
@@ -268,6 +288,7 @@ struct Interpreter : Parser {
         case ValueKind::Dependent:
             return value.type;
         case ValueKind::CompleteDecl:
+        case ValueKind::ParameterizedDecl:
             return { value.u.declType };
         default:
             VERIFY_NOT_REACHED();
@@ -310,7 +331,6 @@ struct Interpreter : Parser {
     }
 
     bool cmpWord(Word l, Word r) { return sview(l) == sview(r); }
-
     bool cmpValue(const Value& l, const Value& r) {
         VERIFY(l.kind == r.kind);
         switch (l.kind) {
@@ -335,6 +355,18 @@ struct Interpreter : Parser {
             VERIFY_NOT_REACHED();
         }
     }
+    bool cmpCompleteDecls(const CompleteDecl& l, const CompleteDecl& r) {
+        if (l.decl != r.decl)
+            return false;
+        EXPECT_EQ(l.args.size(), r.args.size());
+        for (uint32_t i = 0; i < l.args.size(); i++) {
+            EXPECT_EQ(l.args[i].index, i);
+            EXPECT_EQ(r.args[i].index, i);
+            if (!cmpValue(l.args[i], r.args[i]))
+                return false;
+        }
+        return true;
+    }
 
     std::optional<std::vector<PositionalValue>> positionArguments(Parameters& parameters, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
         std::vector<PositionalValue> out;
@@ -353,14 +385,6 @@ struct Interpreter : Parser {
         if (subOff == subArgs.size())
             return out;
         return {};
-    }
-    std::optional<ParameterizedDecl> bindArguments(Ptr<Decl> inDecl, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
-        ParameterizedDecl out { inDecl };
-        auto args = positionArguments(at(inDecl).parametric, inArgs, subArgs);
-        if (!args.has_value())
-            return {};
-        out.args = std::move(args.value());
-        return out;
     }
     bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
         if (!deduceParameters(typeOf(source), typeOf(target), deductions))
@@ -392,7 +416,7 @@ struct Interpreter : Parser {
 
         return true;
     }
-    Value convertAndDeduce(LookupContext& context, const Type& targetType, const Value& sourceValue, std::vector<Deduction>& deductions) {
+    Value convertAndDeduce(LookupContext&, const Type& targetType, const Value& sourceValue, std::vector<Deduction>& deductions) {
         if (!deduceParameters(typeOf(sourceValue), targetType, deductions))
             return {};
         // TODO: convert
@@ -502,8 +526,9 @@ struct Interpreter : Parser {
         if (!paramArgs.has_value())
             return {};
 
-        return CompleteDecl { decl.decl, std::move(paramArgs.value()), std::move(withArgs.value()) };
+        return CompleteDecl { decl.decl, decl.staticContext, std::move(paramArgs.value()), std::move(withArgs.value()) };
     }
+
     std::vector<NamedValue> evaluateArguments(LookupContext& ctx, Arguments& a) {
         std::vector<NamedValue> out;
         auto args = at(a.args);
@@ -512,6 +537,7 @@ struct Interpreter : Parser {
         }
         return out;
     }
+
     LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedValue> args) {
         LookupResult out;
         for (Ptr<Decl> decl : context.decls) {
@@ -520,16 +546,18 @@ struct Interpreter : Parser {
                 continue;
 
             out.context = &context;
-            auto sub = bindArguments(decl, {}, args);
-            if (!sub.has_value())
+            ParameterizedDecl parameterized { decl, asStaticContext(context) };
+            auto parametricArgs = positionArguments(d.parametric, {}, args);
+            if (!parametricArgs.has_value())
                 continue;
+            parameterized.args = std::move(parametricArgs.value());
 
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
                 out.decls.clear();
                 break;
             }
             out.declKind = at(decl).kind;
-            out.decls.push_back(sub.value());
+            out.decls.push_back(std::move(parameterized));
         }
         return out;
     }
@@ -547,19 +575,6 @@ struct Interpreter : Parser {
         }
         fmt::println("looking up '{}' failed", sview(ident.word));
         VERIFY_NOT_REACHED();
-    }
-
-    bool cmpCompleteDecls(const CompleteDecl& l, const CompleteDecl& r) {
-        if (l.decl != r.decl)
-            return false;
-        EXPECT_EQ(l.args.size(), r.args.size());
-        for (uint32_t i = 0; i < l.args.size(); i++) {
-            EXPECT_EQ(l.args[i].index, i);
-            EXPECT_EQ(r.args[i].index, i);
-            if (!cmpValue(l.args[i], r.args[i]))
-                return false;
-        }
-        return true;
     }
     Value getValue(LookupContext& context, const CompleteDecl& decl) {
         VERIFY(at(decl.decl).kind == DeclKind::VarDecl);
@@ -584,6 +599,7 @@ struct Interpreter : Parser {
         return context;
     }
     Value initialize(LookupContext& parent, const CompleteDecl& decl) {
+        // FIXME: Only initialize global (static) VarDecls
         const VarDecl& d = (VarDecl&)at(decl.decl);
         LookupContext withCtx = makeCompleteParameterContext(parent, d.with.params, decl.withArgs);
         LookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args);
@@ -662,7 +678,8 @@ struct Interpreter : Parser {
         CompleteDecl target;
         std::vector<PositionalValue> args;
     };
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, LookupContext& fnDeclCtx, std::span<const NamedValue> namedFnArgs) {
+    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::span<const NamedValue> namedFnArgs) {
+        VERIFY(fnDecl.staticContext != nullptr);
         auto& fn = as<FnDecl>(fnDecl.decl);
 
         auto posFnArgs = positionArguments(fn.params, {}, namedFnArgs);
@@ -671,7 +688,7 @@ struct Interpreter : Parser {
 
         DependentScope depScope { this };
 
-        auto withCtx = makeParameterContext(fnDeclCtx, fn.with.params, {}, depScope.deductions);
+        auto withCtx = makeParameterContext(*fnDecl.staticContext, fn.with.params, {}, depScope.deductions);
         if (!withCtx.has_value())
             return {};
 
@@ -699,7 +716,14 @@ struct Interpreter : Parser {
         if (!fnCtx.has_value())
             return {};
 
-        return CompleteCall { { fnDecl.decl, std::move(parametricArgs.value()), std::move(withArgs.value()) }, std::move(fnArgs.value()) };
+        return CompleteCall { { fnDecl.decl, fnDecl.staticContext, std::move(parametricArgs.value()), std::move(withArgs.value()) }, std::move(fnArgs.value()) };
+    }
+    Value evaluateFunction(CompleteCall call) {
+        auto& targetDecl = as<FnDecl>(call.target.decl);
+        LookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs);
+        LookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args);
+        LookupContext fnParmsCtx = makeCompleteParameterContext(parametricCtx, targetDecl.params, call.args);
+        return evaluateCompoundStmt(fnParmsCtx, at(targetDecl.body));
     }
     Value evalCallExpr(LookupContext& ctx, CallExpr& e) {
         Value base = evaluateExpr(ctx, e.base);
@@ -714,17 +738,46 @@ struct Interpreter : Parser {
             VERIFY(base.kind == ValueKind::Struct);
             std::optional<CompleteCall> call;
             for (Value& overload : base.u.memberValues->array()) {
-                // FIXME: don't hard code the globalContext
-                auto c = completeCall(overload.type, *globalContext, args);
+                auto c = completeCall(overload.type, args);
                 if (c.has_value()) {
                     VERIFY(!call.has_value());
                     call = std::move(c.value());
                 }
             }
             VERIFY(call.has_value());
-            return {};
+            return evaluateFunction(std::move(call.value()));
         }
         VERIFY_NOT_REACHED();
+    }
+
+    Value evaluateCompoundStmt(LookupContext& parent, CompoundStmt& body) {
+        LookupContext context { &parent };
+        std::vector<Ptr<Decl>> decls;
+        for (Ptr<Stmt> stmtP : at(body.body)) {
+            switch (at(stmtP).kind) {
+                case StmtKind::NullStmt:
+                    break;
+                case StmtKind::AssignStmt:
+                    break;
+                case StmtKind::LetStmt: {
+                    auto& stmt = as<LetStmt>(stmtP);
+                    auto& decl = at(stmt.decl);
+                    Value init = evaluateExpr(context, decl.initializer);
+                    if (decl.type) {
+                        Type type = asTypeValue(evaluateExpr(context, decl.type));
+                        init = convert(context, type, init);
+                    }
+                    decls.push_back(stmt.decl);
+                    context.decls = decls;
+                    context.completeDeclVals.push_back({ { stmt.decl }, init });
+                    break;
+                }
+                default:
+                    evaluateExpr(context, (Ptr<Expr>)stmtP);
+                    break;
+            }
+        }
+        return {};
     }
 
 #define DECLARE_EVAL_STUB(kind) \
@@ -782,14 +835,13 @@ void testInterpreter() {
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        with {A: Type, B: Type}
-        foo(x: A, y: B) { }
-        with {T: Type}
-        foo(a: T, a: T) { }
+        function foo() {
+            let x = 1;
+        }
     )str");
 
     Interpreter::Value v = it.interpretExpr(
-        "foo(1, 2)");
+        "foo()");
     fmt::print("eval: ");
     it.dumpValue(v);
 }
