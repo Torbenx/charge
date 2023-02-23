@@ -134,6 +134,7 @@ struct Parser : Lexer, STStorage {
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
     void parseLetStmt(Ptr<Stmt>& out);
+    void parseReturnStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
 

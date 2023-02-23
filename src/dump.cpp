@@ -81,6 +81,7 @@ struct STDumper : STContext {
     void visitCompoundStmt(Ptr<CompoundStmt>) { }
     void visitLetStmt(Ptr<LetStmt>) { }
     void visitExprStmt(Ptr<ExprStmt>) { }
+    void visitReturnStmt(Ptr<ReturnStmt>) { }
 
     void visitStructDecl(Ptr<StructDecl> e) {
         out << '\'' << sview(at(e).name) << '\'';
@@ -142,6 +143,9 @@ struct STDumper : STContext {
         child(at(e).decl, IsLastChild::Yes);
     }
     void childrenExprStmt(Ptr<ExprStmt> e) {
+        child(at(e).expr, IsLastChild::Yes);
+    }
+    void childrenReturnStmt(Ptr<ReturnStmt> e) {
         child(at(e).expr, IsLastChild::Yes);
     }
 

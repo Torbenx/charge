@@ -329,6 +329,13 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     out = make<LetStmt>(d);
 }
 
+void Parser::parseReturnStmt(Ptr<Stmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    advance();
+    auto& e = makeSet<ReturnStmt>(out);
+    return parseBinaryExpr(e.expr);
+}
+
 void Parser::parseStmt(Ptr<Stmt>& out) {
     if (tok.kind() == TokenKind::SemiColon) {
         out = make<NullStmt>();
@@ -338,6 +345,8 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
         auto view = source.view(tok);
         if (view == "let" || view == "const" || view == "mut")
             return parseLetStmt(out);
+        if (view == "return")
+            return parseReturnStmt(out);
     }
     Ptr<Expr> expr;
     parseBinaryExpr(expr);

@@ -769,6 +769,9 @@ struct Interpreter : Parser {
             }
             case StmtKind::ExprStmt:
                 evaluateExpr(context, as<ExprStmt>(stmtP).expr);
+                break;
+            case StmtKind::ReturnStmt:
+                return evaluateExpr(context, as<ReturnStmt>(stmtP).expr);
             default:
                 VERIFY_NOT_REACHED();
             }
@@ -829,6 +832,7 @@ void testInterpreter() {
     it.interpretDecls(R"str(
         function foo() {
             let x = 1;
+            return x;
         }
     )str");
 
