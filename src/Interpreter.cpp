@@ -273,7 +273,7 @@ struct Interpreter : Parser {
             setSourceBuffer("Array");
             Ptr<Expr> e;
             parseBinaryExpr(e);
-            VERIFY(at(e).kind == StmtKind::IdentifierExpr);
+            VERIFY(at(e).kind == ExprKind::IdentifierExpr);
             LookupResult r = lookupIdentifier(*globalContext, as<IdentifierExpr>(e).identifier);
             VERIFY(r.declKind == DeclKind::StructDecl);
             EXPECT_EQ(r.decls.size(), 1u);
@@ -619,24 +619,19 @@ struct Interpreter : Parser {
     }
 
     Value evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
-        Value v = evaluate(ctx, p);
-        return v;
-    }
-    Value evaluate(LookupContext& ctx, Ptr<Stmt> p) {
         auto& e = at(p);
 
-#define STMT_KIND(kind)  \
-    case StmtKind::kind: \
+#define EXPR_KIND(kind)  \
+    case ExprKind::kind: \
         return eval##kind(ctx, (kind&)e);
 
         switch (e.kind) {
-            ENUMERATE_STMT_KINDS
+            ENUMERATE_EXPR_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
-#undef STMT_KIND
+#undef EXPR_KIND
     }
-
     Value evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
         LookupResult r = lookupIdentifier(ctx, e.identifier);
 
@@ -755,26 +750,27 @@ struct Interpreter : Parser {
         std::vector<Ptr<Decl>> decls;
         for (Ptr<Stmt> stmtP : at(body.body)) {
             switch (at(stmtP).kind) {
-                case StmtKind::NullStmt:
-                    break;
-                case StmtKind::AssignStmt:
-                    break;
-                case StmtKind::LetStmt: {
-                    auto& stmt = as<LetStmt>(stmtP);
-                    auto& decl = at(stmt.decl);
-                    Value init = evaluateExpr(context, decl.initializer);
-                    if (decl.type) {
-                        Type type = asTypeValue(evaluateExpr(context, decl.type));
-                        init = convert(context, type, init);
-                    }
-                    decls.push_back(stmt.decl);
-                    context.decls = decls;
-                    context.completeDeclVals.push_back({ { stmt.decl }, init });
-                    break;
+            case StmtKind::NullStmt:
+                break;
+            case StmtKind::AssignStmt:
+                break;
+            case StmtKind::LetStmt: {
+                auto& stmt = as<LetStmt>(stmtP);
+                auto& decl = at(stmt.decl);
+                Value init = evaluateExpr(context, decl.initializer);
+                if (decl.type) {
+                    Type type = asTypeValue(evaluateExpr(context, decl.type));
+                    init = convert(context, type, init);
                 }
-                default:
-                    evaluateExpr(context, (Ptr<Expr>)stmtP);
-                    break;
+                decls.push_back(stmt.decl);
+                context.decls = decls;
+                context.completeDeclVals.push_back({ { stmt.decl }, init });
+                break;
+            }
+            case StmtKind::ExprStmt:
+                evaluateExpr(context, as<ExprStmt>(stmtP).expr);
+            default:
+                VERIFY_NOT_REACHED();
             }
         }
         return {};
@@ -787,10 +783,6 @@ struct Interpreter : Parser {
     DECLARE_EVAL_STUB(AccessExpr)
     DECLARE_EVAL_STUB(ImmediateBraceExpr)
     DECLARE_EVAL_STUB(BinaryOperatorExpr)
-    DECLARE_EVAL_STUB(AssignStmt)
-    DECLARE_EVAL_STUB(NullStmt)
-    DECLARE_EVAL_STUB(CompoundStmt)
-    DECLARE_EVAL_STUB(LetStmt)
 
     void dumpValue(const Value& value) {
         switch (value.kind) {

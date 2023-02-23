@@ -23,19 +23,22 @@ struct Decl;
 ENUMERATE_DECL_KINDS
 #undef DECL_KIND
 
-#define ENUMERATE_STMT_KINDS      \
-    STMT_KIND(UnaryOperatorExpr)  \
-    STMT_KIND(ParenExpr)          \
-    STMT_KIND(AccessExpr)         \
-    STMT_KIND(ImmediateBraceExpr) \
-    STMT_KIND(CallExpr)           \
-    STMT_KIND(IdentifierExpr)     \
-    STMT_KIND(BinaryOperatorExpr) \
-    STMT_KIND(AssignStmt)         \
-    STMT_KIND(NullStmt)           \
-    STMT_KIND(CompoundStmt)       \
-    STMT_KIND(IntLiteralExpr)     \
-    STMT_KIND(LetStmt)
+#define ENUMERATE_STMT_KINDS \
+    STMT_KIND(AssignStmt)    \
+    STMT_KIND(NullStmt)      \
+    STMT_KIND(CompoundStmt)  \
+    STMT_KIND(LetStmt)       \
+    STMT_KIND(ExprStmt)
+
+#define ENUMERATE_EXPR_KINDS      \
+    EXPR_KIND(UnaryOperatorExpr)  \
+    EXPR_KIND(ParenExpr)          \
+    EXPR_KIND(AccessExpr)         \
+    EXPR_KIND(ImmediateBraceExpr) \
+    EXPR_KIND(CallExpr)           \
+    EXPR_KIND(IdentifierExpr)     \
+    EXPR_KIND(BinaryOperatorExpr) \
+    EXPR_KIND(IntLiteralExpr)
 
 #define STMT_KIND(kind) kind,
 enum class StmtKind : uint8_t {
@@ -45,11 +48,22 @@ enum class StmtKind : uint8_t {
 #undef STMT_KIND
 const char* toString(StmtKind);
 
+#define EXPR_KIND(kind) kind,
+enum class ExprKind : uint8_t {
+    Invalid,
+    ENUMERATE_EXPR_KINDS
+};
+#undef EXPR_KIND
+const char* toString(ExprKind);
+
 struct Stmt;
 struct Expr;
 #define STMT_KIND(kind) struct kind;
 ENUMERATE_STMT_KINDS
 #undef STMT_KIND
+#define EXPR_KIND(kind) struct kind;
+ENUMERATE_EXPR_KINDS
+#undef EXPR_KIND
 
 template<typename Derived, typename Base>
 inline std::ptrdiff_t computeOffsetInBase() {
@@ -155,15 +169,11 @@ struct FnDecl : Decl {
         : Decl(DeclKind::FnDecl, name) { }
 };
 
-// Statements
-struct Stmt {
-    StmtKind kind = StmtKind::Invalid;
-    Stmt(StmtKind kind)
+// Expressions
+struct Expr {
+    ExprKind kind = ExprKind::Invalid;
+    Expr(ExprKind kind)
         : kind(kind) { }
-};
-struct Expr : Stmt {
-    Expr(StmtKind kind)
-        : Stmt(kind) { }
 };
 
 enum class UnaryOperator : uint8_t {
@@ -189,13 +199,13 @@ struct UnaryOperatorExpr : Expr {
     UnaryOperator op;
     Ptr<Expr> subExpr;
     UnaryOperatorExpr(UnaryOperator op, Ptr<Expr> subExpr = {})
-        : Expr(StmtKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
+        : Expr(ExprKind::UnaryOperatorExpr), op(op), subExpr(subExpr) { }
 };
 
 struct ParenExpr : Expr {
     Ptr<Expr> subExpr;
     ParenExpr(Ptr<Expr> subExpr = {})
-        : Expr(StmtKind::ParenExpr), subExpr(subExpr) { }
+        : Expr(ExprKind::ParenExpr), subExpr(subExpr) { }
 };
 
 struct AccessExpr : Expr {
@@ -203,13 +213,13 @@ struct AccessExpr : Expr {
     Ptr<Expr> base;
     Identifier member;
     AccessExpr(bool isStatic, Ptr<Expr> base = {}, Word member = {})
-        : Expr(StmtKind::AccessExpr), isStatic(isStatic), base(base), member { {}, member } { }
+        : Expr(ExprKind::AccessExpr), isStatic(isStatic), base(base), member { {}, member } { }
 };
 
 struct ImmediateBraceExpr : Expr {
     Arguments args;
     ImmediateBraceExpr(Arguments args = {})
-        : Expr(StmtKind::ImmediateBraceExpr), args(args) { }
+        : Expr(ExprKind::ImmediateBraceExpr), args(args) { }
 };
 
 enum class CallKind : uint8_t {
@@ -221,13 +231,13 @@ struct CallExpr : Expr {
     Ptr<Expr> base;
     Arguments args;
     CallExpr(CallKind callKind, Ptr<Expr> base = {}, Arguments args = {})
-        : Expr(StmtKind::CallExpr), callKind(callKind), base(base), args(args) { }
+        : Expr(ExprKind::CallExpr), callKind(callKind), base(base), args(args) { }
 };
 
 struct IdentifierExpr : Expr {
     Identifier identifier;
     IdentifierExpr(Word identifier = {})
-        : Expr(StmtKind::IdentifierExpr), identifier { {}, identifier } { }
+        : Expr(ExprKind::IdentifierExpr), identifier { {}, identifier } { }
 };
 
 enum class BinaryOperator : uint8_t {
@@ -265,12 +275,19 @@ struct BinaryOperatorExpr : Expr {
     Ptr<Expr> left;
     Ptr<Expr> right;
     BinaryOperatorExpr(BinaryOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
-        : Expr(StmtKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
+        : Expr(ExprKind::BinaryOperatorExpr), op(op), left(left), right(right) { }
 };
 
 constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
     return (v + alignment - 1) & ~(alignment - 1);
 }
+
+// Statements
+struct Stmt {
+    StmtKind kind = StmtKind::Invalid;
+    Stmt(StmtKind kind)
+        : kind(kind) { }
+};
 
 enum class AssignOperator : uint8_t {
     // this must match the order of TokenKind
@@ -316,11 +333,17 @@ struct CompoundStmt : Stmt {
 struct IntLiteralExpr : Expr {
     uint64_t value;
     IntLiteralExpr(uint64_t value)
-        : Expr(StmtKind::IntLiteralExpr), value(value) { }
+        : Expr(ExprKind::IntLiteralExpr), value(value) { }
 };
 
 struct LetStmt : Stmt {
     Ptr<VarDecl> decl;
     LetStmt(Ptr<VarDecl> decl = {})
         : Stmt(StmtKind::LetStmt), decl(decl) { }
+};
+
+struct ExprStmt : Stmt {
+    Ptr<Expr> expr;
+    ExprStmt(Ptr<Expr> expr = {})
+        : Stmt(StmtKind::ExprStmt), expr(expr) { }
 };

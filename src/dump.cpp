@@ -13,8 +13,8 @@ struct STDumper : STContext {
     std::ostream& out;
     std::vector<char> prefix = {};
 
-    template<typename T> // T = { Stmt, Decl }
-    void dump(Ptr<T> e, std::string_view name) {
+    template<typename T> // T = { Stmt, Expr, Decl }
+    void dump(Ptr<T> e, std::string_view name = {}) {
         auto oldPrefixSize = prefix.size();
         if (name.length() > 0) {
             out << name << ": ";
@@ -30,7 +30,7 @@ struct STDumper : STContext {
         prefix.resize(oldPrefixSize);
     }
 
-    template<typename T> // T = { Stmt, Decl }
+    template<typename T> // T = { Stmt, Expr, Decl }
     void child(Ptr<T> e, IsLastChild last, std::string_view name = {}) {
         out << std::string_view { prefix.data(), prefix.size() };
         if ((bool)last) {
@@ -70,15 +70,17 @@ struct STDumper : STContext {
     void visitBinaryOperatorExpr(Ptr<BinaryOperatorExpr> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
     }
+    void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
+        out << '\'' << at(e).value << '\'';
+    }
+
     void visitAssignStmt(Ptr<AssignStmt> e) {
         out << '\'' << toShortString(at(e).op) << '\'';
     }
     void visitNullStmt(Ptr<NullStmt>) { }
     void visitCompoundStmt(Ptr<CompoundStmt>) { }
-    void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
-        out << '\'' << at(e).value << '\'';
-    }
     void visitLetStmt(Ptr<LetStmt>) { }
+    void visitExprStmt(Ptr<ExprStmt>) { }
 
     void visitStructDecl(Ptr<StructDecl> e) {
         out << '\'' << sview(at(e).name) << '\'';
@@ -126,17 +128,21 @@ struct STDumper : STContext {
         child(at(e).left, IsLastChild::No);
         child(at(e).right, IsLastChild::Yes);
     }
+    void childrenIntLiteralExpr(Ptr<IntLiteralExpr>) { }
     void childrenAssignStmt(Ptr<AssignStmt> e) {
         child(at(e).left, IsLastChild::No);
         child(at(e).right, IsLastChild::Yes);
     }
+
     void childrenNullStmt(Ptr<NullStmt>) { }
     void childrenCompoundStmt(Ptr<CompoundStmt> e) {
         childrenSpan(at(e).body, IsLastChild::Yes);
     }
-    void childrenIntLiteralExpr(Ptr<IntLiteralExpr>) { }
     void childrenLetStmt(Ptr<LetStmt> e) {
         child(at(e).decl, IsLastChild::Yes);
+    }
+    void childrenExprStmt(Ptr<ExprStmt> e) {
+        child(at(e).expr, IsLastChild::Yes);
     }
 
     void childrenStructDecl(Ptr<StructDecl> e) {
@@ -165,6 +171,20 @@ struct STDumper : STContext {
         }
 
 #undef STMT_KIND
+    }
+    void dispatchChildren(Ptr<Expr> e) {
+#define EXPR_KIND(kind)               \
+    case ExprKind::kind:              \
+        children##kind((Ptr<kind>)e); \
+        break;
+
+        switch (at(e).kind) {
+            ENUMERATE_EXPR_KINDS
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+#undef EXPR_KIND
     }
     void dispatchChildren(Ptr<Decl> d) {
 #define DECL_KIND(kind)               \
@@ -195,7 +215,20 @@ struct STDumper : STContext {
 
 #undef STMT_KIND
     }
+    void dispatchVisit(Ptr<Expr> e) {
+#define EXPR_KIND(kind)            \
+    case ExprKind::kind:           \
+        visit##kind((Ptr<kind>)e); \
+        break;
 
+        switch (at(e).kind) {
+            ENUMERATE_EXPR_KINDS
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+#undef EXPR_KIND
+    }
     void dispatchVisit(Ptr<Decl> d) {
 #define DECL_KIND(kind)            \
     case DeclKind::kind:           \
@@ -214,6 +247,10 @@ struct STDumper : STContext {
 }
 
 void dump(STContext context, Ptr<Stmt> e, std::string_view name) {
+    STDumper dumper { context, std::cout };
+    dumper.dump(e, name);
+}
+void dump(STContext context, Ptr<Expr> e, std::string_view name) {
     STDumper dumper { context, std::cout };
     dumper.dump(e, name);
 }

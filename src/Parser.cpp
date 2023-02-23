@@ -16,6 +16,22 @@ const char* toString(StmtKind kind) {
 #undef STMT_KIND
 };
 
+const char* toString(ExprKind kind) {
+#define EXPR_KIND(kind)  \
+    case ExprKind::kind: \
+        return #kind;
+
+    switch (kind) {
+    case ExprKind::Invalid:
+        return "Invalid";
+        ENUMERATE_EXPR_KINDS
+    default:
+        return "???";
+    }
+
+#undef EXPR_KIND
+};
+
 const char* toString(DeclKind kind) {
 #define DECL_KIND(kind)  \
     case DeclKind::kind: \
@@ -332,7 +348,7 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
         parseBinaryExpr(stmt.right);
     } else {
         // expression statement
-        out = expr;
+        out = make<ExprStmt>(expr);
     }
 }
 
