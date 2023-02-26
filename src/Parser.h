@@ -37,7 +37,7 @@ struct STContext : STStorage {
 
 struct Parser : Lexer, STStorage {
     Parser() = default;
-    Parser(SourceBuffer buffer, bool dump) {
+    Parser(SourceBuffer buffer, bool dump = false) {
         dumpTokens = dump;
         setSourceBuffer(buffer);
     }

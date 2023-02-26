@@ -21,7 +21,7 @@ int main() {
     test();
 
     {
-        Parser par("-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, a{1,2,3}::foo, d, }++)", true);
+        Parser par("-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, a{1,2,3}::foo, d, }++)");
         Ptr<Expr> e;
         par.parseBinaryExpr(e);
         fmt::println("used storage {} * 4 bytes", par.storageEndAlign4);
@@ -56,8 +56,7 @@ int main() {
                         bothZero();
                 }
             }
-        )str",
-            true);
+        )str");
         Ptr<Decl> out = {};
         par.parseDecl(out);
         dump(par.context(), out);

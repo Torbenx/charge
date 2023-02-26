@@ -285,23 +285,31 @@ struct Interpreter : Parser {
         return evaluateExpr(*globalContext, e);
     }
 
+    ParameterizedDecl findDeclHelper(const char* name) {
+        setSourceBuffer(name);
+        Ptr<Expr> e;
+        parseBinaryExpr(e);
+        VERIFY(at(e).kind == ExprKind::IdentifierExpr);
+        LookupResult r = lookupIdentifier(*globalContext, as<IdentifierExpr>(e).identifier);
+        EXPECT_EQ(r.decls.size(), 1u);
+        return r.decls[0];
+    }
     void findBuiltins() {
         numType = asTypeValue(interpretExpr("num"));
         typeType = asTypeValue(interpretExpr("Type"));
         overloadSetType = asTypeValue(interpretExpr("OverloadSet"));
         overloadType = asTypeValue(interpretExpr("Overload"));
-        boolType = asTypeValue(interpretExpr("bool"));
 
-        {
-            setSourceBuffer("Array");
-            Ptr<Expr> e;
-            parseBinaryExpr(e);
-            VERIFY(at(e).kind == ExprKind::IdentifierExpr);
-            LookupResult r = lookupIdentifier(*globalContext, as<IdentifierExpr>(e).identifier);
-            VERIFY(r.declKind == DeclKind::StructDecl);
-            EXPECT_EQ(r.decls.size(), 1u);
-            arrayDecl = r.decls[0].decl;
-        }
+        boolType = asTypeValue(interpretExpr("bool"));
+        auto falseDecl = findDeclHelper("false");
+        VERIFY(at(falseDecl.decl).kind == DeclKind::VarDecl);
+        falseDecl.staticContext->completeDeclVals.push_back({ falseDecl, makeBuiltinValue(boolType, 0) });
+        auto trueDecl = findDeclHelper("true");
+        VERIFY(at(trueDecl.decl).kind == DeclKind::VarDecl);
+        trueDecl.staticContext->completeDeclVals.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
+
+        arrayDecl = findDeclHelper("Array").decl;
+        VERIFY(at(arrayDecl).kind == DeclKind::StructDecl);
     }
 
     Type typeOf(const Value& value) {
@@ -335,7 +343,7 @@ struct Interpreter : Parser {
         }
     }
 
-    Value makeNum(int64_t value) { return { numType, value }; }
+    Value makeBuiltinValue(Type type, int64_t value) { return { std::move(type), value }; }
     Value makeDependentValue(Ptr<VarDecl> decl, Type type, uint32_t nestLevel) {
         return { std::move(type), decl, nestLevel };
     }
@@ -690,7 +698,7 @@ struct Interpreter : Parser {
     }
 
     Value evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
-        return makeNum(e.value);
+        return makeBuiltinValue(numType, e.value);
     }
 
     struct CompleteCall {
@@ -892,17 +900,20 @@ void testInterpreter() {
         struct Overload{} {}
         struct OverloadSet{} {}
         struct bool{} {}
+        const true: bool = {};
+        const false: bool = {};
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        function foo(x: num) {
+        function foo(x: bool) {
             if x
-                foo(x);;
+                return foo(false);
+            return x;
         }
     )str");
 
     Interpreter::Value v = it.interpretExpr(
-        "foo(1)");
+        "foo(true)");
     fmt::print("eval: ");
     it.dumpValue(v);
 }
