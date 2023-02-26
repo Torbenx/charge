@@ -29,7 +29,8 @@ ENUMERATE_DECL_KINDS
     STMT_KIND(CompoundStmt)  \
     STMT_KIND(LetStmt)       \
     STMT_KIND(ExprStmt)      \
-    STMT_KIND(ReturnStmt)
+    STMT_KIND(ReturnStmt)    \
+    STMT_KIND(IfStmt)
 
 #define ENUMERATE_EXPR_KINDS      \
     EXPR_KIND(UnaryOperatorExpr)  \
@@ -353,4 +354,12 @@ struct ReturnStmt : Stmt {
     Ptr<Expr> expr;
     ReturnStmt(Ptr<Expr> expr = {})
         : Stmt(StmtKind::ReturnStmt), expr(expr) { }
+};
+
+struct IfStmt : Stmt {
+    Ptr<Expr> condition;
+    Ptr<Stmt> ifTrue;
+    Ptr<Stmt> ifFalse;
+    IfStmt(Ptr<Expr> condition = {}, Ptr<Stmt> ifTrue = {}, Ptr<Stmt> ifFalse = {})
+        : Stmt(StmtKind::IfStmt), condition(condition), ifTrue(ifTrue), ifFalse(ifFalse) { }
 };

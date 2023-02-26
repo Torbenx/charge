@@ -47,8 +47,13 @@ int main() {
 
                 const foo{Y: Type}: Y = 5;
 
-                function bar{Z: Type}(z: Z = 3) {
-                    let y: X = z + x;
+                function bar(z: Z = 3) {
+                    if x > 0
+                        xNonZero();
+                    else if y > 0
+                        yNonZero();
+                    else
+                        bothZero();
                 }
             }
         )str",

@@ -206,6 +206,16 @@ struct Interpreter : Parser {
         StaticLookupContext(StaticLookupContext* parent, CompleteDecl staticDecl)
             : LookupContext(parent), staticDecl(std::move(staticDecl)) { isStaticContext = true; }
     };
+    struct LocalLookupContext : LookupContext {
+        std::vector<Ptr<Decl>> declsVector;
+        LocalLookupContext(LookupContext* parent)
+            : LookupContext(parent) { }
+        void declare(Ptr<Decl> decl, Value value) {
+            declsVector.push_back(decl);
+            decls = declsVector;
+            completeDeclVals.push_back({ { decl }, value });
+        }
+    };
     StaticLookupContext* asStaticContext(LookupContext& context) {
         if (context.isStaticContext)
             return static_cast<StaticLookupContext*>(&context);
@@ -218,6 +228,17 @@ struct Interpreter : Parser {
         bool valid() const { return context != nullptr; }
     };
 
+    enum class ControlFlowKind {
+        None,
+        Return,
+        Break,
+        Continue,
+    };
+    struct ControlFlow {
+        ControlFlowKind kind = ControlFlowKind::None;
+        Value value = {}; // return value
+    };
+
     StaticLookupContext* globalContext = nullptr;
 
     Type typeType;
@@ -225,6 +246,7 @@ struct Interpreter : Parser {
     Ptr<Decl> arrayDecl;
     Type overloadSetType;
     Type overloadType;
+    Type boolType;
 
     uint32_t dependentNestLevel = 0;
     struct Deduction {
@@ -268,6 +290,7 @@ struct Interpreter : Parser {
         typeType = asTypeValue(interpretExpr("Type"));
         overloadSetType = asTypeValue(interpretExpr("OverloadSet"));
         overloadType = asTypeValue(interpretExpr("Overload"));
+        boolType = asTypeValue(interpretExpr("bool"));
 
         {
             setSourceBuffer("Array");
@@ -632,6 +655,7 @@ struct Interpreter : Parser {
         }
 #undef EXPR_KIND
     }
+
     Value evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
         LookupResult r = lookupIdentifier(ctx, e.identifier);
 
@@ -708,7 +732,7 @@ struct Interpreter : Parser {
             return {};
 
         auto fnArgs = completeParameterContext(fn.params, fnCtx.value());
-        if (!fnCtx.has_value())
+        if (!fnArgs.has_value())
             return {};
 
         return CompleteCall { { fnDecl.decl, fnDecl.staticContext, std::move(parametricArgs.value()), std::move(withArgs.value()) }, std::move(fnArgs.value()) };
@@ -718,7 +742,12 @@ struct Interpreter : Parser {
         LookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs);
         LookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args);
         LookupContext fnParmsCtx = makeCompleteParameterContext(parametricCtx, targetDecl.params, call.args);
-        return evaluateCompoundStmt(fnParmsCtx, at(targetDecl.body));
+        auto flow = evalCompoundStmt(fnParmsCtx, at(targetDecl.body));
+        if (flow.kind == ControlFlowKind::None)
+            return {};
+        if (flow.kind == ControlFlowKind::Return)
+            return flow.value;
+        VERIFY_NOT_REACHED();
     }
     Value evalCallExpr(LookupContext& ctx, CallExpr& e) {
         Value base = evaluateExpr(ctx, e.base);
@@ -745,47 +774,82 @@ struct Interpreter : Parser {
         VERIFY_NOT_REACHED();
     }
 
-    Value evaluateCompoundStmt(LookupContext& parent, CompoundStmt& body) {
-        LookupContext context { &parent };
-        std::vector<Ptr<Decl>> decls;
-        for (Ptr<Stmt> stmtP : at(body.body)) {
-            switch (at(stmtP).kind) {
-            case StmtKind::NullStmt:
-                break;
-            case StmtKind::AssignStmt:
-                break;
-            case StmtKind::LetStmt: {
-                auto& stmt = as<LetStmt>(stmtP);
-                auto& decl = at(stmt.decl);
-                Value init = evaluateExpr(context, decl.initializer);
-                if (decl.type) {
-                    Type type = asTypeValue(evaluateExpr(context, decl.type));
-                    init = convert(context, type, init);
-                }
-                decls.push_back(stmt.decl);
-                context.decls = decls;
-                context.completeDeclVals.push_back({ { stmt.decl }, init });
-                break;
-            }
-            case StmtKind::ExprStmt:
-                evaluateExpr(context, as<ExprStmt>(stmtP).expr);
-                break;
-            case StmtKind::ReturnStmt:
-                return evaluateExpr(context, as<ReturnStmt>(stmtP).expr);
-            default:
-                VERIFY_NOT_REACHED();
-            }
+    Value evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+    Value evalParenExpr(LookupContext&, ParenExpr&) { VERIFY_NOT_REACHED(); }
+    Value evalAccessExpr(LookupContext&, AccessExpr&) { VERIFY_NOT_REACHED(); }
+    Value evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
+    Value evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+
+    ControlFlow evaluateStmt(LocalLookupContext& ctx, Ptr<Stmt> p) {
+        auto& e = at(p);
+
+#define STMT_KIND(kind)  \
+    case StmtKind::kind: \
+        return eval##kind(ctx, (kind&)e);
+
+        switch (e.kind) {
+            ENUMERATE_STMT_KINDS
+        default:
+            VERIFY_NOT_REACHED();
+        }
+#undef STMT_KIND
+    }
+
+#define PROPEGATE_FLOW(...)                     \
+    {                                           \
+        ControlFlow flow = __VA_ARGS__;         \
+        if (flow.kind != ControlFlowKind::None) \
+            return flow;                        \
+    }
+
+    ControlFlow evalCompoundStmt(LookupContext& parent, CompoundStmt& body) {
+        LocalLookupContext context { &parent };
+        for (Ptr<Stmt> stmt : at(body.body)) {
+            PROPEGATE_FLOW(evaluateStmt(context, stmt));
         }
         return {};
     }
 
-#define DECLARE_EVAL_STUB(kind) \
-    Value eval##kind(LookupContext&, kind&) { VERIFY_NOT_REACHED(); }
-    DECLARE_EVAL_STUB(UnaryOperatorExpr)
-    DECLARE_EVAL_STUB(ParenExpr)
-    DECLARE_EVAL_STUB(AccessExpr)
-    DECLARE_EVAL_STUB(ImmediateBraceExpr)
-    DECLARE_EVAL_STUB(BinaryOperatorExpr)
+    ControlFlow evalLetStmt(LocalLookupContext& context, LetStmt& stmt) {
+        auto& decl = at(stmt.decl);
+        Value init = evaluateExpr(context, decl.initializer);
+        if (decl.type) {
+            Type type = asTypeValue(evaluateExpr(context, decl.type));
+            init = convert(context, type, init);
+        }
+        context.declare(stmt.decl, init);
+        return {};
+    }
+
+    ControlFlow evalExprStmt(LookupContext& context, ExprStmt& stmt) {
+        evaluateExpr(context, stmt.expr);
+        return {};
+    }
+
+    ControlFlow evalReturnStmt(LookupContext& context, ReturnStmt& stmt) {
+        if (stmt.expr)
+            return { ControlFlowKind::Return, evaluateExpr(context, stmt.expr) };
+        return { ControlFlowKind::Return };
+    }
+
+    ControlFlow evalIfStmt(LookupContext& context, IfStmt& stmt) {
+        Value condition = evaluateExpr(context, stmt.condition);
+        // TODO: apply conversions
+        VERIFY(cmpCompleteDecls(typeOf(condition), boolType));
+        VERIFY(condition.kind == ValueKind::Builtin);
+        if (condition.u.builtinValue) {
+            LocalLookupContext localCtx { &context };
+            PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.ifTrue));
+        } else if (stmt.ifFalse) {
+            LocalLookupContext localCtx { &context };
+            PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.ifFalse));
+        }
+        return {};
+    }
+
+    ControlFlow evalNullStmt(LookupContext&, NullStmt&) { return {}; }
+
+    ControlFlow evalAssignStmt(LookupContext&, AssignStmt&) { VERIFY_NOT_REACHED(); }
 
     void dumpValue(const Value& value) {
         switch (value.kind) {
@@ -827,17 +891,18 @@ void testInterpreter() {
         struct Array{T: Type} {}
         struct Overload{} {}
         struct OverloadSet{} {}
+        struct bool{} {}
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        function foo() {
-            let x = 1;
-            return x;
+        function foo(x: num) {
+            if x
+                foo(x);;
         }
     )str");
 
     Interpreter::Value v = it.interpretExpr(
-        "foo()");
+        "foo(1)");
     fmt::print("eval: ");
     it.dumpValue(v);
 }

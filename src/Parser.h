@@ -135,8 +135,11 @@ struct Parser : Lexer, STStorage {
     void parseArgument(Arguments::Arg& out);
     void parseLetStmt(Ptr<Stmt>& out);
     void parseReturnStmt(Ptr<Stmt>& out);
+    void parseIfStmt(Ptr<Stmt>& out);
+    void parseExprOrAssignStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
+    void parseSingleOrCompoundStmt(Ptr<Stmt>& out);
 
     void parseParameterContext(Parameters& out);
     void parseParameter(Ptr<VarDecl>& out);

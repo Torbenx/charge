@@ -327,27 +327,38 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     parseBinaryExpr(at(d).initializer);
 
     out = make<LetStmt>(d);
+
+    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+    advance();
 }
 
 void Parser::parseReturnStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     advance();
     auto& e = makeSet<ReturnStmt>(out);
-    return parseBinaryExpr(e.expr);
+    if (tok.kind() == TokenKind::SemiColon)
+        return;
+    parseBinaryExpr(e.expr);
+
+    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+    advance();
 }
 
-void Parser::parseStmt(Ptr<Stmt>& out) {
-    if (tok.kind() == TokenKind::SemiColon) {
-        out = make<NullStmt>();
+void Parser::parseIfStmt(Ptr<Stmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    advance();
+
+    auto& stmt = makeSet<IfStmt>(out);
+    parseBinaryExpr(stmt.condition);
+    parseSingleOrCompoundStmt(stmt.ifTrue);
+
+    if (tok.kind() != TokenKind::Word || source.view(tok) != "else")
         return;
-    }
-    if (tok.kind() == TokenKind::Word) {
-        auto view = source.view(tok);
-        if (view == "let" || view == "const" || view == "mut")
-            return parseLetStmt(out);
-        if (view == "return")
-            return parseReturnStmt(out);
-    }
+    advance();
+    parseSingleOrCompoundStmt(stmt.ifFalse);
+}
+
+void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
     if (isAssignOp(tok.kind())) {
@@ -359,6 +370,26 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
         // expression statement
         out = make<ExprStmt>(expr);
     }
+    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+    advance();
+}
+
+void Parser::parseStmt(Ptr<Stmt>& out) {
+    if (tok.kind() == TokenKind::SemiColon) {
+        out = make<NullStmt>();
+        advance();
+        return;
+    }
+    if (tok.kind() == TokenKind::Word) {
+        auto view = source.view(tok);
+        if (view == "let" || view == "const" || view == "mut")
+            return parseLetStmt(out);
+        if (view == "return")
+            return parseReturnStmt(out);
+        if (view == "if")
+            return parseIfStmt(out);
+    }
+    parseExprOrAssignStmt(out);
 }
 
 void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
@@ -369,11 +400,19 @@ void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
     while (tok.kind() != TokenKind::RightBrace) {
         auto& stmt = append(body, {});
         parseStmt(stmt);
-        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
-        advance();
     }
     advance();
     e.body = finalizeSpan(body);
+}
+
+void Parser::parseSingleOrCompoundStmt(Ptr<Stmt>& out) {
+    if (tok.kind() == TokenKind::LeftBrace) {
+        Ptr<CompoundStmt> body;
+        parseCompoundStmt(body);
+        out = body;
+    } else {
+        parseStmt(out);
+    }
 }
 
 void Parser::parseParameterContext(Parameters& out) {
