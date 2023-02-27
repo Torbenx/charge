@@ -132,10 +132,6 @@ const char* toShortString(AssignOperator op) {
 }
 // clang-format on
 
-constexpr bool isWordOrGlobal(TokenKind kind) {
-    return kind == TokenKind::Word || kind == TokenKind::ColonColon;
-}
-
 uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
     uint32_t sizeAlign4 = alignmentCeil(sizeof(uint32_t), itemCount * itemSize) / sizeof(uint32_t);
     uint32_t alignmentAlign4 = alignmentCeil(sizeof(uint32_t), itemAlign) / sizeof(uint32_t);
