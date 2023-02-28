@@ -127,6 +127,7 @@ struct Interpreter : Parser {
 
         Value(const Value& other)
             : type(other.type), u(other.u), kind(other.kind) {
+            ref();
         }
         Value& operator=(const Value& other) {
             deref();
