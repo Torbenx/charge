@@ -499,7 +499,8 @@ void Parser::parseDecl(Ptr<Decl>& out) {
         }
         advance();
         d.decls = finalizeSpan(decls);
-    }
+    } else
+        VERIFY_NOT_REACHED();
 
     at(out).name = name;
     at(out).with = with;

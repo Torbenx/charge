@@ -5,20 +5,24 @@
 #include <span>
 #include <vector>
 
+inline constexpr uint32_t BUMP_START_OFFSET_ALIGN4 = 128;
+
 struct STStorage {
-    uint32_t* storage = new uint32_t[512] {};
+    uint32_t* storage = new uint32_t[4096] {};
 
     template<typename E>
     E& at(Ptr<E> e) {
+        VERIFY(e.offsetAlign4 >= BUMP_START_OFFSET_ALIGN4);
         return *(E*)(storage + e.offsetAlign4);
     }
     template<typename T>
     T& at(Span<T> s, uint32_t i) {
-        return *(T*)((std::byte*)&at(s.begin) + i * sizeof(T));
+        return *(&at(s.begin) + i);
     }
     template<typename T>
     std::span<T> at(Span<T> s) {
-        return { &at(s.begin), s.count };
+        VERIFY(s.count == 0 || s.begin.offsetAlign4 >= BUMP_START_OFFSET_ALIGN4);
+        return { (T*)(storage + s.begin.offsetAlign4), s.count };
     }
 
     template<typename E1, typename E2>
@@ -55,7 +59,7 @@ struct Parser : Lexer, STStorage {
         uint32_t begin = 0;
     };
 
-    uint32_t storageEndAlign4 = 16;
+    uint32_t storageEndAlign4 = BUMP_START_OFFSET_ALIGN4;
     uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
     template<typename T>
     Ptr<T> allocate(uint32_t count = 1) {
