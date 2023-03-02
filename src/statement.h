@@ -7,8 +7,10 @@
 // Basics
 #define ENUMERATE_DECL_KINDS \
     DECL_KIND(StructDecl)    \
-    DECL_KIND(VarDecl)       \
-    DECL_KIND(FnDecl)
+    DECL_KIND(FnDecl)        \
+    DECL_KIND(GlobalDecl)    \
+    DECL_KIND(LocalDecl)     \
+    DECL_KIND(MethodDecl)
 
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
@@ -124,7 +126,7 @@ struct Arguments {
 };
 
 struct Parameters {
-    Span<Ptr<VarDecl>> params;
+    Span<Ptr<LocalDecl>> params;
 };
 
 struct WithClause {
@@ -139,36 +141,53 @@ struct Identifier : Arguments {
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
     Word name;
-    WithClause with;
-    Parameters parametric;
     Decl(DeclKind kind, Word name = {})
         : kind(kind), name(name) { }
 };
 
-struct StructDecl : Decl {
-    Span<Ptr<Decl>> decls;
-    StructDecl(Word name = {})
-        : Decl(DeclKind::StructDecl, name) { }
+struct StaticDecl : Decl {
+    WithClause with;
+    Parameters parametric;
+    using Decl::Decl;
 };
 
-struct VarDecl : Decl {
-    enum class Qualifier : uint8_t {
-        None,
-        Const,
-        Mut,
-    };
-    Qualifier qual;
+struct VarInfo {
     Ptr<Expr> type;
     Ptr<Expr> initializer;
-    VarDecl(Word name = {}, Qualifier qual = Qualifier::None)
-        : Decl(DeclKind::VarDecl, name), qual(qual) { }
+    bool isMutable = false;
+    VarInfo(bool isMutable)
+        : isMutable(isMutable) { }
 };
 
-struct FnDecl : Decl {
+struct GlobalDecl : StaticDecl, VarInfo {
+    GlobalDecl(Word name, bool isMutable)
+        : StaticDecl(DeclKind::GlobalDecl, name), VarInfo(isMutable) { }
+};
+
+struct LocalDecl : Decl, VarInfo {
+    LocalDecl(Word name, bool isMutable)
+        : Decl(DeclKind::LocalDecl, name), VarInfo(isMutable) { }
+};
+
+struct StructDecl : StaticDecl {
+    Span<Ptr<StaticDecl>> staticDecls;
+    Span<Ptr<Decl>> memberDecls;
+    StructDecl(Word name = {})
+        : StaticDecl(DeclKind::StructDecl, name) { }
+};
+
+struct FnInfo {
     Parameters params;
     Ptr<CompoundStmt> body;
+};
+struct FnDecl : StaticDecl, FnInfo {
     FnDecl(Word name = {})
-        : Decl(DeclKind::FnDecl, name) { }
+        : StaticDecl(DeclKind::FnDecl, name) { }
+};
+
+struct MethodDecl : Decl, FnInfo {
+    MethodDecl(Word name = {})
+        : Decl(DeclKind::MethodDecl, name) { }
 };
 
 // Expressions
@@ -339,8 +358,8 @@ struct IntLiteralExpr : Expr {
 };
 
 struct LetStmt : Stmt {
-    Ptr<VarDecl> decl;
-    LetStmt(Ptr<VarDecl> decl = {})
+    Ptr<Decl> decl;
+    LetStmt(Ptr<Decl> decl = {})
         : Stmt(StmtKind::LetStmt), decl(decl) { }
 };
 

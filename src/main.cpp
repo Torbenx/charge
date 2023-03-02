@@ -45,7 +45,7 @@ int main() {
             struct Foo{X: Type} {
                 x: list{X} = 5;
 
-                const foo{Y: Type}: Y = 5;
+                static foo{Y: Type}: Y = 5;
 
                 function bar(z: Z = 3) {
                     if x > 0
@@ -58,7 +58,7 @@ int main() {
             }
         )str");
         Ptr<Decl> out = {};
-        par.parseDecl(out);
+        par.parseDecl(out, Parser::DeclParseScope::Namespace);
         dump(par.context(), out);
     }
 

@@ -29,6 +29,47 @@ struct STStorage {
     E1& as(Ptr<E2> e) requires std::derived_from<E1, E2> {
         return at(Ptr<E1>(e));
     }
+
+    bool isStaticDecl(Ptr<Decl> decl) {
+        switch (at(decl).kind) {
+        case DeclKind::FnDecl:
+        case DeclKind::GlobalDecl:
+        case DeclKind::StructDecl:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    Ptr<StaticDecl> asStaticDecl(Ptr<Decl> decl) {
+        if (decl && isStaticDecl(decl))
+            return (Ptr<StaticDecl>)decl;
+        return {};
+    }
+    Ptr<VarInfo> asVar(Ptr<Decl> decl) {
+        if (!decl)
+            return {};
+        switch (at(decl).kind) {
+        case DeclKind::LocalDecl:
+            return (Ptr<LocalDecl>)decl;
+        case DeclKind::GlobalDecl:
+            return (Ptr<GlobalDecl>)decl;
+        default:
+            return {};
+        }
+    }
+    Ptr<FnInfo> asFn(Ptr<Decl> decl) {
+        if (!decl)
+            return {};
+        switch (at(decl).kind) {
+        case DeclKind::FnDecl:
+            return (Ptr<FnDecl>)decl;
+        case DeclKind::MethodDecl:
+            return (Ptr<MethodDecl>)decl;
+        default:
+            return {};
+        }
+    }
 };
 
 struct STContext : STStorage {
@@ -70,8 +111,8 @@ struct Parser : Lexer, STStorage {
         return { token.start, (uint16_t)token.length, (uint16_t)sourceId };
     }
 
-    std::array<std::byte*, 1> spanStorage = { new std::byte[400] {} };
-    std::array<uint32_t, 1> spanBuilderEnd = {};
+    std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
+    std::array<uint32_t, 2> spanBuilderEnd = {};
 
     template<typename T, int I = 0>
     SpanBuilder<T, I> beginSpan() {
@@ -146,9 +187,13 @@ struct Parser : Lexer, STStorage {
     void parseSingleOrCompoundStmt(Ptr<Stmt>& out);
 
     void parseParameterContext(Parameters& out);
-    void parseParameter(Ptr<VarDecl>& out);
+    void parseParameter(Ptr<LocalDecl>& out);
     void parseWithClause(WithClause& out);
-    void parseDecl(Ptr<Decl>& out);
+    enum DeclParseScope {
+        Namespace,
+        Struct,
+    };
+    void parseDecl(Ptr<Decl>& out, DeclParseScope scope);
 
     STContext context() {
         return { *this, sourceBuffers };

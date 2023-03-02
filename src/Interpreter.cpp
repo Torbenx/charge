@@ -99,7 +99,7 @@ struct Interpreter : Parser {
             int64_t builtinValue;
             Ptr<Decl> declType;
             struct {
-                Ptr<VarDecl> decl;
+                Ptr<LocalDecl> decl;
                 uint32_t nestLevel;
             } dependent;
         } u;
@@ -111,7 +111,7 @@ struct Interpreter : Parser {
             : type(std::move(type)), u { .builtinValue = value }, kind(ValueKind::Builtin) { }
         Value(complete_t, Ptr<Decl> type, CompleteDecl decl)
             : type(std::move(decl)), u { .declType = type }, kind(ValueKind::CompleteDecl) { }
-        Value(Type type, Ptr<VarDecl> depDecl, uint32_t level)
+        Value(Type type, Ptr<LocalDecl> depDecl, uint32_t level)
             : type(std::move(type)), u { .dependent = { depDecl, level } }, kind(ValueKind::Dependent) { }
         Value(Type type, uint32_t memberCount)
             : type(std::move(type))
@@ -265,7 +265,7 @@ struct Interpreter : Parser {
 
     uint32_t dependentNestLevel = 0;
     struct Deduction {
-        Ptr<VarDecl> param;
+        Ptr<LocalDecl> param;
         Value value;
     };
     struct DependentScope {
@@ -287,7 +287,7 @@ struct Interpreter : Parser {
         auto decls = beginSpan<Ptr<Decl>>();
         while (tok.kind() != TokenKind::EOS) {
             auto& d = append(decls, {});
-            parseDecl(d);
+            parseDecl(d, DeclParseScope::Namespace);
         }
         Ptr<StaticLookupContext> ctx = make<StaticLookupContext>(globalContext, CompleteDecl {});
         globalContext = &at(ctx);
@@ -319,10 +319,10 @@ struct Interpreter : Parser {
 
         boolType = completeDecl(findDeclHelper("bool"));
         auto falseDecl = findDeclHelper("false");
-        VERIFY(at(falseDecl.decl).kind == DeclKind::VarDecl);
+        VERIFY(at(falseDecl.decl).kind == DeclKind::GlobalDecl);
         falseDecl.staticContext->completeDeclVals.push_back({ falseDecl, makeBuiltinValue(boolType, 0) });
         auto trueDecl = findDeclHelper("true");
-        VERIFY(at(trueDecl.decl).kind == DeclKind::VarDecl);
+        VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
         trueDecl.staticContext->completeDeclVals.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
 
         arrayDecl = findDeclHelper("Array").decl;
@@ -377,7 +377,7 @@ struct Interpreter : Parser {
     }
 
     Value makeBuiltinValue(Type type, int64_t value) { return { std::move(type), value }; }
-    Value makeDependentValue(Ptr<VarDecl> decl, Type type, uint32_t nestLevel) {
+    Value makeDependentValue(Ptr<LocalDecl> decl, Type type, uint32_t nestLevel) {
         return { std::move(type), decl, nestLevel };
     }
     Value makeTypeValue(Type type) {
@@ -464,7 +464,7 @@ struct Interpreter : Parser {
     }
     bool deduceParameters(const Type& source, const Type& target, std::vector<Deduction>& deductions) {
         if (target.dependentIn(this->dependentNestLevel)) {
-            deductions.push_back({ (Ptr<VarDecl>)target.decl, makeTypeValue(source) });
+            deductions.push_back({ (Ptr<LocalDecl>)target.decl, makeTypeValue(source) });
             return true;
         }
         if (target.dependentAtAll()) {
@@ -493,7 +493,7 @@ struct Interpreter : Parser {
             Type targetType = asTypeValue(targetTypeValue);
             Type sourceType = typeOf(sourceValue);
             if (targetType.dependentIn(this->dependentNestLevel)) {
-                deductions.push_back({ (Ptr<VarDecl>)targetType.decl, makeTypeValue(sourceType) });
+                deductions.push_back({ (Ptr<LocalDecl>)targetType.decl, makeTypeValue(sourceType) });
                 return sourceValue;
             }
             if (targetType.dependentAtAll()) {
@@ -538,7 +538,7 @@ struct Interpreter : Parser {
 
         for (uint32_t i = 0; i < allDecls.size(); i++) {
             Value arg;
-            Value type = evaluateExpr(context, as<VarDecl>(allDecls[i]).type);
+            Value type = evaluateExpr(context, as<LocalDecl>(allDecls[i]).type);
             if (argOff < args.size() && i == args[argOff].index) {
                 arg = convertAndDeduce(type, args[argOff], deductions);
                 if (!arg.valid()) {
@@ -553,7 +553,7 @@ struct Interpreter : Parser {
                 auto completeType = toCompleteType(type);
                 if (!completeType.valid())
                     return {};
-                arg = makeDependentValue((Ptr<VarDecl>)allDecls[i], completeType, this->dependentNestLevel);
+                arg = makeDependentValue((Ptr<LocalDecl>)allDecls[i], completeType, this->dependentNestLevel);
             }
             context.decls = allDecls.subspan(0, i + 1);
             context.completeDeclVals.push_back({ { allDecls[i] }, arg });
@@ -583,7 +583,7 @@ struct Interpreter : Parser {
     std::optional<std::vector<PositionalValue>> completeParameterContext(Parameters& parameters, LookupContext& context) {
         // context should have been created by makeParameterContext and
         // the values should thus be in the same order as the parameters
-        std::span<const Ptr<VarDecl>> params = at(parameters.params);
+        std::span<const Ptr<LocalDecl>> params = at(parameters.params);
         EXPECT_EQ(params.size(), context.completeDeclVals.size());
 
         std::vector<PositionalValue> out;
@@ -620,33 +620,34 @@ struct Interpreter : Parser {
     CompleteDecl completeDecl(const ParameterizedDecl& decl) {
         DependentScope depScope { this };
 
-        if (!decl.staticContext) {
-            EXPECT_EQ(at(decl.decl).with.params.params.count, 0u);
-            EXPECT_EQ(at(decl.decl).parametric.params.count, 0u);
+        Ptr<StaticDecl> sDecl = asStaticDecl(decl.decl);
+        if (!sDecl) {
+            VERIFY(!decl.staticContext);
             return CompleteDecl { decl.decl, nullptr };
         }
-        // fmt::println("completing '{}' at level {}", sview(at(decl.decl).name), depScope.level);
+        VERIFY((bool)decl.staticContext);
+        // fmt::println("completing '{}' at level {}", sview(at(sDecl).name), depScope.level);
 
-        auto withCtx = makeParameterContext(*decl.staticContext, at(decl.decl).with.params, {}, depScope.deductions);
+        auto withCtx = makeParameterContext(*decl.staticContext, at(sDecl).with.params, {}, depScope.deductions);
         if (!withCtx.has_value())
             return {};
 
-        auto paramCtx = makeParameterContext(withCtx.value(), at(decl.decl).parametric, decl.args, depScope.deductions);
+        auto paramCtx = makeParameterContext(withCtx.value(), at(sDecl).parametric, decl.args, depScope.deductions);
         if (!paramCtx.has_value())
             return {};
 
         applyDeductions(withCtx.value(), depScope.deductions);
         applyDeductions(paramCtx.value(), depScope.deductions);
 
-        auto withArgs = completeParameterContext(at(decl.decl).with.params, withCtx.value());
+        auto withArgs = completeParameterContext(at(sDecl).with.params, withCtx.value());
         if (!withArgs.has_value())
             return {};
 
-        auto paramArgs = completeParameterContext(at(decl.decl).parametric, paramCtx.value());
+        auto paramArgs = completeParameterContext(at(sDecl).parametric, paramCtx.value());
         if (!paramArgs.has_value())
             return {};
 
-        return CompleteDecl { decl.decl, decl.staticContext, std::move(paramArgs.value()), std::move(withArgs.value()) };
+        return CompleteDecl { sDecl, decl.staticContext, std::move(paramArgs.value()), std::move(withArgs.value()) };
     }
 
     std::vector<NamedValue> evaluateArguments(LookupContext& ctx, Arguments& a) {
@@ -661,16 +662,19 @@ struct Interpreter : Parser {
     LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedValue> args) {
         LookupResult out;
         for (Ptr<Decl> decl : context.decls) {
-            auto& d = at(decl);
-            if (!cmpWord(d.name, name))
+            if (!cmpWord(at(decl).name, name))
                 continue;
 
             out.context = &context;
             ParameterizedDecl parameterized { decl, asStaticContext(context) };
-            auto parametricArgs = positionArguments(d.parametric, {}, args);
-            if (!parametricArgs.has_value())
-                continue;
-            parameterized.args = std::move(parametricArgs.value());
+            if (context.isStaticContext) {
+                Ptr<StaticDecl> sDecl = asStaticDecl(decl);
+                VERIFY((bool)sDecl);
+                auto parametricArgs = positionArguments(at(sDecl).parametric, {}, args);
+                if (!parametricArgs.has_value())
+                    continue;
+                parameterized.args = std::move(parametricArgs.value());
+            }
 
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
                 out.decls.clear();
@@ -697,7 +701,7 @@ struct Interpreter : Parser {
     }
     Value getValue(const LValue& lVal) {
         VERIFY(lVal.valid());
-        VERIFY(at(lVal.decl.decl).kind == DeclKind::VarDecl);
+        VERIFY((bool)asVar(lVal.decl.decl));
         for (auto& v : lVal.context->completeDeclVals) {
             if (!cmpCompleteDecls(v.decl, lVal.decl))
                 continue;
@@ -709,7 +713,7 @@ struct Interpreter : Parser {
     }
     void setValue(const LValue& lVal, Value value) {
         VERIFY(lVal.valid());
-        VERIFY(at(lVal.decl.decl).kind == DeclKind::VarDecl);
+        VERIFY((bool)asVar(lVal.decl.decl));
         for (auto& v : lVal.context->completeDeclVals) {
             if (!cmpCompleteDecls(v.decl, lVal.decl))
                 continue;
@@ -731,8 +735,8 @@ struct Interpreter : Parser {
         return context;
     }
     Value initialize(LookupContext& parent, const CompleteDecl& decl) {
-        // FIXME: Only initialize global (static) VarDecls
-        const VarDecl& d = (VarDecl&)at(decl.decl);
+        VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
+        const GlobalDecl& d = as<GlobalDecl>(decl.decl);
         LookupContext withCtx = makeCompleteParameterContext(parent, d.with.params, decl.withArgs);
         LookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args);
 
@@ -746,7 +750,7 @@ struct Interpreter : Parser {
         return source;
     }
     LValue toLValue(const LookupResult& result) {
-        VERIFY(result.declKind == DeclKind::VarDecl);
+        VERIFY(result.declKind == DeclKind::LocalDecl || result.declKind == DeclKind::GlobalDecl);
         CompleteDecl theDecl;
         for (const ParameterizedDecl& d : result.decls) {
             auto complete = completeDecl(d);
@@ -784,16 +788,18 @@ struct Interpreter : Parser {
         LookupResult r = lookupIdentifier(ctx, e.identifier);
 
         switch (r.declKind) {
-        case DeclKind::VarDecl: {
+        case DeclKind::GlobalDecl:
+        case DeclKind::LocalDecl: {
             LValue lVal = toLValue(r);
             if (lVal.valid())
                 return getValue(lVal);
             return {};
         }
         case DeclKind::FnDecl:
+        case DeclKind::MethodDecl:
         case DeclKind::StructDecl: {
-            const auto& setType = r.declKind == DeclKind::FnDecl ? overloadSetType : typeOverloadSetType;
-            const auto& itemType = r.declKind == DeclKind::FnDecl ? overloadType : typeOverloadType;
+            const auto& setType = r.declKind == DeclKind::StructDecl ? typeOverloadSetType : overloadSetType;
+            const auto& itemType = r.declKind == DeclKind::StructDecl ? typeOverloadType : overloadType;
             Value v = makeStructValue(setType, r.decls.size());
             for (uint32_t i = 0; i < r.decls.size(); i++)
                 v.u.memberValues->array()[i] = makeParameterizedDeclValue(itemType.decl, std::move(r.decls[i]));
@@ -903,18 +909,17 @@ struct Interpreter : Parser {
     Value evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
     Value evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
 
-    LValue evaluateExprForLValue(LookupContext& context, Ptr<Expr> p) {
+    void setExprValue(LookupContext& context, Ptr<Expr> p, Value value) {
         auto& e = at(p);
         switch (e.kind) {
         case ExprKind::IdentifierExpr: {
             auto& idExpr = (IdentifierExpr&)e;
             LookupResult r = lookupIdentifier(context, idExpr.identifier);
-            if (r.declKind != DeclKind::VarDecl)
-                return {};
-            return toLValue(r);
+            setValue(toLValue(r), std::move(value));
+            break;
         }
         default:
-            return {};
+            VERIFY_NOT_REACHED();
         }
     }
 
@@ -949,10 +954,10 @@ struct Interpreter : Parser {
     }
 
     ControlFlow evalLetStmt(LocalLookupContext& context, LetStmt& stmt) {
-        auto& decl = at(stmt.decl);
-        Value init = evaluateExpr(context, decl.initializer);
-        if (decl.type) {
-            Type type = toCompleteType(evaluateExpr(context, decl.type));
+        VarInfo& info = at(asVar(stmt.decl));
+        Value init = evaluateExpr(context, info.initializer);
+        if (info.type) {
+            Type type = toCompleteType(evaluateExpr(context, info.type));
             init = convert(context, type, init);
         }
         context.declare(stmt.decl, init);
@@ -989,9 +994,8 @@ struct Interpreter : Parser {
 
     ControlFlow evalAssignStmt(LookupContext& context, AssignStmt& stmt) {
         if (stmt.op == AssignOperator::None) {
-            LValue left = evaluateExprForLValue(context, stmt.left);
             Value right = evaluateExpr(context, stmt.right);
-            setValue(left, std::move(right));
+            setExprValue(context, stmt.left, std::move(right));
         } else
             VERIFY_NOT_REACHED();
         return {};
@@ -1008,9 +1012,11 @@ struct Interpreter : Parser {
         case ValueKind::ParameterizedDecl:
         case ValueKind::CompleteDecl:
             fmt::println("[{}] {}{}", sview(at(value.u.declType).name), value.type.dependentAtAll() ? "dependent " : "", sview(at(value.type.decl).name));
-            for (auto& arg : value.type.args) {
-                fmt::print("  '{}': ", sview(at(at(at(value.type.decl).parametric.params, arg.index)).name));
-                dumpValue(arg);
+            if (auto sDecl = asStaticDecl(value.type.decl)) {
+                for (auto& arg : value.type.args) {
+                    fmt::print("  '{}': ", sview(at(at(at(sDecl).parametric.params, arg.index)).name));
+                    dumpValue(arg);
+                }
             }
             break;
         case ValueKind::Dependent:

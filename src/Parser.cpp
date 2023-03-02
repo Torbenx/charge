@@ -301,28 +301,34 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
         advance();
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto qual = VarDecl::Qualifier::None;
+    bool isMut = false;
+    bool isConst = false;
     if (source.view(tok) == "const") {
-        qual = VarDecl::Qualifier::Const;
+        isConst = true;
         advance();
     } else if (source.view(tok) == "mut") {
-        qual = VarDecl::Qualifier::Mut;
+        isMut = true;
         advance();
     }
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto d = make<VarDecl>(asWord(tok), qual);
+    Ptr<Decl> decl;
+    VarInfo* info;
+    if (isConst)
+        info = &makeSet<GlobalDecl>(decl, asWord(tok), true);
+    else
+        info = &makeSet<LocalDecl>(decl, asWord(tok), isMut);
 
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseBinaryExpr(at(d).type);
+        parseBinaryExpr(info->type);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
-    parseBinaryExpr(at(d).initializer);
+    parseBinaryExpr(info->initializer);
 
-    out = make<LetStmt>(d);
+    out = make<LetStmt>(decl);
 
     EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
     advance();
@@ -417,7 +423,7 @@ void Parser::parseParameterContext(Parameters& out) {
     TokenKind rightKind = leftToRightBracket(leftKind);
     advance();
 
-    auto params = beginSpan<Ptr<VarDecl>>();
+    auto params = beginSpan<Ptr<LocalDecl>>();
     while (tok.kind() != rightKind) {
         auto& param = append(params, {});
         parseParameter(param);
@@ -429,9 +435,9 @@ void Parser::parseParameterContext(Parameters& out) {
     out.params = finalizeSpan(params);
 }
 
-void Parser::parseParameter(Ptr<VarDecl>& out) {
+void Parser::parseParameter(Ptr<LocalDecl>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto& e = makeSet<VarDecl>(out, asWord(tok));
+    auto& e = makeSet<LocalDecl>(out, asWord(tok), /*isMut = */ false);
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
@@ -449,62 +455,113 @@ void Parser::parseWithClause(WithClause& out) {
     parseParameterContext(out.params);
 }
 
-void Parser::parseDecl(Ptr<Decl>& out) {
+void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     WithClause with;
     if (source.view(tok) == "with")
         parseWithClause(with);
 
-    auto attributes = beginSpan<Word>();
+    bool hasStatic = false;
+    bool hasMut = false;
+    Word declarator;
+    Word name;
     while (tok.kind() == TokenKind::Word) {
-        append(attributes, asWord(tok));
+        auto view = source.view(tok);
+        if (view == "static")
+            hasStatic = true;
+        else if (view == "mut")
+            hasMut = true;
+        else {
+            if (!declarator) {
+                declarator = asWord(tok);
+            } else {
+                name = asWord(tok);
+                advance();
+                break;
+            }
+        }
         advance();
     }
-    VERIFY(spanSize(attributes) > 0);
-    Word name = *(spanEnd(attributes) - 1);
+    if (!name) {
+        name = declarator;
+        declarator = {};
+    }
+    VERIFY((bool)name);
+    if (scope == DeclParseScope::Namespace) {
+        // [mut] name
+        VERIFY(!hasStatic);
+    } else {
+        // static [mut] name
+        // name
+        VERIFY(!(hasMut && !hasStatic));
+    }
 
     Parameters parametric;
     if (tok.kind() == TokenKind::LeftBrace) {
         parseParameterContext(parametric);
     }
 
+    bool isLocal = scope == DeclParseScope::Struct && !hasStatic;
+    if (isLocal) {
+        EXPECT_EQ(with.params.params.count, 0u);
+        EXPECT_EQ(parametric.params.count, 0u);
+    }
+
     // variable
     if (tok.kind() == TokenKind::Colon || tok.kind() == TokenKind::Equal) {
-        auto& d = makeSet<VarDecl>(out);
+        VarInfo* info;
+        if (isLocal)
+            info = &makeSet<LocalDecl>(out, name, hasMut);
+        else
+            info = &makeSet<GlobalDecl>(out, name, !hasMut);
+
         if (tok.kind() == TokenKind::Colon) {
             advance();
-            parseBinaryExpr(d.type);
+            parseBinaryExpr(info->type);
         }
         EXPECT_EQ(tok.kind(), TokenKind::Equal);
         advance();
-        parseBinaryExpr(d.initializer);
+        parseBinaryExpr(info->initializer);
         EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
         advance();
     }
     // function
     else if (tok.kind() == TokenKind::LeftParen) {
-        auto& d = makeSet<FnDecl>(out);
-        parseParameterContext(d.params);
+        VERIFY(!hasMut);
+        FnInfo* info;
+        if (isLocal)
+            info = &makeSet<MethodDecl>(out, name);
+        else
+            info = &makeSet<FnDecl>(out, name);
+
+        parseParameterContext(info->params);
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
-        parseCompoundStmt(d.body);
+        parseCompoundStmt(info->body);
     }
     // struct
     else if (tok.kind() == TokenKind::LeftBrace) {
+        VERIFY(!hasMut);
+        VERIFY(!hasStatic);
         advance();
-        auto& d = makeSet<StructDecl>(out);
-        auto decls = beginSpan<Ptr<Decl>>();
+        auto& d = makeSet<StructDecl>(out, name);
+        auto memberDecls = beginSpan<Ptr<Decl>, 0>();
+        auto staticDecls = beginSpan<Ptr<StaticDecl>, 1>();
         while (tok.kind() != TokenKind::RightBrace) {
-            auto& decl = append(decls, {});
-            parseDecl(decl);
+            Ptr<Decl> decl;
+            parseDecl(decl, DeclParseScope::Struct);
+            if (Ptr<StaticDecl> sDecl = asStaticDecl(decl))
+                append(staticDecls, sDecl);
+            else
+                append(memberDecls, decl);
         }
         advance();
-        d.decls = finalizeSpan(decls);
+        d.memberDecls = finalizeSpan(memberDecls);
+        d.staticDecls = finalizeSpan(staticDecls);
     } else
         VERIFY_NOT_REACHED();
 
-    at(out).name = name;
-    at(out).with = with;
-    at(out).parametric = parametric;
-
-    discardSpan(attributes);
+    if (auto staticDecl = asStaticDecl(out)) {
+        at(staticDecl).with = with;
+        at(staticDecl).parametric = parametric;
+    }
 }

@@ -87,14 +87,18 @@ struct STDumper : STContext {
     void visitStructDecl(Ptr<StructDecl> e) {
         out << '\'' << sview(at(e).name) << '\'';
     }
-    void visitVarDecl(Ptr<VarDecl> e) {
-        if (at(e).qual == VarDecl::Qualifier::Const)
-            out << "const ";
-        else if (at(e).qual == VarDecl::Qualifier::Mut)
+    void visitLocalDecl(Ptr<LocalDecl> e) {
+        if (at(e).isMutable)
+            out << "mut ";
+        out << '\'' << sview(at(e).name) << '\'';
+    }
+    void visitGlobalDecl(Ptr<GlobalDecl> e) {
+        if (at(e).isMutable)
             out << "mut ";
         out << '\'' << sview(at(e).name) << '\'';
     }
     void visitFnDecl(Ptr<FnDecl>) { }
+    void visitMethodDecl(Ptr<MethodDecl>) { }
 
     template<typename T>
     void childrenSpan(Span<T> s, IsLastChild isLast) {
@@ -157,15 +161,25 @@ struct STDumper : STContext {
     }
 
     void childrenStructDecl(Ptr<StructDecl> e) {
-        childrenSpan(at(e).decls, IsLastChild::Yes);
+        childrenSpan(at(e).staticDecls, (IsLastChild)(at(e).memberDecls.count == 0));
+        childrenSpan(at(e).memberDecls, IsLastChild::Yes);
     }
-    void childrenVarDecl(Ptr<VarDecl> e) {
-        if (at(e).type)
-            child(at(e).type, (IsLastChild) !(bool)(at(e).initializer));
-        if (at(e).initializer)
-            child(at(e).initializer, IsLastChild::Yes);
+    void childrenVarInfo(VarInfo& info) {
+        if (info.type)
+            child(info.type, (IsLastChild) !(bool)(info.initializer));
+        if (info.initializer)
+            child(info.initializer, IsLastChild::Yes);
+    }
+    void childrenLocalDecl(Ptr<LocalDecl> e) {
+        childrenVarInfo(at(e));
+    }
+    void childrenGlobalDecl(Ptr<GlobalDecl> e) {
+        childrenVarInfo(at(e));
     }
     void childrenFnDecl(Ptr<FnDecl> e) {
+        child(at(e).body, IsLastChild::Yes);
+    }
+    void childrenMethodDecl(Ptr<MethodDecl> e) {
         child(at(e).body, IsLastChild::Yes);
     }
 
