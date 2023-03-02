@@ -261,9 +261,7 @@ struct Interpreter : Parser {
 
     enum class LookupContextKind {
         Static,
-        Parameter,
-        Block,
-        Struct,
+        Local,
     };
     struct LookupContext {
         LookupContext* parent = nullptr;
@@ -273,7 +271,8 @@ struct Interpreter : Parser {
             : parent(parent), kind(kind) { }
     };
     struct LocalLookupContext : LookupContext {
-        using LookupContext::LookupContext;
+        LocalLookupContext(LookupContext* parent)
+            : LookupContext(LookupContextKind::Local, parent) { }
         std::span<Value> values = {};
         LocalLookupContext(const LocalLookupContext&) = delete;
         LocalLookupContext(LocalLookupContext&&) = default;
@@ -294,7 +293,7 @@ struct Interpreter : Parser {
         std::vector<Value> valuesVector;
 
         ParameterLookupContext(LookupContext* parent)
-            : LocalLookupContext(LookupContextKind::Parameter, parent) { }
+            : LocalLookupContext(parent) { }
         void appendValue(Value value) {
             valuesVector.emplace_back(std::move(value));
             values = valuesVector;
@@ -304,7 +303,7 @@ struct Interpreter : Parser {
         std::vector<Ptr<Decl>> declsVector;
         std::vector<Value> valuesVector;
         BlockLookupContext(LookupContext* parent)
-            : LocalLookupContext(LookupContextKind::Block, parent) { }
+            : LocalLookupContext(parent) { }
         void declare(Ptr<Decl> decl, Value value) {
             EXPECT_EQ(declsVector.size(), valuesVector.size());
             declsVector.push_back(decl);
@@ -813,21 +812,20 @@ struct Interpreter : Parser {
     void setValue(const LValue& lVal, Value value) {
         getValueRef(lVal) = value;
     }
-    ParameterLookupContext makeCompleteParameterContext(LookupContext& parent, const Parameters& params, std::span<const Value> args) {
+    
+    // args must not be a temporary and the values inside it may be modified
+    LocalLookupContext makeCompleteParameterContext(LookupContext& parent, const Parameters& params, std::span<Value> args) {
         auto decls = at((Span<Ptr<Decl>>)params.params);
-        ParameterLookupContext context { &parent };
+        LocalLookupContext context { &parent };
         context.decls = decls;
-        EXPECT_EQ(decls.size(), args.size());
-        for (uint32_t i = 0; i < decls.size(); i++) {
-            context.appendValue(args[i]);
-        }
+        context.values = args;
         return context;
     }
     Value initialize(LookupContext& parent, const CompleteDecl& decl) {
         VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
         const GlobalDecl& d = as<GlobalDecl>(decl.decl);
-        ParameterLookupContext withCtx = makeCompleteParameterContext(parent, d.with.params, decl.withArgs());
-        ParameterLookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args());
+        LocalLookupContext withCtx = makeCompleteParameterContext(parent, d.with.params, decl.withArgs());
+        LocalLookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args());
 
         Value source = evaluateExpr(paramCtx, d.initializer);
         if (d.type) {
@@ -960,9 +958,9 @@ struct Interpreter : Parser {
     }
     Value evaluateFunction(CompleteCall call) {
         auto& targetDecl = as<FnDecl>(call.target.decl);
-        ParameterLookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs());
-        ParameterLookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args());
-        ParameterLookupContext fnParmsCtx = makeCompleteParameterContext(parametricCtx, targetDecl.params, call.args);
+        LocalLookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs());
+        LocalLookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args());
+        LocalLookupContext fnParmsCtx = makeCompleteParameterContext(parametricCtx, targetDecl.params, call.args);
         auto flow = evalCompoundStmt(fnParmsCtx, at(targetDecl.body));
         if (flow.kind == ControlFlowKind::None)
             return {};
