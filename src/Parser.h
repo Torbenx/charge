@@ -3,17 +3,53 @@
 #include "statement.h"
 #include <array>
 #include <span>
+#include <unordered_map>
 #include <vector>
+
 
 inline constexpr uint32_t BUMP_START_OFFSET_ALIGN4 = 128;
 
 struct STStorage {
-    uint32_t* storage = new uint32_t[4096] {};
+    uint32_t* stStorage = new uint32_t[4096] {};
+    std::unordered_map<std::string, uint32_t> wordMap = {};
+    uint32_t storageEndAlign4 = BUMP_START_OFFSET_ALIGN4;
+    uint32_t nextWordId = 1;
+
+    uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
+};
+
+class STContext {
+private:
+    STContext() = default;
+
+public:
+    std::shared_ptr<STStorage> storage = {};
+
+    static STContext create() {
+        STContext ctx;
+        ctx.storage = std::make_shared<STStorage>();
+        return ctx;
+    }
+
+    Word asWord(std::string_view view) {
+        std::string word { view };
+        uint32_t& id = storage->wordMap[std::move(word)];
+        if (id == 0)
+            id = storage->nextWordId++;
+        return Word { id };
+    }
+    std::string_view sview(Word word) const {
+        for (const auto& pair : storage->wordMap) {
+            if (pair.second == word.id)
+                return pair.first;
+        }
+        return {};
+    }
 
     template<typename E>
     E& at(Ptr<E> e) {
         VERIFY(e.offsetAlign4 >= BUMP_START_OFFSET_ALIGN4);
-        return *(E*)(storage + e.offsetAlign4);
+        return *(E*)(storage->stStorage + e.offsetAlign4);
     }
     template<typename T>
     T& at(Span<T> s, uint32_t i) {
@@ -22,7 +58,7 @@ struct STStorage {
     template<typename T>
     std::span<T> at(Span<T> s) {
         VERIFY(s.count == 0 || s.begin.offsetAlign4 >= BUMP_START_OFFSET_ALIGN4);
-        return { (T*)(storage + s.begin.offsetAlign4), s.count };
+        return { (T*)(storage->stStorage + s.begin.offsetAlign4), s.count };
     }
 
     template<typename E1, typename E2>
@@ -70,46 +106,35 @@ struct STStorage {
             return {};
         }
     }
-};
 
-struct STContext : STStorage {
-    std::span<SourceBuffer> sources;
-
-    std::string_view sview(Word word) {
-        return { (const char*)&sources[word.bufferId][word.start], word.length };
+    template<typename T>
+    Ptr<T> allocate(uint32_t count = 1) {
+        return Ptr<T> { storage->allocate(alignof(T), sizeof(T), count) };
+    }
+    template<typename E, typename... Args>
+    Ptr<E> make(Args&&... args) {
+        Ptr<E> p = allocate<E>();
+        new (&at(p)) E { std::forward<Args>(args)... };
+        return p;
+    }
+    template<typename E, typename... Args, typename E2>
+    E& makeSet(Ptr<E2>& out, Args&&... args) {
+        auto p = make<E>(std::forward<Args>(args)...);
+        out = p;
+        return at(p);
     }
 };
 
-struct Parser : Lexer, STStorage {
-    Parser() = default;
-    Parser(SourceBuffer buffer, bool dump = false) {
-        dumpTokens = dump;
-        setSourceBuffer(buffer);
-    }
+struct Parser : Lexer, STContext {
+    Parser(STContext context, SourceBuffer buffer)
+        : Lexer(buffer), STContext(std::move(context)) { }
 
-    uint32_t sourceId = 0;
-    std::vector<SourceBuffer> sourceBuffers;
-    void setSourceBuffer(SourceBuffer buffer) {
-        sourceId = sourceBuffers.size();
-        sourceBuffers.push_back(buffer);
-        Lexer::reset(buffer);
-    }
+    Word asWord(Token tok) { return STContext::asWord(source.view(tok)); }
 
     template<typename T, int I>
     struct SpanBuilder {
         uint32_t begin = 0;
     };
-
-    uint32_t storageEndAlign4 = BUMP_START_OFFSET_ALIGN4;
-    uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
-    template<typename T>
-    Ptr<T> allocate(uint32_t count = 1) {
-        return Ptr<T> { allocate(alignof(T), sizeof(T), count) };
-    }
-
-    Word asWord(Token token) const {
-        return { token.start, (uint16_t)token.length, (uint16_t)sourceId };
-    }
 
     std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
     std::array<uint32_t, 2> spanBuilderEnd = {};
@@ -160,19 +185,6 @@ struct Parser : Lexer, STStorage {
         spanBuilderEnd[I] = s.begin;
     }
 
-    template<typename E, typename... Args>
-    Ptr<E> make(Args&&... args) {
-        Ptr<E> p = allocate<E>();
-        new (&at(p)) E { std::forward<Args>(args)... };
-        return p;
-    }
-    template<typename E, typename... Args, typename E2>
-    E& makeSet(Ptr<E2>& out, Args&&... args) {
-        auto p = make<E>(std::forward<Args>(args)...);
-        out = p;
-        return at(p);
-    }
-
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
@@ -194,10 +206,6 @@ struct Parser : Lexer, STStorage {
         Struct,
     };
     void parseDecl(Ptr<Decl>& out, DeclParseScope scope);
-
-    STContext context() {
-        return { *this, sourceBuffers };
-    }
 };
 
 void dump(STContext context, Ptr<Stmt> e, std::string_view name = {});

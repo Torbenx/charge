@@ -3,7 +3,7 @@
 #include <optional>
 #include <vector>
 
-struct Interpreter : Parser {
+struct Interpreter : STContext {
     /*
      * We destingluish between parameterized and completed declarations:
      * - Parameterized decls are a source level declarations with a list of arguments
@@ -312,8 +312,6 @@ struct Interpreter : Parser {
             values = valuesVector;
         }
     };
-    struct StructLookupContext : LocalLookupContext {
-    };
     StaticLookupContext* asStaticContext(LookupContext& context) {
         if (context.kind == LookupContextKind::Static)
             return static_cast<StaticLookupContext*>(&context);
@@ -377,52 +375,53 @@ struct Interpreter : Parser {
         }
     };
 
-    Interpreter() = default;
+    Interpreter()
+        : STContext(STContext::create()) { }
 
     void interpretDecls(SourceBuffer buffer) {
-        setSourceBuffer(buffer);
-        auto decls = beginSpan<Ptr<Decl>>();
-        while (tok.kind() != TokenKind::EOS) {
-            auto& d = append(decls, {});
-            parseDecl(d, DeclParseScope::Namespace);
+        Parser parser { *this, buffer };
+        auto decls = parser.beginSpan<Ptr<Decl>>();
+        while (parser.tok.kind() != TokenKind::EOS) {
+            auto& d = parser.append(decls, {});
+            parser.parseDecl(d, Parser::DeclParseScope::Namespace);
         }
         Ptr<StaticLookupContext> ctx = make<StaticLookupContext>(globalContext, CompleteDecl {});
         globalContext = &at(ctx);
-        globalContext->decls = at(finalizeSpan(decls));
+        globalContext->decls = at(parser.finalizeSpan(decls));
     }
     Value interpretExpr(SourceBuffer buffer) {
-        setSourceBuffer(buffer);
+        Parser parser { *this, buffer };
         Ptr<Expr> e;
-        parseBinaryExpr(e);
+        parser.parseBinaryExpr(e);
         return evaluateExpr(*globalContext, e);
     }
 
-    ParameterizedDecl findDeclHelper(const char* name) {
-        setSourceBuffer(name);
-        Ptr<Expr> e;
-        parseBinaryExpr(e);
-        VERIFY(at(e).kind == ExprKind::IdentifierExpr);
-        LookupResult r = lookupIdentifier(*globalContext, as<IdentifierExpr>(e).identifier);
+    ParameterizedDecl findDeclHelper(Word name) {
+        Identifier id { {}, name };
+        LookupResult r = lookupIdentifier(*globalContext, id);
         EXPECT_EQ(r.decls.size(), 1u);
         return r.decls[0];
     }
+    CompleteDecl findCompDeclHelper(Word name) {
+        return completeDecl(findDeclHelper(name));
+    }
     void findBuiltins() {
-        numType = completeDecl(findDeclHelper("num"));
-        typeType = completeDecl(findDeclHelper("Type"));
-        overloadType = completeDecl(findDeclHelper("Overload"));
-        overloadSetType = completeDecl(findDeclHelper("OverloadSet"));
-        typeOverloadType = completeDecl(findDeclHelper("TypeOverload"));
-        typeOverloadSetType = completeDecl(findDeclHelper("TypeOverloadSet"));
+        numType = findCompDeclHelper(asWord("num"));
+        typeType = findCompDeclHelper(asWord("Type"));
+        overloadType = findCompDeclHelper(asWord("Overload"));
+        overloadSetType = findCompDeclHelper(asWord("OverloadSet"));
+        typeOverloadType = findCompDeclHelper(asWord("TypeOverload"));
+        typeOverloadSetType = findCompDeclHelper(asWord("TypeOverloadSet"));
 
-        boolType = completeDecl(findDeclHelper("bool"));
-        auto falseDecl = completeDecl(findDeclHelper("false"));
+        boolType = findCompDeclHelper(asWord("bool"));
+        auto falseDecl = findCompDeclHelper(asWord("false"));
         VERIFY(at(falseDecl.decl).kind == DeclKind::GlobalDecl);
         falseDecl.staticContext->values.push_back({ falseDecl, makeBuiltinValue(boolType, 0) });
-        auto trueDecl = completeDecl(findDeclHelper("true"));
+        auto trueDecl = findCompDeclHelper(asWord("true"));
         VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
         trueDecl.staticContext->values.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
 
-        arrayDecl = findDeclHelper("Array").decl;
+        arrayDecl = findDeclHelper(asWord("Array")).decl;
         VERIFY(at(arrayDecl).kind == DeclKind::StructDecl);
     }
 
@@ -485,11 +484,7 @@ struct Interpreter : Parser {
         return Value { parameterized_t(), type, std::move(decl) };
     }
 
-    std::string_view sview(Word w) {
-        return { (const char*)&sourceBuffers[w.bufferId][w.start], w.length };
-    }
-
-    bool cmpWord(Word l, Word r) { return sview(l) == sview(r); }
+    bool cmpWord(Word l, Word r) { return l.id == r.id; }
     bool cmpValue(const Value& l, const Value& r) {
         VERIFY(l.kind == r.kind);
         switch (l.kind) {
@@ -812,7 +807,7 @@ struct Interpreter : Parser {
     void setValue(const LValue& lVal, Value value) {
         getValueRef(lVal) = value;
     }
-    
+
     // args must not be a temporary and the values inside it may be modified
     LocalLookupContext makeCompleteParameterContext(LookupContext& parent, const Parameters& params, std::span<Value> args) {
         auto decls = at((Span<Ptr<Decl>>)params.params);
@@ -860,8 +855,8 @@ struct Interpreter : Parser {
         auto& e = at(p);
 
         Value ret;
-#define EXPR_KIND(kind)  \
-    case ExprKind::kind: \
+#define EXPR_KIND(kind)                  \
+    case ExprKind::kind:                 \
         ret = eval##kind(ctx, (kind&)e); \
         break;
 

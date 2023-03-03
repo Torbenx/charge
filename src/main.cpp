@@ -21,27 +21,26 @@ int main() {
     test();
 
     {
-        Parser par("-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, a{1,2,3}::foo, d, }++)");
+        Parser par(STContext::create(), "-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, a{1,2,3}::foo, d, }++)");
         Ptr<Expr> e;
         par.parseBinaryExpr(e);
-        fmt::println("used storage {} * 4 bytes", par.storageEndAlign4);
-        dump(par.context(), e);
+        fmt::println("used storage {} * 4 bytes", par.storage->storageEndAlign4);
+        dump(par, e);
     }
     {
-        Parser par(R"str({
+        Parser par(STContext::create(), R"str({
             let x = a + b;
             let const x = a + b;
             let mut x = a + b;
             const x = a + b;
             mut x = a + b;
-        })str",
-            true);
+        })str");
         Ptr<CompoundStmt> out = {};
         par.parseCompoundStmt(out);
-        dump(par.context(), out);
+        dump(par, out);
     }
     {
-        Parser par(R"str(
+        Parser par(STContext::create(), R"str(
             struct Foo{X: Type} {
                 x: list{X} = 5;
 
@@ -59,7 +58,7 @@ int main() {
         )str");
         Ptr<Decl> out = {};
         par.parseDecl(out, Parser::DeclParseScope::Namespace);
-        dump(par.context(), out);
+        dump(par, out);
     }
 
     testInterpreter();

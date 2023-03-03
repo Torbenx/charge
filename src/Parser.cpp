@@ -132,7 +132,7 @@ const char* toShortString(AssignOperator op) {
 }
 // clang-format on
 
-uint32_t Parser::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
+uint32_t STStorage::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t itemCount) {
     uint32_t sizeAlign4 = alignmentCeil(sizeof(uint32_t), itemCount * itemSize) / sizeof(uint32_t);
     uint32_t alignmentAlign4 = alignmentCeil(sizeof(uint32_t), itemAlign) / sizeof(uint32_t);
     storageEndAlign4 = alignmentCeil(alignmentAlign4, storageEndAlign4);

@@ -111,10 +111,8 @@ struct Span {
     }
 };
 struct Word {
-    uint32_t start = 0;
-    uint16_t length = 0;
-    uint16_t bufferId = 0;
-    explicit operator bool() const { return length != 0; }
+    uint32_t id = 0;
+    explicit operator bool() const { return id != 0; }
 };
 
 struct Arguments {
