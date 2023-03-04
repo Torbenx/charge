@@ -528,15 +528,12 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     // function
     else if (tok.kind() == TokenKind::LeftParen) {
         VERIFY(!hasMut);
-        FnInfo* info;
-        if (isLocal)
-            info = &makeSet<MethodDecl>(out, name);
-        else
-            info = &makeSet<FnDecl>(out, name);
+        VERIFY(!hasStatic);
+        auto& d = makeSet<FnDecl>(out, name);
 
-        parseParameterContext(info->params);
+        parseParameterContext(d.params);
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
-        parseCompoundStmt(info->body);
+        parseCompoundStmt(d.body);
     }
     // struct
     else if (tok.kind() == TokenKind::LeftBrace) {

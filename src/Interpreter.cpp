@@ -884,7 +884,6 @@ struct Interpreter : STContext {
             return {};
         }
         case DeclKind::FnDecl:
-        case DeclKind::MethodDecl:
         case DeclKind::StructDecl: {
             const auto& setType = r.declKind == DeclKind::StructDecl ? typeOverloadSetType : overloadSetType;
             const auto& itemType = r.declKind == DeclKind::StructDecl ? typeOverloadType : overloadType;

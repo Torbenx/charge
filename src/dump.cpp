@@ -98,7 +98,6 @@ struct STDumper : STContext {
         out << '\'' << sview(at(e).name) << '\'';
     }
     void visitFnDecl(Ptr<FnDecl>) { }
-    void visitMethodDecl(Ptr<MethodDecl>) { }
 
     template<typename T>
     void childrenSpan(Span<T> s, IsLastChild isLast) {
@@ -177,9 +176,6 @@ struct STDumper : STContext {
         childrenVarInfo(at(e));
     }
     void childrenFnDecl(Ptr<FnDecl> e) {
-        child(at(e).body, IsLastChild::Yes);
-    }
-    void childrenMethodDecl(Ptr<MethodDecl> e) {
         child(at(e).body, IsLastChild::Yes);
     }
 

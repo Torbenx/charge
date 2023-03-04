@@ -94,18 +94,6 @@ public:
             return {};
         }
     }
-    Ptr<FnInfo> asFn(Ptr<Decl> decl) {
-        if (!decl)
-            return {};
-        switch (at(decl).kind) {
-        case DeclKind::FnDecl:
-            return (Ptr<FnDecl>)decl;
-        case DeclKind::MethodDecl:
-            return (Ptr<MethodDecl>)decl;
-        default:
-            return {};
-        }
-    }
 
     template<typename T>
     Ptr<T> allocate(uint32_t count = 1) {

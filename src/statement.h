@@ -9,8 +9,7 @@
     DECL_KIND(StructDecl)    \
     DECL_KIND(FnDecl)        \
     DECL_KIND(GlobalDecl)    \
-    DECL_KIND(LocalDecl)     \
-    DECL_KIND(MethodDecl)
+    DECL_KIND(LocalDecl)
 
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
@@ -174,18 +173,11 @@ struct StructDecl : StaticDecl {
         : StaticDecl(DeclKind::StructDecl, name) { }
 };
 
-struct FnInfo {
+struct FnDecl : StaticDecl {
     Parameters params;
     Ptr<CompoundStmt> body;
-};
-struct FnDecl : StaticDecl, FnInfo {
     FnDecl(Word name = {})
         : StaticDecl(DeclKind::FnDecl, name) { }
-};
-
-struct MethodDecl : Decl, FnInfo {
-    MethodDecl(Word name = {})
-        : Decl(DeclKind::MethodDecl, name) { }
 };
 
 // Expressions
