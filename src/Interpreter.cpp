@@ -605,8 +605,8 @@ struct Interpreter : STContext {
             ParameterizedDecl decl { (Ptr<Decl>)declP, globalContext };
             decl.allocateArgs(1);
             decl.args()[0] = { targetTypeValue, 0 };
-            std::array<PositionalValue, 1> fnArgs { { { sourceValue, 0 } } };
-            auto c = completeCall(decl, fnArgs);
+            std::vector<PositionalValue> fnArgs { { sourceValue, 0 } };
+            auto c = completeCall(decl, std::move(fnArgs));
             if (c.has_value()) {
                 VERIFY(!call.has_value());
                 call = std::move(c.value());
@@ -615,6 +615,38 @@ struct Interpreter : STContext {
         if (!call.has_value())
             return {};
         return evaluateFunction(call.value());
+    }
+
+    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalValue> args, std::vector<Deduction>& deductions) {
+        for (auto& arg : args) {
+            Value type = evaluateExpr(context, at(at(params.params, arg.index())).type);
+            Value cvtArg = convertAndDeduce(type, arg, deductions);
+            if (!cvtArg.valid()) {
+                fmt::print("unable to initialize ");
+                dumpValue(type);
+                fmt::print("with ");
+                dumpValue(arg);
+                return false;
+            }
+            arg = { std::move(cvtArg), arg.index() };
+        }
+        return true;
+    }
+    std::optional<std::vector<Value>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalValue> args) {
+        std::vector<Value> out;
+        uint32_t argOff = 0;
+        for (uint32_t i = 0; i < params.params.count; i++) {
+            Value arg;
+            if (argOff < args.size() && i == args[argOff].index()) {
+                arg = args[argOff];
+            } else {
+                arg = evaluateDefaultArg(context, at(params.params, i));
+                if (!arg.valid())
+                    return {};
+            }
+            out.emplace_back(std::move(arg));
+        }
+        return out;
     }
 
     std::optional<ParameterLookupContext> makeParameterContext(
@@ -668,6 +700,19 @@ struct Interpreter : STContext {
             }
         }
     }
+    Value evaluateDefaultArg(LookupContext& context, Ptr<LocalDecl> decl) {
+        auto& param = at(decl);
+        if (!param.initializer)
+            return {};
+        Value arg = evaluateExpr(context, param.initializer);
+        if (param.type) {
+            auto type = toCompleteType(evaluateExpr(context, param.type));
+            if (!type.valid())
+                return {};
+            arg = convert(context, type, arg);
+        }
+        return arg;
+    }
     bool completeParameterContext(std::span<Value> out, LocalLookupContext& context) {
         for (uint32_t i = 0; i < context.decls.size(); i++) {
             Ptr<LocalDecl> decl = (Ptr<LocalDecl>)context.decls[i];
@@ -679,16 +724,9 @@ struct Interpreter : STContext {
             if (value.dependentIn(this->dependentNestLevel)) {
                 // no argument was provided and nothing was deduced
                 // -> use the default arugment
-                auto& param = at(decl);
-                if (!param.initializer)
+                arg = evaluateDefaultArg(context, decl);
+                if (!arg.valid())
                     return false;
-                arg = evaluateExpr(context, param.initializer);
-                if (param.type) {
-                    auto type = toCompleteType(evaluateExpr(context, param.type));
-                    if (!type.valid())
-                        return false;
-                    arg = convert(context, type, arg);
-                }
             } else {
                 // argument shoud already be converted
                 arg = value;
@@ -911,9 +949,9 @@ struct Interpreter : STContext {
         if (!positionArguments(posFnArgs, as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs))
             return {};
 
-        return completeCall(fnDecl, posFnArgs);
+        return completeCall(fnDecl, std::move(posFnArgs));
     }
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::span<const PositionalValue> posFnArgs) {
+    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::vector<PositionalValue> posFnArgs) {
         VERIFY(fnDecl.staticContext != nullptr);
         auto& fn = as<FnDecl>(fnDecl.decl);
 
@@ -927,17 +965,14 @@ struct Interpreter : STContext {
         if (!parametricCtx.has_value())
             return {};
 
-        auto fnCtx = makeParameterContext(parametricCtx.value(), fn.params, posFnArgs, depScope.deductions);
-        if (!fnCtx.has_value())
+        if (!convertFnArgs(parametricCtx.value(), fn.params, posFnArgs, depScope.deductions))
             return {};
 
         applyDeductions(withCtx.value(), depScope.deductions);
         applyDeductions(parametricCtx.value(), depScope.deductions);
-        applyDeductions(fnCtx.value(), depScope.deductions);
 
         CompleteCall out { { fnDecl.decl, fnDecl.staticContext } };
         out.target.allocateArgs(parametricCtx.value().decls.size(), withCtx.value().decls.size());
-        out.args.resize(fnCtx.value().decls.size());
 
         if (!completeParameterContext(out.target.withArgs(), withCtx.value()))
             return {};
@@ -945,9 +980,12 @@ struct Interpreter : STContext {
         if (!completeParameterContext(out.target.args(), parametricCtx.value()))
             return {};
 
-        if (!completeParameterContext(out.args, fnCtx.value()))
+        auto fnArgs = completeFnArgs(parametricCtx.value(), fn.params, posFnArgs);
+        VERIFY(fnArgs.has_value());
+        if (!fnArgs.has_value())
             return {};
-
+        out.args = std::move(fnArgs.value());
+        
         return out;
     }
     Value evaluateFunction(CompleteCall call) {
