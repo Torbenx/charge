@@ -1,45 +1,226 @@
-struct Foo {
-    add: num = 0;
-    vals: array{num} = { 1, 2, 3 };
 
-    function get(i: num) -> num {
-        return vals[i] + add;
-    }
-    function get(const transform: num -> num, idx: num) -> num {
-        return transform(vals[idx]) + add;
-    }
-}
-struct Bar{T: Type} {
+struct Bar(T: Type) {
     add: T = 0;
-    vals: array{T} = { 1, 2, 3 };
+    vals: Array{T} = { 1, 2, 3 };
     
-    fuction get(i: num) -> T {
+    function get(i: num) -> T {
         return vals[i] + add;
     }
 }
-let const Foo2 = Bar{num};
+Foo2 = Bar{num};
 struct Foo2 -> Bar{num};
 
-function appendTo{T: Type}(v&: array{T}, item: T) {
+function appendTo{T: Type}(v&: Array{T}, item: T) {
     v.append(item);
 }
 
 const sizeOf{T: Type}: num = sizeof(T);
 
-with {cparams: array{TupleElement}, cargs: Tuple{cparams}, params: array{TupleElement}, RetT: Type}
-function call{f{cargs...}: (params...) -> RetT}(args: Tuple{params}) -> Ret {
-    return f{cargs...}(args...);
+
+with {cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type}
+function call{f{cargs..}: (params..) -> RetT}(args..: Tuple{params}) -> RetT {
+    return f{cargs..}(args..);
 }
 
 function test{T: Type, size: num}(defaultValue: T = {}, table: FixedArray{T, num});
 call{test}({}, { 1, 2, 3 }); // -> call{test{T = num, size = 3}}
 call{test{T = num}}(table = {}); // -> call{test{T = num, size = 0}}
 
+
 with {T: Type}
-struct Specialize{Base: {T} -> Type, Arg: T} -> Base{Arg};
+struct Specialize(Base: {T} -> Type, Arg: T) -> Base{Arg};
+
 
 with {b}
-isSpecializationOf{special: b{_}, base: b}: bool = true;
+isSpecializationOf{special: b{_..}, base: b}: bool = true;
+
 isSpecializationOf{spacial, base}: bool = false;
 
-function doStuff{b,c}(first: b{c}, second: b);
+function doStuff{b, c}(first: b{c}, second: b);
+
+
+function f{T: Type, x: T}(y: T) { return x + y; }
+// f{x = 2}(3) -> ?;
+
+
+function recurse{x ?greaterThen{0}: ?numeric}() {
+    recurse{x - 1}();
+}
+function recurse{?sameAs{0}: ?numeric}() {
+    // base case
+}
+
+function recurse{x ?(# > 0): ?numeric}() {
+    recurse{x - 1}();
+}
+function recurse{?(# == 0): ?numeric}() {
+    // base case
+}
+
+
+struct Int {
+    value: num = 0;
+}
+convert (i: Int) -> num { return i.value; }
+convert (n: num) -> Int { return { n }; }
+
+struct Int {
+    value: num = 0;
+
+    convert (self) -> num {
+        return value;
+    }
+    convert (n: num) {
+        return Int(value = n);
+    }
+}
+
+function bar() {
+    let lambda = {} => (i: num) { };
+    lambda(1);
+
+    let namedLambda = {} => foo(i: num) { };
+    namedLambda.foo(1);
+
+    let multiLambda = {} => {
+        function foo(i: num) { }
+        function bar() { }
+    }
+    multiLambda.foo(1);
+    multiLambda.bar();
+}
+
+struct vec3 {
+    x: num = 0;
+    y: num = 0;
+    z: num = 0;
+
+    function lengthSq() -> num;
+};
+function get() -> vec3;
+function q() {
+    let { x, y, z } = get();
+    let { l = #.lengthSq(), z = #.z, y = #.y } = get();
+}
+
+struct Array(T: Type) {
+    function popBack(self&) -> T;
+    function truncate(self&, newSize: num);
+}
+function foo() {
+    let arr: Array = { 1, 2, 3 };
+    let { back = #, arr2 = .self } = arr.popBack();
+    let { arr3 = .self } = arr.truncate(3);
+
+    mut mArr: Array = { 4, 5, 6 };
+    mArr.popBack();
+    let { foo = .self } = (mArr).popBack();
+}
+
+struct Range {
+    low: float;
+    high: float;
+}
+struct Rect {
+    h: Range;
+    v: Range;
+
+    function bottomLeft(self) -> Vec2 {
+        return { h.low, v.low };
+    }
+    function bottomLeft(self&) = (bl: Vec2) {
+        let { h.low, v.low } = bl;
+    }
+
+    get_set bottomLeftSwap(self&, Vec2& v) {
+        std::swap{Vec2}(v, { h.low, v.low });
+    }
+    function bottomLeftImpl(self) -> Vec2 {
+        mut Rect r = self;
+        mut Vec2 v = {};
+        bottomLeftSwap(r, v);
+        return v;
+    }
+    function bottomLeftImpl(self&) = (v: Vec2) {
+        mut Vec2 swap = v;
+        bottomLeftSwap(self, v);
+    }
+
+    function bottomLeftNoOp(self&) {
+        bottomLeftImpl() = bottomLeftImpl();
+
+        mut Rect r = self;
+        mut Vec2 v = {};
+        bottomLeftSwap(r, v);
+        mut Vec2 swap = v;
+        bottomLeftSwap(self, v);
+
+        mut Rect r = self;
+        mut Vec2 v = {};
+        bottomLeftSwap(r, v);
+        bottomLeftSwap(self, v);
+    }
+
+    function bottomLeft(self&) swap (bl: Vec2) {
+        std::swap{Vec2}(v, { h.low, v.low });
+    }
+}
+
+struct Array(T: Type) {
+    has Index{(int) -> T} {
+        function swap(self&, i: num, item&: T) {
+            std::swap(...[i], item);
+        }
+    }
+}
+
+with {T: Type}
+function withIndexType{C ?Index{(num) -> T}: Type}(c: C);
+with {T: Type}
+function withIndexType(c: ?Index{(num) -> T});
+with {T: Type}
+function getFirst(arr: ?match Array{T}) -> T {
+    return arr.first();
+};
+
+
+struct HierarchyRoot(Anchor: Type) {
+    id: uint32 = 0;
+
+    has std::AutoInitialize {
+        with {T: Type}
+        function init(self&: T) {
+            id = idfor{T}();
+        }
+    }
+
+    convert (self) -> HierarchyElement{Anchor} {
+        return { id };
+    }
+}
+struct HierarchyElement(Anchor: Type) {
+    id: uint32 = 0;
+}
+function has{T: Type, Anchor: Type}(elm: HierarchyElement{Anchor}) -> bool;
+function is{T: Type, Anchor: Type}(elm: HierarchyElement{Anchor}) -> bool {
+    return elem.id == idfor{T};
+}
+
+struct Expr {
+    has HierarchyRoot{Expr};
+    function kind(self) -> ExprKind { return (ExprKind)self; }
+}
+struct ExprKind = HierarchyElement{Expr};
+exprKind{T: Type}: ExprKind = elementFor{T};
+
+struct BinaryOperatorExpr {
+    has Expr;
+}
+
+function dispatch(ref{Expr} e) {
+    match e.kind() {
+        exprKind{BinaryOperatorExpr} -> {
+
+        }
+    }
+}
