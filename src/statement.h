@@ -177,6 +177,7 @@ struct StructDecl : StaticDecl {
 struct FnDecl : StaticDecl {
     Parameters params;
     Ptr<CompoundStmt> body;
+    Ptr<LocalDecl> assignParam;
     FnDecl(Word name = {})
         : StaticDecl(DeclKind::FnDecl, name) { }
 };

@@ -186,8 +186,8 @@ struct Parser : Lexer, STContext {
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
     void parseSingleOrCompoundStmt(Ptr<Stmt>& out);
     enum ParameterParseScope {
-        Static, // with, parametric
-        Function,
+        Static, // basic parameters (with, parametric)
+        Function, // allow 'mut' and '&'
     };
     void parseParameterContext(Parameters& out, ParameterParseScope);
     void parseParameter(Ptr<LocalDecl>& out, ParameterParseScope);

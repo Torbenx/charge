@@ -553,6 +553,17 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         auto& d = makeSet<FnDecl>(out, name);
 
         parseParameterContext(d.params, ParameterParseScope::Function);
+        if (tok.kind() == TokenKind::Equal) {
+            advance();
+            EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+            advance();
+
+            parseParameter(d.assignParam, ParameterParseScope::Static);
+            VERIFY(!(bool)at(d.assignParam).initializer);
+
+            EXPECT_EQ(tok.kind(), TokenKind::RightParen);
+            advance();
+        }
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
         parseCompoundStmt(d.body);
     }

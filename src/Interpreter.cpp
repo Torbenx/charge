@@ -947,7 +947,7 @@ struct Interpreter : STContext {
                 if (cmpCompleteDecls(v.decl, lVal.decl))
                     return v.value;
             }
-            Value v = initialize(*lVal.context, lVal.decl);
+            Value v = initialize(lVal.decl);
             sContext->values.push_back({ lVal.decl, v });
             return sContext->values.back().value;
         }
@@ -975,20 +975,26 @@ struct Interpreter : STContext {
         context.values = args;
         return context;
     }
-    Value initialize(LookupContext& parent, const CompleteDecl& decl) {
-        VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
-        const GlobalDecl& d = as<GlobalDecl>(decl.decl);
-        LocalLookupContext withCtx = makeCompleteParameterContext(parent, d.with.params, decl.withArgs());
+    template<typename Callback>
+    auto withStaticContext(const CompleteDecl& decl, Callback&& callback) {
+        auto& d = at(asStaticDecl(decl.decl));
+        VERIFY((bool)decl.staticContext);
+        LocalLookupContext withCtx = makeCompleteParameterContext(*decl.staticContext, d.with.params, decl.withArgs());
         LocalLookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args());
-
-        Value source = evaluateExpr(paramCtx, d.initializer);
-        if (d.type) {
-            Value v = evaluateExpr(paramCtx, d.type);
-            VERIFY(v.kind == ValueKind::CompleteDecl);
-            VERIFY(v.u.declType == typeType.decl);
-            source = convert(paramCtx, toCompleteType(v), source);
-        }
-        return source;
+        return callback(paramCtx);
+    }
+    Value initialize(const CompleteDecl& decl) {
+        VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
+        return withStaticContext(decl, [&](LookupContext& context) {
+            auto& d = as<GlobalDecl>(decl.decl);
+            Value source = evaluateExpr(context, d.initializer);
+            if (d.type) {
+                Type type = toCompleteType(evaluateExpr(context, d.type));
+                VERIFY(type.valid());
+                source = convert(context, type, source);
+            }
+            return source;
+        });
     }
     LValue toLValue(const LookupResult& result) {
         VERIFY(result.declKind == DeclKind::LocalDecl || result.declKind == DeclKind::GlobalDecl);
@@ -1016,6 +1022,7 @@ struct Interpreter : STContext {
 #define EXPR_KIND(kind)  \
     case ExprKind::kind: \
         return eval##kind(ctx, (kind&)e);
+
         switch (e.kind) {
             ENUMERATE_EXPR_KINDS
         default:
@@ -1111,35 +1118,53 @@ struct Interpreter : STContext {
         return out;
     }
     Value evaluateFunction(CompleteCall call) {
+        return evaluateFunction(std::move(call), Value {});
+    }
+    Value evaluateFunction(CompleteCall call, Value assignArg) {
         auto& targetDecl = as<FnDecl>(call.target.decl);
-        LocalLookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs());
-        LocalLookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args());
+        return withStaticContext(call.target, [&](LookupContext& parametricCtx) -> Value {
+            ParameterLookupContext fnParamCtx { &parametricCtx };
+            fnParamCtx.decls = at((Span<Ptr<Decl>>)targetDecl.params.params);
+            for (uint32_t i = 0; i < call.args.size(); i++)
+                fnParamCtx.appendValue(call.args[i]);
 
-        ParameterLookupContext fnParamCtx { &parametricCtx };
-        fnParamCtx.decls = at((Span<Ptr<Decl>>)targetDecl.params.params);
-        for (uint32_t i = 0; i < call.args.size(); i++)
-            fnParamCtx.appendValue(call.args[i]);
+            BlockLookupContext assignParamCtx { &fnParamCtx };
+            if (targetDecl.assignParam)
+                assignParamCtx.declare(targetDecl.assignParam, assignArg);
 
-        auto flow = evalCompoundStmt(fnParamCtx, at(targetDecl.body));
+            auto flow = evalCompoundStmt(assignParamCtx, at(targetDecl.body));
 
-        for (uint32_t i = 0; i < call.args.size(); i++) {
-            if (!call.args[i].isInOut)
-                continue;
+            for (uint32_t i = 0; i < call.args.size(); i++) {
+                if (!call.args[i].isInOut)
+                    continue;
 
-            setExprValue(call.args[i], fnParamCtx.values[i]);
-        }
+                setExprValue(call.args[i], fnParamCtx.values[i]);
+            }
 
-        if (flow.kind == ControlFlowKind::None)
-            return {};
-        if (flow.kind == ControlFlowKind::Return)
-            return flow.value;
-        VERIFY_NOT_REACHED();
+            if (flow.kind == ControlFlowKind::None)
+                return {};
+            if (flow.kind == ControlFlowKind::Return)
+                return flow.value;
+            VERIFY_NOT_REACHED();
+        });
     }
     struct CallExprRecord : ExprRecord {
-        CallExprRecord(Value result)
-            : ExprRecord(RecordKind::CallExpr, result) { }
+        std::optional<CompleteCall> assignCall;
+        CallExprRecord(Value result, std::optional<CompleteCall> assignCall)
+            : ExprRecord(RecordKind::CallExpr, result), assignCall(assignCall) { }
     };
+    bool cmpCompleteCallArgs(const CompleteCall& l, const CompleteCall& r) {
+        if (l.args.size() != r.args.size())
+            return false;
+        for (uint32_t i = 0; i < l.args.size(); i++) {
+            if (!cmpValue(l.args[i], r.args[i]))
+                return false;
+        }
+        return true;
+    }
     ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
+        auto badCall = ExprResult::make<CallExprRecord>(Value {}, std::nullopt);
+
         Value base = evaluateExpr(ctx, e.base);
         auto baseType = typeOf(base);
         VERIFY(e.callKind == CallKind::Paren);
@@ -1150,21 +1175,45 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(baseType, typeType)) {
             // hacked constructor: make builtin value
             VERIFY(e.args.args.count == 0);
-            return ExprResult::make<CallExprRecord>(makeBuiltinValue(toCompleteType(base), (int64_t)0));
+            return ExprResult::make<CallExprRecord>(makeBuiltinValue(toCompleteType(base), (int64_t)0), std::nullopt);
         } else if (cmpCompleteDecls(baseType, overloadSetType)) {
             auto args = evaluateArguments(ctx, e.args);
             VERIFY(base.kind == ValueKind::Struct);
             std::optional<CompleteCall> call;
+            std::optional<CompleteCall> assignCall;
             for (Value& overload : base.u.array->array()) {
                 VERIFY(overload.kind == ValueKind::ParameterizedDecl);
-                auto c = completeCall(overload.type, args);
-                if (c.has_value()) {
-                    VERIFY(!call.has_value());
+                std::optional<CompleteCall> c = completeCall(overload.type, args);
+                if (!c.has_value())
+                    continue;
+
+                auto& decl = as<FnDecl>(c.value().target.decl);
+                if (decl.assignParam) {
+                    if (assignCall.has_value())
+                        return badCall;
+                    assignCall = std::move(c.value());
+                } else {
+                    if (call.has_value())
+                        return badCall;
                     call = std::move(c.value());
                 }
             }
-            VERIFY(call.has_value());
-            return ExprResult::make<CallExprRecord>(evaluateFunction(call.value()));
+            if (!call.has_value())
+                return badCall;
+            Value callResult = evaluateFunction(call.value());
+
+            if (assignCall.has_value()) {
+                if (!cmpCompleteCallArgs(call.value(), assignCall.value()))
+                    return badCall;
+
+                auto assignType = withStaticContext(assignCall.value().target, [&](LookupContext& context) {
+                    auto& d = as<FnDecl>(assignCall.value().target.decl);
+                    return toCompleteType(evaluateExpr(context, at(d.assignParam).type));
+                });
+                if (!assignType.valid() || !cmpCompleteDecls(assignType, typeOf(callResult)))
+                    return badCall;
+            }
+            return ExprResult::make<CallExprRecord>(callResult, assignCall);
         }
         VERIFY_NOT_REACHED();
     }
@@ -1190,6 +1239,13 @@ struct Interpreter : STContext {
             if (!b.lValue.valid())
                 return false;
             setValue(b.lValue, std::move(value));
+            return true;
+        }
+        case RecordKind::CallExpr: {
+            auto& b = base.as<CallExprRecord>();
+            if (!b.assignCall.has_value())
+                return false;
+            evaluateFunction(b.assignCall.value(), value);
             return true;
         }
         default:
@@ -1344,6 +1400,30 @@ void testInterpreter() {
             return x;
         }
 
+        mut g_globalVal: num = 0;
+        function globalVal() {
+            return g_globalVal;
+        }
+        function globalVal() = (n: num) {
+            g_globalVal = n;
+        }
+        function updateGlobalVal() {
+            get(globalVal());
+            globalVal() = 456;
+            return globalVal();
+        }
+
+        function wrap{T: Type}(var: T) {
+            return var;
+        }
+        function wrap{T: Type}(var&: T) = (val: T) {
+            var = val;
+        }
+        function updateWrappedGlobalVal() {
+            get(wrap(globalVal()));
+            return wrap(globalVal());
+        }
+
         struct constant{T: Type, v: T} {}
         with{T: Type}
         function mkConst{v: T}() { return constant{T, v}(); }
@@ -1360,5 +1440,7 @@ void testInterpreter() {
     };
     eval("foo(true)");
     eval("callGet()");
+    eval("updateGlobalVal()");
+    eval("updateWrappedGlobalVal()");
     eval("bar(mkConst{mkConst{5}()}())");
 }
