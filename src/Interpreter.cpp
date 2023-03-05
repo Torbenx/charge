@@ -719,7 +719,7 @@ struct Interpreter : STContext {
         }
         if (!call.has_value())
             return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
-        return ExprResult::make<ConversionRecord>(evaluateFunction(call.value()), sourceValue);
+        return ExprResult::make<ConversionRecord>(evaluateCall(call.value()), sourceValue);
     }
 
     struct HackedRecord : ExprRecord {
@@ -826,7 +826,7 @@ struct Interpreter : STContext {
             auto type = toCompleteType(evaluateExpr(context, param.type));
             if (!type.valid())
                 return ExprResult::make<ConversionRecord>(Value {}, arg);
-            arg = ExprResult::make<ConversionRecord>(convert(context, type, arg), arg);
+            arg = convert(context, type, arg);
         }
         return arg;
     }
@@ -862,7 +862,6 @@ struct Interpreter : STContext {
             return CompleteDecl { decl.decl, nullptr };
         }
         VERIFY((bool)decl.staticContext);
-        // fmt::println("completing '{}' at level {}", sview(at(sDecl).name), depScope.level);
 
         auto withCtx = makeParameterContext(*decl.staticContext, at(sDecl).with.params, {}, depScope.deductions);
         if (!withCtx.has_value())
@@ -987,7 +986,7 @@ struct Interpreter : STContext {
         VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
         return withStaticContext(decl, [&](LookupContext& context) {
             auto& d = as<GlobalDecl>(decl.decl);
-            Value source = evaluateExpr(context, d.initializer);
+            ExprResult source = evaluateExpr(context, d.initializer);
             if (d.type) {
                 Type type = toCompleteType(evaluateExpr(context, d.type));
                 VERIFY(type.valid());
@@ -1012,7 +1011,8 @@ struct Interpreter : STContext {
         return {};
     }
 
-    Value convert(LookupContext&, Type, Value val) {
+    ExprResult convert(LookupContext&, Type type, ExprResult val) {
+        VERIFY(cmpCompleteDecls(type, typeOf(val)));
         return val;
     }
 
@@ -1117,8 +1117,25 @@ struct Interpreter : STContext {
 
         return out;
     }
-    Value evaluateFunction(CompleteCall call) {
-        return evaluateFunction(std::move(call), Value {});
+    Value evaluateCall(CompleteCall call) { return evaluateCall(std::move(call), {}); }
+    Value evaluateCall(CompleteCall call, Value assignArg) {
+        auto& decl = at(call.target.decl);
+        if (decl.kind == DeclKind::FnDecl)
+            return evaluateFunction(std::move(call), assignArg);
+        if (decl.kind == DeclKind::StructDecl) {
+            if (assignArg.valid()) {
+                VERIFY(assignArg.kind == ValueKind::Array);
+                VERIFY(cmpCompleteDecls(assignArg.type, call.target));
+                for (uint32_t i = 0; i < call.args.size(); i++)
+                    setExprValue(call.args[i], assignArg.u.array->array()[i]);
+                return {};
+            } else {
+                Value result = makeArrayValue(call.target, call.args.size());
+                std::copy_n(call.args.data(), call.args.size(), result.u.array->array().data());
+                return result;
+            }
+        }
+        VERIFY_NOT_REACHED();
     }
     Value evaluateFunction(CompleteCall call, Value assignArg) {
         VERIFY(at(call.target.decl).kind == DeclKind::FnDecl);
@@ -1187,17 +1204,14 @@ struct Interpreter : STContext {
             if (!call.has_value())
                 return badCall;
 
-            auto theCall = std::move(call.value());
-            Value result = makeArrayValue(theCall.target, theCall.args.size());
-            std::copy_n(theCall.args.data(), theCall.args.size(), result.u.array->array().data());
-            return ExprResult::make<CallExprRecord>(result, theCall);
+            return ExprResult::make<CallExprRecord>(evaluateCall(call.value()), call.value());
         } else if (cmpCompleteDecls(baseType, typeType)) {
             auto type = asTypeValue(base);
             auto& decl = as<StructDecl>(type.decl);
             auto posArgs = positionArguments(decl.params, {}, args);
             if (!posArgs.has_value())
                 return badCall;
-            CompleteCall theCall { type };
+            CompleteCall call { type };
             if (!withStaticContext(type, [&](LookupContext& context) -> bool {
                     DependentScope depScope { this };
                     if (!convertFnArgs(context, decl.params, posArgs.value(), depScope.deductions))
@@ -1207,14 +1221,12 @@ struct Interpreter : STContext {
                     auto valsOpt = completeFnArgs(context, decl.params, posArgs.value());
                     if (!valsOpt.has_value())
                         return false;
-                    theCall.args = std::move(valsOpt.value());
+                    call.args = std::move(valsOpt.value());
                     return true;
                 }))
                 return badCall;
 
-            Value result = makeArrayValue(theCall.target, theCall.args.size());
-            std::copy_n(theCall.args.data(), theCall.args.size(), result.u.array->array().data());
-            return ExprResult::make<CallExprRecord>(result, theCall);
+            return ExprResult::make<CallExprRecord>(evaluateCall(call), call);
         }
         // function
         else if (cmpCompleteDecls(baseType, overloadSetType)) {
@@ -1240,7 +1252,7 @@ struct Interpreter : STContext {
             }
             if (!call.has_value())
                 return badCall;
-            Value callResult = evaluateFunction(call.value());
+            Value callResult = evaluateFunction(call.value(), {});
 
             if (assignCall.has_value()) {
                 if (!cmpCompleteCallArgs(call.value(), assignCall.value()))
@@ -1285,7 +1297,7 @@ struct Interpreter : STContext {
             auto& b = base.as<CallExprRecord>();
             if (!b.assignCall.has_value())
                 return false;
-            evaluateFunction(b.assignCall.value(), value);
+            evaluateCall(b.assignCall.value(), value);
             return true;
         }
         default:
@@ -1325,7 +1337,7 @@ struct Interpreter : STContext {
 
     ControlFlow evalLetStmt(BlockLookupContext& context, LetStmt& stmt) {
         VarInfo& info = at(asVar(stmt.decl));
-        Value init = evaluateExpr(context, info.initializer);
+        ExprResult init = evaluateExpr(context, info.initializer);
         if (info.type) {
             Type type = toCompleteType(evaluateExpr(context, info.type));
             init = convert(context, type, init);
@@ -1473,6 +1485,18 @@ void testInterpreter() {
         function bar{a: num, A: Type}(b: constant{A, a}) { return a; }
         function bar{a: num, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) { return a; }
         function bar{a: num, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) { return a; }
+
+        struct A{} {
+            x: num = 0;
+            y: num = 0;
+        }
+        function testA() {
+            let a = A(789);
+            let x: num = 1;
+            let y: num = 2;
+            A(x, y) = a;
+            return A(x, y);
+        }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -1485,4 +1509,5 @@ void testInterpreter() {
     eval("updateGlobalVal()");
     eval("updateWrappedGlobalVal()");
     eval("bar(mkConst{mkConst{5}()}())");
+    eval("testA()");
 }
