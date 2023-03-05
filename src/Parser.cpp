@@ -573,18 +573,20 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         VERIFY(!hasStatic);
         advance();
         auto& d = makeSet<StructDecl>(out, name);
-        auto memberDecls = beginSpan<Ptr<Decl>, 0>();
+        auto memberDecls = beginSpan<Ptr<LocalDecl>, 0>();
         auto staticDecls = beginSpan<Ptr<StaticDecl>, 1>();
         while (tok.kind() != TokenKind::RightBrace) {
             Ptr<Decl> decl;
             parseDecl(decl, DeclParseScope::Struct);
-            if (Ptr<StaticDecl> sDecl = asStaticDecl(decl))
+            if (Ptr<StaticDecl> sDecl = asStaticDecl(decl)) {
                 append(staticDecls, sDecl);
-            else
-                append(memberDecls, decl);
+            } else {
+                VERIFY(at(decl).kind == DeclKind::LocalDecl);
+                append(memberDecls, (Ptr<LocalDecl>)decl);
+            }
         }
         advance();
-        d.memberDecls = finalizeSpan(memberDecls);
+        d.params.params = finalizeSpan(memberDecls);
         d.staticDecls = finalizeSpan(staticDecls);
     } else
         VERIFY_NOT_REACHED();

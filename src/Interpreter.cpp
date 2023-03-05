@@ -155,7 +155,7 @@ struct Interpreter : STContext {
         CompleteDecl,
         ParameterizedDecl,
         Builtin,
-        Struct,
+        Array,
         Dependent,
     };
     struct parameterized_t { };
@@ -184,10 +184,10 @@ struct Interpreter : STContext {
             : type(std::move(decl)), u { .declType = type }, kind(ValueKind::CompleteDecl) { }
         Value(Type type, Ptr<LocalDecl> depDecl, uint32_t level)
             : type(std::move(type)), u { .dependent = { depDecl, level } }, kind(ValueKind::Dependent) { }
-        Value(Type type, uint32_t memberCount)
+        Value(Type type, uint32_t size)
             : type(std::move(type))
-            , u { .array = ValueArray::make(memberCount) }
-            , kind(ValueKind::Struct) { }
+            , u { .array = ValueArray::make(size) }
+            , kind(ValueKind::Array) { }
         Value(parameterized_t, Ptr<Decl> type, ParameterizedDecl decl)
             : type(std::move(decl)), u { .declType = type }, kind(ValueKind::ParameterizedDecl) { }
 
@@ -228,11 +228,11 @@ struct Interpreter : STContext {
         bool dependentAtAll() const { return u.dependent.nestLevel > 0; }
 
         void ref() {
-            if (kind == ValueKind::Struct)
+            if (kind == ValueKind::Array)
                 ValueArray::ref(u.array);
         }
         void deref() {
-            if (kind == ValueKind::Struct)
+            if (kind == ValueKind::Array)
                 ValueArray::deref(u.array);
         }
         ~Value() {
@@ -523,7 +523,7 @@ struct Interpreter : STContext {
 
     Type typeOf(const Value& value) {
         switch (value.kind) {
-        case ValueKind::Struct:
+        case ValueKind::Array:
         case ValueKind::Builtin:
         case ValueKind::Dependent:
             return value.type;
@@ -556,7 +556,7 @@ struct Interpreter : STContext {
             return asTypeValue(in);
         }
         if (cmpCompleteDecls(inType, typeOverloadSetType)) {
-            VERIFY(in.kind == ValueKind::Struct);
+            VERIFY(in.kind == ValueKind::Array);
             if (in.u.array->size != 1)
                 return {};
             Value parametricT = in.u.array->array()[0];
@@ -573,8 +573,8 @@ struct Interpreter : STContext {
     Value makeTypeValue(Type type) {
         return { complete_t(), typeType.decl, std::move(type) };
     }
-    Value makeStructValue(Type type, uint32_t memberCount) {
-        return Value { std::move(type), memberCount };
+    Value makeArrayValue(Type type, uint32_t size) {
+        return Value { std::move(type), size };
     }
     Value makeParameterizedDeclValue(Ptr<Decl> type, ParameterizedDecl decl) {
         return Value { parameterized_t(), type, std::move(decl) };
@@ -587,7 +587,7 @@ struct Interpreter : STContext {
         case ValueKind::Builtin:
             VERIFY(cmpCompleteDecls(l.type, r.type));
             return l.u.builtinValue == r.u.builtinValue;
-        case ValueKind::Struct: {
+        case ValueKind::Array: {
             VERIFY(cmpCompleteDecls(l.type, r.type));
             EXPECT_EQ(l.u.array->size, r.u.array->size);
             uint32_t size = l.u.array->size;
@@ -751,7 +751,7 @@ struct Interpreter : STContext {
         for (uint32_t i = 0; i < params.params.count; i++) {
             ExprResult arg
                 = (argOff < args.size() && i == args[argOff].index())
-                ? (ExprResult)args[argOff]
+                ? (ExprResult)args[argOff++]
                 : evaluateDefaultArg(context, at(params.params, i));
 
             if (!arg.value().valid())
@@ -1051,7 +1051,7 @@ struct Interpreter : STContext {
         case DeclKind::StructDecl: {
             const auto& setType = r.declKind == DeclKind::StructDecl ? typeOverloadSetType : overloadSetType;
             const auto& itemType = r.declKind == DeclKind::StructDecl ? typeOverloadType : overloadType;
-            Value v = makeStructValue(setType, r.decls.size());
+            Value v = makeArrayValue(setType, r.decls.size());
             for (uint32_t i = 0; i < r.decls.size(); i++)
                 v.u.array->array()[i] = makeParameterizedDeclValue(itemType.decl, std::move(r.decls[i]));
             return ExprResult::make<IdentifierExprRecord>(v, LValue {});
@@ -1082,7 +1082,7 @@ struct Interpreter : STContext {
     }
     std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::vector<PositionalExprResult> posFnArgs) {
         VERIFY(fnDecl.staticContext != nullptr);
-        auto& fn = as<FnDecl>(fnDecl.decl);
+        auto& fn = as<CallableDecl>(fnDecl.decl);
 
         DependentScope depScope { this };
 
@@ -1121,6 +1121,7 @@ struct Interpreter : STContext {
         return evaluateFunction(std::move(call), Value {});
     }
     Value evaluateFunction(CompleteCall call, Value assignArg) {
+        VERIFY(at(call.target.decl).kind == DeclKind::FnDecl);
         auto& targetDecl = as<FnDecl>(call.target.decl);
         return withStaticContext(call.target, [&](LookupContext& parametricCtx) -> Value {
             ParameterLookupContext fnParamCtx { &parametricCtx };
@@ -1168,17 +1169,56 @@ struct Interpreter : STContext {
         Value base = evaluateExpr(ctx, e.base);
         auto baseType = typeOf(base);
         VERIFY(e.callKind == CallKind::Paren);
+        auto args = evaluateArguments(ctx, e.args);
+
+        // constructor
         if (cmpCompleteDecls(baseType, typeOverloadSetType)) {
-            base = makeTypeValue(toCompleteType(base));
-            baseType = typeOf(base);
+            VERIFY(base.kind == ValueKind::Array);
+            std::optional<CompleteCall> call;
+            for (Value& overload : base.u.array->array()) {
+                VERIFY(overload.kind == ValueKind::ParameterizedDecl);
+                std::optional<CompleteCall> c = completeCall(overload.type, args);
+                if (!c.has_value())
+                    continue;
+                if (call.has_value())
+                    return badCall;
+                call = std::move(c.value());
+            }
+            if (!call.has_value())
+                return badCall;
+
+            auto theCall = std::move(call.value());
+            Value result = makeArrayValue(theCall.target, theCall.args.size());
+            std::copy_n(theCall.args.data(), theCall.args.size(), result.u.array->array().data());
+            return ExprResult::make<CallExprRecord>(result, theCall);
+        } else if (cmpCompleteDecls(baseType, typeType)) {
+            auto type = asTypeValue(base);
+            auto& decl = as<StructDecl>(type.decl);
+            auto posArgs = positionArguments(decl.params, {}, args);
+            if (!posArgs.has_value())
+                return badCall;
+            CompleteCall theCall { type };
+            if (!withStaticContext(type, [&](LookupContext& context) -> bool {
+                    DependentScope depScope { this };
+                    if (!convertFnArgs(context, decl.params, posArgs.value(), depScope.deductions))
+                        return false;
+                    EXPECT_EQ(depScope.deductions.size(), 0u);
+
+                    auto valsOpt = completeFnArgs(context, decl.params, posArgs.value());
+                    if (!valsOpt.has_value())
+                        return false;
+                    theCall.args = std::move(valsOpt.value());
+                    return true;
+                }))
+                return badCall;
+
+            Value result = makeArrayValue(theCall.target, theCall.args.size());
+            std::copy_n(theCall.args.data(), theCall.args.size(), result.u.array->array().data());
+            return ExprResult::make<CallExprRecord>(result, theCall);
         }
-        if (cmpCompleteDecls(baseType, typeType)) {
-            // hacked constructor: make builtin value
-            VERIFY(e.args.args.count == 0);
-            return ExprResult::make<CallExprRecord>(makeBuiltinValue(toCompleteType(base), (int64_t)0), std::nullopt);
-        } else if (cmpCompleteDecls(baseType, overloadSetType)) {
-            auto args = evaluateArguments(ctx, e.args);
-            VERIFY(base.kind == ValueKind::Struct);
+        // function
+        else if (cmpCompleteDecls(baseType, overloadSetType)) {
+            VERIFY(base.kind == ValueKind::Array);
             std::optional<CompleteCall> call;
             std::optional<CompleteCall> assignCall;
             for (Value& overload : base.u.array->array()) {
@@ -1353,8 +1393,8 @@ struct Interpreter : STContext {
         case ValueKind::Dependent:
             fmt::println("[{}] dependend {}", sview(at(value.type.decl).name), sview(at(value.u.dependent.decl).name));
             break;
-        case ValueKind::Struct:
-            fmt::println("[{}] struct with {} members", sview(at(value.type.decl).name), value.u.array->size);
+        case ValueKind::Array:
+            fmt::println("[{}] array with {} elements", sview(at(value.type.decl).name), value.u.array->size);
             for (const Value& member : value.u.array->array()) {
                 fmt::print("  ");
                 dumpValue(member);
@@ -1424,7 +1464,9 @@ void testInterpreter() {
             return wrap(globalVal());
         }
 
-        struct constant{T: Type, v: T} {}
+        struct constant{T: Type, v: T} {
+            valueMember: T = v;
+        }
         with{T: Type}
         function mkConst{v: T}() { return constant{T, v}(); }
 

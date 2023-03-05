@@ -138,7 +138,7 @@ struct Identifier : Arguments {
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
     Word name;
-    Decl(DeclKind kind, Word name = {})
+    Decl(DeclKind kind, Word name)
         : kind(kind), name(name) { }
 };
 
@@ -167,19 +167,23 @@ struct LocalDecl : Decl, VarInfo {
         : Decl(DeclKind::LocalDecl, name), VarInfo(isMutable) { }
 };
 
-struct StructDecl : StaticDecl {
-    Span<Ptr<StaticDecl>> staticDecls;
-    Span<Ptr<Decl>> memberDecls;
-    StructDecl(Word name = {})
-        : StaticDecl(DeclKind::StructDecl, name) { }
+struct CallableDecl : StaticDecl {
+    Parameters params;
+    CallableDecl(DeclKind kind, Word name)
+        : StaticDecl(kind, name) { }
 };
 
-struct FnDecl : StaticDecl {
-    Parameters params;
+struct StructDecl : CallableDecl {
+    Span<Ptr<StaticDecl>> staticDecls;
+    StructDecl(Word name = {})
+        : CallableDecl(DeclKind::StructDecl, name) { }
+};
+
+struct FnDecl : CallableDecl {
     Ptr<CompoundStmt> body;
     Ptr<LocalDecl> assignParam;
     FnDecl(Word name = {})
-        : StaticDecl(DeclKind::FnDecl, name) { }
+        : CallableDecl(DeclKind::FnDecl, name) { }
 };
 
 // Expressions
