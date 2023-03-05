@@ -333,6 +333,102 @@ struct Interpreter : STContext {
         bool valid() const { return context != nullptr; }
     };
 
+#define EXPR_KIND(kind) kind,
+    enum class RecordKind {
+        Conversion,
+        Empty,
+        Hacked,
+        ENUMERATE_EXPR_KINDS
+    };
+#undef EXPR_KIND
+    const char* toString(RecordKind kind) {
+#define EXPR_KIND(kind)    \
+    case RecordKind::kind: \
+        return #kind;
+
+        switch (kind) {
+            ENUMERATE_EXPR_KINDS
+        case RecordKind::Conversion:
+            return "Conversion";
+        case RecordKind::Empty:
+            return "Empty";
+        case RecordKind::Hacked:
+            return "Hacked";
+        default:
+            return "????";
+        }
+
+#undef EXPR_KIND
+    }
+
+    struct ExprRecord {
+        RecordKind kind;
+        uint32_t refCnt = 1;
+        Value result;
+
+        ExprRecord(RecordKind kind, Value result)
+            : kind(kind), result(std::move(result)) { }
+    };
+    struct ExprResult {
+        ExprRecord* ptr;
+
+        template<std::derived_from<ExprRecord> T, typename... Args>
+        static ExprResult make(Args&&... args) {
+            return ExprResult { new T(args...) };
+        }
+
+        void ref() {
+            ptr->refCnt += 1;
+        }
+        void deref() {
+            ptr->refCnt -= 1;
+            if (ptr->refCnt == 0)
+                delete ptr;
+        }
+
+        Value value() const { return ptr->result; }
+        operator Value() const { return value(); }
+        RecordKind kind() const { return ptr->kind; }
+        template<typename T>
+        T& as() { return *(T*)ptr; }
+
+        ExprResult(const ExprResult& other)
+            : ptr(other.ptr) { ref(); }
+        ExprResult& operator=(const ExprResult& other) {
+            deref();
+            ptr = other.ptr;
+            ref();
+            return *this;
+        }
+        ~ExprResult() {
+            deref();
+        }
+
+    private:
+        ExprResult(ExprRecord* ptr)
+            : ptr(ptr) { }
+    };
+    struct PositionalExprResult : ExprResult {
+        uint32_t m_index = 0;
+        PositionalExprResult(ExprResult result, uint32_t index)
+            : ExprResult(result), m_index(index) { }
+        PositionalValue value() const {
+            return { ExprResult::value(), index() };
+        }
+        operator PositionalValue() const { return value(); }
+        uint32_t index() const { return m_index; }
+    };
+    struct NamedExprResult : ExprResult {
+        Word m_name = {};
+        NamedExprResult(ExprResult result, Word name)
+            : ExprResult(result), m_name(name) { }
+        NamedValue value() const {
+            return { ExprResult::value(), name() };
+        }
+        operator NamedValue() const { return value(); }
+        Word name() const { return m_name; }
+    };
+
     enum class ControlFlowKind {
         None,
         Return,
@@ -520,21 +616,25 @@ struct Interpreter : STContext {
         return true;
     }
 
-    bool positionArguments(std::span<PositionalValue> out, Parameters& parameters, std::span<const PositionalValue> inArgs, std::span<const NamedValue> subArgs) {
+    std::optional<std::vector<PositionalExprResult>> positionArguments(Parameters& parameters,
+        std::span<const PositionalExprResult> inArgs, std::span<const NamedExprResult> subArgs) {
+
+        std::vector<PositionalExprResult> out;
         auto params = at(parameters.params);
         uint32_t inOff = 0;
         uint32_t subOff = 0;
-        uint32_t outOff = 0;
         for (uint32_t i = 0; i < params.size(); i++) {
             if (inOff < inArgs.size() && inArgs[inOff].index() == i) {
-                out[outOff++] = inArgs[inOff];
+                out.push_back(inArgs[inOff]);
                 inOff += 1;
             } else if (subOff < subArgs.size() && (!subArgs[subOff].name() || cmpWord(at(params[i]).name, subArgs[subOff].name()))) {
-                out[outOff++] = { subArgs[subOff], i };
+                out.push_back({ subArgs[subOff], i });
                 subOff += 1;
             }
         }
-        return subOff == subArgs.size();
+        if (subOff != subArgs.size())
+            return {};
+        return out;
     }
 
     bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
@@ -567,11 +667,16 @@ struct Interpreter : STContext {
 
         return true;
     }
-    Value convertAndDeduce(Value targetTypeValue, const Value& sourceValue, std::vector<Deduction>& deductions) {
+    struct ConversionRecord : ExprRecord {
+        ExprResult base;
+        ConversionRecord(Value result, ExprResult base)
+            : ExprRecord(RecordKind::Conversion, result), base(base) { }
+    };
+    ExprResult convertAndDeduce(Value targetTypeValue, ExprResult sourceValue, std::vector<Deduction>& deductions) {
         if (cmpCompleteDecls(typeOf(targetTypeValue), typeOverloadSetType)) {
             auto completeType = toCompleteType(targetTypeValue);
             if (!completeType.valid())
-                return {};
+                return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
             targetTypeValue = makeTypeValue(completeType);
         }
         if (cmpCompleteDecls(typeOf(targetTypeValue), typeType)) {
@@ -589,14 +694,14 @@ struct Interpreter : STContext {
             if (targetType.decl == sourceType.decl) {
                 for (uint32_t i = 0; i < sourceType.args().size(); i++) {
                     if (!deduceParameters(sourceType.args()[i], targetType.args()[i], deductions))
-                        return {};
+                        return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
                 }
                 return sourceValue;
             }
 
             // TODO: should this be a conversion?
             if (cmpCompleteDecls(sourceType, typeOverloadSetType)) {
-                return makeTypeValue(toCompleteType(sourceValue));
+                return ExprResult::make<ConversionRecord>(makeTypeValue(toCompleteType(sourceValue)), sourceValue);
             }
         }
 
@@ -605,7 +710,7 @@ struct Interpreter : STContext {
             ParameterizedDecl decl { (Ptr<Decl>)declP, globalContext };
             decl.allocateArgs(1);
             decl.args()[0] = { targetTypeValue, 0 };
-            std::vector<PositionalValue> fnArgs { { sourceValue, 0 } };
+            std::vector<PositionalExprResult> fnArgs { { sourceValue, 0 } };
             auto c = completeCall(decl, std::move(fnArgs));
             if (c.has_value()) {
                 VERIFY(!call.has_value());
@@ -613,38 +718,45 @@ struct Interpreter : STContext {
             }
         }
         if (!call.has_value())
-            return {};
-        return evaluateFunction(call.value());
+            return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
+        return ExprResult::make<ConversionRecord>(evaluateFunction(call.value()), sourceValue);
     }
 
-    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalValue> args, std::vector<Deduction>& deductions) {
+    struct HackedRecord : ExprRecord {
+        HackedRecord(Value result)
+            : ExprRecord(RecordKind::Hacked, std::move(result)) { }
+    };
+    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, std::vector<Deduction>& deductions) {
         for (auto& arg : args) {
             Value type = evaluateExpr(context, at(at(params.params, arg.index())).type);
-            Value cvtArg = convertAndDeduce(type, arg, deductions);
-            if (!cvtArg.valid()) {
+            ExprResult cvtArg = convertAndDeduce(type, arg, deductions);
+            if (!cvtArg.value().valid()) {
                 fmt::print("unable to initialize ");
                 dumpValue(type);
                 fmt::print("with ");
                 dumpValue(arg);
                 return false;
             }
-            arg = { std::move(cvtArg), arg.index() };
+            arg = { cvtArg, arg.index() };
         }
         return true;
     }
-    std::optional<std::vector<Value>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalValue> args) {
-        std::vector<Value> out;
+
+    struct FnArgumentResult : ExprResult {
+        bool isInOut = false;
+    };
+    std::optional<std::vector<FnArgumentResult>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalExprResult> args) {
+        std::vector<FnArgumentResult> out;
         uint32_t argOff = 0;
         for (uint32_t i = 0; i < params.params.count; i++) {
-            Value arg;
-            if (argOff < args.size() && i == args[argOff].index()) {
-                arg = args[argOff];
-            } else {
-                arg = evaluateDefaultArg(context, at(params.params, i));
-                if (!arg.valid())
-                    return {};
-            }
-            out.emplace_back(std::move(arg));
+            ExprResult arg
+                = (argOff < args.size() && i == args[argOff].index())
+                ? (ExprResult)args[argOff]
+                : evaluateDefaultArg(context, at(params.params, i));
+
+            if (!arg.value().valid())
+                return {};
+            out.push_back({ std::move(arg), at(at(params.params, i)).isInOut });
         }
         return out;
     }
@@ -660,7 +772,7 @@ struct Interpreter : STContext {
             Value arg;
             Value type = evaluateExpr(context, as<LocalDecl>(allDecls[i]).type);
             if (argOff < args.size() && i == args[argOff].index()) {
-                arg = convertAndDeduce(type, args[argOff], deductions);
+                arg = convertAndDeduce(type, ExprResult::make<HackedRecord>(args[argOff]), deductions);
                 if (!arg.valid()) {
                     fmt::print("unable to initialize ");
                     dumpValue(type);
@@ -700,16 +812,21 @@ struct Interpreter : STContext {
             }
         }
     }
-    Value evaluateDefaultArg(LookupContext& context, Ptr<LocalDecl> decl) {
+
+    struct EmptyRecord : ExprRecord {
+        EmptyRecord()
+            : ExprRecord(RecordKind::Empty, {}) { }
+    };
+    ExprResult evaluateDefaultArg(LookupContext& context, Ptr<LocalDecl> decl) {
         auto& param = at(decl);
         if (!param.initializer)
-            return {};
-        Value arg = evaluateExpr(context, param.initializer);
+            return ExprResult::make<EmptyRecord>();
+        ExprResult arg = evaluateExpr(context, param.initializer);
         if (param.type) {
             auto type = toCompleteType(evaluateExpr(context, param.type));
             if (!type.valid())
-                return {};
-            arg = convert(context, type, arg);
+                return ExprResult::make<ConversionRecord>(Value {}, arg);
+            arg = ExprResult::make<ConversionRecord>(convert(context, type, arg), arg);
         }
         return arg;
     }
@@ -770,8 +887,8 @@ struct Interpreter : STContext {
         return out;
     }
 
-    std::vector<NamedValue> evaluateArguments(LookupContext& ctx, Arguments& a) {
-        std::vector<NamedValue> out;
+    std::vector<NamedExprResult> evaluateArguments(LookupContext& ctx, Arguments& a) {
+        std::vector<NamedExprResult> out;
         auto args = at(a.args);
         for (auto& arg : args) {
             out.push_back({ evaluateExpr(ctx, arg.source), arg.target });
@@ -779,7 +896,7 @@ struct Interpreter : STContext {
         return out;
     }
 
-    LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedValue> args) {
+    LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedExprResult> args) {
         LookupResult out;
         for (Ptr<Decl> decl : context.decls) {
             if (!cmpWord(at(decl).name, name))
@@ -790,9 +907,13 @@ struct Interpreter : STContext {
             if (context.kind == LookupContextKind::Static) {
                 Ptr<StaticDecl> sDecl = asStaticDecl(decl);
                 VERIFY((bool)sDecl);
-                parameterized.allocateArgs(args.size());
-                if (!positionArguments(parameterized.args(), at(sDecl).parametric, {}, args))
+                auto posArgs = positionArguments(at(sDecl).parametric, {}, args);
+                if (!posArgs.has_value())
                     continue;
+
+                parameterized.allocateArgs(args.size());
+                for (uint32_t i = 0; i < args.size(); i++)
+                    parameterized.args()[i] = posArgs.value()[i];
             }
 
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
@@ -889,28 +1010,26 @@ struct Interpreter : STContext {
         return val;
     }
 
-    Value evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
+    ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
         auto& e = at(p);
 
-        Value ret;
-#define EXPR_KIND(kind)                  \
-    case ExprKind::kind:                 \
-        ret = eval##kind(ctx, (kind&)e); \
-        break;
-
+#define EXPR_KIND(kind)  \
+    case ExprKind::kind: \
+        return eval##kind(ctx, (kind&)e);
         switch (e.kind) {
             ENUMERATE_EXPR_KINDS
         default:
             VERIFY_NOT_REACHED();
         }
 #undef EXPR_KIND
-
-        if (!ret.valid())
-            fmt::println("evaluating {} was invalid", toString(e.kind));
-        return ret;
     }
 
-    Value evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
+    struct IdentifierExprRecord : ExprRecord {
+        LValue lValue;
+        IdentifierExprRecord(Value result, LValue lValue)
+            : ExprRecord(RecordKind::IdentifierExpr, result), lValue(lValue) { }
+    };
+    ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
         LookupResult r = lookupIdentifier(ctx, e.identifier);
 
         switch (r.declKind) {
@@ -918,8 +1037,8 @@ struct Interpreter : STContext {
         case DeclKind::LocalDecl: {
             LValue lVal = toLValue(r);
             if (lVal.valid())
-                return getValue(lVal);
-            return {};
+                return ExprResult::make<IdentifierExprRecord>(getValue(lVal), lVal);
+            return ExprResult::make<IdentifierExprRecord>(Value {}, lVal);
         }
         case DeclKind::FnDecl:
         case DeclKind::StructDecl: {
@@ -928,30 +1047,33 @@ struct Interpreter : STContext {
             Value v = makeStructValue(setType, r.decls.size());
             for (uint32_t i = 0; i < r.decls.size(); i++)
                 v.u.array->array()[i] = makeParameterizedDeclValue(itemType.decl, std::move(r.decls[i]));
-            return v;
+            return ExprResult::make<IdentifierExprRecord>(v, LValue {});
         }
         default:
             VERIFY_NOT_REACHED();
         }
     }
 
-    Value evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
-        return makeBuiltinValue(numType, e.value);
+    struct IntLiteralExprRecord : ExprRecord {
+        IntLiteralExprRecord(Value result)
+            : ExprRecord(RecordKind::IntLiteralExpr, result) { }
+    };
+    ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
+        return ExprResult::make<IntLiteralExprRecord>(makeBuiltinValue(numType, e.value));
     }
 
     struct CompleteCall {
         CompleteDecl target;
-        std::vector<Value> args = {};
+        std::vector<FnArgumentResult> args = {};
     };
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::span<const NamedValue> namedFnArgs) {
-        std::vector<PositionalValue> posFnArgs;
-        posFnArgs.resize(namedFnArgs.size());
-        if (!positionArguments(posFnArgs, as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs))
+    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::span<const NamedExprResult> namedFnArgs) {
+        auto posFnArgs = positionArguments(as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs);
+        if (!posFnArgs.has_value())
             return {};
 
-        return completeCall(fnDecl, std::move(posFnArgs));
+        return completeCall(fnDecl, std::move(posFnArgs.value()));
     }
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::vector<PositionalValue> posFnArgs) {
+    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::vector<PositionalExprResult> posFnArgs) {
         VERIFY(fnDecl.staticContext != nullptr);
         auto& fn = as<FnDecl>(fnDecl.decl);
 
@@ -985,22 +1107,39 @@ struct Interpreter : STContext {
         if (!fnArgs.has_value())
             return {};
         out.args = std::move(fnArgs.value());
-        
+
         return out;
     }
     Value evaluateFunction(CompleteCall call) {
         auto& targetDecl = as<FnDecl>(call.target.decl);
         LocalLookupContext withCtx = makeCompleteParameterContext(*call.target.staticContext, targetDecl.with.params, call.target.withArgs());
         LocalLookupContext parametricCtx = makeCompleteParameterContext(withCtx, targetDecl.parametric, call.target.args());
-        LocalLookupContext fnParmsCtx = makeCompleteParameterContext(parametricCtx, targetDecl.params, call.args);
-        auto flow = evalCompoundStmt(fnParmsCtx, at(targetDecl.body));
+
+        ParameterLookupContext fnParamCtx { &parametricCtx };
+        fnParamCtx.decls = at((Span<Ptr<Decl>>)targetDecl.params.params);
+        for (uint32_t i = 0; i < call.args.size(); i++)
+            fnParamCtx.appendValue(call.args[i]);
+
+        auto flow = evalCompoundStmt(fnParamCtx, at(targetDecl.body));
+
+        for (uint32_t i = 0; i < call.args.size(); i++) {
+            if (!call.args[i].isInOut)
+                continue;
+
+            setExprValue(call.args[i], fnParamCtx.values[i]);
+        }
+
         if (flow.kind == ControlFlowKind::None)
             return {};
         if (flow.kind == ControlFlowKind::Return)
             return flow.value;
         VERIFY_NOT_REACHED();
     }
-    Value evalCallExpr(LookupContext& ctx, CallExpr& e) {
+    struct CallExprRecord : ExprRecord {
+        CallExprRecord(Value result)
+            : ExprRecord(RecordKind::CallExpr, result) { }
+    };
+    ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
         Value base = evaluateExpr(ctx, e.base);
         auto baseType = typeOf(base);
         VERIFY(e.callKind == CallKind::Paren);
@@ -1011,7 +1150,7 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(baseType, typeType)) {
             // hacked constructor: make builtin value
             VERIFY(e.args.args.count == 0);
-            return { toCompleteType(base), (int64_t)0 };
+            return ExprResult::make<CallExprRecord>(makeBuiltinValue(toCompleteType(base), (int64_t)0));
         } else if (cmpCompleteDecls(baseType, overloadSetType)) {
             auto args = evaluateArguments(ctx, e.args);
             VERIFY(base.kind == ValueKind::Struct);
@@ -1025,25 +1164,33 @@ struct Interpreter : STContext {
                 }
             }
             VERIFY(call.has_value());
-            return evaluateFunction(std::move(call.value()));
+            return ExprResult::make<CallExprRecord>(evaluateFunction(call.value()));
         }
         VERIFY_NOT_REACHED();
     }
 
-    Value evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
-    Value evalParenExpr(LookupContext&, ParenExpr&) { VERIFY_NOT_REACHED(); }
-    Value evalAccessExpr(LookupContext&, AccessExpr&) { VERIFY_NOT_REACHED(); }
-    Value evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
-    Value evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+    struct ParenExprRecord : ExprRecord {
+        ExprResult base;
+        ParenExprRecord(ExprResult result)
+            : ExprRecord(RecordKind::ParenExpr, result.value()), base(result) { }
+    };
+    ExprResult evalParenExpr(LookupContext& context, ParenExpr& e) {
+        return ExprResult::make<ParenExprRecord>(evaluateExpr(context, e.subExpr));
+    }
 
-    void setExprValue(LookupContext& context, Ptr<Expr> p, Value value) {
-        auto& e = at(p);
-        switch (e.kind) {
-        case ExprKind::IdentifierExpr: {
-            auto& idExpr = (IdentifierExpr&)e;
-            LookupResult r = lookupIdentifier(context, idExpr.identifier);
-            setValue(toLValue(r), std::move(value));
-            break;
+    ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+    ExprResult evalAccessExpr(LookupContext&, AccessExpr&) { VERIFY_NOT_REACHED(); }
+    ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
+    ExprResult evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+
+    bool setExprValue(ExprResult base, Value value) {
+        switch (base.kind()) {
+        case RecordKind::IdentifierExpr: {
+            auto& b = base.as<IdentifierExprRecord>();
+            if (!b.lValue.valid())
+                return false;
+            setValue(b.lValue, std::move(value));
+            return true;
         }
         default:
             VERIFY_NOT_REACHED();
@@ -1121,8 +1268,9 @@ struct Interpreter : STContext {
 
     ControlFlow evalAssignStmt(LookupContext& context, AssignStmt& stmt) {
         if (stmt.op == AssignOperator::None) {
-            Value right = evaluateExpr(context, stmt.right);
-            setExprValue(context, stmt.left, std::move(right));
+            ExprResult left = evaluateExpr(context, stmt.left);
+            ExprResult right = evaluateExpr(context, stmt.right);
+            setExprValue(left, right.value());
         } else
             VERIFY_NOT_REACHED();
         return {};
@@ -1187,6 +1335,15 @@ void testInterpreter() {
             return x;
         }
 
+        funtion get(x&: num) {
+            x = 123;
+        }
+        function callGet() {
+            mut x = 0;
+            get(x);
+            return x;
+        }
+
         struct constant{T: Type, v: T} {}
         with{T: Type}
         function mkConst{v: T}() { return constant{T, v}(); }
@@ -1202,5 +1359,6 @@ void testInterpreter() {
         it.dumpValue(v);
     };
     eval("foo(true)");
+    eval("callGet()");
     eval("bar(mkConst{mkConst{5}()}())");
 }

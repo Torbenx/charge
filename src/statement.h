@@ -152,6 +152,7 @@ struct VarInfo {
     Ptr<Expr> type;
     Ptr<Expr> initializer;
     bool isMutable = false;
+    bool isInOut = false;
     VarInfo(bool isMutable)
         : isMutable(isMutable) { }
 };

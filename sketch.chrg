@@ -117,53 +117,32 @@ function foo() {
     let { foo = .self } = (mArr).popBack();
 }
 
+struct Vec2 {
+    m_x: float;
+    m_y: float;
+
+    function x(self&) => m_x;
+}
 struct Range {
-    low: float;
-    high: float;
+    m_low: float;
+    m_high: float;
+
+    function low(self&) => m_low;
+    function high(self&) => m_high;
 }
 struct Rect {
     h: Range;
     v: Range;
 
-    function bottomLeft(self) -> Vec2 {
-        return { h.low, v.low };
-    }
-    function bottomLeft(self&) = (bl: Vec2) {
-        let { h.low, v.low } = bl;
-    }
+    function bottomLeft(self&) => { h.low(), v.low() };
+}
+function onlyX(v: Vec2) -> float { return v.x(); }
+function onlyX(v&: Vec2) = (x: float) { v.x() = x; }
+function onlyX(v&: Vec2) => v.x();
 
-    get_set bottomLeftSwap(self&, Vec2& v) {
-        std::swap{Vec2}(v, { h.low, v.low });
-    }
-    function bottomLeftImpl(self) -> Vec2 {
-        mut Rect r = self;
-        mut Vec2 v = {};
-        bottomLeftSwap(r, v);
-        return v;
-    }
-    function bottomLeftImpl(self&) = (v: Vec2) {
-        mut Vec2 swap = v;
-        bottomLeftSwap(self, v);
-    }
-
-    function bottomLeftNoOp(self&) {
-        bottomLeftImpl() = bottomLeftImpl();
-
-        mut Rect r = self;
-        mut Vec2 v = {};
-        bottomLeftSwap(r, v);
-        mut Vec2 swap = v;
-        bottomLeftSwap(self, v);
-
-        mut Rect r = self;
-        mut Vec2 v = {};
-        bottomLeftSwap(r, v);
-        bottomLeftSwap(self, v);
-    }
-
-    function bottomLeft(self&) swap (bl: Vec2) {
-        std::swap{Vec2}(v, { h.low, v.low });
-    }
+function update(v&: float) { v = 2.0; }
+function callUpdate(r&: Rect) {
+    update(r.bottomLeft().x());
 }
 
 struct Array(T: Type) {
