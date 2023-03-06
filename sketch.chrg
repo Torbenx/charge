@@ -147,9 +147,7 @@ function callUpdate(r&: Rect) {
 
 struct Array(T: Type) {
     has Index{(int) -> T} {
-        function swap(self&, i: num, item&: T) {
-            std::swap(...[i], item);
-        }
+        function index(self&, i: int) => ...[i];
     }
 }
 

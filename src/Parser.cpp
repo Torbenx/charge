@@ -141,6 +141,22 @@ uint32_t STStorage::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t ite
     return ret;
 }
 
+std::string_view STContext::sview(Word word) const {
+    for (const auto& pair : storage->wordMap) {
+        if (pair.second == word.id)
+            return pair.first;
+    }
+    return {};
+}
+
+Word STContext::asWord(std::string_view view) {
+    std::string word { view };
+    uint32_t& id = storage->wordMap[std::move(word)];
+    if (id == 0)
+        id = storage->nextWordId++;
+    return Word { id };
+}
+
 static uint64_t parseInteger(std::string_view range) {
     auto characterValue = [](uint8_t c) -> uint64_t {
         if (c >= 'a' && c <= 'f')

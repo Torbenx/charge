@@ -31,20 +31,8 @@ public:
         return ctx;
     }
 
-    Word asWord(std::string_view view) {
-        std::string word { view };
-        uint32_t& id = storage->wordMap[std::move(word)];
-        if (id == 0)
-            id = storage->nextWordId++;
-        return Word { id };
-    }
-    std::string_view sview(Word word) const {
-        for (const auto& pair : storage->wordMap) {
-            if (pair.second == word.id)
-                return pair.first;
-        }
-        return {};
-    }
+    Word asWord(std::string_view view);
+    std::string_view sview(Word word) const;
 
     template<typename E>
     E& at(Ptr<E> e) {
