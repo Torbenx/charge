@@ -1166,7 +1166,16 @@ struct Interpreter : STContext {
         if (!parametricCtx.has_value())
             return {};
 
-        if (!convertFnArgs(parametricCtx.value(), fn.params, posFnArgs.value(), depScope.deductions))
+        // Early type context since we don't know all the parametric arguments yet.
+        // This is fine since the type expressions are evaluated in this context, which
+        // have to be constant expressions.
+        StaticLookupContext structCtx { &parametricCtx.value(), {} };
+        if (fn.kind == DeclKind::StructDecl) {
+            auto& structDecl = (StructDecl&)fn;
+            structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
+        }
+
+        if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), depScope.deductions))
             return {};
 
         applyDeductions(withCtx.value(), depScope.deductions);
@@ -1181,8 +1190,13 @@ struct Interpreter : STContext {
         if (!completeParameterContext(out.target.args(), parametricCtx.value()))
             return {};
 
-        // TODO: allow accessing 'self', member variables and functions in default initializers
-        auto fnArgs = completeFnArgs(parametricCtx.value(), fn.params, posFnArgs.value());
+        // Now the parametric arguments are deduced so we can make the proper context.
+        // This crutial since default member initializers can access mutable static members.
+        LookupContext* initializeCtx = &parametricCtx.value();
+        if (fn.kind == DeclKind::StructDecl)
+            initializeCtx = getTypeContext(out.target);
+
+        auto fnArgs = completeFnArgs(*initializeCtx, fn.params, posFnArgs.value());
         VERIFY(fnArgs.has_value());
         if (!fnArgs.has_value())
             return {};
@@ -1306,22 +1320,18 @@ struct Interpreter : STContext {
             auto posArgs = positionArguments(decl.params, {}, args);
             if (!posArgs.has_value())
                 return badCall;
-            CompleteCall call { type };
-            if (!withParametricContext(type, [&](LookupContext& context) -> bool {
-                    // TODO: allow accessing 'self', member variables and functions in default initializers
-                    DependentScope depScope { this };
-                    if (!convertFnArgs(context, decl.params, posArgs.value(), depScope.deductions))
-                        return false;
-                    EXPECT_EQ(depScope.deductions.size(), 0u);
+            DependentScope depScope { this };
+            LookupContext* typeCtx = getTypeContext(type);
+            if (!convertFnArgs(*typeCtx, decl.params, posArgs.value(), depScope.deductions))
+                return badCall;
+            EXPECT_EQ(depScope.deductions.size(), 0u);
 
-                    auto vals = completeFnArgs(context, decl.params, posArgs.value());
-                    if (!vals.has_value())
-                        return false;
-                    call.args = std::move(vals.value());
-                    return true;
-                }))
+            auto vals = completeFnArgs(*typeCtx, decl.params, posArgs.value());
+            if (!vals.has_value())
                 return badCall;
 
+            CompleteCall call { type };
+            call.args = std::move(vals.value());
             return ExprResult::make<CallExprRecord>(evaluateCall(call), call);
         }
         // function
