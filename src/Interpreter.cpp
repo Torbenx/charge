@@ -239,6 +239,14 @@ struct Interpreter : STContext {
             deref();
         }
     };
+    Value deepCopy(Value in) {
+        if (in.kind != ValueKind::Array || in.u.array->refCnt == 1)
+            return in;
+
+        Value out = makeArrayValue(std::move(in.type), in.u.array->size);
+        std::copy_n(in.u.array->array().data(), in.u.array->size, out.u.array->array().data());
+        return out;
+    }
     struct PositionalValue : Value {
         PositionalValue() = default;
         PositionalValue(Value value, uint32_t index)
@@ -282,12 +290,17 @@ struct Interpreter : STContext {
             CompleteDecl decl;
             Value value;
         };
+        struct DeclContext {
+            CompleteDecl decl;
+            StaticLookupContext* context;
+        };
         CompleteDecl staticDecl;
 
-        StaticLookupContext(StaticLookupContext* parent, CompleteDecl staticDecl)
+        StaticLookupContext(LookupContext* parent, CompleteDecl staticDecl)
             : LookupContext(LookupContextKind::Static, parent), staticDecl(std::move(staticDecl)) { }
 
         std::vector<DeclValue> values;
+        std::vector<DeclContext> children;
     };
     struct ParameterLookupContext : LocalLookupContext {
         std::vector<Value> valuesVector;
@@ -374,7 +387,7 @@ struct Interpreter : STContext {
 
         template<std::derived_from<ExprRecord> T, typename... Args>
         static ExprResult make(Args&&... args) {
-            return ExprResult { new T(args...) };
+            return ExprResult { new T(std::forward<Args>(args)...) };
         }
 
         void ref() {
@@ -444,12 +457,15 @@ struct Interpreter : STContext {
 
     Type typeType;
     Type numType;
-    Ptr<Decl> arrayDecl;
+    ParameterizedDecl arrayDecl;
     Type overloadType;
     Type overloadSetType;
+    ParameterizedDecl memberOverloadSetDecl;
+    Ptr<LocalDecl> memberOverloadSetBaseMember;
     Type typeOverloadType;
     Type typeOverloadSetType;
     Type boolType;
+    Word selfWord;
 
     // convert{To}(from)
     std::vector<Ptr<FnDecl>> conversions;
@@ -508,6 +524,7 @@ struct Interpreter : STContext {
         overloadSetType = findCompDeclHelper(asWord("OverloadSet"));
         typeOverloadType = findCompDeclHelper(asWord("TypeOverload"));
         typeOverloadSetType = findCompDeclHelper(asWord("TypeOverloadSet"));
+        selfWord = asWord("self");
 
         boolType = findCompDeclHelper(asWord("bool"));
         auto falseDecl = findCompDeclHelper(asWord("false"));
@@ -517,8 +534,12 @@ struct Interpreter : STContext {
         VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
         trueDecl.staticContext->values.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
 
-        arrayDecl = findDeclHelper(asWord("Array")).decl;
-        VERIFY(at(arrayDecl).kind == DeclKind::StructDecl);
+        arrayDecl = findDeclHelper(asWord("Array"));
+        VERIFY(at(arrayDecl.decl).kind == DeclKind::StructDecl);
+        memberOverloadSetDecl = findDeclHelper(asWord("MemberOverloadSet"));
+        VERIFY(at(memberOverloadSetDecl.decl).kind == DeclKind::StructDecl);
+        memberOverloadSetBaseMember = at(as<StructDecl>(memberOverloadSetDecl.decl).params.params, 0);
+        VERIFY(cmpWord(at(memberOverloadSetBaseMember).name, asWord("base")));
     }
 
     Type typeOf(const Value& value) {
@@ -598,7 +619,7 @@ struct Interpreter : STContext {
             return true;
         }
         case ValueKind::ParameterizedDecl:
-            VERIFY_NOT_REACHED();
+            return cmpParameterizedDecls(l.type, r.type);
         case ValueKind::CompleteDecl:
             return cmpCompleteDecls(l.type, r.type);
         default:
@@ -615,15 +636,35 @@ struct Interpreter : STContext {
         }
         return true;
     }
+    bool cmpParameterizedDecls(const ParameterizedDecl& l, const ParameterizedDecl& r) {
+        if (l.decl != r.decl)
+            return false;
+        if (l.args().size() != r.args().size())
+            return false;
+        for (uint32_t i = 0; i < l.args().size(); i++) {
+            if (l.args()[i].index() != r.args()[i].index())
+                return false;
+            if (!cmpValue(l.args()[i], r.args()[i]))
+                return false;
+        }
+        return true;
+    }
 
     std::optional<std::vector<PositionalExprResult>> positionArguments(Parameters& parameters,
-        std::span<const PositionalExprResult> inArgs, std::span<const NamedExprResult> subArgs) {
+        std::span<const PositionalExprResult> inArgs, std::span<const NamedExprResult> subArgs, std::optional<ExprResult> selfArg = {}) {
 
         std::vector<PositionalExprResult> out;
         auto params = at(parameters.params);
         uint32_t inOff = 0;
         uint32_t subOff = 0;
-        for (uint32_t i = 0; i < params.size(); i++) {
+        uint32_t i = 0;
+        if (params.size() > 0 && cmpWord(at(params[0]).name, selfWord) && selfArg.has_value()) {
+            if (inArgs.size() > 0 && inArgs[0].index() == 0)
+                return {};
+            out.push_back({ selfArg.value(), 0 });
+            i += 1;
+        }
+        for (; i < params.size(); i++) {
             if (inOff < inArgs.size() && inArgs[inOff].index() == i) {
                 out.push_back(inArgs[inOff]);
                 inOff += 1;
@@ -710,8 +751,8 @@ struct Interpreter : STContext {
             ParameterizedDecl decl { (Ptr<Decl>)declP, globalContext };
             decl.allocateArgs(1);
             decl.args()[0] = { targetTypeValue, 0 };
-            std::vector<PositionalExprResult> fnArgs { { sourceValue, 0 } };
-            auto c = completeCall(decl, std::move(fnArgs));
+            std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
+            auto c = completeCall(decl, fnArgs);
             if (c.has_value()) {
                 VERIFY(!call.has_value());
                 call = std::move(c.value());
@@ -728,7 +769,11 @@ struct Interpreter : STContext {
     };
     bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, std::vector<Deduction>& deductions) {
         for (auto& arg : args) {
-            Value type = evaluateExpr(context, at(at(params.params, arg.index())).type);
+            Ptr<Expr> typeExpr = at(at(params.params, arg.index())).type;
+            if (!typeExpr)
+                continue;
+
+            Value type = evaluateExpr(context, typeExpr);
             ExprResult cvtArg = convertAndDeduce(type, arg, deductions);
             if (!cvtArg.value().valid()) {
                 fmt::print("unable to initialize ");
@@ -941,14 +986,9 @@ struct Interpreter : STContext {
     Value& getValueRef(const LValue& lVal) {
         VERIFY(lVal.valid());
         VERIFY((bool)asVar(lVal.decl.decl));
-        if (auto sContext = asStaticContext(*lVal.context)) {
-            for (auto& v : sContext->values) {
-                if (cmpCompleteDecls(v.decl, lVal.decl))
-                    return v.value;
-            }
-            Value v = initialize(lVal.decl);
-            sContext->values.push_back({ lVal.decl, v });
-            return sContext->values.back().value;
+        if (lVal.context->kind == LookupContextKind::Static) {
+            VERIFY(lVal.context == lVal.decl.staticContext);
+            return getStaticValueRef(lVal.decl);
         }
 
         LocalLookupContext* lContext = (LocalLookupContext*)lVal.context;
@@ -964,6 +1004,23 @@ struct Interpreter : STContext {
     }
     void setValue(const LValue& lVal, Value value) {
         getValueRef(lVal) = value;
+    }
+    Value& getStaticValueRef(const CompleteDecl& decl) {
+        VERIFY((bool)decl.staticContext);
+        auto context = decl.staticContext;
+        for (auto& v : context->values) {
+            if (cmpCompleteDecls(v.decl, decl))
+                return v.value;
+        }
+        Value v = initialize(decl);
+        context->values.push_back({ decl, v });
+        return context->values.back().value;
+    }
+    Value getStaticValue(const CompleteDecl& decl) {
+        return getStaticValueRef(decl);
+    }
+    void setStaticValue(const CompleteDecl& decl, Value v) {
+        getStaticValueRef(decl) = std::move(v);
     }
 
     // args must not be a temporary and the values inside it may be modified
@@ -1036,9 +1093,7 @@ struct Interpreter : STContext {
         IdentifierExprRecord(Value result, LValue lValue)
             : ExprRecord(RecordKind::IdentifierExpr, result), lValue(lValue) { }
     };
-    ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
-        LookupResult r = lookupIdentifier(ctx, e.identifier);
-
+    ExprResult lookupToValue(LookupResult r) {
         switch (r.declKind) {
         case DeclKind::GlobalDecl:
         case DeclKind::LocalDecl: {
@@ -1060,6 +1115,9 @@ struct Interpreter : STContext {
             VERIFY_NOT_REACHED();
         }
     }
+    ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
+        return lookupToValue(lookupIdentifier(ctx, e.identifier));
+    }
 
     struct IntLiteralExprRecord : ExprRecord {
         IntLiteralExprRecord(Value result)
@@ -1073,14 +1131,13 @@ struct Interpreter : STContext {
         CompleteDecl target;
         std::vector<FnArgumentResult> args = {};
     };
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::span<const NamedExprResult> namedFnArgs) {
-        auto posFnArgs = positionArguments(as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs);
+    std::optional<CompleteCall> completeCall(
+        const ParameterizedDecl& fnDecl, std::span<const NamedExprResult> namedFnArgs, std::optional<ExprResult> selfArg = {}) {
+
+        auto posFnArgs = positionArguments(as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs, selfArg);
         if (!posFnArgs.has_value())
             return {};
 
-        return completeCall(fnDecl, std::move(posFnArgs.value()));
-    }
-    std::optional<CompleteCall> completeCall(const ParameterizedDecl& fnDecl, std::vector<PositionalExprResult> posFnArgs) {
         VERIFY(fnDecl.staticContext != nullptr);
         auto& fn = as<CallableDecl>(fnDecl.decl);
 
@@ -1094,7 +1151,7 @@ struct Interpreter : STContext {
         if (!parametricCtx.has_value())
             return {};
 
-        if (!convertFnArgs(parametricCtx.value(), fn.params, posFnArgs, depScope.deductions))
+        if (!convertFnArgs(parametricCtx.value(), fn.params, posFnArgs.value(), depScope.deductions))
             return {};
 
         applyDeductions(withCtx.value(), depScope.deductions);
@@ -1109,7 +1166,7 @@ struct Interpreter : STContext {
         if (!completeParameterContext(out.target.args(), parametricCtx.value()))
             return {};
 
-        auto fnArgs = completeFnArgs(parametricCtx.value(), fn.params, posFnArgs);
+        auto fnArgs = completeFnArgs(parametricCtx.value(), fn.params, posFnArgs.value());
         VERIFY(fnArgs.has_value());
         if (!fnArgs.has_value())
             return {};
@@ -1127,7 +1184,7 @@ struct Interpreter : STContext {
                 VERIFY(assignArg.kind == ValueKind::Array);
                 VERIFY(cmpCompleteDecls(assignArg.type, call.target));
                 for (uint32_t i = 0; i < call.args.size(); i++)
-                    setExprValue(call.args[i], assignArg.u.array->array()[i]);
+                    VERIFY(setExprValue(call.args[i], assignArg.u.array->array()[i]));
                 return {};
             } else {
                 Value result = makeArrayValue(call.target, call.args.size());
@@ -1156,7 +1213,7 @@ struct Interpreter : STContext {
                 if (!call.args[i].isInOut)
                     continue;
 
-                setExprValue(call.args[i], fnParamCtx.values[i]);
+                VERIFY(setExprValue(call.args[i], fnParamCtx.values[i]));
             }
 
             if (flow.kind == ControlFlowKind::None)
@@ -1180,13 +1237,10 @@ struct Interpreter : STContext {
         }
         return true;
     }
-    ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
+    ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args) {
         auto badCall = ExprResult::make<CallExprRecord>(Value {}, std::nullopt);
-
-        Value base = evaluateExpr(ctx, e.base);
+        Value base = baseR;
         auto baseType = typeOf(base);
-        VERIFY(e.callKind == CallKind::Paren);
-        auto args = evaluateArguments(ctx, e.args);
 
         // constructor
         if (cmpCompleteDecls(baseType, typeOverloadSetType)) {
@@ -1205,7 +1259,8 @@ struct Interpreter : STContext {
                 return badCall;
 
             return ExprResult::make<CallExprRecord>(evaluateCall(call.value()), call.value());
-        } else if (cmpCompleteDecls(baseType, typeType)) {
+        }
+        if (cmpCompleteDecls(baseType, typeType)) {
             auto type = asTypeValue(base);
             auto& decl = as<StructDecl>(type.decl);
             auto posArgs = positionArguments(decl.params, {}, args);
@@ -1218,10 +1273,10 @@ struct Interpreter : STContext {
                         return false;
                     EXPECT_EQ(depScope.deductions.size(), 0u);
 
-                    auto valsOpt = completeFnArgs(context, decl.params, posArgs.value());
-                    if (!valsOpt.has_value())
+                    auto vals = completeFnArgs(context, decl.params, posArgs.value());
+                    if (!vals.has_value())
                         return false;
-                    call.args = std::move(valsOpt.value());
+                    call.args = std::move(vals.value());
                     return true;
                 }))
                 return badCall;
@@ -1229,13 +1284,20 @@ struct Interpreter : STContext {
             return ExprResult::make<CallExprRecord>(evaluateCall(call), call);
         }
         // function
-        else if (cmpCompleteDecls(baseType, overloadSetType)) {
+        std::optional<ExprResult> selfArg;
+        if (baseType.decl == memberOverloadSetDecl.decl) {
+            VERIFY(base.kind == ValueKind::Array);
+            selfArg = ExprResult::make<AccessExprRecord>(base.u.array->array()[0], baseR, memberOverloadSetBaseMember);
+            base = baseType.args()[1];
+            baseType = typeOf(base);
+        }
+        if (cmpCompleteDecls(baseType, overloadSetType)) {
             VERIFY(base.kind == ValueKind::Array);
             std::optional<CompleteCall> call;
             std::optional<CompleteCall> assignCall;
             for (Value& overload : base.u.array->array()) {
                 VERIFY(overload.kind == ValueKind::ParameterizedDecl);
-                std::optional<CompleteCall> c = completeCall(overload.type, args);
+                std::optional<CompleteCall> c = completeCall(overload.type, args, selfArg);
                 if (!c.has_value())
                     continue;
 
@@ -1267,22 +1329,86 @@ struct Interpreter : STContext {
             }
             return ExprResult::make<CallExprRecord>(callResult, assignCall);
         }
+        fmt::print("can not call ");
+        dumpValue(base);
+        fmt::print("of type ");
+        dumpValue(makeTypeValue(baseType));
         VERIFY_NOT_REACHED();
+    }
+    ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
+        VERIFY(e.callKind == CallKind::Paren);
+        ExprResult base = evaluateExpr(ctx, e.base);
+        auto args = evaluateArguments(ctx, e.args);
+        return invokeCall(base, args);
     }
 
     struct ParenExprRecord : ExprRecord {
-        ExprResult base;
-        ParenExprRecord(ExprResult result)
-            : ExprRecord(RecordKind::ParenExpr, result.value()), base(result) { }
+        ParenExprRecord(Value result)
+            : ExprRecord(RecordKind::ParenExpr, std::move(result)) { }
     };
     ExprResult evalParenExpr(LookupContext& context, ParenExpr& e) {
         return ExprResult::make<ParenExprRecord>(evaluateExpr(context, e.subExpr));
     }
 
+    struct AccessExprRecord : ExprRecord {
+        ExprResult base;
+        Ptr<LocalDecl> accessDecl;
+        AccessExprRecord(Value result, ExprResult base, Ptr<LocalDecl> accessDecl)
+            : ExprRecord(RecordKind::AccessExpr, result), base(base), accessDecl(accessDecl) { }
+    };
+    StaticLookupContext* getTypeContext(const Type& type) {
+        for (auto& child : type.staticContext->children) {
+            if (cmpCompleteDecls(child.decl, type))
+                return child.context;
+        }
+
+        auto& d = as<StructDecl>(type.decl);
+        auto withCtx = make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext, d.with.params, type.withArgs()));
+        auto paramCtx = make<LocalLookupContext>(makeCompleteParameterContext(at(withCtx), d.parametric, type.args()));
+        auto& typeCtx = at(make<StaticLookupContext>(&at(paramCtx), type));
+        typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
+        type.staticContext->children.push_back({ type, &typeCtx });
+        return &typeCtx;
+    }
+    ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
+        ExprResult base = evaluateExpr(context, e.base);
+        Value baseValue = base;
+        if (!e.isStatic && baseValue.kind == ValueKind::Array && e.member.args.count == 0) {
+            auto members = at(as<StructDecl>(baseValue.type.decl).params.params);
+            for (uint32_t i = 0; i < members.size(); i++) {
+                if (cmpWord(at(members[i]).name, e.member.word))
+                    return ExprResult::make<AccessExprRecord>(baseValue.u.array->array()[i], base, members[i]);
+            }
+        }
+        Type type = e.isStatic ? toCompleteType(baseValue) : typeOf(baseValue);
+        auto* typeCtx = getTypeContext(type);
+
+        auto args = evaluateArguments(context, e.member);
+        LookupResult r = lookupIdentifierIn(*typeCtx, e.member.word, args);
+        DeclKind declKind = r.declKind;
+        ExprResult idVal = lookupToValue(std::move(r));
+        if (!idVal.value().valid())
+            return idVal;
+
+        auto badAccess = ExprResult::make<IdentifierExprRecord>(Value {}, LValue {});
+        if (declKind == DeclKind::StructDecl && !e.isStatic)
+            return badAccess;
+        if (e.isStatic || declKind != DeclKind::FnDecl)
+            return idVal;
+
+        ParameterizedDecl setDecl = memberOverloadSetDecl;
+        setDecl.allocateArgs(2);
+        setDecl.args()[0] = { ExprResult::make<HackedRecord>(makeTypeValue(type)), 0 };
+        setDecl.args()[1] = { idVal, 1 };
+        CompleteDecl setDeclComp = completeDecl(setDecl);
+
+        std::array<NamedExprResult, 1> baseArg { { { base, {} } } };
+        return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(setDeclComp)), baseArg);
+    }
+
     ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
-    ExprResult evalAccessExpr(LookupContext&, AccessExpr&) { VERIFY_NOT_REACHED(); }
-    ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
     ExprResult evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
+    ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
 
     bool setExprValue(ExprResult base, Value value) {
         switch (base.kind()) {
@@ -1299,6 +1425,22 @@ struct Interpreter : STContext {
                 return false;
             evaluateCall(b.assignCall.value(), value);
             return true;
+        }
+        case RecordKind::AccessExpr: {
+            auto& b = base.as<AccessExprRecord>();
+            if (!b.accessDecl)
+                return false;
+            Value baseValue = b.base;
+            VERIFY(baseValue.kind == ValueKind::Array);
+            auto members = at(as<StructDecl>(baseValue.type.decl).params.params);
+            for (uint32_t i = 0; i < members.size(); i++) {
+                if (members[i] == b.accessDecl) {
+                    Value newVal = deepCopy(baseValue);
+                    newVal.u.array->array()[i] = value;
+                    return setExprValue(b.base, newVal);
+                }
+            }
+            VERIFY_NOT_REACHED();
         }
         default:
             VERIFY_NOT_REACHED();
@@ -1378,7 +1520,7 @@ struct Interpreter : STContext {
         if (stmt.op == AssignOperator::None) {
             ExprResult left = evaluateExpr(context, stmt.left);
             ExprResult right = evaluateExpr(context, stmt.right);
-            setExprValue(left, right.value());
+            VERIFY(setExprValue(left, right.value()));
         } else
             VERIFY_NOT_REACHED();
         return {};
@@ -1427,6 +1569,9 @@ void testInterpreter() {
 
         struct Overload{} {}
         struct OverloadSet{} {}
+        struct MemberOverloadSet{T: Type, set: OverloadSet} {
+            base: T;
+        }
 
         struct TypeOverload{} {}
         struct TypeOverloadSet{} {}
@@ -1495,7 +1640,18 @@ void testInterpreter() {
             let x: num = 1;
             let y: num = 2;
             A(x, y) = a;
-            return A(x, y);
+            return A(x, y).x;
+        }
+
+        struct Base{} {
+            x: num = 0;
+            function set(self&, y: num) { self.x = y; }
+            function get(self) { return self.x; }
+        }
+        function testBase() {
+            mut b: Base = Base();
+            b.set(7);
+            return b.get();
         }
     )str");
 
@@ -1510,4 +1666,5 @@ void testInterpreter() {
     eval("updateWrappedGlobalVal()");
     eval("bar(mkConst{mkConst{5}()}())");
     eval("testA()");
+    eval("testBase()");
 }

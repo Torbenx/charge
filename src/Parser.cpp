@@ -540,9 +540,12 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
             advance();
             parseBinaryExpr(info->type);
         }
-        EXPECT_EQ(tok.kind(), TokenKind::Equal);
-        advance();
-        parseBinaryExpr(info->initializer);
+        if (tok.kind() == TokenKind::Equal) {
+            advance();
+            parseBinaryExpr(info->initializer);
+        } else
+            VERIFY(scope == DeclParseScope::Struct);
+
         EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
         advance();
     }
