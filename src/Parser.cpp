@@ -448,7 +448,7 @@ void Parser::parseParameterContext(Parameters& out, ParameterParseScope scope) {
             advance();
     }
     advance();
-    out.params = finalizeSpan(params);
+    out.params = (Span<Ptr<Decl>>)finalizeSpan(params);
 }
 
 void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
@@ -495,8 +495,33 @@ void Parser::parseWithClause(WithClause& out) {
 void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     WithClause with;
-    if (source.view(tok) == "with")
+    if (source.view(tok) == "with") {
         parseWithClause(with);
+    }
+    // has
+    else if (source.view(tok) == "has") {
+        VERIFY(scope == DeclParseScope::Struct);
+        advance();
+        auto& d = makeSet<HasDecl>(out);
+        parseBinaryExpr(d.type);
+        
+        if (tok.kind() == TokenKind::SemiColon) {
+            advance();
+            return;
+        }
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        advance();
+        auto decls = beginSpan<Ptr<StaticDecl>>();
+        while (tok.kind() != TokenKind::RightBrace) {
+            Ptr<Decl> decl = {};
+            parseDecl(decl, DeclParseScope::Has);
+            VERIFY(isStaticDecl(decl));
+            append(decls, (Ptr<StaticDecl>)decl);
+        }
+        advance();
+        d.decls = finalizeSpan(decls);
+        return;
+    }
 
     bool hasStatic = false;
     bool hasMut = false;
@@ -524,13 +549,20 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         declarator = {};
     }
     VERIFY((bool)name);
-    if (scope == DeclParseScope::Namespace) {
+    switch (scope) {
+    case DeclParseScope::Namespace:
         // [mut] name
         VERIFY(!hasStatic);
-    } else {
+        break;
+    case DeclParseScope::Struct:
         // static [mut] name
         // name
         VERIFY(!(hasMut && !hasStatic));
+        break;
+    case DeclParseScope::Has:
+        // static [mut] name
+        VERIFY(hasStatic);
+        break;
     }
 
     Parameters parametric;
@@ -592,7 +624,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         VERIFY(!hasStatic);
         advance();
         auto& d = makeSet<StructDecl>(out, name);
-        auto memberDecls = beginSpan<Ptr<LocalDecl>, 0>();
+        auto memberDecls = beginSpan<Ptr<Decl>, 0>();
         auto staticDecls = beginSpan<Ptr<StaticDecl>, 1>();
         while (tok.kind() != TokenKind::RightBrace) {
             Ptr<Decl> decl;
@@ -600,8 +632,8 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
             if (Ptr<StaticDecl> sDecl = asStaticDecl(decl)) {
                 append(staticDecls, sDecl);
             } else {
-                VERIFY(at(decl).kind == DeclKind::LocalDecl);
-                append(memberDecls, (Ptr<LocalDecl>)decl);
+                VERIFY(at(decl).kind == DeclKind::LocalDecl || at(decl).kind == DeclKind::HasDecl);
+                append(memberDecls, (Ptr<Decl>)decl);
             }
         }
         advance();

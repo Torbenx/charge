@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include <vector>
 
-
 inline constexpr uint32_t BUMP_START_OFFSET_ALIGN4 = 128;
 
 struct STStorage {
@@ -78,6 +77,28 @@ public:
             return (Ptr<LocalDecl>)decl;
         case DeclKind::GlobalDecl:
             return (Ptr<GlobalDecl>)decl;
+        default:
+            return {};
+        }
+    }
+    bool isNamedDecl(Ptr<Decl> decl) {
+        return at(decl).kind != DeclKind::HasDecl;
+    }
+    Ptr<NamedDecl> asNamedDecl(Ptr<Decl> decl) {
+        if (decl && isNamedDecl(decl))
+            return (Ptr<NamedDecl>)decl;
+        return {};
+    }
+    Ptr<TypedInfo> asTyped(Ptr<Decl> decl) {
+        if (!decl)
+            return {};
+        switch (at(decl).kind) {
+        case DeclKind::LocalDecl:
+            return (Ptr<LocalDecl>)decl;
+        case DeclKind::GlobalDecl:
+            return (Ptr<GlobalDecl>)decl;
+        case DeclKind::HasDecl:
+            return (Ptr<HasDecl>)decl;
         default:
             return {};
         }
@@ -183,6 +204,7 @@ struct Parser : Lexer, STContext {
     enum DeclParseScope {
         Namespace,
         Struct,
+        Has,
     };
     void parseDecl(Ptr<Decl>& out, DeclParseScope scope);
 };

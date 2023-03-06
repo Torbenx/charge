@@ -124,7 +124,7 @@ struct Arguments {
 };
 
 struct Parameters {
-    Span<Ptr<LocalDecl>> params;
+    Span<Ptr<Decl>> params;
 };
 
 struct WithClause {
@@ -136,6 +136,11 @@ struct Identifier : Arguments {
 };
 
 // Declarations
+// named   : Global, Local, Struct, Fn
+// callable: Struct, Fn
+// type    : Global, Local, Has
+// var     : Global, Local
+
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
     Decl(DeclKind kind)
@@ -154,8 +159,10 @@ struct StaticDecl : NamedDecl {
     using NamedDecl::NamedDecl;
 };
 
-struct VarInfo {
+struct TypedInfo {
     Ptr<Expr> type;
+};
+struct VarInfo : TypedInfo {
     Ptr<Expr> initializer;
     bool isMutable = false;
     bool isInOut = false;
@@ -192,11 +199,10 @@ struct FnDecl : CallableDecl {
         : CallableDecl(DeclKind::FnDecl, name) { }
 };
 
-struct HasDecl : Decl {
-    Ptr<Expr> type;
+struct HasDecl : Decl, TypedInfo {
     Span<Ptr<StaticDecl>> decls;
-    HasDecl(Ptr<Expr> type = {})
-        : Decl(DeclKind::HasDecl), type(type) { }
+    HasDecl()
+        : Decl(DeclKind::HasDecl) { }
 };
 
 // Expressions
