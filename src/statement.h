@@ -9,7 +9,8 @@
     DECL_KIND(StructDecl)    \
     DECL_KIND(FnDecl)        \
     DECL_KIND(GlobalDecl)    \
-    DECL_KIND(LocalDecl)
+    DECL_KIND(LocalDecl)     \
+    DECL_KIND(HasDecl)
 
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
@@ -137,15 +138,20 @@ struct Identifier : Arguments {
 // Declarations
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
-    Word name;
-    Decl(DeclKind kind, Word name)
-        : kind(kind), name(name) { }
+    Decl(DeclKind kind)
+        : kind(kind) { }
 };
 
-struct StaticDecl : Decl {
+struct NamedDecl : Decl {
+    Word name;
+    NamedDecl(DeclKind kind, Word name)
+        : Decl(kind), name(name) { }
+};
+
+struct StaticDecl : NamedDecl {
     WithClause with;
     Parameters parametric;
-    using Decl::Decl;
+    using NamedDecl::NamedDecl;
 };
 
 struct VarInfo {
@@ -162,9 +168,9 @@ struct GlobalDecl : StaticDecl, VarInfo {
         : StaticDecl(DeclKind::GlobalDecl, name), VarInfo(isMutable) { }
 };
 
-struct LocalDecl : Decl, VarInfo {
+struct LocalDecl : NamedDecl, VarInfo {
     LocalDecl(Word name, bool isMutable)
-        : Decl(DeclKind::LocalDecl, name), VarInfo(isMutable) { }
+        : NamedDecl(DeclKind::LocalDecl, name), VarInfo(isMutable) { }
 };
 
 struct CallableDecl : StaticDecl {
@@ -184,6 +190,13 @@ struct FnDecl : CallableDecl {
     Ptr<LocalDecl> assignParam;
     FnDecl(Word name = {})
         : CallableDecl(DeclKind::FnDecl, name) { }
+};
+
+struct HasDecl : Decl {
+    Ptr<Expr> type;
+    Span<Ptr<StaticDecl>> decls;
+    HasDecl(Ptr<Expr> type = {})
+        : Decl(DeclKind::HasDecl), type(type) { }
 };
 
 // Expressions
@@ -354,8 +367,8 @@ struct IntLiteralExpr : Expr {
 };
 
 struct LetStmt : Stmt {
-    Ptr<Decl> decl;
-    LetStmt(Ptr<Decl> decl = {})
+    Ptr<NamedDecl> decl;
+    LetStmt(Ptr<NamedDecl> decl = {})
         : Stmt(StmtKind::LetStmt), decl(decl) { }
 };
 

@@ -328,7 +328,7 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     }
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    Ptr<Decl> decl;
+    Ptr<NamedDecl> decl;
     VarInfo* info;
     if (isConst)
         info = &makeSet<GlobalDecl>(decl, asWord(tok), true);

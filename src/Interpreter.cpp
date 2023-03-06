@@ -74,7 +74,7 @@ struct Interpreter : STContext {
         }
     };
     struct CompleteDeclBase {
-        Ptr<Decl> decl = {};
+        Ptr<NamedDecl> decl = {};
         uint16_t dependentNestLevel = 0;
         uint16_t argCount = 0;
         StaticLookupContext* staticContext = nullptr;
@@ -103,7 +103,7 @@ struct Interpreter : STContext {
     };
     struct CompleteDecl : CompleteDeclBase {
         CompleteDecl() = default;
-        CompleteDecl(Ptr<Decl> decl, StaticLookupContext* staticContext = nullptr, uint16_t dependentNestLevel = 0)
+        CompleteDecl(Ptr<NamedDecl> decl, StaticLookupContext* staticContext = nullptr, uint16_t dependentNestLevel = 0)
             : CompleteDeclBase { .decl = decl, .dependentNestLevel = dependentNestLevel, .staticContext = staticContext } { }
         CompleteDecl(const CompleteDecl& other)
             : CompleteDeclBase(other) { ValueArray::ref(argsAndWithArgs); }
@@ -165,7 +165,7 @@ struct Interpreter : STContext {
         union {
             ValueArray* array;
             int64_t builtinValue;
-            Ptr<Decl> declType;
+            Ptr<NamedDecl> declType;
             struct {
                 Ptr<LocalDecl> decl;
                 uint32_t nestLevel;
@@ -180,7 +180,7 @@ struct Interpreter : STContext {
         Value() = default;
         Value(Type type, int64_t value)
             : type(std::move(type)), u { .builtinValue = value }, kind(ValueKind::Builtin) { }
-        Value(complete_t, Ptr<Decl> type, CompleteDecl decl)
+        Value(complete_t, Ptr<NamedDecl> type, CompleteDecl decl)
             : type(std::move(decl)), u { .declType = type }, kind(ValueKind::CompleteDecl) { }
         Value(Type type, Ptr<LocalDecl> depDecl, uint32_t level)
             : type(std::move(type)), u { .dependent = { depDecl, level } }, kind(ValueKind::Dependent) { }
@@ -188,7 +188,7 @@ struct Interpreter : STContext {
             : type(std::move(type))
             , u { .array = ValueArray::make(size) }
             , kind(ValueKind::Array) { }
-        Value(parameterized_t, Ptr<Decl> type, ParameterizedDecl decl)
+        Value(parameterized_t, Ptr<NamedDecl> type, ParameterizedDecl decl)
             : type(std::move(decl)), u { .declType = type }, kind(ValueKind::ParameterizedDecl) { }
 
         Value(const Value& other)
@@ -274,7 +274,7 @@ struct Interpreter : STContext {
     struct LookupContext {
         LookupContext* parent = nullptr;
         LookupContextKind kind;
-        std::span<const Ptr<Decl>> decls = {};
+        std::span<const Ptr<NamedDecl>> decls = {};
         LookupContext(LookupContextKind kind, LookupContext* parent)
             : parent(parent), kind(kind) { }
     };
@@ -313,11 +313,11 @@ struct Interpreter : STContext {
         }
     };
     struct BlockLookupContext : LocalLookupContext {
-        std::vector<Ptr<Decl>> declsVector;
+        std::vector<Ptr<NamedDecl>> declsVector;
         std::vector<Value> valuesVector;
         BlockLookupContext(LookupContext* parent)
             : LocalLookupContext(parent) { }
-        void declare(Ptr<Decl> decl, Value value) {
+        void declare(Ptr<NamedDecl> decl, Value value) {
             EXPECT_EQ(declsVector.size(), valuesVector.size());
             declsVector.push_back(decl);
             valuesVector.emplace_back(std::move(value));
@@ -493,10 +493,11 @@ struct Interpreter : STContext {
 
     void interpretDecls(SourceBuffer buffer) {
         Parser parser { *this, buffer };
-        auto decls = parser.beginSpan<Ptr<Decl>>();
+        auto decls = parser.beginSpan<Ptr<NamedDecl>>();
         while (parser.tok.kind() != TokenKind::EOS) {
-            auto& d = parser.append(decls, {});
+            Ptr<Decl> d = {};
             parser.parseDecl(d, Parser::DeclParseScope::Namespace);
+            parser.append(decls, (Ptr<NamedDecl>)d);
         }
         Ptr<StaticLookupContext> ctx = make<StaticLookupContext>(globalContext, CompleteDecl {});
         globalContext = &at(ctx);
@@ -566,7 +567,7 @@ struct Interpreter : STContext {
             return value.type;
         case ValueKind::Dependent: {
             VERIFY(value.type.decl == typeType.decl);
-            Type ret = { (Ptr<Decl>)value.u.dependent.decl };
+            Type ret = { value.u.dependent.decl };
             ret.dependentNestLevel = value.u.dependent.nestLevel;
             return ret;
         }
@@ -601,7 +602,7 @@ struct Interpreter : STContext {
     Value makeArrayValue(Type type, uint32_t size) {
         return Value { std::move(type), size };
     }
-    Value makeParameterizedDeclValue(Ptr<Decl> type, ParameterizedDecl decl) {
+    Value makeParameterizedDeclValue(Ptr<NamedDecl> type, ParameterizedDecl decl) {
         return Value { parameterized_t(), type, std::move(decl) };
     }
 
@@ -752,7 +753,7 @@ struct Interpreter : STContext {
 
         std::optional<CompleteCall> call;
         for (Ptr<FnDecl> declP : conversions) {
-            ParameterizedDecl decl { (Ptr<Decl>)declP, globalContext };
+            ParameterizedDecl decl { declP, globalContext };
             decl.allocateArgs(1);
             decl.args()[0] = { targetTypeValue, 0 };
             std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
@@ -813,7 +814,7 @@ struct Interpreter : STContext {
     std::optional<ParameterLookupContext> makeParameterContext(
         LookupContext& parent, const Parameters& params, std::span<const PositionalValue> args, std::vector<Deduction>& deductions) {
 
-        std::span<Ptr<Decl>> allDecls = at((Span<Ptr<Decl>>)params.params);
+        std::span<Ptr<NamedDecl>> allDecls = at((Span<Ptr<NamedDecl>>)params.params);
         ParameterLookupContext context { &parent };
         uint32_t argOff = 0;
 
@@ -946,7 +947,7 @@ struct Interpreter : STContext {
 
     LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedExprResult> args) {
         LookupResult out;
-        for (Ptr<Decl> decl : context.decls) {
+        for (Ptr<NamedDecl> decl : context.decls) {
             if (!cmpWord(at(decl).name, name))
                 continue;
 
@@ -1030,7 +1031,7 @@ struct Interpreter : STContext {
 
     // args must not be a temporary and the values inside it may be modified
     LocalLookupContext makeCompleteParameterContext(LookupContext& parent, const Parameters& params, std::span<Value> args) {
-        auto decls = at((Span<Ptr<Decl>>)params.params);
+        auto decls = at((Span<Ptr<NamedDecl>>)params.params);
         LocalLookupContext context { &parent };
         context.decls = decls;
         context.values = args;
@@ -1172,7 +1173,7 @@ struct Interpreter : STContext {
         StaticLookupContext structCtx { &parametricCtx.value(), {} };
         if (fn.kind == DeclKind::StructDecl) {
             auto& structDecl = (StructDecl&)fn;
-            structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
+            structCtx.decls = at((Span<Ptr<NamedDecl>>)structDecl.staticDecls);
         }
 
         if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), depScope.deductions))
@@ -1238,7 +1239,7 @@ struct Interpreter : STContext {
                 hasSelf = true;
                 selfCtx.decls = { &selfDecl.decl, 1 };
                 selfCtx.values = { &firstArg, 1 };
-                memberCtx.decls = at((Span<Ptr<Decl>>)as<StructDecl>(firstArg.type.decl).params.params);
+                memberCtx.decls = at((Span<Ptr<NamedDecl>>)as<StructDecl>(firstArg.type.decl).params.params);
                 memberCtx.values = firstArg.u.array->array();
             }
         }
@@ -1249,7 +1250,7 @@ struct Interpreter : STContext {
                 uint32_t i = 0;
                 if (hasSelf)
                     i += 1;
-                fnParamCtx.decls = at((Span<Ptr<Decl>>)targetDecl.params.params).subspan(i);
+                fnParamCtx.decls = at((Span<Ptr<NamedDecl>>)targetDecl.params.params).subspan(i);
                 for (; i < call.args.size(); i++)
                     fnParamCtx.appendValue(call.args[i]);
             }
@@ -1417,7 +1418,7 @@ struct Interpreter : STContext {
         auto withCtx = make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext, d.with.params, type.withArgs()));
         auto paramCtx = make<LocalLookupContext>(makeCompleteParameterContext(at(withCtx), d.parametric, type.args()));
         auto& typeCtx = at(make<StaticLookupContext>(&at(paramCtx), type));
-        typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
+        typeCtx.decls = at((Span<Ptr<NamedDecl>>)d.staticDecls);
         type.staticContext->children.push_back({ type, &typeCtx });
         return &typeCtx;
     }
