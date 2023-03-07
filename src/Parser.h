@@ -31,6 +31,9 @@ public:
     }
 
     Word asWord(std::string_view view);
+    Word makeUnaryOpWord(UnaryOperator op);
+    Word makeBinaryOpWord(BinaryOperator op);
+    Word makeAssignOpWord(BinaryOperator op);
     std::string_view sview(Word word) const;
 
     template<typename E>

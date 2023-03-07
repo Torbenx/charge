@@ -3,18 +3,18 @@ struct Bar(T: Type) {
     add: T = 0;
     vals: Array{T} = { 1, 2, 3 };
     
-    function get(i: num) -> T {
+    function get(i: int) -> T {
         return vals[i] + add;
     }
 }
-Foo2 = Bar{num};
-struct Foo2 -> Bar{num};
+Foo2 = Bar{int};
+struct Foo2 -> Bar{int};
 
 function appendTo{T: Type}(v&: Array{T}, item: T) {
     v.append(item);
 }
 
-const sizeOf{T: Type}: num = sizeof(T);
+const sizeOf{T: Type}: int = sizeof(T);
 
 
 with {cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type}
@@ -22,9 +22,9 @@ function call{f{cargs..}: (params..) -> RetT}(args..: Tuple{params}) -> RetT {
     return f{cargs..}(args..);
 }
 
-function test{T: Type, size: num}(defaultValue: T = {}, table: FixedArray{T, num});
-call{test}({}, { 1, 2, 3 }); // -> call{test{T = num, size = 3}}
-call{test{T = num}}(table = {}); // -> call{test{T = num, size = 0}}
+function test{T: Type, size: int}(defaultValue: T = {}, table: FixedArray{T, int});
+call{test}({}, { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
+call{test{T = int}}(table = {}); // -> call{test{T = int, size = 0}}
 
 
 with {T: Type}
@@ -59,31 +59,31 @@ function recurse{?(# == 0): ?numeric}() {
 
 
 struct Int {
-    value: num = 0;
+    value: int = 0;
 }
-convert (i: Int) -> num { return i.value; }
-convert (n: num) -> Int { return { n }; }
+convert (i: Int) -> int { return i.value; }
+convert (n: int) -> Int { return { n }; }
 
 struct Int {
-    value: num = 0;
+    value: int = 0;
 
-    convert (self) -> num {
+    convert (self) -> int {
         return value;
     }
-    convert (n: num) {
+    convert (n: int) {
         return Int(value = n);
     }
 }
 
 function bar() {
-    let lambda = {} => (i: num) { };
+    let lambda = {} => (i: int) { };
     lambda(1);
 
-    let namedLambda = {} => foo(i: num) { };
+    let namedLambda = {} => foo(i: int) { };
     namedLambda.foo(1);
 
     let multiLambda = {} => {
-        function foo(i: num) { }
+        function foo(i: int) { }
         function bar() { }
     }
     multiLambda.foo(1);
@@ -91,11 +91,11 @@ function bar() {
 }
 
 struct vec3 {
-    x: num = 0;
-    y: num = 0;
-    z: num = 0;
+    x: int = 0;
+    y: int = 0;
+    z: int = 0;
 
-    function lengthSq() -> num;
+    function lengthSq() -> int;
 };
 function get() -> vec3;
 function q() {
@@ -105,7 +105,7 @@ function q() {
 
 struct Array(T: Type) {
     function popBack(self&) -> T;
-    function truncate(self&, newSize: num);
+    function truncate(self&, newSize: int);
 }
 function foo() {
     let arr: Array = { 1, 2, 3 };
@@ -152,9 +152,9 @@ struct Array(T: Type) {
 }
 
 with {T: Type}
-function withIndexType{C ?Index{(num) -> T}: Type}(c: C);
+function withIndexType{C ?Index{(int) -> T}: Type}(c: C);
 with {T: Type}
-function withIndexType(c: ?Index{(num) -> T});
+function withIndexType(c: ?Index{(int) -> T});
 with {T: Type}
 function getFirst(arr: ?match Array{T}) -> T {
     return arr.first();
@@ -200,4 +200,43 @@ function dispatch(ref{Expr} e) {
 
         }
     }
+}
+
+// Binary operators:
+// +   ->   Add
+// -   ->   Sub
+// &   ->   BitAnd
+// &&  ->   LogAnd
+// ^   ->   BitXor
+// |   ->   BitOr
+// ||  ->   LogOr
+// *   ->   Mul
+// /   ->   Div
+// %   ->   Rem
+// <<  ->   Shl
+// >>  ->   Shr
+
+// Unary operators:
+// !   ->   LogNot
+// ~   ->   BitNot
+//          PreInc
+//          PreDec
+// +   ->   Plus
+// -   ->   Neg
+//          PostInc
+//          PostDec
+
+operation Neg(i: Int) -> Int { return -i.value; }
+operation Add(i: Int, j: Int) -> Int { return i + j; }
+operation assign Add(i&: Int, j: Int) { i += j; }
+
+enum Ordering {
+    Less,
+    Equal,
+    Greater,
+}
+compare (i: int) with (j: int) -> Ordering {
+    if i == j return Ordering::Equal;
+    if i < j return Ordering::Less;
+    return Ordering::Greater;
 }

@@ -3,6 +3,7 @@
 #include "Lexer.h"
 #include <concepts>
 #include <cstdint>
+#include <optional>
 
 // Basics
 #define ENUMERATE_DECL_KINDS \
@@ -231,6 +232,7 @@ constexpr UnaryOperator tokenKindToUnaryOp(TokenKind kind) {
     return (UnaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstUnaryOp));
 }
 const char* toShortString(UnaryOperator op);
+const char* toShortString(UnaryOperator op);
 struct UnaryOperatorExpr : Expr {
     UnaryOperator op;
     Ptr<Expr> subExpr;
@@ -277,12 +279,10 @@ struct IdentifierExpr : Expr {
 };
 
 enum class BinaryOperator : uint8_t {
-    // this must match the order of TokenKind
+    // this must match the order binary AND assign operations in TokenKind
     // TODO: test this
     Plus, // +
     Minus, // -
-    NotEqual, // !=
-    Equal, // ==
     BitwiseAnd, // &
     LogicalAnd, // &&
     BitwiseXor, // ^
@@ -291,20 +291,30 @@ enum class BinaryOperator : uint8_t {
     Multiply, // *
     Divide, // /
     Remainder, // %
-    Less, // <
     ShiftLeft, // <<
+    ShiftRight, // >>
+
+    NotEqual, // !=
+    Equal, // ==
+    ValueEqual, // ===
+    Less, // <
     LessEqual, // <=
     Greater, // >
-    ShiftRight, // >>
     GreaterEqual, // >=
+    FirstCmp = NotEqual,
+    LastCmp = GreaterEqual,
 
     COUNT,
 };
+constexpr bool isCmpOp(BinaryOperator op) {
+    return op >= BinaryOperator::FirstCmp && op <= BinaryOperator::LastCmp;
+}
 constexpr BinaryOperator tokenKindToBinaryOp(TokenKind kind) {
     VERIFY(isBinaryOp(kind));
     return (BinaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstBinaryOp));
 }
 const char* toShortString(BinaryOperator op);
+const char* toOperationString(BinaryOperator op);
 int precedenceOf(BinaryOperator op);
 struct BinaryOperatorExpr : Expr {
     BinaryOperator op;
@@ -325,33 +335,17 @@ struct Stmt {
         : kind(kind) { }
 };
 
-enum class AssignOperator : uint8_t {
-    // this must match the order of TokenKind
-    // TODO: test this
-    None, // =
-    Plus, // +=
-    Minus, // -=
-    BitwiseAnd, // &=
-    BitwiseXor, // ^=
-    BitwiseOr, // |=
-    Multiply, // *=
-    Divide, // /=
-    Remainder, // %=
-    ShiftLeft, // <<=
-    ShiftRight, // >>=
-
-    COUNT,
-};
-constexpr AssignOperator tokenKindToAssignOp(TokenKind kind) {
+constexpr std::optional<BinaryOperator> tokenKindToAssignOp(TokenKind kind) {
+    if (kind == TokenKind::Equal)
+        return {};
     VERIFY(isAssignOp(kind));
-    return (AssignOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstAssignOp));
+    return (BinaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstAssignOp));
 }
-const char* toShortString(AssignOperator op);
 struct AssignStmt : Stmt {
-    AssignOperator op;
+    std::optional<BinaryOperator> op;
     Ptr<Expr> left;
     Ptr<Expr> right;
-    AssignStmt(AssignOperator op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
+    AssignStmt(std::optional<BinaryOperator> op, Ptr<Expr> left = {}, Ptr<Expr> right = {})
         : Stmt(StmtKind::AssignStmt), op(op), left(left), right(right) { }
 };
 

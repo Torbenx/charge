@@ -22,6 +22,7 @@ const char* toShortString(TokenKind kind) {
     case PlusEqual: return "+=";
     case MinusEqual: return "-=";
     case AmpAmp: return "&&";
+    case AmpAmpEqual: return "&&=";
     case Hat: return "^";
     case Percent: return "%";
     case Amp: return "&";
@@ -29,6 +30,7 @@ const char* toShortString(TokenKind kind) {
     case PercentEqual: return "%=";
     case AmpEqual: return "&=";
     case VertVert: return "||";
+    case VertVertEqual: return "||=";
     case Slash: return "/";
     case Star: return "*";
     case Vert: return "|";
@@ -37,6 +39,7 @@ const char* toShortString(TokenKind kind) {
     case VertEqual: return "|=";
     case Equal: return "=";
     case EqualEqual: return "==";
+    case EqualEqualEqual: return "===";
     case Less: return "<";
     case LessLess: return "<<";
     case LessEqual: return "<=";
@@ -45,6 +48,7 @@ const char* toShortString(TokenKind kind) {
     case GreaterGreater: return ">>";
     case GreaterEqual: return ">=";
     case GreaterGreaterEqual: return ">>=";
+    case Question: return "?";
     case Comma: return ",";
     case Point: return ".";
     case Colon: return ":";
@@ -113,6 +117,7 @@ struct TableHolder {
         { '{', { LeftBrace } },
         { '}', { RightBrace } },
         { '~', { Tilde } },
+        { '?', { Question } },
         { ',', { Comma } },
         { '.', { Point } },
         { ';', { SemiColon } },
@@ -123,12 +128,12 @@ struct TableHolder {
         { '%', { .bare = Percent, .equal = PercentEqual } },
         { '/', { .bare = Slash, .equal = SlashEqual } },
         { '*', { .bare = Star, .equal = StarEqual } },
-        { '=', { .bare = Equal, .repeat = EqualEqual } },
+        { '=', { .bare = Equal, .repeat = EqualEqual, .repeatEqual = EqualEqualEqual } },
 
         { '+', { .bare = Plus, .repeat = PlusPlus, .equal = PlusEqual } },
         { '-', { .bare = Minus, .repeat = MinusMinus, .equal = MinusEqual } },
-        { '&', { .bare = Amp, .repeat = AmpAmp, .equal = AmpEqual } },
-        { '|', { .bare = Vert, .repeat = VertVert, .equal = VertEqual } },
+        { '&', { .bare = Amp, .repeat = AmpAmp, .equal = AmpEqual, .repeatEqual = AmpAmpEqual } },
+        { '|', { .bare = Vert, .repeat = VertVert, .equal = VertEqual, .repeatEqual = VertVertEqual } },
 
         { '<', { .bare = Less, .repeat = LessLess, .equal = LessEqual, .repeatEqual = LessLessEqual } },
         { '>', { .bare = Greater, .repeat = GreaterGreater, .equal = GreaterEqual, .repeatEqual = GreaterGreaterEqual } },

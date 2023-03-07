@@ -27,8 +27,6 @@ enum class TokenKind : uint32_t {
     Plus, // +
     Minus, // -
     // end unary
-    ExclaimEqual, // !=
-    EqualEqual, // ==
     Amp, // &
     AmpAmp, // &&
     Hat, // ^
@@ -37,20 +35,24 @@ enum class TokenKind : uint32_t {
     Star, // *
     Slash, // /
     Percent, // %
-    Less, // <
     LessLess, // <<
+    GreaterGreater, // >>
+    ExclaimEqual, // !=
+    EqualEqual, // ==
+    EqualEqualEqual, // ===
+    Less, // <
     LessEqual, // <=
     Greater, // >
-    GreaterGreater, // >>
     GreaterEqual, // >=
     // end binary
     // begin assign
-    Equal, // =
     PlusEqual, // +=
     MinusEqual, // -=
     AmpEqual, // &=
+    AmpAmpEqual, // &&=
     HatEqual, // ^=
     VertEqual, // |=
+    VertVertEqual, // ||=
     StarEqual, // *=
     SlashEqual, // /=
     PercentEqual, // %=
@@ -62,9 +64,11 @@ enum class TokenKind : uint32_t {
     FirstBinaryOp = Plus,
     LastUnaryOp = Minus,
     LastBinaryOp = GreaterEqual,
-    FirstAssignOp = Equal,
+    FirstAssignOp = PlusEqual,
     LastAssignOp = GreaterGreaterEqual,
 
+    Equal, // =
+    Question, // ?
     Comma, // ,
     Point, // .
     Colon, // :

@@ -55,10 +55,17 @@ int main() {
                         bothZero();
                 }
             }
+
+            struct Int{} {
+                value: int = 0;
+            }
+            operation Add(i: Int, j: Int) { return Int(i.value + j.value); }
         )str");
-        Ptr<Decl> out = {};
-        par.parseDecl(out, Parser::DeclParseScope::Namespace);
-        dump(par, out);
+        while (par.tok.kind() != TokenKind::EOS) {
+            Ptr<Decl> out = {};
+            par.parseDecl(out, Parser::DeclParseScope::Namespace);
+            dump(par, out);
+        }
     }
 
     testInterpreter();

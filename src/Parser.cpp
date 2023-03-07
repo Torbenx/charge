@@ -63,6 +63,20 @@ const char* toShortString(UnaryOperator op) {
     default: return "???";
     }
 }
+const char* toOperationString(UnaryOperator op) {
+    using enum UnaryOperator;
+    switch (op) {
+    case BitwiseNot: return "BitNot";
+    case PreInc: return "PreInc";
+    case PreDec: return "PreDec";
+    case LogicalNot: return "LogNot";
+    case Plus: return "Plus";
+    case Minus: return "Neg";
+    case PostInc: return "PostInc";
+    case PostDec: return "PostDec";
+    default: VERIFY_NOT_REACHED();
+    }
+}
 
 const char* toShortString(BinaryOperator op) {
     using enum BinaryOperator;
@@ -88,6 +102,42 @@ const char* toShortString(BinaryOperator op) {
     default: return "???";
     }
 }
+const char* toStringWithEqual(BinaryOperator op) {
+    using enum BinaryOperator;
+    switch (op) {
+    case Plus: return "+=";
+    case Minus: return "-=";
+    case BitwiseAnd: return "&=";
+    case LogicalAnd: return "&&=";
+    case BitwiseXor: return "^=";
+    case BitwiseOr: return "|=";
+    case LogicalOr: return "||=";
+    case Multiply: return "*=";
+    case Divide: return "/=";
+    case Remainder: return "%=";
+    case ShiftLeft: return "<<=";
+    case ShiftRight: return ">>=";
+    default: VERIFY_NOT_REACHED();
+    }
+}
+const char* toOperationString(BinaryOperator op) {
+    using enum BinaryOperator;
+    switch (op) {
+    case Plus: return "Add";
+    case Minus: return "Sub";
+    case BitwiseAnd: return "BitAnd";
+    case LogicalAnd: return "LogAnd";
+    case BitwiseXor: return "BitXor";
+    case BitwiseOr: return "BitOr";
+    case LogicalOr: return "LogOr";
+    case Multiply: return "Mul";
+    case Divide: return "Div";
+    case Remainder: return "Rem";
+    case ShiftLeft: return "Shl";
+    case ShiftRight: return "Shr";
+    default: VERIFY_NOT_REACHED();
+    }
+}
 
 int precedenceOf(BinaryOperator op) {
     using enum BinaryOperator;
@@ -105,29 +155,13 @@ int precedenceOf(BinaryOperator op) {
         case GreaterEqual: return 4;
         case NotEqual: return 5;
         case Equal: return 5;
+        case ValueEqual: return 5;
         case BitwiseAnd: return 6;
         case BitwiseXor: return 7;
         case BitwiseOr: return 8;
         case LogicalAnd: return 9;
         case LogicalOr: return 10;
         default: VERIFY_NOT_REACHED();
-    }
-}
-const char* toShortString(AssignOperator op) {
-    using enum AssignOperator;
-    switch (op) {
-    case None: return "=";
-    case Plus: return "+=";
-    case Minus: return "-=";
-    case BitwiseAnd: return "&=";
-    case BitwiseXor: return "^=";
-    case BitwiseOr: return "|=";
-    case Multiply: return "*=";
-    case Divide: return "/=";
-    case Remainder: return "%=";
-    case ShiftLeft: return "<<=";
-    case ShiftRight: return ">>=";
-    default: return "???";
     }
 }
 // clang-format on
@@ -141,20 +175,48 @@ uint32_t STStorage::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t ite
     return ret;
 }
 
-std::string_view STContext::sview(Word word) const {
-    for (const auto& pair : storage->wordMap) {
-        if (pair.second == word.id)
-            return pair.first;
-    }
-    return {};
-}
-
 Word STContext::asWord(std::string_view view) {
     std::string word { view };
     uint32_t& id = storage->wordMap[std::move(word)];
     if (id == 0)
         id = storage->nextWordId++;
     return Word { id };
+}
+
+constexpr uint32_t UNARY_OP_WORD_BITS = (uint32_t)1 << 30;
+constexpr uint32_t BINARY_OP_WORD_BITS = (uint32_t)2 << 30;
+constexpr uint32_t ASSIGN_OP_WORD_BITS = (uint32_t)3 << 30;
+constexpr uint32_t OP_WORD_MASK = (uint32_t)3 << 30;
+Word STContext::makeUnaryOpWord(UnaryOperator op) {
+    return Word { UNARY_OP_WORD_BITS | std::to_underlying(op) };
+}
+Word STContext::makeBinaryOpWord(BinaryOperator op) {
+    return Word { BINARY_OP_WORD_BITS | std::to_underlying(op) };
+}
+Word STContext::makeAssignOpWord(BinaryOperator op) {
+    return Word { ASSIGN_OP_WORD_BITS | std::to_underlying(op) };
+}
+
+std::string_view STContext::sview(Word word) const {
+    switch (word.id >> 30) {
+    case 0: {
+        for (const auto& pair : storage->wordMap) {
+            if (pair.second == word.id)
+                return pair.first;
+        }
+        return {};
+    }
+    case 1:
+        return toShortString((UnaryOperator)(word.id & ~OP_WORD_MASK));
+    case 2: {
+        std::string_view s = toStringWithEqual((BinaryOperator)(word.id & ~OP_WORD_MASK));
+        s.remove_suffix(1);
+        return s;
+    }
+    case 3:
+        return toShortString((BinaryOperator)(word.id & ~OP_WORD_MASK));
+    }
+    VERIFY_NOT_REACHED();
 }
 
 static uint64_t parseInteger(std::string_view range) {
@@ -379,7 +441,7 @@ void Parser::parseIfStmt(Ptr<Stmt>& out) {
 void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
-    if (isAssignOp(tok.kind())) {
+    if (isAssignOp(tok.kind()) || tok.kind() == TokenKind::Equal) {
         // AssignStmt
         auto& stmt = makeSet<AssignStmt>(out, tokenKindToAssignOp(tok.kind()), expr);
         advance();
@@ -504,7 +566,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         advance();
         auto& d = makeSet<HasDecl>(out);
         parseBinaryExpr(d.type);
-        
+
         if (tok.kind() == TokenKind::SemiColon) {
             advance();
             return;
@@ -520,6 +582,37 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         }
         advance();
         d.decls = finalizeSpan(decls);
+        return;
+    }
+    //
+    if (source.view(tok) == "operation") {
+        VERIFY(scope == DeclParseScope::Namespace);
+        advance();
+
+        bool hasAssign = false;
+        EXPECT_EQ(tok.kind(), TokenKind::Word);
+        if (source.view(tok) == "assign") {
+            hasAssign = true;
+            advance();
+        }
+
+        Word name = {};
+        EXPECT_EQ(tok.kind(), TokenKind::Word);
+        for (uint32_t i = 0; i < std::to_underlying(UnaryOperator::COUNT); i++) {
+            if (source.view(tok) == toOperationString((UnaryOperator)i))
+                name = makeUnaryOpWord((UnaryOperator)i);
+        }
+        for (uint32_t i = 0; i < std::to_underlying(BinaryOperator::FirstCmp); i++) {
+            if (source.view(tok) == toOperationString((BinaryOperator)i))
+                name = hasAssign ? makeAssignOpWord((BinaryOperator)i) : makeBinaryOpWord((BinaryOperator)i);
+        }
+        VERIFY((bool)name);
+        advance();
+
+        auto& d = makeSet<FnDecl>(out, name);
+        parseParameterContext(d.params, ParameterParseScope::Function);
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        parseCompoundStmt(d.body);
         return;
     }
 

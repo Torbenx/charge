@@ -75,7 +75,10 @@ struct STDumper : STContext {
     }
 
     void visitAssignStmt(Ptr<AssignStmt> e) {
-        out << '\'' << toShortString(at(e).op) << '\'';
+        out << '\'';
+        if (at(e).op.has_value())
+            out << toShortString(at(e).op.value());
+        out << "='";
     }
     void visitNullStmt(Ptr<NullStmt>) { }
     void visitCompoundStmt(Ptr<CompoundStmt>) { }

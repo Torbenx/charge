@@ -470,7 +470,7 @@ struct Interpreter : STContext {
     StaticLookupContext* globalContext = nullptr;
 
     Type typeType;
-    Type numType;
+    Type intType;
     ParameterizedDecl arrayDecl;
     Type overloadType;
     Type overloadSetType;
@@ -532,7 +532,7 @@ struct Interpreter : STContext {
         return completeDecl(findDeclHelper(name));
     }
     void findBuiltins() {
-        numType = findCompDeclHelper(asWord("num"));
+        intType = findCompDeclHelper(asWord("int"));
         typeType = findCompDeclHelper(asWord("Type"));
         overloadType = findCompDeclHelper(asWord("Overload"));
         overloadSetType = findCompDeclHelper(asWord("OverloadSet"));
@@ -1212,7 +1212,7 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::IntLiteralExpr, result) { }
     };
     ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
-        return ExprResult::make<IntLiteralExprRecord>(makeBuiltinValue(numType, e.value));
+        return ExprResult::make<IntLiteralExprRecord>(makeBuiltinValue(intType, e.value));
     }
 
     struct CompleteCall {
@@ -1576,8 +1576,19 @@ struct Interpreter : STContext {
         return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(setDeclComp)), baseArg);
     }
 
+    ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e) {
+        if (!isCmpOp(e.op)) {
+            ExprResult base = lookupToValue(lookupIdentifier(context, { {}, makeBinaryOpWord(e.op) }));
+            std::array<NamedExprResult, 2> args { {
+                { evaluateExpr(context, e.left), {} },
+                { evaluateExpr(context, e.right), {} },
+            } };
+            return invokeCall(base, args);
+        }
+        VERIFY_NOT_REACHED();
+    }
+
     ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
-    ExprResult evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
     ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
 
     bool setExprValue(ExprResult base, Value value) {
@@ -1687,7 +1698,7 @@ struct Interpreter : STContext {
     ControlFlow evalNullStmt(LookupContext&, NullStmt&) { return {}; }
 
     ControlFlow evalAssignStmt(LookupContext& context, AssignStmt& stmt) {
-        if (stmt.op == AssignOperator::None) {
+        if (!stmt.op.has_value()) {
             ExprResult left = evaluateExpr(context, stmt.left);
             ExprResult right = evaluateExpr(context, stmt.right);
             VERIFY(setExprValue(left, right.value()));
@@ -1738,7 +1749,7 @@ void testInterpreter() {
     Interpreter it;
     it.interpretDecls(R"str(
         struct Type{} {}
-        struct num{} {}
+        struct int{} {}
         struct Array{T: Type} {}
 
         struct Overload{} {}
@@ -1762,7 +1773,7 @@ void testInterpreter() {
             return x;
         }
 
-        funtion get(x&: num) {
+        funtion get(x&: int) {
             x = 123;
         }
         function callGet() {
@@ -1771,11 +1782,11 @@ void testInterpreter() {
             return x;
         }
 
-        mut g_globalVal: num = 0;
+        mut g_globalVal: int = 0;
         function globalVal() {
             return g_globalVal;
         }
-        function globalVal() = (n: num) {
+        function globalVal() = (n: int) {
             g_globalVal = n;
         }
         function updateGlobalVal() {
@@ -1801,25 +1812,25 @@ void testInterpreter() {
         with{T: Type}
         function mkConst{v: T}() { return constant{T, v}(); }
 
-        function bar{a: num, A: Type}(b: constant{A, a}) { return a; }
-        function bar{a: num, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) { return a; }
-        function bar{a: num, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) { return a; }
+        function bar{a: int, A: Type}(b: constant{A, a}) { return a; }
+        function bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) { return a; }
+        function bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) { return a; }
 
         struct A{} {
-            x: num = 0;
-            y: num = 0;
+            x: int = 0;
+            y: int = 0;
         }
         function testA() {
             let a = A(789);
-            let x: num = 1;
-            let y: num = 2;
+            let x: int = 1;
+            let y: int = 2;
             A(x, y) = a;
             return A(x, y).x;
         }
 
         struct Base{} {
-            x: num = 0;
-            function set(self&, y: num) { x = y; }
+            x: int = 0;
+            function set(self&, y: int) { x = y; }
             function get(self) { return x; }
 
             function test(self&) {
@@ -1843,6 +1854,8 @@ void testInterpreter() {
                 return get();
             }
         }
+
+        operation Add(i: int, j: int) { return 9; }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -1858,5 +1871,6 @@ void testInterpreter() {
     eval("testA()");
     eval("testBase()");
     eval("HasTest().get()");
-    eval("HasTest().x");
+    eval("HasTest(Base(1)).x");
+    eval("1 + 2");
 }
