@@ -270,6 +270,7 @@ struct Interpreter : STContext {
     enum class LookupContextKind {
         Static,
         Local,
+        StaticRedirect,
     };
     struct LookupContext {
         LookupContext* parent = nullptr;
@@ -285,6 +286,7 @@ struct Interpreter : STContext {
         LocalLookupContext(const LocalLookupContext&) = delete;
         LocalLookupContext(LocalLookupContext&&) = default;
     };
+    struct TypeLookupContext;
     struct StaticLookupContext : LookupContext {
         struct DeclValue {
             CompleteDecl decl;
@@ -292,7 +294,7 @@ struct Interpreter : STContext {
         };
         struct DeclContext {
             CompleteDecl decl;
-            StaticLookupContext* context;
+            TypeLookupContext* context;
         };
         CompleteDecl staticDecl;
 
@@ -325,9 +327,21 @@ struct Interpreter : STContext {
             values = valuesVector;
         }
     };
+    struct StaticRedirectLookupContext : LookupContext {
+        StaticLookupContext* redirect;
+        StaticRedirectLookupContext(LookupContext* parent, StaticLookupContext* redirect)
+            : LookupContext(LookupContextKind::StaticRedirect, parent), redirect(redirect) { }
+    };
+    struct TypeLookupContext : StaticLookupContext {
+        LookupContext* parametricContext;
+        TypeLookupContext(LookupContext* parent, CompleteDecl decl)
+            : StaticLookupContext(parent, std::move(decl)), parametricContext(parent) { }
+    };
     StaticLookupContext* asStaticContext(LookupContext& context) {
         if (context.kind == LookupContextKind::Static)
             return static_cast<StaticLookupContext*>(&context);
+        if (context.kind == LookupContextKind::StaticRedirect)
+            return static_cast<StaticRedirectLookupContext&>(context).redirect;
         return nullptr;
     }
 
@@ -461,7 +475,6 @@ struct Interpreter : STContext {
     Type overloadType;
     Type overloadSetType;
     ParameterizedDecl memberOverloadSetDecl;
-    Ptr<LocalDecl> memberOverloadSetBaseMember;
     Type typeOverloadType;
     Type typeOverloadSetType;
     Type boolType;
@@ -542,8 +555,6 @@ struct Interpreter : STContext {
         VERIFY(at(arrayDecl.decl).kind == DeclKind::StructDecl);
         memberOverloadSetDecl = findDeclHelper(asWord("MemberOverloadSet"));
         VERIFY(at(memberOverloadSetDecl.decl).kind == DeclKind::StructDecl);
-        memberOverloadSetBaseMember = (Ptr<LocalDecl>)at(as<StructDecl>(memberOverloadSetDecl.decl).params.params, 0);
-        VERIFY(cmpWord(at(memberOverloadSetBaseMember).name, asWord("base")));
     }
 
     Type typeOf(const Value& value) {
@@ -772,6 +783,24 @@ struct Interpreter : STContext {
             return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
         return ExprResult::make<ConversionRecord>(evaluateCall(call.value()), sourceValue);
     }
+    void collectConversions(const Type& type, ExprResult val, std::vector<ExprResult>& results) {
+        Type valType = typeOf(val);
+        if (cmpCompleteDecls(type, valType))
+            return results.push_back(val);
+
+        std::optional<ExprResult> out;
+        auto members = at(as<StructDecl>(valType.decl).params.params);
+        for (uint32_t i = 0; i < members.size(); i++) {
+            if (at(members[i]).kind == DeclKind::HasDecl)
+                collectConversions(type, accessMember(val, i), results);
+        }
+    }
+    ExprResult convert(const Type& type, ExprResult val) {
+        std::vector<ExprResult> conversions;
+        collectConversions(type, val, conversions);
+        VERIFY(conversions.size() == 1);
+        return conversions[0];
+    }
 
     struct HackedRecord : ExprRecord {
         HackedRecord(Value result)
@@ -784,6 +813,7 @@ struct Interpreter : STContext {
                 continue;
 
             Value type = evaluateExpr(context, typeExpr);
+            VERIFY(type.valid());
             ExprResult cvtArg = convertAndDeduce(type, arg, deductions);
             if (!cvtArg.value().valid()) {
                 fmt::print("unable to initialize ");
@@ -893,7 +923,7 @@ struct Interpreter : STContext {
                 auto type = toCompleteType(evaluateExpr(context, param.type));
                 if (!type.valid())
                     return ExprResult::make<ConversionRecord>(Value {}, arg);
-                arg = convert(context, type, arg);
+                arg = convert(type, arg);
             }
             return arg;
         }
@@ -983,7 +1013,7 @@ struct Interpreter : STContext {
 
             out.context = &context;
             ParameterizedDecl parameterized { (Ptr<NamedDecl>)decl, asStaticContext(context) };
-            if (context.kind == LookupContextKind::Static) {
+            if (parameterized.staticContext) {
                 Ptr<StaticDecl> sDecl = asStaticDecl(decl);
                 VERIFY((bool)sDecl);
                 auto posArgs = positionArguments(at(sDecl).parametric, {}, args);
@@ -993,7 +1023,8 @@ struct Interpreter : STContext {
                 parameterized.allocateArgs(args.size());
                 for (uint32_t i = 0; i < args.size(); i++)
                     parameterized.args()[i] = posArgs.value()[i];
-            }
+            } else
+                VERIFY(args.empty());
 
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
                 out.decls.clear();
@@ -1022,18 +1053,24 @@ struct Interpreter : STContext {
     Value& getValueRef(const LValue& lVal) {
         VERIFY(lVal.valid());
         VERIFY((bool)asVar(lVal.decl.decl));
-        if (lVal.context->kind == LookupContextKind::Static) {
+        switch (lVal.context->kind) {
+        case LookupContextKind::Static:
             VERIFY(lVal.context == lVal.decl.staticContext);
+            [[fallthrough]];
+        case LookupContextKind::StaticRedirect:
             return getStaticValueRef(lVal.decl);
+        case LookupContextKind::Local: {
+            LocalLookupContext* lContext = (LocalLookupContext*)lVal.context;
+            EXPECT_EQ(lContext->decls.size(), lContext->values.size());
+            for (uint32_t i = 0; i < lContext->decls.size(); i++) {
+                if (lContext->decls[i] == lVal.decl.decl)
+                    return lContext->values[i];
+            }
+            VERIFY_NOT_REACHED();
         }
-
-        LocalLookupContext* lContext = (LocalLookupContext*)lVal.context;
-        EXPECT_EQ(lContext->decls.size(), lContext->values.size());
-        for (uint32_t i = 0; i < lContext->decls.size(); i++) {
-            if (lContext->decls[i] == lVal.decl.decl)
-                return lContext->values[i];
+        default:
+            VERIFY_NOT_REACHED();
         }
-        VERIFY_NOT_REACHED();
     }
     Value getValue(const LValue& lVal) {
         return getValueRef(lVal);
@@ -1085,7 +1122,7 @@ struct Interpreter : STContext {
             if (d.type) {
                 Type type = toCompleteType(evaluateExpr(context, d.type));
                 VERIFY(type.valid());
-                source = convert(context, type, source);
+                source = convert(type, source);
             }
             return source;
         });
@@ -1104,11 +1141,6 @@ struct Interpreter : STContext {
         if (theDecl.valid())
             return { result.context, theDecl };
         return {};
-    }
-
-    ExprResult convert(LookupContext&, Type type, ExprResult val) {
-        VERIFY(cmpCompleteDecls(type, typeOf(val)));
-        return val;
     }
 
     ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
@@ -1153,14 +1185,25 @@ struct Interpreter : STContext {
             VERIFY_NOT_REACHED();
         }
     }
+    bool isTypeSubContext(TypeLookupContext* typeCtx, LookupContext* foundCtx) {
+        LookupContext* testCtx = typeCtx;
+        do {
+            if (testCtx == foundCtx)
+                return true;
+            testCtx = testCtx->parent;
+        } while (testCtx != typeCtx->parametricContext);
+        return false;
+    }
     ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
         LookupResult result = lookupIdentifier(ctx, e.identifier);
         ExprResult value = lookupToValue(result);
         auto selfResult = lookupIdentifier(ctx, { {}, selfWord });
 
-        if (selfResult.valid() && selfResult.context->parent == result.context && result.declKind == DeclKind::FnDecl)
+        if (selfResult.valid()
+            && result.declKind == DeclKind::FnDecl
+            && isTypeSubContext((TypeLookupContext*)selfResult.context->parent, result.context)) {
             return transformMemberOverloadSet(lookupToValue(selfResult), value);
-
+        }
         return value;
     }
 
@@ -1207,6 +1250,12 @@ struct Interpreter : STContext {
 
         if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), depScope.deductions))
             return {};
+        // convert self arg
+        if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
+            && fn.kind == DeclKind::FnDecl && matchName(at(fn.params.params, 0), selfWord)) {
+            VERIFY(fnDecl.staticContext->staticDecl.valid());
+            posFnArgs.value()[0] = { convert(fnDecl.staticContext->staticDecl, posFnArgs.value()[0]), 0 };
+        }
 
         applyDeductions(withCtx.value(), depScope.deductions);
         applyDeductions(parametricCtx.value(), depScope.deductions);
@@ -1368,7 +1417,7 @@ struct Interpreter : STContext {
         std::optional<ExprResult> selfArg;
         if (baseType.decl == memberOverloadSetDecl.decl) {
             VERIFY(base.kind == ValueKind::Array);
-            selfArg = ExprResult::make<AccessExprRecord>(base.u.array->array()[0], baseR, memberOverloadSetBaseMember);
+            selfArg = accessMember(baseR, 0);
             base = baseType.args()[1];
             baseType = typeOf(base);
         }
@@ -1437,19 +1486,43 @@ struct Interpreter : STContext {
         AccessExprRecord(Value result, ExprResult base, Ptr<Decl> accessDecl)
             : ExprRecord(RecordKind::AccessExpr, result), base(base), accessDecl(accessDecl) { }
     };
-    StaticLookupContext* getTypeContext(const Type& type) {
+    LookupContext* recursiveWrapWithHasContexts(LookupContext* base, Ptr<Decl> structDecl, LookupContext& structCtx) {
+        auto& d = as<StructDecl>(structDecl);
+        for (auto member : at(d.params.params)) {
+            if (at(member).kind != DeclKind::HasDecl)
+                continue;
+
+            auto& has = as<HasDecl>(member);
+            Type hasType = toCompleteType(evaluateExpr(structCtx, has.type));
+            VERIFY(hasType.valid());
+            auto* hasCtx = getTypeContext(hasType);
+            base = &at(make<StaticRedirectLookupContext>(base, hasCtx));
+            base->decls = hasCtx->decls;
+
+            base = recursiveWrapWithHasContexts(base, hasType.decl, *hasCtx);
+        }
+        return base;
+    }
+    TypeLookupContext* getTypeContext(const Type& type) {
         for (auto& child : type.staticContext->children) {
             if (cmpCompleteDecls(child.decl, type))
                 return child.context;
         }
 
         auto& d = as<StructDecl>(type.decl);
-        auto withCtx = make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext, d.with.params, type.withArgs()));
-        auto paramCtx = make<LocalLookupContext>(makeCompleteParameterContext(at(withCtx), d.parametric, type.args()));
-        auto& typeCtx = at(make<StaticLookupContext>(&at(paramCtx), type));
+        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext, d.with.params, type.withArgs())));
+        auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, d.parametric, type.args())));
+
+        auto& typeCtx = at(make<TypeLookupContext>(&paramCtx, type));
         typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
+        typeCtx.parent = recursiveWrapWithHasContexts(&paramCtx, type.decl, typeCtx);
+
         type.staticContext->children.push_back({ type, &typeCtx });
         return &typeCtx;
+    }
+    ExprResult accessMember(ExprResult base, uint32_t i) {
+        auto members = at(as<StructDecl>(base.value().type.decl).params.params);
+        return ExprResult::make<AccessExprRecord>(base.value().u.array->array()[i], base, members[i]);
     }
     ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
         ExprResult base = evaluateExpr(context, e.base);
@@ -1458,7 +1531,7 @@ struct Interpreter : STContext {
             auto members = at(as<StructDecl>(baseValue.type.decl).params.params);
             for (uint32_t i = 0; i < members.size(); i++) {
                 if (matchName(members[i], e.member.word))
-                    return ExprResult::make<AccessExprRecord>(baseValue.u.array->array()[i], base, members[i]);
+                    return accessMember(base, i);
             }
         }
         Type type = e.isStatic ? toCompleteType(baseValue) : typeOf(baseValue);
@@ -1568,7 +1641,7 @@ struct Interpreter : STContext {
         ExprResult init = evaluateExpr(context, info.initializer);
         if (info.type) {
             Type type = toCompleteType(evaluateExpr(context, info.type));
-            init = convert(context, type, init);
+            init = convert(type, init);
         }
         context.declare(stmt.decl, init);
         return {};
@@ -1755,6 +1828,9 @@ void testInterpreter() {
 
         struct HasTest{} {
             has Base;
+            function callGet(self) {
+                return get();
+            }
         }
     )str");
 
@@ -1770,5 +1846,5 @@ void testInterpreter() {
     eval("bar(mkConst{mkConst{5}()}())");
     eval("testA()");
     eval("testBase()");
-    eval("HasTest()");
+    eval("HasTest().callGet()");
 }
