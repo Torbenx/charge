@@ -1524,17 +1524,29 @@ struct Interpreter : STContext {
         auto members = at(as<StructDecl>(base.value().type.decl).params.params);
         return ExprResult::make<AccessExprRecord>(base.value().u.array->array()[i], base, members[i]);
     }
-    ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
-        ExprResult base = evaluateExpr(context, e.base);
-        Value baseValue = base;
-        if (!e.isStatic && baseValue.kind == ValueKind::Array && e.member.args.count == 0) {
-            auto members = at(as<StructDecl>(baseValue.type.decl).params.params);
-            for (uint32_t i = 0; i < members.size(); i++) {
-                if (matchName(members[i], e.member.word))
-                    return accessMember(base, i);
+    void collectMembers(ExprResult base, Word name, std::vector<ExprResult>& results) {
+        auto members = at(as<StructDecl>(base.value().type.decl).params.params);
+        for (uint32_t i = 0; i < members.size(); i++) {
+            if (matchName(members[i], name)) {
+                results.push_back(accessMember(base, i));
+                return;
             }
         }
-        Type type = e.isStatic ? toCompleteType(baseValue) : typeOf(baseValue);
+        for (uint32_t i = 0; i < members.size(); i++) {
+            if (at(members[i]).kind == DeclKind::HasDecl)
+                collectMembers(accessMember(base, i), name, results);
+        }
+    }
+    ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
+        ExprResult base = evaluateExpr(context, e.base);
+        if (!e.isStatic && e.member.args.count == 0) {
+            std::vector<ExprResult> matches;
+            collectMembers(base, e.member.word, matches);
+            if (matches.size() == 1)
+                return matches[0];
+            EXPECT_EQ(matches.size(), 0u);
+        }
+        Type type = e.isStatic ? toCompleteType(base.value()) : typeOf(base.value());
         auto* typeCtx = getTypeContext(type);
 
         LookupResult r = lookupIdentifier(*typeCtx, e.member, typeCtx->parametricContext);
@@ -1846,4 +1858,5 @@ void testInterpreter() {
     eval("testA()");
     eval("testBase()");
     eval("HasTest().get()");
+    eval("HasTest().x");
 }
