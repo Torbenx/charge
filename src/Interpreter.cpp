@@ -455,6 +455,9 @@ struct Interpreter : STContext {
         operator NamedValue() const { return value(); }
         Word name() const { return m_name; }
     };
+    struct FnArgumentResult : ExprResult {
+        bool isInOut = false;
+    };
 
     enum class ControlFlowKind {
         None,
@@ -467,7 +470,6 @@ struct Interpreter : STContext {
         Value value = {}; // return value
     };
 
-    StaticLookupContext* globalContext = nullptr;
 
     Type typeType;
     Type intType;
@@ -480,6 +482,11 @@ struct Interpreter : STContext {
     Type boolType;
     Word selfWord;
     CompleteDecl selfDecl;
+
+    StaticLookupContext builtinImplContext { nullptr, {} };
+    StaticLookupContext* globalContext = &builtinImplContext;
+    using BuiltinImpl = Value (*)(Interpreter* i, std::span<const FnArgumentResult> args);
+    std::span<BuiltinImpl> builtinImpls;
 
     // convert{To}(from)
     std::vector<Ptr<FnDecl>> conversions;
@@ -519,6 +526,7 @@ struct Interpreter : STContext {
         Parser parser { *this, buffer };
         Ptr<Expr> e;
         parser.parseBinaryExpr(e);
+        dump(*this, e);
         return evaluateExpr(*globalContext, e);
     }
 
@@ -555,6 +563,42 @@ struct Interpreter : STContext {
         VERIFY(at(arrayDecl.decl).kind == DeclKind::StructDecl);
         memberOverloadSetDecl = findDeclHelper(asWord("MemberOverloadSet"));
         VERIFY(at(memberOverloadSetDecl.decl).kind == DeclKind::StructDecl);
+
+        auto implDecls = beginSpan<Ptr<Decl>, 0>();
+        auto impls = beginSpan<BuiltinImpl, 1>();
+        auto defineImpl = [&](std::string_view name, uint32_t argCount, BuiltinImpl impl) {
+            auto decl = make<FnDecl>(asWord(name));
+            auto params = beginSpan<Ptr<Decl>>();
+            for (uint32_t i = 0; i < argCount; i++)
+                append(params, make<LocalDecl>(Word {}, false));
+            at(decl).params.params = finalizeSpan(params);
+            append(implDecls, decl);
+            append(impls, impl);
+        };
+
+        defineImpl("builtinAddAndMask", 3, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            return i->makeBuiltinValue(
+                i->intType,
+                (args[0].value().u.builtinValue + args[1].value().u.builtinValue) & args[2].value().u.builtinValue);
+        });
+        defineImpl("builtinMulAndMask", 3, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            return i->makeBuiltinValue(
+                i->intType,
+                (args[0].value().u.builtinValue * args[1].value().u.builtinValue) & args[2].value().u.builtinValue);
+        });
+        defineImpl("builtinSignedDivAndMask", 3, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            return i->makeBuiltinValue(
+                i->intType,
+                (args[0].value().u.builtinValue / args[1].value().u.builtinValue) & args[2].value().u.builtinValue);
+        });
+        defineImpl("builtinNegateAndMask", 2, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            return i->makeBuiltinValue(
+                i->intType,
+                (-args[0].value().u.builtinValue) & args[1].value().u.builtinValue);
+        });
+
+        builtinImplContext.decls = at(finalizeSpan(implDecls));
+        builtinImpls = at(finalizeSpan(impls));
     }
 
     Type typeOf(const Value& value) {
@@ -827,9 +871,6 @@ struct Interpreter : STContext {
         return true;
     }
 
-    struct FnArgumentResult : ExprResult {
-        bool isInOut = false;
-    };
     std::optional<std::vector<FnArgumentResult>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalExprResult> args) {
         auto isInOutParam = [&](uint32_t i) {
             auto& p = at(at(params.params, i));
@@ -1305,8 +1346,14 @@ struct Interpreter : STContext {
     }
     Value evaluateFunction(CompleteCall call, Value assignArg) {
         VERIFY(at(call.target.decl).kind == DeclKind::FnDecl);
-        auto& targetDecl = as<FnDecl>(call.target.decl);
+        if (call.target.staticContext == &builtinImplContext) {
+            for (uint32_t i = 0; i < builtinImplContext.decls.size(); i++) {
+                if (call.target.decl == builtinImplContext.decls[i])
+                    return builtinImpls[i](this, call.args);
+            }
+        }
 
+        auto& targetDecl = as<FnDecl>(call.target.decl);
         LocalLookupContext selfCtx { call.target.staticContext };
         LocalLookupContext memberCtx { &selfCtx };
         bool hasSelf = false;
@@ -1576,6 +1623,11 @@ struct Interpreter : STContext {
         return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(setDeclComp)), baseArg);
     }
 
+    ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e) {
+        ExprResult base = lookupToValue(lookupIdentifier(context, { {}, makeUnaryOpWord(e.op) }));
+        NamedExprResult arg = { evaluateExpr(context, e.subExpr), {} };
+        return invokeCall(base, { &arg, 1 });
+    }
     ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e) {
         if (!isCmpOp(e.op)) {
             ExprResult base = lookupToValue(lookupIdentifier(context, { {}, makeBinaryOpWord(e.op) }));
@@ -1588,7 +1640,6 @@ struct Interpreter : STContext {
         VERIFY_NOT_REACHED();
     }
 
-    ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) { VERIFY_NOT_REACHED(); }
     ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
 
     bool setExprValue(ExprResult base, Value value) {
@@ -1749,7 +1800,6 @@ void testInterpreter() {
     Interpreter it;
     it.interpretDecls(R"str(
         struct Type{} {}
-        struct int{} {}
         struct Array{T: Type} {}
 
         struct Overload{} {}
@@ -1764,6 +1814,30 @@ void testInterpreter() {
         struct bool{} {}
         const true: bool = {};
         const false: bool = {};
+        operation LogAnd(a: bool, b: bool) {
+            if (a) {
+                if (b) return true;
+            }
+            return false;
+        }
+        operation LogOr(a: bool, b: bool) {
+            if (!a) {
+                if (!b) return false;
+            }
+            return true;
+        }
+        operation LogNot(a: bool) {
+            if (a) return false;
+            return true;
+        }
+
+        struct int{} {}
+        INT_MASK: int = 0xffff'ffff'ffff'ffff;
+        operation Add(i: int, j: int) { return builtinAddAndMask(i, j, INT_MASK); }
+        operation Sub(i: int, j: int) { return i + (-j); }
+        operation Mul(i: int, j: int) { return builtinMulAndMask(i, j, INT_MASK); }
+        operation Div(i: int, j: int) { return builtinSignedDivAndMask(i, j, INT_MASK); }
+        operation Neg(i: int) { return builtinNegateAndMask(i, INT_MASK); }
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
@@ -1854,8 +1928,6 @@ void testInterpreter() {
                 return get();
             }
         }
-
-        operation Add(i: int, j: int) { return 9; }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -1872,5 +1944,6 @@ void testInterpreter() {
     eval("testBase()");
     eval("HasTest().get()");
     eval("HasTest(Base(1)).x");
-    eval("1 + 2");
+    eval("true && !false");
+    eval("(5 * 4 - 2) / 3");
 }

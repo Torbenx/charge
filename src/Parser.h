@@ -10,9 +10,13 @@ inline constexpr uint32_t BUMP_START_OFFSET_ALIGN4 = 128;
 
 struct STStorage {
     uint32_t* stStorage = new uint32_t[4096] {};
-    std::unordered_map<std::string, uint32_t> wordMap = {};
     uint32_t storageEndAlign4 = BUMP_START_OFFSET_ALIGN4;
+
+    std::unordered_map<std::string, uint32_t> wordMap = {};
     uint32_t nextWordId = 1;
+
+    std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
+    std::array<uint32_t, 2> spanBuilderEnd = {};
 
     uint32_t allocate(uint32_t alignment, uint32_t itemSize, uint32_t itemCount = 1);
 };
@@ -123,32 +127,22 @@ public:
         out = p;
         return at(p);
     }
-};
-
-struct Parser : Lexer, STContext {
-    Parser(STContext context, SourceBuffer buffer)
-        : Lexer(buffer), STContext(std::move(context)) { }
-
-    Word asWord(Token tok) { return STContext::asWord(source.view(tok)); }
 
     template<typename T, int I>
     struct SpanBuilder {
         uint32_t begin = 0;
     };
 
-    std::array<std::byte*, 2> spanStorage = { new std::byte[400] {}, new std::byte[400] {} };
-    std::array<uint32_t, 2> spanBuilderEnd = {};
-
     template<typename T, int I = 0>
     SpanBuilder<T, I> beginSpan() {
-        uint32_t oldEnd = spanBuilderEnd[I];
-        spanBuilderEnd[I] = alignmentCeil(alignof(T), oldEnd);
+        uint32_t oldEnd = storage->spanBuilderEnd[I];
+        storage->spanBuilderEnd[I] = alignmentCeil(alignof(T), oldEnd);
         return { oldEnd };
     }
     template<typename T, int I>
-    T& append(SpanBuilder<T, I> s, const T& item) {
+    T& append(SpanBuilder<T, I> s, const std::type_identity_t<T>& item) {
         T* ret = new (spanEnd(s)) T { item };
-        spanBuilderEnd[I] += sizeof(T);
+        storage->spanBuilderEnd[I] += sizeof(T);
         return *ret;
     }
     template<typename T, int I>
@@ -159,22 +153,22 @@ struct Parser : Lexer, STContext {
         Ptr<T> outSpan = allocate<T>(count);
         std::uninitialized_move_n(beginPtr, count, &at(outSpan));
         std::destroy_n(beginPtr, count);
-        spanBuilderEnd[I] = s.begin;
+        storage->spanBuilderEnd[I] = s.begin;
         return { outSpan, count };
     }
     template<typename T, int I>
     T* spanBegin(SpanBuilder<T, I> s) {
         uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
-        return (T*)(spanStorage[I] + alignedBegin);
+        return (T*)(storage->spanStorage[I] + alignedBegin);
     }
     template<typename T, int I>
     T* spanEnd(SpanBuilder<T, I>) {
-        return (T*)(spanStorage[I] + spanBuilderEnd[I]);
+        return (T*)(storage->spanStorage[I] + storage->spanBuilderEnd[I]);
     }
     template<typename T, int I>
     uint32_t spanSize(SpanBuilder<T, I> s) {
         uint32_t alignedBegin = alignmentCeil(alignof(T), s.begin);
-        return (spanBuilderEnd[I] - alignedBegin) / sizeof(T);
+        return (storage->spanBuilderEnd[I] - alignedBegin) / sizeof(T);
     }
     template<typename T, int I>
     T& get(SpanBuilder<T, I> s, uint32_t i) {
@@ -182,8 +176,15 @@ struct Parser : Lexer, STContext {
     }
     template<typename T, int I>
     void discardSpan(SpanBuilder<T, I> s) {
-        spanBuilderEnd[I] = s.begin;
+        storage->spanBuilderEnd[I] = s.begin;
     }
+};
+
+struct Parser : Lexer, STContext {
+    Parser(STContext context, SourceBuffer buffer)
+        : Lexer(buffer), STContext(std::move(context)) { }
+
+    Word asWord(Token tok) { return STContext::asWord(source.view(tok)); }
 
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
