@@ -1035,11 +1035,11 @@ struct Interpreter : STContext {
         }
         return out;
     }
-    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier ident) {
+    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier ident, LookupContext* end = nullptr) {
         // fmt::println("looking up '{}'", sview(ident.word));
         auto args = evaluateArguments(identCtx, ident);
         LookupContext* context = &identCtx;
-        while (context) {
+        while (context != end) {
             LookupResult r = lookupIdentifierIn(*context, ident.word, args);
             if (r.valid())
                 return r;
@@ -1537,8 +1537,7 @@ struct Interpreter : STContext {
         Type type = e.isStatic ? toCompleteType(baseValue) : typeOf(baseValue);
         auto* typeCtx = getTypeContext(type);
 
-        auto args = evaluateArguments(context, e.member);
-        LookupResult r = lookupIdentifierIn(*typeCtx, e.member.word, args);
+        LookupResult r = lookupIdentifier(*typeCtx, e.member, typeCtx->parametricContext);
         VERIFY(r.valid());
         DeclKind declKind = r.declKind;
         ExprResult idVal = lookupToValue(std::move(r));
@@ -1846,5 +1845,5 @@ void testInterpreter() {
     eval("bar(mkConst{mkConst{5}()}())");
     eval("testA()");
     eval("testBase()");
-    eval("HasTest().callGet()");
+    eval("HasTest().get()");
 }
