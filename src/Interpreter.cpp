@@ -73,22 +73,36 @@ struct Interpreter : STContext {
             return { (Value*)(this + 1), size };
         }
     };
+    struct DependentValue {
+        Ptr<LocalDecl> decl;
+        uint32_t level = 0;
+    };
     struct CompleteDeclBase {
         Ptr<NamedDecl> decl = {};
-        uint16_t dependentNestLevel = 0;
+        bool argsDependent = false;
+        bool declDependent = false;
         uint16_t argCount = 0;
-        StaticLookupContext* staticContext = nullptr;
+        union {
+            StaticLookupContext* staticContext;
+            uint32_t declDepLevel;
+        } u { .staticContext = nullptr };
         ValueArray* argsAndWithArgs = nullptr;
 
+        StaticLookupContext* staticContext() const {
+            if (declDependent)
+                return nullptr;
+            return u.staticContext;
+        }
         void clearFields() {
             *this = {};
         }
         bool valid() const { return (bool)decl; }
-        bool dependentIn(uint32_t nestLevel) const {
-            VERIFY(dependentNestLevel <= nestLevel);
-            return dependentNestLevel != 0 && dependentNestLevel == nestLevel;
+        bool dependentInAnyWay() const { return declDependent || argsDependent; }
+        DependentValue asDependentValue() const {
+            if (!declDependent)
+                return {};
+            return { (Ptr<LocalDecl>)decl, u.declDepLevel };
         }
-        bool dependentAtAll() const { return dependentNestLevel > 0; }
 
         std::span<Value> args() const {
             if (!argsAndWithArgs)
@@ -103,8 +117,11 @@ struct Interpreter : STContext {
     };
     struct CompleteDecl : CompleteDeclBase {
         CompleteDecl() = default;
-        CompleteDecl(Ptr<NamedDecl> decl, StaticLookupContext* staticContext = nullptr, uint16_t dependentNestLevel = 0)
-            : CompleteDeclBase { .decl = decl, .dependentNestLevel = dependentNestLevel, .staticContext = staticContext } { }
+        CompleteDecl(Ptr<NamedDecl> decl, StaticLookupContext* staticContext = nullptr, bool argsDependent = false)
+            : CompleteDeclBase { .decl = decl, .argsDependent = argsDependent, .u { .staticContext = staticContext } } { }
+        CompleteDecl(DependentValue value)
+            : CompleteDeclBase { .decl = value.decl, .argsDependent = false, .declDependent = true, .u { .declDepLevel = value.level } } { }
+
         CompleteDecl(const CompleteDecl& other)
             : CompleteDeclBase(other) { ValueArray::ref(argsAndWithArgs); }
         CompleteDecl(CompleteDecl&& other)
@@ -165,11 +182,11 @@ struct Interpreter : STContext {
         union {
             ValueArray* array;
             int64_t builtinValue;
-            Ptr<NamedDecl> declType;
             struct {
-                Ptr<LocalDecl> decl;
-                uint32_t nestLevel;
-            } dependent;
+                Ptr<NamedDecl> decl;
+                bool dependent;
+            } declType;
+            DependentValue dependent;
         } u { .array = nullptr };
         ValueKind kind = ValueKind::Invalid;
         union {
@@ -181,15 +198,15 @@ struct Interpreter : STContext {
         Value(Type type, int64_t value)
             : type(std::move(type)), u { .builtinValue = value }, kind(ValueKind::Builtin) { }
         Value(complete_t, Ptr<NamedDecl> type, CompleteDecl decl)
-            : type(std::move(decl)), u { .declType = type }, kind(ValueKind::CompleteDecl) { }
-        Value(Type type, Ptr<LocalDecl> depDecl, uint32_t level)
-            : type(std::move(type)), u { .dependent = { depDecl, level } }, kind(ValueKind::Dependent) { }
+            : type(std::move(decl)), u { .declType = { type, false } }, kind(ValueKind::CompleteDecl) { }
+        Value(Type type, DependentValue value)
+            : type(std::move(type)), u { .dependent = value }, kind(ValueKind::Dependent) { }
         Value(Type type, uint32_t size)
             : type(std::move(type))
             , u { .array = ValueArray::make(size) }
             , kind(ValueKind::Array) { }
         Value(parameterized_t, Ptr<NamedDecl> type, ParameterizedDecl decl)
-            : type(std::move(decl)), u { .declType = type }, kind(ValueKind::ParameterizedDecl) { }
+            : type(std::move(decl)), u { .declType = { type, false } }, kind(ValueKind::ParameterizedDecl) { }
 
         Value(const Value& other)
             : type(other.type), u(other.u), kind(other.kind), id(other.id) {
@@ -219,13 +236,17 @@ struct Interpreter : STContext {
         }
 
         bool valid() const { return kind != ValueKind::Invalid; }
-        bool dependentIn(uint32_t nestLevel) const {
-            if (kind != ValueKind::Dependent)
-                return false;
-            VERIFY(u.dependent.nestLevel <= nestLevel);
-            return u.dependent.nestLevel != 0 && u.dependent.nestLevel == nestLevel;
+        bool dependentInAnyWay() const {
+            switch (kind) {
+            case ValueKind::CompleteDecl:
+            case ValueKind::ParameterizedDecl:
+                return u.declType.dependent || type.dependentInAnyWay();
+            case ValueKind::Dependent:
+                return true;
+            default:
+                return type.dependentInAnyWay();
+            }
         }
-        bool dependentAtAll() const { return u.dependent.nestLevel > 0; }
 
         void ref() {
             if (kind == ValueKind::Array)
@@ -470,7 +491,6 @@ struct Interpreter : STContext {
         Value value = {}; // return value
     };
 
-
     Type typeType;
     Type intType;
     ParameterizedDecl arrayDecl;
@@ -488,25 +508,24 @@ struct Interpreter : STContext {
     using BuiltinImpl = Value (*)(Interpreter* i, std::span<const FnArgumentResult> args);
     std::span<BuiltinImpl> builtinImpls;
 
-    // convert{To}(from)
-    std::vector<Ptr<FnDecl>> conversions;
-
-    uint32_t dependentNestLevel = 0;
     struct Deduction {
-        Ptr<LocalDecl> param;
+        Ptr<LocalDecl> decl;
         Value value;
     };
     struct DependentScope {
         Interpreter* i;
         uint32_t level;
-        std::vector<Deduction> deductions;
         DependentScope(Interpreter* i)
-            : i(i), level(++(i->dependentNestLevel)) { }
+            : i(i), level(i->dependenceLevel() + 1) {
+            i->dependentStack.emplace_back();
+        }
         ~DependentScope() {
-            EXPECT_EQ(i->dependentNestLevel, level);
-            i->dependentNestLevel = level - 1;
+            EXPECT_EQ(i->dependenceLevel(), level);
+            i->dependentStack.pop_back();
         }
     };
+    std::vector<std::vector<Deduction>> dependentStack;
+    uint32_t dependenceLevel() { return dependentStack.size() - 1; }
 
     Interpreter()
         : STContext(STContext::create()) { }
@@ -526,7 +545,6 @@ struct Interpreter : STContext {
         Parser parser { *this, buffer };
         Ptr<Expr> e;
         parser.parseBinaryExpr(e);
-        dump(*this, e);
         return evaluateExpr(*globalContext, e);
     }
 
@@ -554,10 +572,10 @@ struct Interpreter : STContext {
         boolType = findCompDeclHelper(asWord("bool"));
         auto falseDecl = findCompDeclHelper(asWord("false"));
         VERIFY(at(falseDecl.decl).kind == DeclKind::GlobalDecl);
-        falseDecl.staticContext->values.push_back({ falseDecl, makeBuiltinValue(boolType, 0) });
+        falseDecl.staticContext()->values.push_back({ falseDecl, makeBuiltinValue(boolType, 0) });
         auto trueDecl = findCompDeclHelper(asWord("true"));
         VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
-        trueDecl.staticContext->values.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
+        trueDecl.staticContext()->values.push_back({ trueDecl, makeBuiltinValue(boolType, 1) });
 
         arrayDecl = findDeclHelper(asWord("Array"));
         VERIFY(at(arrayDecl.decl).kind == DeclKind::StructDecl);
@@ -609,7 +627,7 @@ struct Interpreter : STContext {
             return value.type;
         case ValueKind::CompleteDecl:
         case ValueKind::ParameterizedDecl:
-            return { value.u.declType };
+            return { value.u.declType.decl, globalContext, value.u.declType.dependent };
         default:
             VERIFY_NOT_REACHED();
         }
@@ -617,13 +635,11 @@ struct Interpreter : STContext {
     Type asTypeValue(const Value& value) {
         switch (value.kind) {
         case ValueKind::CompleteDecl:
-            VERIFY(value.u.declType == typeType.decl);
+            VERIFY(value.u.declType.decl == typeType.decl);
             return value.type;
         case ValueKind::Dependent: {
-            VERIFY(value.type.decl == typeType.decl);
-            Type ret = { value.u.dependent.decl };
-            ret.dependentNestLevel = value.u.dependent.nestLevel;
-            return ret;
+            VERIFY(cmpCompleteDecls(value.type, typeType));
+            return { value.u.dependent };
         }
         default:
             VERIFY_NOT_REACHED();
@@ -632,9 +648,9 @@ struct Interpreter : STContext {
 
     Type toCompleteType(const Value& in) {
         Type inType = typeOf(in);
-        if (cmpCompleteDecls(inType, typeType)) {
+        if (cmpCompleteDecls(inType, typeType))
             return asTypeValue(in);
-        }
+
         if (cmpCompleteDecls(inType, typeOverloadSetType)) {
             VERIFY(in.kind == ValueKind::Array);
             if (in.u.array->size != 1)
@@ -647,8 +663,8 @@ struct Interpreter : STContext {
     }
 
     Value makeBuiltinValue(Type type, int64_t value) { return { std::move(type), value }; }
-    Value makeDependentValue(Ptr<LocalDecl> decl, Type type, uint32_t nestLevel) {
-        return { std::move(type), decl, nestLevel };
+    Value makeDependentValue(Type type, Ptr<LocalDecl> depDecl) {
+        return { std::move(type), DependentValue { depDecl, dependenceLevel() } };
     }
     Value makeTypeValue(Type type) {
         return { complete_t(), typeType.decl, std::move(type) };
@@ -743,31 +759,35 @@ struct Interpreter : STContext {
         return out;
     }
 
-    bool deduceParameters(const Value& source, const Value& target, std::vector<Deduction>& deductions) {
-        if (!deduceParameters(typeOf(source), typeOf(target), deductions))
+    void deduce(DependentValue dep, Value val) {
+        dependentStack[dep.level].push_back({ dep.decl, std::move(val) });
+    }
+    bool isUndeduce(Ptr<Decl> decl, const Value& v) {
+        return v.kind == ValueKind::Dependent && v.u.dependent.decl == decl && v.u.dependent.level == dependenceLevel();
+    }
+    bool staticMatch(const Value& source, const Value& target) {
+        if (!staticMatch(typeOf(source), typeOf(target)))
             return false;
 
-        if (target.dependentIn(this->dependentNestLevel)) {
-            deductions.push_back({ target.u.dependent.decl, source });
+        if (target.kind == ValueKind::Dependent) {
+            deduce(target.u.dependent, source);
             return true;
         }
 
+        // TODO: When we got here the types match. Is this the right way to compare the values?
         return cmpValue(source, target);
     }
-    bool deduceParameters(const Type& source, const Type& target, std::vector<Deduction>& deductions) {
-        if (target.dependentIn(this->dependentNestLevel)) {
-            deductions.push_back({ (Ptr<LocalDecl>)target.decl, makeTypeValue(source) });
-            return true;
-        }
-        if (target.dependentAtAll()) {
-            // allow { Q: Type, a: Q, A: Type, c: constant{A, a} }
+    bool staticMatch(const Type& source, const Type& target) {
+        if (target.declDependent) {
+            deduce(target.asDependentValue(), makeTypeValue(source));
             return true;
         }
         if (source.decl != target.decl)
             return false;
+
         VERIFY(source.args().size() == target.args().size());
         for (uint32_t i = 0; i < source.args().size(); i++) {
-            if (!deduceParameters(source.args()[i], target.args()[i], deductions))
+            if (!staticMatch(source.args()[i], target.args()[i]))
                 return false;
         }
 
@@ -778,56 +798,64 @@ struct Interpreter : STContext {
         ConversionRecord(Value result, ExprResult base)
             : ExprRecord(RecordKind::Conversion, result), base(base) { }
     };
-    ExprResult convertAndDeduce(Value targetTypeValue, ExprResult sourceValue, std::vector<Deduction>& deductions) {
-        if (cmpCompleteDecls(typeOf(targetTypeValue), typeOverloadSetType)) {
-            auto completeType = toCompleteType(targetTypeValue);
-            if (!completeType.valid())
-                return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
-            targetTypeValue = makeTypeValue(completeType);
-        }
-        if (cmpCompleteDecls(typeOf(targetTypeValue), typeType)) {
-            // FIXME: merge this case with deduceParameters(Type, Type)
-            Type targetType = asTypeValue(targetTypeValue);
-            Type sourceType = typeOf(sourceValue);
-            if (targetType.dependentIn(this->dependentNestLevel)) {
-                deductions.push_back({ (Ptr<LocalDecl>)targetType.decl, makeTypeValue(sourceType) });
-                return sourceValue;
-            }
-            if (targetType.dependentAtAll()) {
-                // deduction will be handeled at a lower nest level
-                return sourceValue;
-            }
-            if (targetType.decl == sourceType.decl) {
-                for (uint32_t i = 0; i < sourceType.args().size(); i++) {
-                    if (!deduceParameters(sourceType.args()[i], targetType.args()[i], deductions))
-                        return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
-                }
-                return sourceValue;
-            }
-
-            // TODO: should this be a conversion?
-            if (cmpCompleteDecls(sourceType, typeOverloadSetType)) {
-                return ExprResult::make<ConversionRecord>(makeTypeValue(toCompleteType(sourceValue)), sourceValue);
-            }
-        }
-
-        std::optional<CompleteCall> call;
-        for (Ptr<FnDecl> declP : conversions) {
-            ParameterizedDecl decl { declP, globalContext };
-            decl.allocateArgs(1);
-            decl.args()[0] = { targetTypeValue, 0 };
-            std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
-            auto c = completeCall(decl, fnArgs);
-            if (c.has_value()) {
-                VERIFY(!call.has_value());
-                call = std::move(c.value());
-            }
-        }
-        if (!call.has_value())
-            return ExprResult::make<ConversionRecord>(Value {}, sourceValue);
-        return ExprResult::make<ConversionRecord>(evaluateCall(call.value()), sourceValue);
+    ExprResult convertOrSlice(Value targetTypeValue, ExprResult sourceValue, bool allowConversions = true) {
+        return convertOrSlice(toCompleteType(targetTypeValue), sourceValue, allowConversions);
     }
-    void collectConversions(const Type& type, ExprResult val, std::vector<ExprResult>& results) {
+    struct SliceResult : ExprResult {
+        enum Kind {
+            Success,
+            NotFound,
+            Error,
+        };
+        Kind kind;
+    };
+    SliceResult slice(const Type& targetType, ExprResult sourceValue) {
+        SliceResult badResult = { ExprResult::make<EmptyRecord>(), SliceResult::Kind::Error };
+        if (!targetType.valid())
+            return badResult;
+
+        Type sourceType = typeOf(sourceValue);
+
+        // TODO: there is some dublication with staticMatch(Type, Type) here
+        if (targetType.declDependent) {
+            deduce(targetType.asDependentValue(), makeTypeValue(sourceType));
+            return { sourceValue, SliceResult::Kind::Success };
+        }
+        if (targetType.decl == sourceType.decl) {
+            for (uint32_t i = 0; i < sourceType.args().size(); i++) {
+                if (!staticMatch(sourceType.args()[i], targetType.args()[i]))
+                    return badResult;
+            }
+            return { sourceValue, SliceResult::Kind::Success };
+        }
+
+        std::vector<ExprResult> results;
+        collectSlices(targetType, sourceValue, results);
+        if (results.size() == 1)
+            return { results[0], SliceResult::Kind::Success };
+        else if (results.size() > 1)
+            return badResult;
+
+        return { ExprResult::make<EmptyRecord>(), SliceResult::Kind::NotFound };
+    }
+    ExprResult convertOrSlice(const Type& targetType, ExprResult sourceValue, bool allowConversions = true) {
+        auto sliced = slice(targetType, sourceValue);
+        if (sliced.kind != SliceResult::Kind::NotFound || !allowConversions)
+            return sliced;
+
+        Type sourceType = typeOf(sourceValue);
+        // TODO: should this be a conversion?
+        if (cmpCompleteDecls(sourceType, typeOverloadSetType)) {
+            return ExprResult::make<ConversionRecord>(makeTypeValue(toCompleteType(sourceValue)), sourceValue);
+        }
+
+        EvaluatedArguments parametricArgs;
+        parametricArgs.args.push_back({ ExprResult::make<HackedRecord>(makeTypeValue(targetType)), {} });
+        ExprResult convFn = lookupToValue(lookupIdentifier(*globalContext, conversionWord(), parametricArgs));
+        std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
+        return invokeCall(convFn, fnArgs);
+    }
+    void collectSlices(const Type& type, ExprResult val, std::vector<ExprResult>& results) {
         Type valType = typeOf(val);
         if (cmpCompleteDecls(type, valType))
             return results.push_back(val);
@@ -836,21 +864,15 @@ struct Interpreter : STContext {
         auto members = at(as<StructDecl>(valType.decl).params.params);
         for (uint32_t i = 0; i < members.size(); i++) {
             if (at(members[i]).kind == DeclKind::HasDecl)
-                collectConversions(type, accessMember(val, i), results);
+                collectSlices(type, accessMember(val, i), results);
         }
-    }
-    ExprResult convert(const Type& type, ExprResult val) {
-        std::vector<ExprResult> conversions;
-        collectConversions(type, val, conversions);
-        VERIFY(conversions.size() == 1);
-        return conversions[0];
     }
 
     struct HackedRecord : ExprRecord {
         HackedRecord(Value result)
             : ExprRecord(RecordKind::Hacked, std::move(result)) { }
     };
-    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, std::vector<Deduction>& deductions) {
+    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, bool conversionAllowed) {
         for (auto& arg : args) {
             Ptr<Expr> typeExpr = at(asTyped(at(params.params, arg.index()))).type;
             if (!typeExpr)
@@ -858,7 +880,7 @@ struct Interpreter : STContext {
 
             Value type = evaluateExpr(context, typeExpr);
             VERIFY(type.valid());
-            ExprResult cvtArg = convertAndDeduce(type, arg, deductions);
+            ExprResult cvtArg = convertOrSlice(type, arg, conversionAllowed);
             if (!cvtArg.value().valid()) {
                 fmt::print("unable to initialize ");
                 dumpValue(type);
@@ -894,8 +916,7 @@ struct Interpreter : STContext {
         return out;
     }
 
-    std::optional<ParameterLookupContext> makeParameterContext(
-        LookupContext& parent, const Parameters& params, std::span<const PositionalValue> args, std::vector<Deduction>& deductions) {
+    std::optional<ParameterLookupContext> makeParameterContext(LookupContext& parent, const Parameters& params, std::span<const PositionalValue> args) {
 
         std::span<Ptr<Decl>> allDecls = at(params.params);
         ParameterLookupContext context { &parent };
@@ -905,7 +926,7 @@ struct Interpreter : STContext {
             Value arg;
             Value type = evaluateExpr(context, as<LocalDecl>(allDecls[i]).type);
             if (argOff < args.size() && i == args[argOff].index()) {
-                arg = convertAndDeduce(type, ExprResult::make<HackedRecord>(args[argOff]), deductions);
+                arg = convertOrSlice(type, ExprResult::make<HackedRecord>(args[argOff]));
                 if (!arg.valid()) {
                     fmt::print("unable to initialize ");
                     dumpValue(type);
@@ -918,7 +939,7 @@ struct Interpreter : STContext {
                 auto completeType = toCompleteType(type);
                 if (!completeType.valid())
                     return {};
-                arg = makeDependentValue((Ptr<LocalDecl>)allDecls[i], completeType, this->dependentNestLevel);
+                arg = makeDependentValue(completeType, (Ptr<LocalDecl>)allDecls[i]);
             }
             context.decls = allDecls.subspan(0, i + 1);
             context.appendValue(arg);
@@ -927,17 +948,22 @@ struct Interpreter : STContext {
 
         return context;
     }
-    void applyDeductions(LocalLookupContext& context, std::span<const Deduction> deductions) {
+    void applyDeductions(LocalLookupContext& context) {
+        auto& deductions = dependentStack.back();
         for (uint32_t i = 0; i < context.decls.size(); i++) {
             auto decl = context.decls[i];
             auto& value = context.values[i];
             for (auto& deduc : deductions) {
-                if (decl != (Ptr<Decl>)deduc.param)
+                if (decl != (Ptr<Decl>)deduc.decl)
                     continue;
 
-                if (value.dependentIn(this->dependentNestLevel)) {
+                if (deduc.value.dependentInAnyWay())
+                    continue;
+                if (isUndeduce(decl, value)) {
                     // value was deduced
                     value = deduc.value;
+                } else if (value.dependentInAnyWay()) {
+                    VERIFY_NOT_REACHED();
                 } else if (!cmpValue(value, deduc.value)) {
                     // value was deduced multiple times but not to the same value
                     value = {};
@@ -960,12 +986,8 @@ struct Interpreter : STContext {
             if (!param.initializer)
                 return ExprResult::make<EmptyRecord>();
             ExprResult arg = evaluateExpr(context, param.initializer);
-            if (param.type) {
-                auto type = toCompleteType(evaluateExpr(context, param.type));
-                if (!type.valid())
-                    return ExprResult::make<ConversionRecord>(Value {}, arg);
-                arg = convert(type, arg);
-            }
+            if (param.type)
+                arg = convertOrSlice(evaluateExpr(context, param.type), arg);
             return arg;
         }
         case DeclKind::HasDecl: {
@@ -979,7 +1001,7 @@ struct Interpreter : STContext {
             VERIFY_NOT_REACHED();
         }
     }
-    bool completeParameterContext(std::span<Value> out, LocalLookupContext& context) {
+    bool completeParameterContext(std::span<Value> out, LocalLookupContext& context, bool& outDependent) {
         for (uint32_t i = 0; i < context.decls.size(); i++) {
             Ptr<LocalDecl> decl = (Ptr<LocalDecl>)context.decls[i];
             auto& value = context.values[i];
@@ -987,7 +1009,7 @@ struct Interpreter : STContext {
                 return false;
 
             Value arg;
-            if (value.dependentIn(this->dependentNestLevel)) {
+            if (isUndeduce(decl, value)) {
                 // no argument was provided and nothing was deduced
                 // -> use the default arugment
                 arg = evaluateDefaultArg(context, decl);
@@ -997,6 +1019,8 @@ struct Interpreter : STContext {
                 // argument shoud already be converted
                 arg = value;
             }
+            if (arg.dependentInAnyWay())
+                outDependent = true;
 
             out[i] = std::move(arg);
         }
@@ -1007,44 +1031,49 @@ struct Interpreter : STContext {
 
         Ptr<StaticDecl> sDecl = asStaticDecl(decl.decl);
         if (!sDecl) {
-            VERIFY(!decl.staticContext);
+            VERIFY(!decl.staticContext());
             return CompleteDecl { decl.decl, nullptr };
         }
-        VERIFY((bool)decl.staticContext);
+        VERIFY((bool)decl.staticContext());
 
-        auto withCtx = makeParameterContext(*decl.staticContext, at(sDecl).with.params, {}, depScope.deductions);
+        auto withCtx = makeParameterContext(*decl.staticContext(), at(sDecl).with.params, {});
         if (!withCtx.has_value())
             return {};
 
-        auto paramCtx = makeParameterContext(withCtx.value(), at(sDecl).parametric, decl.args(), depScope.deductions);
+        auto paramCtx = makeParameterContext(withCtx.value(), at(sDecl).parametric, decl.args());
         if (!paramCtx.has_value())
             return {};
 
-        applyDeductions(withCtx.value(), depScope.deductions);
-        applyDeductions(paramCtx.value(), depScope.deductions);
+        applyDeductions(withCtx.value());
+        applyDeductions(paramCtx.value());
 
-        CompleteDecl out { sDecl, decl.staticContext };
+        CompleteDecl out { sDecl, decl.staticContext() };
         out.allocateArgs(paramCtx.value().decls.size(), withCtx.value().decls.size());
 
-        if (!completeParameterContext(out.withArgs(), withCtx.value()))
+        if (!completeParameterContext(out.withArgs(), withCtx.value(), out.argsDependent))
             return {};
 
-        if (!completeParameterContext(out.args(), paramCtx.value()))
+        if (!completeParameterContext(out.args(), paramCtx.value(), out.argsDependent))
             return {};
 
         return out;
     }
 
-    std::vector<NamedExprResult> evaluateArguments(LookupContext& ctx, Arguments& a) {
-        std::vector<NamedExprResult> out;
+    struct EvaluatedArguments {
+        std::vector<NamedExprResult> args;
+        bool dependent = false;
+    };
+    EvaluatedArguments evaluateArguments(LookupContext& ctx, Arguments& a) {
+        EvaluatedArguments out;
         auto args = at(a.args);
         for (auto& arg : args) {
-            out.push_back({ evaluateExpr(ctx, arg.source), arg.target });
+            out.args.push_back({ evaluateExpr(ctx, arg.source), arg.target });
+            out.dependent |= out.args.back().value().dependentInAnyWay();
         }
         return out;
     }
 
-    LookupResult lookupIdentifierIn(LookupContext& context, Word name, std::span<const NamedExprResult> args) {
+    LookupResult lookupIdentifierIn(LookupContext& context, Word name, const EvaluatedArguments& args) {
         LookupResult out;
         for (Ptr<Decl> decl : context.decls) {
             if (!isNamedDecl(decl))
@@ -1053,19 +1082,19 @@ struct Interpreter : STContext {
                 continue;
 
             out.context = &context;
-            ParameterizedDecl parameterized { (Ptr<NamedDecl>)decl, asStaticContext(context) };
-            if (parameterized.staticContext) {
+            ParameterizedDecl parameterized { (Ptr<NamedDecl>)decl, asStaticContext(context), args.dependent };
+            if (parameterized.staticContext()) {
                 Ptr<StaticDecl> sDecl = asStaticDecl(decl);
                 VERIFY((bool)sDecl);
-                auto posArgs = positionArguments(at(sDecl).parametric, {}, args);
+                auto posArgs = positionArguments(at(sDecl).parametric, {}, args.args);
                 if (!posArgs.has_value())
                     continue;
 
-                parameterized.allocateArgs(args.size());
-                for (uint32_t i = 0; i < args.size(); i++)
+                parameterized.allocateArgs(args.args.size());
+                for (uint32_t i = 0; i < args.args.size(); i++)
                     parameterized.args()[i] = posArgs.value()[i];
             } else
-                VERIFY(args.empty());
+                VERIFY(args.args.empty());
 
             if (out.declKind != DeclKind::Invalid && out.declKind != at(decl).kind) {
                 out.decls.clear();
@@ -1076,27 +1105,29 @@ struct Interpreter : STContext {
         }
         return out;
     }
-    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier ident, LookupContext* end = nullptr) {
-        // fmt::println("looking up '{}'", sview(ident.word));
-        auto args = evaluateArguments(identCtx, ident);
+    LookupResult lookupIdentifier(LookupContext& identCtx, Word name, const EvaluatedArguments& args, LookupContext* end = nullptr) {
+        // fmt::println("looking up '{}'", sview(name));
         LookupContext* context = &identCtx;
         while (context != end) {
-            LookupResult r = lookupIdentifierIn(*context, ident.word, args);
+            LookupResult r = lookupIdentifierIn(*context, name, args);
             if (r.valid())
                 return r;
 
             context = context->parent;
         }
-        if (!cmpWord(ident.word, selfWord))
-            fmt::println("looking up '{}' failed", sview(ident.word));
+        if (!cmpWord(name, selfWord))
+            fmt::println("looking up '{}' failed", sview(name));
         return {};
+    }
+    LookupResult lookupIdentifier(LookupContext& identCtx, Identifier ident, LookupContext* end = nullptr) {
+        return lookupIdentifier(identCtx, ident.word, evaluateArguments(identCtx, ident), end);
     }
     Value& getValueRef(const LValue& lVal) {
         VERIFY(lVal.valid());
         VERIFY((bool)asVar(lVal.decl.decl));
         switch (lVal.context->kind) {
         case LookupContextKind::Static:
-            VERIFY(lVal.context == lVal.decl.staticContext);
+            VERIFY(lVal.context == lVal.decl.staticContext());
             [[fallthrough]];
         case LookupContextKind::StaticRedirect:
             return getStaticValueRef(lVal.decl);
@@ -1120,8 +1151,8 @@ struct Interpreter : STContext {
         getValueRef(lVal) = value;
     }
     Value& getStaticValueRef(const CompleteDecl& decl) {
-        VERIFY((bool)decl.staticContext);
-        auto context = decl.staticContext;
+        VERIFY((bool)decl.staticContext());
+        auto context = decl.staticContext();
         for (auto& v : context->values) {
             if (cmpCompleteDecls(v.decl, decl))
                 return v.value;
@@ -1153,18 +1184,15 @@ struct Interpreter : STContext {
     }
     template<typename Callback>
     auto withParametricContext(const CompleteDecl& decl, Callback&& callback) {
-        return withParametricContext(decl, *decl.staticContext, std::forward<Callback>(callback));
+        return withParametricContext(decl, *decl.staticContext(), std::forward<Callback>(callback));
     }
     Value initialize(const CompleteDecl& decl) {
         VERIFY(at(decl.decl).kind == DeclKind::GlobalDecl);
         return withParametricContext(decl, [&](LookupContext& context) {
             auto& d = as<GlobalDecl>(decl.decl);
             ExprResult source = evaluateExpr(context, d.initializer);
-            if (d.type) {
-                Type type = toCompleteType(evaluateExpr(context, d.type));
-                VERIFY(type.valid());
-                source = convert(type, source);
-            }
+            if (d.type)
+                source = convertOrSlice(evaluateExpr(context, d.type), source);
             return source;
         });
     }
@@ -1267,16 +1295,17 @@ struct Interpreter : STContext {
         if (!posFnArgs.has_value())
             return {};
 
-        VERIFY(fnDecl.staticContext != nullptr);
+        VERIFY(fnDecl.staticContext() != nullptr);
         auto& fn = as<CallableDecl>(fnDecl.decl);
 
+        bool conversionsAllowed = !cmpWord(at(fnDecl.decl).name, conversionWord());
         DependentScope depScope { this };
 
-        auto withCtx = makeParameterContext(*fnDecl.staticContext, fn.with.params, {}, depScope.deductions);
+        auto withCtx = makeParameterContext(*fnDecl.staticContext(), fn.with.params, {});
         if (!withCtx.has_value())
             return {};
 
-        auto parametricCtx = makeParameterContext(withCtx.value(), fn.parametric, fnDecl.args(), depScope.deductions);
+        auto parametricCtx = makeParameterContext(withCtx.value(), fn.parametric, fnDecl.args());
         if (!parametricCtx.has_value())
             return {};
 
@@ -1289,25 +1318,25 @@ struct Interpreter : STContext {
             structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
         }
 
-        if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), depScope.deductions))
+        if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), conversionsAllowed))
             return {};
-        // convert self arg
+        // slice self arg
         if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
             && fn.kind == DeclKind::FnDecl && matchName(at(fn.params.params, 0), selfWord)) {
-            VERIFY(fnDecl.staticContext->staticDecl.valid());
-            posFnArgs.value()[0] = { convert(fnDecl.staticContext->staticDecl, posFnArgs.value()[0]), 0 };
+            VERIFY(fnDecl.staticContext()->staticDecl.valid());
+            posFnArgs.value()[0] = { slice(fnDecl.staticContext()->staticDecl, posFnArgs.value()[0]), 0 };
         }
 
-        applyDeductions(withCtx.value(), depScope.deductions);
-        applyDeductions(parametricCtx.value(), depScope.deductions);
+        applyDeductions(withCtx.value());
+        applyDeductions(parametricCtx.value());
 
-        CompleteCall out { { fnDecl.decl, fnDecl.staticContext } };
+        CompleteCall out { { fnDecl.decl, fnDecl.staticContext() } };
         out.target.allocateArgs(parametricCtx.value().decls.size(), withCtx.value().decls.size());
 
-        if (!completeParameterContext(out.target.withArgs(), withCtx.value()))
+        if (!completeParameterContext(out.target.withArgs(), withCtx.value(), out.target.argsDependent))
             return {};
 
-        if (!completeParameterContext(out.target.args(), parametricCtx.value()))
+        if (!completeParameterContext(out.target.args(), parametricCtx.value(), out.target.argsDependent))
             return {};
 
         // Now the parametric arguments are deduced so we can make the proper context.
@@ -1346,7 +1375,7 @@ struct Interpreter : STContext {
     }
     Value evaluateFunction(CompleteCall call, Value assignArg) {
         VERIFY(at(call.target.decl).kind == DeclKind::FnDecl);
-        if (call.target.staticContext == &builtinImplContext) {
+        if (call.target.staticContext() == &builtinImplContext) {
             for (uint32_t i = 0; i < builtinImplContext.decls.size(); i++) {
                 if (call.target.decl == builtinImplContext.decls[i])
                     return builtinImpls[i](this, call.args);
@@ -1354,7 +1383,7 @@ struct Interpreter : STContext {
         }
 
         auto& targetDecl = as<FnDecl>(call.target.decl);
-        LocalLookupContext selfCtx { call.target.staticContext };
+        LocalLookupContext selfCtx { call.target.staticContext() };
         LocalLookupContext memberCtx { &selfCtx };
         bool hasSelf = false;
         if (call.args.size() > 0) {
@@ -1446,11 +1475,9 @@ struct Interpreter : STContext {
             auto posArgs = positionArguments(decl.params, {}, args);
             if (!posArgs.has_value())
                 return badCall;
-            DependentScope depScope { this };
             LookupContext* typeCtx = getTypeContext(type);
-            if (!convertFnArgs(*typeCtx, decl.params, posArgs.value(), depScope.deductions))
+            if (!convertFnArgs(*typeCtx, decl.params, posArgs.value(), true))
                 return badCall;
-            EXPECT_EQ(depScope.deductions.size(), 0u);
 
             auto vals = completeFnArgs(*typeCtx, decl.params, posArgs.value());
             if (!vals.has_value())
@@ -1516,7 +1543,7 @@ struct Interpreter : STContext {
         VERIFY(e.callKind == CallKind::Paren);
         ExprResult base = evaluateExpr(ctx, e.base);
         auto args = evaluateArguments(ctx, e.args);
-        return invokeCall(base, args);
+        return invokeCall(base, args.args);
     }
 
     struct ParenExprRecord : ExprRecord {
@@ -1551,20 +1578,20 @@ struct Interpreter : STContext {
         return base;
     }
     TypeLookupContext* getTypeContext(const Type& type) {
-        for (auto& child : type.staticContext->children) {
+        for (auto& child : type.staticContext()->children) {
             if (cmpCompleteDecls(child.decl, type))
                 return child.context;
         }
 
         auto& d = as<StructDecl>(type.decl);
-        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext, d.with.params, type.withArgs())));
+        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext(), d.with.params, type.withArgs())));
         auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, d.parametric, type.args())));
 
         auto& typeCtx = at(make<TypeLookupContext>(&paramCtx, type));
         typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
         typeCtx.parent = recursiveWrapWithHasContexts(&paramCtx, type.decl, typeCtx);
 
-        type.staticContext->children.push_back({ type, &typeCtx });
+        type.staticContext()->children.push_back({ type, &typeCtx });
         return &typeCtx;
     }
     ExprResult accessMember(ExprResult base, uint32_t i) {
@@ -1712,10 +1739,9 @@ struct Interpreter : STContext {
     ControlFlow evalLetStmt(BlockLookupContext& context, LetStmt& stmt) {
         VarInfo& info = at(asVar(stmt.decl));
         ExprResult init = evaluateExpr(context, info.initializer);
-        if (info.type) {
-            Type type = toCompleteType(evaluateExpr(context, info.type));
-            init = convert(type, init);
-        }
+        if (info.type)
+            init = convertOrSlice(evaluateExpr(context, info.type), init);
+
         context.declare(stmt.decl, init);
         return {};
     }
@@ -1768,7 +1794,7 @@ struct Interpreter : STContext {
             break;
         case ValueKind::ParameterizedDecl:
         case ValueKind::CompleteDecl:
-            fmt::println("[{}] {}{}", sview(at(value.u.declType).name), value.type.dependentAtAll() ? "dependent " : "", sview(at(value.type.decl).name));
+            fmt::println("[{}] {}{}", sview(at(value.u.declType.decl).name), value.u.declType.dependent ? "dependent " : "", sview(at(value.type.decl).name));
             if (auto sDecl = asStaticDecl(value.type.decl)) {
                 for (uint32_t i = 0; i < value.type.args().size(); i++) {
                     auto memberDecl = at(at(sDecl).parametric.params, i);
