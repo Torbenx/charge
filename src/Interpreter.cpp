@@ -983,6 +983,39 @@ struct Interpreter : STContext {
         }
         return ExprResult::make<EmptyRecord>();
     }
+    bool recursivelyCheckForHasMember(const Type& shouldHave, const CompleteDecl& type) {
+        if (cmpCompleteDecls(type, shouldHave))
+            return true;
+
+        auto* typeCtx = getTypeContext(type);
+        for (LookupContext* ctx = typeCtx->parent; ctx != typeCtx->parametricContext; ctx = ctx->parent) {
+            VERIFY(ctx->kind == LookupContextKind::StaticRedirect);
+            const auto& decl = ((StaticRedirectLookupContext*)ctx)->redirect->staticDecl;
+            if (recursivelyCheckForHasMember(shouldHave, decl))
+                return true;
+        }
+        return false;
+    }
+    bool checkConstraints(LookupContext& context, std::span<Constraint> constraints, const Value& value) {
+        for (auto c : constraints) {
+            ExprResult condValue = evaluateExpr(context, c.expr);
+            Type condType = typeOf(condValue);
+            if (cmpCompleteDecls(condType, typeType) || cmpCompleteDecls(condType, typeOverloadSetType)) {
+                if (!recursivelyCheckForHasMember(toCompleteType(condValue), toCompleteType(value)))
+                    return false;
+            } else if (cmpCompleteDecls(condType, overloadSetType)) {
+                std::array<NamedExprResult, 1> args { { { ExprResult::make<HackedRecord>(value), {} } } };
+                Value res = invokeCall(condValue, args);
+                VERIFY(res.valid());
+                VERIFY(res.kind == ValueKind::Builtin);
+                VERIFY(cmpCompleteDecls(res.type, boolType));
+                if (!res.u.builtinValue)
+                    return false;
+            } else
+                VERIFY_NOT_REACHED();
+        }
+        return true;
+    }
     bool completeParameterContext(std::span<Value> out, LocalLookupContext& context, bool& outDependent) {
         for (uint32_t i = 0; i < context.decls.size(); i++) {
             Ptr<LocalDecl> decl = (Ptr<LocalDecl>)context.decls[i];
@@ -990,7 +1023,7 @@ struct Interpreter : STContext {
             if (!value.valid())
                 return false;
 
-            Value arg;
+            Value& arg = out[i];
             if (isUndeduce(decl, value)) {
                 // no argument was provided and nothing was deduced
                 // -> use the default arugment
@@ -1001,10 +1034,14 @@ struct Interpreter : STContext {
                 // argument shoud already be converted
                 arg = value;
             }
-            if (arg.dependentInAnyWay())
+            if (arg.dependentInAnyWay()) {
                 outDependent = true;
-
-            out[i] = std::move(arg);
+                continue;
+            }
+            if (!checkConstraints(context, at(at(decl).valueConstraints), arg))
+                return false;
+            if (!checkConstraints(context, at(at(decl).typeContraints), makeTypeValue(typeOf(arg))))
+                return false;
         }
         return true;
     }
@@ -1925,12 +1962,25 @@ void testInterpreter() {
             return b.test2();
         }
 
-        struct HasTest{} {
+        struct HasBase{} {
             has Base;
             function callGet(self) {
                 return get();
             }
         }
+
+        struct Flags{} {
+            flag1: bool;
+            flag2: bool;
+            flag3: bool;
+            flag4: bool;
+        }
+        function allTrue(f: Flags) { return f.flag1 && f.flag2 && f.flag3 && f.flag4; }
+        function atLeastOneFalse(f: Flags) { return !allTrue(f); }
+        function conditionFlags{f ?allTrue: Flags}() { return true; }
+        function conditionFlags{f ?atLeastOneFalse: Flags}() { return false; }
+
+        function hasBase{T ?Base: Type}() { return true; }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -1945,8 +1995,10 @@ void testInterpreter() {
     eval("bar(mkConst{mkConst{5}()}())");
     eval("testA()");
     eval("testBase()");
-    eval("HasTest().get()");
-    eval("HasTest(Base(1)).x");
-    eval("true && !false");
+    eval("HasBase().get()");
+    eval("HasBase(Base(1)).x");
     eval("(5 * 4 - 2) / 3");
+    eval("conditionFlags{Flags(true, true, true, false)}()");
+    eval("conditionFlags{Flags(true, true, true, true)}()");
+    eval("hasBase{HasBase}()");
 }

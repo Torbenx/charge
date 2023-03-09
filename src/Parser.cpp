@@ -513,8 +513,17 @@ Span<Ptr<LocalDecl>> Parser::parseParameterContext(ParameterParseScope scope) {
     return finalizeSpan(params);
 }
 
+Span<Constraint> Parser::parseConstraints() {
+    auto valConstr = beginSpan<Constraint>();
+    while (tok.kind() == TokenKind::Question) {
+        advance();
+        auto& c = append(valConstr, {});
+        parseLeafExpr(c.expr);
+    }
+    return finalizeSpan(valConstr);
+}
 void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
-    // [mut] [name][&] [?constraint] [: type_or_constraint]
+    // [mut] [name][&] [?constraint]... [: type_or_constraint]
     // contraint:
     //   match expr
     //   expr
@@ -537,9 +546,13 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
         e.isInOut = true;
         advance();
     }
+    e.valueConstraints = parseConstraints();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseBinaryExpr(e.type);
+        if (tok.kind() == TokenKind::Question)
+            e.typeContraints = parseConstraints();
+        else
+            parseBinaryExpr(e.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();
@@ -583,7 +596,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         d.decls = finalizeSpan(decls);
         return;
     }
-    //
+    // operation
     if (source.view(tok) == "operation") {
         VERIFY(scope == DeclParseScope::Namespace);
         advance();
@@ -609,6 +622,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         advance();
 
         auto& d = makeSet<FnDecl>(out, name);
+        d.with = with;
         d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
         parseCompoundStmt(d.body);

@@ -144,7 +144,6 @@ struct Identifier : Arguments {
 //  - member          |               no |              no |  no |     no |
 
 struct Constraint {
-    bool match = false;
     Ptr<Expr> expr;
 };
 
@@ -171,7 +170,8 @@ struct VarInfo {
     Ptr<Expr> initializer;
     bool isMutable = false;
     bool isInOut = false;
-    Constraint typeContraint;
+    Span<Constraint> valueConstraints;
+    Span<Constraint> typeContraints;
     VarInfo(bool isMutable)
         : isMutable(isMutable) { }
 };

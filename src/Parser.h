@@ -193,6 +193,7 @@ struct Parser : Lexer, STContext {
         Function, // allow 'mut' and '&'
     };
     Span<Ptr<LocalDecl>> parseParameterContext(ParameterParseScope);
+    Span<Constraint> parseConstraints();
     void parseParameter(Ptr<LocalDecl>& out, ParameterParseScope);
     void parseWithClause(WithClause& out);
     enum DeclParseScope {

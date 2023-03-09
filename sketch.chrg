@@ -187,7 +187,7 @@ function is{T: Type, Anchor: Type}(elm: Class{Anchor}) -> bool {
     return elm == Class{Anchor}::of(T);
 }
 with {Anchor: Type}
-match {T ?ClassRoot{undeduced(Anchor)}: Type} against (class: Class{Anchor}) {
+match {T ?ClassRoot{Anchor}: Type} against (class: Class{Anchor}) {
     return performMatch{Class{Anchor}::of(T)}(class);
 }
 with {Anchor: Type}
@@ -195,7 +195,7 @@ match {T ?ClassRoot{Anchor}: Type} against (inst: ?ClassRoot{Anchor}) {
     return performMatch{Class{Anchor}::of(T)}(inst.class());
 }
 with {Anchor: Type}
-match {class: Class{Anchor}} against (inst: ?ClassRoot{undeduced(Anchor)}) {
+match {class: Class{Anchor}} against (inst: ?ClassRoot{Anchor}) {
     return performMatch{class}(inst.class());
 }
 
