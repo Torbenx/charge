@@ -1026,14 +1026,12 @@ struct Interpreter : STContext {
         }
         return true;
     }
-    CompleteDecl completeDecl(const ParameterizedDecl& decl) {
+    template<typename Callback>
+    CompleteDecl withDependentParametricContext(const ParameterizedDecl& decl, Callback&& callback) {
         DependentScope depScope { this };
 
         Ptr<StaticDecl> sDecl = asStaticDecl(decl.decl);
-        if (!sDecl) {
-            VERIFY(!decl.staticContext());
-            return CompleteDecl { decl.decl, nullptr };
-        }
+        VERIFY((bool)sDecl);
         VERIFY((bool)decl.staticContext());
 
         auto withCtx = makeParameterContext(*decl.staticContext(), at(sDecl).with.params, {});
@@ -1042,6 +1040,10 @@ struct Interpreter : STContext {
 
         auto paramCtx = makeParameterContext(withCtx.value(), at(sDecl).parametric, decl.args());
         if (!paramCtx.has_value())
+            return {};
+
+        bool success = callback(paramCtx.value());
+        if (!success)
             return {};
 
         applyDeductions(withCtx.value());
@@ -1057,6 +1059,14 @@ struct Interpreter : STContext {
             return {};
 
         return out;
+    }
+    CompleteDecl completeDecl(const ParameterizedDecl& decl) {
+        if (!isStaticDecl(decl.decl)) {
+            VERIFY(decl.staticContext() == nullptr);
+            VERIFY(decl.args().size() == 0);
+            return CompleteDecl { decl.decl };
+        }
+        return withDependentParametricContext(decl, [](LookupContext&) { return true; });
     }
 
     struct EvaluatedArguments {
@@ -1291,62 +1301,48 @@ struct Interpreter : STContext {
     std::optional<CompleteCall> completeCall(
         const ParameterizedDecl& fnDecl, std::span<const NamedExprResult> namedFnArgs, std::optional<ExprResult> selfArg = {}) {
 
-        auto posFnArgs = positionArguments(as<FnDecl>(fnDecl.decl).params, {}, namedFnArgs, selfArg);
+        auto& fn = as<CallableDecl>(fnDecl.decl);
+        auto posFnArgs = positionArguments(fn.params, {}, namedFnArgs, selfArg);
         if (!posFnArgs.has_value())
             return {};
 
-        VERIFY(fnDecl.staticContext() != nullptr);
-        auto& fn = as<CallableDecl>(fnDecl.decl);
+        CompleteCall out;
+        out.target = withDependentParametricContext(fnDecl, [&](LookupContext& context) {
+            bool conversionsAllowed = !cmpWord(fn.name, conversionWord());
 
-        bool conversionsAllowed = !cmpWord(at(fnDecl.decl).name, conversionWord());
-        DependentScope depScope { this };
+            // Early type context since we don't know all the parametric arguments yet.
+            // This is fine since the type expressions are evaluated in this context, which
+            // have to be constant expressions.
+            StaticLookupContext structCtx { &context, {} };
+            if (fn.kind == DeclKind::StructDecl) {
+                auto& structDecl = (StructDecl&)fn;
+                structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
+            }
 
-        auto withCtx = makeParameterContext(*fnDecl.staticContext(), fn.with.params, {});
-        if (!withCtx.has_value())
+            if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), conversionsAllowed))
+                return false;
+            // slice self arg
+            if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
+                && fn.kind == DeclKind::FnDecl && matchName(at(fn.params.params, 0), selfWord)) {
+                VERIFY(fnDecl.staticContext()->staticDecl.valid());
+                posFnArgs.value()[0] = { slice(fnDecl.staticContext()->staticDecl, posFnArgs.value()[0]), 0 };
+            }
+
+            return true;
+        });
+        if (!out.target.valid())
             return {};
 
-        auto parametricCtx = makeParameterContext(withCtx.value(), fn.parametric, fnDecl.args());
-        if (!parametricCtx.has_value())
-            return {};
-
-        // Early type context since we don't know all the parametric arguments yet.
-        // This is fine since the type expressions are evaluated in this context, which
-        // have to be constant expressions.
-        StaticLookupContext structCtx { &parametricCtx.value(), {} };
-        if (fn.kind == DeclKind::StructDecl) {
-            auto& structDecl = (StructDecl&)fn;
-            structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
-        }
-
-        if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), conversionsAllowed))
-            return {};
-        // slice self arg
-        if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
-            && fn.kind == DeclKind::FnDecl && matchName(at(fn.params.params, 0), selfWord)) {
-            VERIFY(fnDecl.staticContext()->staticDecl.valid());
-            posFnArgs.value()[0] = { slice(fnDecl.staticContext()->staticDecl, posFnArgs.value()[0]), 0 };
-        }
-
-        applyDeductions(withCtx.value());
-        applyDeductions(parametricCtx.value());
-
-        CompleteCall out { { fnDecl.decl, fnDecl.staticContext() } };
-        out.target.allocateArgs(parametricCtx.value().decls.size(), withCtx.value().decls.size());
-
-        if (!completeParameterContext(out.target.withArgs(), withCtx.value(), out.target.argsDependent))
-            return {};
-
-        if (!completeParameterContext(out.target.args(), parametricCtx.value(), out.target.argsDependent))
-            return {};
 
         // Now the parametric arguments are deduced so we can make the proper context.
         // This crutial since default member initializers can access mutable static members.
-        LookupContext* initializeCtx = &parametricCtx.value();
+        auto withCtx = [&](LookupContext& ctx) { return completeFnArgs(ctx, fn.params, posFnArgs.value()); };
+        std::optional<std::vector<FnArgumentResult>> fnArgs;
         if (fn.kind == DeclKind::StructDecl)
-            initializeCtx = getTypeContext(out.target);
+            fnArgs = withCtx(*getTypeContext(out.target));
+        else
+            fnArgs = withParametricContext(out.target, withCtx);
 
-        auto fnArgs = completeFnArgs(*initializeCtx, fn.params, posFnArgs.value());
-        VERIFY(fnArgs.has_value());
         if (!fnArgs.has_value())
             return {};
         out.args = std::move(fnArgs.value());
