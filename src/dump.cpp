@@ -166,8 +166,8 @@ struct STDumper : STContext {
     }
 
     void childrenStructDecl(Ptr<StructDecl> e) {
-        childrenSpan(at(e).staticDecls, (IsLastChild)(at(e).params.params.count == 0));
-        childrenSpan(at(e).params.params, IsLastChild::Yes);
+        childrenSpan(at(e).staticDecls, (IsLastChild)(at(e).params.count == 0));
+        childrenSpan(at(e).params, IsLastChild::Yes);
     }
     void childrenVarInfo(VarInfo& info) {
         if (info.type)

@@ -495,7 +495,7 @@ void Parser::parseSingleOrCompoundStmt(Ptr<Stmt>& out) {
     }
 }
 
-void Parser::parseParameterContext(Parameters& out, ParameterParseScope scope) {
+Span<Ptr<LocalDecl>> Parser::parseParameterContext(ParameterParseScope scope) {
     TokenKind leftKind = tok.kind();
     VERIFY(isLeftBracket(leftKind));
     TokenKind rightKind = leftToRightBracket(leftKind);
@@ -510,7 +510,7 @@ void Parser::parseParameterContext(Parameters& out, ParameterParseScope scope) {
             advance();
     }
     advance();
-    out.params = (Span<Ptr<Decl>>)finalizeSpan(params);
+    return finalizeSpan(params);
 }
 
 void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
@@ -550,7 +550,7 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
 void Parser::parseWithClause(WithClause& out) {
     EXPECT_EQ(source.view(tok), "with");
     advance();
-    parseParameterContext(out.params, ParameterParseScope::Static);
+    out.params = parseParameterContext(ParameterParseScope::Static);
 }
 
 void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
@@ -609,7 +609,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         advance();
 
         auto& d = makeSet<FnDecl>(out, name);
-        parseParameterContext(d.params, ParameterParseScope::Function);
+        d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
         parseCompoundStmt(d.body);
         return;
@@ -657,15 +657,15 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         break;
     }
 
-    Parameters parametric;
+    Span<Ptr<LocalDecl>> parametric;
     if (tok.kind() == TokenKind::LeftBrace) {
-        parseParameterContext(parametric, ParameterParseScope::Static);
+        parametric = parseParameterContext(ParameterParseScope::Static);
     }
 
     bool isLocal = scope == DeclParseScope::Struct && !hasStatic;
     if (isLocal) {
-        EXPECT_EQ(with.params.params.count, 0u);
-        EXPECT_EQ(parametric.params.count, 0u);
+        EXPECT_EQ(with.params.count, 0u);
+        EXPECT_EQ(parametric.count, 0u);
     }
 
     // variable
@@ -695,7 +695,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         VERIFY(!hasStatic);
         auto& d = makeSet<FnDecl>(out, name);
 
-        parseParameterContext(d.params, ParameterParseScope::Function);
+        d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
         if (tok.kind() == TokenKind::Equal) {
             advance();
             EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
@@ -729,7 +729,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
             }
         }
         advance();
-        d.params.params = finalizeSpan(memberDecls);
+        d.params = finalizeSpan(memberDecls);
         d.staticDecls = finalizeSpan(staticDecls);
     } else
         VERIFY_NOT_REACHED();

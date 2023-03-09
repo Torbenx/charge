@@ -124,12 +124,8 @@ struct Arguments {
     Span<Arg> args;
 };
 
-struct Parameters {
-    Span<Ptr<Decl>> params;
-};
-
 struct WithClause {
-    Parameters params;
+    Span<Ptr<LocalDecl>> params;
 };
 
 struct Identifier : Arguments {
@@ -140,6 +136,17 @@ struct Identifier : Arguments {
 // named   : Global, Local, Struct, Fn
 // callable: Struct, Fn
 // var     : Global, Local, Has
+
+// local decls        | value constraint | type constraint | mut | in out |
+//  - fn param        |               no |             yes | yes |    yes |
+//  - with/parametric |              yes |             yes |  no |     no |
+//  - let             |               no |              no | yes |     no |
+//  - member          |               no |              no |  no |     no |
+
+struct Constraint {
+    bool match = false;
+    Ptr<Expr> expr;
+};
 
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
@@ -155,7 +162,7 @@ struct NamedDecl : Decl {
 
 struct StaticDecl : NamedDecl {
     WithClause with;
-    Parameters parametric;
+    Span<Ptr<LocalDecl>> parametric;
     using NamedDecl::NamedDecl;
 };
 
@@ -164,6 +171,7 @@ struct VarInfo {
     Ptr<Expr> initializer;
     bool isMutable = false;
     bool isInOut = false;
+    Constraint typeContraint;
     VarInfo(bool isMutable)
         : isMutable(isMutable) { }
 };
@@ -179,7 +187,7 @@ struct LocalDecl : NamedDecl, VarInfo {
 };
 
 struct CallableDecl : StaticDecl {
-    Parameters params;
+    Span<Ptr<Decl>> params;
     CallableDecl(DeclKind kind, Word name)
         : StaticDecl(kind, name) { }
 };

@@ -589,7 +589,7 @@ struct Interpreter : STContext {
             auto params = beginSpan<Ptr<Decl>>();
             for (uint32_t i = 0; i < argCount; i++)
                 append(params, make<LocalDecl>(Word {}, false));
-            at(decl).params.params = finalizeSpan(params);
+            at(decl).params = finalizeSpan(params);
             append(implDecls, decl);
             append(impls, impl);
         };
@@ -731,11 +731,10 @@ struct Interpreter : STContext {
         auto named = asNamedDecl(decl);
         return named && cmpWord(at(named).name, name);
     }
-    std::optional<std::vector<PositionalExprResult>> positionArguments(Parameters& parameters,
+    std::optional<std::vector<PositionalExprResult>> positionArguments(std::span<Ptr<Decl>> params,
         std::span<const PositionalExprResult> inArgs, std::span<const NamedExprResult> subArgs, std::optional<ExprResult> selfArg = {}) {
 
         std::vector<PositionalExprResult> out;
-        auto params = at(parameters.params);
         uint32_t inOff = 0;
         uint32_t subOff = 0;
         uint32_t i = 0;
@@ -861,7 +860,7 @@ struct Interpreter : STContext {
             return results.push_back(val);
 
         std::optional<ExprResult> out;
-        auto members = at(as<StructDecl>(valType.decl).params.params);
+        auto members = at(as<StructDecl>(valType.decl).params);
         for (uint32_t i = 0; i < members.size(); i++) {
             if (at(members[i]).kind == DeclKind::HasDecl)
                 collectSlices(type, accessMember(val, i), results);
@@ -872,9 +871,9 @@ struct Interpreter : STContext {
         HackedRecord(Value result)
             : ExprRecord(RecordKind::Hacked, std::move(result)) { }
     };
-    bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, bool conversionAllowed) {
+    bool convertFnArgs(LookupContext& context, std::span<Ptr<Decl>> params, std::span<PositionalExprResult> args, bool conversionAllowed) {
         for (auto& arg : args) {
-            Ptr<Expr> typeExpr = at(asVar(at(params.params, arg.index()))).type;
+            Ptr<Expr> typeExpr = at(asVar(params[arg.index()])).type;
             if (!typeExpr)
                 continue;
 
@@ -893,33 +892,30 @@ struct Interpreter : STContext {
         return true;
     }
 
-    std::optional<std::vector<FnArgumentResult>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalExprResult> args) {
+    std::optional<std::vector<FnArgumentResult>> completeFnArgs(LookupContext& context, std::span<Ptr<Decl>> params, std::span<const PositionalExprResult> args) {
 
         std::vector<FnArgumentResult> out;
         uint32_t argOff = 0;
-        for (uint32_t i = 0; i < params.params.count; i++) {
-            auto& param = at(params.params, i);
+        for (uint32_t i = 0; i < params.size(); i++) {
             ExprResult arg
                 = (argOff < args.size() && i == args[argOff].index())
                 ? (ExprResult)args[argOff++]
-                : evaluateDefaultArg(context, param);
+                : evaluateDefaultArg(context, params[i]);
 
             if (!arg.value().valid())
                 return {};
-            out.push_back({ std::move(arg), at(asVar(param)).isInOut });
+            out.push_back({ std::move(arg), at(asVar(params[i])).isInOut });
         }
         return out;
     }
 
-    std::optional<ParameterLookupContext> makeParameterContext(LookupContext& parent, const Parameters& params, std::span<const PositionalValue> args) {
-
-        std::span<Ptr<Decl>> allDecls = at(params.params);
+    std::optional<ParameterLookupContext> makeParameterContext(LookupContext& parent, std::span<Ptr<LocalDecl>> allDecls, std::span<const PositionalValue> args) {
         ParameterLookupContext context { &parent };
         uint32_t argOff = 0;
 
         for (uint32_t i = 0; i < allDecls.size(); i++) {
             Value arg;
-            Value type = evaluateExpr(context, as<LocalDecl>(allDecls[i]).type);
+            Value type = evaluateExpr(context, at(allDecls[i]).type);
             if (argOff < args.size() && i == args[argOff].index()) {
                 arg = convertOrSlice(type, ExprResult::make<HackedRecord>(args[argOff]));
                 if (!arg.valid()) {
@@ -936,7 +932,7 @@ struct Interpreter : STContext {
                     return {};
                 arg = makeDependentValue(completeType, (Ptr<LocalDecl>)allDecls[i]);
             }
-            context.decls = allDecls.subspan(0, i + 1);
+            context.decls = std::span<Ptr<Decl>>((Ptr<Decl>*)allDecls.data(), i + 1);
             context.appendValue(arg);
         }
         EXPECT_EQ(argOff, args.size());
@@ -1020,11 +1016,11 @@ struct Interpreter : STContext {
         VERIFY((bool)sDecl);
         VERIFY((bool)decl.staticContext());
 
-        auto withCtx = makeParameterContext(*decl.staticContext(), at(sDecl).with.params, {});
+        auto withCtx = makeParameterContext(*decl.staticContext(), at(at(sDecl).with.params), {});
         if (!withCtx.has_value())
             return {};
 
-        auto paramCtx = makeParameterContext(withCtx.value(), at(sDecl).parametric, decl.args());
+        auto paramCtx = makeParameterContext(withCtx.value(), at(at(sDecl).parametric), decl.args());
         if (!paramCtx.has_value())
             return {};
 
@@ -1082,7 +1078,7 @@ struct Interpreter : STContext {
             if (parameterized.staticContext()) {
                 Ptr<StaticDecl> sDecl = asStaticDecl(decl);
                 VERIFY((bool)sDecl);
-                auto posArgs = positionArguments(at(sDecl).parametric, {}, args.args);
+                auto posArgs = positionArguments(at((Span<Ptr<Decl>>)at(sDecl).parametric), {}, args.args);
                 if (!posArgs.has_value())
                     continue;
 
@@ -1165,17 +1161,17 @@ struct Interpreter : STContext {
     }
 
     // args must not be a temporary and the values inside it may be modified
-    LocalLookupContext makeCompleteParameterContext(LookupContext& parent, const Parameters& params, std::span<Value> args) {
+    LocalLookupContext makeCompleteParameterContext(LookupContext& parent, std::span<Ptr<LocalDecl>> params, std::span<Value> args) {
         LocalLookupContext context { &parent };
-        context.decls = at(params.params);
+        context.decls = std::span<Ptr<Decl>>((Ptr<Decl>*)params.data(), params.size());
         context.values = args;
         return context;
     }
     template<typename Callback>
     auto withParametricContext(const CompleteDecl& decl, LookupContext& ctx, Callback&& callback) {
         auto& d = at(asStaticDecl(decl.decl));
-        LocalLookupContext withCtx = makeCompleteParameterContext(ctx, d.with.params, decl.withArgs());
-        LocalLookupContext paramCtx = makeCompleteParameterContext(withCtx, d.parametric, decl.args());
+        LocalLookupContext withCtx = makeCompleteParameterContext(ctx, at(d.with.params), decl.withArgs());
+        LocalLookupContext paramCtx = makeCompleteParameterContext(withCtx, at(d.parametric), decl.args());
         return callback(paramCtx);
     }
     template<typename Callback>
@@ -1288,7 +1284,7 @@ struct Interpreter : STContext {
         const ParameterizedDecl& fnDecl, std::span<const NamedExprResult> namedFnArgs, std::optional<ExprResult> selfArg = {}) {
 
         auto& fn = as<CallableDecl>(fnDecl.decl);
-        auto posFnArgs = positionArguments(fn.params, {}, namedFnArgs, selfArg);
+        auto posFnArgs = positionArguments(at(fn.params), {}, namedFnArgs, selfArg);
         if (!posFnArgs.has_value())
             return {};
 
@@ -1305,11 +1301,11 @@ struct Interpreter : STContext {
                 structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
             }
 
-            if (!convertFnArgs(structCtx, fn.params, posFnArgs.value(), conversionsAllowed))
+            if (!convertFnArgs(structCtx, at(fn.params), posFnArgs.value(), conversionsAllowed))
                 return false;
             // slice self arg
             if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
-                && fn.kind == DeclKind::FnDecl && matchName(at(fn.params.params, 0), selfWord)) {
+                && fn.kind == DeclKind::FnDecl && matchName(at(fn.params, 0), selfWord)) {
                 VERIFY(fnDecl.staticContext()->staticDecl.valid());
                 posFnArgs.value()[0] = { slice(fnDecl.staticContext()->staticDecl, posFnArgs.value()[0]), 0 };
             }
@@ -1321,7 +1317,7 @@ struct Interpreter : STContext {
 
         // Now the parametric arguments are deduced so we can make the proper context.
         // This crutial since default member initializers can access mutable static members.
-        auto withCtx = [&](LookupContext& ctx) { return completeFnArgs(ctx, fn.params, posFnArgs.value()); };
+        auto withCtx = [&](LookupContext& ctx) { return completeFnArgs(ctx, at(fn.params), posFnArgs.value()); };
         std::optional<std::vector<FnArgumentResult>> fnArgs;
         if (fn.kind == DeclKind::StructDecl)
             fnArgs = withCtx(*getTypeContext(out.target));
@@ -1368,13 +1364,13 @@ struct Interpreter : STContext {
         LocalLookupContext memberCtx { &selfCtx };
         bool hasSelf = false;
         if (call.args.size() > 0) {
-            auto firstParam = at(targetDecl.params.params, 0);
+            auto firstParam = at(targetDecl.params, 0);
             auto& firstArg = call.args[0].value();
             if (matchName(firstParam, selfWord)) {
                 hasSelf = true;
                 selfCtx.decls = { (Ptr<Decl>*)&selfDecl.decl, 1 };
                 selfCtx.values = { &firstArg, 1 };
-                memberCtx.decls = at(as<StructDecl>(firstArg.type.decl).params.params);
+                memberCtx.decls = at(as<StructDecl>(firstArg.type.decl).params);
                 memberCtx.values = firstArg.u.array->array();
             }
         }
@@ -1385,7 +1381,7 @@ struct Interpreter : STContext {
                 uint32_t i = 0;
                 if (hasSelf)
                     i += 1;
-                fnParamCtx.decls = at(targetDecl.params.params).subspan(i);
+                fnParamCtx.decls = at(targetDecl.params).subspan(i);
                 for (; i < call.args.size(); i++)
                     fnParamCtx.appendValue(call.args[i]);
             }
@@ -1453,14 +1449,14 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(baseType, typeType)) {
             auto type = asTypeValue(base);
             auto& decl = as<StructDecl>(type.decl);
-            auto posArgs = positionArguments(decl.params, {}, args);
+            auto posArgs = positionArguments(at(decl.params), {}, args);
             if (!posArgs.has_value())
                 return badCall;
             LookupContext* typeCtx = getTypeContext(type);
-            if (!convertFnArgs(*typeCtx, decl.params, posArgs.value(), true))
+            if (!convertFnArgs(*typeCtx, at(decl.params), posArgs.value(), true))
                 return badCall;
 
-            auto vals = completeFnArgs(*typeCtx, decl.params, posArgs.value());
+            auto vals = completeFnArgs(*typeCtx, at(decl.params), posArgs.value());
             if (!vals.has_value())
                 return badCall;
 
@@ -1543,7 +1539,7 @@ struct Interpreter : STContext {
     };
     LookupContext* recursiveWrapWithHasContexts(LookupContext* base, Ptr<Decl> structDecl, LookupContext& structCtx) {
         auto& d = as<StructDecl>(structDecl);
-        for (auto member : at(d.params.params)) {
+        for (auto member : at(d.params)) {
             if (at(member).kind != DeclKind::HasDecl)
                 continue;
 
@@ -1565,8 +1561,8 @@ struct Interpreter : STContext {
         }
 
         auto& d = as<StructDecl>(type.decl);
-        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext(), d.with.params, type.withArgs())));
-        auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, d.parametric, type.args())));
+        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext(), at(d.with.params), type.withArgs())));
+        auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, at(d.parametric), type.args())));
 
         auto& typeCtx = at(make<TypeLookupContext>(&paramCtx, type));
         typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
@@ -1576,11 +1572,11 @@ struct Interpreter : STContext {
         return &typeCtx;
     }
     ExprResult accessMember(ExprResult base, uint32_t i) {
-        auto members = at(as<StructDecl>(base.value().type.decl).params.params);
+        auto members = at(as<StructDecl>(base.value().type.decl).params);
         return ExprResult::make<AccessExprRecord>(base.value().u.array->array()[i], base, members[i]);
     }
     void collectMembers(ExprResult base, Word name, std::vector<ExprResult>& results) {
-        auto members = at(as<StructDecl>(base.value().type.decl).params.params);
+        auto members = at(as<StructDecl>(base.value().type.decl).params);
         for (uint32_t i = 0; i < members.size(); i++) {
             if (matchName(members[i], name)) {
                 results.push_back(accessMember(base, i));
@@ -1672,7 +1668,7 @@ struct Interpreter : STContext {
                 return false;
             Value baseValue = b.base;
             VERIFY(baseValue.kind == ValueKind::Array);
-            auto members = at(as<StructDecl>(baseValue.type.decl).params.params);
+            auto members = at(as<StructDecl>(baseValue.type.decl).params);
             for (uint32_t i = 0; i < members.size(); i++) {
                 if (members[i] == b.accessDecl) {
                     Value newVal = deepCopy(baseValue);
@@ -1778,7 +1774,7 @@ struct Interpreter : STContext {
             fmt::println("[{}] {}{}", sview(at(value.u.declType.decl).name), value.u.declType.dependent ? "dependent " : "", sview(at(value.type.decl).name));
             if (auto sDecl = asStaticDecl(value.type.decl)) {
                 for (uint32_t i = 0; i < value.type.args().size(); i++) {
-                    auto memberDecl = at(at(sDecl).parametric.params, i);
+                    auto memberDecl = at(at(sDecl).parametric, i);
                     if (at(memberDecl).kind == DeclKind::LocalDecl)
                         fmt::print("  '{}': ", sview(as<LocalDecl>(memberDecl).name));
                     else
