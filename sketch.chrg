@@ -1,12 +1,12 @@
 
-struct Bar(T: Type) {
-    add: T = 0;
-    vals: Array{T} = { 1, 2, 3 };
+struct Bar{T: Type} (
+    add: T = 0
+    vals: Array{T} = { 1, 2, 3 }
     
     function get(i: int) -> T {
         return vals[i] + add;
     }
-}
+)
 Foo2 = Bar{int};
 struct Foo2 -> Bar{int};
 
@@ -28,7 +28,7 @@ call{test{T = int}}(table = {}); // -> call{test{T = int, size = 0}}
 
 
 with {T: Type}
-struct Specialize(Base: {T} -> Type, Arg: T) -> Base{Arg};
+struct Specialize{Base: {T} -> Type, Arg: T} -> Base{Arg};
 
 
 with {b}
@@ -58,14 +58,14 @@ function recurse{?(# == 0): ?numeric}() {
 }
 
 
-struct Int {
-    value: int = 0;
-}
+struct Int (
+    value: int = 0
+)
 convert (i: Int) -> int { return i.value; }
 convert (n: int) -> Int { return { n }; }
 
-struct Int {
-    value: int = 0;
+struct Int (
+    value: int = 0
 
     convert (self) -> int {
         return value;
@@ -73,7 +73,7 @@ struct Int {
     convert (n: int) {
         return Int(value = n);
     }
-}
+)
 
 function bar() {
     let lambda = {} => (i: int) { };
@@ -90,23 +90,23 @@ function bar() {
     multiLambda.bar();
 }
 
-struct vec3 {
-    x: int = 0;
-    y: int = 0;
-    z: int = 0;
+struct vec3 (
+    x: int = 0
+    y: int = 0
+    z: int = 0
 
     function lengthSq() -> int;
-};
+);
 function get() -> vec3;
 function q() {
     let { x, y, z } = get();
     let { l = #.lengthSq(), z = #.z, y = #.y } = get();
 }
 
-struct Array(T: Type) {
+struct Array{T: Type} (
     function popBack(self&) -> T;
     function truncate(self&, newSize: int);
-}
+)
 function foo() {
     let arr: Array = { 1, 2, 3 };
     let { back = #, arr2 = .self } = arr.popBack();
@@ -117,25 +117,25 @@ function foo() {
     let { foo = .self } = (mArr).popBack();
 }
 
-struct Vec2 {
+struct Vec2 (
     m_x: float;
     m_y: float;
 
-    function x(self&) => m_x;
-}
-struct Range {
+    function x(self&) => m_x
+)
+struct Range (
     m_low: float;
     m_high: float;
 
-    function low(self&) => m_low;
-    function high(self&) => m_high;
-}
-struct Rect {
-    h: Range;
-    v: Range;
+    function low(self&) => m_low
+    function high(self&) => m_high
+)
+struct Rect (
+    h: Range
+    v: Range
 
-    function bottomLeft(self&) => { h.low(), v.low() };
-}
+    function bottomLeft(self&) => { h.low(), v.low() }
+)
 function onlyX(v: Vec2) -> float { return v.x(); }
 function onlyX(v&: Vec2) = (x: float) { v.x() = x; }
 function onlyX(v&: Vec2) => v.x();
@@ -145,11 +145,11 @@ function callUpdate(r&: Rect) {
     update(r.bottomLeft().x());
 }
 
-struct Array(T: Type) {
-    has Index{(int) -> T} {
+struct Array{T: Type} (
+    has Index{(int) -> T} (
         function index(self&, i: int) => ...[i];
-    }
-}
+    )
+)
 
 with {T: Type}
 function withIndexType{C ?Index{(int) -> T}: Type}(c: C);
@@ -161,42 +161,56 @@ function getFirst(arr: ?match Array{T}) -> T {
 };
 
 
-struct HierarchyRoot(Anchor: Type) {
-    id: uint32 = 0;
+struct RootClass{Self: Type} (
+    use Anchor = Self;
+    m_class: Class{Anchor} = {}
 
-    has std::AutoInitialize {
-        with {T: Type}
-        function init(self&: T) {
-            id = idfor{T}();
+    has std::AutoInitialize (
+        with {Self: Type}
+        function init(self&) {
+            id = class();
         }
+    )
+    function class(self) -> Class{Anchor} {
+        return m_class;
     }
-
-    convert (self) -> HierarchyElement{Anchor} {
-        return { id };
+    convert (self) -> Class{Anchor} {
+        return class();
     }
+)
+struct Class{Anchor: Type} (
+    function of(T: Type) -> Class{Anchor};
+    function type() -> Type;
+)
+function has{T: Type, Anchor: Type}(elm: Class{Anchor}) -> bool;
+function is{T: Type, Anchor: Type}(elm: Class{Anchor}) -> bool {
+    return elm == Class{Anchor}::of(T);
 }
-struct HierarchyElement(Anchor: Type) {
-    id: uint32 = 0;
+with {Anchor: Type}
+match {T ?ClassRoot{undeduced(Anchor)}: Type} against (class: Class{Anchor}) {
+    return performMatch{Class{Anchor}::of(T)}(class);
 }
-function has{T: Type, Anchor: Type}(elm: HierarchyElement{Anchor}) -> bool;
-function is{T: Type, Anchor: Type}(elm: HierarchyElement{Anchor}) -> bool {
-    return elem.id == idfor{T};
+with {Anchor: Type}
+match {T ?ClassRoot{Anchor}: Type} against (inst: ?ClassRoot{Anchor}) {
+    return performMatch{Class{Anchor}::of(T)}(inst.class());
+}
+with {Anchor: Type}
+match {class: Class{Anchor}} against (inst: ?ClassRoot{undeduced(Anchor)}) {
+    return performMatch{class}(inst.class());
 }
 
-struct Expr {
-    has HierarchyRoot{Expr};
-    function kind(self) -> ExprKind { return (ExprKind)self; }
-}
-struct ExprKind = HierarchyElement{Expr};
-exprKind{T: Type}: ExprKind = elementFor{T};
+struct Expr (
+    has ClassRoot
+)
+use ExprClass = Class{Expr}
 
-struct BinaryOperatorExpr {
-    has Expr;
-}
+struct BinaryOperatorExpr (
+    has Expr
+)
 
 function dispatch(ref{Expr} e) {
-    match e.kind() {
-        exprKind{BinaryOperatorExpr} -> {
+    match e {
+        BinaryOperatorExpr => {
 
         }
     }
@@ -226,17 +240,41 @@ function dispatch(ref{Expr} e) {
 //          PostInc
 //          PostDec
 
+// Other:
+// []  ->   Index
+// ()  ->   Invoke
+
 operation Neg(i: Int) -> Int { return -i.value; }
 operation Add(i: Int, j: Int) -> Int { return i + j; }
 operation assign Add(i&: Int, j: Int) { i += j; }
 
-enum Ordering {
+enum Ordering (
     Less,
     Equal,
     Greater,
-}
+)
 compare (i: int) with (j: int) -> Ordering {
     if i == j return Ordering::Equal;
     if i < j return Ordering::Less;
     return Ordering::Greater;
+}
+
+
+incomplete final struct SliceResult (
+    has ClassRoot
+
+    struct Success (has SliceResult, result: ExprResult)
+    struct NotFound (has SliceResult)
+    struct Error (has SliceResult)
+)
+function slice() -> SliceResult;
+function doSlice() -> Opt{ExprResult} {
+    let r: SliceResult = slice();
+    match r.class() {
+        SliceResult::Success => return r.result;
+        _ => return {};
+    }
+}
+function useSlice() {
+    let slice = doSlice() else return;
 }

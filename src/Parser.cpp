@@ -518,7 +518,6 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
     // contraint:
     //   match expr
     //   expr
-    //   (expr)
     // type_or_constraint:
     //   expr
     //   ?contraint

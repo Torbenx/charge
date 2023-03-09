@@ -874,7 +874,7 @@ struct Interpreter : STContext {
     };
     bool convertFnArgs(LookupContext& context, const Parameters& params, std::span<PositionalExprResult> args, bool conversionAllowed) {
         for (auto& arg : args) {
-            Ptr<Expr> typeExpr = at(asTyped(at(params.params, arg.index()))).type;
+            Ptr<Expr> typeExpr = at(asVar(at(params.params, arg.index()))).type;
             if (!typeExpr)
                 continue;
 
@@ -894,24 +894,19 @@ struct Interpreter : STContext {
     }
 
     std::optional<std::vector<FnArgumentResult>> completeFnArgs(LookupContext& context, const Parameters& params, std::span<const PositionalExprResult> args) {
-        auto isInOutParam = [&](uint32_t i) {
-            auto& p = at(at(params.params, i));
-            if (p.kind != DeclKind::LocalDecl)
-                return false;
-            return ((LocalDecl&)p).isInOut;
-        };
 
         std::vector<FnArgumentResult> out;
         uint32_t argOff = 0;
         for (uint32_t i = 0; i < params.params.count; i++) {
+            auto& param = at(params.params, i);
             ExprResult arg
                 = (argOff < args.size() && i == args[argOff].index())
                 ? (ExprResult)args[argOff++]
-                : evaluateDefaultArg(context, at(params.params, i));
+                : evaluateDefaultArg(context, param);
 
             if (!arg.value().valid())
                 return {};
-            out.push_back({ std::move(arg), isInOutParam(i) });
+            out.push_back({ std::move(arg), at(asVar(param)).isInOut });
         }
         return out;
     }
@@ -980,26 +975,17 @@ struct Interpreter : STContext {
         return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(type)), {});
     }
     ExprResult evaluateDefaultArg(LookupContext& context, Ptr<Decl> decl) {
-        switch (at(decl).kind) {
-        case DeclKind::LocalDecl: {
-            auto& param = as<LocalDecl>(decl);
-            if (!param.initializer)
-                return ExprResult::make<EmptyRecord>();
-            ExprResult arg = evaluateExpr(context, param.initializer);
-            if (param.type)
-                arg = convertOrSlice(evaluateExpr(context, param.type), arg);
+        auto& var = at(asVar(decl));
+        if (var.initializer) {
+            ExprResult arg = evaluateExpr(context, var.initializer);
+            if (var.type)
+                arg = convertOrSlice(evaluateExpr(context, var.type), arg);
             return arg;
         }
-        case DeclKind::HasDecl: {
-            auto& has = as<HasDecl>(decl);
-            auto type = toCompleteType(evaluateExpr(context, has.type));
-            if (!type.valid())
-                return ExprResult::make<EmptyRecord>();
-            return defaultConstructType(type);
+        if (var.type) {
+            return defaultConstructType(toCompleteType(evaluateExpr(context, var.type)));
         }
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        return ExprResult::make<EmptyRecord>();
     }
     bool completeParameterContext(std::span<Value> out, LocalLookupContext& context, bool& outDependent) {
         for (uint32_t i = 0; i < context.decls.size(); i++) {
@@ -1332,7 +1318,6 @@ struct Interpreter : STContext {
         });
         if (!out.target.valid())
             return {};
-
 
         // Now the parametric arguments are deduced so we can make the proper context.
         // This crutial since default member initializers can access mutable static members.

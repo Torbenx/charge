@@ -86,6 +86,8 @@ public:
             return (Ptr<LocalDecl>)decl;
         case DeclKind::GlobalDecl:
             return (Ptr<GlobalDecl>)decl;
+        case DeclKind::HasDecl:
+            return (Ptr<HasDecl>)decl;
         default:
             return {};
         }
@@ -97,20 +99,6 @@ public:
         if (decl && isNamedDecl(decl))
             return (Ptr<NamedDecl>)decl;
         return {};
-    }
-    Ptr<TypedInfo> asTyped(Ptr<Decl> decl) {
-        if (!decl)
-            return {};
-        switch (at(decl).kind) {
-        case DeclKind::LocalDecl:
-            return (Ptr<LocalDecl>)decl;
-        case DeclKind::GlobalDecl:
-            return (Ptr<GlobalDecl>)decl;
-        case DeclKind::HasDecl:
-            return (Ptr<HasDecl>)decl;
-        default:
-            return {};
-        }
     }
 
     template<typename T>

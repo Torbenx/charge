@@ -139,8 +139,7 @@ struct Identifier : Arguments {
 // Declarations
 // named   : Global, Local, Struct, Fn
 // callable: Struct, Fn
-// type    : Global, Local, Has
-// var     : Global, Local
+// var     : Global, Local, Has
 
 struct Decl {
     DeclKind kind = DeclKind::Invalid;
@@ -160,10 +159,8 @@ struct StaticDecl : NamedDecl {
     using NamedDecl::NamedDecl;
 };
 
-struct TypedInfo {
+struct VarInfo {
     Ptr<Expr> type;
-};
-struct VarInfo : TypedInfo {
     Ptr<Expr> initializer;
     bool isMutable = false;
     bool isInOut = false;
@@ -200,10 +197,10 @@ struct FnDecl : CallableDecl {
         : CallableDecl(DeclKind::FnDecl, name) { }
 };
 
-struct HasDecl : Decl, TypedInfo {
+struct HasDecl : Decl, VarInfo {
     Span<Ptr<StaticDecl>> decls;
     HasDecl()
-        : Decl(DeclKind::HasDecl) { }
+        : Decl(DeclKind::HasDecl), VarInfo(false) { }
 };
 
 // Expressions
