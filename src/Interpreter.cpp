@@ -189,6 +189,7 @@ struct Interpreter : STContext {
             DependentValue dependent;
         } u { .array = nullptr };
         ValueKind kind = ValueKind::Invalid;
+        bool constraint = false;
         union {
             Word name;
             uint32_t index;
@@ -209,7 +210,7 @@ struct Interpreter : STContext {
             : type(std::move(decl)), u { .declType = { type, false } }, kind(ValueKind::ParameterizedDecl) { }
 
         Value(const Value& other)
-            : type(other.type), u(other.u), kind(other.kind), id(other.id) {
+            : type(other.type), u(other.u), kind(other.kind), constraint(other.constraint), id(other.id) {
             ref();
         }
         Value& operator=(const Value& other) {
@@ -217,12 +218,13 @@ struct Interpreter : STContext {
             type = other.type;
             u = other.u;
             kind = other.kind;
+            constraint = other.constraint;
             id = other.id;
             ref();
             return *this;
         }
         Value(Value&& other)
-            : type(std::move(other.type)), u(other.u), kind(other.kind), id(other.id) {
+            : type(std::move(other.type)), u(other.u), kind(other.kind), constraint(other.constraint), id(other.id) {
             other.kind = ValueKind::Invalid;
         }
         Value& operator=(Value&& other) {
@@ -230,6 +232,7 @@ struct Interpreter : STContext {
             type = std::move(other.type);
             u = other.u;
             kind = other.kind;
+            constraint = other.constraint;
             id = other.id;
             other.kind = ValueKind::Invalid;
             return *this;
@@ -620,6 +623,8 @@ struct Interpreter : STContext {
     }
 
     Type typeOf(const Value& value) {
+        if (value.constraint || !value.valid())
+            return {};
         switch (value.kind) {
         case ValueKind::Array:
         case ValueKind::Builtin:
@@ -633,6 +638,8 @@ struct Interpreter : STContext {
         }
     }
     Type asTypeValue(const Value& value) {
+        if (value.constraint || !value.valid())
+            return {};
         switch (value.kind) {
         case ValueKind::CompleteDecl:
             VERIFY(value.u.declType.decl == typeType.decl);
@@ -646,7 +653,15 @@ struct Interpreter : STContext {
         }
     }
 
-    Type toCompleteType(const Value& in) {
+    bool implicitlyConvertibleToType(const Type& in) {
+        return cmpCompleteDecls(in, typeType) || cmpCompleteDecls(in, typeOverloadSetType);
+    }
+    Value implicitlyToTypeValue(const Value& in) {
+        if (in.constraint)
+            return in;
+        return makeTypeValue(implicitlyToType(in));
+    }
+    Type implicitlyToType(const Value& in) {
         Type inType = typeOf(in);
         if (cmpCompleteDecls(inType, typeType))
             return asTypeValue(in);
@@ -660,6 +675,10 @@ struct Interpreter : STContext {
             return completeDecl(parametricT.type);
         }
         return {};
+    }
+    Value asConstraintValue(Value in) {
+        in.constraint = false;
+        return in;
     }
 
     Value makeBuiltinValue(Type type, int64_t value) { return { std::move(type), value }; }
@@ -765,6 +784,9 @@ struct Interpreter : STContext {
         return v.kind == ValueKind::Dependent && v.u.dependent.decl == decl && v.u.dependent.level == dependenceLevel();
     }
     bool staticMatch(const Value& source, const Value& target) {
+        if (target.constraint)
+            return checkConstraint(source, asConstraintValue(target));
+
         if (!staticMatch(typeOf(source), typeOf(target)))
             return false;
 
@@ -787,6 +809,8 @@ struct Interpreter : STContext {
         VERIFY(source.args().size() == target.args().size());
         for (uint32_t i = 0; i < source.args().size(); i++) {
             if (!staticMatch(source.args()[i], target.args()[i]))
+                // FIXME: previous iterations might have deduced somethings that no longer apply
+                //        since we failed here.
                 return false;
         }
 
@@ -798,7 +822,9 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::Conversion, result), base(base) { }
     };
     ExprResult convertOrSlice(Value targetTypeValue, ExprResult sourceValue, bool allowConversions = true) {
-        return convertOrSlice(toCompleteType(targetTypeValue), sourceValue, allowConversions);
+        if (targetTypeValue.constraint)
+            return sourceValue;
+        return convertOrSlice(implicitlyToType(targetTypeValue), sourceValue, allowConversions);
     }
     struct SliceResult : ExprResult {
         enum Kind {
@@ -844,8 +870,8 @@ struct Interpreter : STContext {
 
         Type sourceType = typeOf(sourceValue);
         // TODO: should this be a conversion?
-        if (cmpCompleteDecls(sourceType, typeOverloadSetType)) {
-            return ExprResult::make<ConversionRecord>(makeTypeValue(toCompleteType(sourceValue)), sourceValue);
+        if (implicitlyConvertibleToType(sourceType) && cmpCompleteDecls(targetType, typeType)) {
+            return ExprResult::make<ConversionRecord>(makeTypeValue(implicitlyToType(sourceValue)), sourceValue);
         }
 
         EvaluatedArguments parametricArgs;
@@ -916,7 +942,7 @@ struct Interpreter : STContext {
         for (uint32_t i = 0; i < allDecls.size(); i++) {
             Value arg;
             Value type = evaluateExpr(context, at(allDecls[i]).type);
-            if (argOff < args.size() && i == args[argOff].index()) {
+            if (argOff < args.size() && i == args[argOff].index() && type.valid()) {
                 arg = convertOrSlice(type, ExprResult::make<HackedRecord>(args[argOff]));
                 if (!arg.valid()) {
                     fmt::print("unable to initialize ");
@@ -925,9 +951,16 @@ struct Interpreter : STContext {
                     dumpValue(args[argOff]);
                     return {};
                 }
+                for (auto& constr : at(at(allDecls[i]).valueConstraints)) {
+                    Value expr = evaluateExpr(context, constr.condition);
+                    if (!expr.valid())
+                        continue;
+                    if (!checkConstraint(arg, expr))
+                        return {};
+                }
                 argOff += 1;
             } else {
-                auto completeType = toCompleteType(type);
+                auto completeType = implicitlyToType(type);
                 if (!completeType.valid())
                     return {};
                 arg = makeDependentValue(completeType, (Ptr<LocalDecl>)allDecls[i]);
@@ -979,12 +1012,12 @@ struct Interpreter : STContext {
             return arg;
         }
         if (var.type) {
-            return defaultConstructType(toCompleteType(evaluateExpr(context, var.type)));
+            return defaultConstructType(implicitlyToType(evaluateExpr(context, var.type)));
         }
         return ExprResult::make<EmptyRecord>();
     }
     bool recursivelyCheckForHasMember(const Type& shouldHave, const CompleteDecl& type) {
-        if (cmpCompleteDecls(type, shouldHave))
+        if (staticMatch(type, shouldHave))
             return true;
 
         auto* typeCtx = getTypeContext(type);
@@ -996,27 +1029,24 @@ struct Interpreter : STContext {
         }
         return false;
     }
-    bool checkConstraints(LookupContext& context, std::span<Constraint> constraints, const Value& value) {
-        for (auto c : constraints) {
-            ExprResult condValue = evaluateExpr(context, c.expr);
-            Type condType = typeOf(condValue);
-            if (cmpCompleteDecls(condType, typeType) || cmpCompleteDecls(condType, typeOverloadSetType)) {
-                if (!recursivelyCheckForHasMember(toCompleteType(condValue), toCompleteType(value)))
-                    return false;
-            } else if (cmpCompleteDecls(condType, overloadSetType)) {
-                std::array<NamedExprResult, 1> args { { { ExprResult::make<HackedRecord>(value), {} } } };
-                Value res = invokeCall(condValue, args);
-                VERIFY(res.valid());
-                VERIFY(res.kind == ValueKind::Builtin);
-                VERIFY(cmpCompleteDecls(res.type, boolType));
-                if (!res.u.builtinValue)
-                    return false;
-            } else
-                VERIFY_NOT_REACHED();
+    bool checkConstraint(const Value& value, const Value& condValue) {
+        Type condType = typeOf(condValue);
+        if (implicitlyConvertibleToType(condType))
+            return recursivelyCheckForHasMember(implicitlyToType(condValue), implicitlyToType(value));
+
+        if (cmpCompleteDecls(condType, overloadSetType)) {
+            std::array<NamedExprResult, 1> args { { { ExprResult::make<HackedRecord>(value), {} } } };
+            Value res = invokeCall(ExprResult::make<HackedRecord>(condValue), args);
+            VERIFY(res.valid());
+            VERIFY(res.kind == ValueKind::Builtin);
+            VERIFY(cmpCompleteDecls(res.type, boolType));
+            return res.u.builtinValue;
         }
-        return true;
+
+        VERIFY_NOT_REACHED();
     }
-    bool completeParameterContext(std::span<Value> out, LocalLookupContext& context, bool& outDependent) {
+    bool completeParameterContext(std::span<Value> out, LocalLookupContext& context, std::span<const PositionalValue> args, bool& outDependent) {
+        uint32_t argOff = 0;
         for (uint32_t i = 0; i < context.decls.size(); i++) {
             Ptr<LocalDecl> decl = (Ptr<LocalDecl>)context.decls[i];
             auto& value = context.values[i];
@@ -1025,23 +1055,31 @@ struct Interpreter : STContext {
 
             Value& arg = out[i];
             if (isUndeduce(decl, value)) {
-                // no argument was provided and nothing was deduced
-                // -> use the default arugment
-                arg = evaluateDefaultArg(context, decl);
-                if (!arg.valid())
-                    return false;
+                if (argOff < args.size() && args[argOff].index() == i) {
+                    arg = args[argOff];
+                } else if (at(decl).initializer) {
+                    // no argument was provided and nothing was deduced
+                    // -> use the default arugment
+                    arg = evaluateExpr(context, at(decl).initializer);
+                }
+                if (at(decl).type)
+                    arg = convertOrSlice(evaluateExpr(context, at(decl).type), ExprResult::make<HackedRecord>(arg));
             } else {
-                // argument shoud already be converted
+                // argument should already be converted
                 arg = value;
+                if (at(decl).type && !staticMatch(makeTypeValue(typeOf(arg)), implicitlyToTypeValue(evaluateExpr(context, at(decl).type))))
+                    return false;
             }
+            if (!arg.valid())
+                return false;
             if (arg.dependentInAnyWay()) {
                 outDependent = true;
                 continue;
             }
-            if (!checkConstraints(context, at(at(decl).valueConstraints), arg))
-                return false;
-            if (!checkConstraints(context, at(at(decl).typeContraints), makeTypeValue(typeOf(arg))))
-                return false;
+            for (auto constr : at(at(decl).valueConstraints)) {
+                if (!checkConstraint(arg, evaluateExpr(context, constr.condition)))
+                    return false;
+            }
         }
         return true;
     }
@@ -1071,10 +1109,10 @@ struct Interpreter : STContext {
         CompleteDecl out { sDecl, decl.staticContext() };
         out.allocateArgs(paramCtx.value().decls.size(), withCtx.value().decls.size());
 
-        if (!completeParameterContext(out.withArgs(), withCtx.value(), out.argsDependent))
+        if (!completeParameterContext(out.withArgs(), withCtx.value(), {}, out.argsDependent))
             return {};
 
-        if (!completeParameterContext(out.args(), paramCtx.value(), out.argsDependent))
+        if (!completeParameterContext(out.args(), paramCtx.value(), decl.args(), out.argsDependent))
             return {};
 
         return out;
@@ -1262,6 +1300,8 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::IdentifierExpr, result), lValue(lValue) { }
     };
     ExprResult lookupToValue(LookupResult r) {
+        if (!r.valid())
+            return ExprResult::make<EmptyRecord>();
         switch (r.declKind) {
         case DeclKind::GlobalDecl:
         case DeclKind::LocalDecl: {
@@ -1540,7 +1580,7 @@ struct Interpreter : STContext {
 
                 auto assignType = withParametricContext(assignCall.value().target, [&](LookupContext& context) {
                     auto& d = as<FnDecl>(assignCall.value().target.decl);
-                    return toCompleteType(evaluateExpr(context, at(d.assignParam).type));
+                    return implicitlyToType(evaluateExpr(context, at(d.assignParam).type));
                 });
                 if (!assignType.valid() || !cmpCompleteDecls(assignType, typeOf(callResult)))
                     return badCall;
@@ -1551,7 +1591,7 @@ struct Interpreter : STContext {
         dumpValue(base);
         fmt::print("of type ");
         dumpValue(makeTypeValue(baseType));
-        VERIFY_NOT_REACHED();
+        return ExprResult::make<EmptyRecord>();
     }
     ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
         VERIFY(e.callKind == CallKind::Paren);
@@ -1581,7 +1621,7 @@ struct Interpreter : STContext {
                 continue;
 
             auto& has = as<HasDecl>(member);
-            Type hasType = toCompleteType(evaluateExpr(structCtx, has.type));
+            Type hasType = implicitlyToType(evaluateExpr(structCtx, has.type));
             VERIFY(hasType.valid());
             auto* hasCtx = getTypeContext(hasType);
             base = &at(make<StaticRedirectLookupContext>(base, hasCtx));
@@ -1634,7 +1674,7 @@ struct Interpreter : STContext {
                 return matches[0];
             EXPECT_EQ(matches.size(), 0u);
         }
-        Type type = e.isStatic ? toCompleteType(base.value()) : typeOf(base.value());
+        Type type = e.isStatic ? implicitlyToType(base.value()) : typeOf(base.value());
         auto* typeCtx = getTypeContext(type);
 
         LookupResult r = lookupIdentifier(*typeCtx, e.member, typeCtx->parametricContext);
@@ -1679,6 +1719,12 @@ struct Interpreter : STContext {
             return invokeCall(base, args);
         }
         VERIFY_NOT_REACHED();
+    }
+    ExprResult evalConstraintExpr(LookupContext& context, ConstraintExpr& e) {
+        Value cond = evaluateExpr(context, e.constraint.condition);
+        cond = deepCopy(cond);
+        cond.constraint = true;
+        return ExprResult::make<HackedRecord>(cond);
     }
 
     ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
@@ -1798,22 +1844,29 @@ struct Interpreter : STContext {
         return {};
     }
 
+    std::string_view declName(Ptr<NamedDecl> d) {
+        if (!d)
+            return "Invalid Decl";
+        return sview(at(d).name);
+    }
     void dumpValue(const Value& value) {
+        if (value.constraint)
+            fmt::print("? ");
         switch (value.kind) {
         case ValueKind::Invalid:
             fmt::println("Invalid Value");
             break;
         case ValueKind::Builtin:
-            fmt::println("[{}] {}", sview(at(value.type.decl).name), value.u.builtinValue);
+            fmt::println("[{}] {}", declName(value.type.decl), value.u.builtinValue);
             break;
         case ValueKind::ParameterizedDecl:
         case ValueKind::CompleteDecl:
-            fmt::println("[{}] {}{}", sview(at(value.u.declType.decl).name), value.u.declType.dependent ? "dependent " : "", sview(at(value.type.decl).name));
+            fmt::println("[{}] {}{}", declName(value.u.declType.decl), value.u.declType.dependent ? "dependent " : "", declName(value.type.decl));
             if (auto sDecl = asStaticDecl(value.type.decl)) {
                 for (uint32_t i = 0; i < value.type.args().size(); i++) {
                     auto memberDecl = at(at(sDecl).parametric, i);
                     if (at(memberDecl).kind == DeclKind::LocalDecl)
-                        fmt::print("  '{}': ", sview(as<LocalDecl>(memberDecl).name));
+                        fmt::print("  '{}': ", declName(memberDecl));
                     else
                         VERIFY_NOT_REACHED();
                     dumpValue(value.type.args()[i]);
@@ -1821,10 +1874,10 @@ struct Interpreter : STContext {
             }
             break;
         case ValueKind::Dependent:
-            fmt::println("[{}] dependend {}", sview(at(value.type.decl).name), sview(at(value.u.dependent.decl).name));
+            fmt::println("[{}] dependend {}", declName(value.type.decl), declName(value.u.dependent.decl));
             break;
         case ValueKind::Array:
-            fmt::println("[{}] array with {} elements", sview(at(value.type.decl).name), value.u.array->size);
+            fmt::println("[{}] array with {} elements", declName(value.type.decl), value.u.array->size);
             for (const Value& member : value.u.array->array()) {
                 fmt::print("  ");
                 dumpValue(member);
@@ -1981,6 +2034,7 @@ void testInterpreter() {
         function conditionFlags{f ?atLeastOneFalse: Flags}() { return false; }
 
         function hasBase{T ?Base: Type}() { return true; }
+        function hasBase2{b: ?Base}() { return b; }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2001,4 +2055,6 @@ void testInterpreter() {
     eval("conditionFlags{Flags(true, true, true, false)}()");
     eval("conditionFlags{Flags(true, true, true, true)}()");
     eval("hasBase{HasBase}()");
+    eval("hasBase2{A()}()");
+    eval("hasBase2{HasBase()}()");
 }

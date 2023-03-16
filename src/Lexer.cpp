@@ -39,7 +39,6 @@ const char* toShortString(TokenKind kind) {
     case VertEqual: return "|=";
     case Equal: return "=";
     case EqualEqual: return "==";
-    case EqualEqualEqual: return "===";
     case Less: return "<";
     case LessLess: return "<<";
     case LessEqual: return "<=";
@@ -128,7 +127,7 @@ struct TableHolder {
         { '%', { .bare = Percent, .equal = PercentEqual } },
         { '/', { .bare = Slash, .equal = SlashEqual } },
         { '*', { .bare = Star, .equal = StarEqual } },
-        { '=', { .bare = Equal, .repeat = EqualEqual, .repeatEqual = EqualEqualEqual } },
+        { '=', { .bare = Equal, .repeat = EqualEqual } },
 
         { '+', { .bare = Plus, .repeat = PlusPlus, .equal = PlusEqual } },
         { '-', { .bare = Minus, .repeat = MinusMinus, .equal = MinusEqual } },
@@ -199,11 +198,21 @@ void Lexer::advance() {
         VERIFY_NOT_REACHED();
     }
 
-    bool repeat = source[pos() + 1] == head;
-    bool equal = source[pos() + (repeat ? 2 : 1)] == '=';
+    // x
+    // xx
+    // x=
+    // xx=
+    // =>
+    // ->
+
+    uint32_t end = pos() + 1;
+    bool repeat = source[end] == head;
+    end += repeat ? 1 : 0;
+    bool equal = source[end] == '=';
     uint32_t idx = (uint32_t)head - 0x20 + (repeat ? 0x60 : 0) + (equal ? 0x60 * 2 : 0);
     auto [kind, advance] = TableHolder::table.table[idx];
-    uint32_t end = pos() + advance;
+
+    end = pos() + advance;
     if ((TokenKind)kind == TokenKind::Word) {
         while (isBulkWordChar(source[end])) {
             end += 1;

@@ -155,7 +155,6 @@ int precedenceOf(BinaryOperator op) {
         case GreaterEqual: return 4;
         case NotEqual: return 5;
         case Equal: return 5;
-        case ValueEqual: return 5;
         case BitwiseAnd: return 6;
         case BitwiseXor: return 7;
         case BitwiseOr: return 8;
@@ -198,6 +197,9 @@ Word STContext::makeAssignOpWord(BinaryOperator op) {
 }
 
 std::string_view STContext::sview(Word word) const {
+    if (word.id == conversionWord().id) {
+        return "conversion";
+    }
     switch (word.id >> 30) {
     case 0: {
         for (const auto& pair : storage->wordMap) {
@@ -261,6 +263,12 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
         advance();
         return parseLeafExpr(e.subExpr);
     }
+    // constraint
+    if (tok.kind() == TokenKind::Question) {
+        auto& e = makeSet<ConstraintExpr>(out);
+        advance();
+        return parseLeafExpr(e.constraint.condition);
+    }
 
     Ptr<Expr> base;
     // paren
@@ -284,7 +292,7 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
         if (tok.kind() == TokenKind::LeftBrace)
             parseArgumentContext(e.identifier);
     }
-    // IntegerLiteral
+    // integer literal
     else if (tok.kind() == TokenKind::IntegerLiteral) {
         base = make<IntLiteralExpr>(parseInteger(source.view(tok)));
         advance();
@@ -513,23 +521,8 @@ Span<Ptr<LocalDecl>> Parser::parseParameterContext(ParameterParseScope scope) {
     return finalizeSpan(params);
 }
 
-Span<Constraint> Parser::parseConstraints() {
-    auto valConstr = beginSpan<Constraint>();
-    while (tok.kind() == TokenKind::Question) {
-        advance();
-        auto& c = append(valConstr, {});
-        parseLeafExpr(c.expr);
-    }
-    return finalizeSpan(valConstr);
-}
 void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
-    // [mut] [name][&] [?constraint]... [: type_or_constraint]
-    // contraint:
-    //   match expr
-    //   expr
-    // type_or_constraint:
-    //   expr
-    //   ?contraint
+    // [mut] [name][&] [?constraint] [: expr]
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     bool hasMut = source.view(tok) == "mut";
@@ -546,13 +539,16 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
         e.isInOut = true;
         advance();
     }
-    e.valueConstraints = parseConstraints();
+    auto constr = beginSpan<Constraint>();
+    while (tok.kind() == TokenKind::Question) {
+        advance();
+        auto& c = append(constr, {});
+        parseLeafExpr(c.condition);
+    }
+    e.valueConstraints = finalizeSpan(constr);
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        if (tok.kind() == TokenKind::Question)
-            e.typeContraints = parseConstraints();
-        else
-            parseBinaryExpr(e.type);
+        parseBinaryExpr(e.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();

@@ -43,7 +43,8 @@ ENUMERATE_DECL_KINDS
     EXPR_KIND(CallExpr)           \
     EXPR_KIND(IdentifierExpr)     \
     EXPR_KIND(BinaryOperatorExpr) \
-    EXPR_KIND(IntLiteralExpr)
+    EXPR_KIND(IntLiteralExpr)     \
+    EXPR_KIND(ConstraintExpr)
 
 #define STMT_KIND(kind) kind,
 enum class StmtKind : uint8_t {
@@ -132,19 +133,8 @@ struct Identifier : Arguments {
     Word word;
 };
 
-// Declarations
-// named   : Global, Local, Struct, Fn
-// callable: Struct, Fn
-// var     : Global, Local, Has
-
-// local decls        | value constraint | type constraint | mut | in out |
-//  - fn param        |               no |             yes | yes |    yes |
-//  - with/parametric |              yes |             yes |  no |     no |
-//  - let             |               no |              no | yes |     no |
-//  - member          |               no |              no |  no |     no |
-
 struct Constraint {
-    Ptr<Expr> expr;
+    Ptr<Expr> condition;
 };
 
 struct Decl {
@@ -171,7 +161,6 @@ struct VarInfo {
     bool isMutable = false;
     bool isInOut = false;
     Span<Constraint> valueConstraints;
-    Span<Constraint> typeContraints;
     VarInfo(bool isMutable)
         : isMutable(isMutable) { }
 };
@@ -301,7 +290,6 @@ enum class BinaryOperator : uint8_t {
 
     NotEqual, // !=
     Equal, // ==
-    ValueEqual, // ===
     Less, // <
     LessEqual, // <=
     Greater, // >
@@ -333,6 +321,18 @@ constexpr uint32_t alignmentCeil(uint32_t alignment, uint32_t v) {
     return (v + alignment - 1) & ~(alignment - 1);
 }
 
+struct IntLiteralExpr : Expr {
+    uint64_t value;
+    IntLiteralExpr(uint64_t value)
+        : Expr(ExprKind::IntLiteralExpr), value(value) { }
+};
+
+struct ConstraintExpr : Expr {
+    Constraint constraint;
+    ConstraintExpr()
+        : Expr(ExprKind::ConstraintExpr) { }
+};
+
 // Statements
 struct Stmt {
     StmtKind kind = StmtKind::Invalid;
@@ -363,12 +363,6 @@ struct CompoundStmt : Stmt {
     Span<Ptr<Stmt>> body;
     CompoundStmt()
         : Stmt(StmtKind::CompoundStmt) { }
-};
-
-struct IntLiteralExpr : Expr {
-    uint64_t value;
-    IntLiteralExpr(uint64_t value)
-        : Expr(ExprKind::IntLiteralExpr), value(value) { }
 };
 
 struct LetStmt : Stmt {

@@ -39,7 +39,6 @@ enum class TokenKind : uint32_t {
     GreaterGreater, // >>
     ExclaimEqual, // !=
     EqualEqual, // ==
-    EqualEqualEqual, // ===
     Less, // <
     LessEqual, // <=
     Greater, // >
@@ -77,6 +76,13 @@ enum class TokenKind : uint32_t {
     Word, // abc123
     IntegerLiteral,
     EOS,
+
+    // =>
+    // ->
+    // <=>
+    // '
+    // "
+    // ..
 
     COUNT,
 };

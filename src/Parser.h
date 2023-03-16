@@ -39,7 +39,7 @@ public:
     Word makeBinaryOpWord(BinaryOperator op);
     Word makeAssignOpWord(BinaryOperator op);
     static constexpr uint32_t CONVERSION_WORD_ID = -1;
-    Word conversionWord() { return { CONVERSION_WORD_ID }; }
+    static Word conversionWord() { return { CONVERSION_WORD_ID }; }
     std::string_view sview(Word word) const;
 
     template<typename E>
@@ -193,7 +193,6 @@ struct Parser : Lexer, STContext {
         Function, // allow 'mut' and '&'
     };
     Span<Ptr<LocalDecl>> parseParameterContext(ParameterParseScope);
-    Span<Constraint> parseConstraints();
     void parseParameter(Ptr<LocalDecl>& out, ParameterParseScope);
     void parseWithClause(WithClause& out);
     enum DeclParseScope {

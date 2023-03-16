@@ -73,6 +73,7 @@ struct STDumper : STContext {
     void visitIntLiteralExpr(Ptr<IntLiteralExpr> e) {
         out << '\'' << at(e).value << '\'';
     }
+    void visitConstraintExpr(Ptr<ConstraintExpr>) { }
 
     void visitAssignStmt(Ptr<AssignStmt> e) {
         out << '\'';
@@ -140,11 +141,12 @@ struct STDumper : STContext {
         child(at(e).right, IsLastChild::Yes);
     }
     void childrenIntLiteralExpr(Ptr<IntLiteralExpr>) { }
+    void childrenConstraintExpr(Ptr<ConstraintExpr>) { }
+
     void childrenAssignStmt(Ptr<AssignStmt> e) {
         child(at(e).left, IsLastChild::No);
         child(at(e).right, IsLastChild::Yes);
     }
-
     void childrenNullStmt(Ptr<NullStmt>) { }
     void childrenCompoundStmt(Ptr<CompoundStmt> e) {
         childrenSpan(at(e).body, IsLastChild::Yes);
