@@ -115,6 +115,7 @@ struct Span {
 struct Word {
     uint32_t id = 0;
     explicit operator bool() const { return id != 0; }
+    bool operator==(const Word& other) const { return id == other.id; }
 };
 
 struct Arguments {

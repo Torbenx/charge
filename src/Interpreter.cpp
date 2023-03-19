@@ -698,7 +698,6 @@ struct Interpreter : STContext {
         return Value { parameterized_t(), type, std::move(decl) };
     }
 
-    bool cmpWord(Word l, Word r) { return l.id == r.id; }
     bool cmpValue(const Value& l, const Value& r) {
         VERIFY(l.kind == r.kind);
         switch (l.kind) {
@@ -751,7 +750,7 @@ struct Interpreter : STContext {
         if (!name)
             return true;
         auto named = asNamedDecl(decl);
-        return named && cmpWord(at(named).name, name);
+        return named && at(named).name == name;
     }
     std::optional<std::vector<PositionalExprResult>> positionArguments(std::span<Ptr<Decl>> params,
         std::span<const PositionalExprResult> inArgs, std::span<const NamedExprResult> subArgs, std::optional<ExprResult> selfArg = {}) {
@@ -1136,7 +1135,7 @@ struct Interpreter : STContext {
         for (Ptr<Decl> decl : context.decls) {
             if (!isNamedDecl(decl))
                 continue;
-            if (!cmpWord(as<NamedDecl>(decl).name, name))
+            if (as<NamedDecl>(decl).name != name)
                 continue;
 
             out.context = &context;
@@ -1173,7 +1172,7 @@ struct Interpreter : STContext {
 
             context = context->parent;
         }
-        if (!cmpWord(name, selfWord))
+        if (name != selfWord)
             fmt::println("looking up '{}' failed", sview(name));
         return {};
     }
@@ -1354,7 +1353,7 @@ struct Interpreter : STContext {
 
         CompleteCall out;
         out.target = withDependentParametricContext(fnDecl, [&](LookupContext& context) {
-            bool conversionsAllowed = !cmpWord(fn.name, conversionWord());
+            bool conversionsAllowed = fn.name != conversionWord();
 
             // Early type context since we don't know all the parametric arguments yet.
             // This is fine since the type expressions are evaluated in this context, which
