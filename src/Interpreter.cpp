@@ -384,48 +384,45 @@ struct Interpreter : STContext {
         bool valid() const { return context != nullptr; }
     };
 
-#define EXPR_KIND(kind) kind,
     enum class RecordKind {
-        Conversion,
         Empty,
-        Hacked,
-        ENUMERATE_EXPR_KINDS
+        Basic,
+        Call,
+        Access,
+        Identifier,
     };
-#undef EXPR_KIND
     const char* toString(RecordKind kind) {
-#define EXPR_KIND(kind)    \
-    case RecordKind::kind: \
-        return #kind;
-
         switch (kind) {
-            ENUMERATE_EXPR_KINDS
-        case RecordKind::Conversion:
-            return "Conversion";
         case RecordKind::Empty:
             return "Empty";
-        case RecordKind::Hacked:
-            return "Hacked";
+        case RecordKind::Basic:
+            return "Basic";
+        case RecordKind::Call:
+            return "Call";
+        case RecordKind::Identifier:
+            return "Identifier";
         default:
             return "????";
         }
-
-#undef EXPR_KIND
     }
-
     struct ExprRecord {
         RecordKind kind;
         uint32_t refCnt = 1;
-        Value result;
 
-        ExprRecord(RecordKind kind, Value result)
-            : kind(kind), result(std::move(result)) { }
+        ExprRecord(RecordKind kind)
+            : kind(kind) { }
+    };
+    struct BasicRecord : ExprRecord {
+        BasicRecord()
+            : ExprRecord(RecordKind::Basic) { }
     };
     struct ExprResult {
         ExprRecord* ptr;
+        Value m_value;
 
         template<std::derived_from<ExprRecord> T, typename... Args>
-        static ExprResult make(Args&&... args) {
-            return ExprResult { new T(std::forward<Args>(args)...) };
+        static ExprResult make(Value result, Args&&... args) {
+            return ExprResult { std::move(result), new T(std::forward<Args>(args)...) };
         }
 
         void ref() {
@@ -437,17 +434,19 @@ struct Interpreter : STContext {
                 delete ptr;
         }
 
-        Value& value() const { return ptr->result; }
+        Value& value() { return m_value; }
+        const Value& value() const { return m_value; }
         operator Value() const { return value(); }
         RecordKind kind() const { return ptr->kind; }
         template<typename T>
         T& as() { return *(T*)ptr; }
 
         ExprResult(const ExprResult& other)
-            : ptr(other.ptr) { ref(); }
+            : ptr(other.ptr), m_value(other.value()) { ref(); }
         ExprResult& operator=(const ExprResult& other) {
             deref();
             ptr = other.ptr;
+            m_value = other.value();
             ref();
             return *this;
         }
@@ -456,8 +455,8 @@ struct Interpreter : STContext {
         }
 
     private:
-        ExprResult(ExprRecord* ptr)
-            : ptr(ptr) { }
+        ExprResult(Value value, ExprRecord* ptr)
+            : ptr(ptr), m_value(std::move(value)) { }
     };
     struct PositionalExprResult : ExprResult {
         uint32_t m_index = 0;
@@ -510,6 +509,8 @@ struct Interpreter : STContext {
     StaticLookupContext* globalContext = &builtinImplContext;
     using BuiltinImpl = Value (*)(Interpreter* i, std::span<const FnArgumentResult> args);
     std::span<BuiltinImpl> builtinImpls;
+
+    ExprResult invalResult = ExprResult::make<ExprRecord>(Value {}, RecordKind::Empty);
 
     struct Deduction {
         Ptr<LocalDecl> decl;
@@ -816,11 +817,6 @@ struct Interpreter : STContext {
 
         return true;
     }
-    struct ConversionRecord : ExprRecord {
-        ExprResult base;
-        ConversionRecord(Value result, ExprResult base)
-            : ExprRecord(RecordKind::Conversion, result), base(base) { }
-    };
     ExprResult convertOrSlice(Value targetTypeValue, ExprResult sourceValue, bool allowConversions = true) {
         if (targetTypeValue.constraint)
             return sourceValue;
@@ -835,7 +831,7 @@ struct Interpreter : STContext {
         Kind kind;
     };
     SliceResult slice(const Type& targetType, ExprResult sourceValue) {
-        SliceResult badResult = { ExprResult::make<EmptyRecord>(), SliceResult::Kind::Error };
+        SliceResult badResult = { invalResult, SliceResult::Kind::Error };
         if (!targetType.valid())
             return badResult;
 
@@ -861,7 +857,7 @@ struct Interpreter : STContext {
         else if (results.size() > 1)
             return badResult;
 
-        return { ExprResult::make<EmptyRecord>(), SliceResult::Kind::NotFound };
+        return { invalResult, SliceResult::Kind::NotFound };
     }
     ExprResult convertOrSlice(const Type& targetType, ExprResult sourceValue, bool allowConversions = true) {
         auto sliced = slice(targetType, sourceValue);
@@ -871,11 +867,11 @@ struct Interpreter : STContext {
         Type sourceType = typeOf(sourceValue);
         // TODO: should this be a conversion?
         if (implicitlyConvertibleToType(sourceType) && cmpCompleteDecls(targetType, typeType)) {
-            return ExprResult::make<ConversionRecord>(makeTypeValue(implicitlyToType(sourceValue)), sourceValue);
+            return ExprResult::make<BasicRecord>(makeTypeValue(implicitlyToType(sourceValue)));
         }
 
         EvaluatedArguments parametricArgs;
-        parametricArgs.args.push_back({ ExprResult::make<HackedRecord>(makeTypeValue(targetType)), {} });
+        parametricArgs.args.push_back({ ExprResult::make<BasicRecord>(makeTypeValue(targetType)), {} });
         ExprResult convFn = lookupToValue(lookupIdentifier(*globalContext, conversionWord(), parametricArgs));
         std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
         return invokeCall(convFn, fnArgs);
@@ -893,10 +889,6 @@ struct Interpreter : STContext {
         }
     }
 
-    struct HackedRecord : ExprRecord {
-        HackedRecord(Value result)
-            : ExprRecord(RecordKind::Hacked, std::move(result)) { }
-    };
     bool convertFnArgs(LookupContext& context, std::span<Ptr<Decl>> params, std::span<PositionalExprResult> args, bool conversionAllowed) {
         for (auto& arg : args) {
             Ptr<Expr> typeExpr = at(asVar(params[arg.index()])).type;
@@ -943,7 +935,7 @@ struct Interpreter : STContext {
             Value arg;
             Value type = evaluateExpr(context, at(allDecls[i]).type);
             if (argOff < args.size() && i == args[argOff].index() && type.valid()) {
-                arg = convertOrSlice(type, ExprResult::make<HackedRecord>(args[argOff]));
+                arg = convertOrSlice(type, ExprResult::make<BasicRecord>(args[argOff]));
                 if (!arg.valid()) {
                     fmt::print("unable to initialize ");
                     dumpValue(type);
@@ -996,12 +988,8 @@ struct Interpreter : STContext {
         }
     }
 
-    struct EmptyRecord : ExprRecord {
-        EmptyRecord()
-            : ExprRecord(RecordKind::Empty, {}) { }
-    };
     ExprResult defaultConstructType(const Type& type) {
-        return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(type)), {});
+        return invokeCall(ExprResult::make<BasicRecord>(makeTypeValue(type)), {});
     }
     ExprResult evaluateDefaultArg(LookupContext& context, Ptr<Decl> decl) {
         auto& var = at(asVar(decl));
@@ -1014,7 +1002,7 @@ struct Interpreter : STContext {
         if (var.type) {
             return defaultConstructType(implicitlyToType(evaluateExpr(context, var.type)));
         }
-        return ExprResult::make<EmptyRecord>();
+        return invalResult;
     }
     bool recursivelyCheckForHasMember(const Type& shouldHave, const CompleteDecl& type) {
         if (staticMatch(type, shouldHave))
@@ -1035,8 +1023,8 @@ struct Interpreter : STContext {
             return recursivelyCheckForHasMember(implicitlyToType(condValue), implicitlyToType(value));
 
         if (cmpCompleteDecls(condType, overloadSetType)) {
-            std::array<NamedExprResult, 1> args { { { ExprResult::make<HackedRecord>(value), {} } } };
-            Value res = invokeCall(ExprResult::make<HackedRecord>(condValue), args);
+            std::array<NamedExprResult, 1> args { { { ExprResult::make<BasicRecord>(value), {} } } };
+            Value res = invokeCall(ExprResult::make<BasicRecord>(condValue), args);
             VERIFY(res.valid());
             VERIFY(res.kind == ValueKind::Builtin);
             VERIFY(cmpCompleteDecls(res.type, boolType));
@@ -1063,7 +1051,7 @@ struct Interpreter : STContext {
                     arg = evaluateExpr(context, at(decl).initializer);
                 }
                 if (at(decl).type)
-                    arg = convertOrSlice(evaluateExpr(context, at(decl).type), ExprResult::make<HackedRecord>(arg));
+                    arg = convertOrSlice(evaluateExpr(context, at(decl).type), ExprResult::make<BasicRecord>(arg));
             } else {
                 // argument should already be converted
                 arg = value;
@@ -1294,21 +1282,21 @@ struct Interpreter : STContext {
 #undef EXPR_KIND
     }
 
-    struct IdentifierExprRecord : ExprRecord {
+    struct IdentifierRecord : ExprRecord {
         LValue lValue;
-        IdentifierExprRecord(Value result, LValue lValue)
-            : ExprRecord(RecordKind::IdentifierExpr, result), lValue(lValue) { }
+        IdentifierRecord(LValue lValue)
+            : ExprRecord(RecordKind::Identifier), lValue(lValue) { }
     };
     ExprResult lookupToValue(LookupResult r) {
         if (!r.valid())
-            return ExprResult::make<EmptyRecord>();
+            return invalResult;
         switch (r.declKind) {
         case DeclKind::GlobalDecl:
         case DeclKind::LocalDecl: {
             LValue lVal = toLValue(r);
             if (lVal.valid())
-                return ExprResult::make<IdentifierExprRecord>(getValue(lVal), lVal);
-            return ExprResult::make<IdentifierExprRecord>(Value {}, lVal);
+                return ExprResult::make<IdentifierRecord>(getValue(lVal), lVal);
+            return invalResult;
         }
         case DeclKind::FnDecl:
         case DeclKind::StructDecl: {
@@ -1317,7 +1305,7 @@ struct Interpreter : STContext {
             Value v = makeArrayValue(setType, r.decls.size());
             for (uint32_t i = 0; i < r.decls.size(); i++)
                 v.u.array->array()[i] = makeParameterizedDeclValue(itemType.decl, std::move(r.decls[i]));
-            return ExprResult::make<IdentifierExprRecord>(v, LValue {});
+            return ExprResult::make<BasicRecord>(v);
         }
         default:
             VERIFY_NOT_REACHED();
@@ -1345,12 +1333,8 @@ struct Interpreter : STContext {
         return value;
     }
 
-    struct IntLiteralExprRecord : ExprRecord {
-        IntLiteralExprRecord(Value result)
-            : ExprRecord(RecordKind::IntLiteralExpr, result) { }
-    };
     ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
-        return ExprResult::make<IntLiteralExprRecord>(makeBuiltinValue(intType, e.value));
+        return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, e.value));
     }
 
     struct CompleteCall {
@@ -1486,10 +1470,10 @@ struct Interpreter : STContext {
             VERIFY_NOT_REACHED();
         });
     }
-    struct CallExprRecord : ExprRecord {
-        std::optional<CompleteCall> assignCall;
-        CallExprRecord(Value result, std::optional<CompleteCall> assignCall)
-            : ExprRecord(RecordKind::CallExpr, result), assignCall(assignCall) { }
+    struct CallRecord : ExprRecord {
+        CompleteCall assignCall;
+        CallRecord(CompleteCall assignCall)
+            : ExprRecord(RecordKind::Call), assignCall(assignCall) { }
     };
     bool cmpCompleteCallArgs(const CompleteCall& l, const CompleteCall& r) {
         if (l.args.size() != r.args.size())
@@ -1501,7 +1485,6 @@ struct Interpreter : STContext {
         return true;
     }
     ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args) {
-        auto badCall = ExprResult::make<CallExprRecord>(Value {}, std::nullopt);
         Value base = baseR;
         auto baseType = typeOf(base);
 
@@ -1515,31 +1498,31 @@ struct Interpreter : STContext {
                 if (!c.has_value())
                     continue;
                 if (call.has_value())
-                    return badCall;
+                    return invalResult;
                 call = std::move(c.value());
             }
             if (!call.has_value())
-                return badCall;
+                return invalResult;
 
-            return ExprResult::make<CallExprRecord>(evaluateCall(call.value()), call.value());
+            return ExprResult::make<CallRecord>(evaluateCall(call.value()), call.value());
         }
         if (cmpCompleteDecls(baseType, typeType)) {
             auto type = asTypeValue(base);
             auto& decl = as<StructDecl>(type.decl);
             auto posArgs = positionArguments(at(decl.params), {}, args);
             if (!posArgs.has_value())
-                return badCall;
+                return invalResult;
             LookupContext* typeCtx = getTypeContext(type);
             if (!convertFnArgs(*typeCtx, at(decl.params), posArgs.value(), true))
-                return badCall;
+                return invalResult;
 
             auto vals = completeFnArgs(*typeCtx, at(decl.params), posArgs.value());
             if (!vals.has_value())
-                return badCall;
+                return invalResult;
 
             CompleteCall call { type };
             call.args = std::move(vals.value());
-            return ExprResult::make<CallExprRecord>(evaluateCall(call), call);
+            return ExprResult::make<CallRecord>(evaluateCall(call), call);
         }
         // function
         std::optional<ExprResult> selfArg;
@@ -1562,36 +1545,39 @@ struct Interpreter : STContext {
                 auto& decl = as<FnDecl>(c.value().target.decl);
                 if (decl.assignParam) {
                     if (assignCall.has_value())
-                        return badCall;
+                        return invalResult;
                     assignCall = std::move(c.value());
                 } else {
                     if (call.has_value())
-                        return badCall;
+                        return invalResult;
                     call = std::move(c.value());
                 }
             }
             if (!call.has_value())
-                return badCall;
+                return invalResult;
             Value callResult = evaluateFunction(call.value(), {});
 
             if (assignCall.has_value()) {
                 if (!cmpCompleteCallArgs(call.value(), assignCall.value()))
-                    return badCall;
+                    return invalResult;
 
                 auto assignType = withParametricContext(assignCall.value().target, [&](LookupContext& context) {
                     auto& d = as<FnDecl>(assignCall.value().target.decl);
                     return implicitlyToType(evaluateExpr(context, at(d.assignParam).type));
                 });
                 if (!assignType.valid() || !cmpCompleteDecls(assignType, typeOf(callResult)))
-                    return badCall;
+                    return invalResult;
             }
-            return ExprResult::make<CallExprRecord>(callResult, assignCall);
+            if (assignCall.has_value())
+                return ExprResult::make<CallRecord>(callResult, assignCall.value());
+            else
+                return ExprResult::make<BasicRecord>(callResult);
         }
         fmt::print("can not call ");
         dumpValue(base);
         fmt::print("of type ");
         dumpValue(makeTypeValue(baseType));
-        return ExprResult::make<EmptyRecord>();
+        return invalResult;
     }
     ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
         VERIFY(e.callKind == CallKind::Paren);
@@ -1600,19 +1586,15 @@ struct Interpreter : STContext {
         return invokeCall(base, args.args);
     }
 
-    struct ParenExprRecord : ExprRecord {
-        ParenExprRecord(Value result)
-            : ExprRecord(RecordKind::ParenExpr, std::move(result)) { }
-    };
     ExprResult evalParenExpr(LookupContext& context, ParenExpr& e) {
-        return ExprResult::make<ParenExprRecord>(evaluateExpr(context, e.subExpr));
+        return ExprResult::make<BasicRecord>(evaluateExpr(context, e.subExpr));
     }
 
-    struct AccessExprRecord : ExprRecord {
+    struct AccessRecord : ExprRecord {
         ExprResult base;
         Ptr<Decl> accessDecl;
-        AccessExprRecord(Value result, ExprResult base, Ptr<Decl> accessDecl)
-            : ExprRecord(RecordKind::AccessExpr, result), base(base), accessDecl(accessDecl) { }
+        AccessRecord(ExprResult base, Ptr<Decl> accessDecl)
+            : ExprRecord(RecordKind::Access), base(base), accessDecl(accessDecl) { }
     };
     LookupContext* recursiveWrapWithHasContexts(LookupContext* base, Ptr<Decl> structDecl, LookupContext& structCtx) {
         auto& d = as<StructDecl>(structDecl);
@@ -1650,7 +1632,7 @@ struct Interpreter : STContext {
     }
     ExprResult accessMember(ExprResult base, uint32_t i) {
         auto members = at(as<StructDecl>(base.value().type.decl).params);
-        return ExprResult::make<AccessExprRecord>(base.value().u.array->array()[i], base, members[i]);
+        return ExprResult::make<AccessRecord>(base.value().u.array->array()[i], base, members[i]);
     }
     void collectMembers(ExprResult base, Word name, std::vector<ExprResult>& results) {
         auto members = at(as<StructDecl>(base.value().type.decl).params);
@@ -1684,7 +1666,7 @@ struct Interpreter : STContext {
         if (!idVal.value().valid())
             return idVal;
 
-        auto badAccess = ExprResult::make<IdentifierExprRecord>(Value {}, LValue {});
+        auto badAccess = ExprResult::make<IdentifierRecord>(Value {}, LValue {});
         if (declKind == DeclKind::StructDecl && !e.isStatic)
             return badAccess;
         if (e.isStatic || declKind != DeclKind::FnDecl)
@@ -1696,12 +1678,12 @@ struct Interpreter : STContext {
     ExprResult transformMemberOverloadSet(ExprResult base, ExprResult overloadSet) {
         ParameterizedDecl setDecl = memberOverloadSetDecl;
         setDecl.allocateArgs(2);
-        setDecl.args()[0] = { ExprResult::make<HackedRecord>(makeTypeValue(typeOf(base))), 0 };
+        setDecl.args()[0] = { ExprResult::make<BasicRecord>(makeTypeValue(typeOf(base))), 0 };
         setDecl.args()[1] = { overloadSet, 1 };
         CompleteDecl setDeclComp = completeDecl(setDecl);
 
         std::array<NamedExprResult, 1> baseArg { { { base, {} } } };
-        return invokeCall(ExprResult::make<HackedRecord>(makeTypeValue(setDeclComp)), baseArg);
+        return invokeCall(ExprResult::make<BasicRecord>(makeTypeValue(setDeclComp)), baseArg);
     }
 
     ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e) {
@@ -1724,29 +1706,27 @@ struct Interpreter : STContext {
         Value cond = evaluateExpr(context, e.constraint.condition);
         cond = deepCopy(cond);
         cond.constraint = true;
-        return ExprResult::make<HackedRecord>(cond);
+        return ExprResult::make<BasicRecord>(cond);
     }
 
     ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
 
     bool setExprValue(ExprResult base, Value value) {
         switch (base.kind()) {
-        case RecordKind::IdentifierExpr: {
-            auto& b = base.as<IdentifierExprRecord>();
+        case RecordKind::Identifier: {
+            auto& b = base.as<IdentifierRecord>();
             if (!b.lValue.valid())
                 return false;
             setValue(b.lValue, std::move(value));
             return true;
         }
-        case RecordKind::CallExpr: {
-            auto& b = base.as<CallExprRecord>();
-            if (!b.assignCall.has_value())
-                return false;
-            evaluateCall(b.assignCall.value(), value);
+        case RecordKind::Call: {
+            auto& b = base.as<CallRecord>();
+            evaluateCall(b.assignCall, value);
             return true;
         }
-        case RecordKind::AccessExpr: {
-            auto& b = base.as<AccessExprRecord>();
+        case RecordKind::Access: {
+            auto& b = base.as<AccessRecord>();
             if (!b.accessDecl)
                 return false;
             Value baseValue = b.base;

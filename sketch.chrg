@@ -3,28 +3,30 @@ struct Bar{T: Type} (
     add: T = 0
     vals: Array{T} = { 1, 2, 3 }
     
-    function get(i: int) => T:{
+    fn get(i: int) => T:{
         return vals[i] + add;
     }
 )
 Foo2 = Bar{int};
 struct Foo2 -> Bar{int};
 
-function appendTo{T: Type}(v&: Array{T}, item: T) => {
+fn appendTo{T: Type}(v&: Array{T}, item: T) => {
     v.append(item);
 }
 
-const sizeOf{T: Type}: int = sizeof(T);
+const sizeOf{T: Type}: int = sizeof(T)
 
 
 with {cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type}
-function call{f{cargs..}: (params..) -> RetT}(args..: Tuple{undeduced(params)}) -> RetT {
+fn call{f{cargs..}: (params..) -> RetT}(args..: Tuple{undeduced(params)}) -> RetT {
     return f{cargs..}(args..);
 }
 
-function test{T: Type, size: int}(defaultValue: T = {}, table: FixedArray{T, int});
-call{test}({}, { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
-call{test{T = int}}(table = {}); // -> call{test{T = int, size = 0}}
+fn test{T: Type, size: int}(defaultValue: T = {}, table: FixedArray{T, size});
+fn callTest() => {
+    call{test}({}, { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
+    call{test{T = int}}(table = {}); // -> call{test{T = int, size = 0}}
+}
 
 
 with {base}
@@ -32,13 +34,13 @@ isSpecializationOf{?match base{_..}, base}: bool = true;
 
 isSpecializationOf{spacial, base}: bool = false;
 
-function doStuff{b, c}(first: b{c}, second: b);
+fn doStuff{b, c}(first: b{c}, second: b);
 
 
-function recurse{x ?[# > 0]}() {
+fn recurse{x ?[# > 0]}() {
     recurse{x - 1}();
 }
-function recurse{?match 0}() {
+fn recurse{?match 0}() {
     // base case
 }
 
@@ -60,7 +62,7 @@ struct Int (
     }
 )
 
-function bar() {
+fn bar() {
     let lambda = (i: int) => int:{
         let j: int = calc(i);
         return i == j * j;
@@ -79,10 +81,10 @@ struct vec3 (
     y: int = 0
     z: int = 0
 
-    function lengthSq() => int:{}
+    fn lengthSq() => int:{}
 )
-function get() => vec3:{}
-function q() => {
+fn get() => vec3:{}
+fn q() => {
     with {x, y, z}
     { x, y, z } = get();
     with {l, z, y}
@@ -90,10 +92,10 @@ function q() => {
 }
 
 struct Array{T: Type} (
-    function popBack(self&) => T:{}
-    function truncate(self&, newSize: int) => {}
+    fn popBack(self&) => T:{}
+    fn truncate(self&, newSize: int) => {}
 )
-function foo() {
+fn foo() => {
     let arr: Array = { 1, 2, 3 };
     with {back, arr2}
     { back = #, arr2 = .self } = arr.popBack();
@@ -110,42 +112,42 @@ struct Vec2 (
     m_x: float
     m_y: float
 
-    function x(self&) <=> m_x
+    fn x(self&) <=> m_x
 )
 struct Range (
     m_low: float
     m_high: float
 
-    function low(self&) <=> m_low
-    function high(self&) <=> m_high
+    fn low(self&) <=> m_low
+    fn high(self&) <=> m_high
 )
 struct Rect (
     h: Range
     v: Range
 
-    function bottomLeft(self&) <=> Vec2(h.low(), v.low())
+    fn bottomLeft(self&) <=> Vec2(h.low(), v.low())
 )
-function onlyX(v: Vec2) => v.x();
-function onlyX(v&: Vec2) = (x: float) { v.x() = x; }
-function onlyX(v&: Vec2) <=> v.x();
+fn onlyX(v: Vec2) => v.x();
+fn onlyX(v&: Vec2) = (x: float) { v.x() = x; }
+fn onlyX(v&: Vec2) <=> v.x();
 
-function update(v&: float) { v = 2.0; }
-function callUpdate(r&: Rect) {
+fn update(v&: float) { v = 2.0; }
+fn callUpdate(r&: Rect) {
     update(r.bottomLeft().x());
 }
 
 struct Array{T: Type} (
     has Index{(int) -> T} (
-        function index(self&, i: int) => ...[i];
+        fn index(self&, i: int) => ...[i]
     )
 )
 
 with {T: Type}
-function withIndexType{C ?Index{(int) -> T}: Type}(c: C) => {}
+fn withIndexType{C ?Index{(int) -> T}: Type}(c: C) => {}
 with {T: Type}
-function withIndexType(c: ?Index{(int) -> T}) => {}
+fn withIndexType(c: ?Index{(int) -> T}) => {}
 with {T: Type}
-function getFirst(arr: ?match Array{T}) => T:{
+fn getFirst(arr: ?match Array{T}) => T:{
     return arr.first();
 }
 
@@ -194,70 +196,68 @@ compare (i: int) with (j: int) => Ordering:{
 }
 
 
-struct Enum{Anchor: Type} (
-    m_var: Variant{Anchor} = {}
+struct ClassRoot{Anchor: Type} (
+    m_class: Class{Anchor} = {}
 
     has AutoInitialize (
         with {Self: Type}
-        function init(self&) {
-            m_var = Variant{Anchor}::of(Self);
+        fn init(self&) {
+            m_class = Class{Anchor}::of(Self);
         }
     )
-    function var(self) { return m_var; }
-    convert (self) => Class{Anchor}:{
-        return var();
-    }
+    fn class(self) => { return m_class; }
+    convert (self) => class()
 )
-struct Variant{Anchor: Type} (
-    function of(T: Type) => Variant{Anchor}:{}
-    function type(self) => Type:{}
+struct Class{Anchor: Type} (
+    fn of(T: Type) => Variant{Anchor}:{}
+    fn type(self) => Type:{}
 )
 with {Anchor: Type}
-function has{T ?undeduced(Anchor): Type}(var: Variant{Anchor}) => bool:{}
+fn has{T ?undeduced(Anchor): Type}(var: Class{Anchor}) => bool:{}
 with {Anchor: Type}
-function is{T ?undeduced(Anchor): Type}(var: Variant{Anchor}) => bool:{
-    return var == Variant{Anchor}::of(T);
+fn is{T ?undeduced(Anchor): Type}(var: Class{Anchor}) => bool:{
+    return var == Class{Anchor}::of(T);
 }
 with {Anchor: Type}
-match {T ?Enum{undeduced(Anchor)}: Type} against (var: Variant{Anchor}) => {
-    return performMatch{Variant{Anchor}::of(T)}(var);
+match {T ?ClassRoot{undeduced(Anchor)}: Type} against (var: Class{Anchor}) => {
+    return performMatch{Class{Anchor}::of(T)}(var);
 }
 with {Anchor: Type}
-match {var: Variant{Anchor}} against (inst: ?Enum{undeduced(Anchor)}) => {
-    return performMatch{var}(inst.variant());
+match {var: Class{Anchor}} against (inst: ?ClassRoot{undeduced(Anchor)}) => {
+    return performMatch{var}(inst.class());
 }
-with {Anchor: Type, T ?undeduced(Anchor): Type}
-match {T} against (inst: ?Enum{Anchor}) => {
-    return performMatch{Variant{Anchor}::of(T)}(inst.variant());
+with {Anchor: Type, T ?ClassRoot{undeduced(Anchor)}: Type}
+match {T} against (inst: ?ClassRoot{Anchor}) => {
+    return performMatch{Class{Anchor}::of(T)}(inst.class());
 }
 
 incomplete final struct SliceResult (
-    has Enum
+    has ClassRoot
     struct Success (has SliceResult, result: ExprResult)
     struct NotFound (has SliceResult)
     struct Error (has SliceResult)
 )
-function slice() => Union{SliceResult}:{}
-function doSlice() => Opt{ExprResult}:{
+fn slice() => Union{SliceResult}:{}
+fn doSlice() => Opt{ExprResult}:{
     return match (slice()) {
         with {s ?SliceResult::Success} s => s.result;
-        _ => {};
+        else => {};
     };
 }
-function useSlice() => {
+fn useSlice() => {
     let slice = doSlice() else return;
 }
 
 incomplete final(module) struct Expr (
-    has Enum
+    has ClassRoot
 )
 struct BinaryOperatorExpr (
-    has Expr
     op: BinaryOperator
     left: id{Expr}
     right: id{Expr}
+    has Expr
 )
-function dispatch(ref{Expr} e) => {
+fn dispatch(ref{Expr} e) => {
     match (e) {
         with {e ?BinaryOperatorExpr} e => { }
 
@@ -267,13 +267,20 @@ function dispatch(ref{Expr} e) => {
 }
 
 incomplete struct View (
-    static className: String;
+    static virtual className: String;
 
-    has Enum{View}
+    has ClassRoot{View}
 )
 struct ImageView (
     has View (
-        static className: String = "Image"
+        static override className: String = "Image"
     )
-
 )
+
+object Obj (
+    i: int = 0
+    fn get(this) => idof(i)
+)
+fn deref(firstArg: id{int}, secondArg: id{Obj}) => {
+    return *firstArg + *secondArg.get();
+}
