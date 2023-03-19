@@ -112,11 +112,6 @@ struct Span {
         return { Ptr<Ptr<Base>>(begin.offsetAlign4), count };
     }
 };
-struct Word {
-    uint32_t id = 0;
-    explicit operator bool() const { return id != 0; }
-    bool operator==(const Word& other) const { return id == other.id; }
-};
 
 struct Arguments {
     struct Arg {
@@ -227,7 +222,7 @@ constexpr UnaryOperator tokenKindToUnaryOp(TokenKind kind) {
     return (UnaryOperator)(std::to_underlying(kind) - std::to_underlying(TokenKind::FirstUnaryOp));
 }
 const char* toShortString(UnaryOperator op);
-const char* toShortString(UnaryOperator op);
+const char* toOperationString(UnaryOperator op);
 struct UnaryOperatorExpr : Expr {
     UnaryOperator op;
     Ptr<Expr> subExpr;

@@ -221,37 +221,47 @@ std::string_view STContext::sview(Word word) const {
     VERIFY_NOT_REACHED();
 }
 
-static uint64_t parseInteger(std::string_view range) {
-    auto characterValue = [](uint8_t c) -> uint64_t {
+uint64_t Parser::lexInteger() {
+    VERIFY(tok.kind() == TokenKind::IntegerLiteral);
+
+    auto characterValue = [](uint8_t c) -> int {
         if (c >= 'a' && c <= 'f')
             return c - 'a' + 10;
         if (c >= 'A' && c <= 'F')
             return c - 'A' + 10;
         if (c >= '0' && c <= '9')
             return c - '0';
-        VERIFY_NOT_REACHED();
+
+        if (c == '\'')
+            return -2;
+
+        return -1;
+    };
+
+    int curDig = characterValue(source[pos()]);
+    auto nextDigit = [&]() {
+        m_position += 1;
+        curDig = characterValue(source[pos()]);
     };
 
     uint64_t base = 10;
-    uint64_t pos = 0;
-    if (range[0] == '0') {
-        if (range.length() == 1)
-            return 0;
-        if (range[1] == 'x' || range[1] == 'X')
+    if (curDig == 0) {
+        nextDigit();
+        char baseChar = source[pos()];
+        if (baseChar == 'x' || baseChar == 'X') {
             base = 16;
-        else if (range[1] == 'b' || range[1] == 'B')
+            nextDigit();
+        } else if (baseChar == 'b' || baseChar == 'B') {
             base = 2;
-        else
-            VERIFY_NOT_REACHED();
-        pos = 2;
+            nextDigit();
+        }
     }
     uint64_t value = 0;
-    for (; pos < range.length(); pos += 1) {
-        if (range[pos] == '\'')
+    for (; curDig != -1; nextDigit()) {
+        if (curDig == -2)
             continue;
-        uint64_t v = characterValue(range[pos]);
-        VERIFY(v < base);
-        value = v + value * base;
+        VERIFY((uint64_t)curDig < base);
+        value = value * base + (uint64_t)curDig;
     }
     return value;
 }
@@ -287,14 +297,15 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     }
     // identifier
     else if (tok.kind() == TokenKind::Word) {
-        auto& e = makeSet<IdentifierExpr>(base, asWord(tok));
+        auto& e = makeSet<IdentifierExpr>(base, tok.word);
         advance();
         if (tok.kind() == TokenKind::LeftBrace)
             parseArgumentContext(e.identifier);
     }
     // integer literal
     else if (tok.kind() == TokenKind::IntegerLiteral) {
-        base = make<IntLiteralExpr>(parseInteger(source.view(tok)));
+        base = make<IntLiteralExpr>(lexInteger());
+        skipWhiteSpace();
         advance();
     }
     //
@@ -315,7 +326,7 @@ void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
         bool isStatic = tok.kind() == TokenKind::ColonColon;
         advance();
         EXPECT_EQ(tok.kind(), TokenKind::Word);
-        auto& e = makeSet<AccessExpr>(base, isStatic, base, asWord(tok));
+        auto& e = makeSet<AccessExpr>(base, isStatic, base, tok.word);
         advance();
         if (tok.kind() == TokenKind::LeftBrace)
             parseArgumentContext(e.member);
@@ -373,7 +384,7 @@ void Parser::parseArgument(Arguments::Arg& out) {
     if (tok.kind() == TokenKind::Point) {
         advance();
         EXPECT_EQ(tok.kind(), TokenKind::Word);
-        out.target = asWord(tok);
+        out.target = tok.word;
         advance();
         EXPECT_EQ(tok.kind(), TokenKind::Equal);
         advance();
@@ -383,16 +394,17 @@ void Parser::parseArgument(Arguments::Arg& out) {
 
 void Parser::parseLetStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    if (source.view(tok) == "let")
+    if (tok.word == letWord)
         advance();
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     bool isMut = false;
-    bool isConst = false;
-    if (source.view(tok) == "const") {
-        isConst = true;
+    bool isStatic = false;
+    if (tok.word == staticWord) {
+        isStatic = true;
         advance();
-    } else if (source.view(tok) == "mut") {
+    }
+    if (tok.word == mutWord) {
         isMut = true;
         advance();
     }
@@ -400,10 +412,10 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     Ptr<NamedDecl> decl;
     VarInfo* info;
-    if (isConst)
-        info = &makeSet<GlobalDecl>(decl, asWord(tok), true);
+    if (isStatic)
+        info = &makeSet<GlobalDecl>(decl, tok.word, isMut);
     else
-        info = &makeSet<LocalDecl>(decl, asWord(tok), isMut);
+        info = &makeSet<LocalDecl>(decl, tok.word, isMut);
 
     advance();
     if (tok.kind() == TokenKind::Colon) {
@@ -440,7 +452,7 @@ void Parser::parseIfStmt(Ptr<Stmt>& out) {
     parseBinaryExpr(stmt.condition);
     parseSingleOrCompoundStmt(stmt.ifTrue);
 
-    if (tok.kind() != TokenKind::Word || source.view(tok) != "else")
+    if (tok.kind() != TokenKind::Word || tok.word != elseWord)
         return;
     advance();
     parseSingleOrCompoundStmt(stmt.ifFalse);
@@ -469,12 +481,11 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
         return;
     }
     if (tok.kind() == TokenKind::Word) {
-        auto view = source.view(tok);
-        if (view == "let" || view == "const" || view == "mut")
+        if (tok.word == letWord || tok.word == staticWord || tok.word == mutWord)
             return parseLetStmt(out);
-        if (view == "return")
+        if (tok.word == returnWord)
             return parseReturnStmt(out);
-        if (view == "if")
+        if (tok.word == ifWord)
             return parseIfStmt(out);
     }
     parseExprOrAssignStmt(out);
@@ -525,14 +536,14 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
     // [mut] [name][&] [?constraint] [: expr]
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    bool hasMut = source.view(tok) == "mut";
+    bool hasMut = tok.word == mutWord;
     if (hasMut) {
         VERIFY(scope == ParameterParseScope::Function);
         advance();
     }
 
     EXPECT_EQ(tok.kind(), TokenKind::Word);
-    auto& e = makeSet<LocalDecl>(out, asWord(tok), /*isMut = */ hasMut);
+    auto& e = makeSet<LocalDecl>(out, tok.word, /*isMut = */ hasMut);
     advance();
     if (tok.kind() == TokenKind::Amp) {
         VERIFY(scope == ParameterParseScope::Function);
@@ -557,7 +568,7 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
 }
 
 void Parser::parseWithClause(WithClause& out) {
-    EXPECT_EQ(source.view(tok), "with");
+    VERIFY(tok.word == withWord);
     advance();
     out.params = parseParameterContext(ParameterParseScope::Static);
 }
@@ -565,11 +576,11 @@ void Parser::parseWithClause(WithClause& out) {
 void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     WithClause with;
-    if (source.view(tok) == "with") {
+    if (tok.word == withWord) {
         parseWithClause(with);
     }
     // has
-    else if (source.view(tok) == "has") {
+    else if (tok.word == hasWord) {
         VERIFY(scope == DeclParseScope::Struct);
         advance();
         auto& d = makeSet<HasDecl>(out);
@@ -593,13 +604,13 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         return;
     }
     // operation
-    if (source.view(tok) == "operation") {
+    if (tok.word == operationWord) {
         VERIFY(scope == DeclParseScope::Namespace);
         advance();
 
         bool hasAssign = false;
         EXPECT_EQ(tok.kind(), TokenKind::Word);
-        if (source.view(tok) == "assign") {
+        if (tok.word == assignWord) {
             hasAssign = true;
             advance();
         }
@@ -607,11 +618,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         Word name = {};
         EXPECT_EQ(tok.kind(), TokenKind::Word);
         for (uint32_t i = 0; i < std::to_underlying(UnaryOperator::COUNT); i++) {
-            if (source.view(tok) == toOperationString((UnaryOperator)i))
+            if (tok.word == unaryOperationWords[i])
                 name = makeUnaryOpWord((UnaryOperator)i);
         }
         for (uint32_t i = 0; i < std::to_underlying(BinaryOperator::FirstCmp); i++) {
-            if (source.view(tok) == toOperationString((BinaryOperator)i))
+            if (tok.word == binaryOperationWords[i])
                 name = hasAssign ? makeAssignOpWord((BinaryOperator)i) : makeBinaryOpWord((BinaryOperator)i);
         }
         VERIFY((bool)name);
@@ -630,16 +641,15 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     Word declarator;
     Word name;
     while (tok.kind() == TokenKind::Word) {
-        auto view = source.view(tok);
-        if (view == "static")
+        if (tok.word == staticWord)
             hasStatic = true;
-        else if (view == "mut")
+        else if (tok.word == mutWord)
             hasMut = true;
         else {
             if (!declarator) {
-                declarator = asWord(tok);
+                declarator = tok.word;
             } else {
-                name = asWord(tok);
+                name = tok.word;
                 advance();
                 break;
             }

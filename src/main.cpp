@@ -3,8 +3,12 @@
 
 void test() {
     auto testSingleToken = [](TokenKind kind) {
-        Lexer lex(exampleString(kind));
+        Parser lex(STContext::create(), "");
+        lex.reset(exampleString(kind));
         EXPECT_EQ(lex.tok.kind(), kind);
+
+        if (isLiteral(lex.tok.kind()))
+            return;
         lex.advance();
         EXPECT_EQ(lex.tok.kind(), TokenKind::EOS);
     };
@@ -30,9 +34,9 @@ int main() {
     {
         Parser par(STContext::create(), R"str({
             let x = a + b;
-            let const x = a + b;
+            let static x = a + b;
             let mut x = a + b;
-            const x = a + b;
+            static x = a + b;
             mut x = a + b;
         })str");
         Ptr<CompoundStmt> out = {};

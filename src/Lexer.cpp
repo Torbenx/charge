@@ -1,4 +1,4 @@
-#include "Lexer.h"
+#include "Parser.h"
 #include <array>
 
 const char* toShortString(TokenKind kind) {
@@ -78,6 +78,7 @@ struct Table {
         TokenKind repeat = bare;
         TokenKind equal = bare;
         TokenKind repeatEqual = repeat;
+        uint8_t bareAdvance = 1;
     };
     struct InputRange : Input {
         char first, last;
@@ -97,10 +98,10 @@ struct Table {
     constexpr Table(std::initializer_list<InputRange> inputs) {
         for (auto input : inputs) {
             for (char c = input.first; c <= input.last; c++) {
-                table[c - 0x20 + 0x60 * 0] = { input.bare, 1 };
-                table[c - 0x20 + 0x60 * 1] = { input.repeat, input.repeat != input.bare ? 2 : 1 };
-                table[c - 0x20 + 0x60 * 2] = { input.equal, input.equal != input.bare ? 2 : 1 };
-                table[c - 0x20 + 0x60 * 3] = { input.repeatEqual, input.repeatEqual != input.repeat ? 3 : (input.repeatEqual != input.bare ? 2 : 1) };
+                table[c - 0x20 + 0x60 * 0] = { input.bare, input.bareAdvance };
+                table[c - 0x20 + 0x60 * 1] = { input.repeat, input.repeat != input.bare ? 2 : input.bareAdvance };
+                table[c - 0x20 + 0x60 * 2] = { input.equal, input.equal != input.bare ? 2 : input.bareAdvance };
+                table[c - 0x20 + 0x60 * 3] = { input.repeatEqual, input.repeatEqual != input.repeat ? 3 : (input.repeatEqual != input.bare ? 2 : input.bareAdvance) };
             }
         }
     }
@@ -137,7 +138,7 @@ struct TableHolder {
         { '<', { .bare = Less, .repeat = LessLess, .equal = LessEqual, .repeatEqual = LessLessEqual } },
         { '>', { .bare = Greater, .repeat = GreaterGreater, .equal = GreaterEqual, .repeatEqual = GreaterGreaterEqual } },
 
-        { '0', '9', { IntegerLiteral } },
+        { '0', '9', { .bare = IntegerLiteral, .bareAdvance = 0 } },
 
         { 'a', 'z', { Word } },
         { 'A', 'Z', { Word } },
@@ -168,29 +169,25 @@ constexpr bool isIntLiteralChar(u8 c) {
 
 }
 
-void Lexer::reset(SourceBuffer buffer) {
+void Parser::reset(SourceBuffer buffer) {
     source = buffer;
-    uint32_t firstToken = nextNonWhiteSpace(0);
-    m_position = firstToken;
-    tok.flags |= firstToken > 0 ? TokenFlags::HasLeadingWhiteSpace : 0;
+    m_position = 0;
+    skipWhiteSpace();
     advance();
 }
 
-uint32_t Lexer::nextNonWhiteSpace(uint32_t pos) const {
+uint32_t Parser::nextNonWhiteSpace(uint32_t pos) const {
     while (isWhiteSpace(source[pos])) {
         pos += 1;
     }
     return pos;
 }
 
-void Lexer::advance() {
+void Parser::advance() {
     u8 head = source[pos()];
     if (head == '\0') [[unlikely]] {
         tok = {
-            .start = pos(),
-            .length = 0,
-            .m_kind = (uint32_t)TokenKind::EOS,
-            .flags = 0,
+            .m_kind = TokenKind::EOS,
         };
         return;
     }
@@ -213,29 +210,22 @@ void Lexer::advance() {
     auto [kind, advance] = TableHolder::table.table[idx];
 
     end = pos() + advance;
+    Word word = {};
     if ((TokenKind)kind == TokenKind::Word) {
         while (isBulkWordChar(source[end])) {
             end += 1;
         }
-    } else if ((TokenKind)kind == TokenKind::IntegerLiteral) {
-        while (isIntLiteralChar(source[end])) {
-            end += 1;
-        }
+        word = asWord(source.view(pos(), end));
     }
 
-    bool leadingSpace = tok.hasTrailingWhiteSpace();
-    uint32_t flags = leadingSpace ? TokenFlags::HasLeadingWhiteSpace : 0;
-
-    uint32_t spaceEnd = nextNonWhiteSpace(end);
-    flags |= (spaceEnd == end) ? TokenFlags::HasTrailingWhiteSpace : 0;
-
     tok = {
-        .start = pos(),
-        .length = end - pos(),
-        .m_kind = kind,
-        .flags = flags,
+        .word = word,
+        .m_kind = (TokenKind)kind,
     };
-    m_position = spaceEnd;
+
     if (dumpTokens)
-        fmt::println("'{:4}': \"{}\"", toShortString(tok.kind()), source.view(tok));
+        fmt::println("'{:4}': \"{}\"", toShortString((TokenKind)kind), source.view(pos(), end));
+
+    m_position = end;
+    skipWhiteSpace();
 }

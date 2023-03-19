@@ -22,15 +22,11 @@ struct STStorage {
 };
 
 class STContext {
-private:
-    STContext() = default;
-
 public:
-    std::shared_ptr<STStorage> storage = {};
+    std::shared_ptr<STStorage> storage;
 
     static STContext create() {
-        STContext ctx;
-        ctx.storage = std::make_shared<STStorage>();
+        STContext ctx { std::make_shared<STStorage>() };
         return ctx;
     }
 
@@ -40,6 +36,31 @@ public:
     Word makeAssignOpWord(BinaryOperator op);
     static constexpr uint32_t CONVERSION_WORD_ID = -1;
     static Word conversionWord() { return { CONVERSION_WORD_ID }; }
+    Word structWord = asWord("struct");
+    Word fnWord = asWord("fn");
+    Word letWord = asWord("let");
+    Word mutWord = asWord("mut");
+    Word staticWord = asWord("static");
+    Word ifWord = asWord("if");
+    Word elseWord = asWord("else");
+    Word returnWord = asWord("return");
+    Word withWord = asWord("with");
+    Word hasWord = asWord("has");
+    Word operationWord = asWord("operation");
+    Word assignWord = asWord("assign");
+    template<typename T, T max>
+    std::array<Word, std::to_underlying(max)> operationWords() {
+        std::array<Word, std::to_underlying(max)> out;
+        for (std::underlying_type_t<T> i = 0; i < std::to_underlying(max); i++) {
+            out[i] = asWord(toOperationString((T)i));
+        }
+        return out;
+    }
+    std::array<Word, std::to_underlying(UnaryOperator::COUNT)> unaryOperationWords
+        = operationWords<UnaryOperator, UnaryOperator::COUNT>();
+    std::array<Word, std::to_underlying(BinaryOperator::FirstCmp)> binaryOperationWords
+        = operationWords<BinaryOperator, BinaryOperator::FirstCmp>();
+
     std::string_view sview(Word word) const;
 
     template<typename E>
@@ -170,12 +191,23 @@ public:
     }
 };
 
-struct Parser : Lexer, STContext {
+struct Parser : STContext {
+    SourceBuffer source;
+    uint32_t m_position = 0;
+    uint32_t pos() const { return m_position; }
+    bool dumpTokens = false;
+
+    void reset(SourceBuffer);
+    void advance();
+    uint32_t nextNonWhiteSpace(uint32_t pos) const;
+    void skipWhiteSpace() { m_position = nextNonWhiteSpace(pos()); }
+
+    Token tok = {};
+
     Parser(STContext context, SourceBuffer buffer)
-        : Lexer(buffer), STContext(std::move(context)) { }
+        : STContext(std::move(context)) { reset(buffer); }
 
-    Word asWord(Token tok) { return STContext::asWord(source.view(tok)); }
-
+    uint64_t lexInteger();
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);

@@ -5,6 +5,12 @@
 #include <string_view>
 #include <utility>
 
+struct Word {
+    uint32_t id = 0;
+    explicit operator bool() const { return id != 0; }
+    bool operator==(const Word& other) const { return id == other.id; }
+};
+
 enum class TokenKind : uint32_t {
     Invalid,
 
@@ -74,7 +80,11 @@ enum class TokenKind : uint32_t {
     ColonColon, // ::
     SemiColon, // ;
     Word, // abc123
+
     IntegerLiteral,
+    FirstLiteral = IntegerLiteral,
+    LastLiteral = IntegerLiteral,
+
     EOS,
 
     // =>
@@ -123,6 +133,9 @@ constexpr TokenKind rightToLeftBracket(TokenKind kind) {
     VERIFY(isRightBracket(kind));
     return (TokenKind)(std::to_underlying(kind) - 1);
 }
+constexpr bool isLiteral(TokenKind kind) {
+    return kind >= TokenKind::FirstLiteral && kind <= TokenKind::LastLiteral;
+}
 
 enum TokenFlags : uint32_t {
     HasLeadingWhiteSpace = 0x01,
@@ -130,21 +143,10 @@ enum TokenFlags : uint32_t {
 };
 
 struct Token {
-    static constexpr int KIND_BITS = 8;
-    static_assert((1 << KIND_BITS) > (int)TokenKind::COUNT);
+    Word word = {};
+    TokenKind m_kind = TokenKind::Invalid;
 
-    uint32_t start = 0;
-    uint32_t length : 8 = 0;
-    uint32_t m_kind : KIND_BITS = 0;
-    uint32_t flags : 16 = 0;
-
-    TokenKind kind() const { return (TokenKind)m_kind; }
-    constexpr bool hasLeadingWhiteSpace() const {
-        return flags & HasLeadingWhiteSpace;
-    }
-    constexpr bool hasTrailingWhiteSpace() const {
-        return flags & HasTrailingWhiteSpace;
-    }
+    TokenKind kind() const { return m_kind; }
 };
 
 struct SourceBuffer {
@@ -159,24 +161,7 @@ struct SourceBuffer {
         return buffer[i];
     }
 
-    std::string_view view(Token t) const {
-        return { (const char*)(&buffer[t.start]), t.length };
+    std::string_view view(uint32_t pos, uint32_t end) {
+        return { (const char*)&buffer[pos], end - pos };
     }
-};
-
-struct Lexer {
-    SourceBuffer source;
-    uint32_t m_position = 0;
-    uint32_t pos() const { return m_position; }
-    bool dumpTokens = false;
-
-    Lexer() = default;
-    Lexer(SourceBuffer buffer, bool dump = false)
-        : dumpTokens(dump) { reset(buffer); }
-    void reset(SourceBuffer);
-
-    void advance();
-    uint32_t nextNonWhiteSpace(uint32_t pos) const;
-
-    Token tok = {};
 };
