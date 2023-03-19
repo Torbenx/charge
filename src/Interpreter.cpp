@@ -687,6 +687,8 @@ struct Interpreter : STContext {
         return { std::move(type), DependentValue { depDecl, dependenceLevel() } };
     }
     Value makeTypeValue(Type type) {
+        if (type.declDependent)
+            return { typeType, type.asDependentValue() };
         return { complete_t(), typeType.decl, std::move(type) };
     }
     Value makeArrayValue(Type type, uint32_t size) {
@@ -810,7 +812,7 @@ struct Interpreter : STContext {
         VERIFY(source.args().size() == target.args().size());
         for (uint32_t i = 0; i < source.args().size(); i++) {
             if (!staticMatch(source.args()[i], target.args()[i]))
-                // FIXME: previous iterations might have deduced somethings that no longer apply
+                // FIXME: previous iterations might have deduced somethings that no longer applies
                 //        since we failed here.
                 return false;
         }
@@ -934,13 +936,16 @@ struct Interpreter : STContext {
         for (uint32_t i = 0; i < allDecls.size(); i++) {
             Value arg;
             Value type = evaluateExpr(context, at(allDecls[i]).type);
-            if (argOff < args.size() && i == args[argOff].index() && type.valid()) {
-                arg = convertOrSlice(type, ExprResult::make<BasicRecord>(args[argOff]));
+            if (argOff < args.size() && i == args[argOff].index()) {
+                auto inArg = args[argOff++];
+                if (!type.valid())
+                    continue;
+                arg = convertOrSlice(type, ExprResult::make<BasicRecord>(inArg));
                 if (!arg.valid()) {
                     fmt::print("unable to initialize ");
                     dumpValue(type);
                     fmt::print("with ");
-                    dumpValue(args[argOff]);
+                    dumpValue(inArg);
                     return {};
                 }
                 for (auto& constr : at(at(allDecls[i]).valueConstraints)) {
@@ -950,7 +955,6 @@ struct Interpreter : STContext {
                     if (!checkConstraint(arg, expr))
                         return {};
                 }
-                argOff += 1;
             } else {
                 auto completeType = implicitlyToType(type);
                 if (!completeType.valid())
@@ -1087,8 +1091,7 @@ struct Interpreter : STContext {
         if (!paramCtx.has_value())
             return {};
 
-        bool success = callback(paramCtx.value());
-        if (!success)
+        if (!callback(paramCtx.value()))
             return {};
 
         applyDeductions(withCtx.value());
