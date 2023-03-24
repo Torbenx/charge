@@ -1339,6 +1339,18 @@ struct Interpreter : STContext {
     ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
         return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, e.value));
     }
+    ExprResult evalCompoundExpr(LookupContext& parent, CompoundExpr& e) {
+        BlockLookupContext context { &parent };
+        auto stmts = at(e.body);
+        for (uint32_t i = 0; i < stmts.size() - 1; i++) {
+            auto flow = evaluateStmt(context, stmts[i]);
+            VERIFY(flow.kind == ControlFlowKind::None);
+        }
+        auto& lastStmt = at(stmts.back());
+        VERIFY(lastStmt.kind == StmtKind::ExprStmt);
+        Value res = evaluateExpr(context, ((ExprStmt&)lastStmt).expr);
+        return ExprResult::make<BasicRecord>(res);
+    }
 
     struct CompleteCall {
         CompleteDecl target;
@@ -1994,11 +2006,11 @@ void testInterpreter() {
                 return get();
             }
         )
-        fn testBase() => {
+        fn testBase() => [
             mut b = Base();
             b.test();
-            return b.test2();
-        }
+            b.test2()
+        ];
 
         struct HasBase (
             has Base;

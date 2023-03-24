@@ -218,6 +218,7 @@ struct Parser : STContext {
     void parseIfStmt(Ptr<Stmt>& out);
     void parseExprOrAssignStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
+    Span<Ptr<Stmt>> parseStmts();
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
     void parseSingleOrCompoundStmt(Ptr<Stmt>& out);
     enum ParameterParseScope {

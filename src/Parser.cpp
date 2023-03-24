@@ -299,6 +299,11 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
         skipWhiteSpace();
         advance();
     }
+    // compound expr
+    else if (tok.kind() == TokenKind::LeftAngle) {
+        auto& e = makeSet<CompoundExpr>(base);
+        e.body = parseStmts();
+    }
     //
     else {
         fmt::println("unexpected token {}", tok.kind());
@@ -461,8 +466,9 @@ void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
         // expression statement
         out = make<ExprStmt>(expr);
     }
-    EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
-    advance();
+    // semi colon not mandatory to support [expr]
+    if (tok.kind() == TokenKind::SemiColon)
+        advance();
 }
 
 void Parser::parseStmt(Ptr<Stmt>& out) {
@@ -482,17 +488,23 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
     parseExprOrAssignStmt(out);
 }
 
-void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
-    EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+Span<Ptr<Stmt>> Parser::parseStmts() {
+    VERIFY(isLeftBracket(tok.kind()));
+    TokenKind rightBracket = leftToRightBracket(tok.kind());
     advance();
-    auto& e = makeSet<CompoundStmt>(out);
     auto body = beginSpan<Ptr<Stmt>>();
-    while (tok.kind() != TokenKind::RightBrace) {
+    while (tok.kind() != rightBracket) {
         auto& stmt = append(body, {});
         parseStmt(stmt);
     }
     advance();
-    e.body = finalizeSpan(body);
+    return finalizeSpan(body);
+}
+
+void Parser::parseCompoundStmt(Ptr<CompoundStmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+    auto& e = makeSet<CompoundStmt>(out);
+    e.body = parseStmts();
 }
 
 void Parser::parseSingleOrCompoundStmt(Ptr<Stmt>& out) {
