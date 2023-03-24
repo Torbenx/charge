@@ -284,15 +284,6 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     // paren
     if (tok.kind() == TokenKind::LeftParen) {
         auto& e = makeSet<ParenExpr>(base);
-        advance();
-        parseBinaryExpr(e.subExpr);
-
-        EXPECT_EQ(tok.kind(), TokenKind::RightParen);
-        advance();
-    }
-    // brace
-    else if (tok.kind() == TokenKind::LeftBrace) {
-        auto& e = makeSet<ImmediateBraceExpr>(base);
         parseArgumentContext(e.args);
     }
     // identifier
@@ -631,6 +622,10 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         auto& d = makeSet<FnDecl>(out, name);
         d.with = with;
         d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
+        EXPECT_EQ(tok.kind(), TokenKind::Equal);
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Greater);
+        advance();
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
         parseCompoundStmt(d.body);
         return;
@@ -689,7 +684,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     }
 
     // variable
-    if (tok.kind() == TokenKind::Colon || tok.kind() == TokenKind::Equal) {
+    if (!declarator) {
         VarInfo* info;
         if (isLocal)
             info = &makeSet<LocalDecl>(out, name, hasMut);
@@ -710,14 +705,17 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         advance();
     }
     // function
-    else if (tok.kind() == TokenKind::LeftParen) {
+    else if (declarator == fnWord) {
         VERIFY(!hasMut);
         VERIFY(!hasStatic);
         auto& d = makeSet<FnDecl>(out, name);
 
         d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
-        if (tok.kind() == TokenKind::Equal) {
+        EXPECT_EQ(tok.kind(), TokenKind::Equal);
+        advance();
+        if (tok.kind() == TokenKind::Greater) {
             advance();
+        } else {
             EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
             advance();
 
@@ -731,14 +729,15 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         parseCompoundStmt(d.body);
     }
     // struct
-    else if (tok.kind() == TokenKind::LeftBrace) {
+    else if (declarator == structWord) {
         VERIFY(!hasMut);
         VERIFY(!hasStatic);
-        advance();
         auto& d = makeSet<StructDecl>(out, name);
         auto memberDecls = beginSpan<Ptr<Decl>, 0>();
         auto staticDecls = beginSpan<Ptr<StaticDecl>, 1>();
-        while (tok.kind() != TokenKind::RightBrace) {
+        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        advance();
+        while (tok.kind() != TokenKind::RightParen) {
             Ptr<Decl> decl;
             parseDecl(decl, DeclParseScope::Struct);
             if (Ptr<StaticDecl> sDecl = asStaticDecl(decl)) {

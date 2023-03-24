@@ -39,7 +39,6 @@ ENUMERATE_DECL_KINDS
     EXPR_KIND(UnaryOperatorExpr)  \
     EXPR_KIND(ParenExpr)          \
     EXPR_KIND(AccessExpr)         \
-    EXPR_KIND(ImmediateBraceExpr) \
     EXPR_KIND(CallExpr)           \
     EXPR_KIND(IdentifierExpr)     \
     EXPR_KIND(BinaryOperatorExpr) \
@@ -231,9 +230,9 @@ struct UnaryOperatorExpr : Expr {
 };
 
 struct ParenExpr : Expr {
-    Ptr<Expr> subExpr;
-    ParenExpr(Ptr<Expr> subExpr = {})
-        : Expr(ExprKind::ParenExpr), subExpr(subExpr) { }
+    Arguments args;
+    ParenExpr()
+        : Expr(ExprKind::ParenExpr) { }
 };
 
 struct AccessExpr : Expr {
@@ -242,12 +241,6 @@ struct AccessExpr : Expr {
     Identifier member;
     AccessExpr(bool isStatic, Ptr<Expr> base = {}, Word member = {})
         : Expr(ExprKind::AccessExpr), isStatic(isStatic), base(base), member { {}, member } { }
-};
-
-struct ImmediateBraceExpr : Expr {
-    Arguments args;
-    ImmediateBraceExpr(Arguments args = {})
-        : Expr(ExprKind::ImmediateBraceExpr), args(args) { }
 };
 
 enum class CallKind : uint8_t {

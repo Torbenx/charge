@@ -25,7 +25,7 @@ int main() {
     test();
 
     {
-        Parser par(STContext::create(), "-+(+{ a, { c, q, }[.a = { a < (b + c) * d }], b, a{1,2,3}::foo, d, }++)");
+        Parser par(STContext::create(), "-+(+( a, ( c, q, )[.a = ( a < (b + c) * d )], b, a{1,2,3}::foo, d, )++)");
         Ptr<Expr> e;
         par.parseBinaryExpr(e);
         fmt::println("used storage {} * 4 bytes", par.storage->storageEndAlign4);
@@ -45,12 +45,12 @@ int main() {
     }
     {
         Parser par(STContext::create(), R"str(
-            struct Foo{X: Type} {
+            struct Foo{X: Type} (
                 x: list{X} = 5;
 
                 static foo{Y: Type}: Y = 5;
 
-                function bar(z: Z = 3) {
+                fn bar(z: Z = 3) => {
                     if x > 0
                         xNonZero();
                     else if y > 0
@@ -58,13 +58,14 @@ int main() {
                     else
                         bothZero();
                 }
-            }
+            )
 
-            struct Int{} {
+            struct Int (
                 value: int = 0;
-            }
-            operation Add(i: Int, j: Int) { return Int(i.value + j.value); }
+            )
+            operation Add(i: Int, j: Int) => { return Int(i.value + j.value); }
         )str");
+        par.dumpTokens = true;
         while (par.tok.kind() != TokenKind::EOS) {
             Ptr<Decl> out = {};
             par.parseDecl(out, Parser::DeclParseScope::Namespace);

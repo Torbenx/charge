@@ -60,7 +60,6 @@ struct STDumper : STContext {
     void visitAccessExpr(Ptr<AccessExpr> e) {
         out << '\'' << (at(e).isStatic ? "::" : ".") << sview(at(e).member.word) << '\'';
     }
-    void visitImmediateBraceExpr(Ptr<ImmediateBraceExpr>) { }
     void visitCallExpr(Ptr<CallExpr> e) {
         out << '\'' << (at(e).callKind == CallKind::Paren ? "()" : "[]") << '\'';
     }
@@ -115,14 +114,11 @@ struct STDumper : STContext {
         child(at(e).subExpr, IsLastChild::Yes);
     }
     void childrenParenExpr(Ptr<ParenExpr> e) {
-        child(at(e).subExpr, IsLastChild::Yes);
+        child(at(e).args, IsLastChild::Yes);
     }
     void childrenAccessExpr(Ptr<AccessExpr> e) {
         child(at(e).base, (IsLastChild)(at(e).member.args.count == 0));
         child(at(e).member, IsLastChild::Yes);
-    }
-    void childrenImmediateBraceExpr(Ptr<ImmediateBraceExpr> e) {
-        child(at(e).args, IsLastChild::Yes);
     }
     void childrenCallExpr(Ptr<CallExpr> e) {
         if (at(e).args.args.count == 0) {

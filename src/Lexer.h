@@ -137,11 +137,6 @@ constexpr bool isLiteral(TokenKind kind) {
     return kind >= TokenKind::FirstLiteral && kind <= TokenKind::LastLiteral;
 }
 
-enum TokenFlags : uint32_t {
-    HasLeadingWhiteSpace = 0x01,
-    HasTrailingWhiteSpace = 0x02,
-};
-
 struct Token {
     Word word = {};
     TokenKind m_kind = TokenKind::Invalid;

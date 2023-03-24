@@ -536,6 +536,7 @@ struct Interpreter : STContext {
 
     void interpretDecls(SourceBuffer buffer) {
         Parser parser { *this, buffer };
+        parser.dumpTokens = true;
         auto decls = parser.beginSpan<Ptr<Decl>>();
         while (parser.tok.kind() != TokenKind::EOS) {
             auto& d = parser.append(decls, {});
@@ -1589,7 +1590,9 @@ struct Interpreter : STContext {
     }
 
     ExprResult evalParenExpr(LookupContext& context, ParenExpr& e) {
-        return ExprResult::make<BasicRecord>(evaluateExpr(context, e.subExpr));
+        if (e.args.args.count == 1)
+            return ExprResult::make<BasicRecord>(evaluateExpr(context, at(e.args.args, 0).source));
+        VERIFY_NOT_REACHED();
     }
 
     struct AccessRecord : ExprRecord {
@@ -1710,8 +1713,6 @@ struct Interpreter : STContext {
         cond.constraint = true;
         return ExprResult::make<BasicRecord>(cond);
     }
-
-    ExprResult evalImmediateBraceExpr(LookupContext&, ImmediateBraceExpr&) { VERIFY_NOT_REACHED(); }
 
     bool setExprValue(ExprResult base, Value value) {
         switch (base.kind()) {
@@ -1874,102 +1875,102 @@ struct Interpreter : STContext {
 void testInterpreter() {
     Interpreter it;
     it.interpretDecls(R"str(
-        struct Type{} {}
-        struct Array{T: Type} {}
+        struct Type ()
+        struct Array{T: Type} ()
 
-        struct Overload{} {}
-        struct OverloadSet{} {}
-        struct MemberOverloadSet{T: Type, set: OverloadSet} {
+        struct Overload ()
+        struct OverloadSet ()
+        struct MemberOverloadSet{T: Type, set: OverloadSet} (
             base: T;
-        }
+        )
 
-        struct TypeOverload{} {}
-        struct TypeOverloadSet{} {}
+        struct TypeOverload ()
+        struct TypeOverloadSet ()
 
-        struct bool{} {}
-        const true: bool = {};
-        const false: bool = {};
-        operation LogAnd(a: bool, b: bool) {
+        struct bool ()
+        true: bool = ();
+        false: bool = ();
+        operation LogAnd(a: bool, b: bool) => {
             if (a) {
                 if (b) return true;
             }
             return false;
         }
-        operation LogOr(a: bool, b: bool) {
+        operation LogOr(a: bool, b: bool) => {
             if (!a) {
                 if (!b) return false;
             }
             return true;
         }
-        operation LogNot(a: bool) {
+        operation LogNot(a: bool) => {
             if (a) return false;
             return true;
         }
 
-        struct int{} {}
+        struct int ()
         INT_MASK: int = 0xffff'ffff'ffff'ffff;
-        operation Add(i: int, j: int) { return builtinAddAndMask(i, j, INT_MASK); }
-        operation Sub(i: int, j: int) { return i + (-j); }
-        operation Mul(i: int, j: int) { return builtinMulAndMask(i, j, INT_MASK); }
-        operation Div(i: int, j: int) { return builtinSignedDivAndMask(i, j, INT_MASK); }
-        operation Neg(i: int) { return builtinNegateAndMask(i, INT_MASK); }
+        operation Add(i: int, j: int) => { return builtinAddAndMask(i, j, INT_MASK); }
+        operation Sub(i: int, j: int) => { return i + (-j); }
+        operation Mul(i: int, j: int) => { return builtinMulAndMask(i, j, INT_MASK); }
+        operation Div(i: int, j: int) => { return builtinSignedDivAndMask(i, j, INT_MASK); }
+        operation Neg(i: int) => { return builtinNegateAndMask(i, INT_MASK); }
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        function foo(x: bool) {
+        fn foo(x: bool) => {
             if x
                 x = foo(false);
             return x;
         }
 
-        funtion get(x&: int) {
+        fn get(x&: int) => {
             x = 123;
         }
-        function callGet() {
+        fn callGet() => {
             mut x = 0;
             get(x);
             return x;
         }
 
         mut g_globalVal: int = 0;
-        function globalVal() {
+        fn globalVal() => {
             return g_globalVal;
         }
-        function globalVal() = (n: int) {
+        fn globalVal() = (n: int) {
             g_globalVal = n;
         }
-        function updateGlobalVal() {
+        fn updateGlobalVal() => {
             get(globalVal());
             globalVal() = 456;
             return globalVal();
         }
 
-        function wrap{T: Type}(var: T) {
+        fn wrap{T: Type}(var: T) => {
             return var;
         }
-        function wrap{T: Type}(var&: T) = (val: T) {
+        fn wrap{T: Type}(var&: T) = (val: T) {
             var = val;
         }
-        function updateWrappedGlobalVal() {
+        fn updateWrappedGlobalVal() => {
             get(wrap(globalVal()));
             return wrap(globalVal());
         }
 
-        struct constant{T: Type, v: T} {
+        struct constant{T: Type, v: T} (
             valueMember: T = v;
-        }
+        )
         with{T: Type}
-        function mkConst{v: T}() { return constant{T, v}(); }
+        fn mkConst{v: T}() => { return constant{T, v}(); }
 
-        function bar{a: int, A: Type}(b: constant{A, a}) { return a; }
-        function bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) { return a; }
-        function bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) { return a; }
+        fn bar{a: int, A: Type}(b: constant{A, a}) => { return a; }
+        fn bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) => { return a; }
+        fn bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) => { return a; }
 
-        struct A{} {
+        struct A (
             x: int = 0;
             y: int = 0;
-        }
-        function testA() {
+        )
+        fn testA() => {
             let a = A(789);
             let x: int = 1;
             let y: int = 2;
@@ -1977,46 +1978,46 @@ void testInterpreter() {
             return A(x, y).x;
         }
 
-        struct Base{} {
+        struct Base (
             x: int = 0;
-            function set(self&, y: int) { x = y; }
-            function get(self) { return x; }
+            fn set(self&, y: int) => { x = y; }
+            fn get(self) => { return x; }
 
-            function test(self&) {
+            fn test(self&) => {
                 self.set(7);
                 return self.get();
             }
-            function test2(self&) {
+            fn test2(self&) => {
                 set(8);
                 return get();
             }
-        }
-        function testBase() {
+        )
+        fn testBase() => {
             mut b = Base();
             b.test();
             return b.test2();
         }
 
-        struct HasBase{} {
+        struct HasBase (
             has Base;
-            function callGet(self) {
+            fn callGet(self) => {
                 return get();
             }
-        }
+        )
 
-        struct Flags{} {
+        struct Flags (
             flag1: bool;
             flag2: bool;
             flag3: bool;
             flag4: bool;
-        }
-        function allTrue(f: Flags) { return f.flag1 && f.flag2 && f.flag3 && f.flag4; }
-        function atLeastOneFalse(f: Flags) { return !allTrue(f); }
-        function conditionFlags{f ?allTrue: Flags}() { return true; }
-        function conditionFlags{f ?atLeastOneFalse: Flags}() { return false; }
+        )
+        fn allTrue(f: Flags) => { return f.flag1 && f.flag2 && f.flag3 && f.flag4; }
+        fn atLeastOneFalse(f: Flags) => { return !allTrue(f); }
+        fn conditionFlags{f ?allTrue: Flags}() => { return true; }
+        fn conditionFlags{f ?atLeastOneFalse: Flags}() => { return false; }
 
-        function hasBase{T ?Base: Type}() { return true; }
-        function hasBase2{b: ?Base}() { return b; }
+        fn hasBase{T ?Base: Type}() => { return true; }
+        fn hasBase2{b: ?Base}() => { return b; }
     )str");
 
     auto eval = [&](const char* expr) {
