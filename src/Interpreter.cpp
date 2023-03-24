@@ -504,6 +504,7 @@ struct Interpreter : STContext {
     Type boolType;
     Word selfWord;
     CompleteDecl selfDecl;
+    Type namespaceType;
 
     StaticLookupContext builtinImplContext { nullptr, {} };
     StaticLookupContext* globalContext = &builtinImplContext;
@@ -569,6 +570,7 @@ struct Interpreter : STContext {
         overloadSetType = findCompDeclHelper(asWord("OverloadSet"));
         typeOverloadType = findCompDeclHelper(asWord("TypeOverload"));
         typeOverloadSetType = findCompDeclHelper(asWord("TypeOverloadSet"));
+        namespaceType = findCompDeclHelper(asWord("Namespace"));
 
         selfWord = asWord("self");
         auto selfDeclPtr = make<LocalDecl>(selfWord, false);
@@ -691,6 +693,9 @@ struct Interpreter : STContext {
         if (type.declDependent)
             return { typeType, type.asDependentValue() };
         return { complete_t(), typeType.decl, std::move(type) };
+    }
+    Value makeNamespaceValue(CompleteDecl ns) {
+        return { complete_t(), namespaceType.decl, std::move(ns) };
     }
     Value makeArrayValue(Type type, uint32_t size) {
         return Value { std::move(type), size };
@@ -1012,7 +1017,7 @@ struct Interpreter : STContext {
         if (staticMatch(type, shouldHave))
             return true;
 
-        auto* typeCtx = getTypeContext(type);
+        auto* typeCtx = getStaticContext(type);
         for (LookupContext* ctx = typeCtx->parent; ctx != typeCtx->parametricContext; ctx = ctx->parent) {
             VERIFY(ctx->kind == LookupContextKind::StaticRedirect);
             const auto& decl = ((StaticRedirectLookupContext*)ctx)->redirect->staticDecl;
@@ -1301,6 +1306,14 @@ struct Interpreter : STContext {
                 return ExprResult::make<IdentifierRecord>(getValue(lVal), lVal);
             return invalResult;
         }
+        case DeclKind::NamespaceDecl: {
+            if (r.decls.size() != 1)
+                return invalResult;
+            auto ns = completeDecl(r.decls[0]);
+            if (!ns.valid())
+                return invalResult;
+            return ExprResult::make<BasicRecord>(makeNamespaceValue(ns));
+        }
         case DeclKind::FnDecl:
         case DeclKind::StructDecl: {
             const auto& setType = r.declKind == DeclKind::StructDecl ? typeOverloadSetType : overloadSetType;
@@ -1396,7 +1409,7 @@ struct Interpreter : STContext {
         auto withCtx = [&](LookupContext& ctx) { return completeFnArgs(ctx, at(fn.params), posFnArgs.value()); };
         std::optional<std::vector<FnArgumentResult>> fnArgs;
         if (fn.kind == DeclKind::StructDecl)
-            fnArgs = withCtx(*getTypeContext(out.target));
+            fnArgs = withCtx(*getStaticContext(out.target));
         else
             fnArgs = withParametricContext(out.target, withCtx);
 
@@ -1487,7 +1500,7 @@ struct Interpreter : STContext {
             }
 
             return retValue;
-            
+
             VERIFY_NOT_REACHED();
         });
     }
@@ -1533,7 +1546,7 @@ struct Interpreter : STContext {
             auto posArgs = positionArguments(at(decl.params), {}, args);
             if (!posArgs.has_value())
                 return invalResult;
-            LookupContext* typeCtx = getTypeContext(type);
+            LookupContext* typeCtx = getStaticContext(type);
             if (!convertFnArgs(*typeCtx, at(decl.params), posArgs.value(), true))
                 return invalResult;
 
@@ -1628,7 +1641,7 @@ struct Interpreter : STContext {
             auto& has = as<HasDecl>(member);
             Type hasType = implicitlyToType(evaluateExpr(structCtx, has.type));
             VERIFY(hasType.valid());
-            auto* hasCtx = getTypeContext(hasType);
+            auto* hasCtx = getStaticContext(hasType);
             base = &at(make<StaticRedirectLookupContext>(base, hasCtx));
             base->decls = hasCtx->decls;
 
@@ -1636,22 +1649,23 @@ struct Interpreter : STContext {
         }
         return base;
     }
-    TypeLookupContext* getTypeContext(const Type& type) {
-        for (auto& child : type.staticContext()->children) {
-            if (cmpCompleteDecls(child.decl, type))
+    TypeLookupContext* getStaticContext(const CompleteDecl& decl) {
+        for (auto& child : decl.staticContext()->children) {
+            if (cmpCompleteDecls(child.decl, decl))
                 return child.context;
         }
 
-        auto& d = as<StructDecl>(type.decl);
-        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*type.staticContext(), at(d.with.params), type.withArgs())));
-        auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, at(d.parametric), type.args())));
+        auto& d = as<StaticDecl>(decl.decl);
+        auto& withCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(*decl.staticContext(), at(d.with.params), decl.withArgs())));
+        auto& paramCtx = at(make<LocalLookupContext>(makeCompleteParameterContext(withCtx, at(d.parametric), decl.args())));
 
-        auto& typeCtx = at(make<TypeLookupContext>(&paramCtx, type));
-        typeCtx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
-        typeCtx.parent = recursiveWrapWithHasContexts(&paramCtx, type.decl, typeCtx);
+        auto& ctx = at(make<TypeLookupContext>(&paramCtx, decl));
+        ctx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
+        if (at(decl.decl).kind == DeclKind::StructDecl)
+            ctx.parent = recursiveWrapWithHasContexts(&paramCtx, decl.decl, ctx);
 
-        type.staticContext()->children.push_back({ type, &typeCtx });
-        return &typeCtx;
+        decl.staticContext()->children.push_back({ decl, &ctx });
+        return &ctx;
     }
     ExprResult accessMember(ExprResult base, uint32_t i) {
         auto members = at(as<StructDecl>(base.value().type.decl).params);
@@ -1679,10 +1693,18 @@ struct Interpreter : STContext {
                 return matches[0];
             EXPECT_EQ(matches.size(), 0u);
         }
-        Type type = e.isStatic ? implicitlyToType(base.value()) : typeOf(base.value());
-        auto* typeCtx = getTypeContext(type);
+        CompleteDecl staticDecl = {};
+        if (e.isStatic) {
+            if (cmpCompleteDecls(typeOf(base.value()), namespaceType)) {
+                VERIFY(base.value().kind == ValueKind::CompleteDecl);
+                staticDecl = base.value().type;
+            } else
+                staticDecl = implicitlyToType(base.value());
+        } else
+            staticDecl = typeOf(base.value());
+        auto* staticCtx = getStaticContext(staticDecl);
 
-        LookupResult r = lookupIdentifier(*typeCtx, e.member, typeCtx->parametricContext);
+        LookupResult r = lookupIdentifier(*staticCtx, e.member, staticCtx->parametricContext);
         VERIFY(r.valid());
         DeclKind declKind = r.declKind;
         ExprResult idVal = lookupToValue(std::move(r));
@@ -1894,6 +1916,7 @@ void testInterpreter() {
     Interpreter it;
     it.interpretDecls(R"str(
         struct Type ()
+        struct Namespace ()
         struct Array{T: Type} ()
 
         struct Overload ()
@@ -1992,6 +2015,8 @@ void testInterpreter() {
             return A(x, y).x;
         }
 
+        namespace baseNS (
+
         struct Base (
             x: int = 0;
             fn set(self&, y: int) => { x = y; }
@@ -2017,6 +2042,11 @@ void testInterpreter() {
             fn callGet(self) => get();
         )
 
+        fn hasBase{T ?Base: Type}() => true;
+        fn hasBase2{b: ?Base}() => b;
+
+        )
+
         struct Flags (
             flag1: bool;
             flag2: bool;
@@ -2027,9 +2057,6 @@ void testInterpreter() {
         fn atLeastOneFalse(f: Flags) => !allTrue(f);
         fn conditionFlags{f ?allTrue: Flags}() => true;
         fn conditionFlags{f ?atLeastOneFalse: Flags}() => false;
-
-        fn hasBase{T ?Base: Type}() => true;
-        fn hasBase2{b: ?Base}() => b;
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2043,13 +2070,13 @@ void testInterpreter() {
     eval("updateWrappedGlobalVal()");
     eval("bar(mkConst{mkConst{5}()}())");
     eval("testA()");
-    eval("testBase()");
-    eval("HasBase().get()");
-    eval("HasBase(Base(1)).x");
+    eval("baseNS::testBase()");
+    eval("baseNS::HasBase().get()");
+    eval("baseNS::HasBase(baseNS::Base(1)).x");
     eval("(5 * 4 - 2) / 3");
     eval("conditionFlags{Flags(true, true, true, false)}()");
     eval("conditionFlags{Flags(true, true, true, true)}()");
-    eval("hasBase{HasBase}()");
-    eval("hasBase2{A()}()");
-    eval("hasBase2{HasBase()}()");
+    eval("baseNS::hasBase{baseNS::HasBase}()");
+    eval("baseNS::hasBase2{A()}()");
+    eval("baseNS::hasBase2{baseNS::HasBase()}()");
 }

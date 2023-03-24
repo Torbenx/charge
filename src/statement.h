@@ -11,7 +11,8 @@
     DECL_KIND(FnDecl)        \
     DECL_KIND(GlobalDecl)    \
     DECL_KIND(LocalDecl)     \
-    DECL_KIND(HasDecl)
+    DECL_KIND(HasDecl)       \
+    DECL_KIND(NamespaceDecl)
 
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
@@ -148,6 +149,7 @@ struct NamedDecl : Decl {
 struct StaticDecl : NamedDecl {
     WithClause with;
     Span<Ptr<LocalDecl>> parametric;
+    Span<Ptr<StaticDecl>> staticDecls;
     using NamedDecl::NamedDecl;
 };
 
@@ -178,9 +180,13 @@ struct CallableDecl : StaticDecl {
 };
 
 struct StructDecl : CallableDecl {
-    Span<Ptr<StaticDecl>> staticDecls;
     StructDecl(Word name = {})
         : CallableDecl(DeclKind::StructDecl, name) { }
+};
+
+struct NamespaceDecl : StaticDecl {
+    NamespaceDecl(Word name)
+        : StaticDecl(DeclKind::NamespaceDecl, name) { }
 };
 
 struct FnDecl : CallableDecl {

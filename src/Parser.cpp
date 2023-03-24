@@ -771,6 +771,21 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         advance();
         d.params = finalizeSpan(memberDecls);
         d.staticDecls = finalizeSpan(staticDecls);
+    }
+    // namespace
+    else if (declarator == namespaceWord) {
+        auto& d = makeSet<NamespaceDecl>(out, name);
+        auto staticDecls = beginSpan<Ptr<StaticDecl>>();
+        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        advance();
+        while (tok.kind() != TokenKind::RightParen) {
+            Ptr<Decl> decl;
+            parseDecl(decl, DeclParseScope::Namespace);
+            VERIFY(isStaticDecl(decl));
+            append(staticDecls, (Ptr<StaticDecl>)decl);
+        }
+        advance();
+        d.staticDecls = finalizeSpan(staticDecls);
     } else
         VERIFY_NOT_REACHED();
 

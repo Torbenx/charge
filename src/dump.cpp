@@ -105,6 +105,9 @@ struct STDumper : STContext {
         out << '\'' << sview(at(e).name) << '\'';
     }
     void visitHasDecl(Ptr<HasDecl>) { }
+    void visitNamespaceDecl(Ptr<NamespaceDecl> e) {
+        out << '\'' << sview(at(e).name) << '\'';
+    }
 
     template<typename T>
     void childrenSpan(Span<T> s, IsLastChild isLast) {
@@ -189,6 +192,9 @@ struct STDumper : STContext {
     void childrenHasDecl(Ptr<HasDecl> e) {
         child(at(e).type, (IsLastChild)(at(e).decls.count == 0));
         childrenSpan(at(e).decls, IsLastChild::Yes);
+    }
+    void childrenNamespaceDecl(Ptr<NamespaceDecl> e) {
+        childrenSpan(at(e).staticDecls, IsLastChild::Yes);
     }
 
     void dispatchChildren(Ptr<Stmt> e) {

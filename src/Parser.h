@@ -48,6 +48,8 @@ public:
     Word hasWord = asWord("has");
     Word operationWord = asWord("operation");
     Word assignWord = asWord("assign");
+    Word enumWord = asWord("enum");
+    Word namespaceWord = asWord("namespace");
     template<typename T, T max>
     std::array<Word, std::to_underlying(max)> operationWords() {
         std::array<Word, std::to_underlying(max)> out;
@@ -88,6 +90,7 @@ public:
         case DeclKind::FnDecl:
         case DeclKind::GlobalDecl:
         case DeclKind::StructDecl:
+        case DeclKind::NamespaceDecl:
             return true;
         default:
             return false;
