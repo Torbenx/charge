@@ -1,0 +1,139 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Charge",
+	"patterns": [
+		{
+			"include": "#comment"
+		},
+		{
+			"include": "#operators"
+		},
+		{
+			"include": "#decl-keywords"
+		},
+		{
+			"include": "#controls"
+		},
+		{
+			"include": "#ids"
+		},
+		{
+			"include": "#numbers"
+		},
+		{
+			"include": "#strings"
+		},
+		{
+			"include": "#char"
+		}
+	],
+	"repository": {
+		"comment": {
+			"patterns": [
+				{
+					"match": "(//).*$\\n",
+					"name": "comment.line.double-slash"
+				}
+			]
+		},
+		"decl-keywords": {
+			"patterns": [
+				{
+					"match": "\\b(static|template|struct|fn|special_case|as|convert|let|mut|with|has|compare|incomplete|final|module|virtual|override|operation|enum|object|assign)\\b",
+					"captures": {
+						"1": {
+							"name": "keyword.other.charge"
+						}
+					}
+				}
+			]
+		},
+		"controls": {
+			"patterns": [
+				{
+					"match": "\\b(if|else|match|return|break|continue)\\b",
+					"captures": {
+						"1": {
+							"name": "keyword.control.charge"
+						}
+					}
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"match": "!|~|\\+|-|\\+\\+|--|&|&&|\\^|\\||\\|\\||\\*|/|%|<<|>>|!=|==|<|<=|=>|>|\\+=|-=|&=|&&=|\\^=|\\|=|\\|\\|=|\\*=|/=|%=|<<=|>>=",
+					"name": "keyword.operator.charge"
+				}
+			]
+		},
+		"ids": {
+			"patterns": [
+				{
+					"match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+					"captures": {
+						"1": {
+							"name": "variable.name.charge"
+						}
+					}
+				}
+			]
+		},
+		"numbers": {
+			"patterns": [
+				{
+					"match": "\\b(0x[0-9'a-fA-F]+)([a-zA-Z_][a-zA-Z0-9_]*)?\\b",
+					"captures": {
+						"1": {
+							"name": "constant.numeric.charge"
+						},
+						"2": {
+							"name": "entity.name.tag.charge"
+						}
+					}
+				},
+				{
+					"match": "\\b(0b[01']+)([a-zA-Z_][a-zA-Z0-9_]*)?\\b",
+					"captures": {
+						"1": {
+							"name": "constant.numeric.charge"
+						},
+						"2": {
+							"name": "entity.name.tag.charge"
+						}
+					}
+				},
+				{
+					"match": "\\b([0-9']+)([a-zA-Z_][a-zA-Z0-9_]*)?\\b",
+					"captures": {
+						"1": {
+							"name": "constant.numeric.charge"
+						},
+						"2": {
+							"name": "entity.name.tag.charge"
+						}
+					}
+				}
+			]
+		},
+		"strings": {
+			"begin": "\"",
+			"end": "\"",
+			"name": "string.quoted.double.charge"
+		},
+		"char": {
+			"patterns": [
+				{
+					"match": "'.'",
+					"name": "string.quoted.single.charge"
+				},
+				{
+					"match": "'\\\\.'",
+					"name": "string.quoted.single.charge"
+				}
+			]
+		}
+	},
+	"scopeName": "source.charge"
+}
