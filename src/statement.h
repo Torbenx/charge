@@ -185,6 +185,7 @@ struct StructDecl : CallableDecl {
 struct FnDecl : CallableDecl {
     Ptr<CompoundStmt> body;
     Ptr<LocalDecl> assignParam;
+    Ptr<Expr> bodyExpr;
     FnDecl(Word name = {})
         : CallableDecl(DeclKind::FnDecl, name) { }
 };

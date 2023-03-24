@@ -1454,7 +1454,15 @@ struct Interpreter : STContext {
             if (targetDecl.assignParam)
                 assignParamCtx.declare(targetDecl.assignParam, assignArg);
 
-            auto flow = evalCompoundStmt(assignParamCtx, at(targetDecl.body));
+            Value retValue = {};
+            if (targetDecl.body) {
+                auto flow = evalCompoundStmt(assignParamCtx, at(targetDecl.body));
+                if (flow.kind == ControlFlowKind::Return)
+                    retValue = flow.value;
+            } else if (targetDecl.bodyExpr) {
+                retValue = evaluateExpr(assignParamCtx, targetDecl.bodyExpr);
+            } else
+                VERIFY_NOT_REACHED();
 
             if (call.args.size() > 0) {
                 uint32_t d = hasSelf ? 1 : 0;
@@ -1466,10 +1474,8 @@ struct Interpreter : STContext {
                 }
             }
 
-            if (flow.kind == ControlFlowKind::None)
-                return {};
-            if (flow.kind == ControlFlowKind::Return)
-                return flow.value;
+            return retValue;
+            
             VERIFY_NOT_REACHED();
         });
     }
@@ -1909,11 +1915,11 @@ void testInterpreter() {
 
         struct int ()
         INT_MASK: int = 0xffff'ffff'ffff'ffff;
-        operation Add(i: int, j: int) => { return builtinAddAndMask(i, j, INT_MASK); }
-        operation Sub(i: int, j: int) => { return i + (-j); }
-        operation Mul(i: int, j: int) => { return builtinMulAndMask(i, j, INT_MASK); }
-        operation Div(i: int, j: int) => { return builtinSignedDivAndMask(i, j, INT_MASK); }
-        operation Neg(i: int) => { return builtinNegateAndMask(i, INT_MASK); }
+        operation Add(i: int, j: int) => builtinAddAndMask(i, j, INT_MASK);
+        operation Sub(i: int, j: int) => i + (-j);
+        operation Mul(i: int, j: int) => builtinMulAndMask(i, j, INT_MASK);
+        operation Div(i: int, j: int) => builtinSignedDivAndMask(i, j, INT_MASK);
+        operation Neg(i: int) => builtinNegateAndMask(i, INT_MASK);
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
@@ -1933,9 +1939,7 @@ void testInterpreter() {
         }
 
         mut g_globalVal: int = 0;
-        fn globalVal() => {
-            return g_globalVal;
-        }
+        fn globalVal() => g_globalVal;
         fn globalVal() = (n: int) {
             g_globalVal = n;
         }
@@ -1945,9 +1949,7 @@ void testInterpreter() {
             return globalVal();
         }
 
-        fn wrap{T: Type}(var: T) => {
-            return var;
-        }
+        fn wrap{T: Type}(var: T) => var;
         fn wrap{T: Type}(var&: T) = (val: T) {
             var = val;
         }
@@ -1960,11 +1962,11 @@ void testInterpreter() {
             valueMember: T = v;
         )
         with{T: Type}
-        fn mkConst{v: T}() => { return constant{T, v}(); }
+        fn mkConst{v: T}() => constant{T, v}();
 
-        fn bar{a: int, A: Type}(b: constant{A, a}) => { return a; }
-        fn bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) => { return a; }
-        fn bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) => { return a; }
+        fn bar{a: int, A: Type}(b: constant{A, a}) => a;
+        fn bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) => a;
+        fn bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) => a;
 
         struct A (
             x: int = 0;
@@ -1981,7 +1983,7 @@ void testInterpreter() {
         struct Base (
             x: int = 0;
             fn set(self&, y: int) => { x = y; }
-            fn get(self) => { return x; }
+            fn get(self) => x;
 
             fn test(self&) => {
                 self.set(7);
@@ -2000,9 +2002,7 @@ void testInterpreter() {
 
         struct HasBase (
             has Base;
-            fn callGet(self) => {
-                return get();
-            }
+            fn callGet(self) => get();
         )
 
         struct Flags (
@@ -2011,13 +2011,13 @@ void testInterpreter() {
             flag3: bool;
             flag4: bool;
         )
-        fn allTrue(f: Flags) => { return f.flag1 && f.flag2 && f.flag3 && f.flag4; }
-        fn atLeastOneFalse(f: Flags) => { return !allTrue(f); }
-        fn conditionFlags{f ?allTrue: Flags}() => { return true; }
-        fn conditionFlags{f ?atLeastOneFalse: Flags}() => { return false; }
+        fn allTrue(f: Flags) => f.flag1 && f.flag2 && f.flag3 && f.flag4;
+        fn atLeastOneFalse(f: Flags) => !allTrue(f);
+        fn conditionFlags{f ?allTrue: Flags}() => true;
+        fn conditionFlags{f ?atLeastOneFalse: Flags}() => false;
 
-        fn hasBase{T ?Base: Type}() => { return true; }
-        fn hasBase2{b: ?Base}() => { return b; }
+        fn hasBase{T ?Base: Type}() => true;
+        fn hasBase2{b: ?Base}() => b;
     )str");
 
     auto eval = [&](const char* expr) {

@@ -564,6 +564,35 @@ void Parser::parseWithClause(WithClause& out) {
     out.params = parseParameterContext(ParameterParseScope::Static);
 }
 
+void Parser::parseFunctionDefinition(FnDecl& out) {
+    if (tok.kind() == TokenKind::SemiColon)
+        return;
+    if (tok.kind() == TokenKind::Equal) {
+        advance();
+        if (tok.kind() == TokenKind::Greater) {
+            advance();
+            if (tok.kind() == TokenKind::LeftBrace) {
+                parseCompoundStmt(out.body);
+            } else {
+                parseBinaryExpr(out.bodyExpr);
+                EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+                advance();
+            }
+        } else {
+            EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+            advance();
+
+            parseParameter(out.assignParam, ParameterParseScope::Static);
+            VERIFY(!(bool)at(out.assignParam).initializer);
+
+            EXPECT_EQ(tok.kind(), TokenKind::RightParen);
+            advance();
+            parseCompoundStmt(out.body);
+        }
+    } else
+        VERIFY_NOT_REACHED();
+}
+
 void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     WithClause with;
@@ -622,12 +651,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         auto& d = makeSet<FnDecl>(out, name);
         d.with = with;
         d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
-        EXPECT_EQ(tok.kind(), TokenKind::Equal);
-        advance();
-        EXPECT_EQ(tok.kind(), TokenKind::Greater);
-        advance();
-        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
-        parseCompoundStmt(d.body);
+        parseFunctionDefinition(d);
         return;
     }
 
@@ -711,22 +735,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         auto& d = makeSet<FnDecl>(out, name);
 
         d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
-        EXPECT_EQ(tok.kind(), TokenKind::Equal);
-        advance();
-        if (tok.kind() == TokenKind::Greater) {
-            advance();
-        } else {
-            EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
-            advance();
-
-            parseParameter(d.assignParam, ParameterParseScope::Static);
-            VERIFY(!(bool)at(d.assignParam).initializer);
-
-            EXPECT_EQ(tok.kind(), TokenKind::RightParen);
-            advance();
-        }
-        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
-        parseCompoundStmt(d.body);
+        parseFunctionDefinition(d);
     }
     // struct
     else if (declarator == structWord) {

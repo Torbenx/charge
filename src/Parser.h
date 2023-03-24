@@ -232,6 +232,7 @@ struct Parser : STContext {
         Struct,
         Has,
     };
+    void parseFunctionDefinition(FnDecl& out);
     void parseDecl(Ptr<Decl>& out, DeclParseScope scope);
 };
 
