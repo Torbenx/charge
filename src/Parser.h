@@ -91,6 +91,8 @@ public:
         case DeclKind::GlobalDecl:
         case DeclKind::StructDecl:
         case DeclKind::NamespaceDecl:
+        case DeclKind::EnumDecl:
+        case DeclKind::EnumValueDecl:
             return true;
         default:
             return false;

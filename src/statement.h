@@ -12,7 +12,9 @@
     DECL_KIND(GlobalDecl)    \
     DECL_KIND(LocalDecl)     \
     DECL_KIND(HasDecl)       \
-    DECL_KIND(NamespaceDecl)
+    DECL_KIND(NamespaceDecl) \
+    DECL_KIND(EnumDecl)      \
+    DECL_KIND(EnumValueDecl)
 
 #define DECL_KIND(kind) kind,
 enum class DeclKind : uint8_t {
@@ -187,6 +189,15 @@ struct StructDecl : CallableDecl {
 struct NamespaceDecl : StaticDecl {
     NamespaceDecl(Word name)
         : StaticDecl(DeclKind::NamespaceDecl, name) { }
+};
+
+struct EnumDecl : StaticDecl {
+    EnumDecl(Word name)
+        : StaticDecl(DeclKind::EnumDecl, name) { }
+};
+struct EnumValueDecl : StaticDecl {
+    EnumValueDecl(Word name)
+        : StaticDecl(DeclKind::EnumValueDecl, name) { }
 };
 
 struct FnDecl : CallableDecl {

@@ -166,6 +166,7 @@ struct Interpreter : STContext {
         Type(CompleteDecl decl)
             : CompleteDecl(std::move(decl)) { }
     };
+    bool isStruct(const Type& type) { return at(type.decl).kind == DeclKind::StructDecl; }
 
     enum class ValueKind : uint8_t {
         Invalid,
@@ -690,12 +691,14 @@ struct Interpreter : STContext {
         return { std::move(type), DependentValue { depDecl, dependenceLevel() } };
     }
     Value makeTypeValue(Type type) {
-        if (type.declDependent)
-            return { typeType, type.asDependentValue() };
-        return { complete_t(), typeType.decl, std::move(type) };
+        return makeCompleteDeclValue(typeType, type);
     }
-    Value makeNamespaceValue(CompleteDecl ns) {
-        return { complete_t(), namespaceType.decl, std::move(ns) };
+    Value makeCompleteDeclValue(const Type& type, CompleteDecl decl) {
+        EXPECT_EQ(type.args().size(), 0u);
+        EXPECT_EQ(type.withArgs().size(), 0u);
+        if (decl.declDependent)
+            return { type, decl.asDependentValue() };
+        return { complete_t(), type.decl, std::move(decl) };
     }
     Value makeArrayValue(Type type, uint32_t size) {
         return Value { std::move(type), size };
@@ -888,6 +891,8 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(type, valType))
             return results.push_back(val);
 
+        if (!isStruct(valType))
+            return;
         std::optional<ExprResult> out;
         auto members = at(as<StructDecl>(valType.decl).params);
         for (uint32_t i = 0; i < members.size(); i++) {
@@ -1187,7 +1192,6 @@ struct Interpreter : STContext {
     }
     Value& getValueRef(const LValue& lVal) {
         VERIFY(lVal.valid());
-        VERIFY((bool)asVar(lVal.decl.decl));
         switch (lVal.context->kind) {
         case LookupContextKind::Static:
             VERIFY(lVal.context == lVal.decl.staticContext());
@@ -1260,7 +1264,7 @@ struct Interpreter : STContext {
         });
     }
     LValue toLValue(const LookupResult& result) {
-        VERIFY(result.declKind == DeclKind::LocalDecl || result.declKind == DeclKind::GlobalDecl);
+        VERIFY(result.declKind == DeclKind::LocalDecl || result.declKind == DeclKind::GlobalDecl || result.declKind == DeclKind::EnumValueDecl);
         CompleteDecl theDecl;
         for (const ParameterizedDecl& d : result.decls) {
             auto complete = completeDecl(d);
@@ -1299,6 +1303,7 @@ struct Interpreter : STContext {
         if (!r.valid())
             return invalResult;
         switch (r.declKind) {
+        case DeclKind::EnumValueDecl:
         case DeclKind::GlobalDecl:
         case DeclKind::LocalDecl: {
             LValue lVal = toLValue(r);
@@ -1306,13 +1311,15 @@ struct Interpreter : STContext {
                 return ExprResult::make<IdentifierRecord>(getValue(lVal), lVal);
             return invalResult;
         }
+        case DeclKind::EnumDecl:
         case DeclKind::NamespaceDecl: {
+            const auto& type = r.declKind == DeclKind::EnumDecl ? typeType : namespaceType;
             if (r.decls.size() != 1)
                 return invalResult;
-            auto ns = completeDecl(r.decls[0]);
-            if (!ns.valid())
+            auto decl = completeDecl(r.decls[0]);
+            if (!decl.valid())
                 return invalResult;
-            return ExprResult::make<BasicRecord>(makeNamespaceValue(ns));
+            return ExprResult::make<BasicRecord>(makeCompleteDeclValue(type, decl));
         }
         case DeclKind::FnDecl:
         case DeclKind::StructDecl: {
@@ -1384,13 +1391,10 @@ struct Interpreter : STContext {
             // Early type context since we don't know all the parametric arguments yet.
             // This is fine since the type expressions are evaluated in this context, which
             // have to be constant expressions.
-            StaticLookupContext structCtx { &context, {} };
-            if (fn.kind == DeclKind::StructDecl) {
-                auto& structDecl = (StructDecl&)fn;
-                structCtx.decls = at((Span<Ptr<Decl>>)structDecl.staticDecls);
-            }
+            StaticLookupContext staticCtx { &context, {} };
+            staticCtx.decls = at((Span<Ptr<Decl>>)fn.staticDecls);
 
-            if (!convertFnArgs(structCtx, at(fn.params), posFnArgs.value(), conversionsAllowed))
+            if (!convertFnArgs(staticCtx, at(fn.params), posFnArgs.value(), conversionsAllowed))
                 return false;
             // slice self arg
             if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
@@ -1408,10 +1412,10 @@ struct Interpreter : STContext {
         // This crutial since default member initializers can access mutable static members.
         auto withCtx = [&](LookupContext& ctx) { return completeFnArgs(ctx, at(fn.params), posFnArgs.value()); };
         std::optional<std::vector<FnArgumentResult>> fnArgs;
-        if (fn.kind == DeclKind::StructDecl)
-            fnArgs = withCtx(*getStaticContext(out.target));
-        else
+        if (fn.kind == DeclKind::FnDecl)
             fnArgs = withParametricContext(out.target, withCtx);
+        else
+            fnArgs = withCtx(*getStaticContext(out.target));
 
         if (!fnArgs.has_value())
             return {};
@@ -1459,8 +1463,12 @@ struct Interpreter : STContext {
                 hasSelf = true;
                 selfCtx.decls = { (Ptr<Decl>*)&selfDecl.decl, 1 };
                 selfCtx.values = { &firstArg, 1 };
-                memberCtx.decls = at(as<StructDecl>(firstArg.type.decl).params);
-                memberCtx.values = firstArg.u.array->array();
+
+                Type firstArgType = typeOf(firstArg);
+                if (isStruct(firstArgType)) {
+                    memberCtx.decls = at(as<StructDecl>(firstArgType.decl).params);
+                    memberCtx.values = firstArg.u.array->array();
+                }
             }
         }
 
@@ -1542,6 +1550,7 @@ struct Interpreter : STContext {
         }
         if (cmpCompleteDecls(baseType, typeType)) {
             auto type = asTypeValue(base);
+            VERIFY(isStruct(type));
             auto& decl = as<StructDecl>(type.decl);
             auto posArgs = positionArguments(at(decl.params), {}, args);
             if (!posArgs.has_value())
@@ -1649,6 +1658,18 @@ struct Interpreter : STContext {
         }
         return base;
     }
+    void defineEnumConstants(StaticLookupContext& ctx) {
+        int64_t currentValue = 0;
+        for (auto decl : ctx.decls) {
+            if (at(decl).kind == DeclKind::EnumValueDecl) {
+                EnumValueDecl& d = as<EnumValueDecl>(decl);
+                EXPECT_EQ(d.parametric.count, 0u);
+                EXPECT_EQ(d.with.params.count, 0u);
+                CompleteDecl compDecl { (Ptr<NamedDecl>)decl, &ctx };
+                ctx.values.push_back({ compDecl, makeBuiltinValue(ctx.staticDecl, currentValue++) });
+            }
+        }
+    }
     TypeLookupContext* getStaticContext(const CompleteDecl& decl) {
         for (auto& child : decl.staticContext()->children) {
             if (cmpCompleteDecls(child.decl, decl))
@@ -1661,8 +1682,10 @@ struct Interpreter : STContext {
 
         auto& ctx = at(make<TypeLookupContext>(&paramCtx, decl));
         ctx.decls = at((Span<Ptr<Decl>>)d.staticDecls);
-        if (at(decl.decl).kind == DeclKind::StructDecl)
+        if (d.kind == DeclKind::StructDecl)
             ctx.parent = recursiveWrapWithHasContexts(&paramCtx, decl.decl, ctx);
+        if (d.kind == DeclKind::EnumDecl)
+            defineEnumConstants(ctx);
 
         decl.staticContext()->children.push_back({ decl, &ctx });
         return &ctx;
@@ -1672,7 +1695,10 @@ struct Interpreter : STContext {
         return ExprResult::make<AccessRecord>(base.value().u.array->array()[i], base, members[i]);
     }
     void collectMembers(ExprResult base, Word name, std::vector<ExprResult>& results) {
-        auto members = at(as<StructDecl>(base.value().type.decl).params);
+        Type baseType = typeOf(base.value());
+        if (!isStruct(baseType))
+            return;
+        auto members = at(as<StructDecl>(baseType.decl).params);
         for (uint32_t i = 0; i < members.size(); i++) {
             if (matchName(members[i], name)) {
                 results.push_back(accessMember(base, i));
@@ -1706,15 +1732,13 @@ struct Interpreter : STContext {
 
         LookupResult r = lookupIdentifier(*staticCtx, e.member, staticCtx->parametricContext);
         VERIFY(r.valid());
-        DeclKind declKind = r.declKind;
         ExprResult idVal = lookupToValue(std::move(r));
         if (!idVal.value().valid())
             return idVal;
 
-        auto badAccess = ExprResult::make<IdentifierRecord>(Value {}, LValue {});
-        if (declKind == DeclKind::StructDecl && !e.isStatic)
-            return badAccess;
-        if (e.isStatic || declKind != DeclKind::FnDecl)
+        if (!e.isStatic && r.declKind != DeclKind::FnDecl && r.declKind != DeclKind::LocalDecl)
+            return invalResult;
+        if (e.isStatic || r.declKind == DeclKind::LocalDecl)
             return idVal;
 
         return transformMemberOverloadSet(base, idVal);
@@ -1774,6 +1798,7 @@ struct Interpreter : STContext {
                 return false;
             Value baseValue = b.base;
             VERIFY(baseValue.kind == ValueKind::Array);
+            VERIFY(isStruct(baseValue.type));
             auto members = at(as<StructDecl>(baseValue.type.decl).params);
             for (uint32_t i = 0; i < members.size(); i++) {
                 if (members[i] == b.accessDecl) {
@@ -2057,6 +2082,10 @@ void testInterpreter() {
         fn atLeastOneFalse(f: Flags) => !allTrue(f);
         fn conditionFlags{f ?allTrue: Flags}() => true;
         fn conditionFlags{f ?atLeastOneFalse: Flags}() => false;
+
+        enum MyEnum (
+            A; B; C;
+        )
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2079,4 +2108,5 @@ void testInterpreter() {
     eval("baseNS::hasBase{baseNS::HasBase}()");
     eval("baseNS::hasBase2{A()}()");
     eval("baseNS::hasBase2{baseNS::HasBase()}()");
+    eval("MyEnum::B");
 }

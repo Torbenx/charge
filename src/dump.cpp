@@ -108,6 +108,12 @@ struct STDumper : STContext {
     void visitNamespaceDecl(Ptr<NamespaceDecl> e) {
         out << '\'' << sview(at(e).name) << '\'';
     }
+    void visitEnumDecl(Ptr<EnumDecl> e) {
+        out << '\'' << sview(at(e).name) << '\'';
+    }
+    void visitEnumValueDecl(Ptr<EnumValueDecl> e) {
+        out << '\'' << sview(at(e).name) << '\'';
+    }
 
     template<typename T>
     void childrenSpan(Span<T> s, IsLastChild isLast) {
@@ -196,6 +202,10 @@ struct STDumper : STContext {
     void childrenNamespaceDecl(Ptr<NamespaceDecl> e) {
         childrenSpan(at(e).staticDecls, IsLastChild::Yes);
     }
+    void childrenEnumDecl(Ptr<EnumDecl> e) {
+        childrenSpan(at(e).staticDecls, IsLastChild::Yes);
+    }
+    void childrenEnumValueDecl(Ptr<EnumValueDecl>) { }
 
     void dispatchChildren(Ptr<Stmt> e) {
 #define STMT_KIND(kind)               \

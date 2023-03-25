@@ -721,6 +721,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
 
     // variable
     if (!declarator) {
+        if (!hasMut && !hasStatic && tok.kind() == TokenKind::SemiColon) {
+            out = make<EnumValueDecl>(name);
+            advance();
+            return;
+        }
         VarInfo* info;
         if (isLocal)
             info = &makeSet<LocalDecl>(out, name, hasMut);
@@ -775,6 +780,20 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     // namespace
     else if (declarator == namespaceWord) {
         auto& d = makeSet<NamespaceDecl>(out, name);
+        auto staticDecls = beginSpan<Ptr<StaticDecl>>();
+        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        advance();
+        while (tok.kind() != TokenKind::RightParen) {
+            Ptr<Decl> decl;
+            parseDecl(decl, DeclParseScope::Namespace);
+            VERIFY(isStaticDecl(decl));
+            append(staticDecls, (Ptr<StaticDecl>)decl);
+        }
+        advance();
+        d.staticDecls = finalizeSpan(staticDecls);
+    }
+    else if (declarator == enumWord) {
+        auto& d = makeSet<EnumDecl>(out, name);
         auto staticDecls = beginSpan<Ptr<StaticDecl>>();
         EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
         advance();
