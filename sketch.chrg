@@ -4,7 +4,7 @@ struct Bar (
     add: T = 0;
     vals: Array{T} = ( 1, 2, 3 );
     
-    fn get(i: int) => T:{
+    fn get(i: int) T:{
         return vals[i] + add;
     }
 )
@@ -12,11 +12,13 @@ special_case struct Bar{int} (
     add: int = -1;
     vals: Array{int} = ( -1, -2, -3 );
 
-    fn get(i: int) => int:{ return 0; }
+    fn get(i: int) int:{ return 0; }
+    fn get(i: int) { return 0; }
+    fn get(i: int) => 0;
 )
 
 template {T: Type}
-fn appendTo(v&: Array{T}, item: T) => {
+fn appendTo(v&: Array{T}, item: T) {
     v.append(item);
 }
 
@@ -25,13 +27,13 @@ static sizeOf{T: Type}: int = sizeof(T);
 
 with {cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type}
 template {f{cargs..}: (params..) -> RetT}
-fn call(args..: Tuple{undeduced(params)}) -> RetT {
+fn call(args..: Tuple{undeduced(params)}) RetT:{
     return f{cargs..}(args..);
 }
 
 template {T: Type, size: int}
-fn test(defaultValue: T = {}, table: FixedArray{T, size});
-fn callTest() => {
+fn test(defaultValue: T = ()), table: FixedArray{T, size});
+fn callTest() {
     call{test}((), { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
     call{test{T = int}}(table = ()); // -> call{test{T = int, size = 0}}
 }
@@ -48,15 +50,15 @@ fn doStuff(first: b{c}, second: b);
 template {x: int}
 fn recurse();
 template {x ?[# > 0]: int}
-special_case fn recurse{x}() => {
+special_case fn recurse{x}() {
     recurse{x - 1}();
 }
-special_case fn recurse{0}() => {
+special_case fn recurse{0}() {
     // base case
 }
 
 template {x ?[# >= 0]: int}
-special_case fn recurse{x}() as recursePos => {
+special_case fn recurse{x} as recursePos() {
     recurse{x - 1}();
 }
 special_case fn recursePos{0}() {
@@ -67,22 +69,22 @@ special_case fn recursePos{0}() {
 struct Int (
     value: int = 0;
 )
-convert (i: Int) => int:{ return i.value; }
-convert (n: int) => Int:{ return ( n ); }
+convert (i: Int) to int:{ return i.value; }
+convert (n: int) to Int:{ return ( n ); }
 
 struct Int (
     value: int = 0;
 
-    convert (self) => int:{
+    convert (self) to int:{
         return value;
     }
-    convert (n: int) => {
+    convert (n: int) to {
         return Int(value = n);
     }
 )
 
 fn bar() {
-    let lambda = (i: int) => int:{
+    let lambda = (i: int) int:{
         let j: int = calc(i);
         return i == j * j;
     };
@@ -100,10 +102,10 @@ struct vec3 (
     y: int = 0;
     z: int = 0;
 
-    fn lengthSq() => int:{}
+    fn lengthSq() int:{}
 )
-fn get() => vec3:{}
-fn q() => {
+fn get() vec3:{}
+fn q() {
     with {x, y, z}
     { x, y, z } = get();
     with {l, z, y}
@@ -112,10 +114,10 @@ fn q() => {
 
 template {T: Type}
 struct Array (
-    fn popBack(self&) => T:{}
-    fn truncate(self&, newSize: int) => {}
+    fn popBack(self&) T:{}
+    fn truncate(self&, newSize: int) {}
 )
-fn foo() => {
+fn foo() {
     let arr: Array = ( 1, 2, 3 );
     with {back, arr2}
     ( back = #, arr2 = .self ) = arr.popBack();
@@ -151,8 +153,8 @@ fn onlyX(v: Vec2) => v.x();
 fn onlyX(v&: Vec2) = (x: float) { v.x() = x; }
 fn onlyX(v&: Vec2) <=> v.x();
 
-fn update(v&: float) => { v = 2.0; }
-fn callUpdate(r&: Rect) => {
+fn update(v&: float) { v = 2.0; }
+fn callUpdate(r&: Rect) {
     update(r.bottomLeft().x());
 }
 
@@ -173,11 +175,11 @@ special_case struct Array{bool} as BoolArray (
 
 with {T: Type}
 template {C ?Index{(int) -> T}: Type}
-fn withIndexType(c: C) => {}
+fn withIndexType(c: C) {}
 with {T: Type}
-fn withIndexType(c: ?Index{(int) -> T}) => {}
+fn withIndexType(c: ?Index{(int) -> T}) {}
 with {T: Type}
-fn getFirst(arr: ?match Array{T}) => T:{
+fn getFirst(arr: ?match Array{T}) T:{
     return arr.first();
 }
 
@@ -212,14 +214,14 @@ fn getFirst(arr: ?match Array{T}) => T:{
 
 operation Neg(i: Int) => Int(-i.value);
 operation Add(i: Int, j: Int) => Int(i.value + j.value);
-operation assign Add(i&: Int, j: Int) => { i += j; };
+operation assign Add(i&: Int, j: Int) { i += j; };
 
 enum Ordering (
     Less,
     Equal,
     Greater,
 )
-compare (i: int) with (j: int) => Ordering:{
+compare (i: int) with (j: int) Ordering:{
     if (i == j) return Ordering::Equal;
     if (i < j) return Ordering::Less;
     return Ordering::Greater;
@@ -236,32 +238,32 @@ struct ClassRoot (
             m_class = Class{Anchor}::of(Self);
         }
     )
-    fn class(self) => { return m_class; }
-    convert (self) => class();
+    fn class(self) { return m_class; }
+    convert (self) to => class();
 )
 template {Anchor: Type}
 struct Class (
-    fn of(T: Type) => Variant{Anchor}:{}
-    fn type(self) => Type:{}
+    fn of(T: Type) Variant{Anchor}:{}
+    fn type(self) Type:{}
 )
 with {Anchor: Type}
 template {T ?ClassRoot{undeduced(Anchor)}: Type}
-fn has(var: Class{Anchor}) => bool:{}
+fn has(var: Class{Anchor}) bool:{}
 with {Anchor: Type}
 template {T ?ClassRoot{undeduced(Anchor)}: Type}
-fn is(var: Class{Anchor}) => bool:{
+fn is(var: Class{Anchor}) bool:{
     return var == Class{Anchor}::of(T);
 }
 with {Anchor: Type, T ?ClassRoot{undeduced(Anchor)}: Type}
-match {T} against (var: Class{Anchor}) => {
+match {T} against (var: Class{Anchor}) {
     return performMatch{Class{Anchor}::of(T)}(var);
 }
 with {Anchor: Type, var: Class{Anchor}}
-match {var} against (inst: ?ClassRoot{undeduced(Anchor)}) => {
+match {var} against (inst: ?ClassRoot{undeduced(Anchor)}) {
     return performMatch{var}(inst.class());
 }
 with {Anchor: Type, T ?ClassRoot{undeduced(Anchor)}: Type}
-match {T} against (inst: ?ClassRoot{Anchor}) => {
+match {T} against (inst: ?ClassRoot{Anchor}) {
     return performMatch{Class{Anchor}::of(T)}(inst.class());
 }
 
@@ -278,14 +280,14 @@ incomplete final struct SliceResult (
         has SliceResult;
     )
 )
-fn slice() => Union{SliceResult}:{}
-fn doSlice() => Opt{ExprResult}:{
+fn slice() Union{SliceResult}:{}
+fn doSlice() Opt{ExprResult}:{
     return match (slice()) {
         with {s ?SliceResult::Success} s => s.result;
         else => {};
     };
 }
-fn useSlice() => {
+fn useSlice() {
     let slice = doSlice() else return;
 }
 
@@ -298,7 +300,7 @@ struct BinaryOperatorExpr (
     right: id{Expr};
     has Expr;
 )
-fn dispatch(ref{Expr} e) => {
+fn dispatch(ref{Expr} e) {
     match (e) {
         with {e ?BinaryOperatorExpr} e => { }
 
@@ -308,7 +310,8 @@ fn dispatch(ref{Expr} e) => {
 }
 
 incomplete struct View (
-    static virtual className: String;
+    with {Self: Type}
+    static virtual className: String = Self.name();
 
     has ClassRoot{View};
 )
@@ -322,6 +325,6 @@ object Obj (
     i: int = 0;
     fn get(this) => idof(i);
 )
-fn deref(firstArg: id{int}, secondArg: id{Obj}) => {
+fn deref(firstArg: id{int}, secondArg: id{Obj}) {
     return *firstArg + *secondArg.get();
 }

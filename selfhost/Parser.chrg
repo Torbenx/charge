@@ -75,7 +75,7 @@ enum Token (
     EOF;
 )
 
-namespace lookup_table {
+namespace lookup_table (
 
 struct Input (
     firstChar: uint8,
@@ -98,9 +98,10 @@ fn computeIndex(char: uint8, repeat: bool, equal: bool) {
         out += 0x60;
     if (equal)
         out += 0x60 * 2;
+    return out;
 }
 
-fn makeTable(inputs: Array{Input}) => {
+fn makeTable(inputs: Array{Input}) {
     mut out: Array{Output} = ();
     out.resize(0x60 * 4);
 
@@ -170,7 +171,7 @@ static table = [
     ))];
 fn get(char: uint8, repeat: bool, equal: bool) => table[computeIndex(char, repeat, equal)];
 
-}
+)
 
 struct SourcePos (
 
@@ -188,11 +189,11 @@ object Parser (
 
     tok: Token = Token::EOF;
 
-    fn skipWhitespace(self&) => {
+    fn skipWhitespace(self&) {
         while (isWhitespace(source[sourceOff]))
             sourceOff += 1;
     }
-    fn nextToken(self&) => {
+    fn nextToken(self&) {
         skipWhitespace();
 
         let head = source[sourceOff];

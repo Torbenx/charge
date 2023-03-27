@@ -39,7 +39,7 @@
 		"decl-keywords": {
 			"patterns": [
 				{
-					"match": "\\b(static|template|struct|fn|special_case|as|convert|let|mut|with|has|compare|incomplete|final|module|virtual|override|operation|enum|object|assign|namespace)\\b",
+					"match": "\\b(static|template|struct|fn|special_case|as|convert|let|mut|with|has|compare|incomplete|final|module|virtual|override|operation|enum|object|assign|namespace|to)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.other.charge"
