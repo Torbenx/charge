@@ -78,53 +78,42 @@ enum Token (
 namespace lookup_table (
 
 struct Input (
-    firstChar: uint8,
-    lastChar: uint8 = beginChar,
-    bare: Token,
-    repeat: Opt{Token} = (),
-    equal: Opt{Token} = (),
-    repeatEqual: Opt{Token} = (),
-    bareAdvance: int = 1,
+    firstChar: uint8;
+    lastChar: uint8 = beginChar;
+    bare: Token;
+    repeat: Opt{Token} = ();
+    equal: Opt{Token} = ();
+    repeatEqual: Opt{Token} = ();
+    bareAdvance: int = 1;
 )
 
 struct Output (
-    tok: Opt{Token} = (),
-    advance: int = 0,
+    tok: Opt{Token} = ();
+    advance: int = 0;
 )
 
-fn computeIndex(char: uint8, repeat: bool, equal: bool) {
+fn computeIndex(char: uint8, repeat: bool, equal: bool): {
     mut out: int = char - 0x20;
-    if (repeat)
+    if repeat:
         out += 0x60;
-    if (equal)
+    if equal:
         out += 0x60 * 2;
     return out;
 }
 
-fn makeTable(inputs: Array{Input}) {
+fn makeTable(inputs: Array{Input}): {
     mut out: Array{Output} = ();
     out.resize(0x60 * 4);
 
-    for (input in inputs) {
-        for (char in incRange(input.firstCahr, input.lastChar)) {
+    for input in inputs: {
+        for char in incRange(input.firstCahr, input.lastChar): {
             let bareOut: Output = (input.bare, input.bareAdvance);
             out[computeIndex(char, false, false)] = bareOut;
 
-            let repeatOut = match (input.repeat.hasValue()) {
-                true => Output(input.repeat.value(), 2);
-                false => bareOut;
-            };
+            let repeatOut = if input.repeat.hasValue() => Output(input.repeat.value(), 2), else => bareOut;
             out[computeIndex(char, true, false)] = repeatOut;
-            
-            out[computeIndex(char, false, true)] = match (input.repeat.hasValue()) {
-                true => Output(input.equal.value(), 2);
-                false => bareOut;
-            };
-
-            out[computeIndex(char, true, true)] = match (input.repeatEqual.hasValue()) {
-                true => Output(input.repeatEqual.value(), 3);
-                false => repeatOut;
-            };
+            out[computeIndex(char, false, true)] = if input.repeat.hasValue() => Output(input.equal.value(), 2), else => bareOut;
+            out[computeIndex(char, true, true)] = if input.repeatEqual.hasValue() => Output(input.repeatEqual.value(), 3), else => repeatOut;
         }
     }
 
@@ -189,24 +178,21 @@ object Parser (
 
     tok: Token = Token::EOF;
 
-    fn skipWhitespace(self&) {
-        while (isWhitespace(source[sourceOff]))
+    fn skipWhitespace(self&): {
+        while isWhitespace(source[sourceOff]):
             sourceOff += 1;
     }
-    fn nextToken(self&) {
+    fn nextToken(self&): {
         skipWhitespace();
 
         let head = source[sourceOff];
 
         let repeat = source[sourceOff + 1] == head;
 
-        let equalOff = match (repeat) {
-            false => 1;
-            true => 2;
-        };
+        let equalOff = if repeat => 1, else => 2;
         let equal = source[equalOff] == '=';
 
-        with {advance: int}
+        with (advance: int)
         (tok, advance) = lookup_table::get(head, repeat, equal);
 
         sourceOff += advance;
