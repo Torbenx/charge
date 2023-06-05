@@ -440,18 +440,29 @@ void Parser::parseReturnStmt(Ptr<Stmt>& out) {
     advance();
 }
 
+void Parser::parseIfBranch(Ptr<Stmt>& out) {
+    auto& stmt = makeSet<IfStmt>(out);
+    parseBinaryExpr(stmt.condition);
+    EXPECT_EQ(tok.kind(), TokenKind::Colon);
+    advance();
+    parseSingleOrCompoundStmt(stmt.ifTrue);
+
+    if (tok.kind() != TokenKind::Word)
+        return;
+    if (tok.word == elseWord) {
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
+        advance();
+        parseSingleOrCompoundStmt(stmt.ifFalse);
+    } else if (tok.word == elifWord) {
+        advance();
+        parseIfBranch(stmt.ifFalse);
+    }
+}
 void Parser::parseIfStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     advance();
-
-    auto& stmt = makeSet<IfStmt>(out);
-    parseBinaryExpr(stmt.condition);
-    parseSingleOrCompoundStmt(stmt.ifTrue);
-
-    if (tok.kind() != TokenKind::Word || tok.word != elseWord)
-        return;
-    advance();
-    parseSingleOrCompoundStmt(stmt.ifFalse);
+    parseIfBranch(out);
 }
 
 void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
@@ -579,28 +590,27 @@ void Parser::parseWithClause(WithClause& out) {
 void Parser::parseFunctionDefinition(FnDecl& out) {
     if (tok.kind() == TokenKind::SemiColon)
         return;
-    if (tok.kind() == TokenKind::Equal) {
+    if (tok.kind() == TokenKind::FatArrow) {
         advance();
-        if (tok.kind() == TokenKind::Greater) {
-            advance();
-            if (tok.kind() == TokenKind::LeftBrace) {
-                parseCompoundStmt(out.body);
-            } else {
-                parseBinaryExpr(out.bodyExpr);
-                EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
-                advance();
-            }
-        } else {
-            EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
-            advance();
+        parseBinaryExpr(out.bodyExpr);
+        EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
+        advance();
+    } else if (tok.kind() == TokenKind::Equal) {
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        advance();
 
-            parseParameter(out.assignParam, ParameterParseScope::Static);
-            VERIFY(!(bool)at(out.assignParam).initializer);
+        parseParameter(out.assignParam, ParameterParseScope::Static);
+        VERIFY(!(bool)at(out.assignParam).initializer);
 
-            EXPECT_EQ(tok.kind(), TokenKind::RightParen);
-            advance();
-            parseCompoundStmt(out.body);
-        }
+        EXPECT_EQ(tok.kind(), TokenKind::RightParen);
+        advance();
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
+        advance();
+        parseSingleOrCompoundStmt(out.body);
+    } else if (tok.kind() == TokenKind::Colon) {
+        advance();
+        parseSingleOrCompoundStmt(out.body);
     } else
         VERIFY_NOT_REACHED();
 }
@@ -791,8 +801,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         }
         advance();
         d.staticDecls = finalizeSpan(staticDecls);
-    }
-    else if (declarator == enumWord) {
+    } else if (declarator == enumWord) {
         auto& d = makeSet<EnumDecl>(out, name);
         auto staticDecls = beginSpan<Ptr<StaticDecl>>();
         EXPECT_EQ(tok.kind(), TokenKind::LeftParen);

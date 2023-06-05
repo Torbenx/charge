@@ -1489,7 +1489,7 @@ struct Interpreter : STContext {
 
             Value retValue = {};
             if (targetDecl.body) {
-                auto flow = evalCompoundStmt(assignParamCtx, at(targetDecl.body));
+                auto flow = evaluateStmt(assignParamCtx, targetDecl.body);
                 if (flow.kind == ControlFlowKind::Return)
                     retValue = flow.value;
             } else if (targetDecl.bodyExpr) {
@@ -1956,20 +1956,20 @@ void testInterpreter() {
         struct bool ()
         true: bool = ();
         false: bool = ();
-        operation LogAnd(a: bool, b: bool) => {
-            if (a) {
-                if (b) return true;
+        operation LogAnd(a: bool, b: bool): {
+            if a: {
+                if b: return true;
             }
             return false;
         }
-        operation LogOr(a: bool, b: bool) => {
-            if (!a) {
-                if (!b) return false;
+        operation LogOr(a: bool, b: bool): {
+            if !a: {
+                if !b: return false;
             }
             return true;
         }
-        operation LogNot(a: bool) => {
-            if (a) return false;
+        operation LogNot(a: bool): {
+            if a: return false;
             return true;
         }
 
@@ -1983,16 +1983,16 @@ void testInterpreter() {
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
-        fn foo(x: bool) => {
-            if x
+        fn foo(x: bool): {
+            if x:
                 x = foo(false);
             return x;
         }
 
-        fn get(x&: int) => {
+        fn get(x&: int): {
             x = 123;
         }
-        fn callGet() => {
+        fn callGet(): {
             mut x = 0;
             get(x);
             return x;
@@ -2000,20 +2000,20 @@ void testInterpreter() {
 
         mut g_globalVal: int = 0;
         fn globalVal() => g_globalVal;
-        fn globalVal() = (n: int) {
+        fn globalVal() = (n: int): {
             g_globalVal = n;
         }
-        fn updateGlobalVal() => {
+        fn updateGlobalVal(): {
             get(globalVal());
             globalVal() = 456;
             return globalVal();
         }
 
         fn wrap{T: Type}(var: T) => var;
-        fn wrap{T: Type}(var&: T) = (val: T) {
+        fn wrap{T: Type}(var&: T) = (val: T): {
             var = val;
         }
-        fn updateWrappedGlobalVal() => {
+        fn updateWrappedGlobalVal(): {
             get(wrap(globalVal()));
             return wrap(globalVal());
         }
@@ -2032,7 +2032,7 @@ void testInterpreter() {
             x: int = 0;
             y: int = 0;
         )
-        fn testA() => {
+        fn testA(): {
             let a = A(789);
             let x: int = 1;
             let y: int = 2;
@@ -2044,14 +2044,14 @@ void testInterpreter() {
 
         struct Base (
             x: int = 0;
-            fn set(self&, y: int) => { x = y; }
+            fn set(self&, y: int): { x = y; }
             fn get(self) => x;
 
-            fn test(self&) => {
+            fn test(self&): {
                 self.set(7);
                 return self.get();
             }
-            fn test2(self&) => {
+            fn test2(self&): {
                 set(8);
                 return get();
             }

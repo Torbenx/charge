@@ -79,6 +79,7 @@ enum class TokenKind : uint32_t {
     Colon, // :
     ColonColon, // ::
     SemiColon, // ;
+    FatArrow, // =>
     Word, // abc123
 
     IntegerLiteral,

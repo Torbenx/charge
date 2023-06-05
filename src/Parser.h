@@ -43,6 +43,7 @@ public:
     Word staticWord = asWord("static");
     Word ifWord = asWord("if");
     Word elseWord = asWord("else");
+    Word elifWord = asWord("elif");
     Word returnWord = asWord("return");
     Word withWord = asWord("with");
     Word hasWord = asWord("has");
@@ -220,6 +221,7 @@ struct Parser : STContext {
     void parseArgument(Arguments::Arg& out);
     void parseLetStmt(Ptr<Stmt>& out);
     void parseReturnStmt(Ptr<Stmt>& out);
+    void parseIfBranch(Ptr<Stmt>& out);
     void parseIfStmt(Ptr<Stmt>& out);
     void parseExprOrAssignStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);

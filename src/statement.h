@@ -201,7 +201,7 @@ struct EnumValueDecl : StaticDecl {
 };
 
 struct FnDecl : CallableDecl {
-    Ptr<CompoundStmt> body;
+    Ptr<Stmt> body;
     Ptr<LocalDecl> assignParam;
     Ptr<Expr> bodyExpr;
     FnDecl(Word name = {})

@@ -53,6 +53,7 @@ const char* toShortString(TokenKind kind) {
     case Colon: return ":";
     case ColonColon: return "::";
     case SemiColon: return ";";
+    case FatArrow: return "=>";
     case Word: return "word";
     case IntegerLiteral: return "int";
     case EOS: return "EOS";
@@ -76,8 +77,8 @@ struct Table {
     struct Input {
         TokenKind bare;
         TokenKind repeat = bare;
-        TokenKind equal = bare;
-        TokenKind repeatEqual = repeat;
+        TokenKind followed = bare;
+        TokenKind repeatFollowed = repeat;
         uint8_t bareAdvance = 1;
     };
     struct InputRange : Input {
@@ -100,8 +101,8 @@ struct Table {
             for (char c = input.first; c <= input.last; c++) {
                 table[c - 0x20 + 0x60 * 0] = { input.bare, input.bareAdvance };
                 table[c - 0x20 + 0x60 * 1] = { input.repeat, input.repeat != input.bare ? 2 : input.bareAdvance };
-                table[c - 0x20 + 0x60 * 2] = { input.equal, input.equal != input.bare ? 2 : input.bareAdvance };
-                table[c - 0x20 + 0x60 * 3] = { input.repeatEqual, input.repeatEqual != input.repeat ? 3 : (input.repeatEqual != input.bare ? 2 : input.bareAdvance) };
+                table[c - 0x20 + 0x60 * 2] = { input.followed, input.followed != input.bare ? 2 : input.bareAdvance };
+                table[c - 0x20 + 0x60 * 3] = { input.repeatFollowed, input.repeatFollowed != input.repeat ? 3 : (input.repeatFollowed != input.bare ? 2 : input.bareAdvance) };
             }
         }
     }
@@ -123,20 +124,20 @@ struct TableHolder {
         { ';', { SemiColon } },
         { ':', { .bare = Colon, .repeat = ColonColon } },
 
-        { '^', { .bare = Hat, .equal = HatEqual } },
-        { '!', { .bare = Exclaim, .equal = ExclaimEqual } },
-        { '%', { .bare = Percent, .equal = PercentEqual } },
-        { '/', { .bare = Slash, .equal = SlashEqual } },
-        { '*', { .bare = Star, .equal = StarEqual } },
-        { '=', { .bare = Equal, .repeat = EqualEqual } },
+        { '^', { .bare = Hat, .followed = HatEqual } },
+        { '!', { .bare = Exclaim, .followed = ExclaimEqual } },
+        { '%', { .bare = Percent, .followed = PercentEqual } },
+        { '/', { .bare = Slash, .followed = SlashEqual } },
+        { '*', { .bare = Star, .followed = StarEqual } },
+        { '=', { .bare = Equal, .repeat = EqualEqual, .followed = FatArrow } },
 
-        { '+', { .bare = Plus, .repeat = PlusPlus, .equal = PlusEqual } },
-        { '-', { .bare = Minus, .repeat = MinusMinus, .equal = MinusEqual } },
-        { '&', { .bare = Amp, .repeat = AmpAmp, .equal = AmpEqual, .repeatEqual = AmpAmpEqual } },
-        { '|', { .bare = Vert, .repeat = VertVert, .equal = VertEqual, .repeatEqual = VertVertEqual } },
+        { '+', { .bare = Plus, .repeat = PlusPlus, .followed = PlusEqual } },
+        { '-', { .bare = Minus, .repeat = MinusMinus, .followed = MinusEqual } },
+        { '&', { .bare = Amp, .repeat = AmpAmp, .followed = AmpEqual, .repeatFollowed = AmpAmpEqual } },
+        { '|', { .bare = Vert, .repeat = VertVert, .followed = VertEqual, .repeatFollowed = VertVertEqual } },
 
-        { '<', { .bare = Less, .repeat = LessLess, .equal = LessEqual, .repeatEqual = LessLessEqual } },
-        { '>', { .bare = Greater, .repeat = GreaterGreater, .equal = GreaterEqual, .repeatEqual = GreaterGreaterEqual } },
+        { '<', { .bare = Less, .repeat = LessLess, .followed = LessEqual, .repeatFollowed = LessLessEqual } },
+        { '>', { .bare = Greater, .repeat = GreaterGreater, .followed = GreaterEqual, .repeatFollowed = GreaterGreaterEqual } },
 
         { '0', '9', { .bare = IntegerLiteral, .bareAdvance = 0 } },
 
@@ -200,13 +201,15 @@ void Parser::advance() {
     // x=
     // xx=
     // =>
-    // ->
 
     uint32_t end = pos() + 1;
+
     bool repeat = source[end] == head;
     end += repeat ? 1 : 0;
-    bool equal = source[end] == '=';
-    uint32_t idx = (uint32_t)head - 0x20 + (repeat ? 0x60 : 0) + (equal ? 0x60 * 2 : 0);
+
+    u8 followup = head == '=' ? '>' : '=';
+    bool followed = source[end] == followup;
+    uint32_t idx = (uint32_t)head - 0x20 + (repeat ? 0x60 : 0) + (followed ? 0x60 * 2 : 0);
     auto [kind, advance] = TableHolder::table.table[idx];
 
     end = pos() + advance;

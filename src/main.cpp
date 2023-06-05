@@ -50,12 +50,12 @@ int main() {
 
                 static foo{Y: Type}: Y = 5;
 
-                fn bar(z: Z = 3) => {
-                    if x > 0
+                fn bar(z: Z = 3): {
+                    if x > 0:
                         xNonZero();
-                    else if y > 0
+                    elif y > 0:
                         yNonZero();
-                    else
+                    else:
                         bothZero();
                 }
             )
@@ -63,7 +63,7 @@ int main() {
             struct Int (
                 value: int = 0;
             )
-            operation Add(i: Int, j: Int) => { return Int(i.value + j.value); }
+            operation Add(i: Int, j: Int): { return Int(i.value + j.value); }
 
             enum Foo (
                 X; Y; Z;
