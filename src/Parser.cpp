@@ -290,8 +290,10 @@ void Parser::parseLeafExpr(Ptr<Expr>& out) {
     else if (tok.kind() == TokenKind::Word) {
         auto& e = makeSet<IdentifierExpr>(base, tok.word);
         advance();
-        if (tok.kind() == TokenKind::LeftBrace)
+        if (tok.kind() == TokenKind::LeftBrace) {
+            e.identifier.hasBraces = true;
             parseArgumentContext(e.identifier);
+        }
     }
     // integer literal
     else if (tok.kind() == TokenKind::IntegerLiteral) {
@@ -324,8 +326,10 @@ void Parser::wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base) {
         EXPECT_EQ(tok.kind(), TokenKind::Word);
         auto& e = makeSet<AccessExpr>(base, isStatic, base, tok.word);
         advance();
-        if (tok.kind() == TokenKind::LeftBrace)
+        if (tok.kind() == TokenKind::LeftBrace) {
+            e.member.hasBraces = true;
             parseArgumentContext(e.member);
+        }
     } else if (tok.kind() == TokenKind::PlusPlus || tok.kind() == TokenKind::MinusMinus) {
         UnaryOperator op = tok.kind() == TokenKind::PlusPlus ? UnaryOperator::PostInc : UnaryOperator::PostDec;
         base = make<UnaryOperatorExpr>(op, base);
@@ -718,15 +722,15 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         break;
     }
 
-    Span<Ptr<LocalDecl>> parametric;
+    Span<Ptr<LocalDecl>> templateParams;
     if (tok.kind() == TokenKind::LeftBrace) {
-        parametric = parseParameterContext(ParameterParseScope::Static);
+        templateParams = parseParameterContext(ParameterParseScope::Static);
     }
 
     bool isLocal = scope == DeclParseScope::Struct && !hasStatic;
     if (isLocal) {
         EXPECT_EQ(with.params.count, 0u);
-        EXPECT_EQ(parametric.count, 0u);
+        EXPECT_EQ(templateParams.count, 0u);
     }
 
     // variable
@@ -819,6 +823,6 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
 
     if (auto staticDecl = asStaticDecl(out)) {
         at(staticDecl).with = with;
-        at(staticDecl).parametric = parametric;
+        at(staticDecl).templateParams = templateParams;
     }
 }

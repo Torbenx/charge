@@ -130,6 +130,7 @@ struct WithClause {
 
 struct Identifier : Arguments {
     Word word;
+    bool hasBraces = false;
 };
 
 struct Constraint {
@@ -150,7 +151,7 @@ struct NamedDecl : Decl {
 
 struct StaticDecl : NamedDecl {
     WithClause with;
-    Span<Ptr<LocalDecl>> parametric;
+    Span<Ptr<LocalDecl>> templateParams;
     Span<Ptr<StaticDecl>> staticDecls;
     using NamedDecl::NamedDecl;
 };

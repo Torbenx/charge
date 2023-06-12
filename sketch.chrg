@@ -22,7 +22,8 @@ fn appendTo(v&: Array{T}, item: T): {
     v.append(item);
 }
 
-static sizeOf{T: Type}: int = sizeof(T);
+template (T: Type)
+static sizeOf: int = sizeof(T);
 
 
 with (cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type)
@@ -40,8 +41,8 @@ fn callTest(): {
 
 template (spacial, base)
 fn isSpecializationOf() => false;
-with (base)
-fn isSpecializationOf{base{_..}, base}() => true;
+template (base)
+special_case fn isSpecializationOf{base{_..}, base}() => true;
 
 template (b, c)
 fn doStuff(first: b{c}, second: b);
@@ -150,7 +151,7 @@ struct Rect (
     fn bottomLeft(self&) <=> Vec2(h.low(), v.low());
 )
 fn onlyX(v: Vec2) => v.x();
-fn onlyX(v&: Vec2) = (x: float) { v.x() = x; }
+fn onlyX(v&: Vec2) = (x: float): { v.x() = x; }
 fn onlyX(v&: Vec2) <=> v.x();
 
 fn update(v&: float): { v = 2.0; }
@@ -167,9 +168,8 @@ struct Array (
 special_case struct Array{bool} as BoolArray (
     has Index{(int) -> bool} (
         fn index(self, i: int) => getBit(i);
-        fn index(self&, i: int) = (v: bool) {
+        fn index(self&, i: int) = (v: bool):
             setBit(i, v);
-        }
     )
 )
 

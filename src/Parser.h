@@ -128,6 +128,16 @@ public:
         return {};
     }
 
+    bool isPrimaryDecl(Ptr<Decl> decl) {
+        Decl& d = at(decl);
+        switch (d.kind) {
+        case DeclKind::FnDecl:
+            return !((FnDecl&)d).assignParam;
+        default:
+            return true;
+        }
+    }
+
     template<typename T>
     Ptr<T> allocate(uint32_t count = 1) {
         return Ptr<T> { storage->allocate(alignof(T), sizeof(T), count) };
@@ -229,7 +239,7 @@ struct Parser : STContext {
     void parseCompoundStmt(Ptr<CompoundStmt>& out);
     void parseSingleOrCompoundStmt(Ptr<Stmt>& out);
     enum ParameterParseScope {
-        Static, // basic parameters (with, parametric)
+        Static, // basic parameters, ex: 'with' and 'template'
         Function, // allow 'mut' and '&'
     };
     Span<Ptr<LocalDecl>> parseParameterContext(ParameterParseScope);
