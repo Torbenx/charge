@@ -622,8 +622,13 @@ void Parser::parseFunctionDefinition(FnDecl& out) {
 void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     WithClause with;
+    Span<Ptr<LocalDecl>> templateParams;
     if (tok.word == withWord) {
         parseWithClause(with);
+    }
+    if (tok.word == templateWord) {
+        advance();
+        templateParams = parseParameterContext(ParameterParseScope::Static);
     }
     // has
     else if (tok.word == hasWord) {
@@ -636,6 +641,8 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
             advance();
             return;
         }
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
+        advance();
         EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
         advance();
         auto decls = beginSpan<Ptr<StaticDecl>>();
@@ -706,26 +713,6 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         declarator = {};
     }
     VERIFY((bool)name);
-    switch (scope) {
-    case DeclParseScope::Namespace:
-        // [mut] name
-        VERIFY(!hasStatic);
-        break;
-    case DeclParseScope::Struct:
-        // static [mut] name
-        // name
-        VERIFY(!(hasMut && !hasStatic));
-        break;
-    case DeclParseScope::Has:
-        // static [mut] name
-        VERIFY(hasStatic);
-        break;
-    }
-
-    Span<Ptr<LocalDecl>> templateParams;
-    if (tok.kind() == TokenKind::LeftBrace) {
-        templateParams = parseParameterContext(ParameterParseScope::Static);
-    }
 
     bool isLocal = scope == DeclParseScope::Struct && !hasStatic;
     if (isLocal) {
@@ -775,9 +762,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         auto& d = makeSet<StructDecl>(out, name);
         auto memberDecls = beginSpan<Ptr<Decl>, 0>();
         auto staticDecls = beginSpan<Ptr<StaticDecl>, 1>();
-        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
         advance();
-        while (tok.kind() != TokenKind::RightParen) {
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        advance();
+        while (tok.kind() != TokenKind::RightBrace) {
             Ptr<Decl> decl;
             parseDecl(decl, DeclParseScope::Struct);
             if (Ptr<StaticDecl> sDecl = asStaticDecl(decl)) {
@@ -795,9 +784,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     else if (declarator == namespaceWord) {
         auto& d = makeSet<NamespaceDecl>(out, name);
         auto staticDecls = beginSpan<Ptr<StaticDecl>>();
-        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
         advance();
-        while (tok.kind() != TokenKind::RightParen) {
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        advance();
+        while (tok.kind() != TokenKind::RightBrace) {
             Ptr<Decl> decl;
             parseDecl(decl, DeclParseScope::Namespace);
             VERIFY(isStaticDecl(decl));
@@ -808,9 +799,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
     } else if (declarator == enumWord) {
         auto& d = makeSet<EnumDecl>(out, name);
         auto staticDecls = beginSpan<Ptr<StaticDecl>>();
-        EXPECT_EQ(tok.kind(), TokenKind::LeftParen);
+        EXPECT_EQ(tok.kind(), TokenKind::Colon);
         advance();
-        while (tok.kind() != TokenKind::RightParen) {
+        EXPECT_EQ(tok.kind(), TokenKind::LeftBrace);
+        advance();
+        while (tok.kind() != TokenKind::RightBrace) {
             Ptr<Decl> decl;
             parseDecl(decl, DeclParseScope::Namespace);
             VERIFY(isStaticDecl(decl));

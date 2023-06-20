@@ -45,10 +45,12 @@ int main() {
     }
     {
         Parser par(STContext::create(), R"str(
-            struct Foo{X: Type} (
+            template(X: Type)
+            struct Foo: {
                 x: list{X} = 5;
 
-                static foo{Y: Type}: Y = 5;
+                template(Y: Type)
+                static foo: Y = 5;
 
                 fn bar(z: Z = 3): {
                     if x > 0:
@@ -58,16 +60,16 @@ int main() {
                     else:
                         bothZero();
                 }
-            )
+            }
 
-            struct Int (
+            struct Int: {
                 value: int = 0;
-            )
+            }
             operation Add(i: Int, j: Int): { return Int(i.value + j.value); }
 
-            enum Foo (
+            enum Foo: {
                 X; Y; Z;
-            )
+            }
         )str");
         par.dumpTokens = true;
         while (par.tok.kind() != TokenKind::EOS) {

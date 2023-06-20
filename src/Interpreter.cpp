@@ -350,7 +350,9 @@ struct Interpreter : STContext {
     struct StaticRedirectLookupContext : LookupContext {
         StaticLookupContext* redirect;
         StaticRedirectLookupContext(LookupContext* parent, StaticLookupContext* redirect)
-            : LookupContext(LookupContextKind::StaticRedirect, parent), redirect(redirect) { }
+            : LookupContext(LookupContextKind::StaticRedirect, parent), redirect(redirect) {
+            decls = redirect->decls;
+        }
     };
     struct TypeLookupContext : StaticLookupContext {
         LookupContext* templateContext;
@@ -1035,15 +1037,13 @@ struct Interpreter : STContext {
         }
         return invalResult;
     }
-    bool recursivelyCheckForHasMember(const Type& shouldHave, const CompleteDecl& type) {
+    bool checkForHasMember(const Type& shouldHave, const CompleteDecl& type) {
         if (staticMatch(type, shouldHave))
             return true;
 
         auto* typeCtx = getStaticContext(type);
         for (LookupContext* ctx = typeCtx->parent; ctx != typeCtx->templateContext; ctx = ctx->parent) {
-            VERIFY(ctx->kind == LookupContextKind::StaticRedirect);
-            const auto& decl = ((StaticRedirectLookupContext*)ctx)->redirect->staticDecl;
-            if (recursivelyCheckForHasMember(shouldHave, decl))
+            if (ctx->kind == LookupContextKind::StaticRedirect && staticMatch(((StaticRedirectLookupContext*)ctx)->redirect->staticDecl, shouldHave))
                 return true;
         }
         return false;
@@ -1051,7 +1051,7 @@ struct Interpreter : STContext {
     bool checkConstraint(const Value& value, const Value& condValue) {
         Type condType = typeOf(condValue);
         if (implicitlyConvertibleToType(condType))
-            return recursivelyCheckForHasMember(implicitlyToType(condValue), implicitlyToType(value));
+            return checkForHasMember(implicitlyToType(condValue), implicitlyToType(value));
 
         if (isCallable(condType)) {
             std::array<NamedExprResult, 1> args { { { ExprResult::make<BasicRecord>(value), {} } } };
@@ -1265,13 +1265,21 @@ struct Interpreter : STContext {
         return completeTemplate(r.value(), evaluateArguments(ctx, id));
     }
     ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
+        auto selfResult = evalIdentifierName(ctx, selfWord);
+        if (selfResult.value().valid()) {
+            std::vector<ExprResult> members;
+            collectMembers(selfResult, e.identifier.word, members);
+            if (members.size() == 1)
+                return members[0];
+            EXPECT_EQ(members.size(), 0u);
+        }
+
         ExprResult result = evalIdentifier(ctx, e.identifier);
-        //fmt::print("{} => ", sview(e.identifier.word));
-        //dumpValue(result);
+        // fmt::print("{} => ", sview(e.identifier.word));
+        // dumpValue(result);
         if (!result.value().valid())
             return invalResult;
 
-        auto selfResult = evalIdentifierName(ctx, selfWord);
         if (!selfResult.value().valid())
             return result;
         if (result.value().kind != ValueKind::CompleteDecl && result.value().kind != ValueKind::TemplateDecl)
@@ -1322,12 +1330,12 @@ struct Interpreter : STContext {
 
                 if (!convertFnArgs(staticCtx, at(fn.params), posFnArgs.value(), conversionsAllowed))
                     return false;
-                // slice self arg
-                if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
+                // TODO: slice self arg
+                /*if (posFnArgs.value().size() > 0 && posFnArgs.value()[0].index() == 0
                     && fn.kind == DeclKind::FnDecl && matchName(at(fn.params, 0), selfWord)) {
                     VERIFY(fnDecl.staticContext()->staticDecl.valid());
                     posFnArgs.value()[0] = { slice(fnDecl.staticContext()->staticDecl, posFnArgs.value()[0]), 0 };
-                }
+                }*/
 
                 return true;
             }))
@@ -1384,7 +1392,6 @@ struct Interpreter : STContext {
 
         auto& targetDecl = as<FnDecl>(call.target.decl);
         LocalLookupContext selfCtx { call.target.staticContext() };
-        LocalLookupContext memberCtx { &selfCtx };
         bool hasSelf = false;
         if (call.args.size() > 0) {
             auto firstParam = at(targetDecl.params, 0);
@@ -1393,16 +1400,10 @@ struct Interpreter : STContext {
                 hasSelf = true;
                 selfCtx.decls = { (Ptr<Decl>*)&selfDecl.decl, 1 };
                 selfCtx.values = { &firstArg, 1 };
-
-                Type firstArgType = typeOf(firstArg);
-                if (isStruct(firstArgType)) {
-                    memberCtx.decls = at(as<StructDecl>(firstArgType.decl).params);
-                    memberCtx.values = firstArg.u.array->array();
-                }
             }
         }
 
-        return withTemplateContext(call.target, memberCtx, [&](LookupContext& templateCtx) -> Value {
+        return withTemplateContext(call.target, selfCtx, [&](LookupContext& templateCtx) -> Value {
             ParameterLookupContext fnParamCtx { &templateCtx };
             if (call.args.size() > 0) {
                 uint32_t i = 0;
@@ -1438,8 +1439,6 @@ struct Interpreter : STContext {
             }
 
             return retValue;
-
-            VERIFY_NOT_REACHED();
         });
     }
     struct CallRecord : ExprRecord {
@@ -1516,6 +1515,7 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::Access), base(base), accessDecl(accessDecl) { }
     };
     LookupContext* recursiveWrapWithHasContexts(LookupContext* base, Ptr<Decl> structDecl, LookupContext& structCtx) {
+        // TODO: this is wrong in a lot of cases
         auto& d = as<StructDecl>(structDecl);
         for (auto member : at(d.params)) {
             if (at(member).kind != DeclKind::HasDecl)
@@ -1524,11 +1524,12 @@ struct Interpreter : STContext {
             auto& has = as<HasDecl>(member);
             Type hasType = implicitlyToType(evaluateExpr(structCtx, has.type));
             VERIFY(hasType.valid());
-            auto* hasCtx = getStaticContext(hasType);
-            base = &at(make<StaticRedirectLookupContext>(base, hasCtx));
-            base->decls = hasCtx->decls;
+            auto* hasTypeCtx = &at(make<StaticRedirectLookupContext>(base, getStaticContext(hasType)));
 
-            base = recursiveWrapWithHasContexts(base, hasType.decl, *hasCtx);
+            auto* hasCtx = &at(make<StaticLookupContext>(hasTypeCtx, CompleteDecl {}));
+            hasCtx->decls = at((Span<Ptr<Decl>>)has.decls);
+
+            base = recursiveWrapWithHasContexts(hasCtx, hasType.decl, *hasTypeCtx);
         }
         return base;
     }
@@ -1878,26 +1879,28 @@ struct Interpreter : STContext {
 void testInterpreter() {
     Interpreter it;
     it.interpretDecls(R"str(
-        struct Type ()
-        struct Function ()
-        struct Template ()
-        struct TypeTemplate (
+        struct Type: {}
+        struct Function: {}
+        struct Template: {}
+        struct TypeTemplate: {
             has Template;
-        )
-        struct FunctionTemplate (
+        }
+        struct FunctionTemplate: {
             has Template;
-        )
-        struct VariableTemplate (
+        }
+        struct VariableTemplate: {
             has Template;
-        )
-        struct Namespace ()
-        struct Array{T: Type} ()
+        }
+        struct Namespace: {}
+        template(T: Type)
+        struct Array: {}
         
-        struct BasedMemberFunction{T: Type, F: Function} (
+        template(T: Type, F: Function)
+        struct BasedMemberFunction: {
             base: T;
-        )
+        }
 
-        struct bool ()
+        struct bool: {}
         true: bool = ();
         false: bool = ();
         operation LogAnd(a: bool, b: bool): {
@@ -1917,7 +1920,7 @@ void testInterpreter() {
             return true;
         }
 
-        struct int ()
+        struct int: {}
         INT_MASK: int = 0xffff'ffff'ffff'ffff;
         operation Add(i: int, j: int) => builtinAddAndMask(i, j, INT_MASK);
         operation Sub(i: int, j: int) => i + (-j);
@@ -1953,8 +1956,10 @@ void testInterpreter() {
             return globalVal();
         }
 
-        fn wrap{T: Type}(var: T) => var;
-        fn wrap{T: Type}(var&: T) = (val: T): {
+        template(T: Type)
+        fn wrap(var: T) => var;
+        template(T: Type)
+        fn wrap(var&: T) = (val: T): {
             var = val;
         }
         fn updateWrappedGlobalVal(): {
@@ -1962,20 +1967,24 @@ void testInterpreter() {
             return wrap(globalVal());
         }
 
-        struct constant{T: Type, v: T} (
+        template(T: Type, v: T)
+        struct constant: {
             valueMember: T = v;
-        )
-        with{T: Type}
-        fn mkConst{v: T}() => constant{T, v}();
+        }
+        with(T: Type) template(v: T)
+        fn mkConst() => constant{T, v}();
 
-        fn bar{a: int, A: Type}(b: constant{A, a}) => a;
-        fn bar{a: int, A: Type, b: constant{A, a}, B: Type}(c: constant{B, b}) => a;
-        fn bar{a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type}(d: constant{C, c}) => a;
+        template(a: int, A: Type)
+        fn bar(b: constant{A, a}) => a;
+        template(a: int, A: Type, b: constant{A, a}, B: Type)
+        fn bar(c: constant{B, b}) => a;
+        template(a: int, A: Type, b: constant{A, a}, B: Type, c: constant{B, b}, C: Type)
+        fn bar(d: constant{C, c}) => a;
 
-        struct A (
+        struct A: {
             x: int = 0;
             y: int = 0;
-        )
+        }
         fn testA(): {
             let a = A(789);
             let x: int = 1;
@@ -1984,9 +1993,9 @@ void testInterpreter() {
             return A(x, y).x;
         }
 
-        namespace baseNS (
+        namespace baseNS: {
 
-        struct Base (
+        struct Base: {
             x: int = 0;
             fn set(self&, y: int): { x = y; }
             fn get(self) => x;
@@ -1999,37 +2008,45 @@ void testInterpreter() {
                 set(8);
                 return get();
             }
-        )
+        }
         fn testBase() => [
             mut b = Base();
             b.test();
             b.test2()
         ];
 
-        struct HasBase (
-            has Base;
+        struct HasBase: {
+            has Base: {
+                fn test(self&): {
+                    return 2;
+                }
+            }
             fn callGet(self) => get();
-        )
+        }
 
-        fn hasBase{T ?Base: Type}() => true;
-        fn hasBase2{b: ?Base}() => b;
+        template(T ?Base: Type)
+        fn hasBase() => true;
+        template(b: ?Base)
+        fn hasBase2() => b;
 
-        )
+        }
 
-        struct Flags (
+        struct Flags: {
             flag1: bool;
             flag2: bool;
             flag3: bool;
             flag4: bool;
-        )
+        }
         fn allTrue(f: Flags) => f.flag1 && f.flag2 && f.flag3 && f.flag4;
         fn atLeastOneFalse(f: Flags) => !allTrue(f);
-        fn conditionFlags{f ?allTrue: Flags}() => true;
-        fn conditionFlags{f ?atLeastOneFalse: Flags}() => false;
+        template(f ?allTrue: Flags)
+        fn conditionFlags() => true;
+        template(f ?atLeastOneFalse: Flags)
+        fn conditionFlags() => false;
 
-        enum MyEnum (
+        enum MyEnum: {
             A; B; C;
-        )
+        }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2037,20 +2054,21 @@ void testInterpreter() {
         fmt::print("eval: ");
         it.dumpValue(v);
     };
-    eval("foo(true)");
-    eval("callGet()");
-    eval("updateGlobalVal()");
-    eval("updateWrappedGlobalVal()");
+    eval("foo(true)"); // -> false
+    eval("callGet()"); // -> 123
+    eval("updateGlobalVal()"); // -> 456
+    eval("updateWrappedGlobalVal()"); // -> 456
     // eval("bar(mkConst{mkConst{5}()}())");
-    eval("testA()");
-    eval("baseNS::testBase()");
-    eval("baseNS::HasBase().get()");
-    eval("baseNS::HasBase(baseNS::Base(1)).x");
+    eval("testA()"); // -> 789
+    eval("baseNS::testBase()"); // -> 8
+    eval("baseNS::HasBase().get()"); // -> 0
+    eval("baseNS::HasBase(baseNS::Base(1)).x"); // -> 1
+    eval("baseNS::HasBase().test()"); // -> 2
     // eval("(5 * 4 - 2) / 3");
     // eval("conditionFlags{Flags(true, true, true, false)}()");
     // eval("conditionFlags{Flags(true, true, true, true)}()");
-    //eval("baseNS::hasBase{baseNS::HasBase}()");
-    //eval("baseNS::hasBase2{A()}()");
-    //eval("baseNS::hasBase2{baseNS::HasBase()}()");
+    // eval("baseNS::hasBase{baseNS::HasBase}()");
+    // eval("baseNS::hasBase2{A()}()");
+    // eval("baseNS::hasBase2{baseNS::HasBase()}()");
     eval("MyEnum::B");
 }

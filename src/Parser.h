@@ -46,6 +46,7 @@ public:
     Word elifWord = asWord("elif");
     Word returnWord = asWord("return");
     Word withWord = asWord("with");
+    Word templateWord = asWord("template");
     Word hasWord = asWord("has");
     Word operationWord = asWord("operation");
     Word assignWord = asWord("assign");

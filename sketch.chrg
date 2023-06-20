@@ -1,21 +1,21 @@
 
 template (T: Type)
-struct Bar (
+struct Bar: {
     add: T = 0;
     vals: Array{T} = ( 1, 2, 3 );
     
     fn get(i: int) -> T: {
         return vals[i] + add;
     }
-)
-special_case struct Bar{int} (
+}
+special_case struct Bar{int}: {
     add: int = -1;
     vals: Array{int} = ( -1, -2, -3 );
 
     fn get(i: int) => 0;
     fn get(i: int): { return 0; }
     fn get(i: int) -> int: { return 0; }
-)
+}
 
 template (T: Type)
 fn appendTo(v&: Array{T}, item: T): {
@@ -66,23 +66,16 @@ special_case fn recursePos{0}(): {
     // base case
 }
 
-
-struct Int (
-    value: int = 0;
-)
-convert (i: Int) to int: { return i.value; }
-convert (n: int) to Int: { return ( n ); }
-
-struct Int (
+struct Int: {
     value: int = 0;
 
-    convert (self) to int: {
-        return value;
+    has ConvertTo{int}: {
+        fn convert(self) => value;
     }
-    convert (n: int) to: {
-        return Int(value = n);
-    }
-)
+}
+external int has ConvertTo{Int}: {
+    fn convert(self) => Int(self);
+}
 
 fn bar(): {
     let lambda = (i: int) -> int: {
@@ -98,13 +91,13 @@ fn bar(): {
     let withCapture = with(j: int = i) (k: int) => j + k;
 }
 
-struct vec3 (
+struct vec3: {
     x: int = 0;
     y: int = 0;
     z: int = 0;
 
     fn lengthSq() -> int: {}
-)
+}
 fn get() -> vec3: {}
 fn q(): {
     with (x, y, z)
@@ -114,11 +107,11 @@ fn q(): {
 }
 
 template (T: Type)
-struct Array (
+struct Array: {
     fn popBack(self&) -> T: {}
     fn truncate(self&, newSize: int): {}
-)
-fn foo() {
+}
+fn foo(): {
     let arr: Array = ( 1, 2, 3 );
     with (back, arr2)
     ( back = #, arr2 = .self ) = arr.popBack();
@@ -131,25 +124,25 @@ fn foo() {
     ( foo = .self ) = [mArr].popBack();
 }
 
-struct Vec2 (
+struct Vec2: {
     m_x: float;
     m_y: float;
 
     fn x(self&) <=> m_x;
-)
-struct Range (
+}
+struct Range: {
     m_low: float;
     m_high: float;
 
     fn low(self&) <=> m_low;
     fn high(self&) <=> m_high;
-)
-struct Rect (
+}
+struct Rect: {
     h: Range;
     v: Range;
 
     fn bottomLeft(self&) <=> Vec2(h.low(), v.low());
-)
+}
 fn onlyX(v: Vec2) => v.x();
 fn onlyX(v&: Vec2) = (x: float): { v.x() = x; }
 fn onlyX(v&: Vec2) <=> v.x();
@@ -160,18 +153,18 @@ fn callUpdate(r&: Rect): {
 }
 
 template (T: Type)
-struct Array (
+struct Array: {
     has Index{(int) -> T} (
         fn index(self&, i: int) <=> ...[i];
     )
-)
-special_case struct Array{bool} as BoolArray (
+}
+special_case struct Array{bool} as BoolArray: {
     has Index{(int) -> bool} (
         fn index(self, i: int) => getBit(i);
         fn index(self&, i: int) = (v: bool):
             setBit(i, v);
     )
-)
+}
 
 with (T: Type)
 template (C ?Index{(int) -> T}: Type)
@@ -216,12 +209,12 @@ operation Neg(i: Int) => Int(-i.value);
 operation Add(i: Int, j: Int) => Int(i.value + j.value);
 operation assign Add(i&: Int, j: Int): { i += j; }
 
-enum Ordering (
+enum Ordering: {
     Less;
     Equal;
     Greater;
-)
-compare (i: int) with (j: int) Ordering:{
+}
+compare (i: int) with (j: int) Ordering: {
     if i == j: return Ordering::Equal;
     if i < j: return Ordering::Less;
     return Ordering::Greater;
@@ -229,23 +222,25 @@ compare (i: int) with (j: int) Ordering:{
 
 
 template (Anchor: Type)
-struct ClassRoot (
+struct ClassRoot: {
     m_class: Class{Anchor} = ();
 
-    has AutoInitialize (
+    has AutoInitialize: {
         with {Self: Type}
         fn init(self&): {
             m_class = Class{Anchor}::of(Self);
         }
-    )
+    }
     fn class(self): { return m_class; }
-    convert (self) to => class();
-)
+    has ConvertTo{Class{Anchor}}: {
+        fn convert() => class();
+    }
+}
 template (Anchor: Type)
-struct Class (
+struct Class: {
     fn of(T: Type) -> Variant{Anchor}: {}
     fn type(self) -> Type: {}
-)
+}
 with (Anchor: Type)
 template (T ?ClassRoot{undeduced(Anchor)}: Type)
 fn has(var: Class{Anchor}) -> bool: {}
@@ -267,19 +262,19 @@ match {T} against (inst: ?ClassRoot{Anchor}) {
     return performMatch{Class{Anchor}::of(T)}(inst.class());
 }
 
-incomplete final struct SliceResult (
+incomplete closed struct SliceResult: {
     has ClassRoot;
-    struct Success (
+    struct Success: {
         has SliceResult;
         result: ExprResult;
-    )
-    struct NotFound (
+    }
+    struct NotFound: {
         has SliceResult;
-    )
-    struct Error (
+    }
+    struct Error: {
         has SliceResult;
-    )
-)
+    }
+}
 fn slice() -> Union{SliceResult}: {}
 fn doSlice() -> Opt{ExprResult}: {
     return match slice(): {
@@ -296,15 +291,15 @@ fn useSlice(): {
     let slice = doSlice(), else: return;
 }
 
-incomplete final(module) struct Expr (
+incomplete closed(module) struct Expr: {
     has ClassRoot;
-)
-struct BinaryOperatorExpr (
+}
+struct BinaryOperatorExpr: {
     op: BinaryOperator;
     left: id{Expr};
     right: id{Expr};
     has Expr;
-)
+}
 fn dispatch(e: id{Expr}): {
     match *e: {
         with(e ?BinaryOperatorExpr) e: {}
@@ -318,22 +313,22 @@ fn dispatch(e: id{Expr}): {
     }
 }
 
-incomplete struct View (
+incomplete struct View: {
     template (Self: Type)
     static virtual className: String = TypeInfo::get(Self).name();
 
     has ClassRoot{View};
-)
-struct ImageView (
-    has View (
+}
+struct ImageView: {
+    has View: {
         static className: String = "Image";
-    )
-)
+    }
+}
 
-object Obj (
+object Obj: {
     i: int = 0;
     fn get(self) => idof(i);
-)
+}
 fn deref(firstArg: id{int}, secondArg: id{Obj}): {
     return *firstArg + *secondArg.get();
 }
