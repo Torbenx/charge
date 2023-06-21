@@ -424,6 +424,8 @@ struct Interpreter : STContext {
         RecordKind kind() const { return ptr->kind; }
         template<typename T>
         T& as() { return *(T*)ptr; }
+        Value* operator->() { return &value(); }
+        const Value* operator->() const { return &value(); }
 
         ExprResult(const ExprResult& other)
             : ptr(other.ptr), m_value(other.value()) { ref(); }
@@ -484,6 +486,7 @@ struct Interpreter : STContext {
     Type typeType;
     Type fnType;
     Type intType;
+    Type memberType;
     Value arrayTemplateValue;
     Type typeTemplateType;
     Type fnTemplateType;
@@ -539,6 +542,7 @@ struct Interpreter : STContext {
     void findBuiltins() {
         typeType = findCompDeclHelper(asWord("Type"));
         fnType = findCompDeclHelper(asWord("Function"));
+        memberType = findCompDeclHelper(asWord("Member"));
         intType = findCompDeclHelper(asWord("int"));
         typeTemplateType = findCompDeclHelper(asWord("TypeTemplate"));
         fnTemplateType = findCompDeclHelper(asWord("FunctionTemplate"));
@@ -553,10 +557,10 @@ struct Interpreter : STContext {
         boolType = findCompDeclHelper(asWord("bool"));
         auto falseDecl = lookupName(globalContext, asWord("false")).value();
         VERIFY(at(falseDecl.decl).kind == DeclKind::GlobalDecl);
-        ((StaticLookupContext*)falseDecl.context)->values.push_back({ CompleteDecl { falseDecl.decl }, makeBuiltinValue(boolType, 0) });
+        ((StaticLookupContext*)falseDecl.declaringContext)->values.push_back({ CompleteDecl { falseDecl.decl }, makeBuiltinValue(boolType, 0) });
         auto trueDecl = lookupName(globalContext, asWord("true")).value();
         VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
-        ((StaticLookupContext*)trueDecl.context)->values.push_back({ CompleteDecl { trueDecl.decl }, makeBuiltinValue(boolType, 1) });
+        ((StaticLookupContext*)trueDecl.declaringContext)->values.push_back({ CompleteDecl { trueDecl.decl }, makeBuiltinValue(boolType, 1) });
 
         arrayTemplateValue = evalIdentifierName(*globalContext, asWord("Array"));
 
@@ -1177,14 +1181,15 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::Identifier), lValue(lValue) { }
     };
     struct LookupResult {
-        Ptr<NamedDecl> decl;
-        LookupContext* context;
+        Ptr<NamedDecl> decl = {};
+        LookupContext* declaringContext = nullptr;
+        LookupContext* foundInContext = nullptr;
     };
     std::optional<LookupResult> performLookup(LookupContext& context, Word name) {
         auto find = [&](std::span<Ptr<Decl>> decls) -> std::optional<LookupResult> {
             for (Ptr<Decl> decl : decls)
                 if (matchName(decl, name) && isPrimaryDecl(decl))
-                    return LookupResult { (Ptr<NamedDecl>)decl, &context };
+                    return LookupResult { (Ptr<NamedDecl>)decl, &context, &context };
             return {};
         };
         switch (context.kind) {
@@ -1228,7 +1233,11 @@ struct Interpreter : STContext {
                     hasResult = r;
                 }
             }
-            return hasResult;
+            if (hasResult.has_value()) {
+                hasResult.value().foundInContext = &context;
+                return hasResult;
+            }
+            return {};
         }
         default:
             VERIFY_NOT_REACHED();
@@ -1245,20 +1254,21 @@ struct Interpreter : STContext {
             fmt::println("looking up {} failed", sview(name));
         return {};
     }
-    ExprResult evalIdentifierName(LookupContext& ctx, Word name) {
-        auto result = lookupName(&ctx, name);
-        if (!result.has_value())
-            return invalResult;
-
-        auto [decl, declContext] = result.value();
+    ExprResult lookupToValue(LookupResult lookup) {
+        auto [decl, declContext, fContext] = lookup;
         DeclKind declKind = at(decl).kind;
         switch (declKind) {
-        case DeclKind::LocalDecl:
-        case DeclKind::EnumValueDecl: {
-            // TODO: Allow template arguments on local variable of template type
-            LValue lVal { declContext, CompleteDecl { decl, declKind == DeclKind::EnumValueDecl ? (StaticLookupContext*)declContext : nullptr } };
-            return ExprResult::make<IdentifierRecord>(getValue(lVal), lVal);
+        case DeclKind::LocalDecl: {
+            if (declContext->kind == LookupContextKind::Block || declContext->kind == LookupContextKind::Parameter) {
+                LValue lVal { declContext, CompleteDecl { decl } };
+                return ExprResult::make<IdentifierRecord>(getValue(lVal), lVal);
+            }
+            if (declContext->kind == LookupContextKind::Type || declContext->kind == LookupContextKind::EarlyType)
+                return ExprResult::make<BasicRecord>(makeCompleteDeclValue(memberType, CompleteDecl { decl, (StaticLookupContext*)declContext }));
+            VERIFY_NOT_REACHED();
         }
+        case DeclKind::EnumValueDecl:
+            return ExprResult::make<BasicRecord>(getValue(LValue { declContext, CompleteDecl { decl, (StaticLookupContext*)declContext } }));
         case DeclKind::EnumDecl:
         case DeclKind::NamespaceDecl: {
             const auto& type = declKind == DeclKind::EnumDecl ? typeType : namespaceType;
@@ -1296,42 +1306,29 @@ struct Interpreter : STContext {
         }
     }
     ExprResult evalIdentifier(LookupContext& ctx, Identifier id) {
-        ExprResult r = evalIdentifierName(ctx, id.word);
-        if (!r.value().valid())
+        auto lookup = lookupName(&ctx, id.word);
+        if (!lookup.has_value())
             return invalResult;
-        if (!id.hasBraces)
-            return r;
-        if (!isTemplateValue(r.value()))
+        ExprResult result = lookupToValue(lookup.value());
+        if (isTemplateValue(result) && id.hasBraces)
+            result = completeTemplate(result, evaluateArguments(ctx, id));
+
+        auto selfLookup = lookupName(&ctx, selfWord);
+        // TODO: ->parent->parent->parent is kind of ugly
+        if (selfLookup.has_value() && selfLookup->foundInContext->parent->parent->parent == lookup->foundInContext) {
+            ExprResult base = lookupToValue(selfLookup.value());
+            result = transformBasedMembers(base, result);
+        }
+        return result;
+    }
+    ExprResult evalIdentifierName(LookupContext& ctx, Word name) {
+        auto r = lookupName(&ctx, name);
+        if (!r.has_value())
             return invalResult;
-        return completeTemplate(r.value(), evaluateArguments(ctx, id));
+        return lookupToValue(r.value());
     }
     ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
-        auto selfResult = evalIdentifierName(ctx, selfWord);
-        if (selfResult.value().valid()) {
-            std::vector<ExprResult> members;
-            collectMembers(selfResult, e.identifier.word, members);
-            if (members.size() == 1)
-                return members[0];
-            EXPECT_EQ(members.size(), 0u);
-        }
-
-        ExprResult result = evalIdentifier(ctx, e.identifier);
-        // fmt::print("{} => ", sview(e.identifier.word));
-        // dumpValue(result);
-        if (!result.value().valid())
-            return invalResult;
-
-        if (!selfResult.value().valid())
-            return result;
-        if (result.value().kind != ValueKind::CompleteDecl && result.value().kind != ValueKind::TemplateDecl)
-            return result;
-        auto decl = asCompleteDeclValue(result);
-        if (at(decl.decl).kind != DeclKind::FnDecl)
-            return result;
-        // FIXME: Handle member functions of has members
-        if (decl.staticContext() != getStaticContext(typeOf(selfResult)))
-            return result;
-        return makeBasedMemberFunction(selfResult, result);
+        return evalIdentifier(ctx, e.identifier);
     }
 
     ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
@@ -1615,13 +1612,6 @@ struct Interpreter : STContext {
     }
     ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
         ExprResult base = evaluateExpr(context, e.base);
-        if (!e.isStatic && !e.member.hasBraces) {
-            std::vector<ExprResult> matches;
-            collectMembers(base, e.member.word, matches);
-            if (matches.size() == 1)
-                return matches[0];
-            EXPECT_EQ(matches.size(), 0u);
-        }
         CompleteDecl staticDecl = {};
         if (e.isStatic) {
             if (cmpCompleteDecls(typeOf(base.value()), namespaceType)) {
@@ -1631,30 +1621,46 @@ struct Interpreter : STContext {
                 staticDecl = implicitlyToType(base.value());
         } else
             staticDecl = typeOf(base.value());
-        auto* staticCtx = getStaticContext(staticDecl);
 
-        ExprResult r = evalIdentifierName(*staticCtx, e.member.word);
-        if (e.member.hasBraces)
-            r = completeTemplate(r, evaluateArguments(context, e.member));
-        if (!r.value().valid())
+        auto lookup = performLookup(*getStaticContext(staticDecl), e.member.word);
+        if (!lookup.has_value()) {
+            fmt::print("failed to access {} on ", sview(e.member.word));
+            dumpValue(base);
             return invalResult;
-
-        Type rType = typeOf(r.value());
-        if (cmpCompleteDecls(rType, fnType) || cmpCompleteDecls(rType, fnTemplateType)) {
-            return makeBasedMemberFunction(base, r);
         }
-        return r;
+        ExprResult result = lookupToValue(lookup.value());
+        if (isTemplateValue(result) && e.member.hasBraces)
+            result = completeTemplate(result, evaluateArguments(context, e.member));
+        return transformBasedMembers(base, result);
     }
 
-    ExprResult makeBasedMemberFunction(ExprResult base, ExprResult memberFn) {
-        EvaluatedArguments templateArgs;
-        templateArgs.args.emplace_back(ExprResult::make<BasicRecord>(makeTypeValue(typeOf(base))), Word {});
-        templateArgs.args.emplace_back(memberFn, Word {});
-        ExprResult type = completeTemplate(basedMemberFnTemplateValue, templateArgs);
-        if (!type.value().valid())
-            return invalResult;
-        NamedExprResult baseArg { base, Word {} };
-        return invokeCall(type, { &baseArg, 1 });
+    ExprResult transformBasedMembers(ExprResult base, ExprResult result) {
+        Type resultType = typeOf(result);
+        if (cmpCompleteDecls(resultType, fnType) || cmpCompleteDecls(resultType, fnTemplateType)) {
+            EvaluatedArguments templateArgs;
+            templateArgs.args.emplace_back(ExprResult::make<BasicRecord>(makeTypeValue(typeOf(base))), Word {});
+            templateArgs.args.emplace_back(result, Word {});
+            ExprResult type = completeTemplate(basedMemberFnTemplateValue, templateArgs);
+            if (!type.value().valid())
+                return invalResult;
+            NamedExprResult baseArg { base, Word {} };
+            return invokeCall(type, { &baseArg, 1 });
+        }
+        if (cmpCompleteDecls(resultType, memberType)) {
+            auto memberDecl = asCompleteDeclValue(result);
+            auto* typeCtx = memberDecl.staticContext();
+            VERIFY(typeCtx->kind == LookupContextKind::Type || typeCtx->kind == LookupContextKind::EarlyType);
+            base = slice(typeCtx->staticDecl, base);
+            VERIFY(base->kind == ValueKind::Array);
+            auto members = at(as<StructDecl>(typeCtx->staticDecl.decl).params);
+            EXPECT_EQ(members.size(), base->u.array->size);
+            for (uint32_t i = 0; i < members.size(); i++) {
+                if (members[i] == memberDecl.decl)
+                    return ExprResult::make<AccessRecord>(base->u.array->array()[i], base, memberDecl.decl);
+            }
+            VERIFY_NOT_REACHED();
+        }
+        return result;
     }
 
     ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) {
@@ -1794,6 +1800,10 @@ struct Interpreter : STContext {
             VERIFY_NOT_REACHED();
         }
         default:
+            fmt::print("attempt to assign ");
+            dumpValue(value);
+            fmt::print("to basic expr resulting in ");
+            dumpValue(base);
             VERIFY_NOT_REACHED();
         }
     }
@@ -1928,6 +1938,7 @@ void testInterpreter() {
     it.interpretDecls(R"str(
         struct Type: {}
         struct Function: {}
+        struct Member: {}
         struct Template: {}
         struct TypeTemplate: {
             has Template;
