@@ -130,7 +130,6 @@ struct Interpreter : STContext {
         Type(CompleteDecl decl)
             : CompleteDecl(std::move(decl)) { }
     };
-    bool isStruct(const Type& type) { return at(type.decl).kind == DeclKind::StructDecl; }
 
     enum class ValueKind : uint8_t {
         Invalid,
@@ -572,6 +571,10 @@ struct Interpreter : STContext {
                 (-args[0].value().u.builtinValue) & args[1].value().u.builtinValue);
         });
 
+        defineImpl("builtinCompleteTemplate", 1, [](Interpreter* i, std::span<const FnArgumentResult> args) -> Value {
+            return i->completeTemplate(args[0], {});
+        });
+
         auto& nsDecl = makeSet<NamespaceDecl>(builtinImplContext.staticDecl.decl, Word {});
         nsDecl.staticDecls = finalizeSpan(implDecls);
         builtinImpls = at(finalizeSpan(impls));
@@ -613,24 +616,17 @@ struct Interpreter : STContext {
         return { (Ptr<StaticDecl>)value.type.decl, value.type.staticContext() };
     }
 
-    bool implicitlyConvertibleToType(const Type& in) {
-        return cmpCompleteDecls(in, typeType) || cmpCompleteDecls(in, typeTemplateType);
-    }
     Type implicitlyToType(const Value& in) {
-        Type inType = typeOf(in);
-        if (cmpCompleteDecls(inType, typeType))
+        if (cmpCompleteDecls(typeOf(in), typeType))
             return asTypeValue(in);
-
-        if (cmpCompleteDecls(inType, typeTemplateType))
-            return asTypeValue(completeTemplate(in, {}).value());
+        Value converted = convertOrSlice(typeType, ExprResult::make<BasicRecord>(in));
+        if (cmpCompleteDecls(typeOf(converted), typeType))
+            return asTypeValue(converted);
 
         return {};
     }
     bool isTemplateValue(const Value& in) {
         return in.kind == ValueKind::TemplateDecl;
-    }
-    bool isCallable(const Type& in) {
-        return cmpCompleteDecls(in, fnType) || cmpCompleteDecls(in, fnTemplateType);
     }
 
     Value makeBuiltinValue(Type type, int64_t value) { return { std::move(type), value }; }
@@ -826,16 +822,10 @@ struct Interpreter : STContext {
         if (sliced.kind != SliceResult::Kind::NotFound || !allowConversions)
             return sliced;
 
-        Type sourceType = typeOf(sourceValue);
-        // TODO: should this be a conversion?
-        if (implicitlyConvertibleToType(sourceType) && cmpCompleteDecls(targetType, typeType)) {
-            return ExprResult::make<BasicRecord>(makeTypeValue(implicitlyToType(sourceValue)));
-        }
-
         EvaluatedArguments convertToTemplateArgs;
         convertToTemplateArgs.args.push_back(NamedExprResult { ExprResult::make<BasicRecord>(makeTypeValue(targetType)), Word() });
         Type convertToType = asTypeValue(completeTemplate(implicitConvertToTemplateValue, convertToTemplateArgs));
-        auto r = checkForHasMember(convertToType, sourceType);
+        auto r = checkForHasMember(convertToType, typeOf(sourceValue));
         if (!r.has_value())
             return invalResult;
         EXPECT_EQ(at(r->decl).decls.count, 1u);
@@ -851,7 +841,7 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(type, valType))
             return results.push_back(val);
 
-        if (!isStruct(valType))
+        if (val->kind != ValueKind::Array)
             return;
         std::optional<ExprResult> out;
         auto members = at(as<StructDecl>(valType.decl).params);
@@ -1036,20 +1026,15 @@ struct Interpreter : STContext {
         return {};
     }
     bool checkConstraint(const Value& value, const Value& condValue) {
-        Type condType = typeOf(condValue);
-        if (implicitlyConvertibleToType(condType))
-            return checkForHasMember(implicitlyToType(condValue), implicitlyToType(value)).has_value();
+        if (Type type = implicitlyToType(condValue); type.valid())
+            return checkForHasMember(type, implicitlyToType(value)).has_value();
 
-        if (isCallable(condType)) {
-            std::array<NamedExprResult, 1> args { { { ExprResult::make<BasicRecord>(value), {} } } };
-            Value res = invokeCall(ExprResult::make<BasicRecord>(condValue), args);
-            VERIFY(res.valid());
-            VERIFY(res.kind == ValueKind::Builtin);
-            VERIFY(cmpCompleteDecls(res.type, boolType));
-            return res.u.builtinValue;
-        }
-
-        VERIFY_NOT_REACHED();
+        std::array<NamedExprResult, 1> args { { { ExprResult::make<BasicRecord>(value), {} } } };
+        Value res = invokeCall(ExprResult::make<BasicRecord>(condValue), args);
+        VERIFY(res.valid());
+        VERIFY(res.kind == ValueKind::Builtin);
+        VERIFY(cmpCompleteDecls(res.type, boolType));
+        return res.u.builtinValue;
     }
 
     EvaluatedArguments evaluateArguments(LookupContext& ctx, Arguments& a) {
@@ -1475,8 +1460,7 @@ struct Interpreter : STContext {
         auto baseType = typeOf(base);
 
         // constructor
-        if (implicitlyConvertibleToType(baseType)) {
-            Type type = implicitlyToType(base);
+        if (Type type = implicitlyToType(base); type.valid()) {
             auto call = completeCall(type, args);
             if (!call.has_value())
                 return invalResult;
@@ -1559,7 +1543,7 @@ struct Interpreter : STContext {
             auto& structDecl = as<StructDecl>(decl.decl);
             auto memberCount = structDecl.params.count;
             Type* hasTypes = &at(allocate<Type>(memberCount));
-            std::fill_n(hasTypes, memberCount, Type {});
+            std::uninitialized_fill_n(hasTypes, memberCount, Type {});
             for (uint32_t i = 0; i < memberCount; i++) {
                 Ptr<Decl> member = at(structDecl.params, i);
                 if (at(member).kind != DeclKind::HasDecl)
@@ -1757,7 +1741,6 @@ struct Interpreter : STContext {
                 return false;
             Value baseValue = b.base;
             VERIFY(baseValue.kind == ValueKind::Array);
-            VERIFY(isStruct(baseValue.type));
             auto members = at(as<StructDecl>(baseValue.type.decl).params);
             for (uint32_t i = 0; i < members.size(); i++) {
                 if (members[i] == b.accessDecl) {
@@ -1915,6 +1898,9 @@ void testInterpreter() {
         struct Template: {}
         struct TypeTemplate: {
             has Template;
+            has ImplicitConvertTo{Type}: {
+                fn convert(self) => builtinCompleteTemplate(self);
+            }
         }
         struct FunctionTemplate: {
             has Template;
@@ -2005,7 +1991,7 @@ void testInterpreter() {
 
         template(T: Type, v: T)
         struct constant: {
-            valueMember: T = v;
+            value: T = v;
         }
         with(T: Type) template(v: T)
         fn mkConst() => constant{T, v}();
@@ -2115,5 +2101,6 @@ void testInterpreter() {
     // eval("baseNS::hasBase2{A()}()");
     // eval("baseNS::hasBase2{baseNS::HasBase()}()");
     eval("MyEnum::B");
-    eval("wrap{int}(MyInt(3))");
+    eval("wrap{int}(MyInt(3))"); // -> 3
+    eval("wrap{constant}(mkConst{4}()).value"); // -> 4
 }
