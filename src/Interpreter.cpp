@@ -4,35 +4,6 @@
 #include <vector>
 
 struct Interpreter : STContext {
-    /*
-     * We destingluish between parameterized and completed declarations:
-     * - Parameterized decls are a source level declarations with a list of arguments
-     *   for the decls parametric parameters. The Values that are not yet converted to
-     *   the target type of parameter.
-     * - Completed decls are a source with all converted parametric and 'with' arguments
-     *   specified and converted.
-     *
-     * A 'Type' is a completed 'StructDecl'.
-     *
-     * A 'LookupContext' stores the values of variables. More precisely its map from
-     * completed 'VarDecl's to 'Value's.
-     *
-     * If an 'IdentifierExpr' names a 'VarDecl' a parameterized decl is obtained by
-     * parameterizing the source level decl with the evaluated arguments. Then the decl
-     * is completed by converting the arguments to the parameters type and deducing the
-     * arguments of the 'with' clause in the process. Then the 'with' arguments are
-     * converted to 'with' parameter type.
-     *
-     * If an 'IdentifierExpr' names a 'StructDecl' or 'FnDecl' the result is the
-     * parameterized set of all matches.
-     *
-     * When a parametric 'FnDecl' is invoked the call arguments are converted to the
-     * fucntion parameter type and the unspecified parametric and 'with' arguments are
-     * deduced in the process. Then the parametric arguments are converted to parametric
-     * parameter type while deducing futher 'with' arguments. Last the 'with' arguments
-     * are converted to their parameter type.
-     *
-     */
 
     struct Value;
     struct NamedValue;
@@ -496,6 +467,8 @@ struct Interpreter : STContext {
     Word selfWord;
     CompleteDecl selfDecl;
     Type namespaceType;
+    Value convertToTemplateValue;
+    Value implicitConvertToTemplateValue;
 
     NamespaceLookupContext builtinImplContext { nullptr, {} };
     NamespaceLookupContext* globalContext = &builtinImplContext;
@@ -549,6 +522,8 @@ struct Interpreter : STContext {
         globalTemplateType = findCompDeclHelper(asWord("VariableTemplate"));
         namespaceType = findCompDeclHelper(asWord("Namespace"));
         basedMemberFnTemplateValue = evalIdentifierName(*globalContext, asWord("BasedMemberFunction"));
+        convertToTemplateValue = evalIdentifierName(*globalContext, asWord("ConvertTo"));
+        implicitConvertToTemplateValue = evalIdentifierName(*globalContext, asWord("ImplicitConvertTo"));
 
         selfWord = asWord("self");
         auto selfDeclPtr = make<LocalDecl>(selfWord, false);
@@ -857,12 +832,19 @@ struct Interpreter : STContext {
             return ExprResult::make<BasicRecord>(makeTypeValue(implicitlyToType(sourceValue)));
         }
 
-        return invalResult;
-        /*EvaluatedArguments parametricArgs;
-        parametricArgs.args.push_back({ ExprResult::make<BasicRecord>(makeTypeValue(targetType)), {} });
-        ExprResult convFn = lookupToValue(lookupIdentifier(*globalContext, conversionWord(), parametricArgs));
-        std::vector<NamedExprResult> fnArgs { { sourceValue, {} } };
-        return invokeCall(convFn, fnArgs);*/
+        EvaluatedArguments convertToTemplateArgs;
+        convertToTemplateArgs.args.push_back(NamedExprResult { ExprResult::make<BasicRecord>(makeTypeValue(targetType)), Word() });
+        Type convertToType = asTypeValue(completeTemplate(implicitConvertToTemplateValue, convertToTemplateArgs));
+        auto r = checkForHasMember(convertToType, sourceType);
+        if (!r.has_value())
+            return invalResult;
+        EXPECT_EQ(at(r->decl).decls.count, 1u);
+        Ptr<FnDecl> cvtDecl = (Ptr<FnDecl>)at(at(r->decl).decls, 0);
+        VERIFY(at(cvtDecl).kind == DeclKind::FnDecl);
+        EXPECT_EQ(at(cvtDecl).templateParams.count, 0u);
+        auto* cvtDeclContext = getStaticContext(r->containingType);
+        auto cvtCallBase = transformBasedMembers(slice(r->containingType, sourceValue), lookupToValue(cvtDecl, cvtDeclContext));
+        return invokeCall(cvtCallBase, {});
     }
     void collectSlices(const Type& type, ExprResult val, std::vector<ExprResult>& results) {
         Type valType = typeOf(val);
@@ -1035,23 +1017,28 @@ struct Interpreter : STContext {
         }
         return invalResult;
     }
-    bool checkForHasMember(const Type& shouldHave, const CompleteDecl& type) {
-        if (staticMatch(type, shouldHave))
-            return true;
-
+    struct FoundHasMember {
+        Type containingType;
+        Ptr<HasDecl> decl;
+    };
+    std::optional<FoundHasMember> checkForHasMember(const Type& shouldHave, const CompleteDecl& type) {
         TypeLookupContext* typeCtx = (TypeLookupContext*)getStaticContext(type);
         for (uint32_t i = 0; i < typeCtx->hasMemberTypes.size(); i++) {
             if (!typeCtx->hasMemberTypes[i].valid())
                 continue;
-            if (checkForHasMember(shouldHave, typeCtx->hasMemberTypes[i]))
-                return true;
+            const auto& hasType = typeCtx->hasMemberTypes[i];
+            if (staticMatch(shouldHave, hasType))
+                return FoundHasMember { type, (Ptr<HasDecl>)at(as<StructDecl>(type.decl).params, i) };
+            auto r = checkForHasMember(shouldHave, hasType);
+            if (r.has_value())
+                return r.value();
         }
-        return false;
+        return {};
     }
     bool checkConstraint(const Value& value, const Value& condValue) {
         Type condType = typeOf(condValue);
         if (implicitlyConvertibleToType(condType))
-            return checkForHasMember(implicitlyToType(condValue), implicitlyToType(value));
+            return checkForHasMember(implicitlyToType(condValue), implicitlyToType(value)).has_value();
 
         if (isCallable(condType)) {
             std::array<NamedExprResult, 1> args { { { ExprResult::make<BasicRecord>(value), {} } } };
@@ -1254,8 +1241,10 @@ struct Interpreter : STContext {
             fmt::println("looking up {} failed", sview(name));
         return {};
     }
-    ExprResult lookupToValue(LookupResult lookup) {
-        auto [decl, declContext, fContext] = lookup;
+    ExprResult lookupToValue(LookupResult result) {
+        return lookupToValue(result.decl, result.declaringContext);
+    }
+    ExprResult lookupToValue(Ptr<NamedDecl> decl, LookupContext* declContext) {
         DeclKind declKind = at(decl).kind;
         switch (declKind) {
         case DeclKind::LocalDecl: {
@@ -1593,22 +1582,6 @@ struct Interpreter : STContext {
     ExprResult accessMember(ExprResult base, uint32_t i) {
         auto members = at(as<StructDecl>(base.value().type.decl).params);
         return ExprResult::make<AccessRecord>(base.value().u.array->array()[i], base, members[i]);
-    }
-    void collectMembers(ExprResult base, Word name, std::vector<ExprResult>& results) {
-        Type baseType = typeOf(base.value());
-        if (!isStruct(baseType))
-            return;
-        auto members = at(as<StructDecl>(baseType.decl).params);
-        for (uint32_t i = 0; i < members.size(); i++) {
-            if (matchName(members[i], name)) {
-                results.push_back(accessMember(base, i));
-                return;
-            }
-        }
-        for (uint32_t i = 0; i < members.size(); i++) {
-            if (at(members[i]).kind == DeclKind::HasDecl)
-                collectMembers(accessMember(base, i), name, results);
-        }
     }
     ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
         ExprResult base = evaluateExpr(context, e.base);
@@ -1978,6 +1951,11 @@ void testInterpreter() {
             return true;
         }
 
+        template(T: Type)
+        struct ConvertTo: {}
+        template(T: Type)
+        struct ImplicitConvertTo: { has ConvertTo{T}; }
+
         struct int: {}
         INT_MASK: int = 0xffff'ffff'ffff'ffff;
         operation Add(i: int, j: int) => builtinAddAndMask(i, j, INT_MASK);
@@ -2105,6 +2083,14 @@ void testInterpreter() {
         enum MyEnum: {
             A; B; C;
         }
+
+        struct MyInt: {
+            value: int = 0;
+
+            has ImplicitConvertTo{int}: {
+                fn convert(self) => value;
+            }
+        }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2129,4 +2115,5 @@ void testInterpreter() {
     // eval("baseNS::hasBase2{A()}()");
     // eval("baseNS::hasBase2{baseNS::HasBase()}()");
     eval("MyEnum::B");
+    eval("wrap{int}(MyInt(3))");
 }
