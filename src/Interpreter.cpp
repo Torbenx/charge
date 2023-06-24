@@ -468,6 +468,8 @@ struct Interpreter : STContext {
     Type namespaceType;
     Value convertToTemplateValue;
     Value implicitConvertToTemplateValue;
+    std::array<Value, std::to_underlying(BinaryOperator::LastOp) - std::to_underlying(BinaryOperator::FirstOp) + 1> binaryOpTraits = {};
+    std::array<Value, std::to_underlying(UnaryOperator::COUNT)> unaryOpTraits = {};
 
     NamespaceLookupContext builtinImplContext { nullptr, {} };
     NamespaceLookupContext* globalContext = &builtinImplContext;
@@ -523,6 +525,15 @@ struct Interpreter : STContext {
         basedMemberFnTemplateValue = evalIdentifierName(*globalContext, asWord("BasedMemberFunction"));
         convertToTemplateValue = evalIdentifierName(*globalContext, asWord("ConvertTo"));
         implicitConvertToTemplateValue = evalIdentifierName(*globalContext, asWord("ImplicitConvertTo"));
+
+        for (uint32_t i = 0; i < binaryOpTraits.size(); i++) {
+            BinaryOperator op = (BinaryOperator)(std::to_underlying(BinaryOperator::FirstOp) + i);
+            binaryOpTraits[i] = evalIdentifierName(*globalContext, asWord(toOperationString(op)));
+        }
+        for (uint32_t i = 0; i < unaryOpTraits.size(); i++) {
+            UnaryOperator op = (UnaryOperator)i;
+            unaryOpTraits[i] = evalIdentifierName(*globalContext, asWord(toOperationString(op)));
+        }
 
         selfWord = asWord("self");
         auto selfDeclPtr = make<LocalDecl>(selfWord, false);
@@ -834,7 +845,7 @@ struct Interpreter : STContext {
         EXPECT_EQ(at(cvtDecl).templateParams.count, 0u);
         auto* cvtDeclContext = getStaticContext(r->containingType);
         auto cvtCallBase = transformBasedMembers(slice(r->containingType, sourceValue), lookupToValue(cvtDecl, cvtDeclContext));
-        return invokeCall(cvtCallBase, {});
+        return invokeCall(cvtCallBase, {}, false);
     }
     void collectSlices(const Type& type, ExprResult val, std::vector<ExprResult>& results) {
         Type valType = typeOf(val);
@@ -1131,12 +1142,12 @@ struct Interpreter : STContext {
     ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
         auto& e = at(p);
 
-#define EXPR_KIND(kind)                              \
-    case ExprKind::kind: {                           \
-        ExprResult r = eval##kind(ctx, (kind&)e);    \
-        /*if (!r.value().valid())                    \
-            fmt::println("eval" #kind " invalid");*/ \
-        return r;                                    \
+#define EXPR_KIND(kind)                            \
+    case ExprKind::kind: {                         \
+        ExprResult r = eval##kind(ctx, (kind&)e);  \
+        if (!r.value().valid())                    \
+            fmt::println("eval" #kind " invalid"); \
+        return r;                                  \
     }
 
         switch (e.kind) {
@@ -1325,15 +1336,13 @@ struct Interpreter : STContext {
         CompleteDecl target;
         std::vector<FnArgumentResult> args = {};
     };
-    std::optional<CompleteCall> completeCall(CompleteDecl fnDecl, std::span<const NamedExprResult> namedFnArgs, std::optional<ExprResult> selfArg = {}) {
+    std::optional<CompleteCall> completeCall(CompleteDecl fnDecl, std::span<const NamedExprResult> namedFnArgs, std::optional<ExprResult> selfArg, bool conversionsAllowed) {
         auto& fn = as<CallableDecl>(fnDecl.decl);
         auto posFnArgs = positionArguments(at(fn.params), {}, namedFnArgs, selfArg);
         if (!posFnArgs.has_value())
             return {};
 
         if (!withTemplateContext(fnDecl, [&](LookupContext& context) {
-                bool conversionsAllowed = fn.name != conversionWord();
-
                 // Early type context since we don't know all the template arguments yet.
                 // This is fine since the type expressions are evaluated in this context, which
                 // have to be constant expressions.
@@ -1455,13 +1464,13 @@ struct Interpreter : STContext {
         }
         return true;
     }
-    ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args) {
+    ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args, bool conversionsAllowed = true) {
         Value base = baseR;
         auto baseType = typeOf(base);
 
         // constructor
         if (Type type = implicitlyToType(base); type.valid()) {
-            auto call = completeCall(type, args);
+            auto call = completeCall(type, args, {}, conversionsAllowed);
             if (!call.has_value())
                 return invalResult;
             return ExprResult::make<CallRecord>(evaluateCall(call.value()), call.value());
@@ -1482,7 +1491,7 @@ struct Interpreter : STContext {
         if (cmpCompleteDecls(baseType, fnType)) {
             VERIFY(base.kind == ValueKind::CompleteDecl);
             auto baseDecl = asCompleteDeclValue(base);
-            auto call = completeCall(baseDecl, args, selfArg);
+            auto call = completeCall(baseDecl, args, selfArg, conversionsAllowed);
             if (!call.has_value())
                 return invalResult;
 
@@ -1620,21 +1629,37 @@ struct Interpreter : STContext {
         return result;
     }
 
-    ExprResult evalUnaryOperatorExpr(LookupContext&, UnaryOperatorExpr&) {
-        VERIFY_NOT_REACHED();
-        /*ExprResult base = lookupToValue(lookupIdentifier(context, { {}, makeUnaryOpWord(e.op) }));
-        NamedExprResult arg = { evaluateExpr(context, e.subExpr), {} };
-        return invokeCall(base, { &arg, 1 });*/
+    ExprResult invokeOp(Value traitValue, ExprResult base, std::span<NamedExprResult> args) {
+        if (isTemplateValue(traitValue)) {
+            EvaluatedArguments templateArgs;
+            for (NamedExprResult& arg : args)
+                templateArgs.args.push_back(NamedExprResult { ExprResult::make<BasicRecord>(makeTypeValue(typeOf(arg))), Word() });
+            traitValue = completeTemplate(traitValue, templateArgs);
+        }
+        Type targetType = asTypeValue(traitValue);
+
+        VERIFY(base->valid());
+        auto r = checkForHasMember(targetType, typeOf(base));
+        if (!r.has_value())
+            return invalResult;
+        EXPECT_EQ(at(r->decl).decls.count, 1u);
+        Ptr<FnDecl> opDecl = (Ptr<FnDecl>)at(at(r->decl).decls, 0);
+        VERIFY(at(opDecl).kind == DeclKind::FnDecl);
+        EXPECT_EQ(at(opDecl).templateParams.count, 0u);
+        auto* containingCtx = getStaticContext(r->containingType);
+        auto opCallBase = transformBasedMembers(slice(r->containingType, base), lookupToValue(opDecl, containingCtx));
+        return invokeCall(opCallBase, args);
     }
-    ExprResult evalBinaryOperatorExpr(LookupContext&, BinaryOperatorExpr&) {
-        /*if (!isCmpOp(e.op)) {
-            ExprResult base = lookupToValue(lookupIdentifier(context, { {}, makeBinaryOpWord(e.op) }));
-            std::array<NamedExprResult, 2> args { {
-                { evaluateExpr(context, e.left), {} },
-                { evaluateExpr(context, e.right), {} },
-            } };
-            return invokeCall(base, args);
-        }*/
+    ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e) {
+        ExprResult base = evaluateExpr(context, e.subExpr);
+        return invokeOp(unaryOpTraits[std::to_underlying(e.op)], base, {});
+    }
+    ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e) {
+        if (!isCmpOp(e.op)) {
+            ExprResult left = evaluateExpr(context, e.left);
+            NamedExprResult right = NamedExprResult { evaluateExpr(context, e.right), Word() };
+            return invokeOp(binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)], left, std::span<NamedExprResult> { &right, 1 });
+        }
         VERIFY_NOT_REACHED();
     }
     ExprResult evalConstraintExpr(LookupContext&, ConstraintExpr&) {
@@ -1917,38 +1942,79 @@ void testInterpreter() {
             base: T;
         }
 
-        struct bool: {}
-        true: bool = ();
-        false: bool = ();
-        operation LogAnd(a: bool, b: bool): {
-            if a: {
-                if b: return true;
-            }
-            return false;
-        }
-        operation LogOr(a: bool, b: bool): {
-            if !a: {
-                if !b: return false;
-            }
-            return true;
-        }
-        operation LogNot(a: bool): {
-            if a: return false;
-            return true;
-        }
-
         template(T: Type)
         struct ConvertTo: {}
         template(T: Type)
         struct ImplicitConvertTo: { has ConvertTo{T}; }
 
-        struct int: {}
-        INT_MASK: int = 0xffff'ffff'ffff'ffff;
-        operation Add(i: int, j: int) => builtinAddAndMask(i, j, INT_MASK);
-        operation Sub(i: int, j: int) => i + (-j);
-        operation Mul(i: int, j: int) => builtinMulAndMask(i, j, INT_MASK);
-        operation Div(i: int, j: int) => builtinSignedDivAndMask(i, j, INT_MASK);
-        operation Neg(i: int) => builtinNegateAndMask(i, INT_MASK);
+        template(T: Type) struct Add: {}
+        template(T: Type) struct Sub: {}
+        template(T: Type) struct BitAnd: {}
+        template(T: Type) struct LogAnd: {}
+        template(T: Type) struct BitXor: {}
+        template(T: Type) struct BitOr: {}
+        template(T: Type) struct LogOr: {}
+        template(T: Type) struct Mul: {}
+        template(T: Type) struct Div: {}
+        template(T: Type) struct Rem: {}
+        template(T: Type) struct Shl: {}
+        template(T: Type) struct Shr: {}
+
+        struct BitNot: {}
+        struct PreInc: {}
+        struct PreDec: {}
+        struct LogNot: {}
+        struct Plus: {}
+        struct Neg: {}
+        struct PostInc: {}
+        struct PostDec: {}
+
+        struct bool: {
+            has LogAnd{bool}: {
+                fn logAnd(self, b: bool): {
+                    if self: {
+                        if b: return true;
+                    }
+                    return false;
+                }
+            }
+            has LogOr{bool}: {
+                fn logOr(self, b: bool): {
+                    if !self: {
+                        if !b: return false;
+                    }
+                    return true;
+                }
+            }
+            has LogNot: {
+                fn logNot(self): {
+                    if self: return false;
+                    return true;
+                }
+            }
+        }
+        true: bool = ();
+        false: bool = ();
+
+        struct int: {
+            static INT_MASK: int = 0xffff'ffff'ffff'ffff;
+
+            has Add{int}: {
+                fn add(self, r: int) => builtinAddAndMask(self, r, INT_MASK);
+            }
+            has Sub{int}: {
+                fn sub(self, r: int) => add(r.neg());
+            }
+            has Neg: {
+                fn neg(self) => builtinNegateAndMask(self, INT_MASK);
+            }
+            has Mul{int}: {
+                fn mul(self, r: int) => builtinMulAndMask(self, r, INT_MASK);
+            }
+            has Div{int}: {
+                fn div(self, r: int) => builtinSignedDivAndMask(self, r, INT_MASK);
+            }
+        }
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
@@ -2094,7 +2160,8 @@ void testInterpreter() {
     eval("baseNS::HasBase().get()"); // -> 0
     eval("baseNS::HasBase(baseNS::Base(1)).x"); // -> 1
     eval("baseNS::HasBase().test()"); // -> 2
-    // eval("(5 * 4 - 2) / 3");
+    eval("(5 * 4 - 2) / 3"); // -> 6
+    eval("!(true && false)"); // -> true
     // eval("conditionFlags{Flags(true, true, true, false)}()");
     // eval("conditionFlags{Flags(true, true, true, true)}()");
     // eval("baseNS::hasBase{baseNS::HasBase}()");

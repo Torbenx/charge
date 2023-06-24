@@ -9,7 +9,8 @@
 inline constexpr uint32_t BUMP_START_OFFSET_ALIGN4 = 128;
 
 struct STStorage {
-    uint32_t* stStorage = new uint32_t[4096] {};
+    static constexpr uint32_t storageArraySizeAlign4 = 16384;
+    uint32_t* stStorage = new uint32_t[storageArraySizeAlign4] {};
     uint32_t storageEndAlign4 = BUMP_START_OFFSET_ALIGN4;
 
     std::unordered_map<std::string, uint32_t> wordMap = {};
@@ -31,11 +32,7 @@ public:
     }
 
     Word asWord(std::string_view view);
-    Word makeUnaryOpWord(UnaryOperator op);
-    Word makeBinaryOpWord(BinaryOperator op);
-    Word makeAssignOpWord(BinaryOperator op);
     static constexpr uint32_t CONVERSION_WORD_ID = -1;
-    static Word conversionWord() { return { CONVERSION_WORD_ID }; }
     Word structWord = asWord("struct");
     Word fnWord = asWord("fn");
     Word letWord = asWord("let");
@@ -48,22 +45,8 @@ public:
     Word withWord = asWord("with");
     Word templateWord = asWord("template");
     Word hasWord = asWord("has");
-    Word operationWord = asWord("operation");
-    Word assignWord = asWord("assign");
     Word enumWord = asWord("enum");
     Word namespaceWord = asWord("namespace");
-    template<typename T, T max>
-    std::array<Word, std::to_underlying(max)> operationWords() {
-        std::array<Word, std::to_underlying(max)> out;
-        for (std::underlying_type_t<T> i = 0; i < std::to_underlying(max); i++) {
-            out[i] = asWord(toOperationString((T)i));
-        }
-        return out;
-    }
-    std::array<Word, std::to_underlying(UnaryOperator::COUNT)> unaryOperationWords
-        = operationWords<UnaryOperator, UnaryOperator::COUNT>();
-    std::array<Word, std::to_underlying(BinaryOperator::FirstCmp)> binaryOperationWords
-        = operationWords<BinaryOperator, BinaryOperator::FirstCmp>();
 
     std::string_view sview(Word word) const;
 

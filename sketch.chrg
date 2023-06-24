@@ -72,6 +72,10 @@ struct Int: {
     has ConvertTo{int}: {
         fn convert(self) => value;
     }
+
+    has Add{int}: {
+        fn add(self, i: int) => Int(value + i);
+    }
 }
 external int has ConvertTo{Int}: {
     fn convert(self) => Int(self);
@@ -204,10 +208,6 @@ fn getFirst(arr: ?match Array{T}) -> T: {
 // Other:
 // []  ->   Index
 // ()  ->   Invoke
-
-operation Neg(i: Int) => Int(-i.value);
-operation Add(i: Int, j: Int) => Int(i.value + j.value);
-operation assign Add(i&: Int, j: Int): { i += j; }
 
 enum Ordering: {
     Less;

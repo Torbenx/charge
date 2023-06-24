@@ -296,6 +296,8 @@ enum class BinaryOperator : uint8_t {
     Remainder, // %
     ShiftLeft, // <<
     ShiftRight, // >>
+    FirstOp = Plus,
+    LastOp = ShiftRight,
 
     NotEqual, // !=
     Equal, // ==

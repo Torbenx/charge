@@ -171,6 +171,7 @@ uint32_t STStorage::allocate(uint32_t itemAlign, uint32_t itemSize, uint32_t ite
     storageEndAlign4 = alignmentCeil(alignmentAlign4, storageEndAlign4);
     uint32_t ret = storageEndAlign4;
     storageEndAlign4 += sizeAlign4;
+    VERIFY(storageEndAlign4 <= storageArraySizeAlign4);
     return ret;
 }
 
@@ -182,43 +183,12 @@ Word STContext::asWord(std::string_view view) {
     return Word { id };
 }
 
-constexpr uint32_t UNARY_OP_WORD_BITS = (uint32_t)1 << 30;
-constexpr uint32_t BINARY_OP_WORD_BITS = (uint32_t)2 << 30;
-constexpr uint32_t ASSIGN_OP_WORD_BITS = (uint32_t)3 << 30;
-constexpr uint32_t OP_WORD_MASK = (uint32_t)3 << 30;
-Word STContext::makeUnaryOpWord(UnaryOperator op) {
-    return Word { UNARY_OP_WORD_BITS | std::to_underlying(op) };
-}
-Word STContext::makeBinaryOpWord(BinaryOperator op) {
-    return Word { BINARY_OP_WORD_BITS | std::to_underlying(op) };
-}
-Word STContext::makeAssignOpWord(BinaryOperator op) {
-    return Word { ASSIGN_OP_WORD_BITS | std::to_underlying(op) };
-}
-
 std::string_view STContext::sview(Word word) const {
-    if (word.id == conversionWord().id) {
-        return "conversion";
+    for (const auto& pair : storage->wordMap) {
+        if (pair.second == word.id)
+            return pair.first;
     }
-    switch (word.id >> 30) {
-    case 0: {
-        for (const auto& pair : storage->wordMap) {
-            if (pair.second == word.id)
-                return pair.first;
-        }
-        return {};
-    }
-    case 1:
-        return toShortString((UnaryOperator)(word.id & ~OP_WORD_MASK));
-    case 2: {
-        std::string_view s = toStringWithEqual((BinaryOperator)(word.id & ~OP_WORD_MASK));
-        s.remove_suffix(1);
-        return s;
-    }
-    case 3:
-        return toShortString((BinaryOperator)(word.id & ~OP_WORD_MASK));
-    }
-    VERIFY_NOT_REACHED();
+    return {};
 }
 
 uint64_t Parser::lexInteger() {
@@ -654,37 +624,6 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         }
         advance();
         d.decls = finalizeSpan(decls);
-        return;
-    }
-    // operation
-    if (tok.word == operationWord) {
-        VERIFY(scope == DeclParseScope::Namespace);
-        advance();
-
-        bool hasAssign = false;
-        EXPECT_EQ(tok.kind(), TokenKind::Word);
-        if (tok.word == assignWord) {
-            hasAssign = true;
-            advance();
-        }
-
-        Word name = {};
-        EXPECT_EQ(tok.kind(), TokenKind::Word);
-        for (uint32_t i = 0; i < std::to_underlying(UnaryOperator::COUNT); i++) {
-            if (tok.word == unaryOperationWords[i])
-                name = makeUnaryOpWord((UnaryOperator)i);
-        }
-        for (uint32_t i = 0; i < std::to_underlying(BinaryOperator::FirstCmp); i++) {
-            if (tok.word == binaryOperationWords[i])
-                name = hasAssign ? makeAssignOpWord((BinaryOperator)i) : makeBinaryOpWord((BinaryOperator)i);
-        }
-        VERIFY((bool)name);
-        advance();
-
-        auto& d = makeSet<FnDecl>(out, name);
-        d.with = with;
-        d.params = (Span<Ptr<Decl>>)parseParameterContext(ParameterParseScope::Function);
-        parseFunctionDefinition(d);
         return;
     }
 

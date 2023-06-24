@@ -65,7 +65,6 @@ int main() {
             struct Int: {
                 value: int = 0;
             }
-            operation Add(i: Int, j: Int): { return Int(i.value + j.value); }
 
             enum Foo: {
                 X; Y; Z;
