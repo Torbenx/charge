@@ -197,6 +197,7 @@ struct EnumDecl : StaticDecl {
         : StaticDecl(DeclKind::EnumDecl, name) { }
 };
 struct EnumValueDecl : StaticDecl {
+    Ptr<Expr> enumValue = {};
     EnumValueDecl(Word name)
         : StaticDecl(DeclKind::EnumValueDecl, name) { }
 };

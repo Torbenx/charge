@@ -1544,6 +1544,13 @@ struct Interpreter : STContext {
                     EXPECT_EQ(d.templateParams.count, 0u);
                     EXPECT_EQ(d.with.params.count, 0u);
                     CompleteDecl compDecl { (Ptr<NamedDecl>)declInDecl, ctx };
+                    if (d.enumValue) {
+                        Value value = evaluateExpr(*ctx, d.enumValue);
+                        VERIFY(value.valid());
+                        VERIFY(cmpCompleteDecls(typeOf(value), decl));
+                        VERIFY(value.kind == ValueKind::Builtin);
+                        currentValue = value.u.builtinValue;
+                    }
                     ctx->values.push_back({ compDecl, makeBuiltinValue(decl, currentValue++) });
                 }
             }
@@ -2133,7 +2140,7 @@ void testInterpreter() {
         fn conditionFlags() => false;
 
         enum MyEnum: {
-            A; B; C;
+            A; B; C; D = B; E;
         }
 
         struct MyInt: {
@@ -2167,7 +2174,8 @@ void testInterpreter() {
     // eval("baseNS::hasBase{baseNS::HasBase}()");
     // eval("baseNS::hasBase2{A()}()");
     // eval("baseNS::hasBase2{baseNS::HasBase()}()");
-    eval("MyEnum::B");
+    eval("MyEnum::B"); // -> 1
+    eval("MyEnum::E"); // -> 2
     eval("wrap{int}(MyInt(3))"); // -> 3
     eval("wrap{constant}(mkConst{4}()).value"); // -> 4
 }

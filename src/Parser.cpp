@@ -661,8 +661,13 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
 
     // variable
     if (!declarator) {
-        if (!hasMut && !hasStatic && tok.kind() == TokenKind::SemiColon) {
-            out = make<EnumValueDecl>(name);
+        if (!hasMut && !hasStatic && (tok.kind() == TokenKind::SemiColon || tok.kind() == TokenKind::Equal)) {
+            auto& e = makeSet<EnumValueDecl>(out, name);
+            if (tok.kind() == TokenKind::Equal) {
+                advance();
+                parseBinaryExpr(e.enumValue);
+            }
+            EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
             advance();
             return;
         }

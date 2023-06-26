@@ -1,5 +1,5 @@
 
-enum Token (
+enum Token: {
     LeftParen; // (
     RightParen; // )
     LeftAngle; // [
@@ -73,11 +73,11 @@ enum Token (
     LastLiteral = IntegerLiteral;
 
     EOF;
-)
+}
 
-namespace lookup_table (
+namespace lookup_table: {
 
-struct Input (
+struct Input: {
     firstChar: uint8;
     lastChar: uint8 = beginChar;
     bare: Token;
@@ -85,12 +85,12 @@ struct Input (
     equal: Opt{Token} = ();
     repeatEqual: Opt{Token} = ();
     bareAdvance: int = 1;
-)
+}
 
-struct Output (
+struct Output: {
     tok: Opt{Token} = ();
     advance: int = 0;
-)
+}
 
 fn computeIndex(char: uint8, repeat: bool, equal: bool): {
     mut out: int = char - 0x20;
@@ -160,19 +160,17 @@ static table = [
     ))];
 fn get(char: uint8, repeat: bool, equal: bool) => table[computeIndex(char, repeat, equal)];
 
-)
+}
 
-struct SourcePos (
+struct SourcePos: {}
 
-)
-
-object SourceBuffer (
-    has Index{(int) -> uint8} (
+object SourceBuffer: {
+    has Index{(int) -> uint8}: {
         fn index(i: int) => uint8();
-    )
-)
+    }
+}
 
-object Parser (
+object Parser: {
     sourceOff: int = 0;
     source: SourceBuffer;
 
@@ -197,4 +195,4 @@ object Parser (
 
         sourceOff += advance;
     }
-)
+}
