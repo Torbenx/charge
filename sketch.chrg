@@ -1,5 +1,5 @@
 
-template (T: Type)
+template(T: Type)
 struct Bar: {
     add: T = 0;
     vals: Array{T} = ( 1, 2, 3 );
@@ -17,40 +17,37 @@ special_case struct Bar{int}: {
     fn get(i: int) -> int: { return 0; }
 }
 
-template (T: Type)
+template(T: Type)
 fn appendTo(v&: Array{T}, item: T): {
     v.append(item);
 }
 
-template (T: Type)
+template(T: Type)
 static sizeOf: int = sizeof(T);
 
 
-with (cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type)
-template (f{cargs..}: (params..) -> RetT)
+with(cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type)
+template(f{cargs..}: (params..) -> RetT)
 fn call(args..: Tuple{undeduced(params)}) -> RetT: {
     return f{cargs..}(args..);
 }
 
-template (T: Type, size: int)
+template(T: Type, size: int)
 fn test(defaultValue: T = (), table: FixedArray{T, size});
 fn callTest(): {
     call{test}((), { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
     call{test{T = int}}(table = ()); // -> call{test{T = int, size = 0}}
 }
 
-template (spacial, base)
+template(special: Type, base: Template)
 fn isSpecializationOf() => false;
-template (base)
+template(base: Template)
 special_case fn isSpecializationOf{base{_..}, base}() => true;
 
-template (b, c)
-fn doStuff(first: b{c}, second: b);
 
-
-template (x: int)
+template(x: int)
 fn recurse();
-template (x ?[# > 0]: int)
+template(x ?[# > 0]: int)
 special_case fn recurse{x}(): {
     recurse{x - 1}();
 }
@@ -58,7 +55,7 @@ special_case fn recurse{0}(): {
     // base case
 }
 
-template (x ?[# >= 0]: int)
+template(x ?[# >= 0]: int)
 special_case fn recurse{x} as recursePos(): {
     recurse{x - 1}();
 }
@@ -100,31 +97,31 @@ struct vec3: {
     y: int = 0;
     z: int = 0;
 
-    fn lengthSq() -> int: {}
+    fn lengthSq() -> int: { return x * x + y * y + z * z; }
 }
 fn get() -> vec3: {}
 fn q(): {
-    with (x, y, z)
+    with(x, y, z)
     (x, y, z) = get();
-    with (l, z, y)
+    with(l, z, y)
     (l = #.lengthSq(), z = #.z, y = #.y) = get();
 }
 
-template (T: Type)
+template(T: Type)
 struct Array: {
     fn popBack(self&) -> T: {}
     fn truncate(self&, newSize: int): {}
 }
 fn foo(): {
     let arr: Array = ( 1, 2, 3 );
-    with (back, arr2)
+    with(back, arr2)
     ( back = #, arr2 = .self ) = arr.popBack();
-    with (arr3)
+    with(arr3)
     ( arr3 = .self ) = arr.truncate(3);
 
     mut mArr: Array = ( 4, 5, 6 );
     mArr.popBack();
-    with (foo)
+    with(foo)
     ( foo = .self ) = [mArr].popBack();
 }
 
@@ -156,27 +153,27 @@ fn callUpdate(r&: Rect): {
     update(r.bottomLeft().x());
 }
 
-template (T: Type)
+template(T: Type)
 struct Array: {
-    has Index{(int) -> T} (
+    has Index{(int) -> T}: {
         fn index(self&, i: int) <=> ...[i];
-    )
+    }
 }
 special_case struct Array{bool} as BoolArray: {
-    has Index{(int) -> bool} (
+    has Index{(int) -> bool}: {
         fn index(self, i: int) => getBit(i);
         fn index(self&, i: int) = (v: bool):
             setBit(i, v);
-    )
+    }
 }
 
-with (T: Type)
-template (C ?Index{(int) -> T}: Type)
+with(T: Type)
+template(C ?has(Index{(int) -> T}): Type)
 fn withIndexType(c: C): {}
-with (T: Type)
-fn withIndexType(c: ?Index{(int) -> T}): {}
-with (T: Type)
-fn getFirst(arr: ?match Array{T}) -> T: {
+with(T: Type)
+fn withIndexType(c: ?has(Index{(int) -> T})): {}
+with(T: Type)
+fn getFirst(arr: ?match(Array{T})) -> T: {
     return arr.first();
 }
 
@@ -221,12 +218,12 @@ compare (i: int) with (j: int) Ordering: {
 }
 
 
-template (Anchor: Type)
+template(Anchor: Type)
 struct ClassRoot: {
     m_class: Class{Anchor} = ();
 
     has AutoInitialize: {
-        with {Self: Type}
+        with(Self: Type)
         fn init(self&): {
             m_class = Class{Anchor}::of(Self);
         }
@@ -236,33 +233,13 @@ struct ClassRoot: {
         fn convert() => class();
     }
 }
-template (Anchor: Type)
+template(Anchor: Type)
 struct Class: {
-    fn of(T: Type) -> Variant{Anchor}: {}
+    fn of(T ?has{Anchor}: Type) -> Variant{Anchor}: {}
     fn type(self) -> Type: {}
 }
-with (Anchor: Type)
-template (T ?ClassRoot{undeduced(Anchor)}: Type)
-fn has(var: Class{Anchor}) -> bool: {}
-with (Anchor: Type)
-template (T ?ClassRoot{undeduced(Anchor)}: Type)
-fn is(var: Class{Anchor}) -> bool: {
-    return var == Class{Anchor}::of(T);
-}
-with (Anchor: Type, T ?ClassRoot{undeduced(Anchor)}: Type)
-match {T} against (var: Class{Anchor}) {
-    return performMatch{Class{Anchor}::of(T)}(var);
-}
-with (Anchor: Type, var: Class{Anchor})
-match {var} against (inst: ?ClassRoot{undeduced(Anchor)}) {
-    return performMatch{var}(inst.class());
-}
-with (Anchor: Type, T ?ClassRoot{undeduced(Anchor)}: Type)
-match {T} against (inst: ?ClassRoot{Anchor}) {
-    return performMatch{Class{Anchor}::of(T)}(inst.class());
-}
 
-incomplete closed struct SliceResult: {
+incomplete final struct SliceResult: {
     has ClassRoot;
     struct Success: {
         has SliceResult;
@@ -277,21 +254,49 @@ incomplete closed struct SliceResult: {
 }
 fn slice() -> Union{SliceResult}: {}
 fn doSlice() -> Opt{ExprResult}: {
-    return match slice(): {
-        with(s ?SliceResult::Success) s => s.result;
+    return match *slice(): {
+        with(s: SliceResult::Success) dyn_match s => s.result;
         _ => ();
     };
 
     let s = slice();
-    if s.has{SliceResult::Success}():
-        return s.as{SliceResult::Success}().result;
+    if dynMatch{SliceResult::Success}(*s):
+        return (*s, to SliceResult::Success).result;
     return ();
 }
 fn useSlice(): {
     let slice = doSlice(), else: return;
 }
 
-incomplete closed(module) struct Expr: {
+struct Root: {
+    has ClassRoot;
+}
+struct DirectBase: {
+    has Root;
+}
+struct Leaf: {
+    has DirectBase;
+    has OtherThing;
+}
+fn foo(r: Root): {
+    return match r: {
+        with(b: DirectBase) dyn_has b => // matches Leaf, DirectBase
+        with(t: OtherThing) dyn_has t => // matches Leaf
+        with(b: DirectBase) dyn_is b => // matches Leaf, DirectBase
+        with(t: OtherThing) dyn_is t => // matches nothing
+        with(b: DirectBase) dyn_match b => // matches DirectBase
+        with(t: OtherThing) dyn_match t => // matches nothing
+
+        with(b ?dynHas{DirectBase}) b => // matches Leaf, DirectBase
+        with(t ?dynHas{OtherThing}) t => // matches Leaf
+        with(b ?dynIs{DirectBase}) b => // matches Leaf, DirectBase
+        with(t ?dynIs{OtherThing}) t => // matches nothing
+        with(b ?dynMatch{DirectBase}) b => // matches DirectBase
+        with(t ?dynMatch{OtherThing}) t => // matches nothing
+    }
+}
+
+incomplete final(module) struct Expr: {
     has ClassRoot;
 }
 struct BinaryOperatorExpr: {
@@ -302,26 +307,26 @@ struct BinaryOperatorExpr: {
 }
 fn dispatch(e: id{Expr}): {
     match *e: {
-        with(e ?BinaryOperatorExpr) e: {}
+        with(e&: BinaryOperatorExpr) dyn_is e: {}
 
-        with(left: id{Expr}, right: id{Expr})
-        BinaryOperatorExpr(BinaryOperator::Add, left, right): {}
+        with(left&: id{Expr}, right&: id{Expr})
+        dyn_is BinaryOperatorExpr(BinaryOperator::Add, left, right): {}
     }
 
-    if has{BinaryOperatorExpr}(e): {
-        let boe = cast{BinaryOperatorExpr}(e);
+    if dynIs{BinaryOperatorExpr}(*e): {
+        let boe& = *e, to BinaryOperatorExpr;
     }
 }
 
 incomplete struct View: {
-    template (Self: Type)
-    static virtual className: String = TypeInfo::get(Self).name();
+    template(Self: Type)
+    static incomplete virtual CLASS_NAME: String = TypeInfo::get(Self).name();
 
-    has ClassRoot{View};
+    has ClassRoot;
 }
 struct ImageView: {
     has View: {
-        static className: String = "Image";
+        static CLASS_NAME: String = "Image";
     }
 }
 

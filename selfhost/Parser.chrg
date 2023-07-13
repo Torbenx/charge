@@ -190,7 +190,7 @@ object Parser: {
         let equalOff = if repeat => 1, else => 2;
         let equal = source[equalOff] == '=';
 
-        with (advance: int)
+        with(advance: int)
         (tok, advance) = lookup_table::get(head, repeat, equal);
 
         sourceOff += advance;
