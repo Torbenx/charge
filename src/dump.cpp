@@ -88,6 +88,7 @@ struct STDumper : STContext {
     void visitReturnStmt(Ptr<ReturnStmt>) { }
     void visitIfStmt(Ptr<IfStmt>) { }
     void visitForStmt(Ptr<ForStmt>) { }
+    void visitWhileStmt(Ptr<WhileStmt>) { }
 
     void visitStructDecl(Ptr<StructDecl> e) {
         out << '\'' << sview(at(e).name) << '\'';
@@ -179,6 +180,10 @@ struct STDumper : STContext {
     void childrenForStmt(Ptr<ForStmt> e) {
         child(at(e).loopVarDecl, IsLastChild::No);
         child(at(e).rangeExpr, IsLastChild::No);
+        child(at(e).body, IsLastChild::Yes);
+    }
+    void childrenWhileStmt(Ptr<WhileStmt> e) {
+        child(at(e).condition, IsLastChild::No);
         child(at(e).body, IsLastChild::Yes);
     }
 

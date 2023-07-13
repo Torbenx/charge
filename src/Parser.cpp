@@ -453,6 +453,16 @@ void Parser::parseForStmt(Ptr<Stmt>& out) {
     parseSingleOrCompoundStmt(stmt.body);
 }
 
+void Parser::parseWhileStmt(Ptr<Stmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    advance();
+    auto& stmt = makeSet<WhileStmt>(out);
+    parseBinaryExpr(stmt.condition);
+    EXPECT_EQ(tok.kind(), TokenKind::Colon);
+    advance();
+    parseSingleOrCompoundStmt(stmt.body);
+}
+
 void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
@@ -485,6 +495,8 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
             return parseIfStmt(out);
         if (tok.word == forWord)
             return parseForStmt(out);
+        if (tok.word == whileWord)
+            return parseWhileStmt(out);
     }
     parseExprOrAssignStmt(out);
 }

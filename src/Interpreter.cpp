@@ -1673,10 +1673,36 @@ struct Interpreter : STContext {
         return invokeOp(unaryOpTraits[std::to_underlying(e.op)], base, {});
     }
     ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e) {
+        ExprResult left = evaluateExpr(context, e.left);
+        ExprResult right = evaluateExpr(context, e.right);
         if (!isCmpOp(e.op)) {
-            ExprResult left = evaluateExpr(context, e.left);
-            NamedExprResult right = NamedExprResult { evaluateExpr(context, e.right), Word() };
-            return invokeOp(binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)], left, std::span<NamedExprResult> { &right, 1 });
+            NamedExprResult rightNamed = NamedExprResult { right, Word() };
+            return invokeOp(binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)], left, std::span<NamedExprResult> { &rightNamed, 1 });
+        }
+        auto checkOp = [](std::partial_ordering order, BinaryOperator op) -> bool {
+            switch (op) {
+                case BinaryOperator::Less:
+                    return order < 0;
+                case BinaryOperator::LessEqual:
+                    return order <= 0;
+                case BinaryOperator::Equal:
+                    return order == 0;
+                case BinaryOperator::GreaterEqual:
+                    return order >= 0;
+                case BinaryOperator::Greater:
+                    return order > 0;
+                default:
+                    VERIFY_NOT_REACHED();
+            }
+        };
+
+        Type leftType = typeOf(left);
+        Type rightType = typeOf(right);
+        if ((at(leftType.decl).kind == DeclKind::EnumDecl && cmpCompleteDecls(leftType, rightType))
+            || (cmpCompleteDecls(leftType, intType) && cmpCompleteDecls(rightType, intType))) {
+            VERIFY(left->kind == ValueKind::Builtin);
+            VERIFY(right->kind == ValueKind::Builtin);
+            return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, checkOp(left->u.builtinValue <=> right->u.builtinValue, e.op)));
         }
         VERIFY_NOT_REACHED();
     }
@@ -1858,12 +1884,16 @@ struct Interpreter : STContext {
         return { ControlFlowKind::Return };
     }
 
-    ControlFlow evalIfStmt(LookupContext& context, IfStmt& stmt) {
-        Value condition = evaluateExpr(context, stmt.condition);
+    bool evaluateExprToBool(LookupContext& context, Ptr<Expr> e) {
+        Value v = evaluateExpr(context, e);
         // TODO: apply conversions
-        VERIFY(cmpCompleteDecls(typeOf(condition), boolType));
-        VERIFY(condition.kind == ValueKind::Builtin);
-        if (condition.u.builtinValue) {
+        VERIFY(cmpCompleteDecls(typeOf(v), boolType));
+        VERIFY(v.kind == ValueKind::Builtin);
+        return (bool)v.u.builtinValue;
+    }
+
+    ControlFlow evalIfStmt(LookupContext& context, IfStmt& stmt) {
+        if (evaluateExprToBool(context, stmt.condition)) {
             BlockLookupContext localCtx { &context };
             PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.ifTrue));
         } else if (stmt.ifFalse) {
@@ -1881,6 +1911,13 @@ struct Interpreter : STContext {
         for (Value& value : range->u.array->array()) {
             iteratorCtx.values = { &value, 1 };
             BlockLookupContext localCtx { &iteratorCtx };
+            PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.body));
+        }
+        return {};
+    }
+    ControlFlow evalWhileStmt(LookupContext& parent, WhileStmt& stmt) {
+        while (evaluateExprToBool(parent, stmt.condition)) {
+            BlockLookupContext localCtx { &parent };
             PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.body));
         }
         return {};
@@ -2191,10 +2228,18 @@ void testInterpreter() {
 
         fn testFor(): {
             let arr = testArray();
-            for i&: int in arr: {
+            for i&: int in arr:
                 i = i + 1;
-            }
             return arr;
+        }
+
+        fn factorial(n: int): {
+            mut r: int = 1;
+            while (n > 0): {
+                r = r * n;
+                n = n - 1;
+            }
+            return r;
         }
     )str");
 
@@ -2226,4 +2271,5 @@ void testInterpreter() {
     eval("wrap{constant}(mkConst{4}()).value"); // -> 4
     eval("testArray()"); // -> (0, 1, 2)
     eval("testFor()"); // -> (1, 2, 3)
+    eval("factorial(4)"); // -> 24
 }

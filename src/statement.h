@@ -37,7 +37,8 @@ ENUMERATE_DECL_KINDS
     STMT_KIND(ExprStmt)      \
     STMT_KIND(ReturnStmt)    \
     STMT_KIND(IfStmt)        \
-    STMT_KIND(ForStmt)
+    STMT_KIND(ForStmt)       \
+    STMT_KIND(WhileStmt)
 
 #define ENUMERATE_EXPR_KINDS      \
     EXPR_KIND(UnaryOperatorExpr)  \
@@ -416,4 +417,11 @@ struct ForStmt : Stmt {
     Ptr<Stmt> body;
     ForStmt(Ptr<LocalDecl> loopVarDecl = {}, Ptr<Expr> rangeExpr = {}, Ptr<Stmt> body = {})
         : Stmt(StmtKind::ForStmt), loopVarDecl(loopVarDecl), rangeExpr(rangeExpr), body(body) { }
+};
+
+struct WhileStmt : Stmt {
+    Ptr<Expr> condition;
+    Ptr<Stmt> body;
+    WhileStmt(Ptr<Expr> condition = {}, Ptr<Stmt> body = {})
+        : Stmt(StmtKind::WhileStmt), condition(condition), body(body) { }
 };
