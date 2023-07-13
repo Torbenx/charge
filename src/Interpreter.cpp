@@ -586,6 +586,17 @@ struct Interpreter : STContext {
             return i->completeTemplate(args[0], {});
         });
 
+        defineImpl("builtinArraySize", 1, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            return i->makeBuiltinValue(i->intType, args[0].value().u.array->size);
+        });
+        defineImpl("builtinArrayAppend", 2, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            uint32_t oldSize = args[0].value().u.array->size;
+            Value out = i->makeArrayValue(i->typeOf(args[0]), oldSize + 1);
+            std::copy_n(args[0].value().u.array->array().data(), oldSize, out.u.array->array().data());
+            out.u.array->array()[oldSize] = args[1];
+            return out;
+        });
+
         auto& nsDecl = makeSet<NamespaceDecl>(builtinImplContext.staticDecl.decl, Word {});
         nsDecl.staticDecls = finalizeSpan(implDecls);
         builtinImpls = at(finalizeSpan(impls));
@@ -1862,6 +1873,19 @@ struct Interpreter : STContext {
         return {};
     }
 
+    ControlFlow evalForStmt(LookupContext& parent, ForStmt& stmt) {
+        ExprResult range = evaluateExpr(parent, stmt.rangeExpr);
+        VERIFY(range->kind == ValueKind::Array);
+        ParameterLookupContext iteratorCtx { &parent };
+        iteratorCtx.decls = { &(Ptr<Decl>&)stmt.loopVarDecl, 1 };
+        for (Value& value : range->u.array->array()) {
+            iteratorCtx.values = { &value, 1 };
+            BlockLookupContext localCtx { &iteratorCtx };
+            PROPEGATE_FLOW(evaluateStmt(localCtx, stmt.body));
+        }
+        return {};
+    }
+
     ControlFlow evalNullStmt(LookupContext&, NullStmt&) { return {}; }
 
     ControlFlow evalAssignStmt(LookupContext& context, AssignStmt& stmt) {
@@ -1941,8 +1965,14 @@ void testInterpreter() {
             has Template;
         }
         struct Namespace: {}
+
         template(T: Type)
-        struct Array: {}
+        struct Array: {
+            fn append(self&, element: T): {
+                self = builtinArrayAppend(self, element);
+            }
+            fn size(self) => builtinArraySize(self);
+        }
         
         template(T: Type, F: Function)
         struct BasedMemberFunction: {
@@ -2150,6 +2180,22 @@ void testInterpreter() {
                 fn convert(self) => value;
             }
         }
+
+        fn testArray(): {
+            let arr = Array{int}();
+            arr.append(0);
+            arr.append(1);
+            arr.append(arr.size());
+            return arr;
+        }
+
+        fn testFor(): {
+            let arr = testArray();
+            for i&: int in arr: {
+                i = i + 1;
+            }
+            return arr;
+        }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2178,4 +2224,6 @@ void testInterpreter() {
     eval("MyEnum::E"); // -> 2
     eval("wrap{int}(MyInt(3))"); // -> 3
     eval("wrap{constant}(mkConst{4}()).value"); // -> 4
+    eval("testArray()"); // -> (0, 1, 2)
+    eval("testFor()"); // -> (1, 2, 3)
 }

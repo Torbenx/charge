@@ -41,6 +41,8 @@ public:
     Word ifWord = asWord("if");
     Word elseWord = asWord("else");
     Word elifWord = asWord("elif");
+    Word forWord = asWord("for");
+    Word inWord = asWord("in");
     Word returnWord = asWord("return");
     Word withWord = asWord("with");
     Word templateWord = asWord("template");
@@ -217,6 +219,7 @@ struct Parser : STContext {
     void parseReturnStmt(Ptr<Stmt>& out);
     void parseIfBranch(Ptr<Stmt>& out);
     void parseIfStmt(Ptr<Stmt>& out);
+    void parseForStmt(Ptr<Stmt>& out);
     void parseExprOrAssignStmt(Ptr<Stmt>& out);
     void parseStmt(Ptr<Stmt>& out);
     Span<Ptr<Stmt>> parseStmts();

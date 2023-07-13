@@ -36,7 +36,8 @@ ENUMERATE_DECL_KINDS
     STMT_KIND(LetStmt)       \
     STMT_KIND(ExprStmt)      \
     STMT_KIND(ReturnStmt)    \
-    STMT_KIND(IfStmt)
+    STMT_KIND(IfStmt)        \
+    STMT_KIND(ForStmt)
 
 #define ENUMERATE_EXPR_KINDS      \
     EXPR_KIND(UnaryOperatorExpr)  \
@@ -407,4 +408,12 @@ struct IfStmt : Stmt {
     Ptr<Stmt> ifFalse;
     IfStmt(Ptr<Expr> condition = {}, Ptr<Stmt> ifTrue = {}, Ptr<Stmt> ifFalse = {})
         : Stmt(StmtKind::IfStmt), condition(condition), ifTrue(ifTrue), ifFalse(ifFalse) { }
+};
+
+struct ForStmt : Stmt {
+    Ptr<LocalDecl> loopVarDecl;
+    Ptr<Expr> rangeExpr;
+    Ptr<Stmt> body;
+    ForStmt(Ptr<LocalDecl> loopVarDecl = {}, Ptr<Expr> rangeExpr = {}, Ptr<Stmt> body = {})
+        : Stmt(StmtKind::ForStmt), loopVarDecl(loopVarDecl), rangeExpr(rangeExpr), body(body) { }
 };

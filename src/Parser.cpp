@@ -439,6 +439,20 @@ void Parser::parseIfStmt(Ptr<Stmt>& out) {
     parseIfBranch(out);
 }
 
+void Parser::parseForStmt(Ptr<Stmt>& out) {
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    advance();
+    auto& stmt = makeSet<ForStmt>(out);
+    parseParameter(stmt.loopVarDecl, ParameterParseScope::Function);
+    EXPECT_EQ(tok.kind(), TokenKind::Word);
+    VERIFY(tok.word == inWord);
+    advance();
+    parseBinaryExpr(stmt.rangeExpr);
+    EXPECT_EQ(tok.kind(), TokenKind::Colon);
+    advance();
+    parseSingleOrCompoundStmt(stmt.body);
+}
+
 void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
     Ptr<Expr> expr;
     parseBinaryExpr(expr);
@@ -469,6 +483,8 @@ void Parser::parseStmt(Ptr<Stmt>& out) {
             return parseReturnStmt(out);
         if (tok.word == ifWord)
             return parseIfStmt(out);
+        if (tok.word == forWord)
+            return parseForStmt(out);
     }
     parseExprOrAssignStmt(out);
 }
