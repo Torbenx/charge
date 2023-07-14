@@ -322,9 +322,15 @@ struct Interpreter : STContext {
         std::vector<Word> failedLookups;
         EarlyTypeLookupContext(LookupContext* parent, CompleteDecl decl)
             : StaticLookupContext(LookupContextKind::EarlyType, parent, std::move(decl)) { }
+
+        void checkLookups(Interpreter* i, LookupContext& fullCtx) {
+            for (Word name : failedLookups)
+                VERIFY(!i->performLookup(fullCtx, name).has_value());
+        }
     };
     StaticLookupContext* asStaticContext(LookupContext& context) {
-        if (context.kind == LookupContextKind::Type || context.kind == LookupContextKind::Namespace || context.kind == LookupContextKind::Enum)
+        if (context.kind == LookupContextKind::Type || context.kind == LookupContextKind::Namespace
+            || context.kind == LookupContextKind::Enum || context.kind == LookupContextKind::EarlyType)
             return static_cast<StaticLookupContext*>(&context);
         return nullptr;
     }
@@ -458,6 +464,7 @@ struct Interpreter : STContext {
     Type intType;
     Type memberType;
     Value arrayTemplateValue;
+    Value optTemplateValue;
     Type typeTemplateType;
     Type fnTemplateType;
     Type globalTemplateType;
@@ -548,6 +555,7 @@ struct Interpreter : STContext {
         ((StaticLookupContext*)trueDecl.declaringContext)->values.push_back({ CompleteDecl { trueDecl.decl }, makeBuiltinValue(boolType, 1) });
 
         arrayTemplateValue = evalIdentifierName(*globalContext, asWord("Array"));
+        optTemplateValue = evalIdentifierName(*globalContext, asWord("Opt"));
 
         auto implDecls = beginSpan<Ptr<StaticDecl>, 0>();
         auto impls = beginSpan<BuiltinImpl, 1>();
@@ -595,6 +603,21 @@ struct Interpreter : STContext {
             std::copy_n(args[0].value().u.array->array().data(), oldSize, out.u.array->array().data());
             out.u.array->array()[oldSize] = args[1];
             return out;
+        });
+
+        defineImpl("builtinOptValue", 1, [](Interpreter*, std::span<const FnArgumentResult> args) {
+            VERIFY(args[0].value().kind == ValueKind::Array);
+            VERIFY(args[0].value().u.array->size == 1);
+            return args[0].value().u.array->array()[0];
+        });
+
+        defineImpl("builtinOptNew", 1, [](Interpreter* i, std::span<const FnArgumentResult> args) {
+            EvaluatedArguments templateArgs;
+            templateArgs.args.push_back({ ExprResult::make<BasicRecord>(i->makeTypeValue(i->typeOf(args[0]))), Word() });
+            Type type = i->asTypeValue(i->completeTemplate(i->optTemplateValue, templateArgs));
+            Value opt = i->makeArrayValue(type, 1);
+            opt.u.array->array()[0] = args[0];
+            return opt;
         });
 
         auto& nsDecl = makeSet<NamespaceDecl>(builtinImplContext.staticDecl.decl, Word {});
@@ -1353,14 +1376,16 @@ struct Interpreter : STContext {
         if (!posFnArgs.has_value())
             return {};
 
+        EarlyTypeLookupContext earlyTypeCtx { nullptr, fnDecl };
+
         if (!withTemplateContext(fnDecl, [&](LookupContext& context) {
                 // Early type context since we don't know all the template arguments yet.
                 // This is fine since the type expressions are evaluated in this context, which
                 // have to be constant expressions.
-                EarlyTypeLookupContext typeCtx { &context, fnDecl };
+                earlyTypeCtx.parent = &context;
                 LookupContext* contextToUse = nullptr;
                 if (fn.kind == DeclKind::StructDecl)
-                    contextToUse = &typeCtx;
+                    contextToUse = &earlyTypeCtx;
                 else if (fn.kind == DeclKind::FnDecl)
                     contextToUse = &context;
                 else
@@ -1388,10 +1413,13 @@ struct Interpreter : STContext {
         // This crutial since default member initializers can access mutable static members.
         auto callback = [&](LookupContext& ctx) { return completeFnArgs(ctx, at(fn.params), posFnArgs.value()); };
         std::optional<std::vector<FnArgumentResult>> fnArgs;
-        if (fn.kind == DeclKind::FnDecl)
+        if (fn.kind == DeclKind::FnDecl) {
             fnArgs = withTemplateContext(out.target, callback);
-        else
-            fnArgs = callback(*getStaticContext(out.target));
+        } else {
+            StaticLookupContext* ctx = getStaticContext(out.target);
+            earlyTypeCtx.checkLookups(this, *ctx);
+            fnArgs = callback(*ctx);
+        }
 
         if (!fnArgs.has_value())
             return {};
@@ -1534,9 +1562,11 @@ struct Interpreter : STContext {
             : ExprRecord(RecordKind::Access), base(base), accessDecl(accessDecl) { }
     };
     StaticLookupContext* getStaticContext(const CompleteDecl& decl) {
-        for (auto& child : decl.staticContext()->children) {
-            if (cmpCompleteDecls(child.decl, decl))
-                return child.context;
+        if (!decl.dependentInAnyWay()) {
+            for (auto& child : decl.staticContext()->children) {
+                if (cmpCompleteDecls(child.decl, decl))
+                    return child.context;
+            }
         }
 
         auto& d = as<StaticDecl>(decl.decl);
@@ -1566,28 +1596,32 @@ struct Interpreter : STContext {
                 }
             }
         } else if (d.kind == DeclKind::StructDecl) {
-            EarlyTypeLookupContext earlyCtx { &templateCtx, decl };
-            auto& structDecl = as<StructDecl>(decl.decl);
-            auto memberCount = structDecl.params.count;
-            Type* hasTypes = &at(allocate<Type>(memberCount));
-            std::uninitialized_fill_n(hasTypes, memberCount, Type {});
-            for (uint32_t i = 0; i < memberCount; i++) {
-                Ptr<Decl> member = at(structDecl.params, i);
-                if (at(member).kind != DeclKind::HasDecl)
-                    continue;
-                auto& hasDecl = as<HasDecl>(member);
-                Type type = implicitlyToType(evaluateExpr(earlyCtx, hasDecl.type));
-                VERIFY(type.valid());
-                hasTypes[i] = std::move(type);
-            }
+            if (decl.dependentInAnyWay()) {
+                // TODO: check that the context made here can never escape the current stmt
+                ctx = &at(make<EarlyTypeLookupContext>(&templateCtx, decl));
+            } else {
+                EarlyTypeLookupContext earlyCtx { &templateCtx, decl };
+                auto& structDecl = as<StructDecl>(decl.decl);
+                auto memberCount = structDecl.params.count;
+                Type* hasTypes = &at(allocate<Type>(memberCount));
+                std::uninitialized_fill_n(hasTypes, memberCount, Type {});
+                for (uint32_t i = 0; i < memberCount; i++) {
+                    Ptr<Decl> member = at(structDecl.params, i);
+                    if (at(member).kind != DeclKind::HasDecl)
+                        continue;
+                    auto& hasDecl = as<HasDecl>(member);
+                    Type type = implicitlyToType(evaluateExpr(earlyCtx, hasDecl.type));
+                    VERIFY(type.valid());
+                    hasTypes[i] = std::move(type);
+                }
 
-            ctx = &at(make<TypeLookupContext>(&templateCtx, decl, std::span<Type>(hasTypes, memberCount)));
-            for (Word name : earlyCtx.failedLookups)
-                VERIFY(!performLookup(*ctx, name).has_value());
+                ctx = &at(make<TypeLookupContext>(&templateCtx, decl, std::span<Type>(hasTypes, memberCount)));
+                earlyCtx.checkLookups(this, *ctx);
+            }
         } else
             VERIFY_NOT_REACHED();
-
-        decl.staticContext()->children.push_back({ decl, ctx });
+        if (!decl.dependentInAnyWay())
+            decl.staticContext()->children.push_back({ decl, ctx });
         return ctx;
     }
     ExprResult accessMember(ExprResult base, uint32_t i) {
@@ -1606,7 +1640,7 @@ struct Interpreter : STContext {
         } else
             staticDecl = typeOf(base.value());
 
-        auto lookup = performLookup(*getStaticContext(staticDecl), e.member.word);
+        std::optional<LookupResult> lookup = performLookup(*getStaticContext(staticDecl), e.member.word);
         if (!lookup.has_value()) {
             fmt::print("failed to access {} on ", sview(e.member.word));
             dumpValue(base);
@@ -1681,18 +1715,18 @@ struct Interpreter : STContext {
         }
         auto checkOp = [](std::partial_ordering order, BinaryOperator op) -> bool {
             switch (op) {
-                case BinaryOperator::Less:
-                    return order < 0;
-                case BinaryOperator::LessEqual:
-                    return order <= 0;
-                case BinaryOperator::Equal:
-                    return order == 0;
-                case BinaryOperator::GreaterEqual:
-                    return order >= 0;
-                case BinaryOperator::Greater:
-                    return order > 0;
-                default:
-                    VERIFY_NOT_REACHED();
+            case BinaryOperator::Less:
+                return order < 0;
+            case BinaryOperator::LessEqual:
+                return order <= 0;
+            case BinaryOperator::Equal:
+                return order == 0;
+            case BinaryOperator::GreaterEqual:
+                return order >= 0;
+            case BinaryOperator::Greater:
+                return order > 0;
+            default:
+                VERIFY_NOT_REACHED();
             }
         };
 
@@ -1727,13 +1761,13 @@ struct Interpreter : STContext {
     bool transformFnArguments(LookupContext& context, std::span<Ptr<Decl>> params, std::span<FnArgumentResult> args) {
         EXPECT_EQ(params.size(), args.size());
         for (uint32_t i = 0; i < params.size(); i++) {
+            args[i].isInOut = as<LocalDecl>(params[i]).isInOut;
             Ptr<Expr> typeExpr = as<LocalDecl>(params[i]).type;
             if (!typeExpr)
-                return false;
+                continue;
             auto type = implicitlyToType(evaluateExpr(context, typeExpr));
-            if (!type.valid() || !cmpCompleteDecls(type, typeOf(args[i])))
-                return false;
-            args[i].isInOut = as<LocalDecl>(params[i]).isInOut;
+            VERIFY(type.valid());
+            VERIFY(cmpCompleteDecls(type, typeOf(args[i])));
         }
         return true;
     }
@@ -1758,30 +1792,27 @@ struct Interpreter : STContext {
             if (kind == DeclKind::FnDecl) {
                 VERIFY((bool)target.staticContext());
                 FnDecl& targetDecl = as<FnDecl>(target.decl);
-                Ptr<FnDecl> assignDecl = {};
+                Ptr<FnDecl> assignDeclPtr = {};
                 for (Ptr<Decl> decl : at(as<StaticDecl>(target.staticContext()->staticDecl.decl).staticDecls)) {
                     if (isNamedDecl(decl) && at(decl).kind == DeclKind::FnDecl
                         && as<NamedDecl>(decl).name == targetDecl.name
                         && decl != target.decl) {
-                        VERIFY(!assignDecl);
-                        assignDecl = (Ptr<FnDecl>)decl;
+                        VERIFY(!assignDeclPtr);
+                        assignDeclPtr = (Ptr<FnDecl>)decl;
                     }
                 }
-                if (!assignDecl)
-                    return false;
-                if (!checkArguments(*target.staticContext(), at(targetDecl.with.params), target.withArgs()))
-                    return false;
-                auto withCtx = makeParameterContext(*target.staticContext(), at(targetDecl.with.params), target.withArgs());
-                if (!checkArguments(withCtx, at(targetDecl.templateParams), target.templateArgs()))
-                    return false;
-                auto templateCtx = makeParameterContext(withCtx, at(targetDecl.templateParams), target.templateArgs());
+                VERIFY((bool)assignDeclPtr);
+                auto& assignDecl = at(assignDeclPtr);
+                VERIFY(checkArguments(*target.staticContext(), at(assignDecl.with.params), target.withArgs()));
+                auto withCtx = makeParameterContext(*target.staticContext(), at(assignDecl.with.params), target.withArgs());
+                VERIFY(checkArguments(withCtx, at(assignDecl.templateParams), target.templateArgs()));
+                auto templateCtx = makeParameterContext(withCtx, at(assignDecl.templateParams), target.templateArgs());
                 CompleteCall assignCall = b.call;
-                assignCall.target.decl = assignDecl;
-                if (!transformFnArguments(templateCtx, at(targetDecl.params), assignCall.args))
-                    return false;
-                Type assignArgType = implicitlyToType(evaluateExpr(templateCtx, at(at(assignDecl).assignParam).type));
-                if (!assignArgType.valid() || !cmpCompleteDecls(typeOf(value), assignArgType))
-                    return false;
+                assignCall.target.decl = assignDeclPtr;
+                VERIFY(transformFnArguments(templateCtx, at(assignDecl.params), assignCall.args));
+                Type assignArgType = implicitlyToType(evaluateExpr(templateCtx, at(assignDecl.assignParam).type));
+                VERIFY(assignArgType.valid());
+                VERIFY(cmpCompleteDecls(typeOf(value), assignArgType));
                 if (debug) {
                     fmt::print("assign call {} = ", declName(assignCall.target.decl));
                     dumpValue(value);
@@ -2011,6 +2042,15 @@ void testInterpreter() {
             fn size(self) => builtinArraySize(self);
         }
         
+        template(T: Type)
+        struct Opt: {
+            fn new(value: T) => builtinOptNew(value);
+            fn value(self) => builtinOptValue(self);
+            fn value(self&) = (value: T): {
+                self = new(value);
+            }
+        }
+
         template(T: Type, F: Function)
         struct BasedMemberFunction: {
             base: T;
@@ -2089,6 +2129,9 @@ void testInterpreter() {
                 fn div(self, r: int) => builtinSignedDivAndMask(self, r, INT_MASK);
             }
         }
+
+        template(T: Type)
+        fn typeOf(arg: T) => T;
     )str");
     it.findBuiltins();
     it.interpretDecls(R"str(
@@ -2241,6 +2284,12 @@ void testInterpreter() {
             }
             return r;
         }
+
+        fn assignOpt(i: int): {
+            mut opt = Opt::new(0);
+            opt.value() = i;
+            return opt;
+        }
     )str");
 
     auto eval = [&](const char* expr) {
@@ -2272,4 +2321,6 @@ void testInterpreter() {
     eval("testArray()"); // -> (0, 1, 2)
     eval("testFor()"); // -> (1, 2, 3)
     eval("factorial(4)"); // -> 24
+    eval("typeOf(Opt::new(4))"); // -> Opt{int}
+    eval("assignOpt(4)"); // -> 4
 }
