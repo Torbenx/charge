@@ -202,6 +202,7 @@ struct Parser : STContext {
 
     void reset(SourceBuffer);
     void advance();
+    void reemitLastToken(Token);
     uint32_t nextNonWhiteSpace(uint32_t pos) const;
     void skipWhiteSpace() { m_position = nextNonWhiteSpace(pos()); }
 
@@ -215,6 +216,7 @@ struct Parser : STContext {
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
     void parseIfExpr(Ptr<Expr>& out);
+    void parseCommaElseExpr(Ptr<Expr>& out);
     void parseExpr(Ptr<Expr>& out);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);

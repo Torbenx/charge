@@ -141,6 +141,7 @@ constexpr bool isLiteral(TokenKind kind) {
 struct Token {
     Word word = {};
     TokenKind m_kind = TokenKind::Invalid;
+    uint32_t beginPosition = 0;
 
     TokenKind kind() const { return m_kind; }
 };

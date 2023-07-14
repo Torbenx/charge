@@ -50,7 +50,8 @@ ENUMERATE_DECL_KINDS
     EXPR_KIND(IntLiteralExpr)     \
     EXPR_KIND(ConstraintExpr)     \
     EXPR_KIND(CompoundExpr)       \
-    EXPR_KIND(IfExpr)
+    EXPR_KIND(IfExpr)             \
+    EXPR_KIND(CommaElseExpr)
 
 #define STMT_KIND(kind) kind,
 enum class StmtKind : uint8_t {
@@ -359,6 +360,13 @@ struct IfExpr : Expr {
     Ptr<Expr> ifTrue;
     IfExpr()
         : Expr(ExprKind::IfExpr) { }
+};
+
+struct CommaElseExpr : Expr {
+    Ptr<Expr> base;
+    Ptr<Expr> ifFalse;
+    CommaElseExpr()
+        : Expr(ExprKind::CommaElseExpr) { }
 };
 
 // Statements

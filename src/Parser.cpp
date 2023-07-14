@@ -343,7 +343,29 @@ void Parser::parseIfExpr(Ptr<Expr>& out) {
     parseExpr(e.ifTrue);
 }
 
-void Parser::parseExpr(Ptr<Expr>& out) { parseIfExpr(out); }
+void Parser::parseCommaElseExpr(Ptr<Expr>& out) {
+    Ptr<Expr> base;
+    parseIfExpr(base);
+    if (tok.kind() != TokenKind::Comma) {
+        out = base;
+        return;
+    }
+    Token commaToken = tok;
+    advance();
+    if (tok.kind() != TokenKind::Word || tok.word != elseWord) {
+        reemitLastToken(commaToken);
+        out = base;
+        return;
+    }
+    advance();
+    EXPECT_EQ(tok.kind(), TokenKind::FatArrow);
+    advance();
+    auto& e = makeSet<CommaElseExpr>(out);
+    e.base = base;
+    parseExpr(e.ifFalse);
+}
+
+void Parser::parseExpr(Ptr<Expr>& out) { parseCommaElseExpr(out); }
 
 void Parser::parseArgumentContext(Arguments& out) {
     TokenKind leftKind = tok.kind();

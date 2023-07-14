@@ -1383,6 +1383,14 @@ struct Interpreter : STContext {
         //        So instead we should return an empty Tuple or similar once available.
         return defaultConstructType(getOptionalTypeFor(boolType));
     }
+    ExprResult evalCommaElseExpr(LookupContext& context, CommaElseExpr& e, bool) {
+        Value base = evaluateExpr(context, e.base);
+        VERIFY(typeOf(base).decl == asTemplateDeclValue(optTemplateValue).first);
+        VERIFY(base.kind == ValueKind::Array);
+        if (base.u.array->size == 0)
+            return evaluateExpr(context, e.ifFalse);
+        return ExprResult::make<BasicRecord>(base.u.array->array()[0]);
+    }
 
     struct CompleteCall {
         CompleteDecl target;
@@ -2343,4 +2351,6 @@ void testInterpreter() {
     eval("typeOf(Opt::new(4))"); // -> Opt{int}
     eval("assignOpt(4)"); // -> 4
     eval("if true => 5"); // -> 5
+    eval("Opt{int}(), else => 6"); // -> 6
+    eval("assignOpt(7), else => -1"); // -> 7
 }

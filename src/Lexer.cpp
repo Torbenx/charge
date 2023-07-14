@@ -189,6 +189,7 @@ void Parser::advance() {
     if (head == '\0') [[unlikely]] {
         tok = {
             .m_kind = TokenKind::EOS,
+            .beginPosition = pos(),
         };
         return;
     }
@@ -224,6 +225,7 @@ void Parser::advance() {
     tok = {
         .word = word,
         .m_kind = (TokenKind)kind,
+        .beginPosition = pos(),
     };
 
     if (dumpTokens)
@@ -231,4 +233,9 @@ void Parser::advance() {
 
     m_position = end;
     skipWhiteSpace();
+}
+
+void Parser::reemitLastToken(Token token) {
+    m_position = tok.beginPosition;
+    tok = token;
 }

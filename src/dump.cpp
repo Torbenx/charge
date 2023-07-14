@@ -75,6 +75,7 @@ struct STDumper : STContext {
     void visitConstraintExpr(Ptr<ConstraintExpr>) { }
     void visitCompoundExpr(Ptr<CompoundExpr>) { }
     void visitIfExpr(Ptr<IfExpr>) { }
+    void visitCommaElseExpr(Ptr<CommaElseExpr>) { }
 
     void visitAssignStmt(Ptr<AssignStmt> e) {
         out << '\'';
@@ -157,6 +158,10 @@ struct STDumper : STContext {
     void childrenIfExpr(Ptr<IfExpr> e) {
         child(at(e).condition, IsLastChild::No);
         child(at(e).ifTrue, IsLastChild::Yes);
+    }
+    void childrenCommaElseExpr(Ptr<CommaElseExpr> e) {
+        child(at(e).base, IsLastChild::No);
+        child(at(e).ifFalse, IsLastChild::Yes);
     }
 
     void childrenAssignStmt(Ptr<AssignStmt> e) {
