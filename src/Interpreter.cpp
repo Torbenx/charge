@@ -1173,12 +1173,12 @@ struct Interpreter : STContext {
         });
     }
 
-    ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p) {
+    ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p, bool recordOnly = false) {
         auto& e = at(p);
 
 #define EXPR_KIND(kind)                            \
     case ExprKind::kind: {                         \
-        ExprResult r = eval##kind(ctx, (kind&)e);  \
+        ExprResult r = eval##kind(ctx, (kind&)e, recordOnly);  \
         if (!r.value().valid())                    \
             fmt::println("eval" #kind " invalid"); \
         return r;                                  \
@@ -1346,14 +1346,14 @@ struct Interpreter : STContext {
             return invalResult;
         return lookupToValue(r.value());
     }
-    ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e) {
+    ExprResult evalIdentifierExpr(LookupContext& ctx, IdentifierExpr& e, bool) {
         return evalIdentifier(ctx, e.identifier);
     }
 
-    ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e) {
+    ExprResult evalIntLiteralExpr(LookupContext&, IntLiteralExpr& e, bool) {
         return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, e.value));
     }
-    ExprResult evalCompoundExpr(LookupContext& parent, CompoundExpr& e) {
+    ExprResult evalCompoundExpr(LookupContext& parent, CompoundExpr& e, bool) {
         BlockLookupContext context { &parent };
         auto stmts = at(e.body);
         for (uint32_t i = 0; i < stmts.size() - 1; i++) {
@@ -1503,7 +1503,7 @@ struct Interpreter : STContext {
         }
         return true;
     }
-    ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args, bool conversionsAllowed = true) {
+    ExprResult invokeCall(ExprResult baseR, std::span<const NamedExprResult> args, bool conversionsAllowed = true, bool recordOnly = false) {
         Value base = baseR;
         auto baseType = typeOf(base);
 
@@ -1512,7 +1512,7 @@ struct Interpreter : STContext {
             auto call = completeCall(type, args, {}, conversionsAllowed);
             if (!call.has_value())
                 return invalResult;
-            return ExprResult::make<CallRecord>(evaluateCall(call.value()), call.value());
+            return ExprResult::make<CallRecord>(recordOnly ? Value() : evaluateCall(call.value()), call.value());
         }
         // function
         std::optional<ExprResult> selfArg;
@@ -1534,7 +1534,7 @@ struct Interpreter : STContext {
             if (!call.has_value())
                 return invalResult;
 
-            return ExprResult::make<CallRecord>(evaluateCall(call.value()), call.value());
+            return ExprResult::make<CallRecord>(recordOnly ? Value() : evaluateCall(call.value()), call.value());
         }
         fmt::print("cannot call ");
         dumpValue(base);
@@ -1542,16 +1542,16 @@ struct Interpreter : STContext {
         dumpValue(makeTypeValue(baseType));
         return invalResult;
     }
-    ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e) {
+    ExprResult evalCallExpr(LookupContext& ctx, CallExpr& e, bool recordOnly) {
         VERIFY(e.callKind == CallKind::Paren);
         ExprResult base = evaluateExpr(ctx, e.base);
         auto args = evaluateArguments(ctx, e.args);
-        return invokeCall(base, args.args);
+        return invokeCall(base, args.args, true, recordOnly);
     }
 
-    ExprResult evalParenExpr(LookupContext& context, ParenExpr& e) {
+    ExprResult evalParenExpr(LookupContext& context, ParenExpr& e, bool recordOnly) {
         if (e.args.args.count == 1)
-            return ExprResult::make<BasicRecord>(evaluateExpr(context, at(e.args.args, 0).source));
+            return ExprResult::make<BasicRecord>(evaluateExpr(context, at(e.args.args, 0).source, recordOnly));
         VERIFY_NOT_REACHED();
     }
 
@@ -1628,7 +1628,7 @@ struct Interpreter : STContext {
         auto members = at(as<StructDecl>(base.value().type.decl).params);
         return ExprResult::make<AccessRecord>(base.value().u.array->array()[i], base, members[i]);
     }
-    ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e) {
+    ExprResult evalAccessExpr(LookupContext& context, AccessExpr& e, bool) {
         ExprResult base = evaluateExpr(context, e.base);
         CompleteDecl staticDecl = {};
         if (e.isStatic) {
@@ -1681,7 +1681,7 @@ struct Interpreter : STContext {
         return result;
     }
 
-    ExprResult invokeOp(Value traitValue, ExprResult base, std::span<NamedExprResult> args) {
+    ExprResult invokeOp(Value traitValue, ExprResult base, std::span<NamedExprResult> args, bool recordOnly) {
         if (isTemplateValue(traitValue)) {
             EvaluatedArguments templateArgs;
             for (NamedExprResult& arg : args)
@@ -1700,18 +1700,19 @@ struct Interpreter : STContext {
         EXPECT_EQ(at(opDecl).templateParams.count, 0u);
         auto* containingCtx = getStaticContext(r->containingType);
         auto opCallBase = transformBasedMembers(slice(r->containingType, base), lookupToValue(opDecl, containingCtx));
-        return invokeCall(opCallBase, args);
+        return invokeCall(opCallBase, args, recordOnly);
     }
-    ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e) {
+    ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e, bool recordOnly) {
         ExprResult base = evaluateExpr(context, e.subExpr);
-        return invokeOp(unaryOpTraits[std::to_underlying(e.op)], base, {});
+        return invokeOp(unaryOpTraits[std::to_underlying(e.op)], base, {}, recordOnly);
     }
-    ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e) {
+    ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e, bool recordOnly) {
         ExprResult left = evaluateExpr(context, e.left);
         ExprResult right = evaluateExpr(context, e.right);
         if (!isCmpOp(e.op)) {
             NamedExprResult rightNamed = NamedExprResult { right, Word() };
-            return invokeOp(binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)], left, std::span<NamedExprResult> { &rightNamed, 1 });
+            Value trait = binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)];
+            return invokeOp(trait, left, std::span<NamedExprResult> { &rightNamed, 1 }, recordOnly);
         }
         auto checkOp = [](std::partial_ordering order, BinaryOperator op) -> bool {
             switch (op) {
@@ -1740,7 +1741,7 @@ struct Interpreter : STContext {
         }
         VERIFY_NOT_REACHED();
     }
-    ExprResult evalConstraintExpr(LookupContext&, ConstraintExpr&) {
+    ExprResult evalConstraintExpr(LookupContext&, ConstraintExpr&, bool) {
         Value typeValue = makeDependentValue(typeType);
         return ExprResult::make<BasicRecord>(makeDependentValue(asTypeValue(typeValue)));
     }
@@ -1958,7 +1959,7 @@ struct Interpreter : STContext {
 
     ControlFlow evalAssignStmt(LookupContext& context, AssignStmt& stmt) {
         if (!stmt.op.has_value()) {
-            ExprResult left = evaluateExpr(context, stmt.left);
+            ExprResult left = evaluateExpr(context, stmt.left, true);
             ExprResult right = evaluateExpr(context, stmt.right);
             VERIFY(setExprValue(left, right.value()));
         } else
@@ -2286,7 +2287,7 @@ void testInterpreter() {
         }
 
         fn assignOpt(i: int): {
-            mut opt = Opt::new(0);
+            mut opt = Opt{int}();
             opt.value() = i;
             return opt;
         }
