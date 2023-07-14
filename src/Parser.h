@@ -214,6 +214,8 @@ struct Parser : STContext {
     void parseLeafExpr(Ptr<Expr>& out);
     void wrapWithPostfixes(Ptr<Expr>& out, Ptr<Expr> base);
     void parseBinaryExpr(Ptr<Expr>& out, int precedence = 100);
+    void parseIfExpr(Ptr<Expr>& out);
+    void parseExpr(Ptr<Expr>& out);
     void parseArgumentContext(Arguments& out);
     void parseArgument(Arguments::Arg& out);
     void parseLetStmt(Ptr<Stmt>& out);

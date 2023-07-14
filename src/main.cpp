@@ -27,7 +27,7 @@ int main() {
     {
         Parser par(STContext::create(), "-+(+( a, ( c, q, )[.a = ( a < (b + c) * d )], b, a{1,2,3}::foo, d, )++)");
         Ptr<Expr> e;
-        par.parseBinaryExpr(e);
+        par.parseExpr(e);
         fmt::println("used storage {} * 4 bytes", par.storage->storageEndAlign4);
         dump(par, e);
     }

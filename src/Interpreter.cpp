@@ -511,7 +511,7 @@ struct Interpreter : STContext {
     Value interpretExpr(SourceBuffer buffer) {
         Parser parser { *this, buffer };
         Ptr<Expr> e;
-        parser.parseBinaryExpr(e);
+        parser.parseExpr(e);
         return evaluateExpr(*globalContext, e);
     }
 
@@ -1176,12 +1176,12 @@ struct Interpreter : STContext {
     ExprResult evaluateExpr(LookupContext& ctx, Ptr<Expr> p, bool recordOnly = false) {
         auto& e = at(p);
 
-#define EXPR_KIND(kind)                            \
-    case ExprKind::kind: {                         \
-        ExprResult r = eval##kind(ctx, (kind&)e, recordOnly);  \
-        if (!r.value().valid())                    \
-            fmt::println("eval" #kind " invalid"); \
-        return r;                                  \
+#define EXPR_KIND(kind)                                       \
+    case ExprKind::kind: {                                    \
+        ExprResult r = eval##kind(ctx, (kind&)e, recordOnly); \
+        if (!r.value().valid())                               \
+            fmt::println("eval" #kind " invalid");            \
+        return r;                                             \
     }
 
         switch (e.kind) {
@@ -1364,6 +1364,24 @@ struct Interpreter : STContext {
         VERIFY(lastStmt.kind == StmtKind::ExprStmt);
         Value res = evaluateExpr(context, ((ExprStmt&)lastStmt).expr);
         return ExprResult::make<BasicRecord>(res);
+    }
+
+    Type getOptionalTypeFor(Type type) {
+        EvaluatedArguments templateArgs;
+        templateArgs.args.push_back({ ExprResult::make<BasicRecord>(makeTypeValue(type)), Word() });
+        return asTypeValue(completeTemplate(optTemplateValue, templateArgs));
+    }
+    ExprResult wrapInOptional(Value in) {
+        Value opt = makeArrayValue(getOptionalTypeFor(typeOf(in)), 1);
+        opt.u.array->array()[0] = in;
+        return ExprResult::make<BasicRecord>(opt);
+    }
+    ExprResult evalIfExpr(LookupContext& context, IfExpr& e, bool) {
+        if (evaluateExprToBool(context, e.condition))
+            return wrapInOptional(evaluateExpr(context, e.ifTrue));
+        // FIXME: this should have the same type as successful case, but we can't implent that.
+        //        So instead we should return an empty Tuple or similar once available.
+        return defaultConstructType(getOptionalTypeFor(boolType));
     }
 
     struct CompleteCall {
@@ -2324,4 +2342,5 @@ void testInterpreter() {
     eval("factorial(4)"); // -> 24
     eval("typeOf(Opt::new(4))"); // -> Opt{int}
     eval("assignOpt(4)"); // -> 4
+    eval("if true => 5"); // -> 5
 }

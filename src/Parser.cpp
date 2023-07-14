@@ -332,6 +332,19 @@ void Parser::parseBinaryExpr(Ptr<Expr>& out, int precedence) {
     out = left;
 }
 
+void Parser::parseIfExpr(Ptr<Expr>& out) {
+    if (tok.kind() != TokenKind::Word || tok.word != ifWord) 
+        return parseBinaryExpr(out);
+    advance();
+    auto& e = makeSet<IfExpr>(out);
+    parseExpr(e.condition);
+    EXPECT_EQ(tok.kind(), TokenKind::FatArrow);
+    advance();
+    parseExpr(e.ifTrue);
+}
+
+void Parser::parseExpr(Ptr<Expr>& out) { parseIfExpr(out); }
+
 void Parser::parseArgumentContext(Arguments& out) {
     TokenKind leftKind = tok.kind();
     VERIFY(isLeftBracket(leftKind));
@@ -359,7 +372,7 @@ void Parser::parseArgument(Arguments::Arg& out) {
         EXPECT_EQ(tok.kind(), TokenKind::Equal);
         advance();
     }
-    parseBinaryExpr(out.source);
+    parseExpr(out.source);
 }
 
 void Parser::parseLetStmt(Ptr<Stmt>& out) {
@@ -390,11 +403,11 @@ void Parser::parseLetStmt(Ptr<Stmt>& out) {
     advance();
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseBinaryExpr(info->type);
+        parseExpr(info->type);
     }
     EXPECT_EQ(tok.kind(), TokenKind::Equal);
     advance();
-    parseBinaryExpr(info->initializer);
+    parseExpr(info->initializer);
 
     out = make<LetStmt>(decl);
 
@@ -408,16 +421,26 @@ void Parser::parseReturnStmt(Ptr<Stmt>& out) {
     auto& e = makeSet<ReturnStmt>(out);
     if (tok.kind() == TokenKind::SemiColon)
         return;
-    parseBinaryExpr(e.expr);
+    parseExpr(e.expr);
 
     EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
     advance();
 }
 
 void Parser::parseIfBranch(Ptr<Stmt>& out) {
-    auto& stmt = makeSet<IfStmt>(out);
-    parseBinaryExpr(stmt.condition);
+    Ptr<Expr> condition = {};
+    parseExpr(condition);
+    if (tok.kind() == TokenKind::FatArrow) {
+        auto& stmt = makeSet<ExprStmt>(out);
+        auto& e = makeSet<IfExpr>(stmt.expr);
+        e.condition = condition;
+        advance();
+        parseExpr(e.ifTrue);
+        return;
+    }
     EXPECT_EQ(tok.kind(), TokenKind::Colon);
+    auto& stmt = makeSet<IfStmt>(out);
+    stmt.condition = condition;
     advance();
     parseSingleOrCompoundStmt(stmt.ifTrue);
 
@@ -447,7 +470,7 @@ void Parser::parseForStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     VERIFY(tok.word == inWord);
     advance();
-    parseBinaryExpr(stmt.rangeExpr);
+    parseExpr(stmt.rangeExpr);
     EXPECT_EQ(tok.kind(), TokenKind::Colon);
     advance();
     parseSingleOrCompoundStmt(stmt.body);
@@ -457,7 +480,7 @@ void Parser::parseWhileStmt(Ptr<Stmt>& out) {
     EXPECT_EQ(tok.kind(), TokenKind::Word);
     advance();
     auto& stmt = makeSet<WhileStmt>(out);
-    parseBinaryExpr(stmt.condition);
+    parseExpr(stmt.condition);
     EXPECT_EQ(tok.kind(), TokenKind::Colon);
     advance();
     parseSingleOrCompoundStmt(stmt.body);
@@ -465,12 +488,12 @@ void Parser::parseWhileStmt(Ptr<Stmt>& out) {
 
 void Parser::parseExprOrAssignStmt(Ptr<Stmt>& out) {
     Ptr<Expr> expr;
-    parseBinaryExpr(expr);
+    parseExpr(expr);
     if (isAssignOp(tok.kind()) || tok.kind() == TokenKind::Equal) {
         // AssignStmt
         auto& stmt = makeSet<AssignStmt>(out, tokenKindToAssignOp(tok.kind()), expr);
         advance();
-        parseBinaryExpr(stmt.right);
+        parseExpr(stmt.right);
     } else {
         // expression statement
         out = make<ExprStmt>(expr);
@@ -575,11 +598,11 @@ void Parser::parseParameter(Ptr<LocalDecl>& out, ParameterParseScope scope) {
     e.valueConstraints = finalizeSpan(constr);
     if (tok.kind() == TokenKind::Colon) {
         advance();
-        parseBinaryExpr(e.type);
+        parseExpr(e.type);
     }
     if (tok.kind() == TokenKind::Equal) {
         advance();
-        parseBinaryExpr(e.initializer);
+        parseExpr(e.initializer);
     }
 }
 
@@ -594,7 +617,7 @@ void Parser::parseFunctionDefinition(FnDecl& out) {
         return;
     if (tok.kind() == TokenKind::FatArrow) {
         advance();
-        parseBinaryExpr(out.bodyExpr);
+        parseExpr(out.bodyExpr);
         EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
         advance();
     } else if (tok.kind() == TokenKind::Equal) {
@@ -633,7 +656,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
         VERIFY(scope == DeclParseScope::Struct);
         advance();
         auto& d = makeSet<HasDecl>(out);
-        parseBinaryExpr(d.type);
+        parseExpr(d.type);
 
         if (tok.kind() == TokenKind::SemiColon) {
             advance();
@@ -693,7 +716,7 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
             auto& e = makeSet<EnumValueDecl>(out, name);
             if (tok.kind() == TokenKind::Equal) {
                 advance();
-                parseBinaryExpr(e.enumValue);
+                parseExpr(e.enumValue);
             }
             EXPECT_EQ(tok.kind(), TokenKind::SemiColon);
             advance();
@@ -707,11 +730,11 @@ void Parser::parseDecl(Ptr<Decl>& out, DeclParseScope scope) {
 
         if (tok.kind() == TokenKind::Colon) {
             advance();
-            parseBinaryExpr(info->type);
+            parseExpr(info->type);
         }
         if (tok.kind() == TokenKind::Equal) {
             advance();
-            parseBinaryExpr(info->initializer);
+            parseExpr(info->initializer);
         } else
             VERIFY(scope == DeclParseScope::Struct);
 

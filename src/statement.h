@@ -49,7 +49,8 @@ ENUMERATE_DECL_KINDS
     EXPR_KIND(BinaryOperatorExpr) \
     EXPR_KIND(IntLiteralExpr)     \
     EXPR_KIND(ConstraintExpr)     \
-    EXPR_KIND(CompoundExpr)
+    EXPR_KIND(CompoundExpr)       \
+    EXPR_KIND(IfExpr)
 
 #define STMT_KIND(kind) kind,
 enum class StmtKind : uint8_t {
@@ -351,6 +352,13 @@ struct CompoundExpr : Expr {
     Span<Ptr<Stmt>> body;
     CompoundExpr()
         : Expr(ExprKind::CompoundExpr) { }
+};
+
+struct IfExpr : Expr {
+    Ptr<Expr> condition;
+    Ptr<Expr> ifTrue;
+    IfExpr()
+        : Expr(ExprKind::IfExpr) { }
 };
 
 // Statements
