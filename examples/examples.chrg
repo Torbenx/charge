@@ -1,0 +1,73 @@
+
+// inheritance
+struct Base1: { field1: int; }
+struct Base2: { field2: int; }
+struct Derived: {
+    has Base1;
+    has Base2;
+    fn sum(self) => field1 + field2;
+}
+
+// traits
+incomplete struct MyTrait: {
+    incomplete fn someFunctionality(self);
+}
+struct Foo: {
+    has MyTrait: {
+        fn someFunctionality(self): { ... };
+    }
+}
+struct Bar: { }
+external Bar has MyTrait: {
+    fn someFunctionality(self): { ... };
+}
+
+// use traits
+template(T ?has(MyTrait): Type)
+fn useFunctionality(input: T): {
+    input.someFunctionality();
+}
+// or shorter:
+fn useFunctionality(input: ?has(MyTrait)): {
+    input.someFunctionality();
+}
+
+//
+struct Rect: {
+    left: float;
+    top: float;
+    right: float;
+    bottom: float;
+    fn topLeft(self&) <=> Vec2(left, top);
+    fn bottomLeft(self&) <=> Vec2(left, bottom);
+    fn topRight(self&) <=> Vec2(right, top);
+    fn bottomRight(self&) <=> Vec2(right, bottom);
+}
+
+//
+fn getImpl(t: Type) -> Type: {
+    return match t: {
+        int => IntImpl;
+        bool => BoolImpl;
+        _ => DefaultImpl;
+    }
+}
+
+//
+incomplete struct Animal: { has ClassRoot{Self}; }
+incomplete struct Mammal: { has Animal; }
+incomplete struct Reptile: { has Animal; }
+incomplete struct Legs: { }
+struct Whale: { has Mammal; }
+struct Dog: { has Mammal; has Legs; }
+struct Snake: { has Reptile; }
+struct Turtle: { has Reptile; has Legs; }
+fn test(a: Animal): {
+    match a: {
+        with(w: Whale) dyn_match(w): ... // matches 'Whale'
+        with(m: Mammal) dyn_match(m): ... // matches none
+        with(m: Mammal) dyn_is(m): ... // matches 'Dog' and 'Whale'
+        with(l: Legs) dyn_is(l): ... // matches none
+        with(l: Legs) dyn_has(l): ... // matches 'Dog' and 'Turtle'
+    }
+}

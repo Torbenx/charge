@@ -13,7 +13,7 @@
     "languages": [{
       "id": "charge",
       "aliases": ["Charge", "charge"],
-      "extensions": [".chrg .charge"],
+      "extensions": [".chrg", ".charge"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{
