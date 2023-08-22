@@ -33,6 +33,46 @@ fn useFunctionality(input: ?has(MyTrait)): {
 }
 
 //
+incomplete struct Shape: {
+    has ClassRoot{Self};
+    incomplete virtual fn draw();
+}
+struct Rectangle: {
+    has Shape: { fn draw(): { ... } }
+}
+struct Circle: {
+    has Shape: { fn draw(): { ... } }
+}
+fn drawNonRectangles(shapes: Array{ref{Shape}}): {
+    for shape in shapes: {
+        if !dynIs{Rectangle}(*shape):
+            shape.draw();
+    }
+}
+
+//
+incomplete final(module) struct IPAddressBase: {
+    has ClassRoot{Self};
+}
+struct IPv4Address: {
+    has IPAddressBase;
+    address: FixedArray{uint8, 4};
+}
+struct IPv6Address: {
+    has IPAddressBase;
+    address: FixedArray{uint16, 8};
+}
+static IPAddress: Type = Union{IPAddressBase};
+fn printAddress(address: IPAddress): {
+    match *address: {
+        with(v4: IPv4Address) dyn_is(v4):
+            // print v4 address
+        with(v6: IPv6Address) dyn_is(v6):
+            // print v6 address
+    }
+}
+
+//
 struct Rect: {
     left: float;
     top: float;
@@ -70,4 +110,67 @@ fn test(a: Animal): {
         with(l: Legs) dyn_is(l): ... // matches none
         with(l: Legs) dyn_has(l): ... // matches 'Dog' and 'Turtle'
     }
+}
+
+//
+struct RGB: { r: int; g: int; b: int; }
+struct HSV: { h: int; s: int; v: int; }
+static Color: Type = Variant{RGB, HSV};
+fn toString(color: Option{Color}) => match color: {
+    with(r: int)
+    Option(Color(RGB(r, 0, 0))) => format("[r={}]", r);
+
+    with(r: int, g: int, b: int)
+    Option(Color(RGB(r, g, b)))
+        => format("[r={},g={},b={}]", r, g, b);
+
+    with(h: int, s: int, v: int)
+    Option(Color(HSV(h, s, v)))
+        => format("[h={},s={},v={}]", h, s, v);
+
+    Option() => "[]";
+}
+
+//
+template(T ?has(ops::Div): Type)
+fn divide(left: T, right: T) => left / right;
+fn test(): {
+    let a = divide(1, 2); // => 0
+    let b = divide{float}(1, 2); // => 0.5
+}
+
+//
+template(T: Type)
+struct Array: {
+    has Index{(int) -> T}: {
+        fn index(i: int) <=> ...;
+    }
+}
+special_case struct Array{bool} as BoolArray: {
+    has Index{(int) -> bool}: {
+        fn index(i: int) => getBit(i);
+        fn index(i: int) = (value: bool): {
+            setBit(i, value);
+        }
+    }
+}
+
+//
+struct RGB: { r: int; g: int; b: int; }
+
+template(maybeColor: Option{RGB})
+fn templateExample(): { }
+
+template(color: RGB)
+special_case fn templateExample{Option(color)}
+    as templateExampleWithValue(): { }
+
+special_case fn templateExampleWithValue{RGB(0, 0, 0)}
+    as templateExampleWithBlack(): { }
+
+//
+template(parameters: Array{TupleElement})
+fn callFoo(arguments..: Tuple{ parameters}): {
+    let newArguments = arguments.append("bar");
+    foo(newArguments..);
 }
