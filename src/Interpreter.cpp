@@ -2323,34 +2323,52 @@ void testInterpreter() {
         Interpreter::Value v = it.interpretExpr(expr);
         fmt::print("eval: ");
         it.dumpValue(v);
+        return v;
     };
-    eval("foo(true)"); // -> false
-    eval("callGet()"); // -> 123
-    eval("updateGlobalVal()"); // -> 456
-    eval("updateWrappedGlobalVal()"); // -> 456
+    auto evalAndTestBuiltin = [&](const char* expr, int64_t builtinValue) {
+        Interpreter::Value v = it.interpretExpr(expr);
+        if (v.kind == Interpreter::ValueKind::Builtin && v.u.builtinValue == builtinValue)
+            return;
+        fmt::print("-- FAILED -- expected builtin value '{}',\ngot ", builtinValue);
+        it.dumpValue(v);
+    };
+    auto evalAndCompare = [&](const char* expr1, const char* expr2) {
+        Interpreter::Value v1 = it.interpretExpr(expr1);
+        Interpreter::Value v2 = it.interpretExpr(expr2);
+        if (it.cmpValue(v1, v2))
+            return;
+        fmt::print("-- FAILED --\ngot ");
+        it.dumpValue(v1);
+        fmt::print("and ");
+        it.dumpValue(v2);
+    };
+    evalAndTestBuiltin("foo(true)", false);
+    evalAndTestBuiltin("callGet()", 123);
+    evalAndTestBuiltin("updateGlobalVal()", 456);
+    evalAndTestBuiltin("updateWrappedGlobalVal()", 123);
     // eval("bar(mkConst{mkConst{5}()}())");
-    eval("testA()"); // -> 789
-    eval("baseNS::testBase()"); // -> 8
-    eval("baseNS::HasBase().get()"); // -> 0
-    eval("baseNS::HasBase(baseNS::Base(1)).x"); // -> 1
-    eval("baseNS::HasBase().test()"); // -> 2
-    eval("(5 * 4 - 2) / 3"); // -> 6
-    eval("!(true && false)"); // -> true
+    evalAndTestBuiltin("testA()", 789);
+    evalAndTestBuiltin("baseNS::testBase()", 8);
+    evalAndTestBuiltin("baseNS::HasBase().get()", 0);
+    evalAndTestBuiltin("baseNS::HasBase(baseNS::Base(1)).x", 1);
+    evalAndTestBuiltin("baseNS::HasBase().test()", 2);
+    evalAndTestBuiltin("(5 * 4 - 2) / 3", 6);
+    evalAndTestBuiltin("!(true && false)", true);
     // eval("conditionFlags{Flags(true, true, true, false)}()");
     // eval("conditionFlags{Flags(true, true, true, true)}()");
     // eval("baseNS::hasBase{baseNS::HasBase}()");
     // eval("baseNS::hasBase2{A()}()");
     // eval("baseNS::hasBase2{baseNS::HasBase()}()");
-    eval("MyEnum::B"); // -> 1
-    eval("MyEnum::E"); // -> 2
-    eval("wrap{int}(MyInt(3))"); // -> 3
-    eval("wrap{constant}(mkConst{4}()).value"); // -> 4
+    evalAndTestBuiltin("MyEnum::B", 1);
+    evalAndTestBuiltin("MyEnum::E", 2);
+    evalAndTestBuiltin("wrap{int}(MyInt(3))", 3);
+    evalAndTestBuiltin("wrap{constant}(mkConst{4}()).value", 4);
     eval("testArray()"); // -> (0, 1, 2)
     eval("testFor()"); // -> (1, 2, 3)
-    eval("factorial(4)"); // -> 24
-    eval("typeOf(Opt::new(4))"); // -> Opt{int}
-    eval("assignOpt(4)"); // -> 4
-    eval("if true => 5"); // -> 5
-    eval("Opt{int}(), else => 6"); // -> 6
-    eval("assignOpt(7), else => -1"); // -> 7
+    evalAndTestBuiltin("factorial(4)", 24);
+    evalAndCompare("typeOf(Opt::new(4))", "Opt{int}");
+    evalAndCompare("assignOpt(4)", "Opt::new(4)");
+    evalAndCompare("if true => 5", "Opt::new(5)");
+    evalAndTestBuiltin("Opt{int}(), else => 6", 6);
+    evalAndTestBuiltin("assignOpt(7), else => -1", 7);
 }
