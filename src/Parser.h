@@ -50,6 +50,8 @@ public:
     Word hasWord = asWord("has");
     Word enumWord = asWord("enum");
     Word namespaceWord = asWord("namespace");
+    Word trueWord = asWord("true");
+    Word falseWord = asWord("false");
 
     std::string_view sview(Word word) const;
 

@@ -547,12 +547,6 @@ struct Interpreter : STContext {
         selfDecl = { selfDeclPtr, nullptr };
 
         boolType = findCompDeclHelper(asWord("bool"));
-        auto falseDecl = lookupName(globalContext, asWord("false")).value();
-        VERIFY(at(falseDecl.decl).kind == DeclKind::GlobalDecl);
-        ((StaticLookupContext*)falseDecl.declaringContext)->values.push_back({ CompleteDecl { falseDecl.decl }, makeBuiltinValue(boolType, 0) });
-        auto trueDecl = lookupName(globalContext, asWord("true")).value();
-        VERIFY(at(trueDecl.decl).kind == DeclKind::GlobalDecl);
-        ((StaticLookupContext*)trueDecl.declaringContext)->values.push_back({ CompleteDecl { trueDecl.decl }, makeBuiltinValue(boolType, 1) });
 
         arrayTemplateValue = evalIdentifierName(*globalContext, asWord("Array"));
         optTemplateValue = evalIdentifierName(*globalContext, asWord("Opt"));
@@ -1325,6 +1319,10 @@ struct Interpreter : STContext {
         }
     }
     ExprResult evalIdentifier(LookupContext& ctx, Identifier id) {
+        if (id.word == trueWord)
+            return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, 1));
+        if (id.word == falseWord)
+            return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, 0));
         auto lookup = lookupName(&ctx, id.word);
         if (!lookup.has_value())
             return invalResult;
@@ -1730,40 +1728,73 @@ struct Interpreter : STContext {
     }
     ExprResult evalUnaryOperatorExpr(LookupContext& context, UnaryOperatorExpr& e, bool recordOnly) {
         ExprResult base = evaluateExpr(context, e.subExpr);
+        Type baseType = typeOf(base);
+        if (cmpCompleteDecls(baseType, intType)) {
+            switch (e.op) {
+            case UnaryOperator::Plus:
+                VERIFY(base->kind == ValueKind::Builtin);
+                return ExprResult::make<BasicRecord>(base);
+            case UnaryOperator::Minus:
+                VERIFY(base->kind == ValueKind::Builtin);
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(baseType, -base->u.builtinValue));
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        if (cmpCompleteDecls(baseType, boolType)) {
+            VERIFY(base->kind == ValueKind::Builtin);
+            if (e.op == UnaryOperator::LogicalNot)
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, !base->u.builtinValue));
+        }
         return invokeOp(unaryOpTraits[std::to_underlying(e.op)], base, {}, recordOnly);
     }
     ExprResult evalBinaryOperatorExpr(LookupContext& context, BinaryOperatorExpr& e, bool recordOnly) {
         ExprResult left = evaluateExpr(context, e.left);
         ExprResult right = evaluateExpr(context, e.right);
+        Type leftType = typeOf(left);
+        Type rightType = typeOf(right);
+        if (cmpCompleteDecls(leftType, intType) && cmpCompleteDecls(rightType, intType)) {
+            VERIFY(left->kind == ValueKind::Builtin);
+            VERIFY(right->kind == ValueKind::Builtin);
+            switch (e.op) {
+            case BinaryOperator::Plus:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, left->u.builtinValue + right->u.builtinValue));
+            case BinaryOperator::Minus:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, left->u.builtinValue - right->u.builtinValue));
+            case BinaryOperator::Multiply:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, left->u.builtinValue * right->u.builtinValue));
+            case BinaryOperator::Divide:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(intType, left->u.builtinValue / right->u.builtinValue));
+            case BinaryOperator::Less:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue < right->u.builtinValue));
+            case BinaryOperator::LessEqual:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue <= right->u.builtinValue));
+            case BinaryOperator::Equal:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue == right->u.builtinValue));
+            case BinaryOperator::GreaterEqual:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue >= right->u.builtinValue));
+            case BinaryOperator::Greater:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue > right->u.builtinValue));
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        if (cmpCompleteDecls(leftType, boolType) && cmpCompleteDecls(rightType, boolType)) {
+            VERIFY(left->kind == ValueKind::Builtin);
+            VERIFY(right->kind == ValueKind::Builtin);
+            switch (e.op) {
+            case BinaryOperator::LogicalAnd:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue && right->u.builtinValue));
+            case BinaryOperator::LogicalOr:
+                return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, left->u.builtinValue || right->u.builtinValue));
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
         if (!isCmpOp(e.op)) {
             NamedExprResult rightNamed = NamedExprResult { right, Word() };
             Value trait = binaryOpTraits[std::to_underlying(e.op) - std::to_underlying(BinaryOperator::FirstOp)];
             return invokeOp(trait, left, std::span<NamedExprResult> { &rightNamed, 1 }, recordOnly);
-        }
-        auto checkOp = [](std::partial_ordering order, BinaryOperator op) -> bool {
-            switch (op) {
-            case BinaryOperator::Less:
-                return order < 0;
-            case BinaryOperator::LessEqual:
-                return order <= 0;
-            case BinaryOperator::Equal:
-                return order == 0;
-            case BinaryOperator::GreaterEqual:
-                return order >= 0;
-            case BinaryOperator::Greater:
-                return order > 0;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        };
-
-        Type leftType = typeOf(left);
-        Type rightType = typeOf(right);
-        if ((at(leftType.decl).kind == DeclKind::EnumDecl && cmpCompleteDecls(leftType, rightType))
-            || (cmpCompleteDecls(leftType, intType) && cmpCompleteDecls(rightType, intType))) {
-            VERIFY(left->kind == ValueKind::Builtin);
-            VERIFY(right->kind == ValueKind::Builtin);
-            return ExprResult::make<BasicRecord>(makeBuiltinValue(boolType, checkOp(left->u.builtinValue <=> right->u.builtinValue, e.op)));
         }
         VERIFY_NOT_REACHED();
     }
@@ -2110,52 +2141,9 @@ void testInterpreter() {
         struct PostInc: {}
         struct PostDec: {}
 
-        struct bool: {
-            has LogAnd{bool}: {
-                fn logAnd(self, b: bool): {
-                    if self: {
-                        if b: return true;
-                    }
-                    return false;
-                }
-            }
-            has LogOr{bool}: {
-                fn logOr(self, b: bool): {
-                    if !self: {
-                        if !b: return false;
-                    }
-                    return true;
-                }
-            }
-            has LogNot: {
-                fn logNot(self): {
-                    if self: return false;
-                    return true;
-                }
-            }
-        }
-        true: bool = ();
-        false: bool = ();
+        struct bool: {}
 
-        struct int: {
-            static INT_MASK: int = 0xffff'ffff'ffff'ffff;
-
-            has Add{int}: {
-                fn add(self, r: int) => builtinAddAndMask(self, r, INT_MASK);
-            }
-            has Sub{int}: {
-                fn sub(self, r: int) => add(r.neg());
-            }
-            has Neg: {
-                fn neg(self) => builtinNegateAndMask(self, INT_MASK);
-            }
-            has Mul{int}: {
-                fn mul(self, r: int) => builtinMulAndMask(self, r, INT_MASK);
-            }
-            has Div{int}: {
-                fn div(self, r: int) => builtinSignedDivAndMask(self, r, INT_MASK);
-            }
-        }
+        struct int: {}
 
         template(T: Type)
         fn typeOf(arg: T) => T;
@@ -2326,6 +2314,7 @@ void testInterpreter() {
         return v;
     };
     auto evalAndTestBuiltin = [&](const char* expr, int64_t builtinValue) {
+        fmt::println("evaluating {}", expr);
         Interpreter::Value v = it.interpretExpr(expr);
         if (v.kind == Interpreter::ValueKind::Builtin && v.u.builtinValue == builtinValue)
             return;
