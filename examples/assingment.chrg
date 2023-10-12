@@ -1,0 +1,80 @@
+
+object Foo: {
+    std::vector<int> vec;
+}
+fn test(): {
+    mut foo: Foo = ();
+
+    foo.vec = getVector(); // How to do this?
+
+    replace(foo.vec) = getVector(); // Replaces subobject. This would destroy the subobject, which has some problems.
+                                    //  - Since 'foo.vec' is destroyed before calling 'getVector()', it is unclear how to clean up
+                                    //    'foo' when 'getVector()' throw an exception with some of its subobjects uninitialized.
+                                    //  - Memory blocks would have to keep track of more information.
+                                    //  - What are the semantics of being initialized?
+                                    //     - 'std::fully_initialized(inout arg_with_substance) -> bool'
+                                    //     - 'std::fully_uninitialized(inout arg_with_substance) -> bool'
+                                    //     - all members being initialized is not the same as 'fully_initialized()'
+                                    //     - seperate flag for each member AND the full type (recursively)
+                                    //     - Does 'fully_initialized(obj)' imply 'fully_initialized(obj.member)' for all members?
+                                    //        - This means that 'replace(obj.member)' itermediately has 'fully_initialized(obj) == false'.
+                                    //          Can this (falsely) suggest that we have to call the constructor of 'obj' again?
+                                    //        - 'std::construtor_called_for(inout arg_with_substance) -> bool'?
+
+    foo.vec.move_from(getVector()); // 'move_from' would have a 'mut' parameter. This parameter would effectively be a temporary,
+                                    // the exact thing we are trying to avoid. It might be better to just have temporaries as a
+                                    // language feature instead.
+
+    foo.vec = getVector();          // Use 'out' parameters with initializers, see below.
+
+    // On the issue of to clean up 'foo' if 'getVector()' throws an expections in any of these cases:
+    //  - The only safe way is to construct 'getVector()' into a temporary object which we can be discarded if there is an exception.
+    //  - However, it can be argued that if the destructor of 'foo' does something with 'vec' then we have probably done something
+    //    similar with 'vec' before replacing it. Thus calling the destructor of 'foo' wouldn't be the correct handling anyway.
+    //    Custom error handling is required here!
+    //  - In that may the temporary might be the worst option, because we might do what the destructor does with 'vec' twice.
+    //    The other two options can't compile without custom error handling, since the intermediate state violates the preconditions
+    //    of the destructor.
+}
+
+// 'out' parameters with initializer:
+fn getVector() -> (out vec: std::vector{int} = ()): {
+    // First (at the call site) the target object is initialized/assigned with '= ()'.
+    // Then that object serves as 'inout' argument for this function.
+    // These are 'out' parameters (as opposed to 'inout') because the argument provided by the caller can be uninitialized.
+
+    // Q: How is initializing/assiging with '= ()' different from doing so with '= getVector()'?
+    // A: With '= ()' both initialization and assignment can be handled at the call site,
+    //    which is not possible for a general function without introducing a boolean flag.
+    //    This replaces a function call that can't handle both cases with a simpler assignment that can.
+}
+
+// Consider this problem for a not default construtible type:
+object PointerCollection: {
+    a: id{ThingA};
+    b: id{ThingB};
+    c: id{ThingC};
+    has std::destructor: {
+        fn destroy(inout self): {
+            a->notifyOfDestruction(self);
+        }
+    }
+}
+fn getCollection() -> (pc: PointerCollection = ()): {
+    // If we allow the initializer of 'out' parameters to violate the types contact, '= ()' still works.
+    // So the subobject is intermediately contract violating instead of uninitialized.
+
+    // This is more complex and would require interacting with constracts more often then should be nessecary.
+    // Is this actually better then allowing uninitialized subobjects?
+
+    // Similarly to the 'replace' version it is not clear how to clean up the containing object if we throw an exception.
+
+    pc = ( idof(global_a), idof(global_b), idof(global_c) );
+}
+object Bar: {
+    collection: PointerCollection;
+}
+fn test(): {
+    mut bar: Bar = ( getCollection() );
+    bar.collection = getCollection();
+}

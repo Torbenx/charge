@@ -1,0 +1,72 @@
+// token-test
+
+// expect-source-position line=3 column=1
+ // expect-source-position line=4 column=2
+
+/> expect-invalid-char </ `
+/> expect-invalid-char </ @
+/> expect-invalid-char; expect-invalid-char </ ä
+/> expect-no-error </ a
+
+/> expect-unterm-char-literal </ 'abc
+/> expect-unterm-char-literal </ '
+/> expect-invalid-char-literal </ 'ab'
+/> expect-invalid-char-literal </ ''
+/> expect-no-error </ 'a'
+
+/> expect-token LeftParen </ (
+/> expect-token RightParen </ )
+/> expect-token LeftAngle </ [
+/> expect-token RightAngle </ ]
+/> expect-token LeftBrace </ {
+/> expect-token RightBrace </ }
+/> expect-token Question </ ?
+/> expect-token Exclaim </ !
+/> expect-token Tilde </ ~
+/> expect-token PlusPlus </ ++
+/> expect-token MinusMinus </ --
+/> expect-token Plus </ +
+/> expect-token Minus </ -
+/> expect-token Star </ *
+/> expect-token Amp </ &
+/> expect-token Hat </ ^
+/> expect-token Vert </ |
+/> expect-token Slash </ /
+/> expect-token Percent </ %
+/> expect-token LessLess </ <<
+/> expect-token GreaterGreater </ >>
+/> expect-token ExclaimEqual </ !=
+/> expect-token EqualEqual </ ==
+/> expect-token Less </ <
+/> expect-token LessEqual </ <=
+/> expect-token Greater </ >
+/> expect-token GreaterEqual </ >=
+/> expect-token AmpAmp </ &&
+/> expect-token VertVert </ ||
+/> expect-token PlusEqual </ +=
+/> expect-token MinusEqual </ -=
+/> expect-token StarEqual </ *=
+/> expect-token AmpEqual </ &=
+/> expect-token HatEqual </ ^=
+/> expect-token VertEqual </ |=
+/> expect-token SlashEqual </ /=
+/> expect-token PercentEqual </ %=
+/> expect-token LessLessEqual </ <<=
+/> expect-token GreaterGreaterEqual </ >>=
+/> expect-token AmpAmpEqual </ &&=
+/> expect-token VertVertEqual </ ||=
+/> expect-token Equal </ =
+/> expect-token Comma </ ,
+/> expect-token Point </ .
+/> expect-token Colon </ :
+/> expect-token ColonColon </ ::
+/> expect-token SemiColon </ ;
+/> expect-token FatArrow </ =>
+/> expect-token DoubleArrow </ <=>
+/> expect-token Arrow </ ->
+/> expect-token Word </ abc123
+/> expect-token NumericLiteral </ 123
+/> expect-token CharacterLiteral </ 'a'
+
+// expect-unterm-comment; expect-token EOS
+/> some text

@@ -6,6 +6,9 @@
 			"include": "#comment"
 		},
 		{
+			"include": "#block-comment"
+		},
+		{
 			"include": "#operators"
 		},
 		{
@@ -34,12 +37,18 @@
 					"match": "(//).*$\\n",
 					"name": "comment.line.double-slash"
 				}
+				
 			]
+		},
+		"block-comment": {
+			"begin": "/>",
+			"end": "</",
+			"name": "comment.block.charge"
 		},
 		"decl-keywords": {
 			"patterns": [
 				{
-					"match": "\\b(static|template|struct|fn|special_case|external|as|let|mut|with|has|compare|incomplete|final|module|virtual|override|enum|object|namespace|to|in)\\b",
+					"match": "\\b(static|template|struct|fn|special_case|external|as|let|mut|with|has|compare|incomplete|final|module|virtual|override|enum|object|namespace|to|in|proof)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.other.charge"
@@ -51,7 +60,7 @@
 		"controls": {
 			"patterns": [
 				{
-					"match": "\\b(if|elif|else|match|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is)\\b",
+					"match": "\\b(if|elif|else|match|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is|guard|catch|try)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.control.charge"
