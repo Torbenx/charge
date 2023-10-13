@@ -1,8 +1,11 @@
 #pragma once
 
+#include "StreamAllocator.h"
 #include "WordTable.h"
 #include "token.h"
 #include <utility>
+
+using node_stream_offset = aligned_t<4>;
 
 enum class NodeKind : uint8_t {
 
@@ -13,33 +16,13 @@ enum class NodeKind : uint8_t {
 };
 
 template<typename T>
-constexpr bool matchNodeType(NodeKind in) {
-    switch (in) {
-
-#define NODE(kind, type) \
-    case NodeKind::kind: \
-        return std::is_same_v<T, type>;
-#include "nodes.h"
-
-    case NodeKind::COUNT:
-        VERIFY_NOT_REACHED();
-    }
-}
+constexpr bool matchNodeType(NodeKind in);
 template<typename T>
-constexpr bool isNodeType(NodeKind in) {
-    switch (in) {
-
-#define NODE(kind, type) \
-    case NodeKind::kind: \
-        return std::derived_from<type, base>;
-#include "nodes.h"
-
-    case NodeKind::COUNT:
-        VERIFY_NOT_REACHED();
-    }
-}
+constexpr bool isNodeType(NodeKind in);
 
 std::string_view nameString(NodeKind);
+
+struct DeclArrayItem;
 
 struct Node {
     static constexpr int KIND_BITS = 8;
@@ -54,20 +37,18 @@ struct Node {
     }
     NodeKind kind() const { return NodeKind(kindBits); }
 
-    struct backwards_offset {
-        uint32_t offset;
-    };
+    using backwards_offset = node_stream_offset;
     backwards_offset backwardsOffsetTo(Node* target) const {
-        int_t diff = this - target;
-        VERIFY(diff >= 0);
-        VERIFY(diff <= (int_t)(uint32_t)-1);
-        return { (uint32_t)diff };
+        return backwards_offset::backwords_diff(target, this);
     }
-    template<typename T>
-    T* followBackwardOffset(backwards_offset offset) {
-        Node* node = this - offset.offset;
-        VERIFY(isNodeType<T>(node->kind));
-        return (T*)node;
+    backwards_offset backwardsOffsetTo(DeclArrayItem* target) const {
+        return backwards_offset::backwords_diff(target, this);
+    }
+    Node* followBackwardsOffset(backwards_offset offset) {
+        return (Node*)((std::byte*)this - offset);
+    }
+    DeclArrayItem* followBackwardsOffsetToArray(backwards_offset offset) {
+        return (DeclArrayItem*)((std::byte*)this - offset);
     }
 };
 struct EndScope : Node {
@@ -77,6 +58,156 @@ struct EndScope : Node {
     EndScope()
         : Node(NodeKind::EndScope, SingleTokenSourceRange(0)) { }
     SingleTokenSourceRange scopeEndLocation() const { return packedToken(); }
+};
+
+// declaration arrays
+struct Decl;
+struct DeclArrayItem {
+    Word name;
+    // negative offset from the beginning of the array group
+    node_stream_offset offset;
+};
+struct DeclArrayView {
+    DeclArrayItem* base = nullptr;
+    DeclArrayItem* m_begin = nullptr;
+    DeclArrayItem* m_end = nullptr;
+
+    struct iterator {
+        using difference_type = int_t;
+        using value_type = Decl*;
+        DeclArrayItem* base = nullptr;
+        DeclArrayItem* item = nullptr;
+        Decl* operator*() const { return (*this)[0]; }
+        iterator& operator++() {
+            ++item;
+            return *this;
+        }
+        iterator operator++(int) const { return { base, item + 1 }; }
+        iterator& operator--() {
+            --item;
+            return *this;
+        }
+        iterator operator--(int) const {
+            return { base, item - 1 };
+        }
+        std::strong_ordering operator<=>(const iterator& other) const { return item <=> other.item; }
+        bool operator==(const iterator& other) const { return item == other.item; }
+        iterator& operator+=(int_t i) {
+            item += i;
+            return *this;
+        }
+        iterator& operator-=(int_t i) {
+            item += i;
+            return *this;
+        }
+        iterator operator+(int_t i) const { return { base, item + i }; }
+        iterator operator-(int_t i) const { return { base, item + i }; }
+        int_t operator-(const iterator& other) const { return item - other.item; }
+        Decl* operator[](int_t i) const { return (Decl*)((std::byte*)base - item[i].offset); }
+    };
+    iterator begin() const {
+        return { base, m_begin };
+    }
+    iterator end() const {
+        return { base, m_end };
+    }
+    int_t size() const { return m_end - m_begin; }
+};
+inline DeclArrayView::iterator operator+(int_t i, const DeclArrayView::iterator& it) { return { it.base, it.item + i }; }
+static_assert(std::random_access_iterator<DeclArrayView::iterator>);
+struct DeclArrays {
+    DeclArrayItem* begin = nullptr;
+    uint32_t parameterCount = 0;
+    uint32_t staticCount = 0;
+
+    DeclArrayView view(DeclArrayItem* begin, uint32_t count) const {
+        return { this->begin, begin, begin + count };
+    }
+
+    auto all() const {
+        return view(begin, parameterCount + staticCount);
+    }
+    auto parameters() const {
+        return view(begin, parameterCount);
+    }
+    auto statics() const {
+        return view(begin + parameterCount, staticCount);
+    }
+};
+struct TemplatedDeclArrays : DeclArrays {
+    uint32_t withCount = 0;
+    uint32_t templateCount = 0;
+
+    auto withParameters() const {
+        return view(begin, withCount);
+    }
+    auto templateParamters() const {
+        return view(begin + withCount, templateCount);
+    }
+    auto callableParameters() const {
+        return view(begin + withCount + templateCount, parameterCount - withCount - templateCount);
+    }
+};
+
+// declarations
+struct Decl : Node {
+    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
+    Word name;
+    Decl(NodeKind kind, WordAndLocation name)
+        : Node(kind, name.location), name(name) { VERIFY(isNodeType<Decl>(kind)); }
+    SingleTokenSourceRange nameLocation() const { return packedToken(); }
+};
+// a type, namespace, function or static-variable declaration
+struct StaticDecl : Decl {
+    backwards_offset declArraysBegin;
+    uint32_t withParamCount;
+    uint32_t templateParamCount;
+    uint32_t functionParamOrMemberCount;
+    uint32_t staticDeclCount;
+
+    backwards_offset m_returnOrTypeExpr; // function return-type-expr or type-expr for variables
+    backwards_offset m_bodyOrInitExpr; // function body-stmt or body-expr or init-expr for variables
+
+    StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* bodyOrInitExpr)
+        : Decl(kind, name)
+        , declArraysBegin(backwardsOffsetTo(decls.begin))
+        , withParamCount(decls.withParameters().size())
+        , templateParamCount(decls.templateParamters().size())
+        , functionParamOrMemberCount(decls.callableParameters().size())
+        , staticDeclCount(decls.statics().size())
+        , m_returnOrTypeExpr(backwardsOffsetTo(typeExpr))
+        , m_bodyOrInitExpr(backwardsOffsetTo(bodyOrInitExpr)) {
+        VERIFY(matchNodeType<StaticDecl>(kind));
+    }
+
+    Node* returnOrTypeExpr() { return followBackwardsOffset(m_returnOrTypeExpr); }
+    Node* bodyOrInitExpr() { return followBackwardsOffset(m_bodyOrInitExpr); }
+    TemplatedDeclArrays decls() {
+        return {
+            {
+                .begin = followBackwardsOffsetToArray(declArraysBegin),
+                .parameterCount = withParamCount + templateParamCount + functionParamOrMemberCount,
+                .staticCount = staticDeclCount,
+            },
+            withParamCount,
+            templateParamCount,
+        };
+    }
+};
+// a parameter or (has-)member declaration
+struct ParameterOrMemberDecl : Decl {
+    backwards_offset m_typeExpr;
+    backwards_offset m_initExpr; // has-member decls or init-expr for parameters and members
+
+    ParameterOrMemberDecl(NodeKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name)
+        , m_typeExpr(backwardsOffsetTo(typeExpr))
+        , m_initExpr(backwardsOffsetTo(initExpr)) {
+        VERIFY(matchNodeType<ParameterOrMemberDecl>(kind));
+    }
+
+    Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
+    Node* initExpr() { return followBackwardsOffset(m_initExpr); }
 };
 
 // statements
@@ -206,65 +337,31 @@ struct Parameterize : Expr {
     SingleTokenSourceRange leftBraceLocation() const { return packedToken(); }
 };
 
-void dumpDecl(const Decl*, const WordStringTable&);
-void dumpStmt(const Stmt*, const WordStringTable&);
-void dumpExpr(const Expr*, const WordStringTable&);
+void dump(Node*, const WordStringTable&);
 
-struct Decl;
-struct StaticDecl;
-struct ParameterOrMemberDecl;
-struct LetDecl;
-struct LookupResult;
+template<typename T>
+constexpr bool matchNodeType(NodeKind in) {
+    switch (in) {
 
-enum class LookupContextKind : uint32_t {
-    Namespace,
-    Type,
-    PrematureType,
-    Parameter,
-    Block,
-};
-struct LookupResult {
-    Decl* m_decl;
-    id<Decl> decl() const {
-        VERIFY((bool)m_decl);
-        return m_decl;
+#define NODE(kind, type) \
+    case NodeKind::kind: \
+        return std::is_same_v<T, type>;
+#include "nodes.h"
+
+    case NodeKind::COUNT:
+        VERIFY_NOT_REACHED();
     }
-    bool found() const { return m_decl != nullptr; }
-};
-struct LookupContext {
-    LookupContextKind kind;
+}
+template<typename T>
+constexpr bool isNodeType(NodeKind in) {
+    switch (in) {
 
-    LookupResult lookup(Word);
-};
+#define NODE(kind, type) \
+    case NodeKind::kind: \
+        return std::derived_from<type, T>;
+#include "nodes.h"
 
-struct Decl : Node {
-    Word name;
-    Decl(NodeKind kind, WordAndLocation name)
-        : Node(kind, name.location), name(name) { VERIFY(isNodeType<Decl>(kind)); }
-    SingleTokenSourceRange nameLocation() const { return packedToken(); }
-};
-// a type, namespace, function or static-variable declaration
-struct StaticDecl : Decl {
-    // the (return) type expr begins right after the parameter array
-    backwards_offset paramsArrayBegin;
-    uint32_t withParamCount;
-    uint32_t templateParamCount;
-    uint32_t functionParamOrMemberCount;
-
-    backwards_offset bodyOrInitExpr; // function body or init-expr for variables
-    backwards_offset staticDecls;
-    uint32_t staticDeclCount;
-};
-// a parameter or (has-)member declaration
-struct ParameterOrMemberDecl : Decl {
-    // these are backwards offsets from this
-    backwards_offset typeExprBeginOffset;
-    backwards_offset declsOrInitExprBeginOffset; // has-member decls or init-expr for parameters and members
-
-    ParameterOrMemberDecl(NodeKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : Decl(kind, name)
-        , typeExprBeginOffset(backwardsOffsetTo(typeExpr))
-        , declsOrInitExprBeginOffset(backwardsOffsetTo(initExpr)) {
-        VERIFY(matchNodeType<ParameterOrMemberDecl>(kind));
+    case NodeKind::COUNT:
+        VERIFY_NOT_REACHED();
     }
-};
+}

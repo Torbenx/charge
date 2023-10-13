@@ -93,9 +93,10 @@ DECL(TypeDecl, StaticDecl)
 DECL(FunctionDecl, StaticDecl)
 DECL(StaticVariableDecl, StaticDecl)
 DECL(MemberDecl, ParameterOrMemberDecl)
+DECL(LetParameterDecl, ParameterOrMemberDecl)
 DECL(MutParameterDecl, ParameterOrMemberDecl)
-DECL(AmpParameterDecl, ParameterOrMemberDecl)
-DECL(ValueParameterDecl, ParameterOrMemberDecl)
+DECL(InOutParameterDecl, ParameterOrMemberDecl)
+DECL(OutParameterDecl, ParameterOrMemberDecl)
 
 #undef EXPR
 #undef STMT

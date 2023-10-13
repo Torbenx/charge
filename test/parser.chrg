@@ -1,5 +1,6 @@
-// expression-test
-{
+// parser-test
+
+fn test(): {
 
 //; primary expressions
 /> expect-node IdentifierExpr </ a;
@@ -128,4 +129,18 @@ a(p = b, c);
 a(foo = -b + z, bar = c);
 a{b.c{i, j, k}, blub = c} + d;
 
-}
+} // expect-decl FunctionDecl
+
+/> expect-decl FunctionDecl </ fn test(): { }
+/> expect-decl LetParameterDecl; expect-decl FunctionDecl </ fn test(a): { }
+// expect-decl LetParameterDecl; expect-decl MutParameterDecl; expect-decl InOutParameterDecl
+// expect-decl OutParameterDecl; expect-decl FunctionDecl
+fn test(let a, mut b, inout c, out d): { }
+
+// expect-identifier param_type; expect-node EndScope
+// expect-identifier param_init; expect-node EndScope
+// expect-decl LetParameterDecl
+/>;expect-identifier return_type </// expect-node EndScope
+// expect-identifier body_expr; expect-node EndScope
+// expect-decl FunctionDecl
+fn test(param_name: param_type = param_init) => body_expr;

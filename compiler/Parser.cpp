@@ -1,5 +1,15 @@
 #include "compiler.h"
 
+template<bool (*test)(NodeKind)>
+static constexpr NodeKind firstInstance() {
+    for (std::underlying_type_t<NodeKind> i = 0; i < std::to_underlying(NodeKind::COUNT); i++) {
+        NodeKind kind = (NodeKind)i;
+        if (test(kind))
+            return kind;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 std::string_view nameString(NodeKind kind) {
     switch (kind) {
 
@@ -15,27 +25,97 @@ std::string_view nameString(NodeKind kind) {
 
 template<std::derived_from<Node> T>
 T* Parser::emitNode(T in) {
-    T* node = std::construct_at(nodeAllocator.template allocate<T>(), in);
+    T* node = std::construct_at(nodeStream.template allocate<T>(), in);
+
     if (instrumenter)
         instrumenter->emitNode(this, node);
     return node;
 }
+
+struct DeclarationScopeFields {
+    Parser* parser = nullptr;
+    uint32_t parameterDeclStackBegin = 0;
+    uint32_t staticDeclStackBegin = 0;
+};
+struct Parser::DeclarationScope : DeclarationScopeFields {
+    explicit DeclarationScope(Parser* parser)
+        : DeclarationScopeFields {
+            .parser = parser,
+            .parameterDeclStackBegin = (uint32_t)parser->parameterDeclStack.size(),
+            .staticDeclStackBegin = (uint32_t)parser->staticDeclStack.size(),
+        } { }
+
+    DeclarationScope(DeclarationScope&& other)
+        : DeclarationScopeFields(other) {
+        (DeclarationScopeFields&)other = {};
+    }
+
+    DeclArrays finish() {
+        node_stream_offset arrayBeginOffset = parser->nodeStream.offset;
+        auto stackToArrayItem = [&](DeclStackItem item) -> DeclArrayItem {
+            return { item.name, arrayBeginOffset - item.nodeStreamOffset };
+        };
+
+        auto parameterDecls = std::span(parser->parameterDeclStack).subspan(parameterDeclStackBegin);
+        for (auto item : parameterDecls)
+            std::construct_at(parser->nodeStream.allocate<DeclArrayItem>(), stackToArrayItem(item));
+
+        auto staticDecls = std::span(parser->staticDeclStack).subspan(staticDeclStackBegin);
+        for (auto item : staticDecls)
+            std::construct_at(parser->nodeStream.allocate<DeclArrayItem>(), stackToArrayItem(item));
+
+        parser->staticDeclStack.truncate(staticDeclStackBegin);
+        parser->parameterDeclStack.truncate(parameterDeclStackBegin);
+
+        DeclArrays arrays = {
+            .begin = (DeclArrayItem*)parser->nodeStream.position(arrayBeginOffset),
+            .parameterCount = (uint32_t)parameterDecls.size(),
+            .staticCount = (uint32_t)staticDecls.size()
+        };
+
+        parser = nullptr;
+        return arrays;
+    }
+
+    ~DeclarationScope() {
+        if (parser) {
+            parser->staticDeclStack.truncate(staticDeclStackBegin);
+            parser->parameterDeclStack.truncate(parameterDeclStackBegin);
+        }
+    }
+};
+struct Parser::TemplatedDeclarationScope : Parser::DeclarationScope {
+    uint32_t withParamCount = 0;
+    uint32_t templateParamCount = 0;
+    using DeclarationScope::DeclarationScope;
+
+    TemplatedDeclArrays finish() {
+        auto arrays = DeclarationScope::finish();
+        return { arrays, withParamCount, templateParamCount };
+    }
+};
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
-    T* decl = std::construct_at(nodeAllocator.template allocate<T>(), std::forward<Args>(args)...);
+    auto declOffset = nodeStream.offset;
+    T* decl = std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
+
+    static_assert(std::is_same_v<T, StaticDecl> || std::is_same_v<T, ParameterOrMemberDecl>);
+    (std::is_same_v<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, declOffset });
+
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
     return decl;
 }
 
-id<Decl> Parser::parseDeclaration() {
+void Parser::parseDeclaration() {
+    TemplatedDeclarationScope templateScope(this);
     if (tok == Token::Word && tokWord() == words["with"]) {
         nextToken();
         if (tok != Token::LeftParen) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        parseParameters(ParameterParseScope::Template);
+        templateScope.withParamCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
     }
     if (tok == Token::Word && tokWord() == words["template"]) {
         nextToken();
@@ -43,15 +123,19 @@ id<Decl> Parser::parseDeclaration() {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        parseParameters(ParameterParseScope::Template);
+        templateScope.templateParamCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
     }
 
     std::vector<WordAndLocation> attributes;
     while (tok == Token::Word) {
-        if (tokWord() == words["namespace"] || tokWord() == words["struct"] || tokWord() == words["object"])
-            return parseNamespaceOrTypeDecl(attributes);
-        if (tokWord() == words["fn"])
-            return parseFunctionDecl(attributes);
+        if (tokWord() == words["namespace"] || tokWord() == words["struct"] || tokWord() == words["object"]) {
+            parseNamespaceOrTypeDecl(attributes, std::move(templateScope));
+            return;
+        }
+        if (tokWord() == words["fn"]) {
+            parseFunctionDecl(attributes, std::move(templateScope));
+            return;
+        }
 
         attributes.push_back(tokWord());
         nextToken();
@@ -64,10 +148,10 @@ id<Decl> Parser::parseDeclaration() {
     auto name = attributes.back();
     attributes.pop_back();
 
-    return parseVariableDecl(name, attributes);
+    parseVariableDecl(name, attributes, std::move(templateScope));
 }
 
-id<Decl> Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attributes) {
+void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
     VERIFY(tok == Token::Word);
     WordAndLocation declarator = tokWord();
     nextToken();
@@ -87,40 +171,42 @@ id<Decl> Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attri
         VERIFY_NOT_REACHED();
     }
     nextToken();
-    std::vector<std::pair<Word, StaticDecl*>> decls;
     while (tok != Token::RightBrace) {
-        id<Decl> decl = parseDeclaration();
-        decls.push_back({ decl->name, (StaticDecl*)(Decl*)decl });
+        parseDeclaration();
     }
     VERIFY(tok == Token::RightBrace);
     nextToken();
-    return emitDecl<StaticDecl>();
+    // emitDecl<StaticDecl>();
+    VERIFY_NOT_REACHED();
 }
 
-id<Decl> Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes) {
-    // static [mut] name [: type] [= init];
-    Node* typeExpr = nullptr;
-    Node* initExpr = nullptr;
+void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+    // static [mut|let] name [: type] [= init];
+    Node* typeExpr = nextNodeLocation();
     if (tok == Token::Colon) {
         nextToken();
-        typeExpr = nextNodeLocation();
         parseExpression();
-        emitNode(EndScope());
     }
+    emitNode(EndScope());
+
+    Node* initExpr = nextNodeLocation();
     if (tok == Token::Equal) {
         nextToken();
-        initExpr = nextNodeLocation();
         parseExpression();
-        emitNode(EndScope());
     }
+    emitNode(EndScope());
+
     if (tok != Token::SemiColon) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-    return emitDecl<StaticDecl>();
+    nextToken();
+    
+    // emitDecl<StaticDecl>();
+    VERIFY_NOT_REACHED();
 }
 
-id<Decl> Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes) {
+void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
     VERIFY(tok == Token::Word && tokWord() == words["fn"]);
     nextToken();
     if (tok != Token::Word) {
@@ -129,52 +215,58 @@ id<Decl> Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes) 
     }
     WordAndLocation name = tokWord();
     nextToken();
+
     if (tok != Token::LeftParen) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-    parseParameters(ParameterParseScope::Function);
-    VERIFY_NOT_REACHED();
+    parseParameters();
+
+    Node* returnType = nextNodeLocation();
+    if (tok == Token::Arrow) {
+        // TODO: parse return type / parameters
+        VERIFY_NOT_REACHED();
+    }
+    emitNode(EndScope());
+
+    Node* body = nextNodeLocation();
+    parseBodyExprOrStmt();
+
+    emitDecl<StaticDecl>(NodeKind::FunctionDecl, name, templateScope.finish(), returnType, body);
 }
 
-static bool mutAllowed(Parser::ParameterParseScope s) {
-    return s == Parser::ParameterParseScope::Function;
-}
-static bool ampAllowed(Parser::ParameterParseScope s) {
-    return s == Parser::ParameterParseScope::Function;
-}
-void Parser::parseParameters(ParameterParseScope scope) {
+int_t Parser::parseParameters(ParameterParseOptions opts) {
     VERIFY(tok == Token::LeftParen);
     nextToken();
+    int_t count = 0;
     while (tok != Token::RightParen) {
-        // [mut] name[&] [?constrait] [: type] [= init]
-        NodeKind kind = NodeKind::ValueParameterDecl;
-        if (tok == Token::Word && tokWord() == words["mut"]) {
-            if (!mutAllowed(scope)) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
-            }
-            kind = NodeKind::MutParameterDecl;
-            nextToken();
-        }
-
+        // [let|mut|inout|out] name [?constrait] [: type] [= init]
         if (tok != Token::Word) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
+
+        NodeKind kind = NodeKind::LetParameterDecl;
         WordAndLocation name = tokWord();
         nextToken();
-
-        if (tok == Token::Amp) {
-            if (kind == NodeKind::MutParameterDecl) {
+        if (tok == Token::Word) {
+            if (opts == ParameterParseOptions::OnlyLetParameters) {
                 // errorHandler;
                 VERIFY_NOT_REACHED();
             }
-            if (!ampAllowed(scope)) {
+            if (name == words["let"]) {
+                kind = NodeKind::LetParameterDecl;
+            } else if (name == words["mut"]) {
+                kind = NodeKind::MutParameterDecl;
+            } else if (name == words["inout"]) {
+                kind = NodeKind::InOutParameterDecl;
+            } else if (name == words["out"]) {
+                kind = NodeKind::OutParameterDecl;
+            } else {
                 // errorHandler;
                 VERIFY_NOT_REACHED();
             }
-            kind = NodeKind::AmpParameterDecl;
+            name = tokWord();
             nextToken();
         }
 
@@ -198,6 +290,36 @@ void Parser::parseParameters(ParameterParseScope scope) {
         emitNode(EndScope());
 
         emitDecl<ParameterOrMemberDecl>(kind, name, typeExpr, initExpr);
+        count += 1;
+        if (tok == Token::Comma) {
+            nextToken();
+        } else if (tok != Token::RightParen) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+    }
+    VERIFY(tok == Token::RightParen);
+    nextToken();
+
+    // TODO: we should guard against overflow somewhere
+    return count;
+}
+
+void Parser::parseBodyExprOrStmt() {
+    if (tok == Token::Colon) {
+        parseSingleOrCompoundStmt();
+    } else if (tok == Token::FatArrow) {
+        nextToken();
+        parseExpression();
+        emitNode(EndScope());
+        if (tok != Token::SemiColon) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        nextToken();
+    } else {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
     }
 }
 
@@ -235,8 +357,10 @@ void Parser::parseStatement() {
 }
 
 static NodeKind updateToStmt(Token token) {
-    return NodeKind(std::to_underlying(token) - std::to_underlying(Token::FirstUpdateOp)
-        + std::to_underlying(NodeKind::FirstUpdateStmt));
+    static constexpr auto firstUpdateStmt
+        = std::min(std::to_underlying(firstInstance<matchNodeType<UpdateStmt>>()),
+            std::to_underlying(firstInstance<matchNodeType<LogicalUpdateStmt>>()));
+    return NodeKind(std::to_underlying(token) - std::to_underlying(Token::FirstUpdateOp) + firstUpdateStmt);
 }
 Parser::ParsedStatementKind Parser::parseStatementInternal() {
     if (tok == Token::Word) {
@@ -250,7 +374,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
         NodeKind kind = updateToStmt(tok);
         auto opLoc = tokRange();
         nextToken();
-        if (isLogicalUpdateStmt(kind)) {
+        if (matchNodeType<LogicalUpdateStmt>(kind)) {
             emitNode(LogicalUpdateStmt(kind, opLoc));
             parseExpression();
             emitNode(EndScope());
@@ -346,8 +470,10 @@ void Parser::parseIfExpr() {
 }
 
 static NodeKind binaryToExpr(Token tok) {
-    return NodeKind(std::to_underlying(tok) - std::to_underlying(Token::FirstBinaryOp)
-        + std::to_underlying(NodeKind::FirstBinaryOperatorExpr));
+    static constexpr auto firstBinaryExpr
+        = std::min(std::to_underlying(firstInstance<matchNodeType<BinaryOperatorExpr>>()),
+            std::to_underlying(firstInstance<matchNodeType<BinaryLogicalOperatorExpr>>()));
+    return NodeKind(std::to_underlying(tok) - std::to_underlying(Token::FirstBinaryOp) + firstBinaryExpr);
 }
 // clang-format off
 static int precedenceOf(NodeKind node) {
@@ -390,7 +516,7 @@ void Parser::parseBinaryOperatorExpr(int ambientPrecedence) {
         auto opLoc = tokRange();
         nextToken();
         // parse operators with precedence < tokPrecedence
-        if (isBinaryLogicalOperatorExpr(kind)) {
+        if (matchNodeType<BinaryLogicalOperatorExpr>(kind)) {
             emitNode(BinaryLogicalOperatorExpr(kind, opLoc));
             parseBinaryOperatorExpr(tokPrecdence);
             emitNode(EndScope());
@@ -402,8 +528,8 @@ void Parser::parseBinaryOperatorExpr(int ambientPrecedence) {
 }
 
 static NodeKind unaryToExpr(Token tok) {
-    return NodeKind(std::to_underlying(tok) - std::to_underlying(Token::FirstUnaryOp)
-        + std::to_underlying(NodeKind::FirstUnaryOperatorExpr));
+    static constexpr auto firstUnaryExpr = std::to_underlying(firstInstance<matchNodeType<UnaryOperatorExpr>>());
+    return NodeKind(std::to_underlying(tok) - std::to_underlying(Token::FirstUnaryOp) + firstUnaryExpr);
 }
 void Parser::parseUnaryOperatorExpr() {
     if (isUnaryOp(tok)) {

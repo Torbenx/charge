@@ -64,6 +64,10 @@
     rect.bottomLeft().x() = ...; // impossible because the result of 'bottomLeft()' cannot be bound to the 'inout self' parameter of 'x() = '
 
 
+-- All types with an incomplete non-virtual function are 'traits'.
+-- Non-template traits have an implicit 'Self' type template parameter, which must be explicit if template parameters are declared.
+
+
 SSA:
  - resolve everything to fully specified calls / member accesses
  - seperate static and runtime blocks

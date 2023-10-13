@@ -1,4 +1,4 @@
-// token-test
+// lexer-test
 
 // expect-source-position line=3 column=1
  // expect-source-position line=4 column=2

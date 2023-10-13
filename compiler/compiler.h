@@ -1,65 +1,6 @@
 #pragma once
 
-#include "WordTable.h"
 #include "expr.h"
-#include <new>
-
-struct BumpAllocatorFields {
-    std::byte* storage = nullptr;
-    uint32_t alignedOffset = 0;
-    uint32_t alignedCapacity = 0;
-};
-template<size_t defaultAlignment>
-struct BumpAllocator : BumpAllocatorFields {
-    static constexpr size_t MAX_ALIGNMENT = 16;
-    static_assert(std::has_single_bit(defaultAlignment));
-
-    BumpAllocator() { allocateStorage(1024 * 1024); }
-    BumpAllocator(BumpAllocator&& other)
-        : BumpAllocatorFields(other) {
-        (BumpAllocatorFields&)other = {};
-    }
-    BumpAllocator& operator=(BumpAllocator&& other) {
-        freeStorage();
-        (BumpAllocatorFields&)* this = other;
-        (BumpAllocatorFields&)other = {};
-        return *this;
-    }
-    ~BumpAllocator() { freeStorage(); }
-
-    template<typename T>
-    T* allocate() {
-        return (T*)allocate(alignof(T), sizeof(T));
-    }
-    void* allocate(int_t alignment, int_t size) {
-        VERIFY(size > 0 && alignment > 0 && (size_t)alignment <= MAX_ALIGNMENT && std::has_single_bit((size_t)alignment));
-        size_t alignedBegin = alignmentCeil(alignedOffset, aligned(alignment));
-        size_t alignedEnd = alignedBegin + aligned(size);
-        VERIFY(alignedEnd <= alignedCapacity);
-        alignedOffset = alignedEnd;
-        return storage + alignedBegin * defaultAlignment;
-    }
-    void* position() const {
-        return storage + alignedOffset * defaultAlignment;
-    }
-
-private:
-    void freeStorage() {
-        if (storage == nullptr)
-            return;
-        operator delete(storage, alignedCapacity* defaultAlignment, std::align_val_t(MAX_ALIGNMENT));
-        (BumpAllocatorFields&)* this = {};
-    }
-    void allocateStorage(size_t sizeInBytes) {
-        freeStorage();
-        alignedOffset = 0;
-        alignedCapacity = aligned(sizeInBytes);
-        storage = (std::byte*)operator new(alignedCapacity* defaultAlignment, std::align_val_t(defaultAlignment));
-    }
-    size_t aligned(size_t bytes) {
-        return (bytes + defaultAlignment - 1) / defaultAlignment;
-    }
-};
 
 struct SourcePosition {
     uint32_t line;
@@ -87,25 +28,7 @@ struct StreamToken {
         return StreamToken { std::to_underlying(token), end - begin, begin };
     }
 };
-struct TokenStream {
-    static_assert(sizeof(StreamToken) == 8);
-    BumpAllocator<8> allocator;
-    void emit(StreamToken token) {
-        auto prevOffset = allocator.alignedOffset;
-        std::construct_at(allocator.allocate<StreamToken>(), token);
-        VERIFY(allocator.alignedOffset = prevOffset + 1);
-    }
-    int_t size() const { return allocator.alignedOffset; }
-    const StreamToken* data() const {
-        return (StreamToken*)allocator.storage;
-    }
-    const StreamToken& operator[](int_t offset) const {
-        return *(data() + offset);
-    }
-    const StreamToken* begin() const { return data(); }
-    const StreamToken* end() const { return data() + size(); }
-    const StreamToken& back() const { return (*this)[size() - 1]; }
-};
+
 struct LexerState : TokenWithData {
     // These two fields should only be accessed by the Lexer interals.
     // To get the range of the current token the tokenStream should be used
@@ -118,7 +41,7 @@ struct LexerState : TokenWithData {
     TokenWithData cachedNextToken = {};
 
     std::string_view sourceBuffer = {};
-    TokenStream tokenStream;
+    HomogeneousStreamAllocator<StreamToken> tokenStream;
 
     void setSource(std::string_view);
 
@@ -164,27 +87,39 @@ struct Parser : LexerState {
     void reemitLastToken(TokenWithData);
 
     static constexpr auto words = ConstWordStringTable(
-        keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"));
+        keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
+        keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"));
     WordStringTable wordTable { words };
 
-    BumpAllocator<4> nodeAllocator;
+    StreamAllocator<4> nodeStream;
     Node* nextNodeLocation() const {
-        return (Node*)(nodeAllocator.position());
+        return (Node*)(nodeStream.position());
     }
     template<std::derived_from<Node> T>
     T* emitNode(T in);
+
+    struct DeclStackItem {
+        Word name;
+        // offset from the beginning of the stream
+        node_stream_offset nodeStreamOffset;
+    };
+    HomogeneousStreamAllocator<DeclStackItem> staticDeclStack;
+    HomogeneousStreamAllocator<DeclStackItem> parameterDeclStack;
+    struct DeclarationScope;
+    struct TemplatedDeclarationScope;
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDecl(Args&&...);
 
-    id<Decl> parseDeclaration();
-    id<Decl> parseNamespaceOrTypeDecl(std::span<const WordAndLocation>);
-    id<Decl> parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>);
-    id<Decl> parseFunctionDecl(std::span<const WordAndLocation>);
-    enum class ParameterParseScope {
-        Function,
-        Template,
+    void parseDeclaration();
+    void parseNamespaceOrTypeDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
+    void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, TemplatedDeclarationScope);
+    void parseFunctionDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
+    enum class ParameterParseOptions {
+        None,
+        OnlyLetParameters,
     };
-    void parseParameters(ParameterParseScope);
+    int_t parseParameters(ParameterParseOptions = ParameterParseOptions::None);
+    void parseBodyExprOrStmt();
 
     void parseSingleOrCompoundStmt();
     void parseCompoundStmt();

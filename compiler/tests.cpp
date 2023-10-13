@@ -19,8 +19,8 @@ static bool isCommandEndChar(uint8_t c) {
 struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     enum class TestMode {
         Invalid,
-        TokenTest,
-        ExpressionTest,
+        Lexer,
+        Parser,
     };
     using Value = std::variant<std::nullopt_t, NumericLiteral, CharacterLiteral>;
     struct Pair {
@@ -53,8 +53,8 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
 
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
-        "expect-no-error", "expect-token", "expect-node", "expression-test", "token-test", "expect-source-position",
-        "line", "column", "packed-range-begin-column");
+        "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
+        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -83,14 +83,13 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
 
         while (par.tok != Token::EOS) {
             switch (testMode) {
-            case TestMode::TokenTest:
+            case TestMode::Lexer:
                 par.nextToken();
                 break;
-            case TestMode::ExpressionTest: {
+            case TestMode::Parser: {
                 std::cout << "------\n";
-                Node* stmt = par.nextNodeLocation();
-                par.parseCompoundStmt();
-                dumpStmt(stmt, par.wordTable);
+                par.parseDeclaration();
+                dump((Node*)(par.nodeStream.storage + par.staticDeclStack.back().nodeStreamOffset), par.wordTable);
                 break;
             }
             default:
@@ -101,6 +100,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     }
 
     void nextToken(Parser* par) override {
+        // fmt::println("tok {}", nameString(par->tok));
         verify(((LexerState*)par)->valid());
         if (commandQueue.empty())
             return;
@@ -123,6 +123,29 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                     expect_eq(pair.value, nameString(node->kind()), "", &cmd, &pair);
                 else if (pair.key == words["packed-range-begin-column"])
                     expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
+                else
+                    invalidKey(&cmd, &pair);
+            }
+        } else if (commandQueue.top().command == words["expect-identifier"]) {
+            auto cmd = commandQueue.pop();
+            expect_eq(node->kind(), NodeKind::IdentifierExpr);
+            for (const auto& pair : cmd.pairs) {
+                if (pair.key == Word())
+                    expect_eq(pair.value, par->wordTable.view(((IdentifierExpr*)node)->id), "", &cmd, &pair);
+                else
+                    invalidKey(&cmd, &pair);
+            }
+        }
+    }
+    void emitDecl(Parser*, Decl* decl) override {
+        // std::cout << "emitting decl " << decl << " - " << nameString(decl->kind()) << '\n';
+        if (commandQueue.empty())
+            return;
+        if (commandQueue.top().command == words["expect-decl"]) {
+            auto cmd = commandQueue.pop();
+            for (const auto& pair : cmd.pairs) {
+                if (pair.key == Word())
+                    expect_eq(pair.value, nameString(decl->kind()), "", &cmd, &pair);
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -188,14 +211,14 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 verify(commandQueue.empty(), "", &command);
                 break;
             }
-            case words["token-test"].asUint(): {
+            case words["lexer-test"].asUint(): {
                 verifyNoPairs(command);
-                testMode = TestMode::TokenTest;
+                testMode = TestMode::Lexer;
                 break;
             }
-            case words["expression-test"].asUint(): {
+            case words["parser-test"].asUint(): {
                 verifyNoPairs(command);
-                testMode = TestMode::ExpressionTest;
+                testMode = TestMode::Parser;
                 break;
             }
             case words["expect-source-position"].asUint(): {
@@ -262,8 +285,8 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     Command popCommand(Word cause) {
         Command cmd = commandQueue.pop();
         if (cmd.command != cause) {
-            std::cout << "pending command '" << wordTable.view(cmd.command).value()
-                      << "' but got '" << wordTable.view(cause).value() << "'\n";
+            std::cout << "pending command '" << wordTable.view(cmd.command)
+                      << "' but got '" << wordTable.view(cause) << "'\n";
             VERIFY_NOT_REACHED();
         }
         return cmd;

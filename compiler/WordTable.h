@@ -193,7 +193,7 @@ public:
     constexpr Word getWithHash(std::string_view str, uint32_t hash);
     constexpr Word insertKeyword(std::string_view str);
 
-    constexpr std::optional<std::string_view> view(Word word) const;
+    constexpr std::string_view view(Word word) const;
 
     class EntryHandle {
     private:
@@ -337,11 +337,8 @@ constexpr Word WordStringTable::insertKeyword(std::string_view str) {
     maybeRehash();
     return word;
 }
-constexpr std::optional<std::string_view> WordStringTable::view(Word word) const {
-    auto r = findWord(word);
-    if (!r.has_value())
-        return {};
-    return getStorage(entries[r.value()].payload);
+constexpr std::string_view WordStringTable::view(Word word) const {
+    return getStorage(entries[findWord(word).value()].payload);
 }
 
 struct WrappedWordStringTable : WordStringTable {
