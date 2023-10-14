@@ -99,8 +99,8 @@ T* Parser::emitDecl(Args&&... args) {
     auto declOffset = nodeStream.offset;
     T* decl = std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
 
-    static_assert(std::is_same_v<T, StaticDecl> || std::is_same_v<T, ParameterOrMemberDecl>);
-    (std::is_same_v<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, declOffset });
+    static_assert(std::derived_from<T, StaticDecl> || std::derived_from<T, ParameterOrMemberDecl>);
+    (std::derived_from<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, declOffset });
 
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
@@ -152,15 +152,31 @@ void Parser::parseDeclaration() {
 }
 
 void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+    if (attributes.size() != 0) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+
     VERIFY(tok == Token::Word);
     WordAndLocation declarator = tokWord();
+    NodeKind kind;
+    if (declarator == words["namespace"])
+        kind = NodeKind::NamespaceDecl;
+    else if (declarator == words["struct"])
+        kind = NodeKind::StructTypeDecl;
+    else if (declarator == words["object"])
+        kind = NodeKind::ObjectTypeDecl;
+    else
+        VERIFY_NOT_REACHED();
     nextToken();
+
     if (tok != Token::Word) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
     WordAndLocation name = tokWord();
     nextToken();
+
     if (tok != Token::Colon) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -171,17 +187,38 @@ void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attribute
         VERIFY_NOT_REACHED();
     }
     nextToken();
+
     while (tok != Token::RightBrace) {
         parseDeclaration();
     }
     VERIFY(tok == Token::RightBrace);
     nextToken();
-    // emitDecl<StaticDecl>();
-    VERIFY_NOT_REACHED();
+
+    emitDecl<StaticDecl>(kind, name, templateScope.finish());
 }
 
 void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
     // static [mut|let] name [: type] [= init];
+    if (attributes.empty() || attributes.front() != words["static"]) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    NodeKind kind = NodeKind::StaticLetVariableDecl;
+    if (attributes.size() > 1) {
+        if (attributes.size() > 2) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        if (attributes[1] == words["let"]) {
+            kind = NodeKind::StaticLetVariableDecl;
+        } else if (attributes[1] == words["mut"]) {
+            kind = NodeKind::StaticMutVariableDecl;
+        } else {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+    }
+
     Node* typeExpr = nextNodeLocation();
     if (tok == Token::Colon) {
         nextToken();
@@ -201,12 +238,16 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
         VERIFY_NOT_REACHED();
     }
     nextToken();
-    
-    // emitDecl<StaticDecl>();
-    VERIFY_NOT_REACHED();
+
+    emitDecl<VariableOrFunctionDecl>(kind, name, templateScope.finish(), typeExpr, initExpr);
 }
 
 void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+    if (attributes.size() != 0) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+
     VERIFY(tok == Token::Word && tokWord() == words["fn"]);
     nextToken();
     if (tok != Token::Word) {
@@ -224,15 +265,15 @@ void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, Temp
 
     Node* returnType = nextNodeLocation();
     if (tok == Token::Arrow) {
-        // TODO: parse return type / parameters
-        VERIFY_NOT_REACHED();
+        nextToken();
+        parseExpression();
     }
     emitNode(EndScope());
 
     Node* body = nextNodeLocation();
     parseBodyExprOrStmt();
 
-    emitDecl<StaticDecl>(NodeKind::FunctionDecl, name, templateScope.finish(), returnType, body);
+    emitDecl<VariableOrFunctionDecl>(NodeKind::FunctionDecl, name, templateScope.finish(), returnType, body);
 }
 
 int_t Parser::parseParameters(ParameterParseOptions opts) {

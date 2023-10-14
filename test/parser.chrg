@@ -75,18 +75,18 @@ fn test(): {
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EndScope </ if a: { b; }
 
 //; test precedence
-// expect-node IdentifierExpr; expect-node LogicalOrExpr;
-// expect-node IdentifierExpr; expect-node LogicalAndExpr;
-// expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareGreaterEqualExpr;
-// expect-node IdentifierExpr; expect-node CompareEqualExpr;
+// expect-identifier a; expect-node LogicalOrExpr;
+// expect-identifier b; expect-node LogicalAndExpr;
+// expect-identifier c; expect-identifier e; expect-node CompareGreaterEqualExpr;
+// expect-identifier d; expect-node CompareEqualExpr;
 // expect-node EndScope; expect-node EndScope;
 a || b && c >= e == d;
 
 //; test arguments
-// expect-node IdentifierExpr ;; a
+// expect-identifier a
 // expect-node CallExpr
-// expect-node IdentifierExpr; expect-node DesignateArgument ;; p = b
-// expect-node IdentifierExpr ;; c
+// expect-identifier b; expect-node DesignateArgument ;; p = b
+// expect-identifier c
 // expect-node EndScope
 a(p = b, c);
 
@@ -133,14 +133,52 @@ a{b.c{i, j, k}, blub = c} + d;
 
 /> expect-decl FunctionDecl </ fn test(): { }
 /> expect-decl LetParameterDecl; expect-decl FunctionDecl </ fn test(a): { }
-// expect-decl LetParameterDecl; expect-decl MutParameterDecl; expect-decl InOutParameterDecl
-// expect-decl OutParameterDecl; expect-decl FunctionDecl
+
+// expect-decl LetParameterDecl name=a
+// expect-decl MutParameterDecl name=b
+// expect-decl InOutParameterDecl name=c
+// expect-decl OutParameterDecl name=d
+// expect-decl FunctionDecl name=test
 fn test(let a, mut b, inout c, out d): { }
 
 // expect-identifier param_type; expect-node EndScope
 // expect-identifier param_init; expect-node EndScope
 // expect-decl LetParameterDecl
-/>;expect-identifier return_type </// expect-node EndScope
+// expect-identifier return_type; expect-node EndScope
 // expect-identifier body_expr; expect-node EndScope
 // expect-decl FunctionDecl
-fn test(param_name: param_type = param_init) => body_expr;
+fn test(param_name: param_type = param_init) -> return_type => body_expr;
+
+// expect-decl LetParameterDecl name=T
+// expect-decl LetParameterDecl name=a
+// expect-decl LetParameterDecl name=b
+// expect-decl FunctionDecl name=test
+with(T: Type)
+template(a: T)
+fn test(b: T): { }
+
+// expect-decl LetParameterDecl name=a
+// expect-decl FunctionDecl name=foo
+// expect-decl StructTypeDecl name=Foo
+// expect-decl LetParameterDecl name=b
+// expect-decl FunctionDecl name=bar
+// expect-decl ObjectTypeDecl name=Bar
+// expect-decl StaticLetVariableDecl name=x
+// expect-decl NamespaceDecl name=Namespace
+namespace Namespace: {
+    struct Foo: {
+        fn foo(a): { }
+    }
+    object Bar: {
+        fn bar(b): { }
+    }
+    static x;
+}
+
+// expect-identifier type; expect-node EndScope
+// expect-identifier init; expect-node EndScope
+// expect-decl StaticLetVariableDecl name=name
+static name: type = init;
+
+/> expect-decl StaticLetVariableDecl </ static let a;
+/> expect-decl StaticMutVariableDecl </ static mut a;

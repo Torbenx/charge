@@ -184,17 +184,33 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     }
 
     // declarations
+    std::optional<DumpResult> visitStaticDeclInternal(StaticDecl& d) {
+        std::optional<DumpResult> lastDecl;
+        for (Decl* decl : d.decls().all())
+            lastDecl = visitSingleDecl(decl);
+        return lastDecl;
+    }
     DumpResult visitStaticDecl(StaticDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        std::optional<DumpResult> lastDecl;
-        for (Decl* decl : d.decls().all())
-            lastDecl = visitSingleDecl(decl);
+        auto lastDecl = visitStaticDeclInternal(d);
+        if (lastDecl.has_value())
+            lastDecl.value()->lastChild = true;
+        else
+            out->leafNode = true;
+
+        return out;
+    }
+    DumpResult visitVariableOrFunctionDecl(VariableOrFunctionDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto lastDecl = visitStaticDeclInternal(d);
         auto type = visitExprScope(d.returnOrTypeExpr());
         auto body = visitGenericScope(d.bodyOrInitExpr());
-
         VERIFY(!body.declaration.has_value());
+
         if (body.statement.has_value()) {
             VERIFY(body.expressions.empty());
             body.statement.value()->lastChild = true;
@@ -219,7 +235,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         if (!init.empty()) {
             VERIFY(init.size() == 1);
             init.back()->lastChild = true;
-        } else if(!type.empty()) {
+        } else if (!type.empty()) {
             VERIFY(type.size() == 1);
             type.back()->lastChild = true;
         } else {

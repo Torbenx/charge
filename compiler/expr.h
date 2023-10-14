@@ -165,23 +165,16 @@ struct StaticDecl : Decl {
     uint32_t functionParamOrMemberCount;
     uint32_t staticDeclCount;
 
-    backwards_offset m_returnOrTypeExpr; // function return-type-expr or type-expr for variables
-    backwards_offset m_bodyOrInitExpr; // function body-stmt or body-expr or init-expr for variables
-
-    StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* bodyOrInitExpr)
+    StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
         : Decl(kind, name)
         , declArraysBegin(backwardsOffsetTo(decls.begin))
         , withParamCount(decls.withParameters().size())
         , templateParamCount(decls.templateParamters().size())
         , functionParamOrMemberCount(decls.callableParameters().size())
-        , staticDeclCount(decls.statics().size())
-        , m_returnOrTypeExpr(backwardsOffsetTo(typeExpr))
-        , m_bodyOrInitExpr(backwardsOffsetTo(bodyOrInitExpr)) {
-        VERIFY(matchNodeType<StaticDecl>(kind));
+        , staticDeclCount(decls.statics().size()) {
+        VERIFY(isNodeType<StaticDecl>(kind));
     }
 
-    Node* returnOrTypeExpr() { return followBackwardsOffset(m_returnOrTypeExpr); }
-    Node* bodyOrInitExpr() { return followBackwardsOffset(m_bodyOrInitExpr); }
     TemplatedDeclArrays decls() {
         return {
             {
@@ -193,6 +186,21 @@ struct StaticDecl : Decl {
             templateParamCount,
         };
     }
+};
+struct VariableOrFunctionDecl : StaticDecl {
+
+    VariableOrFunctionDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* bodyOrInitExpr)
+        : StaticDecl(kind, name, decls)
+        , m_returnOrTypeExpr(backwardsOffsetTo(typeExpr))
+        , m_bodyOrInitExpr(backwardsOffsetTo(bodyOrInitExpr)) {
+        VERIFY(matchNodeType<VariableOrFunctionDecl>(kind));
+    }
+
+    backwards_offset m_returnOrTypeExpr; // function return-type-expr or type-expr for variables
+    backwards_offset m_bodyOrInitExpr; // function body-stmt or body-expr or init-expr for variables
+
+    Node* returnOrTypeExpr() { return followBackwardsOffset(m_returnOrTypeExpr); }
+    Node* bodyOrInitExpr() { return followBackwardsOffset(m_bodyOrInitExpr); }
 };
 // a parameter or (has-)member declaration
 struct ParameterOrMemberDecl : Decl {

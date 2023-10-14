@@ -54,7 +54,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
-        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier");
+        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -137,7 +137,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             }
         }
     }
-    void emitDecl(Parser*, Decl* decl) override {
+    void emitDecl(Parser* par, Decl* decl) override {
         // std::cout << "emitting decl " << decl << " - " << nameString(decl->kind()) << '\n';
         if (commandQueue.empty())
             return;
@@ -146,6 +146,8 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
                     expect_eq(pair.value, nameString(decl->kind()), "", &cmd, &pair);
+                else if (pair.key == words["name"])
+                    expect_eq(pair.value, par->wordTable.view(decl->name));
                 else
                     invalidKey(&cmd, &pair);
             }

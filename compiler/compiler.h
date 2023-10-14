@@ -88,7 +88,8 @@ struct Parser : LexerState {
 
     static constexpr auto words = ConstWordStringTable(
         keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
-        keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"));
+        keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"),
+        keyword("static"));
     WordStringTable wordTable { words };
 
     StreamAllocator<4> nodeStream;
