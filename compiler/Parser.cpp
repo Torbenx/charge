@@ -1,4 +1,4 @@
-#include "compiler.h"
+#include "Parser.h"
 
 template<bool (*test)(NodeKind)>
 static constexpr NodeKind firstInstance() {
@@ -105,6 +105,23 @@ T* Parser::emitDecl(Args&&... args) {
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
     return decl;
+}
+
+StaticDecl* Parser::parseModule() {
+    DeclarationScope onlyTheModuleScope(this);
+    {
+        TemplatedDeclarationScope moduleScope(this);
+        while (tok != Token::EOS) {
+            parseDeclaration();
+        }
+        emitDecl<StaticDecl>(NodeKind::ModuleDecl, WordAndLocation(), moduleScope.finish());
+    }
+    auto decls = onlyTheModuleScope.finish();
+    VERIFY(decls.parameterCount == 0);
+    VERIFY(decls.staticCount == 1);
+    Decl* moduleDecl = decls.statics()[0];
+    VERIFY(moduleDecl->kind() == NodeKind::ModuleDecl);
+    return (StaticDecl*)moduleDecl;
 }
 
 void Parser::parseDeclaration() {

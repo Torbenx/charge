@@ -112,6 +112,7 @@ struct DeclArrayView {
         return { base, m_end };
     }
     int_t size() const { return m_end - m_begin; }
+    Decl* operator[](int_t i) const { return begin()[i]; }
 };
 inline DeclArrayView::iterator operator+(int_t i, const DeclArrayView::iterator& it) { return { it.base, it.item + i }; }
 static_assert(std::random_access_iterator<DeclArrayView::iterator>);

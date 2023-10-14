@@ -220,6 +220,7 @@ public:
 
 // the table must have at least one free slot
 constexpr WordStringTable::FindResult WordStringTable::findBucket(uint32_t hash, std::string_view str) const {
+    VERIFY(!str.empty());
     uint32_t bucket = hashToBucket(hash);
     uint32_t probeDistance = 1;
     int maxId = -1;
@@ -338,6 +339,8 @@ constexpr Word WordStringTable::insertKeyword(std::string_view str) {
     return word;
 }
 constexpr std::string_view WordStringTable::view(Word word) const {
+    if (word.empty())
+        return {};
     return getStorage(entries[findWord(word).value()].payload);
 }
 

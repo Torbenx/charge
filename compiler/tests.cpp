@@ -1,4 +1,4 @@
-#include "compiler.h"
+#include "Parser.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -21,6 +21,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         Invalid,
         Lexer,
         Parser,
+        Semantic,
     };
     using Value = std::variant<std::nullopt_t, NumericLiteral, CharacterLiteral>;
     struct Pair {
@@ -54,7 +55,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
-        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name");
+        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -90,6 +91,12 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 std::cout << "------\n";
                 par.parseDeclaration();
                 dump((Node*)(par.nodeStream.storage + par.staticDeclStack.back().nodeStreamOffset), par.wordTable);
+                break;
+            }
+            case TestMode::Semantic: {
+                std::cout << "------\n";
+                StaticDecl* module = par.parseModule();
+                dump(module, par.wordTable);
                 break;
             }
             default:
@@ -221,6 +228,11 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             case words["parser-test"].asUint(): {
                 verifyNoPairs(command);
                 testMode = TestMode::Parser;
+                break;
+            }
+            case words["semantic-test"].asUint(): {
+                verifyNoPairs(command);
+                testMode = TestMode::Semantic;
                 break;
             }
             case words["expect-source-position"].asUint(): {

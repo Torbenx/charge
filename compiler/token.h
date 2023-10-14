@@ -180,9 +180,10 @@ public:
     LocalSourceLocation last() const { return m_last; }
 };
 struct SingleTokenSourceRange {
-    uint32_t _unused : 8;
-    uint32_t tokenStreamOffset : 24;
+    uint32_t _unused : 8 = 0;
+    uint32_t tokenStreamOffset : 24 = 0;
 
+    SingleTokenSourceRange() = default;
     explicit SingleTokenSourceRange(uint32_t tokenStreamOffset)
         : tokenStreamOffset(tokenStreamOffset) { }
 

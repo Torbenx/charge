@@ -111,6 +111,7 @@ struct Parser : LexerState {
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDecl(Args&&...);
 
+    StaticDecl* parseModule();
     void parseDeclaration();
     void parseNamespaceOrTypeDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
     void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, TemplatedDeclarationScope);

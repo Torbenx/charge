@@ -89,6 +89,7 @@ STMT(ExpressionStmt, ExpressionStmt)
 STMT(IfStmt, IfStmt)
 
 // ------ declarations ------
+DECL(ModuleDecl, StaticDecl)
 DECL(NamespaceDecl, StaticDecl)
 DECL(StructTypeDecl, StaticDecl)
 DECL(ObjectTypeDecl, StaticDecl)
