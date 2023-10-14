@@ -66,7 +66,7 @@ EXPR(DesignateArgument, DesignateArgument)
 EXPR(Parameterize, Parameterize)
 
 // ------ statements ------
-STMT(AssignUpdateStmt, UpdateStmt)
+STMT(AssignStmt, AssignStmt)
 STMT(AdditionUpdateStmt, UpdateStmt)
 STMT(SubtractionUpdateStmt, UpdateStmt)
 STMT(MultiplyUpdateStmt, UpdateStmt)

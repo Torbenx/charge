@@ -223,6 +223,12 @@ struct ParameterOrMemberDecl : Decl {
 struct Stmt : Node {
     using Node::Node;
 };
+struct AssignStmt : Stmt {
+    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
+    AssignStmt(SingleTokenSourceRange assignLoc)
+        : Stmt(NodeKind::AssignStmt, assignLoc) { }
+    SingleTokenSourceRange assignLocation() const { return packedToken(); }
+};
 struct UpdateStmt : Stmt {
     static constexpr int_t SUB_EXPRESSION_COUNT = 2;
     UpdateStmt(NodeKind kind, SingleTokenSourceRange operatorLoc)

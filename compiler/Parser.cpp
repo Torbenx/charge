@@ -416,8 +416,10 @@ void Parser::parseStatement() {
 
 static NodeKind updateToStmt(Token token) {
     static constexpr auto firstUpdateStmt
-        = std::min(std::to_underlying(firstInstance<matchNodeType<UpdateStmt>>()),
-            std::to_underlying(firstInstance<matchNodeType<LogicalUpdateStmt>>()));
+        = std::min(std::to_underlying(NodeKind::AssignStmt),
+            std::min(
+                std::to_underlying(firstInstance<matchNodeType<UpdateStmt>>()),
+                std::to_underlying(firstInstance<matchNodeType<LogicalUpdateStmt>>())));
     return NodeKind(std::to_underlying(token) - std::to_underlying(Token::FirstUpdateOp) + firstUpdateStmt);
 }
 Parser::ParsedStatementKind Parser::parseStatementInternal() {
@@ -432,7 +434,11 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
         NodeKind kind = updateToStmt(tok);
         auto opLoc = tokRange();
         nextToken();
-        if (matchNodeType<LogicalUpdateStmt>(kind)) {
+        if (kind == NodeKind::AssignStmt) {
+            emitNode(AssignStmt(opLoc));
+            parseExpression();
+            emitNode(EndScope());
+        } else if (matchNodeType<LogicalUpdateStmt>(kind)) {
             emitNode(LogicalUpdateStmt(kind, opLoc));
             parseExpression();
             emitNode(EndScope());

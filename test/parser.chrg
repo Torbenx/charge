@@ -54,7 +54,7 @@ fn test(): {
 /> expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr; expect-node EndScope </ a, else => b;
 
 //; update statements
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node AssignUpdateStmt </ a = b;
+/> expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node EndScope </ a = b;
 /> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node AdditionUpdateStmt </ a += b;
 /> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node SubtractionUpdateStmt </ a -= b;
 /> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node MultiplyUpdateStmt </ a *= b;

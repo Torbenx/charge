@@ -42,7 +42,7 @@
     TOKEN(AmpAmp) /* && */               \
     TOKEN(VertVert) /* || */             \
     /* end binary logic */               \
-    /* begin assign */                   \
+    /* begin update */                   \
     TOKEN(Equal) /* = */                 \
     TOKEN(PlusEqual) /* += */            \
     TOKEN(MinusEqual) /* -= */           \
@@ -56,7 +56,7 @@
     TOKEN(GreaterGreaterEqual) /* >>= */ \
     TOKEN(AmpAmpEqual) /* &&= */         \
     TOKEN(VertVertEqual) /* ||= */       \
-    /* end assign */                     \
+    /* end update */                     \
                                          \
     TOKEN(Comma) /* , */                 \
     TOKEN(Point) /* . */                 \

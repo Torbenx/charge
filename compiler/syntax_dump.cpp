@@ -248,6 +248,13 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     DumpResult visitExpressionStmt(ExpressionStmt&, DumpResult expr) {
         return expr;
     }
+    DumpResult visitAssignStmt(AssignStmt& e, DumpResult base) {
+        auto rightStack = visitExprScope();
+        VERIFY(rightStack.size() == 1);
+        DumpResult right = rightStack[0];
+        right->lastChild = true;
+        return insertBefore(base, DumpEntry { e.kind() });
+    }
     DumpResult visitUpdateStmt(UpdateStmt& e, DumpResult base, DumpResult right) {
         right->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
