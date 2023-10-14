@@ -46,17 +46,6 @@
 -- Notice that any expression of object type has an identity.
 
 
--- Value type categories: bit type => decontracted bit type => value type
-
-    bit type             : any bit pattern is a valid value, i.e. the contract is trivial (e.g. int)
-    decontracted bit type: any bit pattern is a decontracted value (e.g. enum types)
-    value type           : can have constructors/destructors (e.g. slice/anonymous_memory_block)
-
--- decontracted value = a value that may or may not satisfy the types contract
--- How do these categories interact with initialization state?
--- Does this classification apply to object types aswell?
-
-
 -- Types of assignment: initialize, replace, value
     mut rect: Rect = ...;
     rect.left() = ...;           // ok
@@ -66,6 +55,23 @@
 
 -- All types with an incomplete non-virtual function are 'traits'.
 -- Non-template traits have an implicit 'Self' type template parameter, which must be explicit if template parameters are declared.
+
+
+-- Only parameter declarations and can have constraint on them. These are not constraints of the variable but only of its initial value.
+-- By default all parameters are constraint to contract fulfilling values, so there needs be a way to lift that restriction. Examples:
+    fn test(irregular e: Enum);     // This has some nice symmetry with parameter kinds that contract initialization state requirements.
+    fn test(decontracted e: Enum);  // So does this, but in longer. However it has 'contract' in it.
+    fn test(e: decontracted(Enum)); // This makes it a property of the type and suggests there to be a type that the same except for the
+                                    // 'std::contract' trait implementation. Such a type could be useful in some situation, but is a
+                                    // property of variable and not just the initial value.
+    fn test(irregular e ?out(std::regular): Enum)
+
+-- It should be possible to globally change how precondition are erforeced. Possible variants are:
+    - proof : The condition must be proven to be true at the call site.
+    - guard : The condtiion is a dynamically checked and an exception is thrown if it isn't met.
+    - assume: The condition is not checked and assumed to true.
+-- 'proof' preconditions must be part of the function signature.
+-- 'guard' preconditions are ideally also checked at the call size, where they can be optimized away.
 
 
 SSA:

@@ -1,0 +1,43 @@
+
+-- Design priciple: A memory safe subset is more important then full memory safety.
+
+-- Type categories: regular bit type, irregular bit type, alive type
+
+    regular bit type  : any bit pattern is a regular value, i.e. the contract is trivial (example: int)
+    irregular bit type: any bit pattern is an irregular value (example: enum types)
+    alive type        : can have destructors (example: slice/anonymous_memory_block/objects)
+
+-- Bit types are allowed to alias arbitrary memory. Reading from such memory is safe, but writing 
+   is generally not. We implement such reads and writes with value semantics.
+
+-- Q: Since bit types are behave differently then alive types, does it make sense to have a
+      seperate pointer type for them?
+      Example: 'id{T}' for general types and 'pointer{T}', 'address{T}' or 'memory{T}' for bit types
+
+-- Q: How do these type categories interact with initialization state?
+
+-- Q: What assumptions do we make about 'id{T}' and which things do we dynamically guard against?
+       - allocated?   -- Is there memory allocated at the target address?
+       - existance?   -- Is there a 'T' (initialized or otherwise) at the address?
+       - initialized? -- (If required) is the target object fully initialized?
+       - contract?    -- (If required) does the object satisfy the types contract?
+   A: To validate safe semantics when have to check all these things. The question is can we ensure
+      that 'id{T}' always has some of these properties?
+-- We can ensure the 'allocated' question if we
+    - distinguish between 'id{T}' with no shifting and 'idx{T}' with bounds checks, and
+    - guard against access to previously allocated but later deallocated memory.
+-- The 'existance' question is ensured if we additionally
+    - use only dynamic-type safe casts for 'id' to 'id' conversions.
+-- Thus to proof memory safety there must be 'std::dynamic_typeof(expr) -> type' available at proof time.
+
+-- A memory universe is biggest chunk of memory the safe semantics are defined on. Different universes
+   are completely unrelated for the purposes of memory safe semantics.
+-- Models:
+    C++ constexpr: Memory allocation is strongly typed and object construction is only possible into
+                   accordingly typed pointers. Only a single array can be allocated at a time.
+    + extension 1: Allow allocation of multiple arrays at once but treat them as living in seperate
+                   universes, i.e. 1 array = 1 universe.
+    + extension 2: Allow repurposing of allocated memory into new universes, which are completely
+                   unrelated to the old universes they are replacing even when they technically have
+                   the same address.
+-- What about 'inline_memory_block'?
