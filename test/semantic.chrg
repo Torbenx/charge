@@ -1,0 +1,5 @@
+// semantic-test
+
+fn test(): {
+    a + b;
+}

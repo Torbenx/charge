@@ -1,157 +1,7 @@
+#include "NodeStreamVisitor.h"
 #include "expr.h"
 #include "log.h"
 #include <list>
-#include <variant>
-#include <vector>
-
-template<typename Impl, typename DeclResult, typename StmtResult, typename ExprResult>
-struct NodeStreamVisitor {
-    std::vector<ExprResult> exprStack;
-    Node* nodeStream = nullptr;
-    NodeStreamVisitor(Node* stream)
-        : nodeStream(stream) { }
-
-    Impl* impl() { return static_cast<Impl*>(this); }
-
-private:
-    ExprResult popStack(int_t shrinkSize = 1) {
-        ExprResult r = std::move(exprStack.back());
-        exprStack.resize(exprStack.size() - shrinkSize);
-        return r;
-    }
-
-    template<typename T>
-    using ReturnType = std::conditional_t<std::derived_from<T, Decl>, DeclResult, std::conditional_t<std::derived_from<T, Stmt>, StmtResult, ExprResult>>;
-    template<typename T>
-    auto pushOrForward(ReturnType<T>&& in) {
-        // push expressions and forward declarations and statements
-        if constexpr (std::derived_from<T, Expr>)
-            exprStack.emplace_back(std::move(in));
-        else
-            return std::move(in);
-    }
-    template<typename T>
-    auto invoke(ReturnType<T> (Impl::*f)(std::type_identity_t<T>&), T& node) {
-        static_assert(T::SUB_EXPRESSION_COUNT == 0);
-        return pushOrForward<T>((impl()->*f)(node));
-    }
-    template<typename T>
-    auto invoke(ReturnType<T> (Impl::*f)(std::type_identity_t<T>&, ExprResult), T& node) {
-        static_assert(T::SUB_EXPRESSION_COUNT == 1);
-        VERIFY(exprStack.size() >= 1);
-        return pushOrForward<T>((impl()->*f)(node, popStack()));
-    }
-    template<typename T>
-    auto invoke(ReturnType<T> (Impl::*f)(std::type_identity_t<T>&, ExprResult, ExprResult), T& node) {
-        static_assert(T::SUB_EXPRESSION_COUNT == 2);
-        VERIFY(exprStack.size() >= 2);
-        auto temp = std::move(*(exprStack.end() - 2));
-        return pushOrForward<T>((impl()->*f)(node, std::move(temp), popStack(2)));
-    }
-
-    struct SavedNodeStream {
-        NodeStreamVisitor* thiz;
-        Node* saved;
-        ~SavedNodeStream() {
-            thiz->nodeStream = saved;
-        }
-    };
-    SavedNodeStream replaceNodeStream(Node* newStream) {
-        // fmt::print("visit nodes at {}", (void*)newStream);
-        // fmt::println(" - {}", nameString(newStream->kind()));
-        Node* saved = nodeStream;
-        nodeStream = newStream;
-        return { this, saved };
-    }
-
-public:
-    struct ScopeReturnType {
-        std::optional<DeclResult> declaration;
-        std::optional<StmtResult> statement;
-        std::vector<ExprResult> expressions;
-    };
-    ScopeReturnType visitGenericScope() {
-        ScopeReturnType ret {};
-        std::swap(ret.expressions, exprStack);
-        bool looping = true;
-        while (looping) {
-            // std::cout << "visit at " << (void*)*nodeStream << " - " << nameString((*nodeStream)->kind()) << '\n';
-            switch (nodeStream->kind()) {
-
-#define NODE(kind, type)
-#define DECL(kind, type)                                               \
-    case NodeKind::kind: {                                             \
-        type* thisNode = (type*)nodeStream;                            \
-        nodeStream = thisNode + 1;                                     \
-        ret.declaration = invoke<type>(&Impl::visit##type, *thisNode); \
-        looping = false;                                               \
-        break;                                                         \
-    }
-#define STMT(kind, type)                                             \
-    case NodeKind::kind: {                                           \
-        type* thisNode = (type*)nodeStream;                          \
-        nodeStream = thisNode + 1;                                   \
-        ret.statement = invoke<type>(&Impl::visit##type, *thisNode); \
-        looping = false;                                             \
-        break;                                                       \
-    }
-#define EXPR(kind, type)                             \
-    case NodeKind::kind: {                           \
-        type* thisNode = (type*)nodeStream;          \
-        nodeStream = thisNode + 1;                   \
-        invoke<type>(&Impl::visit##type, *thisNode); \
-        break;                                       \
-    }
-#include "nodes.h"
-
-            case NodeKind::EndScope:
-                nodeStream = (EndScope*)nodeStream + 1;
-                looping = false;
-                break;
-            case NodeKind::COUNT:
-                VERIFY_NOT_REACHED();
-            }
-        }
-        std::swap(ret.expressions, exprStack);
-        return ret;
-    }
-
-    DeclResult visitSingleDecl() {
-        ScopeReturnType result = visitGenericScope();
-        VERIFY(result.declaration.has_value());
-        VERIFY(!result.statement.has_value());
-        VERIFY(result.expressions.empty());
-        return std::move(result.declaration.value());
-    }
-    std::optional<StmtResult> visitSingleStmt() {
-        ScopeReturnType result = visitGenericScope();
-        VERIFY(!result.declaration.has_value());
-        VERIFY(result.expressions.empty());
-        return std::move(result.statement);
-    }
-    std::vector<ExprResult> visitExprScope() {
-        ScopeReturnType result = visitGenericScope();
-        VERIFY(!result.declaration.has_value());
-        VERIFY(!result.statement.has_value());
-        return std::move(result.expressions);
-    }
-    auto visitSingleDecl(Node* at) {
-        auto s = replaceNodeStream(at);
-        return visitSingleDecl();
-    }
-    auto visitSingleStmt(Node* at) {
-        auto s = replaceNodeStream(at);
-        return visitSingleStmt();
-    }
-    auto visitExprScope(Node* at) {
-        auto s = replaceNodeStream(at);
-        return visitExprScope();
-    }
-    auto visitGenericScope(Node* at) {
-        auto s = replaceNodeStream(at);
-        return visitGenericScope();
-    }
-};
 
 struct DumpEntry {
     NodeKind kind;
@@ -167,10 +17,10 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     std::list<DumpEntry> entries = {};
     DumpResult currentEnd = entries.end();
 
-    auto visitScopeWithEnd(DumpResult end) {
+    auto visitExprWithEnd(ExpressionPrecedence prec, DumpResult end) {
         DumpResult savedEnd = currentEnd;
         currentEnd = end;
-        auto r = visitExprScope();
+        auto r = visitExpr(prec);
         currentEnd = savedEnd;
         return r;
     }
@@ -187,7 +37,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     std::optional<DumpResult> visitStaticDeclInternal(StaticDecl& d) {
         std::optional<DumpResult> lastDecl;
         for (Decl* decl : d.decls().all())
-            lastDecl = visitSingleDecl(decl);
+            lastDecl = visitDecl(decl);
         return lastDecl;
     }
     DumpResult visitStaticDecl(StaticDecl& d) {
@@ -202,23 +52,45 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
 
         return out;
     }
-    DumpResult visitVariableOrFunctionDecl(VariableOrFunctionDecl& d) {
+    DumpResult visitStaticVariableDecl(StaticVariableDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
         auto lastDecl = visitStaticDeclInternal(d);
-        auto type = visitExprScope(d.returnOrTypeExpr());
-        auto body = visitGenericScope(d.bodyOrInitExpr());
-        VERIFY(!body.declaration.has_value());
+        auto type = visitExpr(d.typeExpr());
+        auto init = visitExpr(d.initExpr());
 
-        if (body.statement.has_value()) {
-            VERIFY(body.expressions.empty());
-            body.statement.value()->lastChild = true;
-        } else if (!body.expressions.empty()) {
-            body.expressions.front()->lastChild = true;
-        } else if (!type.empty()) {
-            VERIFY(type.size() == 1);
-            type.back()->lastChild = true;
+        if (init.has_value()) {
+            init.value()->lastChild = true;
+        } else if (type.has_value()) {
+            type.value()->lastChild = true;
+        } else if (lastDecl.has_value()) {
+            lastDecl.value()->lastChild = true;
+        } else {
+            out->leafNode = true;
+        }
+        return out;
+    }
+    DumpResult visitFunctionDecl(FunctionDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto lastDecl = visitStaticDeclInternal(d);
+        auto type = visitExpr(d.returnTypeExpr());
+        auto body = visitGeneric(d.body());
+
+        if (body.index() != 0) {
+            std::visit(
+                [](auto v) {
+                    if constexpr (std::is_same_v<decltype(v), std::nullopt_t>) {
+                        VERIFY_NOT_REACHED();
+                    } else {
+                        v->lastChild = true;
+                    }
+                },
+                body);
+        } else if (type.has_value()) {
+            type.value()->lastChild = true;
         } else if (lastDecl.has_value()) {
             lastDecl.value()->lastChild = true;
         } else {
@@ -230,14 +102,12 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto type = visitExprScope(d.typeExpr());
-        auto init = visitExprScope(d.initExpr());
-        if (!init.empty()) {
-            VERIFY(init.size() == 1);
-            init.back()->lastChild = true;
-        } else if (!type.empty()) {
-            VERIFY(type.size() == 1);
-            type.back()->lastChild = true;
+        auto type = visitExpr(d.typeExpr());
+        auto init = visitExpr(d.initExpr());
+        if (init.has_value()) {
+            init.value()->lastChild = true;
+        } else if (type.has_value()) {
+            type.value()->lastChild = true;
         } else {
             out->leafNode = true;
         }
@@ -248,22 +118,9 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     DumpResult visitExpressionStmt(ExpressionStmt&, DumpResult expr) {
         return expr;
     }
-    DumpResult visitAssignStmt(AssignStmt& e, DumpResult base) {
-        auto rightStack = visitExprScope();
-        VERIFY(rightStack.size() == 1);
-        DumpResult right = rightStack[0];
-        right->lastChild = true;
-        return insertBefore(base, DumpEntry { e.kind() });
-    }
-    DumpResult visitUpdateStmt(UpdateStmt& e, DumpResult base, DumpResult right) {
-        right->lastChild = true;
-        return insertBefore(base, DumpEntry { e.kind() });
-    }
-    DumpResult visitLogicalUpdateStmt(LogicalUpdateStmt& e, DumpResult base) {
-        auto rightStack = visitExprScope();
-        VERIFY(rightStack.size() == 1);
-        DumpResult right = rightStack[0];
-        right->lastChild = true;
+    DumpResult visitUpdateStmt(UpdateStmt& e, DumpResult base) {
+        auto right = visitExpr(ExpressionPrecedence::Statement);
+        right.value()->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
     }
     DumpResult visitLetStmt(LetStmt&) { VERIFY_NOT_REACHED(); }
@@ -271,7 +128,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
         std::optional<DumpResult> lastStmt;
         for (;;) {
-            auto maybeStmt = visitSingleStmt();
+            auto maybeStmt = visitStmt();
             if (!maybeStmt.has_value())
                 break;
             lastStmt = maybeStmt.value();
@@ -283,7 +140,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         return out;
     }
     DumpResult visitIfStmt(IfStmt& e, DumpResult condition) {
-        auto body = visitSingleStmt();
+        auto body = visitStmt();
         VERIFY(body.has_value());
         body.value()->lastChild = true;
         return insertBefore(condition, DumpEntry { e.kind() });
@@ -294,30 +151,33 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         subExpr->lastChild = true;
         return insertBefore(subExpr, DumpEntry { e.kind() });
     }
-    DumpResult visitBinaryOperatorExpr(BinaryOperatorExpr& e, DumpResult left, DumpResult right) {
-        right->lastChild = true;
-        return insertBefore(left, DumpEntry { e.kind() });
-    }
-    DumpResult visitBinaryLogicalOperatorExpr(BinaryLogicalOperatorExpr& e, DumpResult left) {
-        auto rightStack = visitExprScope();
-        VERIFY(rightStack.size() == 1);
-        DumpResult right = rightStack[0];
-        right->lastChild = true;
+    DumpResult visitBinaryOperatorExpr(BinaryOperatorExpr& e, DumpResult left) {
+        auto right = visitExpr(precedenceOf(e.kind()));
+        right.value()->lastChild = true;
         return insertBefore(left, DumpEntry { e.kind() });
     }
     DumpResult visitCallExpr(CallExpr& e, DumpResult base) {
-        std::vector<DumpResult> args = visitExprScope();
-        if (args.empty())
-            base->lastChild = true;
-        else
-            args.back()->lastChild = true;
+        DumpResult lastChild = base;
+        for (;;) {
+            auto maybeExpr = visitExpr(ExpressionPrecedence::Statement);
+            if (!maybeExpr.has_value())
+                break;
+            lastChild = maybeExpr.value();
+        }
+        lastChild->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
     }
     DumpResult visitParenthesizedExpr(ParenthesizedExpr& e) {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
-        auto args = visitExprScope();
-        if (args.size() > 0)
-            args.back()->lastChild = true;
+        std::optional<DumpResult> lastChild;
+        for (;;) {
+            auto maybeExpr = visitExpr(ExpressionPrecedence::Statement);
+            if (!maybeExpr.has_value())
+                break;
+            lastChild = maybeExpr.value();
+        }
+        if (lastChild.has_value())
+            lastChild.value()->lastChild = true;
         else
             out->leafNode = true;
         return out;
@@ -337,7 +197,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
         std::optional<DumpResult> lastStmt;
         for (;;) {
-            auto maybeStmt = visitSingleStmt();
+            auto maybeStmt = visitStmt();
             if (!maybeStmt.has_value())
                 break;
             lastStmt = maybeStmt.value();
@@ -346,15 +206,13 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         return out;
     }
     DumpResult visitIfExpr(IfExpr& e, DumpResult cond) {
-        auto ifTrue = visitExprScope();
-        VERIFY(ifTrue.size() == 1);
-        ifTrue.front()->lastChild = true;
+        auto ifTrue = visitExpr(ExpressionPrecedence::ConditionalIf);
+        ifTrue.value()->lastChild = true;
         return insertBefore(cond, DumpEntry { e.kind() });
     }
     DumpResult visitCommaElseExpr(CommaElseExpr& e, DumpResult base) {
-        auto ifFalse = visitExprScope();
-        VERIFY(ifFalse.size() == 1);
-        ifFalse.front()->lastChild = true;
+        auto ifFalse = visitExpr(ExpressionPrecedence::ConditionalElse);
+        ifFalse.value()->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
     }
     DumpResult visitNumericLiteralExpr(NumericLiteralExpr&) { VERIFY_NOT_REACHED(); }
@@ -367,10 +225,16 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         VERIFY(base->kind == NodeKind::IdentifierExpr || base->kind == NodeKind::MemberAccessExpr || base->kind == NodeKind::StaticAccessExpr);
         DumpResult next = base;
         ++next;
-        auto args = visitScopeWithEnd(next);
-        if (args.size() > 0) {
+        std::optional<DumpResult> lastArg;
+        for (;;) {
+            auto arg = visitExprWithEnd(ExpressionPrecedence::Statement, next);
+            if (!arg.has_value())
+                break;
+            lastArg = arg.value();
+        }
+        if (lastArg.has_value()) {
             base->hasBraces = true;
-            args.back()->lastChild = true;
+            lastArg.value()->lastChild = true;
         }
         return base;
     }
@@ -447,14 +311,12 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
 
 void dump(Node* stream, const WordStringTable& table) {
     Dumper dumper { stream, table };
-    auto r = dumper.visitGenericScope();
-    if (r.declaration.has_value())
-        r.declaration.value()->lastChild = true;
-    else if (r.statement.has_value())
-        r.statement.value()->lastChild = true;
-    else if (r.expressions.size() > 0)
-        r.expressions.back()->lastChild = true;
-    else
-        VERIFY_NOT_REACHED();
+    auto r = dumper.visitGeneric(ExpressionPrecedence::Statement);
+    std::visit([](auto v) {
+        if constexpr (!std::is_same_v<decltype(v), std::nullopt_t>) {
+            v->lastChild = true;
+        }
+    },
+        r);
     dumper.print();
 }

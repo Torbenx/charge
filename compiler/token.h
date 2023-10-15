@@ -37,11 +37,9 @@
     TOKEN(LessEqual) /* <= */            \
     TOKEN(Greater) /* > */               \
     TOKEN(GreaterEqual) /* >= */         \
-    /* end binary */                     \
-    /* begin binary logic */             \
     TOKEN(AmpAmp) /* && */               \
     TOKEN(VertVert) /* || */             \
-    /* end binary logic */               \
+    /* end binary */                     \
     /* begin update */                   \
     TOKEN(Equal) /* = */                 \
     TOKEN(PlusEqual) /* += */            \
@@ -90,9 +88,7 @@ enum class Token : uint32_t {
     FirstUnaryOp = Question,
     FirstBinaryOp = Plus,
     LastUnaryOp = Star,
-    LastBinaryOp = GreaterEqual,
-    FirstBinaryLogicOp = AmpAmp,
-    LastBinaryLogicOp = VertVert,
+    LastBinaryOp = VertVert,
     FirstUpdateOp = Equal,
     LastUpdateOp = VertVertEqual,
     FirstComment = LineComment,
@@ -105,9 +101,6 @@ inline bool isUnaryOp(Token kind) {
 }
 inline bool isBinaryOp(Token kind) {
     return kind >= Token::FirstBinaryOp && kind <= Token::LastBinaryOp;
-}
-inline bool isBinaryLogicOp(Token kind) {
-    return kind >= Token::FirstBinaryLogicOp && kind <= Token::LastBinaryLogicOp;
 }
 inline bool isUpdateOp(Token kind) {
     return kind >= Token::FirstUpdateOp && kind <= Token::LastUpdateOp;

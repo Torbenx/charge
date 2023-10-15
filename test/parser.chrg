@@ -4,17 +4,17 @@ fn test(): {
 
 //; primary expressions
 /> expect-node IdentifierExpr </ a;
-/> expect-node IdentifierExpr; expect-node Parameterize; expect-node EndScope </ a{};
-/> expect-node ParenthesizedExpr; expect-node EndScope </ ();
-/> expect-node CompoundExpr; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EndScope </ [a];
+/> expect-node IdentifierExpr; expect-node Parameterize; expect-node EmptyNode </ a{};
+/> expect-node ParenthesizedExpr; expect-node EmptyNode </ ();
+/> expect-node CompoundExpr; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode; expect-node ExpressionStmt </ [a];
 
 //; postfix expressions
 /> expect-node IdentifierExpr; expect-node MemberAccessExpr </ a.b;
 /> expect-node IdentifierExpr; expect-node StaticAccessExpr </ a::b;
-/> expect-node IdentifierExpr; expect-node MemberAccessExpr; expect-node Parameterize; expect-node EndScope </ a.b{};
-/> expect-node IdentifierExpr; expect-node StaticAccessExpr; expect-node Parameterize; expect-node EndScope </ a::b{};
-/> expect-node IdentifierExpr; expect-node CallExpr; expect-node EndScope </ a();
-/> expect-node IdentifierExpr; expect-node IndexExpr </ a[];
+/> expect-node IdentifierExpr; expect-node MemberAccessExpr; expect-node Parameterize; expect-node EmptyNode </ a.b{};
+/> expect-node IdentifierExpr; expect-node StaticAccessExpr; expect-node Parameterize; expect-node EmptyNode </ a::b{};
+/> expect-node IdentifierExpr; expect-node CallExpr; expect-node EmptyNode </ a();
+/> expect-node IdentifierExpr; expect-node IndexExpr; expect-node EmptyNode </ a[];
 /> expect-node IdentifierExpr; expect-node PostIncrementExpr </ a++;
 /> expect-node IdentifierExpr; expect-node PostDecrementExpr </ a--;
 
@@ -29,100 +29,102 @@ fn test(): {
 /> expect-node IdentifierExpr; expect-node DereferenceExpr </ *a;
 
 //; binary expressions
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node AdditionExpr </ a + b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node SubtractionExpr </ a - b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node MultiplyExpr </ a * b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseAndExpr </ a & b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseXorExpr </ a ^ b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseOrExpr </ a | b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node DivideExpr </ a / b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node RemainderExpr </ a % b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node ShiftLeftExpr </ a << b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node ShiftRightExpr </ a >> b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareNotEqualExpr </ a != b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareEqualExpr </ a == b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareLessExpr </ a < b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareLessEqualExpr </ a <= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareGreaterExpr </ a > b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node CompareGreaterEqualExpr </ a >= b;
-
-/> expect-node IdentifierExpr; expect-node LogicalAndExpr; expect-node IdentifierExpr; expect-node EndScope </ a && b;
-/> expect-node IdentifierExpr; expect-node LogicalOrExpr; expect-node IdentifierExpr; expect-node EndScope </ a || b;
+/> expect-node IdentifierExpr; expect-node AdditionExpr; expect-node IdentifierExpr </ a + b;
+/> expect-node IdentifierExpr; expect-node SubtractionExpr; expect-node IdentifierExpr </ a - b;
+/> expect-node IdentifierExpr; expect-node MultiplyExpr; expect-node IdentifierExpr </ a * b;
+/> expect-node IdentifierExpr; expect-node BitwiseAndExpr; expect-node IdentifierExpr </ a & b;
+/> expect-node IdentifierExpr; expect-node BitwiseXorExpr; expect-node IdentifierExpr </ a ^ b;
+/> expect-node IdentifierExpr; expect-node BitwiseOrExpr; expect-node IdentifierExpr </ a | b;
+/> expect-node IdentifierExpr; expect-node DivideExpr; expect-node IdentifierExpr </ a / b;
+/> expect-node IdentifierExpr; expect-node RemainderExpr; expect-node IdentifierExpr </ a % b;
+/> expect-node IdentifierExpr; expect-node ShiftLeftExpr; expect-node IdentifierExpr </ a << b;
+/> expect-node IdentifierExpr; expect-node ShiftRightExpr; expect-node IdentifierExpr </ a >> b;
+/> expect-node IdentifierExpr; expect-node CompareNotEqualExpr; expect-node IdentifierExpr </ a != b;
+/> expect-node IdentifierExpr; expect-node CompareEqualExpr; expect-node IdentifierExpr </ a == b;
+/> expect-node IdentifierExpr; expect-node CompareLessExpr; expect-node IdentifierExpr </ a < b;
+/> expect-node IdentifierExpr; expect-node CompareLessEqualExpr; expect-node IdentifierExpr </ a <= b;
+/> expect-node IdentifierExpr; expect-node CompareGreaterExpr; expect-node IdentifierExpr </ a > b;
+/> expect-node IdentifierExpr; expect-node CompareGreaterEqualExpr; expect-node IdentifierExpr </ a >= b;
+/> expect-node IdentifierExpr; expect-node LogicalAndExpr; expect-node IdentifierExpr </ a && b;
+/> expect-node IdentifierExpr; expect-node LogicalOrExpr; expect-node IdentifierExpr </ a || b;
 
 //; conditional expressions
-/> expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr; expect-node EndScope </ if a => b;
-/> expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr; expect-node EndScope </ a, else => b;
+/> expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr </ if a => b;
+/> expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr </ a, else => b;
 
 //; update statements
-/> expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node EndScope </ a = b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node AdditionUpdateStmt </ a += b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node SubtractionUpdateStmt </ a -= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node MultiplyUpdateStmt </ a *= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node DivideUpdateStmt </ a /= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node RemainderUpdateStmt </ a %= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseAndUpdateStmt </ a &= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseXorUpdateStmt </ a ^= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node BitwiseOrUpdateStmt </ a |= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node ShiftLeftUpdateStmt </ a <<= b;
-/> expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node ShiftRightUpdateStmt </ a >>= b;
-
-/> expect-node IdentifierExpr; expect-node LogicalAndUpdateStmt; expect-node IdentifierExpr; expect-node EndScope </ a &&= b;
-/> expect-node IdentifierExpr; expect-node LogicalOrUpdateStmt; expect-node IdentifierExpr; expect-node EndScope </ a ||= b;
+/> expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr </ a = b;
+/> expect-node IdentifierExpr; expect-node AdditionUpdateStmt; expect-node IdentifierExpr </ a += b;
+/> expect-node IdentifierExpr; expect-node SubtractionUpdateStmt; expect-node IdentifierExpr </ a -= b;
+/> expect-node IdentifierExpr; expect-node MultiplyUpdateStmt; expect-node IdentifierExpr </ a *= b;
+/> expect-node IdentifierExpr; expect-node DivideUpdateStmt; expect-node IdentifierExpr </ a /= b;
+/> expect-node IdentifierExpr; expect-node RemainderUpdateStmt; expect-node IdentifierExpr </ a %= b;
+/> expect-node IdentifierExpr; expect-node BitwiseAndUpdateStmt; expect-node IdentifierExpr </ a &= b;
+/> expect-node IdentifierExpr; expect-node BitwiseXorUpdateStmt; expect-node IdentifierExpr </ a ^= b;
+/> expect-node IdentifierExpr; expect-node BitwiseOrUpdateStmt; expect-node IdentifierExpr </ a |= b;
+/> expect-node IdentifierExpr; expect-node ShiftLeftUpdateStmt; expect-node IdentifierExpr </ a <<= b;
+/> expect-node IdentifierExpr; expect-node ShiftRightUpdateStmt; expect-node IdentifierExpr </ a >>= b;
+/> expect-node IdentifierExpr; expect-node LogicalAndUpdateStmt; expect-node IdentifierExpr </ a &&= b;
+/> expect-node IdentifierExpr; expect-node LogicalOrUpdateStmt; expect-node IdentifierExpr </ a ||= b;
 
 //; if and compound statement
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: b;
-/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node EndScope </ if a: { }
-/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EndScope </ if a: { b; }
+/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt </ if a: { }
+/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: { b; }
 
 //; test precedence
 // expect-identifier a; expect-node LogicalOrExpr;
 // expect-identifier b; expect-node LogicalAndExpr;
-// expect-identifier c; expect-identifier e; expect-node CompareGreaterEqualExpr;
-// expect-identifier d; expect-node CompareEqualExpr;
-// expect-node EndScope; expect-node EndScope;
+// expect-identifier c; expect-node CompareGreaterEqualExpr; expect-identifier e
+// expect-node CompareEqualExpr; expect-identifier d
 a || b && c >= e == d;
+
+// expect-identifier a; expect-node AdditionExpr; expect-identifier b; expect-node AdditionExpr; expect-identifier c
+a + b + c;
+
+a * b + c >> d > e == f;
 
 //; test arguments
 // expect-identifier a
 // expect-node CallExpr
-// expect-identifier b; expect-node DesignateArgument ;; p = b
+// expect-identifier b; expect-node DesignateArgument
 // expect-identifier c
-// expect-node EndScope
+// expect-node EmptyNode
 a(p = b, c);
 
 //; test trailing comma
-// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EndScope
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode
 (a, b,);
 
 //; test comma-else in arguments
 // expect-node ParenthesizedExpr;
-// expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr; expect-node EndScope
-// expect-node IdentifierExpr; expect-node EndScope
+// expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr
+// expect-node IdentifierExpr; expect-node EmptyNode
 (a, else => b, c);
 
 //; test reemitLastToken with newline and comment tokens in between
 //; the cases where reemitLastToken is used are
 //;  - to check for 'word =' in an argument list
 //;  - to check for ', else'
-// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EndScope
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EmptyNode
 (a, /></);
-// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EndScope
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EmptyNode
 (a,
 );
-// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EndScope
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EmptyNode
 (a/></);
-// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EndScope
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node EmptyNode
 (a
 );
 
 //; test source position after reemitLastToken
 // expect-node ParenthesizedExpr packed-range-begin-column=1
 // expect-node IdentifierExpr    packed-range-begin-column=3
-// expect-node EndScope          packed-range-begin-column=5
+// expect-node EmptyNode         packed-range-begin-column=5
 ( a );
 // expect-node ParenthesizedExpr packed-range-begin-column=1
 // expect-node IdentifierExpr    packed-range-begin-column=3
-// expect-node EndScope          packed-range-begin-column=1
+// expect-node EmptyNode         packed-range-begin-column=1
 ( a //
 );
 
@@ -141,11 +143,11 @@ a{b.c{i, j, k}, blub = c} + d;
 // expect-decl FunctionDecl name=test
 fn test(let a, mut b, inout c, out d): { }
 
-// expect-identifier param_type; expect-node EndScope
-// expect-identifier param_init; expect-node EndScope
+// expect-identifier param_type; expect-node EmptyNode
+// expect-identifier param_init; expect-node EmptyNode
 // expect-decl LetParameterDecl
-// expect-identifier return_type; expect-node EndScope
-// expect-identifier body_expr; expect-node EndScope
+// expect-identifier return_type; expect-node EmptyNode
+// expect-identifier body_expr; expect-node EmptyNode
 // expect-decl FunctionDecl
 fn test(param_name: param_type = param_init) -> return_type => body_expr;
 
@@ -175,8 +177,8 @@ namespace Namespace: {
     static x;
 }
 
-// expect-identifier type; expect-node EndScope
-// expect-identifier init; expect-node EndScope
+// expect-identifier type; expect-node EmptyNode
+// expect-identifier init; expect-node EmptyNode
 // expect-decl StaticLetVariableDecl name=name
 static name: type = init;
 

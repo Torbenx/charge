@@ -25,7 +25,7 @@
 
    *The initialization of block 'let' and 'mut' variables can be deferred.
 
--- Should non-parameter 'let' variables with object type?
+-- Should there be non-parameter 'let' variables of object type?
    What meaning does deferred initialization have for such variables?
 
 -- Variables supposed to be uninitialized at the end are automatically destroyed if there not.

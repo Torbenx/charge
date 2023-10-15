@@ -6,6 +6,7 @@ add_executable(compiler
     log.cpp
     tests.cpp
     syntax_dump.cpp
+    semantic.cpp
 )
 target_compile_options(compiler PRIVATE "-Wall;-Wextra;-Wsuggest-override;-fsized-deallocation")
 target_link_libraries(compiler PRIVATE fmt)

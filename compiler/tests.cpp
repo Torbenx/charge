@@ -1,4 +1,5 @@
 #include "Parser.h"
+#include "semantic.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>

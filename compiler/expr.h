@@ -7,14 +7,34 @@
 
 using node_stream_offset = aligned_t<4>;
 
+enum class ExpressionPrecedence : uint8_t {
+    Primary,
+    Postfix,
+    Unary,
+    Multiplication,
+    Addition,
+    Shift,
+    Relational,
+    Equality,
+    BitwiseAnd,
+    BitwiseXor,
+    BitwiseOr,
+    LogicalAnd,
+    LogicalOr,
+    ConditionalIf,
+    ConditionalElse,
+    Statement,
+};
+
 enum class NodeKind : uint8_t {
 
-#define NODE(kind, type) kind,
+#define NODE(kind, type, prec) kind,
 #include "nodes.h"
 
     COUNT,
 };
 
+ExpressionPrecedence precedenceOf(NodeKind node);
 template<typename T>
 constexpr bool matchNodeType(NodeKind in);
 template<typename T>
@@ -50,14 +70,6 @@ struct Node {
     DeclArrayItem* followBackwardsOffsetToArray(backwards_offset offset) {
         return (DeclArrayItem*)((std::byte*)this - offset);
     }
-};
-struct EndScope : Node {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
-    EndScope(SingleTokenSourceRange endLoc)
-        : Node(NodeKind::EndScope, endLoc) { }
-    EndScope()
-        : Node(NodeKind::EndScope, SingleTokenSourceRange(0)) { }
-    SingleTokenSourceRange scopeEndLocation() const { return packedToken(); }
 };
 
 // declaration arrays
@@ -152,7 +164,6 @@ struct TemplatedDeclArrays : DeclArrays {
 
 // declarations
 struct Decl : Node {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
     Word name;
     Decl(NodeKind kind, WordAndLocation name)
         : Node(kind, name.location), name(name) { VERIFY(isNodeType<Decl>(kind)); }
@@ -188,20 +199,33 @@ struct StaticDecl : Decl {
         };
     }
 };
-struct VariableOrFunctionDecl : StaticDecl {
+struct StaticVariableDecl : StaticDecl {
 
-    VariableOrFunctionDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* bodyOrInitExpr)
+    StaticVariableDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* initExpr)
         : StaticDecl(kind, name, decls)
-        , m_returnOrTypeExpr(backwardsOffsetTo(typeExpr))
-        , m_bodyOrInitExpr(backwardsOffsetTo(bodyOrInitExpr)) {
-        VERIFY(matchNodeType<VariableOrFunctionDecl>(kind));
+        , m_typeExpr(backwardsOffsetTo(typeExpr))
+        , m_initExpr(backwardsOffsetTo(initExpr)) {
+        VERIFY(matchNodeType<StaticVariableDecl>(kind));
     }
 
-    backwards_offset m_returnOrTypeExpr; // function return-type-expr or type-expr for variables
-    backwards_offset m_bodyOrInitExpr; // function body-stmt or body-expr or init-expr for variables
+    backwards_offset m_typeExpr;
+    backwards_offset m_initExpr;
 
-    Node* returnOrTypeExpr() { return followBackwardsOffset(m_returnOrTypeExpr); }
-    Node* bodyOrInitExpr() { return followBackwardsOffset(m_bodyOrInitExpr); }
+    Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
+    Node* initExpr() { return followBackwardsOffset(m_initExpr); }
+};
+struct FunctionDecl : StaticDecl {
+
+    FunctionDecl(WordAndLocation name, TemplatedDeclArrays decls, Node* returnTypeExpr, Node* body)
+        : StaticDecl(NodeKind::FunctionDecl, name, decls)
+        , m_returnTypeExpr(backwardsOffsetTo(returnTypeExpr))
+        , m_body(backwardsOffsetTo(body)) { }
+
+    backwards_offset m_returnTypeExpr;
+    backwards_offset m_body;
+
+    Node* returnTypeExpr() { return followBackwardsOffset(m_returnTypeExpr); }
+    Node* body() { return followBackwardsOffset(m_body); }
 };
 // a parameter or (has-)member declaration
 struct ParameterOrMemberDecl : Decl {
@@ -223,41 +247,29 @@ struct ParameterOrMemberDecl : Decl {
 struct Stmt : Node {
     using Node::Node;
 };
-struct AssignStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
-    AssignStmt(SingleTokenSourceRange assignLoc)
-        : Stmt(NodeKind::AssignStmt, assignLoc) { }
-    SingleTokenSourceRange assignLocation() const { return packedToken(); }
-};
 struct UpdateStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 2;
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = true;
     UpdateStmt(NodeKind kind, SingleTokenSourceRange operatorLoc)
         : Stmt(kind, operatorLoc) { VERIFY(matchNodeType<UpdateStmt>(kind)); }
     SingleTokenSourceRange operatorLocation() const { return packedToken(); }
 };
-struct LogicalUpdateStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
-    LogicalUpdateStmt(NodeKind kind, SingleTokenSourceRange operatorLoc)
-        : Stmt(kind, operatorLoc) { VERIFY(matchNodeType<LogicalUpdateStmt>(kind)); }
-    SingleTokenSourceRange operatorLocation() const { return packedToken(); }
-};
 struct LetStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
 };
 struct CompoundStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
     CompoundStmt(SingleTokenSourceRange leftLoc)
         : Stmt(NodeKind::CompoundStmt, leftLoc) { }
     SingleTokenSourceRange leftBraceLocation() const { return packedToken(); }
 };
 struct ExpressionStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = true;
     ExpressionStmt(SingleTokenSourceRange endToken)
         : Stmt(NodeKind::ExpressionStmt, endToken) { }
     SingleTokenSourceRange endTokenLocation() const { return packedToken(); }
 };
 struct IfStmt : Stmt {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = true;
     IfStmt(SingleTokenSourceRange ifLoc)
         : Stmt(NodeKind::IfStmt, ifLoc) { }
     SingleTokenSourceRange ifLocation() const { return packedToken(); }
@@ -268,37 +280,26 @@ struct Expr : Node {
     using Node::Node;
 };
 struct UnaryOperatorExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     UnaryOperatorExpr(NodeKind kind, SingleTokenSourceRange operatorLoc)
         : Expr(kind, operatorLoc) { VERIFY(matchNodeType<UnaryOperatorExpr>(kind)); }
     SingleTokenSourceRange operatorLocation() const { return packedToken(); }
 };
 struct BinaryOperatorExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 2;
     BinaryOperatorExpr(NodeKind kind, SingleTokenSourceRange operatorLoc)
         : Expr(kind, operatorLoc) { VERIFY(matchNodeType<BinaryOperatorExpr>(kind)); }
     SingleTokenSourceRange operatorLocation() const { return packedToken(); }
 };
-struct BinaryLogicalOperatorExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
-    BinaryLogicalOperatorExpr(NodeKind kind, SingleTokenSourceRange operatorLoc)
-        : Expr(kind, operatorLoc) { VERIFY(matchNodeType<BinaryLogicalOperatorExpr>(kind)); }
-    SingleTokenSourceRange operatorLocation() const { return packedToken(); }
-};
 struct CallExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     CallExpr(NodeKind kind, SingleTokenSourceRange leftBracketLoc)
         : Expr(kind, leftBracketLoc) { VERIFY(matchNodeType<CallExpr>(kind)); }
     SingleTokenSourceRange leftBracketLocation() const { return packedToken(); }
 };
 struct ParenthesizedExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
     ParenthesizedExpr(SingleTokenSourceRange openParenLoc)
         : Expr(NodeKind::ParenthesizedExpr, openParenLoc) { }
     SingleTokenSourceRange leftParenthesizeLocation() const { return packedToken(); }
 };
 struct AccessExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     Word target;
     AccessExpr(NodeKind kind, SingleTokenSourceRange wordRange, Word target)
         : Expr(kind, wordRange), target(target) { VERIFY(matchNodeType<AccessExpr>(kind)); }
@@ -306,7 +307,6 @@ struct AccessExpr : Expr {
     Word accessTarget() const { return target; }
 };
 struct IdentifierExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
     Word id;
     IdentifierExpr(SingleTokenSourceRange idLoc, Word id)
         : Expr(NodeKind::IdentifierExpr, idLoc), id(id) { }
@@ -314,31 +314,25 @@ struct IdentifierExpr : Expr {
     Word identifierWord() const { return id; }
 };
 struct CompoundExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
     CompoundExpr(SingleTokenSourceRange leftAngleLoc)
         : Expr(NodeKind::CompoundExpr, leftAngleLoc) { }
     SingleTokenSourceRange leftAngleLocation() const { return packedToken(); }
 };
 struct IfExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     IfExpr(SingleTokenSourceRange ifLoc)
         : Expr(NodeKind::IfExpr, ifLoc) { }
     SingleTokenSourceRange ifLocation() const { return packedToken(); }
 };
 struct CommaElseExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     CommaElseExpr(SingleTokenSourceRange elseLoc)
         : Expr(NodeKind::CommaElseExpr, elseLoc) { }
     SingleTokenSourceRange elseLocation() const { return packedToken(); }
 };
 struct NumericLiteralExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
 };
 struct CharacterLiteralExpr : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
 };
 struct DesignateArgument : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     Word m_designator;
     DesignateArgument(SingleTokenSourceRange desLoc, Word des)
         : Expr(NodeKind::DesignateArgument, desLoc), m_designator(des) { }
@@ -346,10 +340,17 @@ struct DesignateArgument : Expr {
     Word designatorWord() const { return m_designator; }
 };
 struct Parameterize : Expr {
-    static constexpr int_t SUB_EXPRESSION_COUNT = 1;
     Parameterize(SingleTokenSourceRange leftBraceLoc)
         : Expr(NodeKind::Parameterize, leftBraceLoc) { }
     SingleTokenSourceRange leftBraceLocation() const { return packedToken(); }
+};
+struct EmptyNode : Node {
+    static constexpr int_t SUB_EXPRESSION_COUNT = 0;
+    EmptyNode(SingleTokenSourceRange loc)
+        : Node(NodeKind::EmptyNode, loc) { }
+    EmptyNode()
+        : Node(NodeKind::EmptyNode, SingleTokenSourceRange(0)) { }
+    SingleTokenSourceRange location() const { return packedToken(); }
 };
 
 void dump(Node*, const WordStringTable&);
@@ -358,7 +359,7 @@ template<typename T>
 constexpr bool matchNodeType(NodeKind in) {
     switch (in) {
 
-#define NODE(kind, type) \
+#define NODE(kind, type, prec) \
     case NodeKind::kind: \
         return std::is_same_v<T, type>;
 #include "nodes.h"
@@ -371,7 +372,7 @@ template<typename T>
 constexpr bool isNodeType(NodeKind in) {
     switch (in) {
 
-#define NODE(kind, type) \
+#define NODE(kind, type, prec) \
     case NodeKind::kind: \
         return std::derived_from<type, T>;
 #include "nodes.h"

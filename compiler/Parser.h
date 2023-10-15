@@ -137,7 +137,7 @@ struct Parser : LexerState {
     void parseCommaElseExpr();
     void parseCommaElseExprHere();
     void parseIfExpr();
-    void parseBinaryOperatorExpr(int ambientPrecedence = 100);
+    void parseBinaryOperatorExpr();
     void parseUnaryOperatorExpr();
     void parsePostfixExpr();
     void parsePostfixExprHere();

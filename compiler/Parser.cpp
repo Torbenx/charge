@@ -13,12 +13,24 @@ static constexpr NodeKind firstInstance() {
 std::string_view nameString(NodeKind kind) {
     switch (kind) {
 
-#define NODE(kind, type) \
-    case NodeKind::kind: \
+#define NODE(kind, type, prec) \
+    case NodeKind::kind:       \
         return #kind;
 #include "nodes.h"
 
-    case NodeKind::COUNT:
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+ExpressionPrecedence precedenceOf(NodeKind node) {
+    switch (node) {
+
+#define NODE(kind, type, prec) \
+    case NodeKind::kind:       \
+        return ExpressionPrecedence::prec;
+#include "nodes.h"
+
+    default:
         VERIFY_NOT_REACHED();
     }
 }
@@ -107,6 +119,7 @@ T* Parser::emitDecl(Args&&... args) {
     return decl;
 }
 
+// declarations
 StaticDecl* Parser::parseModule() {
     DeclarationScope onlyTheModuleScope(this);
     {
@@ -241,14 +254,14 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
         nextToken();
         parseExpression();
     }
-    emitNode(EndScope());
+    emitNode(EmptyNode());
 
     Node* initExpr = nextNodeLocation();
     if (tok == Token::Equal) {
         nextToken();
         parseExpression();
     }
-    emitNode(EndScope());
+    emitNode(EmptyNode());
 
     if (tok != Token::SemiColon) {
         // errorHandler;
@@ -256,7 +269,7 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     }
     nextToken();
 
-    emitDecl<VariableOrFunctionDecl>(kind, name, templateScope.finish(), typeExpr, initExpr);
+    emitDecl<StaticVariableDecl>(kind, name, templateScope.finish(), typeExpr, initExpr);
 }
 
 void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
@@ -285,12 +298,12 @@ void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, Temp
         nextToken();
         parseExpression();
     }
-    emitNode(EndScope());
+    emitNode(EmptyNode());
 
     Node* body = nextNodeLocation();
     parseBodyExprOrStmt();
 
-    emitDecl<VariableOrFunctionDecl>(NodeKind::FunctionDecl, name, templateScope.finish(), returnType, body);
+    emitDecl<FunctionDecl>(name, templateScope.finish(), returnType, body);
 }
 
 int_t Parser::parseParameters(ParameterParseOptions opts) {
@@ -338,14 +351,14 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             nextToken();
             parseExpression();
         }
-        emitNode(EndScope());
+        emitNode(EmptyNode());
 
         Node* initExpr = nextNodeLocation();
         if (tok == Token::Equal) {
             nextToken();
             parseExpression();
         }
-        emitNode(EndScope());
+        emitNode(EmptyNode());
 
         emitDecl<ParameterOrMemberDecl>(kind, name, typeExpr, initExpr);
         count += 1;
@@ -369,7 +382,7 @@ void Parser::parseBodyExprOrStmt() {
     } else if (tok == Token::FatArrow) {
         nextToken();
         parseExpression();
-        emitNode(EndScope());
+        emitNode(EmptyNode());
         if (tok != Token::SemiColon) {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -381,6 +394,7 @@ void Parser::parseBodyExprOrStmt() {
     }
 }
 
+// statements
 void Parser::parseSingleOrCompoundStmt() {
     VERIFY(tok == Token::Colon);
     nextToken();
@@ -402,7 +416,7 @@ void Parser::parseCompoundStmt() {
         parseStatement();
     }
     VERIFY(tok == Token::RightBrace);
-    emitNode(EndScope(tokRange()));
+    emitNode(EmptyNode(tokRange()));
     nextToken();
 }
 
@@ -416,10 +430,7 @@ void Parser::parseStatement() {
 
 static NodeKind updateToStmt(Token token) {
     static constexpr auto firstUpdateStmt
-        = std::min(std::to_underlying(NodeKind::AssignStmt),
-            std::min(
-                std::to_underlying(firstInstance<matchNodeType<UpdateStmt>>()),
-                std::to_underlying(firstInstance<matchNodeType<LogicalUpdateStmt>>())));
+        = std::to_underlying(firstInstance<matchNodeType<UpdateStmt>>());
     return NodeKind(std::to_underlying(token) - std::to_underlying(Token::FirstUpdateOp) + firstUpdateStmt);
 }
 Parser::ParsedStatementKind Parser::parseStatementInternal() {
@@ -431,21 +442,9 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
     }
     parseBinaryOperatorExpr();
     if (isUpdateOp(tok)) {
-        NodeKind kind = updateToStmt(tok);
-        auto opLoc = tokRange();
+        emitNode(UpdateStmt(updateToStmt(tok), tokRange()));
         nextToken();
-        if (kind == NodeKind::AssignStmt) {
-            emitNode(AssignStmt(opLoc));
-            parseExpression();
-            emitNode(EndScope());
-        } else if (matchNodeType<LogicalUpdateStmt>(kind)) {
-            emitNode(LogicalUpdateStmt(kind, opLoc));
-            parseExpression();
-            emitNode(EndScope());
-        } else {
-            parseExpression();
-            emitNode(UpdateStmt(kind, opLoc));
-        }
+        parseExpression();
         if (tok != Token::SemiColon) {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -472,7 +471,6 @@ void Parser::parseIfExprOrStmt(bool statement) {
         emitNode(IfExpr(ifLoc));
         nextToken();
         parseBinaryOperatorExpr();
-        emitNode(EndScope());
         if (statement) {
             parseCommaElseExprHere();
             emitNode(ExpressionStmt(tokRange()));
@@ -495,6 +493,7 @@ void Parser::parseIfExprOrStmt(bool statement) {
     }
 }
 
+// expressions
 void Parser::parseExpression() {
     parseCommaElseExpr();
 }
@@ -518,7 +517,6 @@ void Parser::parseCommaElseExprHere() {
         emitNode(CommaElseExpr(elseLoc));
         nextToken();
         parseIfExpr();
-        emitNode(EndScope());
     } else {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -535,59 +533,17 @@ void Parser::parseIfExpr() {
 
 static NodeKind binaryToExpr(Token tok) {
     static constexpr auto firstBinaryExpr
-        = std::min(std::to_underlying(firstInstance<matchNodeType<BinaryOperatorExpr>>()),
-            std::to_underlying(firstInstance<matchNodeType<BinaryLogicalOperatorExpr>>()));
+        = std::to_underlying(firstInstance<matchNodeType<BinaryOperatorExpr>>());
     return NodeKind(std::to_underlying(tok) - std::to_underlying(Token::FirstBinaryOp) + firstBinaryExpr);
 }
-// clang-format off
-static int precedenceOf(NodeKind node) {
-    using enum NodeKind;
-    switch (node) {
-    case MultiplyExpr: return 1;
-    case DivideExpr: return 1;
-    case RemainderExpr: return 1;
-    case AdditionExpr: return 2;
-    case SubtractionExpr: return 2;
-    case ShiftLeftExpr: return 3;
-    case ShiftRightExpr: return 3;
-    case CompareLessExpr: return 4;
-    case CompareLessEqualExpr: return 4;
-    case CompareGreaterExpr: return 4;
-    case CompareGreaterEqualExpr: return 4;
-    case CompareNotEqualExpr: return 5;
-    case CompareEqualExpr: return 5;
-    case BitwiseAndExpr: return 6;
-    case BitwiseXorExpr: return 7;
-    case BitwiseOrExpr: return 8;
-    case LogicalAndExpr: return 9;
-    case LogicalOrExpr: return 10;
-    default: VERIFY_NOT_REACHED();
-    }
-}
-// clang-format on
-void Parser::parseBinaryOperatorExpr(int ambientPrecedence) {
+void Parser::parseBinaryOperatorExpr() {
     parseUnaryOperatorExpr();
 
-    while (isBinaryOp(tok) || isBinaryLogicOp(tok)) {
-        NodeKind kind = binaryToExpr(tok);
-        int tokPrecdence = precedenceOf(kind);
-        if (tokPrecdence >= ambientPrecedence) {
-            // the operator described by 'tok' will be evaluated later
-            break;
-        }
-
-        // the operator described by 'tok' must be evaluated first
-        auto opLoc = tokRange();
+    // The precedence is resolved later by the NodeStreamVisitor.
+    while (isBinaryOp(tok)) {
+        emitNode(BinaryOperatorExpr(binaryToExpr(tok), tokRange()));
         nextToken();
-        // parse operators with precedence < tokPrecedence
-        if (matchNodeType<BinaryLogicalOperatorExpr>(kind)) {
-            emitNode(BinaryLogicalOperatorExpr(kind, opLoc));
-            parseBinaryOperatorExpr(tokPrecdence);
-            emitNode(EndScope());
-        } else {
-            parseBinaryOperatorExpr(tokPrecdence);
-            emitNode(BinaryOperatorExpr(kind, opLoc));
-        }
+        parseUnaryOperatorExpr();
     }
 }
 
@@ -666,7 +622,7 @@ void Parser::parsePrimaryExpr() {
             }
         }
         VERIFY(tok == Token::RightAngle);
-        emitNode(EndScope(tokRange()));
+        emitNode(EmptyNode(tokRange()));
         nextToken();
     } else if (tok == Token::CharacterLiteral) {
         VERIFY_NOT_REACHED();
@@ -706,6 +662,6 @@ void Parser::parseArguments() {
         }
     }
     VERIFY(tok == rightBracket);
-    emitNode(EndScope(tokRange()));
+    emitNode(EmptyNode(tokRange()));
     nextToken();
 }

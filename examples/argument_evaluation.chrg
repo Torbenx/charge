@@ -1,0 +1,17 @@
+
+template(T: type)
+fn test(x: T, i: int);
+
+template(T: Type)
+fn update(inout x: T) -> int: {
+    // modify 'x' here...
+    return 0;
+}
+
+template(T: Type)
+fn call(mut x: T): {
+    // This does different things depending on whether 'T' is an object or value type.
+    // If 'T' a object type the updated value will be passed to test,
+    // and if 'T' a value type the non-update value gets passed.
+    test(x, update(x));
+}
