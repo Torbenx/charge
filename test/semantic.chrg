@@ -1,5 +1,5 @@
 // semantic-test
 
-fn test(): {
-    a + b;
-}
+struct test_type: { }
+
+static foo: test_type;

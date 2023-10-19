@@ -108,11 +108,10 @@ struct Parser::TemplatedDeclarationScope : Parser::DeclarationScope {
 };
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
-    auto declOffset = nodeStream.offset;
     T* decl = std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
 
     static_assert(std::derived_from<T, StaticDecl> || std::derived_from<T, ParameterOrMemberDecl>);
-    (std::derived_from<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, declOffset });
+    (std::derived_from<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, nodeStream.offsetOf(decl) });
 
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
@@ -120,21 +119,21 @@ T* Parser::emitDecl(Args&&... args) {
 }
 
 // declarations
-StaticDecl* Parser::parseModule() {
+ModuleDecl* Parser::parseModule() {
     DeclarationScope onlyTheModuleScope(this);
     {
         TemplatedDeclarationScope moduleScope(this);
         while (tok != Token::EOS) {
             parseDeclaration();
         }
-        emitDecl<StaticDecl>(NodeKind::ModuleDecl, WordAndLocation(), moduleScope.finish());
+        emitDecl<ModuleDecl>(moduleScope.finish());
     }
     auto decls = onlyTheModuleScope.finish();
     VERIFY(decls.parameterCount == 0);
     VERIFY(decls.staticCount == 1);
     Decl* moduleDecl = decls.statics()[0];
     VERIFY(moduleDecl->kind() == NodeKind::ModuleDecl);
-    return (StaticDecl*)moduleDecl;
+    return (ModuleDecl*)moduleDecl;
 }
 
 void Parser::parseDeclaration() {

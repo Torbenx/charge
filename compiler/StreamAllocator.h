@@ -70,8 +70,9 @@ struct StreamAllocator : StreamAllocatorFields<elementAlignment> {
         return (T*)allocate(alignof(T), sizeof(T));
     }
     void* allocate(int_t alignment, int_t size) {
-        VERIFY(size > 0 && alignment > 0 && (size_t)alignment <= elementAlignment && std::has_single_bit((size_t)alignment));
-        aligned_t begin = Base::offset;
+        VERIFY(size > 0 && alignment > 0 && std::has_single_bit((size_t)alignment));
+        aligned_t align = aligned(alignment);
+        aligned_t begin = typename Base::aligned_t(alignmentCeil(Base::offset.value, align.value));
         aligned_t end = begin + aligned(size);
         VERIFY(end <= Base::capacity);
         Base::offset = end;
@@ -82,6 +83,9 @@ struct StreamAllocator : StreamAllocatorFields<elementAlignment> {
     }
     void* position(Base::aligned_t off) const {
         return Base::storage + off;
+    }
+    auto offsetOf(void* target) {
+        return aligned((std::byte*)target - Base::storage);
     }
 
 private:

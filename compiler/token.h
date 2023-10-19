@@ -147,7 +147,7 @@ struct TokenWithData {
 struct SingleTokenSourceRange;
 struct LocalSourceLocation {
 private:
-    LocalSourceLocation(uint32_t tokenStreamOffset, bool atEnd)
+    constexpr LocalSourceLocation(uint32_t tokenStreamOffset, bool atEnd)
         : isAtEnd(atEnd), tokenStreamOffset(tokenStreamOffset) { }
     friend struct SingleTokenSourceRange;
 
@@ -155,7 +155,7 @@ public:
     uint32_t isAtEnd : 8;
     uint32_t tokenStreamOffset : 24;
 
-    bool operator==(const LocalSourceLocation& other) const {
+    constexpr bool operator==(const LocalSourceLocation& other) const {
         return isAtEnd == other.isAtEnd && tokenStreamOffset == other.tokenStreamOffset;
     }
 };
@@ -165,28 +165,28 @@ private:
     LocalSourceLocation m_last;
 
 public:
-    LocalSourceRange(LocalSourceLocation first, LocalSourceLocation last)
+    constexpr LocalSourceRange(LocalSourceLocation first, LocalSourceLocation last)
         : m_first(first), m_last(last) {
         VERIFY((int_t)last.tokenStreamOffset >= (int_t)first.tokenStreamOffset);
     }
-    LocalSourceLocation first() const { return m_first; }
-    LocalSourceLocation last() const { return m_last; }
+    constexpr LocalSourceLocation first() const { return m_first; }
+    constexpr LocalSourceLocation last() const { return m_last; }
 };
 struct SingleTokenSourceRange {
     uint32_t _unused : 8 = 0;
     uint32_t tokenStreamOffset : 24 = 0;
 
-    SingleTokenSourceRange() = default;
-    explicit SingleTokenSourceRange(uint32_t tokenStreamOffset)
+    constexpr SingleTokenSourceRange() = default;
+    constexpr explicit SingleTokenSourceRange(uint32_t tokenStreamOffset)
         : tokenStreamOffset(tokenStreamOffset) { }
 
-    LocalSourceLocation first() const { return { tokenStreamOffset, false }; }
-    LocalSourceLocation last() const { return { tokenStreamOffset, true }; }
-    operator LocalSourceRange() const { return { first(), last() }; }
+    constexpr LocalSourceLocation first() const { return { tokenStreamOffset, false }; }
+    constexpr LocalSourceLocation last() const { return { tokenStreamOffset, true }; }
+    constexpr operator LocalSourceRange() const { return { first(), last() }; }
 };
 struct WordAndLocation {
     Word word;
     SingleTokenSourceRange location;
 
-    operator Word() const { return word; }
+    constexpr operator Word() const { return word; }
 };

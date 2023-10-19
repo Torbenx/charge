@@ -17,6 +17,9 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     std::list<DumpEntry> entries = {};
     DumpResult currentEnd = entries.end();
 
+    Dumper(const WordStringTable& table)
+        : wordTable(table) { }
+
     auto visitExprWithEnd(ExpressionPrecedence prec, DumpResult end) {
         DumpResult savedEnd = currentEnd;
         currentEnd = end;
@@ -40,7 +43,30 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
             lastDecl = visitDecl(decl);
         return lastDecl;
     }
-    DumpResult visitStaticDecl(StaticDecl& d) {
+    DumpResult visitModuleDecl(ModuleDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+
+        auto lastDecl = visitStaticDeclInternal(d);
+        if (lastDecl.has_value())
+            lastDecl.value()->lastChild = true;
+        else
+            out->leafNode = true;
+
+        return out;
+    }
+    DumpResult visitNamespaceDecl(NamespaceDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto lastDecl = visitStaticDeclInternal(d);
+        if (lastDecl.has_value())
+            lastDecl.value()->lastChild = true;
+        else
+            out->leafNode = true;
+
+        return out;
+    }
+    DumpResult visitTypeDecl(TypeDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
@@ -310,8 +336,8 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
 };
 
 void dump(Node* stream, const WordStringTable& table) {
-    Dumper dumper { stream, table };
-    auto r = dumper.visitGeneric(ExpressionPrecedence::Statement);
+    Dumper dumper { table };
+    auto r = dumper.visitGeneric(stream);
     std::visit([](auto v) {
         if constexpr (!std::is_same_v<decltype(v), std::nullopt_t>) {
             v->lastChild = true;

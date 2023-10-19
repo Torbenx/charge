@@ -5,8 +5,6 @@
 template<typename Impl, typename DeclResult, typename StmtResult, typename ExprResult>
 struct NodeStreamVisitor {
     Node* nodeStream = nullptr;
-    NodeStreamVisitor(Node* stream)
-        : nodeStream(stream) { }
 
     Impl* impl() { return static_cast<Impl*>(this); }
 
@@ -57,6 +55,7 @@ private:
 public:
     using GenericReturnType = std::variant<std::nullopt_t, DeclResult, StmtResult, ExprResult>;
     GenericReturnType visitGeneric(ExpressionPrecedence ambientPrec) {
+        VERIFY(nodeStream != nullptr);
         // std::cout << "visit at " << (void*)nodeStream << " - " << nameString(nodeStream->kind()) << '\n';
 
         GenericReturnType ret = std::nullopt;

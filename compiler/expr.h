@@ -1,9 +1,21 @@
 #pragma once
 
+#include "StaticDeclProgram.h"
 #include "StreamAllocator.h"
 #include "WordTable.h"
 #include "token.h"
 #include <utility>
+
+struct DeclArrayItem;
+struct Decl;
+
+static constexpr auto words = ConstWordStringTable(
+    // parser
+    keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
+    keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"),
+    keyword("static"),
+    // sema
+    "type");
 
 using node_stream_offset = aligned_t<4>;
 
@@ -42,15 +54,13 @@ constexpr bool isNodeType(NodeKind in);
 
 std::string_view nameString(NodeKind);
 
-struct DeclArrayItem;
-
 struct Node {
     static constexpr int KIND_BITS = 8;
     static_assert(std::to_underlying(NodeKind::COUNT) < 1 << KIND_BITS);
     uint32_t kindBits : KIND_BITS;
     uint32_t streamOffsetBits : (32 - KIND_BITS);
 
-    Node(NodeKind kind, SingleTokenSourceRange token)
+    constexpr Node(NodeKind kind, SingleTokenSourceRange token)
         : kindBits(std::to_underlying(kind)), streamOffsetBits(token.tokenStreamOffset) { }
     SingleTokenSourceRange packedToken() const {
         return SingleTokenSourceRange(streamOffsetBits);
@@ -58,10 +68,14 @@ struct Node {
     NodeKind kind() const { return NodeKind(kindBits); }
 
     using backwards_offset = node_stream_offset;
-    backwards_offset backwardsOffsetTo(Node* target) const {
+    constexpr backwards_offset backwardsOffsetTo(Node* target) const {
+        if (target == nullptr)
+            return { 0 };
         return backwards_offset::backwords_diff(target, this);
     }
-    backwards_offset backwardsOffsetTo(DeclArrayItem* target) const {
+    constexpr backwards_offset backwardsOffsetTo(DeclArrayItem* target) const {
+        if (target == nullptr)
+            return { 0 };
         return backwards_offset::backwords_diff(target, this);
     }
     Node* followBackwardsOffset(backwards_offset offset) {
@@ -73,7 +87,6 @@ struct Node {
 };
 
 // declaration arrays
-struct Decl;
 struct DeclArrayItem {
     Word name;
     // negative offset from the beginning of the array group
@@ -89,42 +102,42 @@ struct DeclArrayView {
         using value_type = Decl*;
         DeclArrayItem* base = nullptr;
         DeclArrayItem* item = nullptr;
-        Decl* operator*() const { return (*this)[0]; }
+        constexpr Decl* operator*() const { return (*this)[0]; }
         iterator& operator++() {
             ++item;
             return *this;
         }
-        iterator operator++(int) const { return { base, item + 1 }; }
-        iterator& operator--() {
+        constexpr iterator operator++(int) const { return { base, item + 1 }; }
+        constexpr iterator& operator--() {
             --item;
             return *this;
         }
-        iterator operator--(int) const {
+        constexpr iterator operator--(int) const {
             return { base, item - 1 };
         }
-        std::strong_ordering operator<=>(const iterator& other) const { return item <=> other.item; }
-        bool operator==(const iterator& other) const { return item == other.item; }
-        iterator& operator+=(int_t i) {
+        constexpr std::strong_ordering operator<=>(const iterator& other) const { return item <=> other.item; }
+        constexpr bool operator==(const iterator& other) const { return item == other.item; }
+        constexpr iterator& operator+=(int_t i) {
             item += i;
             return *this;
         }
-        iterator& operator-=(int_t i) {
+        constexpr iterator& operator-=(int_t i) {
             item += i;
             return *this;
         }
-        iterator operator+(int_t i) const { return { base, item + i }; }
-        iterator operator-(int_t i) const { return { base, item + i }; }
-        int_t operator-(const iterator& other) const { return item - other.item; }
-        Decl* operator[](int_t i) const { return (Decl*)((std::byte*)base - item[i].offset); }
+        constexpr iterator operator+(int_t i) const { return { base, item + i }; }
+        constexpr iterator operator-(int_t i) const { return { base, item + i }; }
+        constexpr int_t operator-(const iterator& other) const { return item - other.item; }
+        constexpr Decl* operator[](int_t i) const { return (Decl*)((std::byte*)base - item[i].offset); }
     };
-    iterator begin() const {
+    constexpr iterator begin() const {
         return { base, m_begin };
     }
-    iterator end() const {
+    constexpr iterator end() const {
         return { base, m_end };
     }
-    int_t size() const { return m_end - m_begin; }
-    Decl* operator[](int_t i) const { return begin()[i]; }
+    constexpr int_t size() const { return m_end - m_begin; }
+    constexpr Decl* operator[](int_t i) const { return begin()[i]; }
 };
 inline DeclArrayView::iterator operator+(int_t i, const DeclArrayView::iterator& it) { return { it.base, it.item + i }; }
 static_assert(std::random_access_iterator<DeclArrayView::iterator>);
@@ -133,17 +146,17 @@ struct DeclArrays {
     uint32_t parameterCount = 0;
     uint32_t staticCount = 0;
 
-    DeclArrayView view(DeclArrayItem* begin, uint32_t count) const {
+    constexpr DeclArrayView view(DeclArrayItem* begin, uint32_t count) const {
         return { this->begin, begin, begin + count };
     }
 
-    auto all() const {
+    constexpr auto all() const {
         return view(begin, parameterCount + staticCount);
     }
-    auto parameters() const {
+    constexpr auto parameters() const {
         return view(begin, parameterCount);
     }
-    auto statics() const {
+    constexpr auto statics() const {
         return view(begin + parameterCount, staticCount);
     }
 };
@@ -151,13 +164,13 @@ struct TemplatedDeclArrays : DeclArrays {
     uint32_t withCount = 0;
     uint32_t templateCount = 0;
 
-    auto withParameters() const {
+    constexpr auto withParameters() const {
         return view(begin, withCount);
     }
-    auto templateParamters() const {
+    constexpr auto templateParamters() const {
         return view(begin + withCount, templateCount);
     }
-    auto callableParameters() const {
+    constexpr auto callableParameters() const {
         return view(begin + withCount + templateCount, parameterCount - withCount - templateCount);
     }
 };
@@ -165,7 +178,7 @@ struct TemplatedDeclArrays : DeclArrays {
 // declarations
 struct Decl : Node {
     Word name;
-    Decl(NodeKind kind, WordAndLocation name)
+    constexpr Decl(NodeKind kind, WordAndLocation name)
         : Node(kind, name.location), name(name) { VERIFY(isNodeType<Decl>(kind)); }
     SingleTokenSourceRange nameLocation() const { return packedToken(); }
 };
@@ -177,7 +190,9 @@ struct StaticDecl : Decl {
     uint32_t functionParamOrMemberCount;
     uint32_t staticDeclCount;
 
-    StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
+    StaticDeclProgram program;
+
+    constexpr StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
         : Decl(kind, name)
         , declArraysBegin(backwardsOffsetTo(decls.begin))
         , withParamCount(decls.withParameters().size())
@@ -199,6 +214,31 @@ struct StaticDecl : Decl {
         };
     }
 };
+struct TypeDecl : StaticDecl {
+    constexpr TypeDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
+        : StaticDecl(kind, name, decls) { VERIFY(isNodeType<TypeDecl>(kind)); }
+};
+struct NamespaceDecl : StaticDecl {
+    NamespaceDecl(WordAndLocation name, TemplatedDeclArrays decls)
+        : StaticDecl(NodeKind::NamespaceDecl, name, decls) { }
+};
+struct ModuleDecl : StaticDecl {
+    ModuleDecl(TemplatedDeclArrays decls)
+        : StaticDecl(NodeKind::ModuleDecl, {}, decls) { }
+};
+struct FunctionDecl : StaticDecl {
+
+    FunctionDecl(WordAndLocation name, TemplatedDeclArrays decls, Node* returnTypeExpr, Node* body)
+        : StaticDecl(NodeKind::FunctionDecl, name, decls)
+        , m_returnTypeExpr(backwardsOffsetTo(returnTypeExpr))
+        , m_body(backwardsOffsetTo(body)) { }
+
+    backwards_offset m_returnTypeExpr;
+    backwards_offset m_body;
+
+    Node* returnTypeExpr() { return followBackwardsOffset(m_returnTypeExpr); }
+    Node* body() { return followBackwardsOffset(m_body); }
+};
 struct StaticVariableDecl : StaticDecl {
 
     StaticVariableDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* initExpr)
@@ -213,19 +253,9 @@ struct StaticVariableDecl : StaticDecl {
 
     Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
     Node* initExpr() { return followBackwardsOffset(m_initExpr); }
-};
-struct FunctionDecl : StaticDecl {
 
-    FunctionDecl(WordAndLocation name, TemplatedDeclArrays decls, Node* returnTypeExpr, Node* body)
-        : StaticDecl(NodeKind::FunctionDecl, name, decls)
-        , m_returnTypeExpr(backwardsOffsetTo(returnTypeExpr))
-        , m_body(backwardsOffsetTo(body)) { }
-
-    backwards_offset m_returnTypeExpr;
-    backwards_offset m_body;
-
-    Node* returnTypeExpr() { return followBackwardsOffset(m_returnTypeExpr); }
-    Node* body() { return followBackwardsOffset(m_body); }
+    // operands for instructions in the constant stream
+    InstructionOperand typeValue;
 };
 // a parameter or (has-)member declaration
 struct ParameterOrMemberDecl : Decl {
@@ -360,11 +390,11 @@ constexpr bool matchNodeType(NodeKind in) {
     switch (in) {
 
 #define NODE(kind, type, prec) \
-    case NodeKind::kind: \
+    case NodeKind::kind:       \
         return std::is_same_v<T, type>;
 #include "nodes.h"
 
-    case NodeKind::COUNT:
+    default:
         VERIFY_NOT_REACHED();
     }
 }
@@ -373,11 +403,11 @@ constexpr bool isNodeType(NodeKind in) {
     switch (in) {
 
 #define NODE(kind, type, prec) \
-    case NodeKind::kind: \
+    case NodeKind::kind:       \
         return std::derived_from<type, T>;
 #include "nodes.h"
 
-    case NodeKind::COUNT:
+    default:
         VERIFY_NOT_REACHED();
     }
 }

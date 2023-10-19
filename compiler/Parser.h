@@ -86,10 +86,6 @@ struct Parser : LexerState {
     void nextToken();
     void reemitLastToken(TokenWithData);
 
-    static constexpr auto words = ConstWordStringTable(
-        keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
-        keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"),
-        keyword("static"));
     WordStringTable wordTable { words };
 
     StreamAllocator<4> nodeStream;
@@ -111,7 +107,7 @@ struct Parser : LexerState {
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDecl(Args&&...);
 
-    StaticDecl* parseModule();
+    ModuleDecl* parseModule();
     void parseDeclaration();
     void parseNamespaceOrTypeDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
     void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, TemplatedDeclarationScope);

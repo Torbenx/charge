@@ -2,27 +2,18 @@
 
 #include "expr.h"
 
-struct SSAName {
-    uint32_t id;
-};
+#define ENUMERATE_INSTRUCTIONS \
+    INST(StaticVariableId, unary)
 
-struct Inst {
-    uint16_t opcode;
-    uint16_t length;
-};
-struct ValueInst : Inst {
-    SSAName result;
-};
-struct DeclarationReference : ValueInst {
-    uint32_t decl;
-};
+enum class Opcode : uint16_t {
 
-struct BasicBlock {
+#define INST(name, layout) name,
+    ENUMERATE_INSTRUCTIONS
+#undef INST
 
 };
 
 struct LookupContext {
-
 };
 
 // The value of an expression is either a
@@ -31,19 +22,17 @@ struct LookupContext {
 //  - hypothetical value obtained from a
 //     - load, or
 //     - function call.
-// There should be no values of unknown or object type.
 // For values of unknown type we must enforce the stricter object semantics.
-struct DeclLiteral {
-
+struct LiteralValue {
+    SSAName literal;
 };
 struct LoadValue {
-
+    SSAName substance;
 };
 struct CallValue {
-
 };
 struct ExprValue {
-    std::variant<DeclLiteral, LoadValue, CallValue> value;
+    std::variant<LiteralValue, LoadValue, CallValue> value;
     SSAName type;
 };
 
@@ -57,4 +46,6 @@ struct SemanticContext {
     Instrumenter* instrumenter = nullptr;
 
     std::optional<id<Decl>> performLookup(LookupContext& ctx, Word name, LocalSourceRange dbgRange);
+
+    void signatureCheckStaticVariableDecl(StaticVariableDecl&);
 };
