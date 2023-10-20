@@ -81,6 +81,10 @@ STMT(LogicalOrUpdateStmt, UpdateStmt, Statement)
 STMT(CompoundStmt, CompoundStmt, Primary)
 STMT(ExpressionStmt, ExpressionStmt, Statement)
 STMT(IfStmt, IfStmt, Statement)
+STMT(ReturnStmt, ReturnStmt, Statement)
+STMT(EmptyReturnStmt, EmptyReturnStmt, Primary)
+STMT(LetStmt, LetStmt, Primary)
+STMT(MutLetStmt, LetStmt, Primary)
 
 // ------ declarations ------
 DECL(ModuleDecl, ModuleDecl, Primary)
@@ -91,10 +95,13 @@ DECL(FunctionDecl, FunctionDecl, Primary)
 DECL(StaticLetVariableDecl, StaticVariableDecl, Primary)
 DECL(StaticMutVariableDecl, StaticVariableDecl, Primary)
 DECL(MemberDecl, ParameterOrMemberDecl, Primary)
+DECL(HasMemberDecl, HasMemberDecl, Primary)
 DECL(LetParameterDecl, ParameterOrMemberDecl, Primary)
 DECL(MutParameterDecl, ParameterOrMemberDecl, Primary)
 DECL(InOutParameterDecl, ParameterOrMemberDecl, Primary)
 DECL(OutParameterDecl, ParameterOrMemberDecl, Primary)
+DECL(BlockLetDecl, BlockLetDecl, Primary)
+DECL(BlockMutDecl, BlockLetDecl, Primary)
 
 #undef EXPR
 #undef STMT

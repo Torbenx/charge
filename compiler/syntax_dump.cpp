@@ -139,6 +139,40 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         }
         return out;
     }
+    DumpResult visitHasMemberDecl(HasMemberDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        if (!d.name.empty())
+            out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto type = visitExpr(d.typeExpr());
+        VERIFY(type.has_value());
+        std::optional<DumpResult> lastDecl;
+        for (Decl* decl : d.decls().all())
+            lastDecl = visitDecl(decl);
+
+        if (lastDecl.has_value()) {
+            lastDecl.value()->lastChild = true;
+        } else {
+            type.value()->lastChild = true;
+        }
+
+        return out;
+    }
+    DumpResult visitBlockLetDecl(BlockLetDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto type = visitExpr(d.typeExpr());
+        auto init = visitExpr(d.initExpr());
+        if (type.has_value()) {
+            type.value()->lastChild = true;
+        } else if (init.has_value()) {
+            init.value()->lastChild = true;
+        } else {
+            out->leafNode = true;
+        }
+        return out;
+    }
 
     // statements
     DumpResult visitExpressionStmt(ExpressionStmt&, DumpResult expr) {
@@ -149,7 +183,13 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         right.value()->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
     }
-    DumpResult visitLetStmt(LetStmt&) { VERIFY_NOT_REACHED(); }
+    DumpResult visitLetStmt(LetStmt& e) {
+        DumpResult out = insertAtEnd(DumpEntry { e.kind() });
+        DumpResult decl = visitBlockLetDecl(*e.decl());
+        decl->lastChild = true;
+        nodeStream = e.decl() + 1;
+        return out;
+    }
     DumpResult visitCompoundStmt(CompoundStmt& e) {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
         std::optional<DumpResult> lastStmt;
@@ -170,6 +210,13 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         VERIFY(body.has_value());
         body.value()->lastChild = true;
         return insertBefore(condition, DumpEntry { e.kind() });
+    }
+    DumpResult visitReturnStmt(ReturnStmt& e, DumpResult expr) {
+        expr->lastChild = true;
+        return insertBefore(expr, DumpEntry { e.kind() });
+    }
+    DumpResult visitEmptyReturnStmt(EmptyReturnStmt& e) {
+        return insertAtEnd(DumpEntry { e.kind(), true });
     }
 
     // expressions
@@ -241,8 +288,12 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         ifFalse.value()->lastChild = true;
         return insertBefore(base, DumpEntry { e.kind() });
     }
-    DumpResult visitNumericLiteralExpr(NumericLiteralExpr&) { VERIFY_NOT_REACHED(); }
-    DumpResult visitCharacterLiteralExpr(CharacterLiteralExpr&) { VERIFY_NOT_REACHED(); }
+    DumpResult visitNumericLiteralExpr(NumericLiteralExpr& e) {
+        return insertAtEnd(DumpEntry { e.kind(), true });
+    }
+    DumpResult visitCharacterLiteralExpr(CharacterLiteralExpr& e) {
+        return insertAtEnd(DumpEntry { e.kind(), true });
+    }
     DumpResult visitDesignateArgument(DesignateArgument& e, DumpResult argument) {
         argument->name = e.designatorWord();
         return argument;

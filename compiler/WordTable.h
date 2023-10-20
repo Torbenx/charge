@@ -310,6 +310,8 @@ constexpr Word WordStringTable::get(std::string_view str) {
     return getWithHash(str, Word::hash(str));
 }
 constexpr Word WordStringTable::getWithHash(std::string_view str, uint32_t hash) {
+    if (str.empty())
+        return Word();
     auto r = findBucket(hash, str);
     if (r.found)
         return entries[r.bucket].word;

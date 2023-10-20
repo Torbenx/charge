@@ -13,7 +13,7 @@ static constexpr auto words = ConstWordStringTable(
     // parser
     keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
     keyword("with"), keyword("template"), keyword("mut"), keyword("let"), keyword("inout"), keyword("out"),
-    keyword("static"),
+    keyword("static"), keyword("return"), keyword("has"), keyword("as"),
     // sema
     "type");
 
@@ -68,18 +68,31 @@ struct Node {
     NodeKind kind() const { return NodeKind(kindBits); }
 
     using backwards_offset = node_stream_offset;
+    using forwards_offset = node_stream_offset;
     constexpr backwards_offset backwardsOffsetTo(Node* target) const {
         if (target == nullptr)
             return { 0 };
-        return backwards_offset::backwords_diff(target, this);
+        return backwards_offset::backwards_diff(target, this);
     }
     constexpr backwards_offset backwardsOffsetTo(DeclArrayItem* target) const {
         if (target == nullptr)
             return { 0 };
-        return backwards_offset::backwords_diff(target, this);
+        return backwards_offset::backwards_diff(target, this);
+    }
+    constexpr forwards_offset forwardsOffsetTo(Node* target) const {
+        if (target == nullptr)
+            return { 0 };
+        return forwards_offset::forwards_diff(target, this);
     }
     Node* followBackwardsOffset(backwards_offset offset) {
+        if (offset.value == 0)
+            return nullptr;
         return (Node*)((std::byte*)this - offset);
+    }
+    Node* followForwardsOffset(forwards_offset offset) {
+        if (offset.value == 0)
+            return nullptr;
+        return (Node*)((std::byte*)this + offset);
     }
     DeclArrayItem* followBackwardsOffsetToArray(backwards_offset offset) {
         return (DeclArrayItem*)((std::byte*)this - offset);
@@ -184,35 +197,14 @@ struct Decl : Node {
 };
 // a type, namespace, function or static-variable declaration
 struct StaticDecl : Decl {
-    backwards_offset declArraysBegin;
-    uint32_t withParamCount;
-    uint32_t templateParamCount;
-    uint32_t functionParamOrMemberCount;
-    uint32_t staticDeclCount;
+    TemplatedDeclArrays m_decls;
 
     StaticDeclProgram program;
 
     constexpr StaticDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
-        : Decl(kind, name)
-        , declArraysBegin(backwardsOffsetTo(decls.begin))
-        , withParamCount(decls.withParameters().size())
-        , templateParamCount(decls.templateParamters().size())
-        , functionParamOrMemberCount(decls.callableParameters().size())
-        , staticDeclCount(decls.statics().size()) {
-        VERIFY(isNodeType<StaticDecl>(kind));
-    }
+        : Decl(kind, name), m_decls(decls) { VERIFY(isNodeType<StaticDecl>(kind)); }
 
-    TemplatedDeclArrays decls() {
-        return {
-            {
-                .begin = followBackwardsOffsetToArray(declArraysBegin),
-                .parameterCount = withParamCount + templateParamCount + functionParamOrMemberCount,
-                .staticCount = staticDeclCount,
-            },
-            withParamCount,
-            templateParamCount,
-        };
-    }
+    TemplatedDeclArrays decls() { return m_decls; }
 };
 struct TypeDecl : StaticDecl {
     constexpr TypeDecl(NodeKind kind, WordAndLocation name, TemplatedDeclArrays decls)
@@ -260,13 +252,35 @@ struct StaticVariableDecl : StaticDecl {
 // a parameter or (has-)member declaration
 struct ParameterOrMemberDecl : Decl {
     backwards_offset m_typeExpr;
-    backwards_offset m_initExpr; // has-member decls or init-expr for parameters and members
+    backwards_offset m_initExpr;
 
     ParameterOrMemberDecl(NodeKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
         : Decl(kind, name)
         , m_typeExpr(backwardsOffsetTo(typeExpr))
         , m_initExpr(backwardsOffsetTo(initExpr)) {
-        VERIFY(matchNodeType<ParameterOrMemberDecl>(kind));
+        VERIFY(isNodeType<ParameterOrMemberDecl>(kind));
+    }
+
+    Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
+    Node* initExpr() { return followBackwardsOffset(m_initExpr); }
+};
+struct HasMemberDecl : ParameterOrMemberDecl {
+    DeclArrays m_decls;
+
+    HasMemberDecl(WordAndLocation name, Node* typeExpr, Node* initExpr, DeclArrays decls)
+        : ParameterOrMemberDecl(NodeKind::HasMemberDecl, name, typeExpr, initExpr), m_decls(decls) { }
+
+    DeclArrays decls() { return m_decls; }
+};
+struct BlockLetDecl : Decl {
+    backwards_offset m_typeExpr;
+    backwards_offset m_initExpr;
+
+    BlockLetDecl(NodeKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name)
+        , m_typeExpr(backwardsOffsetTo(typeExpr))
+        , m_initExpr(backwardsOffsetTo(initExpr)) {
+        VERIFY(isNodeType<BlockLetDecl>(kind));
     }
 
     Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
@@ -285,6 +299,14 @@ struct UpdateStmt : Stmt {
 };
 struct LetStmt : Stmt {
     static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
+    Word name;
+    forwards_offset m_decl;
+    LetStmt(NodeKind kind, WordAndLocation name)
+        : Stmt(kind, name.location), name(name) { VERIFY(matchNodeType<LetStmt>(kind)); }
+    SingleTokenSourceRange nameLocation() const { return packedToken(); }
+
+    void setDecl(BlockLetDecl* decl) { m_decl = forwardsOffsetTo(decl); }
+    BlockLetDecl* decl() { return (BlockLetDecl*)followForwardsOffset(m_decl); }
 };
 struct CompoundStmt : Stmt {
     static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
@@ -303,6 +325,18 @@ struct IfStmt : Stmt {
     IfStmt(SingleTokenSourceRange ifLoc)
         : Stmt(NodeKind::IfStmt, ifLoc) { }
     SingleTokenSourceRange ifLocation() const { return packedToken(); }
+};
+struct ReturnStmt : Stmt {
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = true;
+    ReturnStmt(SingleTokenSourceRange returnLoc)
+        : Stmt(NodeKind::ReturnStmt, returnLoc) { }
+    SingleTokenSourceRange returnLocation() const { return packedToken(); }
+};
+struct EmptyReturnStmt : Stmt {
+    static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
+    EmptyReturnStmt(SingleTokenSourceRange returnLoc)
+        : Stmt(NodeKind::EmptyReturnStmt, returnLoc) { }
+    SingleTokenSourceRange returnLocation() const { return packedToken(); }
 };
 
 // expressions
@@ -359,8 +393,14 @@ struct CommaElseExpr : Expr {
     SingleTokenSourceRange elseLocation() const { return packedToken(); }
 };
 struct NumericLiteralExpr : Expr {
+    NumericLiteralExpr(SingleTokenSourceRange litLoc)
+        : Expr(NodeKind::NumericLiteralExpr, litLoc) { }
+    SingleTokenSourceRange literalLocation() const { return packedToken(); }
 };
 struct CharacterLiteralExpr : Expr {
+    CharacterLiteralExpr(SingleTokenSourceRange litLoc)
+        : Expr(NodeKind::CharacterLiteralExpr, litLoc) { }
+    SingleTokenSourceRange literalRange() const { return packedToken(); }
 };
 struct DesignateArgument : Expr {
     Word m_designator;

@@ -14,9 +14,17 @@ struct aligned_t {
     size_t bytes() const { return value * elementAlignment; }
 
     template<typename T, typename S>
-    static aligned_t backwords_diff(T* target, S* source) {
+    static aligned_t backwards_diff(T* target, S* source) {
         static_assert(alignof(T) >= elementAlignment && alignof(S) >= elementAlignment);
         int_t diff = ((std::byte*)source - (std::byte*)target) / elementAlignment;
+        VERIFY(diff >= 0);
+        VERIFY(diff <= (int_t)std::numeric_limits<uint32_t>::max());
+        return { (uint32_t)diff };
+    }
+    template<typename T, typename S>
+    static aligned_t forwards_diff(T* target, S* source) {
+        static_assert(alignof(T) >= elementAlignment && alignof(S) >= elementAlignment);
+        int_t diff = ((std::byte*)target - (std::byte*)source) / elementAlignment;
         VERIFY(diff >= 0);
         VERIFY(diff <= (int_t)std::numeric_limits<uint32_t>::max());
         return { (uint32_t)diff };
@@ -52,7 +60,7 @@ struct StreamAllocator : StreamAllocatorFields<elementAlignment> {
     using Base = StreamAllocatorFields<elementAlignment>;
     static_assert(std::has_single_bit(elementAlignment));
 
-    StreamAllocator() { allocateStorage(1024 * 1024); }
+    StreamAllocator() { allocateStorage(128 * 1024 * 1024); }
     StreamAllocator(StreamAllocator&& other)
         : Base(other) {
         (Base&)other = {};

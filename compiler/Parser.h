@@ -112,6 +112,7 @@ struct Parser : LexerState {
     void parseNamespaceOrTypeDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
     void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, TemplatedDeclarationScope);
     void parseFunctionDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
+    void parseHasMemberDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
     enum class ParameterParseOptions {
         None,
         OnlyLetParameters,

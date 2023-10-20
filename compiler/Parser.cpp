@@ -105,13 +105,19 @@ struct Parser::TemplatedDeclarationScope : Parser::DeclarationScope {
         auto arrays = DeclarationScope::finish();
         return { arrays, withParamCount, templateParamCount };
     }
+
+    void discard() {
+        VERIFY(withParamCount == 0 && templateParamCount == 0);
+        parser = nullptr;
+    }
 };
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
     T* decl = std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
 
-    static_assert(std::derived_from<T, StaticDecl> || std::derived_from<T, ParameterOrMemberDecl>);
-    (std::derived_from<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, nodeStream.offsetOf(decl) });
+    if constexpr (std::derived_from<T, StaticDecl> || std::derived_from<T, ParameterOrMemberDecl>) {
+        (std::derived_from<T, StaticDecl> ? staticDeclStack : parameterDeclStack).emit({ decl->name, nodeStream.offsetOf(decl) });
+    }
 
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
@@ -163,6 +169,10 @@ void Parser::parseDeclaration() {
         }
         if (tokWord() == words["fn"]) {
             parseFunctionDecl(attributes, std::move(templateScope));
+            return;
+        }
+        if (tokWord() == words["has"]) {
+            parseHasMemberDecl(attributes, std::move(templateScope));
             return;
         }
 
@@ -305,6 +315,57 @@ void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, Temp
     emitDecl<FunctionDecl>(name, templateScope.finish(), returnType, body);
 }
 
+void Parser::parseHasMemberDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+    templateScope.discard();
+    if (attributes.size() != 0) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+
+    VERIFY(tok == Token::Word && tokWord() == words["has"]);
+    nextToken();
+
+    Node* typeExpr = nextNodeLocation();
+    parseBinaryOperatorExpr();
+    emitNode(EmptyNode());
+
+    Node* initExpr = nextNodeLocation();
+    emitNode(EmptyNode());
+
+    WordAndLocation name = {};
+    if (tok == Token::Word && tokWord() == words["as"]) {
+        nextToken();
+        if (tok != Token::Word) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        name = tokWord();
+        nextToken();
+    }
+
+    DeclarationScope scope(this);
+    if (tok == Token::Colon) {
+        nextToken();
+        if (tok != Token::LeftBrace) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        nextToken();
+        while (tok != Token::RightBrace) {
+            parseDeclaration();
+        }
+        VERIFY(tok == Token::RightBrace);
+        nextToken();
+    } else if (tok == Token::SemiColon) {
+        nextToken();
+    } else {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+
+    emitDecl<HasMemberDecl>(name, typeExpr, initExpr, scope.finish());
+}
+
 int_t Parser::parseParameters(ParameterParseOptions opts) {
     VERIFY(tok == Token::LeftParen);
     nextToken();
@@ -436,6 +497,73 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
     if (tok == Token::Word) {
         if (tokWord() == words["if"]) {
             parseIfExprOrStmt(/* statement = */ true);
+            return ParsedStatementKind::Normal;
+        }
+        if (tokWord() == words["return"]) {
+            auto returnLoc = tokRange();
+            nextToken();
+
+            if (tok == Token::SemiColon) {
+                emitNode(EmptyReturnStmt(returnLoc));
+                nextToken();
+                return ParsedStatementKind::Normal;
+            }
+
+            parseExpression();
+            emitNode(ReturnStmt(returnLoc));
+
+            if (tok != Token::SemiColon) {
+                // errorHandler;
+                VERIFY_NOT_REACHED();
+            }
+            nextToken();
+            return ParsedStatementKind::Normal;
+        }
+        if (tokWord() == words["let"] || tokWord() == words["mut"]) {
+            NodeKind stmtKind = NodeKind::LetStmt;
+            NodeKind declKind = NodeKind::BlockLetDecl;
+            if (tokWord() == words["let"])
+                nextToken();
+            if (tok != Token::Word) {
+                // errorHandler;
+                VERIFY_NOT_REACHED();
+            }
+            if (tokWord() == words["mut"]) {
+                stmtKind = NodeKind::MutLetStmt;
+                declKind = NodeKind::BlockMutDecl;
+                nextToken();
+            }
+            if (tok != Token::Word) {
+                // errorHandler;
+                VERIFY_NOT_REACHED();
+            }
+            WordAndLocation name = tokWord();
+            nextToken();
+
+            LetStmt* stmtNode = emitNode(LetStmt(stmtKind, name));
+
+            Node* typeExpr = nextNodeLocation();
+            if (tok == Token::Colon) {
+                nextToken();
+                parseExpression();
+            }
+            emitNode(EmptyNode());
+
+            Node* initExpr = nextNodeLocation();
+            if (tok == Token::Equal) {
+                nextToken();
+                parseExpression();
+            }
+            emitNode(EmptyNode());
+
+            stmtNode->setDecl(emitDecl<BlockLetDecl>(declKind, name, typeExpr, initExpr));
+
+            if (tok != Token::SemiColon) {
+                // errorHandler;
+                VERIFY_NOT_REACHED();
+            }
+            nextToken();
+
             return ParsedStatementKind::Normal;
         }
     }
@@ -624,9 +752,11 @@ void Parser::parsePrimaryExpr() {
         emitNode(EmptyNode(tokRange()));
         nextToken();
     } else if (tok == Token::CharacterLiteral) {
-        VERIFY_NOT_REACHED();
+        emitNode(CharacterLiteralExpr(tokRange()));
+        nextToken();
     } else if (tok == Token::NumericLiteral) {
-        VERIFY_NOT_REACHED();
+        emitNode(NumericLiteralExpr(tokRange()));
+        nextToken();
     } else {
         // errorHandler;
         VERIFY_NOT_REACHED();

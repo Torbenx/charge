@@ -419,8 +419,13 @@ void Parser::nextToken() {
             tokData = wordTable.getWithHash(source(tokBegin, sourceOffset), hash);
         } else if (tok == Token::NumericLiteral) {
             // TODO: implement parsing num literals
-            while (sourceBuffer[sourceOffset] >= '0' && sourceBuffer[sourceOffset] <= '9')
-                sourceOffset += 1;
+            for (;;) {
+                char c = sourceBuffer[sourceOffset];
+                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
+                    sourceOffset += 1;
+                else
+                    break;
+            }
             tokData = NumericLiteral();
         } else if (tok == Token::CharacterLiteral) {
             sourceOffset += 1;

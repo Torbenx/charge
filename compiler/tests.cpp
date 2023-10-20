@@ -1,5 +1,6 @@
 #include "Parser.h"
 #include "semantic.h"
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -23,6 +24,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         Lexer,
         Parser,
         Semantic,
+        Benchmark,
     };
     using Value = std::variant<std::nullopt_t, NumericLiteral, CharacterLiteral>;
     struct Pair {
@@ -56,7 +58,8 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
-        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test");
+        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test",
+        "benchmark");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -85,9 +88,10 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
 
         while (par.tok != Token::EOS) {
             switch (testMode) {
-            case TestMode::Lexer:
+            case TestMode::Lexer: {
                 par.nextToken();
                 break;
+            }
             case TestMode::Parser: {
                 std::cout << "------\n";
                 par.parseDeclaration();
@@ -98,6 +102,19 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 std::cout << "------\n";
                 StaticDecl* module = par.parseModule();
                 dump(module, par.wordTable);
+                break;
+            }
+            case TestMode::Benchmark: {
+                par.instrumenter = nullptr;
+                std::cout << "------\n";
+                using Clock = std::chrono::high_resolution_clock;
+                auto start = Clock::now();
+                StaticDecl* module = par.parseModule();
+                auto stop = Clock::now();
+                std::cout << "Parsing module took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+                std::cout << " and produced " << par.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";
+                std::cout << " and " << par.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                par.instrumenter = this;
                 break;
             }
             default:
@@ -234,6 +251,11 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             case words["semantic-test"].asUint(): {
                 verifyNoPairs(command);
                 testMode = TestMode::Semantic;
+                break;
+            }
+            case words["benchmark"].asUint(): {
+                verifyNoPairs(command);
+                testMode = TestMode::Benchmark;
                 break;
             }
             case words["expect-source-position"].asUint(): {

@@ -67,10 +67,17 @@ fn test(): {
 /> expect-node IdentifierExpr; expect-node LogicalAndUpdateStmt; expect-node IdentifierExpr </ a &&= b;
 /> expect-node IdentifierExpr; expect-node LogicalOrUpdateStmt; expect-node IdentifierExpr </ a ||= b;
 
-//; if and compound statement
+//; other statements
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: b;
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt </ if a: { }
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: { b; }
+/> expect-identifier condition; expect-node IfExpr; expect-identifier if_true; expect-node ExpressionStmt </ if condition => if_true;
+/> expect-node EmptyReturnStmt </ return;
+/> expect-node IdentifierExpr; expect-node ReturnStmt </ return a;
+/> expect-node LetStmt; expect-decl BlockLetDecl name=a </ let a;
+/> expect-node MutLetStmt; expect-decl BlockMutDecl name=a </ let mut a;
+/> expect-node MutLetStmt; expect-decl BlockMutDecl name=a </ mut a;
+/> expect-node LetStmt; expect-identifier type; expect-node EmptyNode; expect-identifier init; expect-node EmptyNode </ let a: type = init;
 
 //; test precedence
 // expect-identifier a; expect-node LogicalOrExpr;
@@ -184,3 +191,10 @@ static name: type = init;
 
 /> expect-decl StaticLetVariableDecl </ static let a;
 /> expect-decl StaticMutVariableDecl </ static mut a;
+
+// expect-decl HasMemberDecl; expect-decl StructTypeDecl
+struct Foo: { has Bar; }
+// expect-decl HasMemberDecl name=bar; expect-decl StructTypeDecl
+struct Foo: { has Bar as bar; }
+// expect-decl FunctionDecl name=test; expect-decl HasMemberDecl; expect-decl StructTypeDecl
+struct Foo: { has Bar: { fn test(): { } } }

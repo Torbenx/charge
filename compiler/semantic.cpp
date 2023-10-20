@@ -70,6 +70,8 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
     DeclResult visitFunctionDecl(FunctionDecl&) { VERIFY_NOT_REACHED(); }
     DeclResult visitStaticVariableDecl(StaticVariableDecl&) { VERIFY_NOT_REACHED(); }
     DeclResult visitParameterOrMemberDecl(ParameterOrMemberDecl&) { VERIFY_NOT_REACHED(); }
+    DeclResult visitHasMemberDecl(HasMemberDecl&) { VERIFY_NOT_REACHED(); }
+    DeclResult visitBlockLetDecl(BlockLetDecl&) { VERIFY_NOT_REACHED(); }
 
     // statements
     StmtResult visitExpressionStmt(ExpressionStmt&, ExprValue) {
@@ -83,6 +85,12 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
         VERIFY_NOT_REACHED();
     }
     StmtResult visitIfStmt(IfStmt&, ExprValue) {
+        VERIFY_NOT_REACHED();
+    }
+    StmtResult visitReturnStmt(ReturnStmt&, ExprValue) {
+        VERIFY_NOT_REACHED();
+    }
+    StmtResult visitEmptyReturnStmt(EmptyReturnStmt&) {
         VERIFY_NOT_REACHED();
     }
 
