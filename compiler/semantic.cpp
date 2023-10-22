@@ -57,7 +57,7 @@ SSAName ConstantTable::emit(TypedConstant constant) {
     return { table_phase, id };
 }
 
-static TypeDecl typeType { DeclKind::StructTypeDecl, { words["type"], SingleTokenSourceRange() }, {} };
+static TypeDecl typeType { DeclKind::StructType, { words["type"], SingleTokenSourceRange() }, {} };
 
 struct StmtResult { };
 struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {

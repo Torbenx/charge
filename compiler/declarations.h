@@ -6,22 +6,22 @@
 
 struct Node;
 
-#define ENUMERATE_DECL_KINDS                        \
-    DECL(ModuleDecl, ModuleDecl)                    \
-    DECL(NamespaceDecl, NamespaceDecl)              \
-    DECL(StructTypeDecl, TypeDecl)                  \
-    DECL(ObjectTypeDecl, TypeDecl)                  \
-    DECL(FunctionDecl, FunctionDecl)                \
-    DECL(StaticLetVariableDecl, StaticVariableDecl) \
-    DECL(StaticMutVariableDecl, StaticVariableDecl) \
-    DECL(MemberDecl, ParameterOrMemberDecl)         \
-    DECL(HasMemberDecl, HasMemberDecl)              \
-    DECL(LetParameterDecl, ParameterOrMemberDecl)   \
-    DECL(MutParameterDecl, ParameterOrMemberDecl)   \
-    DECL(InOutParameterDecl, ParameterOrMemberDecl) \
-    DECL(OutParameterDecl, ParameterOrMemberDecl)   \
-    DECL(BlockLetDecl, BlockLetDecl)                \
-    DECL(BlockMutDecl, BlockLetDecl)
+#define ENUMERATE_DECL_KINDS                    \
+    DECL(Module, ModuleDecl)                    \
+    DECL(Namespace, NamespaceDecl)              \
+    DECL(StructType, TypeDecl)                  \
+    DECL(ObjectType, TypeDecl)                  \
+    DECL(Function, FunctionDecl)                \
+    DECL(StaticLetVariable, StaticVariableDecl) \
+    DECL(StaticMutVariable, StaticVariableDecl) \
+    DECL(Member, ParameterOrMemberDecl)         \
+    DECL(HasMember, HasMemberDecl)              \
+    DECL(LetParameter, ParameterOrMemberDecl)   \
+    DECL(MutParameter, ParameterOrMemberDecl)   \
+    DECL(InOutParameter, ParameterOrMemberDecl) \
+    DECL(OutParameter, ParameterOrMemberDecl)   \
+    DECL(BlockLetVariable, BlockVariableDecl)   \
+    DECL(BlockMutVariable, BlockVariableDecl)
 
 enum class DeclKind : uint8_t {
 
@@ -29,6 +29,13 @@ enum class DeclKind : uint8_t {
     ENUMERATE_DECL_KINDS
 #undef DECL
 
+};
+
+enum class DeclStatus : uint8_t {
+    Unchecked,
+    SignatureCheckInProgress,
+    SignatureChecked,
+    FullyChecked,
 };
 
 std::string_view nameString(DeclKind);
@@ -129,14 +136,18 @@ struct TemplatedDeclArrays : DeclArrays {
 
 // declarations
 struct Decl {
-    uint32_t kindBits : 8;
+    uint32_t kindBits : 6;
+    uint32_t statusBits : 2;
     uint32_t locationBits : 24;
     Word name;
     constexpr Decl(DeclKind kind, WordAndLocation name)
         : kindBits(std::to_underlying(kind))
+        , statusBits(std::to_underlying(DeclStatus::Unchecked))
         , locationBits(name.location.tokenStreamOffset)
         , name(name) { VERIFY(isDeclType<Decl>(kind)); }
     DeclKind kind() const { return (DeclKind)kindBits; }
+    DeclStatus status() const { return (DeclStatus)statusBits; }
+    void setDeclStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
     SingleTokenSourceRange nameLocation() const { return SingleTokenSourceRange(locationBits); }
 };
 struct StaticDecl : Decl {
@@ -155,16 +166,16 @@ struct TypeDecl : StaticDecl {
 };
 struct NamespaceDecl : StaticDecl {
     NamespaceDecl(WordAndLocation name, TemplatedDeclArrays decls)
-        : StaticDecl(DeclKind::NamespaceDecl, name, decls) { }
+        : StaticDecl(DeclKind::Namespace, name, decls) { }
 };
 struct ModuleDecl : StaticDecl {
     ModuleDecl(TemplatedDeclArrays decls)
-        : StaticDecl(DeclKind::ModuleDecl, {}, decls) { }
+        : StaticDecl(DeclKind::Module, {}, decls) { }
 };
 struct FunctionDecl : StaticDecl {
 
     FunctionDecl(WordAndLocation name, TemplatedDeclArrays decls, Node* returnTypeExpr, Node* body)
-        : StaticDecl(DeclKind::FunctionDecl, name, decls)
+        : StaticDecl(DeclKind::Function, name, decls)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { }
 
@@ -210,19 +221,17 @@ struct HasMemberDecl : ParameterOrMemberDecl {
     DeclArrays m_decls;
 
     HasMemberDecl(WordAndLocation name, Node* typeExpr, Node* initExpr, DeclArrays decls)
-        : ParameterOrMemberDecl(DeclKind::HasMemberDecl, name, typeExpr, initExpr), m_decls(decls) { }
+        : ParameterOrMemberDecl(DeclKind::HasMember, name, typeExpr, initExpr), m_decls(decls) { }
 
     DeclArrays decls() { return m_decls; }
 };
-struct BlockLetDecl : Decl {
-    relative_pointer<BlockLetDecl, Node> m_typeExpr;
-    relative_pointer<BlockLetDecl, Node> m_initExpr;
+struct BlockVariableDecl : Decl {
+    relative_pointer<BlockVariableDecl, Node> m_typeExpr;
+    relative_pointer<BlockVariableDecl, Node> m_initExpr;
 
-    BlockLetDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : Decl(kind, name)
-        , m_typeExpr(this, typeExpr)
-        , m_initExpr(this, initExpr) {
-        VERIFY(isDeclType<BlockLetDecl>(kind));
+    BlockVariableDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name), m_typeExpr(this, typeExpr), m_initExpr(this, initExpr) {
+        VERIFY(isDeclType<BlockVariableDecl>(kind));
     }
 
     Node* typeExpr() { return m_typeExpr.get(this); }

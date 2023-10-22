@@ -178,7 +178,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
 
         return out;
     }
-    DumpResult visitBlockLetDecl(BlockLetDecl& d) {
+    DumpResult visitBlockVariableDecl(BlockVariableDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
@@ -205,7 +205,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
     }
     DumpResult visitLetStmt(LetStmt& e) {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
-        DumpResult decl = visitBlockLetDecl(*e.decl());
+        DumpResult decl = visitBlockVariableDecl(*e.decl());
         decl->lastChild = true;
         nodeStream = reinterpret_cast<Node*>(e.decl() + 1);
         return out;

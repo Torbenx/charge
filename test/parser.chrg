@@ -74,9 +74,9 @@ fn test(): {
 /> expect-identifier condition; expect-node IfExpr; expect-identifier if_true; expect-node ExpressionStmt </ if condition => if_true;
 /> expect-node EmptyReturnStmt </ return;
 /> expect-node IdentifierExpr; expect-node ReturnStmt </ return a;
-/> expect-node LetStmt; expect-decl BlockLetDecl name=a </ let a;
-/> expect-node MutLetStmt; expect-decl BlockMutDecl name=a </ let mut a;
-/> expect-node MutLetStmt; expect-decl BlockMutDecl name=a </ mut a;
+/> expect-node LetStmt; expect-decl BlockLetVariable name=a </ let a;
+/> expect-node MutLetStmt; expect-decl BlockMutVariable name=a </ let mut a;
+/> expect-node MutLetStmt; expect-decl BlockMutVariable name=a </ mut a;
 /> expect-node LetStmt; expect-identifier type; expect-node EmptyNode; expect-identifier init; expect-node EmptyNode </ let a: type = init;
 
 //; test precedence
@@ -138,42 +138,42 @@ a(p = b, c);
 a(foo = -b + z, bar = c);
 a{b.c{i, j, k}, blub = c} + d;
 
-} // expect-decl FunctionDecl
+} // expect-decl Function
 
-/> expect-decl FunctionDecl </ fn test(): { }
-/> expect-decl LetParameterDecl; expect-decl FunctionDecl </ fn test(a): { }
+/> expect-decl Function </ fn test(): { }
+/> expect-decl LetParameter; expect-decl Function </ fn test(a): { }
 
-// expect-decl LetParameterDecl name=a
-// expect-decl MutParameterDecl name=b
-// expect-decl InOutParameterDecl name=c
-// expect-decl OutParameterDecl name=d
-// expect-decl FunctionDecl name=test
+// expect-decl LetParameter name=a
+// expect-decl MutParameter name=b
+// expect-decl InOutParameter name=c
+// expect-decl OutParameter name=d
+// expect-decl Function name=test
 fn test(let a, mut b, inout c, out d): { }
 
 // expect-identifier param_type; expect-node EmptyNode
 // expect-identifier param_init; expect-node EmptyNode
-// expect-decl LetParameterDecl
+// expect-decl LetParameter
 // expect-identifier return_type; expect-node EmptyNode
 // expect-identifier body_expr; expect-node EmptyNode
-// expect-decl FunctionDecl
+// expect-decl Function
 fn test(param_name: param_type = param_init) -> return_type => body_expr;
 
-// expect-decl LetParameterDecl name=T
-// expect-decl LetParameterDecl name=a
-// expect-decl LetParameterDecl name=b
-// expect-decl FunctionDecl name=test
+// expect-decl LetParameter name=T
+// expect-decl LetParameter name=a
+// expect-decl LetParameter name=b
+// expect-decl Function name=test
 with(T: Type)
 template(a: T)
 fn test(b: T): { }
 
-// expect-decl LetParameterDecl name=a
-// expect-decl FunctionDecl name=foo
-// expect-decl StructTypeDecl name=Foo
-// expect-decl LetParameterDecl name=b
-// expect-decl FunctionDecl name=bar
-// expect-decl ObjectTypeDecl name=Bar
-// expect-decl StaticLetVariableDecl name=x
-// expect-decl NamespaceDecl name=Namespace
+// expect-decl LetParameter name=a
+// expect-decl Function name=foo
+// expect-decl StructType name=Foo
+// expect-decl LetParameter name=b
+// expect-decl Function name=bar
+// expect-decl ObjectType name=Bar
+// expect-decl StaticLetVariable name=x
+// expect-decl Namespace name=Namespace
 namespace Namespace: {
     struct Foo: {
         fn foo(a): { }
@@ -186,15 +186,15 @@ namespace Namespace: {
 
 // expect-identifier type; expect-node EmptyNode
 // expect-identifier init; expect-node EmptyNode
-// expect-decl StaticLetVariableDecl name=name
+// expect-decl StaticLetVariable name=name
 static name: type = init;
 
-/> expect-decl StaticLetVariableDecl </ static let a;
-/> expect-decl StaticMutVariableDecl </ static mut a;
+/> expect-decl StaticLetVariable </ static let a;
+/> expect-decl StaticMutVariable </ static mut a;
 
-// expect-decl HasMemberDecl; expect-decl StructTypeDecl
+// expect-decl HasMember; expect-decl StructType
 struct Foo: { has Bar; }
-// expect-decl HasMemberDecl name=bar; expect-decl StructTypeDecl
+// expect-decl HasMember name=bar; expect-decl StructType
 struct Foo: { has Bar as bar; }
-// expect-decl FunctionDecl name=test; expect-decl HasMemberDecl; expect-decl StructTypeDecl
+// expect-decl Function name=test; expect-decl HasMember; expect-decl StructType
 struct Foo: { has Bar: { fn test(): { } } }

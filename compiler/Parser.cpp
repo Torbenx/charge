@@ -151,7 +151,7 @@ ModuleDecl* Parser::parseModule() {
     VERIFY(decls.parameterCount == 0);
     VERIFY(decls.staticCount == 1);
     Decl* moduleDecl = decls.statics()[0];
-    VERIFY(moduleDecl->kind() == DeclKind::ModuleDecl);
+    VERIFY(moduleDecl->kind() == DeclKind::Module);
     return (ModuleDecl*)moduleDecl;
 }
 
@@ -213,11 +213,11 @@ void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attribute
     WordAndLocation declarator = tokWord();
     DeclKind kind;
     if (declarator == words["namespace"])
-        kind = DeclKind::NamespaceDecl;
+        kind = DeclKind::Namespace;
     else if (declarator == words["struct"])
-        kind = DeclKind::StructTypeDecl;
+        kind = DeclKind::StructType;
     else if (declarator == words["object"])
-        kind = DeclKind::ObjectTypeDecl;
+        kind = DeclKind::ObjectType;
     else
         VERIFY_NOT_REACHED();
     nextToken();
@@ -255,16 +255,16 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-    DeclKind kind = DeclKind::StaticLetVariableDecl;
+    DeclKind kind = DeclKind::StaticLetVariable;
     if (attributes.size() > 1) {
         if (attributes.size() > 2) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
         if (attributes[1] == words["let"]) {
-            kind = DeclKind::StaticLetVariableDecl;
+            kind = DeclKind::StaticLetVariable;
         } else if (attributes[1] == words["mut"]) {
-            kind = DeclKind::StaticMutVariableDecl;
+            kind = DeclKind::StaticMutVariable;
         } else {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -390,7 +390,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             VERIFY_NOT_REACHED();
         }
 
-        DeclKind kind = DeclKind::LetParameterDecl;
+        DeclKind kind = DeclKind::LetParameter;
         WordAndLocation name = tokWord();
         nextToken();
         if (tok == Token::Word) {
@@ -399,13 +399,13 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
                 VERIFY_NOT_REACHED();
             }
             if (name == words["let"]) {
-                kind = DeclKind::LetParameterDecl;
+                kind = DeclKind::LetParameter;
             } else if (name == words["mut"]) {
-                kind = DeclKind::MutParameterDecl;
+                kind = DeclKind::MutParameter;
             } else if (name == words["inout"]) {
-                kind = DeclKind::InOutParameterDecl;
+                kind = DeclKind::InOutParameter;
             } else if (name == words["out"]) {
-                kind = DeclKind::OutParameterDecl;
+                kind = DeclKind::OutParameter;
             } else {
                 // errorHandler;
                 VERIFY_NOT_REACHED();
@@ -534,7 +534,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
         }
         if (tokWord() == words["let"] || tokWord() == words["mut"]) {
             NodeKind stmtKind = NodeKind::LetStmt;
-            DeclKind declKind = DeclKind::BlockLetDecl;
+            DeclKind declKind = DeclKind::BlockLetVariable;
             if (tokWord() == words["let"])
                 nextToken();
             if (tok != Token::Word) {
@@ -543,7 +543,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             }
             if (tokWord() == words["mut"]) {
                 stmtKind = NodeKind::MutLetStmt;
-                declKind = DeclKind::BlockMutDecl;
+                declKind = DeclKind::BlockMutVariable;
                 nextToken();
             }
             if (tok != Token::Word) {
@@ -569,7 +569,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             }
             emitNode(EmptyNode());
 
-            stmtNode->setDecl(emitDecl<BlockLetDecl>(declKind, name, typeExpr, initExpr));
+            stmtNode->setDecl(emitDecl<BlockVariableDecl>(declKind, name, typeExpr, initExpr));
 
             if (tok != Token::SemiColon) {
                 // errorHandler;
