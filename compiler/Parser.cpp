@@ -533,7 +533,6 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             return ParsedStatementKind::Normal;
         }
         if (tokWord() == words["let"] || tokWord() == words["mut"]) {
-            NodeKind stmtKind = NodeKind::LetStmt;
             DeclKind declKind = DeclKind::BlockLetVariable;
             if (tokWord() == words["let"])
                 nextToken();
@@ -541,8 +540,8 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
                 // errorHandler;
                 VERIFY_NOT_REACHED();
             }
+            auto declaratorLoc = tokRange();
             if (tokWord() == words["mut"]) {
-                stmtKind = NodeKind::MutLetStmt;
                 declKind = DeclKind::BlockMutVariable;
                 nextToken();
             }
@@ -553,7 +552,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             WordAndLocation name = tokWord();
             nextToken();
 
-            LetStmt* stmtNode = emitNode(LetStmt(stmtKind, name));
+            LetStmt* stmtNode = emitNode(LetStmt(declaratorLoc));
 
             Node* typeExpr = nextNodeLocation();
             if (tok == Token::Colon) {

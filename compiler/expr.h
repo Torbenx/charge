@@ -77,11 +77,10 @@ struct UpdateStmt : Stmt {
 };
 struct LetStmt : Stmt {
     static constexpr bool IMPLICIT_EXPRESSION_ARGUMENT = false;
-    Word name;
     relative_pointer<LetStmt, BlockVariableDecl> m_decl;
-    LetStmt(NodeKind kind, WordAndLocation name)
-        : Stmt(kind, name.location), name(name) { VERIFY(matchNodeType<LetStmt>(kind)); }
-    SingleTokenSourceRange nameLocation() const { return packedToken(); }
+    LetStmt(SingleTokenSourceRange declaratorLoc)
+        : Stmt(NodeKind::LetStmt, declaratorLoc) { }
+    SingleTokenSourceRange declaratorLocation() const { return packedToken(); }
 
     void setDecl(BlockVariableDecl* decl) { m_decl = { this, decl }; }
     BlockVariableDecl* decl() { return m_decl.get(this); }

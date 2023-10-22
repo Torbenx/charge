@@ -75,8 +75,8 @@ fn test(): {
 /> expect-node EmptyReturnStmt </ return;
 /> expect-node IdentifierExpr; expect-node ReturnStmt </ return a;
 /> expect-node LetStmt; expect-decl BlockLetVariable name=a </ let a;
-/> expect-node MutLetStmt; expect-decl BlockMutVariable name=a </ let mut a;
-/> expect-node MutLetStmt; expect-decl BlockMutVariable name=a </ mut a;
+/> expect-node LetStmt; expect-decl BlockMutVariable name=a </ let mut a;
+/> expect-node LetStmt; expect-decl BlockMutVariable name=a </ mut a;
 /> expect-node LetStmt; expect-identifier type; expect-node EmptyNode; expect-identifier init; expect-node EmptyNode </ let a: type = init;
 
 //; test precedence
