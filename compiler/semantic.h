@@ -2,8 +2,10 @@
 
 #include "expr.h"
 
-#define ENUMERATE_INSTRUCTIONS \
-    INST(StaticVariableId, unary)
+#define ENUMERATE_INSTRUCTIONS           \
+    INST(StaticVariableId, unary)        \
+    INST(ForeignConstant, foreign_const) \
+    INST(Load, unary)
 
 enum class Opcode : uint16_t {
 
@@ -17,22 +19,22 @@ struct LookupContext {
 };
 
 // The value of an expression is either a
-//  - value (SSAName),
-//  - literal, or
+//  - value (SSAName), or
 //  - hypothetical value obtained from a
 //     - load, or
 //     - function call.
 // For values of unknown type we must enforce the stricter object semantics.
-struct LiteralValue {
-    SSAName literal;
-};
 struct LoadValue {
     SSAName substance;
 };
 struct CallValue {
 };
 struct ExprValue {
-    std::variant<LiteralValue, LoadValue, CallValue> value;
+    std::variant<SSAName, LoadValue, CallValue> value;
+    SSAName type;
+};
+struct TypedValue {
+    SSAName value;
     SSAName type;
 };
 

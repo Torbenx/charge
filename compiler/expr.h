@@ -246,8 +246,7 @@ struct StaticVariableDecl : StaticDecl {
     Node* typeExpr() { return followBackwardsOffset(m_typeExpr); }
     Node* initExpr() { return followBackwardsOffset(m_initExpr); }
 
-    // operands for instructions in the constant stream
-    InstructionOperand typeValue;
+    ConstantStreamInstructionOperand typeValue;
 };
 // a parameter or (has-)member declaration
 struct ParameterOrMemberDecl : Decl {
@@ -445,6 +444,24 @@ constexpr bool isNodeType(NodeKind in) {
 #define NODE(kind, type, prec) \
     case NodeKind::kind:       \
         return std::derived_from<type, T>;
+#include "nodes.h"
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+template<typename Target>
+constexpr Target* dyn_cast(Node* source) {
+    switch (source->kind()) {
+
+#define NODE(kind, type, prec)                                       \
+    case NodeKind::kind: {                                           \
+        if constexpr (std::derived_from<type, Target>) {             \
+            return static_cast<Target*>(static_cast<type*>(source)); \
+        } else {                                                     \
+            return nullptr;                                          \
+        }                                                            \
+    }
 #include "nodes.h"
 
     default:

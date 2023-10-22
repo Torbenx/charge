@@ -23,6 +23,12 @@ struct InstructionOperand {
         : encoded(id | (constant ? (uint16_t)0x8000 : (uint16_t)0)) { }
     constexpr InstructionOperand()
         : InstructionOperand(true, MAX_ID) { }
+
+    bool constant() const { return encoded & (uint16_t)0x8000; }
+    uint16_t id() const { return encoded & (uint16_t)0x7fff; }
+};
+struct ConstantStreamInstructionOperand : InstructionOperand {
+    ValuePhase phase() const { return constant() ? ValuePhase::Literal : ValuePhase::Constant; }
 };
 
 struct Instruction {
@@ -60,26 +66,57 @@ struct InstructionStream {
     template<Opcode op, typename... Args>
     auto emit(Args... args);
 
+    InstructionOperand localize(SSAName name) const;
+
 private:
     // Must only be called directly before emitting an instruction into the stream.
     SSAName allocateName();
-    InstructionOperand localize(SSAName name) const;
     SSAName emit_unary(Opcode op, SSAName in);
+    SSAName emit_binary(Opcode op, SSAName in1, SSAName in2);
+    SSAName emit_foreign_const(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant);
 };
 
-struct ValueTable {
-    std::vector<uint64_t> values;
+enum class ConstantType : uint8_t {
+    Decl,
+};
+struct TypedConstant {
+    ConstantType type;
+    uint64_t encodedValue;
+
+    TypedConstant(ConstantType type, uint64_t encodedValue)
+        : type(type), encodedValue(encodedValue) { }
+    TypedConstant(Decl* decl)
+        : type(ConstantType::Decl), encodedValue((uintptr_t)decl) { }
+
+    Decl* asDecl() const {
+        VERIFY(type == ConstantType::Decl);
+        return (Decl*)(uintptr_t)encodedValue;
+    }
+};
+constexpr bool compareConstantsOfSameType(const TypedConstant& left, const TypedConstant& right) {
+    VERIFY(left.type == right.type);
+    return left.encodedValue == right.encodedValue;
+}
+struct ConstantTable {
+    std::vector<uint64_t> encodedValues;
+    std::vector<ConstantType> types;
     ValuePhase table_phase;
 
-    constexpr ValueTable(ValuePhase phase)
+    constexpr ConstantTable(ValuePhase phase)
         : table_phase(phase) { }
 
-    SSAName emit(uint64_t val);
-    SSAName emit(Decl* decl);
+    SSAName emit(TypedConstant);
+    TypedConstant get(uint16_t index) const {
+        return { types[index], encodedValues[index] };
+    }
 };
 
 struct StaticDeclProgram {
-    ValueTable literalTable { ValuePhase::Literal };
+    ConstantTable literalTable { ValuePhase::Literal };
     InstructionStream constantStream { ValuePhase::Constant };
     InstructionStream runtimeStream { ValuePhase::Runtime };
+
+    ConstantStreamInstructionOperand toConstantOperand(SSAName value) {
+        return ConstantStreamInstructionOperand(constantStream.localize(value));
+    }
 };

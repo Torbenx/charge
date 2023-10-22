@@ -8,6 +8,8 @@ struct StmtResult { };
 // For 'dereference(inout self) <=> *stored_id;' we need to effectively evaluate the dereference
 // of 'stored_id' at the call site.
 
+// All literals of type 'type' are decls.
+
 template<Opcode op, typename... Args>
 auto InstructionStream::emit(Args... args) {
 
@@ -39,26 +41,34 @@ SSAName InstructionStream::emit_unary(Opcode op, SSAName in) {
     stream.push_back({ op, localize(out), localize(in), Instruction::UNUSED_OPERAND });
     return out;
 }
-
-SSAName ValueTable::emit(uint64_t val) {
-    size_t id = values.size();
-    values.push_back(val);
-    return { table_phase, id };
+SSAName InstructionStream::emit_binary(Opcode op, SSAName in1, SSAName in2) {
+    SSAName out = allocateName();
+    stream.push_back({ op, localize(out), localize(in1), localize(in2) });
+    return out;
+}
+SSAName InstructionStream::emit_foreign_const(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant) {
+    SSAName out = allocateName();
+    stream.push_back({ op, localize(out), localize(decl), constant });
+    return out;
 }
 
-SSAName ValueTable::emit(Decl* decl) {
-    return emit((uintptr_t)decl);
+SSAName ConstantTable::emit(TypedConstant constant) {
+    VERIFY(encodedValues.size() == types.size());
+    size_t id = encodedValues.size();
+    encodedValues.push_back(constant.encodedValue);
+    types.push_back(constant.type);
+    return { table_phase, id };
 }
 
 static TypeDecl typeType { NodeKind::StructTypeDecl, { words["type"], SingleTokenSourceRange() }, {} };
 
 struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValue> {
-    Generator(SemanticContext* sema, ValueTable* literalTable, InstructionStream* constantStream, InstructionStream* targetStream)
+    Generator(SemanticContext* sema, ConstantTable* literalTable, InstructionStream* constantStream, InstructionStream* targetStream)
         : sema(sema), literalTable(literalTable), constantStream(constantStream), targetStream(targetStream) { }
 
     SemanticContext* sema = nullptr;
 
-    ValueTable* literalTable = nullptr;
+    ConstantTable* literalTable = nullptr;
     InstructionStream* constantStream = nullptr;
     InstructionStream* targetStream = nullptr;
     std::vector<LookupContext> lookupStack;
@@ -130,17 +140,25 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
         //  - For a type-decl a literal for the type.
         //  - For a function-decl a literal for the function.
 
-        if (isNodeType<StaticDecl>(decl->kind())) {
-            StaticDecl* staticDecl = (StaticDecl*)decl;
+        if (auto* staticDecl = dyn_cast<StaticDecl>(decl)) {
             if (staticDecl->decls().templateParamters().size() > 0) {
                 // TODO: Handle templates
                 VERIFY_NOT_REACHED();
             }
             if (isNodeType<TypeDecl>(staticDecl->kind())) {
-                SSAName typeLit = literalTable->emit(&typeType);
                 SSAName declLit = literalTable->emit(staticDecl);
-                return { LiteralValue { declLit }, typeLit };
-            } else if (isNodeType<StaticVariableDecl>(staticDecl->kind())) {
+                return { declLit, typeTypeLiteral() };
+            } else if (auto* varDecl = dyn_cast<StaticVariableDecl>(decl)) {
+                SSAName varDeclLit = literalTable->emit(varDecl);
+                SSAName type;
+                if (varDecl->typeValue.phase() == ValuePhase::Literal) {
+                    // literal fold
+                    type = literalTable->emit(varDecl->program.literalTable.get(varDecl->typeValue.id()));
+                } else {
+                    type = constantStream->emit<Opcode::ForeignConstant>(varDeclLit, varDecl->typeValue);
+                }
+                SSAName value = constantStream->emit<Opcode::StaticVariableId>(varDeclLit);
+                return { LoadValue { value }, type };
             }
         }
         VERIFY_NOT_REACHED();
@@ -164,23 +182,43 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
     }
 
     //
-    ExprValue implicitToType(ExprValue in) {
+    SSAName typeTypeLiteral() {
+        return literalTable->emit(&typeType);
+    }
+    TypedValue implicitToType(const ExprValue& in) {
         if (literallyEqual(in.type, &typeType)) {
-            return in;
+            return materialize(in);
         }
         VERIFY_NOT_REACHED();
     }
-    bool literallyEqual(SSAName l, Decl* r) {
-        return l.phase() == ValuePhase::Literal && (Decl*)literalTable->values[l.id()] == r;
+    bool literallyEqual(SSAName leftName, TypedConstant right) {
+        if (leftName.phase() != ValuePhase::Literal)
+            return false;
+        TypedConstant left = literalTable->get(leftName.id());
+        return compareConstantsOfSameType(left, right);
     }
+    TypedValue materializeIn(InstructionStream* stream, const ExprValue& in) {
+        return std::visit([&](auto val) -> TypedValue {
+            if constexpr (std::is_same_v<decltype(val), SSAName>)
+                return { val, in.type };
+            if constexpr (std::is_same_v<decltype(val), LoadValue>)
+                return { stream->emit<Opcode::Load>(val.substance), in.type };
+            if constexpr (std::is_same_v<decltype(val), CallValue>)
+                VERIFY_NOT_REACHED();
+        }, in.value);
+    }
+    TypedValue materialize(const ExprValue& in) { return materializeIn(targetStream, in); }
+    TypedValue materializeConstant(const ExprValue& in) { return materializeIn(constantStream, in); }
 };
 
-std::optional<id<Decl>> SemanticContext::performLookup(LookupContext& ctx, Word id, LocalSourceRange idLoc) {
+std::optional<id<Decl>> SemanticContext::performLookup(LookupContext&, Word, LocalSourceRange) {
     return {};
 }
 
 void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
     Generator g(this, &d.program.literalTable, &d.program.constantStream, &d.program.constantStream);
     auto typeExpr = g.visitExpr(d.typeExpr());
-    g.implicitToType(typeExpr.value());
+    auto typeValue = g.implicitToType(typeExpr.value());
+    VERIFY(g.literallyEqual(typeValue.type, &typeType));
+    d.typeValue = d.program.toConstantOperand(typeValue.value);
 }
