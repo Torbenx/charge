@@ -2,9 +2,6 @@
 #include "NodeStreamVisitor.h"
 #include <ranges>
 
-struct DeclResult { };
-struct StmtResult { };
-
 // For 'dereference(inout self) <=> *stored_id;' we need to effectively evaluate the dereference
 // of 'stored_id' at the call site.
 
@@ -60,9 +57,10 @@ SSAName ConstantTable::emit(TypedConstant constant) {
     return { table_phase, id };
 }
 
-static TypeDecl typeType { NodeKind::StructTypeDecl, { words["type"], SingleTokenSourceRange() }, {} };
+static TypeDecl typeType { DeclKind::StructTypeDecl, { words["type"], SingleTokenSourceRange() }, {} };
 
-struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValue> {
+struct StmtResult { };
+struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {
     Generator(SemanticContext* sema, ConstantTable* literalTable, InstructionStream* constantStream, InstructionStream* targetStream)
         : sema(sema), literalTable(literalTable), constantStream(constantStream), targetStream(targetStream) { }
 
@@ -72,16 +70,6 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
     InstructionStream* constantStream = nullptr;
     InstructionStream* targetStream = nullptr;
     std::vector<LookupContext> lookupStack;
-
-    // declarations
-    DeclResult visitModuleDecl(ModuleDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitNamespaceDecl(NamespaceDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitTypeDecl(TypeDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitFunctionDecl(FunctionDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitStaticVariableDecl(StaticVariableDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitParameterOrMemberDecl(ParameterOrMemberDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitHasMemberDecl(HasMemberDecl&) { VERIFY_NOT_REACHED(); }
-    DeclResult visitBlockLetDecl(BlockLetDecl&) { VERIFY_NOT_REACHED(); }
 
     // statements
     StmtResult visitExpressionStmt(ExpressionStmt&, ExprValue) {
@@ -145,7 +133,7 @@ struct Generator : NodeStreamVisitor<Generator, DeclResult, StmtResult, ExprValu
                 // TODO: Handle templates
                 VERIFY_NOT_REACHED();
             }
-            if (isNodeType<TypeDecl>(staticDecl->kind())) {
+            if (isDeclType<TypeDecl>(staticDecl->kind())) {
                 SSAName declLit = literalTable->emit(staticDecl);
                 return { declLit, typeTypeLiteral() };
             } else if (auto* varDecl = dyn_cast<StaticVariableDecl>(decl)) {

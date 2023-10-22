@@ -44,6 +44,19 @@ T* Parser::emitNode(T in) {
     return node;
 }
 
+std::string_view nameString(DeclKind kind) {
+    switch (kind) {
+
+#define DECL(kind, type) \
+    case DeclKind::kind: \
+        return #kind;
+        ENUMERATE_DECL_KINDS
+#undef DECL
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 struct DeclarationScopeFields {
     Parser* parser = nullptr;
     uint32_t parameterDeclStackBegin = 0;
@@ -63,9 +76,9 @@ struct Parser::DeclarationScope : DeclarationScopeFields {
     }
 
     DeclArrays finish() {
-        node_stream_offset arrayBeginOffset = parser->nodeStream.offset;
+        DeclArrayItem* arrayBegin = (DeclArrayItem*)parser->nodeStream.position();
         auto stackToArrayItem = [&](DeclStackItem item) -> DeclArrayItem {
-            return { item.name, arrayBeginOffset - item.nodeStreamOffset };
+            return { item.name, { arrayBegin, (Decl*)parser->nodeStream.position(item.nodeStreamOffset) } };
         };
 
         auto parameterDecls = std::span(parser->parameterDeclStack).subspan(parameterDeclStackBegin);
@@ -80,7 +93,7 @@ struct Parser::DeclarationScope : DeclarationScopeFields {
         parser->parameterDeclStack.truncate(parameterDeclStackBegin);
 
         DeclArrays arrays = {
-            .begin = (DeclArrayItem*)parser->nodeStream.position(arrayBeginOffset),
+            .begin = arrayBegin,
             .parameterCount = (uint32_t)parameterDecls.size(),
             .staticCount = (uint32_t)staticDecls.size()
         };
@@ -138,7 +151,7 @@ ModuleDecl* Parser::parseModule() {
     VERIFY(decls.parameterCount == 0);
     VERIFY(decls.staticCount == 1);
     Decl* moduleDecl = decls.statics()[0];
-    VERIFY(moduleDecl->kind() == NodeKind::ModuleDecl);
+    VERIFY(moduleDecl->kind() == DeclKind::ModuleDecl);
     return (ModuleDecl*)moduleDecl;
 }
 
@@ -198,13 +211,13 @@ void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attribute
 
     VERIFY(tok == Token::Word);
     WordAndLocation declarator = tokWord();
-    NodeKind kind;
+    DeclKind kind;
     if (declarator == words["namespace"])
-        kind = NodeKind::NamespaceDecl;
+        kind = DeclKind::NamespaceDecl;
     else if (declarator == words["struct"])
-        kind = NodeKind::StructTypeDecl;
+        kind = DeclKind::StructTypeDecl;
     else if (declarator == words["object"])
-        kind = NodeKind::ObjectTypeDecl;
+        kind = DeclKind::ObjectTypeDecl;
     else
         VERIFY_NOT_REACHED();
     nextToken();
@@ -242,16 +255,16 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-    NodeKind kind = NodeKind::StaticLetVariableDecl;
+    DeclKind kind = DeclKind::StaticLetVariableDecl;
     if (attributes.size() > 1) {
         if (attributes.size() > 2) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
         if (attributes[1] == words["let"]) {
-            kind = NodeKind::StaticLetVariableDecl;
+            kind = DeclKind::StaticLetVariableDecl;
         } else if (attributes[1] == words["mut"]) {
-            kind = NodeKind::StaticMutVariableDecl;
+            kind = DeclKind::StaticMutVariableDecl;
         } else {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -377,7 +390,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             VERIFY_NOT_REACHED();
         }
 
-        NodeKind kind = NodeKind::LetParameterDecl;
+        DeclKind kind = DeclKind::LetParameterDecl;
         WordAndLocation name = tokWord();
         nextToken();
         if (tok == Token::Word) {
@@ -386,13 +399,13 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
                 VERIFY_NOT_REACHED();
             }
             if (name == words["let"]) {
-                kind = NodeKind::LetParameterDecl;
+                kind = DeclKind::LetParameterDecl;
             } else if (name == words["mut"]) {
-                kind = NodeKind::MutParameterDecl;
+                kind = DeclKind::MutParameterDecl;
             } else if (name == words["inout"]) {
-                kind = NodeKind::InOutParameterDecl;
+                kind = DeclKind::InOutParameterDecl;
             } else if (name == words["out"]) {
-                kind = NodeKind::OutParameterDecl;
+                kind = DeclKind::OutParameterDecl;
             } else {
                 // errorHandler;
                 VERIFY_NOT_REACHED();
@@ -521,7 +534,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
         }
         if (tokWord() == words["let"] || tokWord() == words["mut"]) {
             NodeKind stmtKind = NodeKind::LetStmt;
-            NodeKind declKind = NodeKind::BlockLetDecl;
+            DeclKind declKind = DeclKind::BlockLetDecl;
             if (tokWord() == words["let"])
                 nextToken();
             if (tok != Token::Word) {
@@ -530,7 +543,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             }
             if (tokWord() == words["mut"]) {
                 stmtKind = NodeKind::MutLetStmt;
-                declKind = NodeKind::BlockMutDecl;
+                declKind = DeclKind::BlockMutDecl;
                 nextToken();
             }
             if (tok != Token::Word) {

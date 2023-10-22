@@ -95,7 +95,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             case TestMode::Parser: {
                 std::cout << "------\n";
                 par.parseDeclaration();
-                dump((Node*)(par.nodeStream.storage + par.staticDeclStack.back().nodeStreamOffset), par.wordTable);
+                dump((Decl*)(par.nodeStream.storage + par.staticDeclStack.back().nodeStreamOffset), par.wordTable);
                 break;
             }
             case TestMode::Semantic: {
@@ -109,7 +109,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 std::cout << "------\n";
                 using Clock = std::chrono::high_resolution_clock;
                 auto start = Clock::now();
-                StaticDecl* module = par.parseModule();
+                par.parseModule();
                 auto stop = Clock::now();
                 std::cout << "Parsing module took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
                 std::cout << " and produced " << par.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";

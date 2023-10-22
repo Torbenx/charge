@@ -2,7 +2,7 @@
 
 #include "expr.h"
 
-template<typename Impl, typename DeclResult, typename StmtResult, typename ExprResult>
+template<typename Impl, typename StmtResult, typename ExprResult>
 struct NodeStreamVisitor {
     Node* nodeStream = nullptr;
 
@@ -10,7 +10,7 @@ struct NodeStreamVisitor {
 
 private:
     template<typename T>
-    using ReturnType = std::conditional_t<std::derived_from<T, Decl>, DeclResult, std::conditional_t<std::derived_from<T, Stmt>, StmtResult, ExprResult>>;
+    using ReturnType = std::conditional_t<std::derived_from<T, Stmt>, StmtResult, ExprResult>;
     template<typename T>
     auto invoke(ReturnType<T> (Impl::*f)(std::type_identity_t<T>&), T& node, std::optional<ExprResult>& prevExpr) {
         if constexpr (std::derived_from<T, Stmt>)
@@ -43,17 +43,15 @@ private:
 
     template<typename T>
     static constexpr size_t index() {
-        if (std::derived_from<T, Decl>)
-            return 1;
         if (std::derived_from<T, Stmt>)
-            return 2;
+            return 1;
         if (std::derived_from<T, Expr>)
-            return 3;
+            return 2;
         VERIFY_NOT_REACHED();
     }
 
 public:
-    using GenericReturnType = std::variant<std::nullopt_t, DeclResult, StmtResult, ExprResult>;
+    using GenericReturnType = std::variant<std::nullopt_t, StmtResult, ExprResult>;
     GenericReturnType visitGeneric(ExpressionPrecedence ambientPrec) {
         VERIFY(nodeStream != nullptr);
         // std::cout << "visit at " << (void*)nodeStream << " - " << nameString(nodeStream->kind()) << '\n';
@@ -98,7 +96,7 @@ public:
                 return ret;                                                                                   \
             type* thisNode = (type*)nodeStream;                                                               \
             nodeStream = thisNode + 1;                                                                        \
-            ret.template emplace<index<type>()>(impl()->visit##type(*thisNode, std::move(std::get<3>(ret)))); \
+            ret.template emplace<index<type>()>(impl()->visit##type(*thisNode, std::move(std::get<2>(ret)))); \
         }                                                                                                     \
         break;                                                                                                \
     }
@@ -110,27 +108,17 @@ public:
         }
     }
 
-    DeclResult visitDecl() {
+    std::optional<StmtResult> visitStmt() {
         GenericReturnType result = visitGeneric(ExpressionPrecedence::Statement);
         if (std::holds_alternative<std::nullopt_t>(result))
             return {};
         return std::move(std::get<1>(result));
     }
-    std::optional<StmtResult> visitStmt() {
-        GenericReturnType result = visitGeneric(ExpressionPrecedence::Statement);
-        if (std::holds_alternative<std::nullopt_t>(result))
-            return {};
-        return std::move(std::get<2>(result));
-    }
     std::optional<ExprResult> visitExpr(ExpressionPrecedence ambientPrec) {
         GenericReturnType result = visitGeneric(ambientPrec);
         if (std::holds_alternative<std::nullopt_t>(result))
             return {};
-        return std::move(std::get<3>(result));
-    }
-    auto visitDecl(Node* at) {
-        auto s = replaceNodeStream(at);
-        return visitDecl();
+        return std::move(std::get<2>(result));
     }
     auto visitStmt(Node* at) {
         auto s = replaceNodeStream(at);

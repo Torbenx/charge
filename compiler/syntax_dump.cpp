@@ -3,16 +3,36 @@
 #include "log.h"
 #include <list>
 
+template<typename Impl, typename DeclResult>
+struct DeclVisitor {
+    Impl* impl() { return static_cast<Impl*>(this); }
+
+    DeclResult visitDecl(Decl* decl) {
+        switch (decl->kind()) {
+
+#define DECL(kind, type) \
+    case DeclKind::kind: \
+        return impl()->visit##type(*(type*)decl);
+            ENUMERATE_DECL_KINDS
+#undef DECL
+
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+};
+
 struct DumpEntry {
-    NodeKind kind;
+    std::variant<NodeKind, DeclKind> kind;
     bool leafNode = false;
     bool lastChild = false;
     bool hasBraces = false;
     Word name = {};
     std::string content = {};
 };
+
 using DumpResult = std::list<DumpEntry>::iterator;
-struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
+struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<Dumper, DumpResult> {
     const WordStringTable& wordTable;
     std::list<DumpEntry> entries = {};
     DumpResult currentEnd = entries.end();
@@ -187,7 +207,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         DumpResult out = insertAtEnd(DumpEntry { e.kind() });
         DumpResult decl = visitBlockLetDecl(*e.decl());
         decl->lastChild = true;
-        nodeStream = e.decl() + 1;
+        nodeStream = reinterpret_cast<Node*>(e.decl() + 1);
         return out;
     }
     DumpResult visitCompoundStmt(CompoundStmt& e) {
@@ -299,7 +319,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
         return argument;
     }
     DumpResult visitParameterize(Parameterize&, DumpResult base) {
-        VERIFY(base->kind == NodeKind::IdentifierExpr || base->kind == NodeKind::MemberAccessExpr || base->kind == NodeKind::StaticAccessExpr);
+        // VERIFY(base->kind == NodeKind::IdentifierExpr || base->kind == NodeKind::MemberAccessExpr || base->kind == NodeKind::StaticAccessExpr);
         DumpResult next = base;
         ++next;
         std::optional<DumpResult> lastArg;
@@ -364,6 +384,10 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult, DumpResult> {
     };
 
     void print() {
+        auto nameString = [](std::variant<NodeKind, DeclKind> kind) -> std::string_view {
+            return std::visit([](auto kind) -> std::string_view { return ::nameString(kind); }, kind);
+        };
+
         OutputStream out;
         for (auto entry : entries) {
             out.beginEntry(entry.lastChild, entry.name.empty() ? std::string_view() : wordTable.view(entry.name));
@@ -395,5 +419,12 @@ void dump(Node* stream, const WordStringTable& table) {
         }
     },
         r);
+    dumper.print();
+}
+
+void dump(Decl* decl, const WordStringTable& table) {
+    Dumper dumper { table };
+    auto r = dumper.visitDecl(decl);
+    r->lastChild = true;
     dumper.print();
 }
