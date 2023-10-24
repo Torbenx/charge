@@ -41,6 +41,13 @@ struct Word {
 
 struct WordTable;
 struct WordTableView {
+    struct Ratio {
+        int_t nom;
+        int_t denom;
+
+        constexpr double ratio() const { return (double)nom / denom; };
+    };
+    static constexpr Ratio MAX_LOAD_RATIO = { 3, 4 };
     struct Entry {
         Word word;
         uint32_t payload = 0;
@@ -99,7 +106,7 @@ constexpr std::optional<uint32_t> WordTableView::findWord(Word word) const {
 }
 
 constexpr void WordTable::maybeRehash() {
-    if (usedBuckets * 4 <= bucketCount() * 3)
+    if (usedBuckets * MAX_LOAD_RATIO.denom <= bucketCount() * MAX_LOAD_RATIO.nom)
         return;
 
     uint32_t oldSize = bucketCount();
@@ -375,7 +382,7 @@ template<typename... Ts>
 struct ConstWordStringTable {
 private:
     std::array<char, (alignmentCeil(ConstWordStringTableString<Ts>::LENGTH, 2) + ...) + 2 * sizeof...(Ts)> stringStorage = {};
-    std::array<WordTable::Entry, std::bit_ceil(sizeof...(Ts) * 2)> entryStorage = {};
+    std::array<WordTable::Entry, std::bit_ceil(static_cast<size_t>(sizeof...(Ts) / WordTable::MAX_LOAD_RATIO.ratio() + 0.5))> entryStorage = {};
 
     constexpr WrappedWordStringTable get() const {
         return WrappedWordStringTable(const_cast<decltype(entryStorage)&>(entryStorage),
