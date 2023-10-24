@@ -48,29 +48,27 @@ struct WordTableView {
     };
 
     Entry* entries;
-    uint32_t logSize;
+    uint32_t invLogSize; // = 32 - log2(size)
     uint32_t usedBuckets = 0;
 
     constexpr WordTableView(std::span<const Entry> entries)
-        : entries(const_cast<Entry*>(entries.data())), logSize(std::countr_zero(entries.size())) {
+        : entries(const_cast<Entry*>(entries.data())), invLogSize(32 - std::countr_zero(entries.size())) {
         VERIFY(std::has_single_bit(entries.size()));
     }
 
     constexpr uint32_t hashToBucket(uint32_t hash) const {
-        if (logSize == 0)
-            return 0;
-        return hash >> (32 - logSize);
+        return (uint64_t)hash >> invLogSize;
     }
     constexpr uint32_t modSize(uint32_t in) const {
-        return in & ((1u << logSize) - 1);
+        return in & hashToBucket(-1);
     }
-    constexpr int_t bucketCount() const { return (int_t)1 << logSize; }
+    constexpr int_t bucketCount() const { return (uint64_t)0x1'0000'0000 >> invLogSize; }
 
     constexpr std::optional<uint32_t> findWord(Word) const;
 
 private:
-    constexpr WordTableView(Entry* entries, uint32_t logSize)
-        : entries(entries), logSize(logSize) { }
+    constexpr WordTableView(Entry* entries, uint32_t invLogSize)
+        : entries(entries), invLogSize(invLogSize) { }
     friend struct WordTable;
 };
 struct WordTable : WordTableView {
@@ -107,8 +105,8 @@ constexpr void WordTable::maybeRehash() {
     uint32_t oldSize = bucketCount();
     Entry* oldEntries = entries;
     std::allocator<Entry> allocator;
-    logSize += 1;
-    VERIFY(logSize < 32);
+    invLogSize -= 1;
+    VERIFY(invLogSize > 0);
     entries = allocator.allocate(bucketCount());
     std::uninitialized_fill_n(entries, bucketCount(), Entry());
     for (uint32_t i = 0; i < oldSize; i++) {
