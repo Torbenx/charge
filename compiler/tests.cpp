@@ -105,17 +105,35 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 break;
             }
             case TestMode::Benchmark: {
-                par.instrumenter = nullptr;
                 std::cout << "------\n";
                 using Clock = std::chrono::high_resolution_clock;
-                auto start = Clock::now();
-                par.parseModule();
-                auto stop = Clock::now();
-                std::cout << "Parsing module took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-                std::cout << " and produced " << par.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";
-                std::cout << " and " << par.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
-                par.instrumenter = this;
-                break;
+                // 120 ms -> 112 ms (-6.7%)
+                // 172 ms -> 163 ms (-5.2%)
+                {
+                    // lexer test
+                    Parser par2;
+                    par2.sourceBuffer = par.sourceBuffer;
+                    auto start = Clock::now();
+                    do
+                        par2.nextToken();
+                    while (par2.tok != Token::EOS);
+                    auto stop = Clock::now();
+                    std::cout << "Lexing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+                    std::cout << " and produced " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                }
+                {
+                    // parse test
+                    Parser par2;
+                    par2.sourceBuffer = par.sourceBuffer;
+                    auto start = Clock::now();
+                    par2.nextToken();
+                    par2.parseModule();
+                    auto stop = Clock::now();
+                    std::cout << "Parsing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+                    std::cout << " and produced " << par2.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";
+                    std::cout << " and " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                }
+                return;
             }
             default:
                 error();
