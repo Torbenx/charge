@@ -57,7 +57,7 @@ SSAName ConstantTable::emit(TypedConstant constant) {
     return { table_phase, id };
 }
 
-static TypeDecl typeType { DeclKind::StructType, { words["type"], SingleTokenSourceRange() }, {} };
+static StaticDecl typeType { DeclKind::StructType, { words["type"], SingleTokenSourceRange() }, {} };
 
 struct StmtResult { };
 struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {
@@ -133,7 +133,7 @@ struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {
                 // TODO: Handle templates
                 VERIFY_NOT_REACHED();
             }
-            if (isDeclType<TypeDecl>(staticDecl->kind())) {
+            if (staticDecl->kind() == DeclKind::StructType || staticDecl->kind() == DeclKind::ObjectType) {
                 SSAName declLit = literalTable->emit(staticDecl);
                 return { declLit, typeTypeLiteral() };
             } else if (auto* varDecl = dyn_cast<StaticVariableDecl>(decl)) {

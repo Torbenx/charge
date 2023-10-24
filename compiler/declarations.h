@@ -7,10 +7,10 @@
 struct Node;
 
 #define ENUMERATE_DECL_KINDS                    \
-    DECL(Module, ModuleDecl)                    \
-    DECL(Namespace, NamespaceDecl)              \
-    DECL(StructType, TypeDecl)                  \
-    DECL(ObjectType, TypeDecl)                  \
+    DECL(Module, StaticDecl)                    \
+    DECL(Namespace, StaticDecl)                 \
+    DECL(StructType, StaticDecl)                \
+    DECL(ObjectType, StaticDecl)                \
     DECL(Function, FunctionDecl)                \
     DECL(StaticLetVariable, StaticVariableDecl) \
     DECL(StaticMutVariable, StaticVariableDecl) \
@@ -159,18 +159,6 @@ struct StaticDecl : Decl {
         : Decl(kind, name), m_decls(decls) { VERIFY(isDeclType<StaticDecl>(kind)); }
 
     TemplatedDeclArrays decls() { return m_decls; }
-};
-struct TypeDecl : StaticDecl {
-    constexpr TypeDecl(DeclKind kind, WordAndLocation name, TemplatedDeclArrays decls)
-        : StaticDecl(kind, name, decls) { VERIFY(isDeclType<TypeDecl>(kind)); }
-};
-struct NamespaceDecl : StaticDecl {
-    NamespaceDecl(WordAndLocation name, TemplatedDeclArrays decls)
-        : StaticDecl(DeclKind::Namespace, name, decls) { }
-};
-struct ModuleDecl : StaticDecl {
-    ModuleDecl(TemplatedDeclArrays decls)
-        : StaticDecl(DeclKind::Module, {}, decls) { }
 };
 struct FunctionDecl : StaticDecl {
 

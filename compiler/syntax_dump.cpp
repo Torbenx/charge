@@ -63,30 +63,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
             lastDecl = visitDecl(decl);
         return lastDecl;
     }
-    DumpResult visitModuleDecl(ModuleDecl& d) {
-        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
-
-        auto lastDecl = visitStaticDeclInternal(d);
-        if (lastDecl.has_value())
-            lastDecl.value()->lastChild = true;
-        else
-            out->leafNode = true;
-
-        return out;
-    }
-    DumpResult visitNamespaceDecl(NamespaceDecl& d) {
-        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
-        out->content = fmt::format("'{}'", wordTable.view(d.name));
-
-        auto lastDecl = visitStaticDeclInternal(d);
-        if (lastDecl.has_value())
-            lastDecl.value()->lastChild = true;
-        else
-            out->leafNode = true;
-
-        return out;
-    }
-    DumpResult visitTypeDecl(TypeDecl& d) {
+    DumpResult visitStaticDecl(StaticDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
