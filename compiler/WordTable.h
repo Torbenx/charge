@@ -59,9 +59,7 @@ struct WordTableView {
     uint32_t usedBuckets = 0;
 
     constexpr WordTableView(std::span<const Entry> entries)
-        : entries(const_cast<Entry*>(entries.data())), invLogSize(32 - std::countr_zero(entries.size())) {
-        VERIFY(std::has_single_bit(entries.size()));
-    }
+        : WordTableView(const_cast<Entry*>(entries.data()), entries.size()) { }
 
     constexpr uint32_t hashToBucket(uint32_t hash) const {
         return (uint64_t)hash >> invLogSize;
@@ -69,13 +67,30 @@ struct WordTableView {
     constexpr uint32_t modSize(uint32_t in) const {
         return in & hashToBucket(-1);
     }
-    constexpr int_t bucketCount() const { return (uint64_t)0x1'0000'0000 >> invLogSize; }
+    constexpr int_t bucketCount() const { return static_cast<uint32_t>((uint64_t)0x1'0000'0000 >> invLogSize); }
 
-    constexpr std::optional<uint32_t> findWord(Word) const;
+    struct LookupState {
+        uint32_t bucket;
+        uint32_t probeIndex = 0;
+    };
+    struct FindResult : LookupState {
+        bool found = false;
+    };
+    constexpr LookupState beginLookup(uint32_t hash) const {
+        return { .bucket = hashToBucket(hash) };
+    }
+    constexpr void advanceLookup(LookupState& state) const {
+        state.probeIndex += 1;
+        state.bucket = modSize(state.bucket + state.probeIndex);
+    }
+    constexpr FindResult findWord(Word) const;
+    constexpr FindResult continueFindWord(Word, LookupState) const;
 
 private:
-    constexpr WordTableView(Entry* entries, uint32_t invLogSize)
-        : entries(entries), invLogSize(invLogSize) { }
+    constexpr WordTableView(Entry* entries, uint32_t size)
+        : entries(entries), invLogSize(32 - std::countr_zero(size)) {
+        VERIFY(std::has_single_bit(size));
+    }
     friend struct WordTable;
 };
 struct WordTable : WordTableView {
@@ -90,18 +105,27 @@ struct WordTable : WordTableView {
     constexpr int_t entryCount() const { return usedBuckets; }
 };
 
-constexpr std::optional<uint32_t> WordTableView::findWord(Word word) const {
-    uint32_t bucket = hashToBucket(word.hash());
-    uint32_t probeDistance = 1;
+constexpr WordTableView::FindResult WordTableView::findWord(Word word) const {
+    LookupState state = beginLookup(word.hash());
     for (;;) {
-        const Entry& entry = entries[bucket];
+        const Entry& entry = entries[state.bucket];
         if (entry.empty())
-            return {};
+            return { state, false };
         if (entry.word == word)
-            return bucket;
+            return { state, true };
 
-        bucket = modSize(bucket + probeDistance);
-        probeDistance += 1;
+        advanceLookup(state);
+    }
+}
+constexpr WordTableView::FindResult WordTableView::continueFindWord(Word word, LookupState state) const {
+    for (;;) {
+        advanceLookup(state);
+
+        const Entry& entry = entries[state.bucket];
+        if (entry.empty())
+            return { state, false };
+        if (entry.word == word)
+            return { state, true };
     }
 }
 
@@ -121,23 +145,21 @@ constexpr void WordTable::maybeRehash() {
         if (oldEntries[i].empty())
             continue;
 
-        uint32_t bucket = hashToBucket(oldEntry.word.hash());
-        uint32_t probeDistance = 1;
+        LookupState state = beginLookup(oldEntry.word.hash());
         for (;;) {
-            Entry& newEntry = entries[bucket];
+            Entry& newEntry = entries[state.bucket];
             if (newEntry.empty())
                 break;
-            bucket = modSize(bucket + probeDistance);
-            probeDistance += 1;
+            advanceLookup(state);
         }
-        entries[bucket] = oldEntry;
+        entries[state.bucket] = oldEntry;
     }
     std::destroy_n(oldEntries, oldSize);
     allocator.deallocate(oldEntries, oldSize);
 }
 
 constexpr WordTable::WordTable()
-    : WordTableView(nullptr, 2) {
+    : WordTableView(nullptr, 4) {
     std::allocator<Entry> allocator;
     entries = allocator.allocate(bucketCount());
     std::uninitialized_fill_n(entries, bucketCount(), Entry());
@@ -226,18 +248,17 @@ public:
 // the table must have at least one free slot
 constexpr WordStringTable::FindResult WordStringTable::findBucket(uint32_t hash, std::string_view str) const {
     VERIFY(!str.empty());
-    uint32_t bucket = hashToBucket(hash);
-    uint32_t probeDistance = 1;
+    LookupState state = beginLookup(hash);
     int maxId = -1;
     bool seenKeyword = false;
     for (;;) {
-        Entry& entry = entries[bucket];
+        Entry& entry = entries[state.bucket];
         if (entry.empty())
-            return { false, seenKeyword, bucket, maxId };
+            return { false, seenKeyword, state.bucket, maxId };
 
         if (entry.word.hash() == hash) {
             if (getStorage(entry.payload) == str)
-                return { true, seenKeyword, bucket, maxId }; // found it
+                return { true, seenKeyword, state.bucket, maxId }; // found it
             // hash collision, keep track of the highest seen id
             if (entry.word.keyword())
                 seenKeyword = true;
@@ -245,8 +266,7 @@ constexpr WordStringTable::FindResult WordStringTable::findBucket(uint32_t hash,
                 maxId = entry.word.id;
         }
 
-        bucket = modSize(bucket + probeDistance);
-        probeDistance += 1;
+        advanceLookup(state);
     }
 }
 
@@ -348,7 +368,9 @@ constexpr Word WordStringTable::insertKeyword(std::string_view str) {
 constexpr std::string_view WordStringTable::view(Word word) const {
     if (word.empty())
         return {};
-    return getStorage(entries[findWord(word).value()].payload);
+    auto result = findWord(word);
+    VERIFY(result.found);
+    return getStorage(entries[result.bucket].payload);
 }
 
 struct WrappedWordStringTable : WordStringTable {
