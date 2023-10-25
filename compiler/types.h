@@ -33,13 +33,12 @@ struct id {
 template<typename Source, typename Target>
 struct relative_pointer {
     using relative_offset_type = int32_t;
-    static constexpr int_t min_alignment = 1;
 
     relative_offset_type aligned_relative_offset = 0;
     constexpr relative_pointer() = default;
     constexpr relative_pointer(Source* source, Target* target) {
         if (target != nullptr) {
-            int_t offset = (reinterpret_cast<std::byte*>(target) - reinterpret_cast<std::byte*>(source)) / min_alignment;
+            int_t offset = (reinterpret_cast<std::byte*>(target) - reinterpret_cast<std::byte*>(source));
             VERIFY(offset >= std::numeric_limits<relative_offset_type>::min()
                 && offset <= std::numeric_limits<relative_offset_type>::max());
             aligned_relative_offset = (relative_offset_type)offset;
@@ -47,7 +46,7 @@ struct relative_pointer {
     }
 
     constexpr int_t relative_offset_bytes() const {
-        return (int_t)aligned_relative_offset * min_alignment;
+        return (int_t)aligned_relative_offset;
     }
 
     constexpr Target* get(Source* source) const {

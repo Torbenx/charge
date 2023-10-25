@@ -95,24 +95,20 @@ struct Parser : LexerState {
     template<std::derived_from<Node> T>
     T* emitNode(T in);
 
-    struct DeclStackItem {
-        Word name;
-        // offset from the beginning of the stream
-        node_stream_offset nodeStreamOffset;
-    };
-    HomogeneousStreamAllocator<DeclStackItem> staticDeclStack;
-    HomogeneousStreamAllocator<DeclStackItem> parameterDeclStack;
-    struct DeclarationScope;
-    struct TemplatedDeclarationScope;
+    DeclContext* declContext = nullptr;
+    template<std::derived_from<Decl> T, typename... Args>
+    T* emitDeclInternal(Args&&...);
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDecl(Args&&...);
+    struct DeclContextHelper;
 
-    StaticDecl* parseModule();
+    NamespaceDecl* parseModule();
     void parseDeclaration();
-    void parseNamespaceOrTypeDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
-    void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, TemplatedDeclarationScope);
-    void parseFunctionDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
-    void parseHasMemberDecl(std::span<const WordAndLocation>, TemplatedDeclarationScope);
+    void parseNamespaceDecl();
+    void parseTypeDecl(std::span<const WordAndLocation>, DeclContextHelper);
+    void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, DeclContextHelper);
+    void parseFunctionDecl(std::span<const WordAndLocation>, DeclContextHelper);
+    void parseHasMemberDecl();
     enum class ParameterParseOptions {
         None,
         OnlyLetParameters,

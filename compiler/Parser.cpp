@@ -57,137 +57,92 @@ std::string_view nameString(DeclKind kind) {
         VERIFY_NOT_REACHED();
     }
 }
-struct DeclarationScopeFields {
-    Parser* parser = nullptr;
-    uint32_t parameterDeclStackBegin = 0;
-    uint32_t staticDeclStackBegin = 0;
-};
-struct Parser::DeclarationScope : DeclarationScopeFields {
-    explicit DeclarationScope(Parser* parser)
-        : DeclarationScopeFields {
-            .parser = parser,
-            .parameterDeclStackBegin = (uint32_t)parser->parameterDeclStack.size(),
-            .staticDeclStackBegin = (uint32_t)parser->staticDeclStack.size(),
-        } { }
 
-    DeclarationScope(DeclarationScope&& other)
-        : DeclarationScopeFields(other) {
-        (DeclarationScopeFields&)other = {};
-    }
-
-    DeclArrays finish() {
-        DeclArrayItem* arrayBegin = (DeclArrayItem*)parser->nodeStream.position();
-        auto stackToArrayItem = [&](DeclStackItem item) -> DeclArrayItem {
-            return { item.name, { arrayBegin, (Decl*)parser->nodeStream.position(item.nodeStreamOffset) } };
-        };
-
-        auto parameterDecls = std::span(parser->parameterDeclStack).subspan(parameterDeclStackBegin);
-        for (auto item : parameterDecls)
-            std::construct_at(parser->nodeStream.allocate<DeclArrayItem>(), stackToArrayItem(item));
-
-        auto staticDecls = std::span(parser->staticDeclStack).subspan(staticDeclStackBegin);
-        for (auto item : staticDecls)
-            std::construct_at(parser->nodeStream.allocate<DeclArrayItem>(), stackToArrayItem(item));
-
-        parser->staticDeclStack.truncate(staticDeclStackBegin);
-        parser->parameterDeclStack.truncate(parameterDeclStackBegin);
-
-        DeclArrays arrays = {
-            .begin = arrayBegin,
-            .parameterCount = (uint32_t)parameterDecls.size(),
-            .staticCount = (uint32_t)staticDecls.size()
-        };
-
-        parser = nullptr;
-        return arrays;
-    }
-
-    ~DeclarationScope() {
-        if (parser) {
-            parser->staticDeclStack.truncate(staticDeclStackBegin);
-            parser->parameterDeclStack.truncate(parameterDeclStackBegin);
-        }
-    }
-};
-struct Parser::TemplatedDeclarationScope : Parser::DeclarationScope {
-    uint32_t withParamCount = 0;
-    uint32_t templateParamCount = 0;
-    using DeclarationScope::DeclarationScope;
-
-    TemplatedDeclArrays finish() {
-        auto arrays = DeclarationScope::finish();
-        return { arrays, withParamCount, templateParamCount };
-    }
-
-    void discard() {
-        VERIFY(withParamCount == 0 && templateParamCount == 0);
-        parser = nullptr;
-    }
-};
+template<std::derived_from<Decl> T, typename... Args>
+T* Parser::emitDeclInternal(Args&&... args) {
+    return std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
+}
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
-    T* decl = std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
+    T* decl = emitDeclInternal<T, Args...>(std::forward<Args>(args)...);
 
-    if constexpr (std::derived_from<T, StaticDecl>) {
-        staticDeclStack.emit({ decl->name, nodeStream.offsetOf((Decl*)decl) });
-    } else if constexpr (std::derived_from<T, ParameterOrMemberDecl>) {
-        parameterDeclStack.emit({ decl->name, nodeStream.offsetOf((Decl*)decl) });
-    }
+    declContext->addDecl(decl);
 
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
     return decl;
 }
 
-// declarations
-StaticDecl* Parser::parseModule() {
-    DeclarationScope onlyTheModuleScope(this);
-    {
-        TemplatedDeclarationScope moduleScope(this);
-        while (tok != Token::EOS) {
-            parseDeclaration();
-        }
-        emitDecl<StaticDecl>(DeclKind::Module, WordAndLocation(), moduleScope.finish());
+struct Parser::DeclContextHelper {
+    Parser* parser;
+    DeclContext* prevContext;
+    DeclContext* createdContext;
+    DeclContextHelper(Parser* parser, DeclContext* newContext)
+        : parser(parser), prevContext(parser->declContext) {
+        parser->declContext = newContext;
     }
-    auto decls = onlyTheModuleScope.finish();
-    VERIFY(decls.parameterCount == 0);
-    VERIFY(decls.staticCount == 1);
-    Decl* moduleDecl = decls.statics()[0];
-    VERIFY(moduleDecl->kind() == DeclKind::Module);
-    return (StaticDecl*)moduleDecl;
+    DeclContextHelper(Parser* parser)
+        : DeclContextHelper(parser, std::construct_at(parser->nodeStream.allocate<DeclContext>())) { }
+    DeclContextHelper(DeclContextHelper&& other)
+        : parser(other.parser), prevContext(other.prevContext) {
+        other.parser = nullptr;
+    }
+    DeclContext* popContext() {
+        VERIFY(parser != nullptr);
+        DeclContext* out = parser->declContext;
+        parser->declContext = prevContext;
+        parser = nullptr;
+        return out;
+    }
+    ~DeclContextHelper() {
+        if (parser)
+            parser->declContext = prevContext;
+    }
+};
+
+// declarations
+NamespaceDecl* Parser::parseModule() {
+    VERIFY(declContext == nullptr);
+    NamespaceDecl* decl = emitDeclInternal<NamespaceDecl>(WordAndLocation());
+    DeclContextHelper helper(this, decl->declContext());
+    while (tok != Token::EOS) {
+        parseDeclaration();
+    }
+    return decl;
 }
 
 void Parser::parseDeclaration() {
-    TemplatedDeclarationScope templateScope(this);
-    if (tok == Token::Word && tokWord() == words["with"]) {
-        nextToken();
-        if (tok != Token::LeftParen) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
-        templateScope.withParamCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
+    if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
     }
-    if (tok == Token::Word && tokWord() == words["template"]) {
+
+    if (tokWord() == words["namespace"]) {
+        parseNamespaceDecl();
+        return;
+    } else if (tokWord() == words["has"]) {
+        parseHasMemberDecl();
+        return;
+    }
+
+    DeclContextHelper helper(this);
+    if (tokWord() == words["template"]) {
         nextToken();
         if (tok != Token::LeftParen) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        templateScope.templateParamCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
+        parseParameters(ParameterParseOptions::OnlyLetParameters);
     }
 
     std::vector<WordAndLocation> attributes;
     while (tok == Token::Word) {
-        if (tokWord() == words["namespace"] || tokWord() == words["struct"] || tokWord() == words["object"]) {
-            parseNamespaceOrTypeDecl(attributes, std::move(templateScope));
+        if (tokWord() == words["struct"] || tokWord() == words["object"]) {
+            parseTypeDecl(attributes, std::move(helper));
             return;
         }
         if (tokWord() == words["fn"]) {
-            parseFunctionDecl(attributes, std::move(templateScope));
-            return;
-        }
-        if (tokWord() == words["has"]) {
-            parseHasMemberDecl(attributes, std::move(templateScope));
+            parseFunctionDecl(attributes, std::move(helper));
             return;
         }
 
@@ -202,23 +157,63 @@ void Parser::parseDeclaration() {
     auto name = attributes.back();
     attributes.pop_back();
 
-    parseVariableDecl(name, attributes, std::move(templateScope));
+    parseVariableDecl(name, attributes, std::move(helper));
 }
 
-void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+void Parser::parseNamespaceDecl() {
+    VERIFY(tok == Token::Word && tokWord() == words["namespace"]);
+    nextToken();
+
+    if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    WordAndLocation name = tokWord();
+    nextToken();
+
+    if (tok != Token::Colon) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    nextToken();
+    if (tok != Token::LeftBrace) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    nextToken();
+
+    auto prevDecls = declContext->decls(name);
+    NamespaceDecl* decl;
+    if (prevDecls.empty()) {
+        decl = emitDecl<NamespaceDecl>(name);
+    } else {
+        Decl* prevDecl = *prevDecls.begin();
+        if (prevDecl->kind() != DeclKind::Namespace) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        decl = (NamespaceDecl*)prevDecl;
+    }
+    DeclContextHelper helper(this, decl->declContext());
+
+    while (tok != Token::RightBrace) {
+        parseDeclaration();
+    }
+    VERIFY(tok == Token::RightBrace);
+    nextToken();
+}
+
+void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
 
     VERIFY(tok == Token::Word);
-    WordAndLocation declarator = tokWord();
     DeclKind kind;
-    if (declarator == words["namespace"])
-        kind = DeclKind::Namespace;
-    else if (declarator == words["struct"])
+    if (tokWord() == words["struct"])
         kind = DeclKind::StructType;
-    else if (declarator == words["object"])
+    else if (tokWord() == words["object"])
         kind = DeclKind::ObjectType;
     else
         VERIFY_NOT_REACHED();
@@ -248,10 +243,10 @@ void Parser::parseNamespaceOrTypeDecl(std::span<const WordAndLocation> attribute
     VERIFY(tok == Token::RightBrace);
     nextToken();
 
-    emitDecl<StaticDecl>(kind, name, templateScope.finish());
+    emitDecl<TypeDecl>(kind, name, helper.popContext());
 }
 
-void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
     // static [mut|let] name [: type] [= init];
     if (attributes.empty() || attributes.front() != words["static"]) {
         // errorHandler;
@@ -293,10 +288,10 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     }
     nextToken();
 
-    emitDecl<StaticVariableDecl>(kind, name, templateScope.finish(), typeExpr, initExpr);
+    emitDecl<StaticVariableDecl>(kind, name, helper.popContext(), typeExpr, initExpr);
 }
 
-void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
+void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -327,16 +322,10 @@ void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, Temp
     Node* body = nextNodeLocation();
     parseBodyExprOrStmt();
 
-    emitDecl<FunctionDecl>(name, templateScope.finish(), returnType, body);
+    emitDecl<FunctionDecl>(name, helper.popContext(), returnType, body);
 }
 
-void Parser::parseHasMemberDecl(std::span<const WordAndLocation> attributes, TemplatedDeclarationScope templateScope) {
-    templateScope.discard();
-    if (attributes.size() != 0) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-
+void Parser::parseHasMemberDecl() {
     VERIFY(tok == Token::Word && tokWord() == words["has"]);
     nextToken();
 
@@ -358,8 +347,9 @@ void Parser::parseHasMemberDecl(std::span<const WordAndLocation> attributes, Tem
         nextToken();
     }
 
-    DeclarationScope scope(this);
+    HasMemberDecl* decl = emitDecl<HasMemberDecl>(name, typeExpr, initExpr);
     if (tok == Token::Colon) {
+        DeclContextHelper helper(this, decl->declContext());
         nextToken();
         if (tok != Token::LeftBrace) {
             // errorHandler;
@@ -377,8 +367,6 @@ void Parser::parseHasMemberDecl(std::span<const WordAndLocation> attributes, Tem
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-
-    emitDecl<HasMemberDecl>(name, typeExpr, initExpr, scope.finish());
 }
 
 int_t Parser::parseParameters(ParameterParseOptions opts) {

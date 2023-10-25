@@ -1,0 +1,13 @@
+// semantic-test
+
+namespace a: {
+
+    fn test1(): { }
+
+}
+
+namespace a: {
+
+    fn test2(): { }
+
+}

@@ -1,16 +1,18 @@
 #pragma once
 
 #include "StaticDeclProgram.h"
+#include "StreamAllocator.h"
 #include "WordTable.h"
 #include "token.h"
 
 struct Node;
+struct ParameterOrMemberDecl;
+struct Decl;
 
 #define ENUMERATE_DECL_KINDS                    \
-    DECL(Module, StaticDecl)                    \
-    DECL(Namespace, StaticDecl)                 \
-    DECL(StructType, StaticDecl)                \
-    DECL(ObjectType, StaticDecl)                \
+    DECL(Namespace, NamespaceDecl)              \
+    DECL(StructType, TypeDecl)                  \
+    DECL(ObjectType, TypeDecl)                  \
     DECL(Function, FunctionDecl)                \
     DECL(StaticLetVariable, StaticVariableDecl) \
     DECL(StaticMutVariable, StaticVariableDecl) \
@@ -45,96 +47,6 @@ constexpr bool isDeclType(DeclKind);
 template<typename T>
 constexpr T* dyn_cast(Decl* in);
 
-// declaration arrays
-struct DeclArrayItem {
-    Word name;
-    // negative offset from the beginning of the array group
-    relative_pointer<DeclArrayItem, Decl> offset;
-};
-struct DeclArrayView {
-    DeclArrayItem* base = nullptr;
-    DeclArrayItem* m_begin = nullptr;
-    DeclArrayItem* m_end = nullptr;
-
-    struct iterator {
-        using difference_type = int_t;
-        using value_type = Decl*;
-        DeclArrayItem* base = nullptr;
-        DeclArrayItem* item = nullptr;
-        constexpr Decl* operator*() const { return (*this)[0]; }
-        iterator& operator++() {
-            ++item;
-            return *this;
-        }
-        constexpr iterator operator++(int) const { return { base, item + 1 }; }
-        constexpr iterator& operator--() {
-            --item;
-            return *this;
-        }
-        constexpr iterator operator--(int) const {
-            return { base, item - 1 };
-        }
-        constexpr std::strong_ordering operator<=>(const iterator& other) const { return item <=> other.item; }
-        constexpr bool operator==(const iterator& other) const { return item == other.item; }
-        constexpr iterator& operator+=(int_t i) {
-            item += i;
-            return *this;
-        }
-        constexpr iterator& operator-=(int_t i) {
-            item += i;
-            return *this;
-        }
-        constexpr iterator operator+(int_t i) const { return { base, item + i }; }
-        constexpr iterator operator-(int_t i) const { return { base, item + i }; }
-        constexpr int_t operator-(const iterator& other) const { return item - other.item; }
-        constexpr Decl* operator[](int_t i) const { return item[i].offset.get(base); }
-    };
-    constexpr iterator begin() const {
-        return { base, m_begin };
-    }
-    constexpr iterator end() const {
-        return { base, m_end };
-    }
-    constexpr int_t size() const { return m_end - m_begin; }
-    constexpr Decl* operator[](int_t i) const { return begin()[i]; }
-};
-inline DeclArrayView::iterator operator+(int_t i, const DeclArrayView::iterator& it) { return { it.base, it.item + i }; }
-static_assert(std::random_access_iterator<DeclArrayView::iterator>);
-struct DeclArrays {
-    DeclArrayItem* begin = nullptr;
-    uint32_t parameterCount = 0;
-    uint32_t staticCount = 0;
-
-    constexpr DeclArrayView view(DeclArrayItem* begin, uint32_t count) const {
-        return { this->begin, begin, begin + count };
-    }
-
-    constexpr auto all() const {
-        return view(begin, parameterCount + staticCount);
-    }
-    constexpr auto parameters() const {
-        return view(begin, parameterCount);
-    }
-    constexpr auto statics() const {
-        return view(begin + parameterCount, staticCount);
-    }
-};
-struct TemplatedDeclArrays : DeclArrays {
-    uint32_t withCount = 0;
-    uint32_t templateCount = 0;
-
-    constexpr auto withParameters() const {
-        return view(begin, withCount);
-    }
-    constexpr auto templateParamters() const {
-        return view(begin + withCount, templateCount);
-    }
-    constexpr auto callableParameters() const {
-        return view(begin + withCount + templateCount, parameterCount - withCount - templateCount);
-    }
-};
-
-// declarations
 struct Decl {
     uint32_t kindBits : 6;
     uint32_t statusBits : 2;
@@ -147,23 +59,134 @@ struct Decl {
         , name(name) { VERIFY(isDeclType<Decl>(kind)); }
     DeclKind kind() const { return (DeclKind)kindBits; }
     DeclStatus status() const { return (DeclStatus)statusBits; }
-    void setDeclStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
+    void setStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
     SingleTokenSourceRange nameLocation() const { return SingleTokenSourceRange(locationBits); }
 };
-struct StaticDecl : Decl {
-    TemplatedDeclArrays m_decls;
 
-    StaticDeclProgram program;
+struct DeclContext : WordTable {
+    using relative_t = relative_pointer<DeclContext, Decl>;
 
-    constexpr StaticDecl(DeclKind kind, WordAndLocation name, TemplatedDeclArrays decls)
-        : Decl(kind, name), m_decls(decls) { VERIFY(isDeclType<StaticDecl>(kind)); }
+    Decl* getFromBucket(uint32_t bucket) {
+        return std::bit_cast<relative_t>(entries[bucket].payload).get(this);
+    }
 
-    TemplatedDeclArrays decls() { return m_decls; }
+    struct named_iterator_end { };
+    struct named_iterator {
+        using difference_type = int_t;
+        using value_type = Decl*;
+
+        DeclContext* context;
+        LookupState state;
+        Word name;
+
+        constexpr named_iterator(DeclContext* context, Word name)
+            : context(context), name(name) {
+            set(context->findWord(name));
+        }
+        constexpr void set(FindResult result) {
+            state = result;
+            if (!result.found)
+                name = {};
+        }
+        constexpr value_type operator*() const {
+            return context->getFromBucket(state.bucket);
+        }
+        constexpr named_iterator& operator++() {
+            set(context->continueFindWord(name, state));
+            return *this;
+        }
+        constexpr named_iterator operator++(int) const {
+            named_iterator out = *this;
+            ++out;
+            return out;
+        }
+        constexpr bool operator==(const named_iterator_end&) const {
+            return name.empty();
+        }
+    };
+    struct named_range {
+        named_iterator m_begin;
+        named_iterator begin() const { return m_begin; }
+        named_iterator_end end() const { return {}; }
+
+        bool empty() const { return begin() == end(); }
+    };
+
+    void addDecl(Decl* decl) {
+        auto result = findWord(decl->name);
+        VERIFY(!result.found);
+        entries[result.bucket] = { decl->name, std::bit_cast<uint32_t>(relative_t(this, decl)) };
+        usedBuckets += 1;
+        maybeRehash();
+    }
+    named_range decls(Word name) {
+        return { named_iterator(this, name) };
+    }
+
+    struct iterator {
+        using difference_type = int_t;
+        using value_type = Decl*;
+
+        DeclContext* context;
+        uint32_t bucket;
+
+        iterator& operator++() {
+            do
+                bucket += 1;
+            while (context->entries[bucket].empty() && bucket < context->bucketCount());
+            return *this;
+        }
+        iterator operator++(int) const {
+            iterator it = *this;
+            ++it;
+            return it;
+        }
+        iterator& operator--() {
+            do
+                bucket -= 1;
+            while (context->entries[bucket].empty() && bucket >= 0);
+            return *this;
+        }
+        iterator operator--(int) const {
+            iterator it = *this;
+            ++it;
+            return it;
+        }
+        Decl* operator*() const { return context->getFromBucket(bucket); }
+        bool operator==(const iterator&) const = default;
+    };
+    iterator begin() { return iterator(this, -1)++; }
+    iterator end() { return iterator(this, bucketCount()); }
+    static_assert(std::bidirectional_iterator<iterator>);
 };
-struct FunctionDecl : StaticDecl {
 
-    FunctionDecl(WordAndLocation name, TemplatedDeclArrays decls, Node* returnTypeExpr, Node* body)
-        : StaticDecl(DeclKind::Function, name, decls)
+// declarations
+struct StaticDecl : Decl {
+    relative_pointer<StaticDecl, DeclContext> m_declContext;
+    StaticDeclProgram program;
+    StaticDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+        : Decl(kind, name), m_declContext(this, declContext) { }
+
+    DeclContext* declContext() { return m_declContext.get(this); }
+};
+struct NamespaceDecl : Decl {
+    DeclContext m_declContext;
+    NamespaceDecl(WordAndLocation name)
+        : Decl(DeclKind::Namespace, name) { }
+
+    DeclContext* declContext() { return &m_declContext; }
+};
+struct TemplatedDecl : StaticDecl {
+    TemplatedDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+        : StaticDecl(kind, name, declContext) { }
+};
+struct TypeDecl : TemplatedDecl {
+    TypeDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+        : TemplatedDecl(kind, name, declContext) { }
+};
+struct FunctionDecl : TemplatedDecl {
+    FunctionDecl(WordAndLocation name, DeclContext* declContext, Node* returnTypeExpr, Node* body)
+        : TemplatedDecl(DeclKind::Function, name, declContext)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { }
 
@@ -173,10 +196,10 @@ struct FunctionDecl : StaticDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 };
-struct StaticVariableDecl : StaticDecl {
+struct StaticVariableDecl : TemplatedDecl {
 
-    StaticVariableDecl(DeclKind kind, WordAndLocation name, TemplatedDeclArrays decls, Node* typeExpr, Node* initExpr)
-        : StaticDecl(kind, name, decls)
+    StaticVariableDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext, Node* typeExpr, Node* initExpr)
+        : TemplatedDecl(kind, name, declContext)
         , m_typeExpr(this, typeExpr)
         , m_initExpr(this, initExpr) {
         VERIFY(isDeclType<StaticVariableDecl>(kind));
@@ -206,12 +229,12 @@ struct ParameterOrMemberDecl : Decl {
     Node* initExpr() { return m_initExpr.get(this); }
 };
 struct HasMemberDecl : ParameterOrMemberDecl {
-    DeclArrays m_decls;
+    DeclContext m_declContext;
 
-    HasMemberDecl(WordAndLocation name, Node* typeExpr, Node* initExpr, DeclArrays decls)
-        : ParameterOrMemberDecl(DeclKind::HasMember, name, typeExpr, initExpr), m_decls(decls) { }
+    HasMemberDecl(WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : ParameterOrMemberDecl(DeclKind::HasMember, name, typeExpr, initExpr) { }
 
-    DeclArrays decls() { return m_decls; }
+    DeclContext* declContext() { return &m_declContext; }
 };
 struct BlockVariableDecl : Decl {
     relative_pointer<BlockVariableDecl, Node> m_typeExpr;

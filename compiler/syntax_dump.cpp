@@ -57,17 +57,29 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
     }
 
     // declarations
-    std::optional<DumpResult> visitStaticDeclInternal(StaticDecl& d) {
+    std::optional<DumpResult> visitDeclContext(DeclContext* declContext) {
         std::optional<DumpResult> lastDecl;
-        for (Decl* decl : d.decls().all())
+        for (Decl* decl : *declContext)
             lastDecl = visitDecl(decl);
         return lastDecl;
     }
-    DumpResult visitStaticDecl(StaticDecl& d) {
+    DumpResult visitNamespaceDecl(NamespaceDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitStaticDeclInternal(d);
+        auto lastDecl = visitDeclContext(d.declContext());
+        if (lastDecl.has_value())
+            lastDecl.value()->lastChild = true;
+        else
+            out->leafNode = true;
+
+        return out;
+    }
+    DumpResult visitTypeDecl(TypeDecl& d) {
+        DumpResult out = insertAtEnd(DumpEntry { d.kind() });
+        out->content = fmt::format("'{}'", wordTable.view(d.name));
+
+        auto lastDecl = visitDeclContext(d.declContext());
         if (lastDecl.has_value())
             lastDecl.value()->lastChild = true;
         else
@@ -79,7 +91,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitStaticDeclInternal(d);
+        auto lastDecl = visitDeclContext(d.declContext());
         auto type = visitExpr(d.typeExpr());
         auto init = visitExpr(d.initExpr());
 
@@ -98,7 +110,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitStaticDeclInternal(d);
+        auto lastDecl = visitDeclContext(d.declContext());
         auto type = visitExpr(d.returnTypeExpr());
         auto body = visitGeneric(d.body());
 
@@ -143,9 +155,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
 
         auto type = visitExpr(d.typeExpr());
         VERIFY(type.has_value());
-        std::optional<DumpResult> lastDecl;
-        for (Decl* decl : d.decls().all())
-            lastDecl = visitDecl(decl);
+        auto lastDecl = visitDeclContext(d.declContext());
 
         if (lastDecl.has_value()) {
             lastDecl.value()->lastChild = true;

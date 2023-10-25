@@ -94,21 +94,19 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
             }
             case TestMode::Parser: {
                 std::cout << "------\n";
-                par.parseDeclaration();
-                dump((Decl*)(par.nodeStream.storage + par.staticDeclStack.back().nodeStreamOffset), par.wordTable);
+                NamespaceDecl* global = par.parseModule();
+                dump(global, par.wordTable);
                 break;
             }
             case TestMode::Semantic: {
                 std::cout << "------\n";
-                StaticDecl* module = par.parseModule();
-                dump(module, par.wordTable);
+                NamespaceDecl* global = par.parseModule();
+                dump(global, par.wordTable);
                 break;
             }
             case TestMode::Benchmark: {
                 std::cout << "------\n";
                 using Clock = std::chrono::high_resolution_clock;
-                // 120 ms -> 112 ms (-6.7%)
-                // 172 ms -> 163 ms (-5.2%)
                 {
                     // lexer test
                     Parser par2;
@@ -181,7 +179,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         }
     }
     void emitDecl(Parser* par, Decl* decl) override {
-        // std::cout << "emitting decl " << decl << " - " << nameString(decl->kind()) << '\n';
+        // std::cout << "emitting decl '" << par->wordTable.view(decl->name) << "' - " << nameString(decl->kind()) << '\n';
         if (commandQueue.empty())
             return;
         if (commandQueue.top().command == words["expect-decl"]) {
