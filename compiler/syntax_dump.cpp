@@ -63,6 +63,13 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
             lastDecl = visitDecl(decl);
         return lastDecl;
     }
+    std::optional<DumpResult> visitDeclContext(ParameterDeclContext* declContext) {
+        std::optional<DumpResult> lastParameter;
+        for (Decl* decl : declContext->parameters())
+            lastParameter = visitDecl(decl);
+        std::optional<DumpResult> lastDecl = visitDeclContext((DeclContext*)declContext);
+        return lastDecl.has_value() ? lastDecl : lastParameter;
+    }
     DumpResult visitNamespaceDecl(NamespaceDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));

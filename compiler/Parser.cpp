@@ -66,13 +66,17 @@ template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
     T* decl = emitDeclInternal<T, Args...>(std::forward<Args>(args)...);
 
-    declContext->addDecl(decl);
+    if constexpr (std::derived_from<T, ParameterOrMemberDecl>)
+        ((ParameterDeclContext*)declContext)->addParameterDecl(decl);
+    else
+        declContext->addDecl(decl);
 
     if (instrumenter)
         instrumenter->emitDecl(this, decl);
     return decl;
 }
 
+template<typename T>
 struct Parser::DeclContextHelper {
     Parser* parser;
     DeclContext* prevContext;
@@ -82,17 +86,17 @@ struct Parser::DeclContextHelper {
         parser->declContext = newContext;
     }
     DeclContextHelper(Parser* parser)
-        : DeclContextHelper(parser, std::construct_at(parser->nodeStream.allocate<DeclContext>())) { }
+        : DeclContextHelper(parser, std::construct_at(parser->nodeStream.template allocate<T>())) { }
     DeclContextHelper(DeclContextHelper&& other)
         : parser(other.parser), prevContext(other.prevContext) {
         other.parser = nullptr;
     }
-    DeclContext* popContext() {
+    T* popContext() {
         VERIFY(parser != nullptr);
         DeclContext* out = parser->declContext;
         parser->declContext = prevContext;
         parser = nullptr;
-        return out;
+        return (T*)out;
     }
     ~DeclContextHelper() {
         if (parser)
@@ -104,7 +108,7 @@ struct Parser::DeclContextHelper {
 NamespaceDecl* Parser::parseModule() {
     VERIFY(declContext == nullptr);
     NamespaceDecl* decl = emitDeclInternal<NamespaceDecl>(WordAndLocation());
-    DeclContextHelper helper(this, decl->declContext());
+    DeclContextHelper<DeclContext> helper(this, decl->declContext());
     while (tok != Token::EOS) {
         parseDeclaration();
     }
@@ -125,14 +129,14 @@ void Parser::parseDeclaration() {
         return;
     }
 
-    DeclContextHelper helper(this);
+    DeclContextHelper<ParameterDeclContext> helper(this);
     if (tokWord() == words["template"]) {
         nextToken();
         if (tok != Token::LeftParen) {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        parseParameters(ParameterParseOptions::OnlyLetParameters);
+        ((ParameterDeclContext*)declContext)->templateParameterCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
     }
 
     std::vector<WordAndLocation> attributes;
@@ -194,7 +198,7 @@ void Parser::parseNamespaceDecl() {
         }
         decl = (NamespaceDecl*)prevDecl;
     }
-    DeclContextHelper helper(this, decl->declContext());
+    DeclContextHelper<DeclContext> helper(this, decl->declContext());
 
     while (tok != Token::RightBrace) {
         parseDeclaration();
@@ -203,7 +207,7 @@ void Parser::parseNamespaceDecl() {
     nextToken();
 }
 
-void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
+void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, DeclContextHelper<ParameterDeclContext> helper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -246,7 +250,7 @@ void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, DeclCont
     emitDecl<TypeDecl>(kind, name, helper.popContext());
 }
 
-void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
+void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, DeclContextHelper<ParameterDeclContext> helper) {
     // static [mut|let] name [: type] [= init];
     if (attributes.empty() || attributes.front() != words["static"]) {
         // errorHandler;
@@ -291,7 +295,7 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     emitDecl<StaticVariableDecl>(kind, name, helper.popContext(), typeExpr, initExpr);
 }
 
-void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, DeclContextHelper helper) {
+void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, DeclContextHelper<ParameterDeclContext> helper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -349,7 +353,7 @@ void Parser::parseHasMemberDecl() {
 
     HasMemberDecl* decl = emitDecl<HasMemberDecl>(name, typeExpr, initExpr);
     if (tok == Token::Colon) {
-        DeclContextHelper helper(this, decl->declContext());
+        DeclContextHelper<DeclContext> helper(this, decl->declContext());
         nextToken();
         if (tok != Token::LeftBrace) {
             // errorHandler;

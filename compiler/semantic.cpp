@@ -129,6 +129,10 @@ struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {
         //  - For a function-decl a literal for the function.
 
         if (auto* staticDecl = dyn_cast<StaticDecl>(decl)) {
+            if (staticDecl->declContext()->templateParameterCount > 0) {
+                // TODO: Handle templates
+                VERIFY_NOT_REACHED();
+            }
             if (staticDecl->kind() == DeclKind::StructType || staticDecl->kind() == DeclKind::ObjectType) {
                 SSAName declLit = literalTable->emit(staticDecl);
                 return { declLit, typeTypeLiteral() };

@@ -4,6 +4,7 @@
 #include "StreamAllocator.h"
 #include "WordTable.h"
 #include "token.h"
+#include <ranges>
 
 struct Node;
 struct ParameterOrMemberDecl;
@@ -61,6 +62,21 @@ struct Decl {
     DeclStatus status() const { return (DeclStatus)statusBits; }
     void setStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
     SingleTokenSourceRange nameLocation() const { return SingleTokenSourceRange(locationBits); }
+};
+// a parameter or (has-)member declaration
+struct ParameterOrMemberDecl : Decl {
+    relative_pointer<ParameterOrMemberDecl, Node> m_typeExpr;
+    relative_pointer<ParameterOrMemberDecl, Node> m_initExpr;
+
+    ParameterOrMemberDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name)
+        , m_typeExpr(this, typeExpr)
+        , m_initExpr(this, initExpr) {
+        VERIFY(isDeclType<ParameterOrMemberDecl>(kind));
+    }
+
+    Node* typeExpr() { return m_typeExpr.get(this); }
+    Node* initExpr() { return m_initExpr.get(this); }
 };
 
 struct DeclContext : WordTable {
@@ -160,14 +176,29 @@ struct DeclContext : WordTable {
     static_assert(std::bidirectional_iterator<iterator>);
 };
 
-// declarations
+struct ParameterDeclContext : DeclContext {
+    std::vector<relative_pointer<DeclContext, ParameterOrMemberDecl>> parameterDecls;
+    int_t templateParameterCount = 0;
+
+    void addParameterDecl(ParameterOrMemberDecl* decl) {
+        parameterDecls.push_back({ this, decl });
+    }
+
+    auto parameters() {
+        return std::ranges::views::transform(parameterDecls,
+            [this](relative_pointer<DeclContext, ParameterOrMemberDecl> rel) {
+                return rel.get(this);
+            });
+    }
+};
+
 struct StaticDecl : Decl {
-    relative_pointer<StaticDecl, DeclContext> m_declContext;
+    relative_pointer<StaticDecl, ParameterDeclContext> m_declContext;
     StaticDeclProgram program;
-    StaticDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+    StaticDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
         : Decl(kind, name), m_declContext(this, declContext) { }
 
-    DeclContext* declContext() { return m_declContext.get(this); }
+    ParameterDeclContext* declContext() { return m_declContext.get(this); }
 };
 struct NamespaceDecl : Decl {
     DeclContext m_declContext;
@@ -177,15 +208,15 @@ struct NamespaceDecl : Decl {
     DeclContext* declContext() { return &m_declContext; }
 };
 struct TemplatedDecl : StaticDecl {
-    TemplatedDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+    TemplatedDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
         : StaticDecl(kind, name, declContext) { }
 };
 struct TypeDecl : TemplatedDecl {
-    TypeDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext)
+    TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
         : TemplatedDecl(kind, name, declContext) { }
 };
 struct FunctionDecl : TemplatedDecl {
-    FunctionDecl(WordAndLocation name, DeclContext* declContext, Node* returnTypeExpr, Node* body)
+    FunctionDecl(WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
         : TemplatedDecl(DeclKind::Function, name, declContext)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { }
@@ -198,7 +229,7 @@ struct FunctionDecl : TemplatedDecl {
 };
 struct StaticVariableDecl : TemplatedDecl {
 
-    StaticVariableDecl(DeclKind kind, WordAndLocation name, DeclContext* declContext, Node* typeExpr, Node* initExpr)
+    StaticVariableDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
         : TemplatedDecl(kind, name, declContext)
         , m_typeExpr(this, typeExpr)
         , m_initExpr(this, initExpr) {
@@ -212,21 +243,6 @@ struct StaticVariableDecl : TemplatedDecl {
     Node* initExpr() { return m_initExpr.get(this); }
 
     ConstantStreamInstructionOperand typeValue;
-};
-// a parameter or (has-)member declaration
-struct ParameterOrMemberDecl : Decl {
-    relative_pointer<ParameterOrMemberDecl, Node> m_typeExpr;
-    relative_pointer<ParameterOrMemberDecl, Node> m_initExpr;
-
-    ParameterOrMemberDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : Decl(kind, name)
-        , m_typeExpr(this, typeExpr)
-        , m_initExpr(this, initExpr) {
-        VERIFY(isDeclType<ParameterOrMemberDecl>(kind));
-    }
-
-    Node* typeExpr() { return m_typeExpr.get(this); }
-    Node* initExpr() { return m_initExpr.get(this); }
 };
 struct HasMemberDecl : ParameterOrMemberDecl {
     DeclContext m_declContext;
