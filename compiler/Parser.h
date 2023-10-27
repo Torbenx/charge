@@ -101,7 +101,25 @@ struct Parser : Lexer {
         virtual void emitNode(Parser*, Node*) { }
         virtual void emitDecl(Parser*, Decl*) { }
     };
-    struct ErrorHandler { };
+    struct ErrorHandler {
+        virtual void expectedParameterName(Parser*) = 0;
+        virtual void parameterModifierNotAllowed(Parser*, WordAndLocation modifier, WordAndLocation name) = 0;
+        virtual void invalidParameterModifier(Parser*, WordAndLocation modifier, WordAndLocation name) = 0;
+        virtual void unexpectedAfterParameter(Parser*, WordAndLocation name) = 0;
+
+        virtual void expectedSemiColon(Parser*) = 0;
+
+        virtual void expectedFunctionBody(Parser*) = 0;
+
+        virtual void expectedIfBody(Parser*, bool statement) = 0;
+        virtual void expectedElseBody(Parser*) = 0;
+
+        virtual void expectedAccessExpr(Parser*) = 0;
+
+        virtual void expectedExpression(Parser*) = 0;
+
+        virtual void unexpectedAfterArgument(Parser*) = 0;
+    };
 
     Instrumenter* instrumenter = nullptr;
     ErrorHandler* errorHandler = nullptr;
@@ -156,3 +174,12 @@ struct Parser : Lexer {
     void parsePrimaryExpr();
     void parseArguments();
 };
+
+template<std::derived_from<Node> T>
+T* Parser::emitNode(T in) {
+    T* node = std::construct_at(nodeStream.template allocate<T>(), in);
+
+    if (instrumenter)
+        instrumenter->emitNode(this, node);
+    return node;
+}

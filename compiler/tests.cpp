@@ -59,7 +59,9 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
         "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test",
-        "benchmark");
+        "benchmark", "expect-expected-parameter-name", "expect-parameter-modifier-not-allowed",
+        "expect-invalid-parameter-modifier", "expect-unexpected-after-parameter", "expect-expected-semicolon",
+        "expect-expected-function-body", "expect-expected-if-body", "expect-expected-else-body");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -338,14 +340,18 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
     }
 
     Command popCommand(Word cause) {
+        if (commandQueue.empty()) {
+            fmt::println("got error '{}' without pending command", wordTable.view(cause));
+            VERIFY_NOT_REACHED();
+        }
         Command cmd = commandQueue.pop();
         if (cmd.command != cause) {
-            std::cout << "pending command '" << wordTable.view(cmd.command)
-                      << "' but got '" << wordTable.view(cause) << "'\n";
+            fmt::println("got error '{}' but pending command is '{}'", wordTable.view(cause), wordTable.view(cmd.command));
             VERIFY_NOT_REACHED();
         }
         return cmd;
     }
+    // lexer errors
     LexerAction invalidCharacter(Lexer* lex, char) override {
         auto cmd = popCommand(words["expect-invalid-char"]);
         verifyNoPairs(cmd);
@@ -374,6 +380,54 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         // skip over remaining line
         lex->sourceOffset = endOffset;
         return LexerAction::Retry;
+    }
+
+    // parser errors
+    void expectedParameterName(Parser* par) override {
+        auto cmd = popCommand(words["expect-expected-parameter-name"]);
+        verifyNoPairs(cmd);
+        // skip token
+        par->nextToken();
+    }
+    void parameterModifierNotAllowed(Parser*, WordAndLocation, WordAndLocation) override {
+        auto cmd = popCommand(words["expect-parameter-modifier-not-allowed"]);
+        verifyNoPairs(cmd);
+        // ignore modifier
+    }
+    void invalidParameterModifier(Parser*, WordAndLocation, WordAndLocation) override {
+        auto cmd = popCommand(words["expect-invalid-parameter-modifier"]);
+        verifyNoPairs(cmd);
+        // ignore modifier
+    }
+    void unexpectedAfterParameter(Parser* par, WordAndLocation) override {
+        auto cmd = popCommand(words["expect-unexpected-after-parameter"]);
+        verifyNoPairs(cmd);
+        // skip token
+        par->nextToken();
+        
+    }
+    void expectedSemiColon(Parser*) override {
+        auto cmd = popCommand(words["expect-expected-semicolon"]);
+        verifyNoPairs(cmd);
+        // ignore
+    }
+    void expectedFunctionBody(Parser*) override {
+        VERIFY_NOT_REACHED();
+    }
+    void expectedIfBody(Parser*, bool) override {
+        VERIFY_NOT_REACHED();
+    }
+    void expectedElseBody(Parser*) override {
+        VERIFY_NOT_REACHED();
+    }
+    void expectedAccessExpr(Parser*) override {
+        VERIFY_NOT_REACHED();
+    }
+    void expectedExpression(Parser*) override {
+        VERIFY_NOT_REACHED();
+    }
+    void unexpectedAfterArgument(Parser*) override {
+        VERIFY_NOT_REACHED();
     }
 };
 

@@ -1,0 +1,27 @@
+// parser-test
+
+// expect-expected-parameter-name
+fn test1(+a: type): { }
+
+// expect-parameter-modifier-not-allowed
+template(let T: type)
+fn test2(): { }
+
+// expect-invalid-parameter-modifier
+fn test3(invalid a: type): { }
+
+// expect-unexpected-after-parameter
+fn test4(a ;): { }
+
+// expect-expected-semicolon
+fn test5() => a
+
+fn test6(): {
+    /> expect-expected-semicolon </ a
+    /> expect-expected-semicolon </ return a
+    /> expect-expected-semicolon </ let a = b
+    /> expect-expected-semicolon </ a += b
+}
+fn test7(): {
+    /> expect-expected-semicolon </ [a a];
+}

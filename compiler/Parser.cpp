@@ -10,6 +10,13 @@ static constexpr NodeKind firstInstance() {
     VERIFY_NOT_REACHED();
 }
 
+static void consumeSemiColon(Parser* par) {
+    if (par->tok == Token::SemiColon)
+        par->nextToken();
+    else
+        par->errorHandler->expectedSemiColon(par);
+}
+
 std::string_view nameString(NodeKind kind) {
     switch (kind) {
 
@@ -33,15 +40,6 @@ ExpressionPrecedence precedenceOf(NodeKind node) {
     default:
         VERIFY_NOT_REACHED();
     }
-}
-
-template<std::derived_from<Node> T>
-T* Parser::emitNode(T in) {
-    T* node = std::construct_at(nodeStream.template allocate<T>(), in);
-
-    if (instrumenter)
-        instrumenter->emitNode(this, node);
-    return node;
 }
 
 std::string_view nameString(DeclKind kind) {
@@ -380,8 +378,8 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
     while (tok != Token::RightParen) {
         // [let|mut|inout|out] name [?constrait] [: type] [= init]
         if (tok != Token::Word) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
+            errorHandler->expectedParameterName(this);
+            VERIFY(tok == Token::Word);
         }
 
         DeclKind kind = DeclKind::LetParameter;
@@ -389,8 +387,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
         nextToken();
         if (tok == Token::Word) {
             if (opts == ParameterParseOptions::OnlyLetParameters) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
+                errorHandler->parameterModifierNotAllowed(this, name, tokWord());
             }
             if (name == words["let"]) {
                 kind = DeclKind::LetParameter;
@@ -401,8 +398,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             } else if (name == words["out"]) {
                 kind = DeclKind::OutParameter;
             } else {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
+                errorHandler->invalidParameterModifier(this, name, tokWord());
             }
             name = tokWord();
             nextToken();
@@ -432,8 +428,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
         if (tok == Token::Comma) {
             nextToken();
         } else if (tok != Token::RightParen) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
+            errorHandler->unexpectedAfterParameter(this, name);
         }
     }
     VERIFY(tok == Token::RightParen);
@@ -450,14 +445,9 @@ void Parser::parseBodyExprOrStmt() {
         nextToken();
         parseExpression();
         emitNode(EmptyNode());
-        if (tok != Token::SemiColon) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
-        nextToken();
+        consumeSemiColon(this);
     } else {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        errorHandler->expectedFunctionBody(this);
     }
 }
 
@@ -473,10 +463,7 @@ void Parser::parseSingleOrCompoundStmt() {
 }
 
 void Parser::parseCompoundStmt() {
-    if (tok != Token::LeftBrace) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
+    VERIFY(tok == Token::LeftBrace);
     emitNode(CompoundStmt(tokRange()));
     nextToken();
     while (tok != Token::RightBrace) {
@@ -490,8 +477,7 @@ void Parser::parseCompoundStmt() {
 void Parser::parseStatement() {
     auto kind = parseStatementInternal();
     if (kind != ParsedStatementKind::Normal) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        errorHandler->expectedSemiColon(this);
     }
 }
 
@@ -519,11 +505,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             parseExpression();
             emitNode(ReturnStmt(returnLoc));
 
-            if (tok != Token::SemiColon) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
-            }
-            nextToken();
+            consumeSemiColon(this);
             return ParsedStatementKind::Normal;
         }
         if (tokWord() == words["let"] || tokWord() == words["mut"]) {
@@ -564,12 +546,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
 
             stmtNode->setDecl(emitDecl<BlockVariableDecl>(declKind, name, typeExpr, initExpr));
 
-            if (tok != Token::SemiColon) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
-            }
-            nextToken();
-
+            consumeSemiColon(this);
             return ParsedStatementKind::Normal;
         }
     }
@@ -578,11 +555,7 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
         emitNode(UpdateStmt(updateToStmt(tok), tokRange()));
         nextToken();
         parseExpression();
-        if (tok != Token::SemiColon) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
-        nextToken();
+        consumeSemiColon(this);
         return ParsedStatementKind::Normal;
     } else {
         parseCommaElseExprHere();
@@ -607,23 +580,16 @@ void Parser::parseIfExprOrStmt(bool statement) {
         if (statement) {
             parseCommaElseExprHere();
             emitNode(ExpressionStmt(tokRange()));
-            if (tok != Token::SemiColon) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
-            }
-            nextToken();
+            consumeSemiColon(this);
         }
-    } else if (tok == Token::Colon) {
-        if (!statement) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
+        return;
+    }
+    if (tok == Token::Colon && statement) {
         emitNode(IfStmt(ifLoc));
         parseSingleOrCompoundStmt();
-    } else {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        return;
     }
+    errorHandler->expectedIfBody(this, statement);
 }
 
 // expressions
@@ -651,8 +617,7 @@ void Parser::parseCommaElseExprHere() {
         nextToken();
         parseIfExpr();
     } else {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        errorHandler->expectedElseBody(this);
     }
 }
 
@@ -706,8 +671,7 @@ void Parser::parsePostfixExprHere() {
             auto location = tokRange();
             nextToken();
             if (tok != Token::Word) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
+                errorHandler->expectedAccessExpr(this);
             }
             emitNode(AccessExpr(kind, location, tokWord()));
             nextToken();
@@ -750,8 +714,7 @@ void Parser::parsePrimaryExpr() {
                 break;
             }
             if (kind == ParsedStatementKind::ExprStmtWithMissingSemiColon) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
+                errorHandler->expectedSemiColon(this);
             }
         }
         VERIFY(tok == Token::RightAngle);
@@ -764,8 +727,7 @@ void Parser::parsePrimaryExpr() {
         emitNode(NumericLiteralExpr(tokRange()));
         nextToken();
     } else {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        errorHandler->expectedExpression(this);
     }
 }
 
@@ -792,8 +754,7 @@ void Parser::parseArguments() {
         if (tok == Token::Comma) {
             nextToken();
         } else if (tok != rightBracket) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
+            errorHandler->unexpectedAfterArgument(this);
         }
     }
     VERIFY(tok == rightBracket);
