@@ -18,7 +18,7 @@ static bool isCommandEndChar(uint8_t c) {
     return c == '\r' || c == '\n' || c == ';';
 }
 
-struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
+struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Instrumenter, Parser::ErrorHandler {
     enum class TestMode {
         Invalid,
         Lexer,
@@ -81,9 +81,11 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
 
     void runTest(std::string_view source) {
         Parser par;
+        par.Lexer::errorHandler = this;
+        par.Lexer::instrumenter = this;
+        par.Parser::errorHandler = this;
+        par.Parser::instrumenter = this;
         par.setSource(source);
-        par.errorHandler = this;
-        par.instrumenter = this;
         par.nextToken();
 
         while (par.tok != Token::EOS) {
@@ -140,16 +142,16 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         verify(commandQueue.empty());
     }
 
-    void nextToken(Parser* par) override {
-        // fmt::println("tok {}", nameString(par->tok));
-        verify(((LexerState*)par)->valid());
+    void nextToken(Lexer* lex) override {
+        // fmt::println("tok {}", nameString(lex->tok));
+        verify(lex->valid());
         if (commandQueue.empty())
             return;
         if (commandQueue.top().command == words["expect-token"]) {
             auto cmd = commandQueue.pop();
             expect_eq(cmd.pairs.size(), (size_t)1, "", &cmd);
             expect_eq(cmd.pairs[0].key, Word(), "", &cmd, &cmd.pairs[0]);
-            expect_eq(cmd.pairs[0].value, nameString(par->tok), "", &cmd, &cmd.pairs[0]);
+            expect_eq(cmd.pairs[0].value, nameString(lex->tok), "", &cmd, &cmd.pairs[0]);
         }
     }
 
@@ -195,9 +197,9 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         }
     }
 
-    void handleComment(Parser* par) override {
-        VERIFY(isComment(par->tok));
-        std::string_view comment = par->tokCommentSource();
+    void handleComment(Lexer* lex) override {
+        VERIFY(isComment(lex->tok));
+        std::string_view comment = lex->tokCommentSource();
         auto skipWhitespace = [&]() {
             while (comment.length() > 0 && (comment.front() == ' ' || comment.front() == '\t'))
                 comment = comment.substr(1);
@@ -275,7 +277,7 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
                 break;
             }
             case words["expect-source-position"].asUint(): {
-                SourcePosition pos = par->sourcePosition(par->tokRange().first());
+                SourcePosition pos = lex->sourcePosition(lex->tokRange().first());
                 for (const auto& pair : command.pairs) {
                     if (pair.key == words["line"])
                         expect_eq<uint32_t>(pos.line, parseInteger(pair.value), "", &command, &pair);
@@ -344,48 +346,48 @@ struct TestInstrumenter : Parser::Instrumenter, Parser::ErrorHandler {
         }
         return cmd;
     }
-    LexerAction invalidCharacter(Parser* par, char) override {
+    LexerAction invalidCharacter(Lexer* lex, char) override {
         auto cmd = popCommand(words["expect-invalid-char"]);
         verifyNoPairs(cmd);
         // skip over character
-        par->sourceOffset += 1;
+        lex->sourceOffset += 1;
         return LexerAction::Retry;
     }
-    LexerAction unterminatedBlockComment(Parser* par, int_t) override {
+    LexerAction unterminatedBlockComment(Lexer* lex, int_t) override {
         auto cmd = popCommand(words["expect-unterm-comment"]);
         verifyNoPairs(cmd);
         // emit EOS token
-        par->tok = Token::EOS;
-        par->tokData = std::nullopt;
+        lex->tok = Token::EOS;
+        lex->tokData = std::nullopt;
         return LexerAction::AcceptState;
     }
-    LexerAction invalidCharacterLiteral(Parser* par, int_t, int_t endOffset) override {
+    LexerAction invalidCharacterLiteral(Lexer* lex, int_t, int_t endOffset) override {
         auto cmd = popCommand(words["expect-invalid-char-literal"]);
         verifyNoPairs(cmd);
         // skip over literal
-        par->sourceOffset = endOffset + 1;
+        lex->sourceOffset = endOffset + 1;
         return LexerAction::Retry;
     }
-    LexerAction unterminatedCharacterLiteral(Parser* par, int_t, int_t endOffset) override {
+    LexerAction unterminatedCharacterLiteral(Lexer* lex, int_t, int_t endOffset) override {
         auto cmd = popCommand(words["expect-unterm-char-literal"]);
         verifyNoPairs(cmd);
         // skip over remaining line
-        par->sourceOffset = endOffset;
+        lex->sourceOffset = endOffset;
         return LexerAction::Retry;
     }
 };
 
-struct BadErrorHandler : Parser::ErrorHandler {
-    LexerAction invalidCharacter(Parser*, char) override {
+struct BadErrorHandler : Lexer::ErrorHandler {
+    LexerAction invalidCharacter(Lexer*, char) override {
         VERIFY_NOT_REACHED();
     }
-    LexerAction unterminatedBlockComment(Parser*, int_t) override {
+    LexerAction unterminatedBlockComment(Lexer*, int_t) override {
         VERIFY_NOT_REACHED();
     }
-    LexerAction invalidCharacterLiteral(Parser*, int_t, int_t) override {
+    LexerAction invalidCharacterLiteral(Lexer*, int_t, int_t) override {
         VERIFY_NOT_REACHED();
     }
-    LexerAction unterminatedCharacterLiteral(Parser*, int_t, int_t) override {
+    LexerAction unterminatedCharacterLiteral(Lexer*, int_t, int_t) override {
         VERIFY_NOT_REACHED();
     }
 };
@@ -421,7 +423,7 @@ int main() {
         std::cout << toSmallString(token);
         std::cout << ' ';
     };
-    par.errorHandler = &errorHandler;
+    par.Lexer::errorHandler = &errorHandler;
     par.setSource("abcdef * psdkjhglasoidhgalsoiuhdpisuhbg98asegsuieg735uhalibliABL + b * q + c / z");
     while (par.tok != Token::EOS) {
         par.nextToken();

@@ -92,7 +92,7 @@ std::string_view nameString(Token token) {
 }
 
 // advances offset to the next non-whitespace character
-static void skipTabsAndSpaces(LexerState& lex) {
+static void skipTabsAndSpaces(Lexer& lex) {
     while (lex.sourceBuffer[lex.sourceOffset] == ' ' || lex.sourceBuffer[lex.sourceOffset] == '\t')
         lex.sourceOffset += 1;
 }
@@ -101,20 +101,20 @@ static bool isEndOfLineCharacter(uint8_t c) {
     return c == '\n' || c == '\r';
 }
 // advances offset to the next new line character
-static void skipToEndOfLine(LexerState& lex) {
+static void skipToEndOfLine(Lexer& lex) {
     while (!isEndOfLineCharacter(lex.sourceBuffer[lex.sourceOffset]))
         lex.sourceOffset += 1;
 }
 
 // advances offset to the next '</'
-static void skipToEndOfBlockComment(LexerState& lex) {
+static void skipToEndOfBlockComment(Lexer& lex) {
     while (lex.sourceBuffer[lex.sourceOffset] != '\0'
         && !(lex.sourceBuffer[lex.sourceOffset] == '<' && lex.sourceBuffer[lex.sourceOffset + 1] == '/')) {
         lex.sourceOffset += 1;
     }
 }
 
-static void skipToEndOfCharacterLiteral(LexerState& lex) {
+static void skipToEndOfCharacterLiteral(Lexer& lex) {
     for (;;) {
         auto c = lex.sourceBuffer[lex.sourceOffset];
         if (c == '\'' || c == '\n' || c == '\r' || c == '\0')
@@ -280,7 +280,7 @@ bool TokenWithData::valid() const {
         return std::holds_alternative<CharacterLiteral>(tokData);
     return std::holds_alternative<std::nullopt_t>(tokData);
 }
-bool LexerState::valid() const {
+bool Lexer::valid() const {
     if (sourceBuffer.empty())
         return false;
     if (*sourceBuffer.end() != '\0' && sourceBuffer.back() != '\0')
@@ -290,10 +290,10 @@ bool LexerState::valid() const {
     return TokenWithData::valid();
 }
 
-std::string_view LexerState::source(int_t begin, int_t end) const {
+std::string_view Lexer::source(int_t begin, int_t end) const {
     return { sourceBuffer.begin() + begin, sourceBuffer.begin() + end };
 }
-std::string_view LexerState::tokCommentSource() const {
+std::string_view Lexer::tokCommentSource() const {
     auto token = tokenStream.back();
     VERIFY(isComment(token.token()));
     if (token.token() == Token::BlockComment)
@@ -303,7 +303,7 @@ std::string_view LexerState::tokCommentSource() const {
     VERIFY_NOT_REACHED();
 }
 
-SingleTokenSourceRange LexerState::tokRange() const {
+SingleTokenSourceRange Lexer::tokRange() const {
     if (cachedNextToken.tok == Token::Invalid)
         return SingleTokenSourceRange(tokenStream.size() - 1);
     int_t index = tokenStream.size() - 2;
@@ -314,7 +314,7 @@ SingleTokenSourceRange LexerState::tokRange() const {
     return SingleTokenSourceRange(index);
 }
 
-SourcePosition LexerState::sourcePosition(LocalSourceLocation loc) const {
+SourcePosition Lexer::sourcePosition(LocalSourceLocation loc) const {
     auto iter = tokenStream.data() + loc.tokenStreamOffset;
     auto offset = loc.isAtEnd ? iter->end() : iter->begin();
     while (iter->token() != Token::Newline)
@@ -322,12 +322,9 @@ SourcePosition LexerState::sourcePosition(LocalSourceLocation loc) const {
     return { .line = iter->lineNumber(), .column = offset - iter->begin() + 1 };
 }
 
-void LexerState::setSource(std::string_view source) {
+void Lexer::setSource(std::string_view source) {
     // reset all fields
-    *this = {};
-
-    sourceBuffer = source;
-    tokenStream.emit(StreamToken::makeNewline(1, 0));
+    (LexerState&)*this = { source };
 
     if (source.empty())
         return;
@@ -335,7 +332,7 @@ void LexerState::setSource(std::string_view source) {
     VERIFY(source[source.length() - 1] != '\0');
 }
 
-void Parser::nextToken() {
+void Lexer::nextToken() {
 
 #define HANDLE_LEXER_ACTION(a)                                         \
     {                                                                  \
@@ -467,7 +464,7 @@ void Parser::nextToken() {
         instrumenter->nextToken(this);
 }
 
-void Parser::reemitLastToken(TokenWithData token) {
+void Lexer::reemitLastToken(TokenWithData token) {
     VERIFY(cachedNextToken.tok == Token::Invalid);
     cachedNextToken = *this;
     (TokenWithData&)* this = token;

@@ -43,6 +43,40 @@ struct LexerState : TokenWithData {
     std::string_view sourceBuffer = {};
     HomogeneousStreamAllocator<StreamToken> tokenStream;
 
+    LexerState(std::string_view sourceBuffer)
+        : sourceBuffer(sourceBuffer) {
+        if (!sourceBuffer.empty())
+            tokenStream.emit(StreamToken::makeNewline(1, 0));
+    }
+};
+
+struct Lexer : LexerState {
+    struct ErrorHandler {
+        enum class LexerAction {
+            // try to lex a new token at the current offset
+            Retry,
+
+            // proceed with the current token (possibly set by the handler)
+            AcceptState,
+        };
+        virtual LexerAction invalidCharacter(Lexer*, char) = 0;
+        virtual LexerAction unterminatedBlockComment(Lexer*, int_t beginOffset) = 0;
+        virtual LexerAction unterminatedCharacterLiteral(Lexer*, int_t beginOffset, int_t endOffset) = 0;
+        virtual LexerAction invalidCharacterLiteral(Lexer*, int_t beginOffset, int_t endOffset) = 0;
+    };
+    struct Instrumenter {
+        virtual void handleComment(Lexer*) { }
+        virtual void nextToken(Lexer*) { }
+    };
+
+    ErrorHandler* errorHandler = nullptr;
+    Instrumenter* instrumenter = nullptr;
+
+    WordStringTable wordTable { words };
+
+    Lexer()
+        : LexerState(std::string_view()) { }
+
     void setSource(std::string_view);
 
     TokenWithData fullToken() const { return *this; }
@@ -56,37 +90,21 @@ struct LexerState : TokenWithData {
 
     std::string_view source(int_t begin, int_t end) const;
     SourcePosition sourcePosition(LocalSourceLocation) const;
-};
-
-struct Parser : LexerState {
-    struct ErrorHandler {
-        enum class LexerAction {
-            // try to lex a new token at the current offset
-            Retry,
-
-            // proceed with the current token (possibly set by the handler)
-            AcceptState,
-        };
-        virtual LexerAction invalidCharacter(Parser*, char) = 0;
-        virtual LexerAction unterminatedBlockComment(Parser*, int_t beginOffset) = 0;
-        virtual LexerAction unterminatedCharacterLiteral(Parser*, int_t beginOffset, int_t endOffset) = 0;
-        virtual LexerAction invalidCharacterLiteral(Parser*, int_t beginOffset, int_t endOffset) = 0;
-    };
-    struct Instrumenter {
-        virtual void handleComment(Parser*) { }
-        virtual void nextToken(Parser*) { }
-        virtual void emitNode(Parser*, Node*) { }
-        virtual void emitDecl(Parser*, Decl*) { }
-    };
-
-    ErrorHandler* errorHandler = nullptr;
-    Instrumenter* instrumenter = nullptr;
 
     // advance while skipping over comment and newline tokens
     void nextToken();
     void reemitLastToken(TokenWithData);
+};
 
-    WordStringTable wordTable { words };
+struct Parser : Lexer {
+    struct Instrumenter {
+        virtual void emitNode(Parser*, Node*) { }
+        virtual void emitDecl(Parser*, Decl*) { }
+    };
+    struct ErrorHandler { };
+
+    Instrumenter* instrumenter = nullptr;
+    ErrorHandler* errorHandler = nullptr;
 
     StreamAllocator<4> nodeStream;
     Node* nextNodeLocation() const {
