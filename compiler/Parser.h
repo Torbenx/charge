@@ -131,20 +131,20 @@ struct Parser : Lexer {
     template<std::derived_from<Node> T>
     T* emitNode(T in);
 
-    DeclContext* declContext = nullptr;
+    StaticDeclContext* staticDeclContext = nullptr;
+    ParameterDeclContext* parameterDeclContext = nullptr;
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDeclInternal(Args&&...);
     template<std::derived_from<Decl> T, typename... Args>
     T* emitDecl(Args&&...);
-    template<typename T>
-    struct DeclContextHelper;
+    struct ParameterDeclContextHelper;
 
     NamespaceDecl* parseModule();
     void parseDeclaration();
     void parseNamespaceDecl();
-    void parseTypeDecl(std::span<const WordAndLocation>, DeclContextHelper<ParameterDeclContext>);
-    void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, DeclContextHelper<ParameterDeclContext>);
-    void parseFunctionDecl(std::span<const WordAndLocation>, DeclContextHelper<ParameterDeclContext>);
+    void parseTypeDecl(std::span<const WordAndLocation>, ParameterDeclContextHelper);
+    void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, ParameterDeclContextHelper);
+    void parseFunctionDecl(std::span<const WordAndLocation>, ParameterDeclContextHelper);
     void parseHasMemberDecl();
     enum class ParameterParseOptions {
         None,

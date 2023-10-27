@@ -57,24 +57,23 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
     }
 
     // declarations
-    std::optional<DumpResult> visitDeclContext(DeclContext* declContext) {
+    std::optional<DumpResult> visitDeclContext(StaticDeclContext* declContext) {
         std::optional<DumpResult> lastDecl;
         for (Decl* decl : *declContext)
             lastDecl = visitDecl(decl);
         return lastDecl;
     }
     std::optional<DumpResult> visitDeclContext(ParameterDeclContext* declContext) {
-        std::optional<DumpResult> lastParameter;
+        std::optional<DumpResult> lastDecl;
         for (Decl* decl : declContext->parameters())
-            lastParameter = visitDecl(decl);
-        std::optional<DumpResult> lastDecl = visitDeclContext((DeclContext*)declContext);
-        return lastDecl.has_value() ? lastDecl : lastParameter;
+            lastDecl = visitDecl(decl);
+        return lastDecl;
     }
     DumpResult visitNamespaceDecl(NamespaceDecl& d) {
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitDeclContext(d.declContext());
+        auto lastDecl = visitDeclContext(d.staticDecls());
         if (lastDecl.has_value())
             lastDecl.value()->lastChild = true;
         else
@@ -86,9 +85,12 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitDeclContext(d.declContext());
-        if (lastDecl.has_value())
-            lastDecl.value()->lastChild = true;
+        auto lastParameter = visitDeclContext(d.parameterDecls());
+        auto lastStatic = visitDeclContext(d.staticDecls());
+        if (lastStatic.has_value())
+            lastStatic.value()->lastChild = true;
+        else if (lastParameter.has_value())
+            lastParameter.value()->lastChild = true;
         else
             out->leafNode = true;
 
@@ -98,7 +100,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitDeclContext(d.declContext());
+        auto lastDecl = visitDeclContext(d.parameterDecls());
         auto type = visitExpr(d.typeExpr());
         auto init = visitExpr(d.initExpr());
 
@@ -117,7 +119,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
         DumpResult out = insertAtEnd(DumpEntry { d.kind() });
         out->content = fmt::format("'{}'", wordTable.view(d.name));
 
-        auto lastDecl = visitDeclContext(d.declContext());
+        auto lastDecl = visitDeclContext(d.parameterDecls());
         auto type = visitExpr(d.returnTypeExpr());
         auto body = visitGeneric(d.body());
 
@@ -162,7 +164,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
 
         auto type = visitExpr(d.typeExpr());
         VERIFY(type.has_value());
-        auto lastDecl = visitDeclContext(d.declContext());
+        auto lastDecl = visitDeclContext(d.staticDecls());
 
         if (lastDecl.has_value()) {
             lastDecl.value()->lastChild = true;

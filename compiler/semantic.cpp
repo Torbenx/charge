@@ -128,8 +128,8 @@ struct Generator : NodeStreamVisitor<Generator, StmtResult, ExprValue> {
         //  - For a type-decl a literal for the type.
         //  - For a function-decl a literal for the function.
 
-        if (auto* staticDecl = dyn_cast<StaticDecl>(decl)) {
-            if (staticDecl->declContext()->templateParameterCount > 0) {
+        if (auto* staticDecl = dyn_cast<ParameterizedDecl>(decl)) {
+            if (staticDecl->parameterDecls()->templateParameterCount > 0) {
                 // TODO: Handle templates
                 VERIFY_NOT_REACHED();
             }

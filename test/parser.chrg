@@ -165,12 +165,12 @@ template(T: type)
 fn test5(a: T): { }
 
 // expect-decl Namespace name=Namespace
+// expect-decl StructType name=Foo
 // expect-decl LetParameter name=a
 // expect-decl Function name=foo
-// expect-decl StructType name=Foo
+// expect-decl ObjectType name=Bar
 // expect-decl LetParameter name=b
 // expect-decl Function name=bar
-// expect-decl ObjectType name=Bar
 // expect-decl StaticLetVariable name=x
 namespace Namespace: {
     struct Foo: {
@@ -190,9 +190,13 @@ static name: type = init;
 /> expect-decl StaticLetVariable </ static let a;
 /> expect-decl StaticMutVariable </ static mut b;
 
-// expect-decl HasMember; expect-decl StructType
+// expect-decl StructType; expect-decl HasMember
 struct Foo1: { has Bar; }
-// expect-decl HasMember name=bar; expect-decl StructType
+// expect-decl StructType; expect-decl HasMember name=bar
 struct Foo2: { has Bar as bar; }
-// expect-decl HasMember; expect-decl Function name=test; expect-decl StructType
+// expect-decl StructType; expect-decl HasMember; expect-decl Function name=test
 struct Foo3: { has Bar: { fn test(): { } } }
+
+// expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
+template(T: type)
+struct Foo4: { static x; }
