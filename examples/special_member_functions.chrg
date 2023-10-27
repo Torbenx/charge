@@ -1,0 +1,29 @@
+
+object MyType: {
+
+    fn operator=(  out self, in      other: MyType); // copy constructor
+    fn operator=(  out self, move    other: MyType); // move constructor
+    fn operator=(  out self, destroy other: MyType); // relocate constructor
+    fn operator=(inout self, in      other: MyType); // copy assignment
+    fn operator=(inout self, move    other: MyType); // move assignment
+    fn operator=(inout self, destroy other: MyType); // relocate assignment
+
+    fn operator=(out[_] self, by-reference other: MyType);
+
+    // deduction rules:
+
+    // by-reference
+    //               r-value -> 'move'
+    //   initialized l-value -> 'in'
+    // uninitialized l-value -> error!
+
+    // out[_]
+    //               r-value -> error!
+    //   initialized l-value -> 'inout'
+    // uninitialized l-value -> 'out'
+
+    // forward
+    //               r-value -> 'copy'
+    //   initialized l-value -> 'in'
+    // uninitialized l-value -> error!
+}
