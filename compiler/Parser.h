@@ -141,11 +141,11 @@ struct Parser : Lexer {
 
     NamespaceDecl* parseModule();
     void parseDeclaration();
-    void parseNamespaceDecl();
-    void parseTypeDecl(std::span<const WordAndLocation>, ParameterDeclContextHelper);
+    void parseNamespaceDecl(WordAndLocation name);
+    void parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation>, ParameterDeclContextHelper);
     void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, ParameterDeclContextHelper);
-    void parseFunctionDecl(std::span<const WordAndLocation>, ParameterDeclContextHelper);
-    void parseHasMemberDecl();
+    void parseFunctionDecl(WordAndLocation name, std::span<const WordAndLocation>, ParameterDeclContextHelper);
+    void parseHasMemberDecl(WordAndLocation name);
     enum class ParameterParseOptions {
         None,
         OnlyLetParameters,

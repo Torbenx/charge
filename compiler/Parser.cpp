@@ -127,14 +127,6 @@ void Parser::parseDeclaration() {
         VERIFY_NOT_REACHED();
     }
 
-    if (tokWord() == words["namespace"]) {
-        parseNamespaceDecl();
-        return;
-    } else if (tokWord() == words["has"]) {
-        parseHasMemberDecl();
-        return;
-    }
-
     ParameterDeclContextHelper helper(this);
     if (tokWord() == words["template"]) {
         nextToken();
@@ -147,45 +139,44 @@ void Parser::parseDeclaration() {
 
     std::vector<WordAndLocation> attributes;
     while (tok == Token::Word) {
-        if (tokWord() == words["struct"] || tokWord() == words["object"]) {
-            parseTypeDecl(attributes, std::move(helper));
-            return;
-        }
-        if (tokWord() == words["fn"]) {
-            parseFunctionDecl(attributes, std::move(helper));
-            return;
-        }
-
         attributes.push_back(tokWord());
         nextToken();
     }
-
     if (attributes.empty()) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
-    auto name = attributes.back();
+    WordAndLocation name = attributes.back();
     attributes.pop_back();
 
-    parseVariableDecl(name, attributes, std::move(helper));
+    if (tok != Token::Colon) {
+        parseVariableDecl(name, attributes, std::move(helper));
+        return;
+    }
+    auto colonToken = fullToken();
+    nextToken();
+
+    if (tok == Token::LeftParen) {
+        parseFunctionDecl(name, attributes, std::move(helper));
+    } else if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    } else if (tokWord() == words["namespace"]) {
+        parseNamespaceDecl(name);
+    } else if (tokWord() == words["has"]) {
+        parseHasMemberDecl(name);
+    } else if (tokWord() == words["struct"] || tokWord() == words["object"]) {
+        parseTypeDecl(name, attributes, std::move(helper));
+    } else {
+        reemitLastToken(colonToken);
+        parseVariableDecl(name, attributes, std::move(helper));
+    }
 }
 
-void Parser::parseNamespaceDecl() {
+void Parser::parseNamespaceDecl(WordAndLocation name) {
     VERIFY(tok == Token::Word && tokWord() == words["namespace"]);
     nextToken();
 
-    if (tok != Token::Word) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-    WordAndLocation name = tokWord();
-    nextToken();
-
-    if (tok != Token::Colon) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-    nextToken();
     if (tok != Token::LeftBrace) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -213,7 +204,7 @@ void Parser::parseNamespaceDecl() {
     nextToken();
 }
 
-void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, ParameterDeclContextHelper parameterHelper) {
+void Parser::parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper parameterHelper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -229,18 +220,6 @@ void Parser::parseTypeDecl(std::span<const WordAndLocation> attributes, Paramete
         VERIFY_NOT_REACHED();
     nextToken();
 
-    if (tok != Token::Word) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-    WordAndLocation name = tokWord();
-    nextToken();
-
-    if (tok != Token::Colon) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-    nextToken();
     if (tok != Token::LeftBrace) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -279,6 +258,7 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     }
 
     Node* typeExpr = nextNodeLocation();
+
     if (tok == Token::Colon) {
         nextToken();
         parseExpression();
@@ -301,25 +281,13 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     emitDecl<StaticVariableDecl>(kind, name, helper.popContext(), typeExpr, initExpr);
 }
 
-void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, ParameterDeclContextHelper helper) {
+void Parser::parseFunctionDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper helper) {
     if (attributes.size() != 0) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
 
-    VERIFY(tok == Token::Word && tokWord() == words["fn"]);
-    nextToken();
-    if (tok != Token::Word) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-    WordAndLocation name = tokWord();
-    nextToken();
-
-    if (tok != Token::LeftParen) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
+    VERIFY(tok == Token::LeftParen);
     parseParameters();
 
     Node* returnType = nextNodeLocation();
@@ -335,7 +303,7 @@ void Parser::parseFunctionDecl(std::span<const WordAndLocation> attributes, Para
     emitDecl<FunctionDecl>(name, helper.popContext(), returnType, body);
 }
 
-void Parser::parseHasMemberDecl() {
+void Parser::parseHasMemberDecl(WordAndLocation name) {
     VERIFY(tok == Token::Word && tokWord() == words["has"]);
     nextToken();
 
@@ -346,25 +314,9 @@ void Parser::parseHasMemberDecl() {
     Node* initExpr = nextNodeLocation();
     emitNode(EmptyNode());
 
-    WordAndLocation name = {};
-    if (tok == Token::Word && tokWord() == words["as"]) {
-        nextToken();
-        if (tok != Token::Word) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
-        name = tokWord();
-        nextToken();
-    }
-
     HasMemberDecl* decl = emitDecl<HasMemberDecl>(name, typeExpr, initExpr);
-    if (tok == Token::Colon) {
+    if (tok == Token::LeftBrace) {
         StaticDeclContextHelper helper(this, decl->staticDecls());
-        nextToken();
-        if (tok != Token::LeftBrace) {
-            // errorHandler;
-            VERIFY_NOT_REACHED();
-        }
         nextToken();
         while (tok != Token::RightBrace) {
             parseDeclaration();
@@ -447,8 +399,8 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
 }
 
 void Parser::parseBodyExprOrStmt() {
-    if (tok == Token::Colon) {
-        parseSingleOrCompoundStmt();
+    if (tok == Token::LeftBrace) {
+        parseCompoundStmt();
     } else if (tok == Token::FatArrow) {
         nextToken();
         parseExpression();
