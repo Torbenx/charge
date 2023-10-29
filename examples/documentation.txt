@@ -74,6 +74,10 @@
 -- 'guard' preconditions are ideally also checked at the call size, where they can be optimized away.
 
 
+-- solve type equality by only allowing 'where assicated-type = direct-assicated-type'.
+-- trait "inheritance" is constraint 'Self' type.
+
+
 SSA:
  - resolve everything to fully specified calls / member accesses
  - seperate static and runtime blocks
