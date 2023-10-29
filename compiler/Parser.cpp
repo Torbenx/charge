@@ -683,10 +683,8 @@ void Parser::parsePostfixExprHere() {
             }
             emitNode(AccessExpr(kind, location, tokWord()));
             nextToken();
-            if (tok == Token::LeftBrace) {
-                emitNode(Parameterize(tokRange()));
-                parseArguments();
-            }
+            if (tok == Token::Less)
+                parseParameterizeOrLess();
         } else if (tok == Token::LeftParen || tok == Token::LeftAngle) {
             NodeKind kind = tok == Token::LeftParen ? NodeKind::CallExpr : NodeKind::IndexExpr;
             emitNode(CallExpr(kind, tokRange()));
@@ -705,10 +703,8 @@ void Parser::parsePrimaryExpr() {
     if (tok == Token::Word) {
         emitNode(IdentifierExpr(tokRange(), tokWord()));
         nextToken();
-        if (tok == Token::LeftBrace) {
-            emitNode(Parameterize(tokRange()));
-            parseArguments();
-        }
+        if (tok == Token::Less)
+            parseParameterizeOrLess();
     } else if (tok == Token::LeftParen) {
         emitNode(ParenthesizedExpr(tokRange()));
         parseArguments();
@@ -768,4 +764,60 @@ void Parser::parseArguments() {
     VERIFY(tok == rightBracket);
     emitNode(EmptyNode(tokRange()));
     nextToken();
+}
+
+void Parser::parseParameterizeOrLess() {
+    enum class State {
+        Ambiguous,
+        DisambiguousByComma,
+    };
+    Node* node = emitNode(Node(NodeKind::Unresolved, tokRange()));
+    State state = State::Ambiguous;
+
+    VERIFY(tok == Token::Less);
+    nextToken();
+    if (tok == Token::Greater) {
+        emitNode(EmptyNode(tokRange()));
+        nextToken();
+        node->setKind(NodeKind::Parameterize);
+        return;
+    }
+
+    // break if we find '<' is a binary operator and
+    // return directly if it is the beginning of a parameter list.
+    for (;;) {
+        parseUnaryOperatorExpr();
+        if (tok == Token::Greater) {
+            emitNode(EmptyNode(tokRange()));
+            nextToken();
+            node->setKind(NodeKind::Parameterize);
+            return;
+        }
+        if (tok == Token::Comma) {
+            auto commaToken = fullToken();
+            nextToken();
+            if (tok == Token::Word && tokWord() == words["else"]) {
+                reemitLastToken(commaToken);
+                break;
+            }
+            state = State::DisambiguousByComma;
+            continue;
+        } else if (isBinaryOp(tok)) {
+            NodeKind kind = binaryToExpr(tok);
+            if (precedenceOf(kind) < ExpressionPrecedence::Relational) {
+                emitNode(BinaryOperatorExpr(kind, tokRange()));
+                nextToken();
+                continue;
+            }
+        }
+        break;
+    }
+    // The initial '<' is part of a relational chain.
+    // We are after a unary expression here which compatible with what the upwards stack expects.
+    // Therefore we can return and let the calling code take care of the rest.
+    if (state == State::DisambiguousByComma) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    node->setKind(NodeKind::CompareLessExpr);
 }

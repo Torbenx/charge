@@ -26,7 +26,7 @@ struct DumpEntry {
     std::variant<NodeKind, DeclKind> kind;
     bool leafNode = false;
     bool lastChild = false;
-    bool hasBraces = false;
+    bool isParameterized = false;
     Word name = {};
     std::string content = {};
 };
@@ -326,7 +326,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
             lastArg = arg.value();
         }
         if (lastArg.has_value()) {
-            base->hasBraces = true;
+            base->isParameterized = true;
             lastArg.value()->lastChild = true;
         }
         return base;
@@ -394,10 +394,10 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
             if (entry.content.length() > 0)
                 out << entry.content;
 
-            if (entry.hasBraces) {
-                out << "{";
+            if (entry.isParameterized) {
+                out << "<";
                 out.addLevel();
-                out << " }";
+                out << " >";
             } else if (entry.leafNode) {
                 out.endTree();
             }

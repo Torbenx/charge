@@ -173,6 +173,7 @@ struct Parser : Lexer {
     void parsePostfixExprHere();
     void parsePrimaryExpr();
     void parseArguments();
+    void parseParameterizeOrLess();
 };
 
 template<std::derived_from<Node> T>

@@ -65,10 +65,13 @@ public:
         if constexpr (ExpressionPrecedence::prec == ExpressionPrecedence::Primary) { \
             type* thisNode = (type*)nodeStream;                                      \
             nodeStream = thisNode + 1;                                               \
-            if constexpr (NodeKind::kind == NodeKind::EmptyNode)                     \
+            if constexpr (NodeKind::kind == NodeKind::EmptyNode) {                   \
                 ret = std::nullopt;                                                  \
-            else                                                                     \
+            } else if constexpr (NodeKind::kind == NodeKind::Unresolved) {           \
+                VERIFY_NOT_REACHED();                                                \
+            } else {                                                                 \
                 ret.template emplace<index<type>()>(impl()->visit##type(*thisNode)); \
+            }                                                                        \
             /* Non-expression primary nodes are returned immediately. */             \
             if constexpr (!std::derived_from<type, Expr>)                            \
                 return ret;                                                          \
