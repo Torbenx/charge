@@ -750,8 +750,17 @@ void Parser::parseParameterizeOrLess() {
         }
         if (tok == Token::Greater) {
             emitNode(EmptyNode(tokRange()));
-            nextToken();
             node->setKind(NodeKind::Parameterize);
+            nextToken();
+            return;
+        }
+        if (tok == Token::GreaterGreater) {
+            emitNode(EmptyNode(tokRange()));
+            node->setKind(NodeKind::Parameterize);
+            auto token = fullToken();
+            token.tok = Token::Greater;
+            nextToken();
+            reemitLastToken(token);
             return;
         }
         if (tok == Token::Comma) {
@@ -765,7 +774,9 @@ void Parser::parseParameterizeOrLess() {
             continue;
         } else if (isBinaryOp(tok)) {
             NodeKind kind = binaryToExpr(tok);
-            if (precedenceOf(kind) < ExpressionPrecedence::Relational) {
+            //    allowed binary ops: *, /, %, +, -
+            // disallowed binary ops: &&, ||, &, |, ^, ==, !=, <, <=, >=, >, >>, <<
+            if (precedenceOf(kind) < ExpressionPrecedence::Shift) {
                 emitNode(BinaryOperatorExpr(kind, tokRange()));
                 nextToken();
                 continue;
