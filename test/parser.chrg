@@ -69,8 +69,8 @@ test: () {
 
 //; other statements
 /> expect-node IdentifierExpr; expect-node IfStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: b;
-/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt </ if a: { }
-/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a: { b; }
+/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt </ if a { }
+/> expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt </ if a { b; }
 /> expect-identifier condition; expect-node IfExpr; expect-identifier if_true; expect-node ExpressionStmt </ if condition => if_true;
 /> expect-node EmptyReturnStmt </ return;
 /> expect-node IdentifierExpr; expect-node ReturnStmt </ return a;
