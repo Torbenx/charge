@@ -127,6 +127,15 @@ void Parser::parseDeclaration() {
         VERIFY_NOT_REACHED();
     }
 
+    if (tokWord() == words["has"]) {
+        parseHasMemberDecl();
+        return;
+    }
+    if (tokWord() == words["namespace"]) {
+        parseNamespaceDecl();
+        return;
+    }
+
     ParameterDeclContextHelper helper(this);
     if (tokWord() == words["template"]) {
         nextToken();
@@ -161,10 +170,6 @@ void Parser::parseDeclaration() {
     } else if (tok != Token::Word) {
         // errorHandler;
         VERIFY_NOT_REACHED();
-    } else if (tokWord() == words["namespace"]) {
-        parseNamespaceDecl(name);
-    } else if (tokWord() == words["has"]) {
-        parseHasMemberDecl(name);
     } else if (tokWord() == words["struct"] || tokWord() == words["object"]) {
         parseTypeDecl(name, attributes, std::move(helper));
     } else {
@@ -173,8 +178,15 @@ void Parser::parseDeclaration() {
     }
 }
 
-void Parser::parseNamespaceDecl(WordAndLocation name) {
+void Parser::parseNamespaceDecl() {
     VERIFY(tok == Token::Word && tokWord() == words["namespace"]);
+    nextToken();
+
+    if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    WordAndLocation name = tokWord();
     nextToken();
 
     if (tok != Token::LeftBrace) {
@@ -303,7 +315,7 @@ void Parser::parseFunctionDecl(WordAndLocation name, std::span<const WordAndLoca
     emitDecl<FunctionDecl>(name, helper.popContext(), returnType, body);
 }
 
-void Parser::parseHasMemberDecl(WordAndLocation name) {
+void Parser::parseHasMemberDecl() {
     VERIFY(tok == Token::Word && tokWord() == words["has"]);
     nextToken();
 
@@ -313,6 +325,17 @@ void Parser::parseHasMemberDecl(WordAndLocation name) {
 
     Node* initExpr = nextNodeLocation();
     emitNode(EmptyNode());
+
+    WordAndLocation name = {};
+    if (tok == Token::Word && tokWord() == words["as"]) {
+        nextToken();
+        if (tok != Token::Word) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+        name = tokWord();
+        nextToken();
+    }
 
     HasMemberDecl* decl = emitDecl<HasMemberDecl>(name, typeExpr, initExpr);
     if (tok == Token::LeftBrace) {

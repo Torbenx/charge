@@ -188,7 +188,7 @@ test5: (a: T) { }
 // expect-decl LetParameter name=b
 // expect-decl Function name=bar
 // expect-decl StaticLetVariable name=x
-Namespace: namespace {
+namespace Namespace {
     Foo: struct {
         foo: (a) { }
     }
@@ -207,9 +207,9 @@ static name: type = init;
 /> expect-decl StaticVarVariable </ static var b;
 
 // expect-decl StructType; expect-decl HasMember name=bar
-Foo2: struct { bar: has Bar; }
+Foo2: struct { has Bar as bar; }
 // expect-decl StructType; expect-decl HasMember; expect-decl Function name=test
-Foo3: struct { bar: has Bar { test: () { } } }
+Foo3: struct { has Bar as bar { test: () { } } }
 
 // expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)

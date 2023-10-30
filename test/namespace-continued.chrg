@@ -1,12 +1,12 @@
 // semantic-test
 
-a: namespace {
+namespace a {
 
     test1: () { }
 
 }
 
-a: namespace {
+namespace a {
 
     test2: () { }
 
