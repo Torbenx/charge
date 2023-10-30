@@ -236,7 +236,7 @@ void Parser::parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation
 }
 
 void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper helper) {
-    // static [mut|let] name [: type] [= init];
+    // static [var|let] name [: type] [= init];
     if (attributes.empty() || attributes.front() != words["static"]) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -249,8 +249,8 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
         }
         if (attributes[1] == words["let"]) {
             kind = DeclKind::StaticLetVariable;
-        } else if (attributes[1] == words["mut"]) {
-            kind = DeclKind::StaticMutVariable;
+        } else if (attributes[1] == words["var"]) {
+            kind = DeclKind::StaticVarVariable;
         } else {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -336,7 +336,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
     nextToken();
     int_t count = 0;
     while (tok != Token::RightParen) {
-        // [let|mut|inout|out] name [?constrait] [: type] [= init]
+        // [let|var|inout|out] name [?constrait] [: type] [= init]
         if (tok != Token::Word) {
             errorHandler->expectedParameterName(this);
             VERIFY(tok == Token::Word);
@@ -351,8 +351,8 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             }
             if (name == words["let"]) {
                 kind = DeclKind::LetParameter;
-            } else if (name == words["mut"]) {
-                kind = DeclKind::MutParameter;
+            } else if (name == words["var"]) {
+                kind = DeclKind::VarParameter;
             } else if (name == words["inout"]) {
                 kind = DeclKind::InOutParameter;
             } else if (name == words["out"]) {
@@ -470,19 +470,14 @@ Parser::ParsedStatementKind Parser::parseStatementInternal() {
             consumeSemiColon(this);
             return ParsedStatementKind::Normal;
         }
-        if (tokWord() == words["let"] || tokWord() == words["mut"]) {
-            DeclKind declKind = DeclKind::BlockLetVariable;
+        if (tokWord() == words["let"] || tokWord() == words["var"]) {
+            DeclKind declKind;
             if (tokWord() == words["let"])
-                nextToken();
-            if (tok != Token::Word) {
-                // errorHandler;
-                VERIFY_NOT_REACHED();
-            }
+                declKind = DeclKind::BlockLetVariable;
+            else
+                declKind = DeclKind::BlockVarVariable;
             auto declaratorLoc = tokRange();
-            if (tokWord() == words["mut"]) {
-                declKind = DeclKind::BlockMutVariable;
-                nextToken();
-            }
+            nextToken();
             if (tok != Token::Word) {
                 // errorHandler;
                 VERIFY_NOT_REACHED();

@@ -16,15 +16,15 @@ struct Decl;
     DECL(ObjectType, TypeDecl)                  \
     DECL(Function, FunctionDecl)                \
     DECL(StaticLetVariable, StaticVariableDecl) \
-    DECL(StaticMutVariable, StaticVariableDecl) \
+    DECL(StaticVarVariable, StaticVariableDecl) \
     DECL(Member, ParameterOrMemberDecl)         \
     DECL(HasMember, HasMemberDecl)              \
     DECL(LetParameter, ParameterOrMemberDecl)   \
-    DECL(MutParameter, ParameterOrMemberDecl)   \
+    DECL(VarParameter, ParameterOrMemberDecl)   \
     DECL(InOutParameter, ParameterOrMemberDecl) \
     DECL(OutParameter, ParameterOrMemberDecl)   \
     DECL(BlockLetVariable, BlockVariableDecl)   \
-    DECL(BlockMutVariable, BlockVariableDecl)
+    DECL(BlockVarVariable, BlockVariableDecl)
 
 enum class DeclKind : uint8_t {
 

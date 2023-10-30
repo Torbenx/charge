@@ -75,9 +75,8 @@ test: () {
 /> expect-node EmptyReturnStmt </ return;
 /> expect-node IdentifierExpr; expect-node ReturnStmt </ return a;
 /> expect-node LetStmt; expect-decl BlockLetVariable name=a1 </ let a1;
-/> expect-node LetStmt; expect-decl BlockMutVariable name=a2 </ let mut a2;
-/> expect-node LetStmt; expect-decl BlockMutVariable name=a3 </ mut a3;
-/> expect-node LetStmt; expect-identifier type; expect-node EmptyNode; expect-identifier init; expect-node EmptyNode </ let a4: type = init;
+/> expect-node LetStmt; expect-decl BlockVarVariable name=a2 </ var a2;
+/> expect-node LetStmt; expect-identifier type; expect-node EmptyNode; expect-identifier init; expect-node EmptyNode </ let a3: type = init;
 
 //; test precedence
 // expect-identifier a; expect-node LogicalOrExpr;
@@ -161,11 +160,11 @@ a<b<c>>;
 /> expect-decl LetParameter; expect-decl Function </ test2: (a) { }
 
 // expect-decl LetParameter name=a
-// expect-decl MutParameter name=b
+// expect-decl VarParameter name=b
 // expect-decl InOutParameter name=c
 // expect-decl OutParameter name=d
 // expect-decl Function name=test3
-test3: (let a, mut b, inout c, out d) { }
+test3: (let a, var b, inout c, out d) { }
 
 // expect-identifier param_type; expect-node EmptyNode
 // expect-identifier param_init; expect-node EmptyNode
@@ -205,7 +204,7 @@ Namespace: namespace {
 static name: type = init;
 
 /> expect-decl StaticLetVariable </ static let a;
-/> expect-decl StaticMutVariable </ static mut b;
+/> expect-decl StaticVarVariable </ static var b;
 
 // expect-decl StructType; expect-decl HasMember name=bar
 Foo2: struct { bar: has Bar; }

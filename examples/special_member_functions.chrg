@@ -1,14 +1,14 @@
 
-object MyType: {
+MyType: object {
 
-    fn operator=(  out self, in      other: MyType); // copy constructor
-    fn operator=(  out self, move    other: MyType); // move constructor
-    fn operator=(  out self, destroy other: MyType); // relocate constructor
-    fn operator=(inout self, in      other: MyType); // copy assignment
-    fn operator=(inout self, move    other: MyType); // move assignment
-    fn operator=(inout self, destroy other: MyType); // relocate assignment
+    constructor: (  out self, in      other: MyType); // copy constructor
+    constructor: (  out self, move    other: MyType); // move constructor
+    constructor: (  out self, destroy other: MyType); // relocate constructor
+    constructor: (inout self, in      other: MyType); // copy assignment
+    constructor: (inout self, move    other: MyType); // move assignment
+    constructor: (inout self, destroy other: MyType); // relocate assignment
 
-    fn operator=(out[_] self, by-reference other: MyType);
+    constructor: (out[_] self, by-reference other: MyType);
 
     // deduction rules:
 
@@ -25,5 +25,26 @@ object MyType: {
     // forward
     //               r-value -> 'copy'
     //   initialized l-value -> 'in'
+    // uninitialized l-value -> error!
+}
+
+MyType: object {
+    // let, var, inout, out
+    // forward, assign
+    constructor: (  out self, let other: MyType);
+    constructor: (  out self, var other: MyType);
+    constructor: (inout self, let other: MyType);
+    constructor: (inout self, var other: MyType);
+
+    constructor: (assign self, forward other: MyType);
+
+    // assign
+    //               r-value -> error!
+    //   initialized l-value -> 'inout'
+    // uninitialized l-value -> 'out'
+
+    // forward
+    //               r-value -> 'var'
+    //   initialized l-value -> 'let'
     // uninitialized l-value -> error!
 }
