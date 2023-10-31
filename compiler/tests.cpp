@@ -105,13 +105,15 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
             case TestMode::Parser: {
                 std::cout << "------\n";
                 NamespaceDecl* global = par.parseModule();
-                dump(global, par.wordTable);
+                // dump(global, par.wordTable);
                 break;
             }
             case TestMode::Semantic: {
                 std::cout << "------\n";
                 NamespaceDecl* global = par.parseModule();
-                dump(global, par.wordTable);
+                // dump(global, par.wordTable);
+                SemanticContext sema;
+                sema.check(global);
                 break;
             }
             case TestMode::Benchmark: {

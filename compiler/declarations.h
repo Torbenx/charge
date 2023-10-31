@@ -9,28 +9,13 @@
 struct Node;
 struct ParameterOrMemberDecl;
 struct Decl;
-
-#define ENUMERATE_DECL_KINDS                    \
-    DECL(Namespace, NamespaceDecl)              \
-    DECL(StructType, TypeDecl)                  \
-    DECL(ObjectType, TypeDecl)                  \
-    DECL(Function, FunctionDecl)                \
-    DECL(StaticLetVariable, StaticVariableDecl) \
-    DECL(StaticVarVariable, StaticVariableDecl) \
-    DECL(Member, ParameterOrMemberDecl)         \
-    DECL(HasMember, HasMemberDecl)              \
-    DECL(LetParameter, ParameterOrMemberDecl)   \
-    DECL(VarParameter, ParameterOrMemberDecl)   \
-    DECL(InOutParameter, ParameterOrMemberDecl) \
-    DECL(OutParameter, ParameterOrMemberDecl)   \
-    DECL(BlockLetVariable, BlockVariableDecl)   \
-    DECL(BlockVarVariable, BlockVariableDecl)
+struct StaticDecl;
+struct ParameterizedDecl;
 
 enum class DeclKind : uint8_t {
 
-#define DECL(kind, type) kind,
-    ENUMERATE_DECL_KINDS
-#undef DECL
+#define ANY_DECL(kind, type) kind,
+#include "declarations.inc"
 
 };
 
@@ -55,11 +40,15 @@ struct Decl {
     Word name;
     constexpr Decl(DeclKind kind, WordAndLocation name)
         : kindBits(std::to_underlying(kind))
-        , statusBits(std::to_underlying(DeclStatus::Unchecked))
+        , statusBits(std::to_underlying(
+              isDeclType<ParameterizedDecl>(kind)
+                  ? DeclStatus::Unchecked
+                  : DeclStatus::FullyChecked))
         , locationBits(name.location.tokenStreamOffset)
         , name(name) { VERIFY(isDeclType<Decl>(kind)); }
     DeclKind kind() const { return (DeclKind)kindBits; }
     DeclStatus status() const { return (DeclStatus)statusBits; }
+    bool signatureChecked() const { return status() >= DeclStatus::SignatureChecked; }
     void setStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
     SingleTokenSourceRange nameLocation() const { return SingleTokenSourceRange(locationBits); }
 };
@@ -128,13 +117,7 @@ struct StaticDeclContext : WordTable {
         bool empty() const { return begin() == end(); }
     };
 
-    void addDecl(Decl* decl) {
-        auto result = findWord(decl->name);
-        VERIFY(!result.found);
-        entries[result.bucket] = { decl->name, std::bit_cast<uint32_t>(relative_t(this, decl)) };
-        usedBuckets += 1;
-        maybeRehash();
-    }
+    void addDecl(StaticDecl* decl);
     named_range decls(Word name) {
         return { named_iterator(this, name) };
     }
@@ -177,47 +160,75 @@ struct StaticDeclContext : WordTable {
 };
 
 struct ParameterDeclContext {
-    std::vector<relative_pointer<ParameterDeclContext, ParameterOrMemberDecl>> parameterDecls;
+    struct Entry {
+        Entry(ParameterDeclContext* ctx, ParameterOrMemberDecl* decl)
+            : name(decl->name), decl(ctx, decl) { }
+        Word name;
+        relative_pointer<ParameterDeclContext, ParameterOrMemberDecl> decl;
+    };
+    std::vector<Entry> parameterDecls;
     int_t templateParameterCount = 0;
 
     void addDecl(ParameterOrMemberDecl* decl) {
         parameterDecls.push_back({ this, decl });
     }
 
+    Decl* find(Word name) {
+        for (Entry entry : parameterDecls) {
+            if (entry.name == name)
+                return entry.decl.get(this);
+        }
+        return nullptr;
+    }
+
     auto parameters() {
         return std::ranges::views::transform(parameterDecls,
-            [this](relative_pointer<ParameterDeclContext, ParameterOrMemberDecl> rel) {
-                return rel.get(this);
-            });
+            [this](Entry entry) { return entry.decl.get(this); });
     }
 };
 
-struct ParameterizedDecl : Decl {
+struct DeclaringStaticDecl;
+struct StaticDecl : Decl {
+    relative_pointer<StaticDecl, DeclaringStaticDecl> m_declaringDecl;
+    using Decl::Decl;
+
+    void setDeclaringStaticDecl(DeclaringStaticDecl* decl) {
+        m_declaringDecl = { this, decl };
+    }
+    DeclaringStaticDecl* declaringDecl() {
+        return m_declaringDecl.get(this);
+    }
+};
+// A static declaration declaring other static declarations.
+struct DeclaringStaticDecl : StaticDecl, private StaticDeclContext {
+    static constexpr DeclaringStaticDecl* fromContext(StaticDeclContext* ctx) {
+        return (DeclaringStaticDecl*)ctx;
+    }
+    DeclaringStaticDecl(DeclKind kind, WordAndLocation name)
+        : StaticDecl(kind, name) { VERIFY(isDeclType<DeclaringStaticDecl>(kind)); }
+
+    StaticDeclContext* staticDecls() { return this; }
+};
+struct ParameterizedDecl {
     relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
     StaticDeclProgram program;
-    ParameterizedDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
-        : Decl(kind, name), m_parameterDecls(this, declContext) { }
+    ParameterizedDecl(ParameterDeclContext* declContext)
+        : m_parameterDecls(this, declContext) { }
 
     ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
 };
-struct NamespaceDecl : Decl {
-    StaticDeclContext m_staticDecls;
+struct NamespaceDecl : DeclaringStaticDecl {
     NamespaceDecl(WordAndLocation name)
-        : Decl(DeclKind::Namespace, name) { }
-
-    StaticDeclContext* staticDecls() { return &m_staticDecls; }
+        : DeclaringStaticDecl(DeclKind::Namespace, name) { }
 };
-struct TypeDecl : ParameterizedDecl {
-    StaticDeclContext m_staticDecls;
-
+struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
     TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
-        : ParameterizedDecl(kind, name, declContext) { }
-    
-    StaticDeclContext* staticDecls() { return &m_staticDecls; }
+        : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext) { }
 };
-struct FunctionDecl : ParameterizedDecl {
+struct FunctionDecl : StaticDecl, ParameterizedDecl {
     FunctionDecl(WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
-        : ParameterizedDecl(DeclKind::Function, name, declContext)
+        : StaticDecl(DeclKind::Function, name)
+        , ParameterizedDecl(declContext)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { }
 
@@ -227,14 +238,13 @@ struct FunctionDecl : ParameterizedDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 };
-struct StaticVariableDecl : ParameterizedDecl {
+struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
 
     StaticVariableDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
-        : ParameterizedDecl(kind, name, declContext)
+        : StaticDecl(kind, name)
+        , ParameterizedDecl(declContext)
         , m_typeExpr(this, typeExpr)
-        , m_initExpr(this, initExpr) {
-        VERIFY(isDeclType<StaticVariableDecl>(kind));
-    }
+        , m_initExpr(this, initExpr) { VERIFY(isDeclType<StaticVariableDecl>(kind)); }
 
     relative_pointer<StaticVariableDecl, Node> m_typeExpr;
     relative_pointer<StaticVariableDecl, Node> m_initExpr;
@@ -264,16 +274,16 @@ struct BlockVariableDecl : Decl {
     Node* typeExpr() { return m_typeExpr.get(this); }
     Node* initExpr() { return m_initExpr.get(this); }
 };
+struct BlockDecl : Decl { };
 
 template<typename T>
 constexpr bool isDeclType(DeclKind kind) {
     switch (kind) {
 
-#define DECL(kind, type) \
-    case DeclKind::kind: \
+#define ANY_DECL(kind, type) \
+    case DeclKind::kind:     \
         return std::derived_from<type, T>;
-        ENUMERATE_DECL_KINDS
-#undef DECL
+#include "declarations.inc"
 
     default:
         VERIFY_NOT_REACHED();
@@ -284,7 +294,7 @@ template<typename Target>
 constexpr Target* dyn_cast(Decl* source) {
     switch (source->kind()) {
 
-#define DECL(kind, type)                                             \
+#define ANY_DECL(kind, type)                                         \
     case DeclKind::kind: {                                           \
         if constexpr (std::derived_from<type, Target>) {             \
             return static_cast<Target*>(static_cast<type*>(source)); \
@@ -292,8 +302,7 @@ constexpr Target* dyn_cast(Decl* source) {
             return nullptr;                                          \
         }                                                            \
     }
-        ENUMERATE_DECL_KINDS
-#undef DECL
+#include "declarations.inc"
 
     default:
         VERIFY_NOT_REACHED();

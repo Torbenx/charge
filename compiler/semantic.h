@@ -15,9 +15,6 @@ enum class Opcode : uint16_t {
 
 };
 
-struct LookupContext {
-};
-
 // The value of an expression is either a
 //  - value (SSAName), or
 //  - hypothetical value obtained from a
@@ -27,10 +24,8 @@ struct LookupContext {
 struct LoadValue {
     SSAName substance;
 };
-struct CallValue {
-};
 struct ExprValue {
-    std::variant<SSAName, LoadValue, CallValue> value;
+    std::variant<SSAName, LoadValue> value;
     SSAName type;
 };
 struct TypedValue {
@@ -47,7 +42,13 @@ struct SemanticContext {
     ErrorHandler* errorHandler = nullptr;
     Instrumenter* instrumenter = nullptr;
 
-    std::optional<id<Decl>> performLookup(LookupContext& ctx, Word name, LocalSourceRange dbgRange);
+    id<Decl> lookupFromInside(Decl*, WordAndLocation);
 
+    void signatureCheckTypeDecl(TypeDecl&);
     void signatureCheckStaticVariableDecl(StaticVariableDecl&);
+    void signatureCheckFunctionDecl(FunctionDecl&);
+
+    void requireSignature(Decl*);
+
+    void check(NamespaceDecl*);
 };

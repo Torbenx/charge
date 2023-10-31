@@ -45,17 +45,24 @@ ExpressionPrecedence precedenceOf(NodeKind node) {
 std::string_view nameString(DeclKind kind) {
     switch (kind) {
 
-#define DECL(kind, type) \
-    case DeclKind::kind: \
+#define ANY_DECL(kind, type) \
+    case DeclKind::kind:     \
         return #kind;
-        ENUMERATE_DECL_KINDS
-#undef DECL
+#include "declarations.inc"
 
     default:
         VERIFY_NOT_REACHED();
     }
 }
 
+void StaticDeclContext::addDecl(StaticDecl* decl) {
+    decl->setDeclaringStaticDecl(DeclaringStaticDecl::fromContext(this));
+    auto result = findWord(decl->name);
+    VERIFY(!result.found);
+    entries[result.bucket] = { decl->name, std::bit_cast<uint32_t>(relative_t(this, decl)) };
+    usedBuckets += 1;
+    maybeRehash();
+}
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDeclInternal(Args&&... args) {
     return std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
@@ -66,7 +73,7 @@ T* Parser::emitDecl(Args&&... args) {
 
     if constexpr (std::derived_from<T, ParameterOrMemberDecl>)
         parameterDeclContext->addDecl(decl);
-    else if constexpr (!std::is_same_v<T, BlockVariableDecl>)
+    else if constexpr (std::derived_from<T, StaticDecl>)
         staticDeclContext->addDecl(decl);
 
     if (instrumenter)

@@ -10,11 +10,10 @@ struct DeclVisitor {
     DeclResult visitDecl(Decl* decl) {
         switch (decl->kind()) {
 
-#define DECL(kind, type) \
-    case DeclKind::kind: \
+#define TREE_DECL(kind, type) \
+    case DeclKind::kind:      \
         return impl()->visit##type(*(type*)decl);
-            ENUMERATE_DECL_KINDS
-#undef DECL
+#include "declarations.inc"
 
         default:
             VERIFY_NOT_REACHED();
@@ -279,7 +278,7 @@ struct Dumper : NodeStreamVisitor<Dumper, DumpResult, DumpResult>, DeclVisitor<D
     }
     DumpResult visitIdentifierExpr(IdentifierExpr& e) {
         DumpEntry entry { e.kind(), true };
-        entry.content = fmt::format("'{}'", wordTable.view(e.identifierWord()));
+        entry.content = fmt::format("'{}'", wordTable.view(e.identifier()));
         return insertAtEnd(std::move(entry));
     }
     DumpResult visitCompoundExpr(CompoundExpr& e) {

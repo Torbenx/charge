@@ -152,8 +152,8 @@ struct IdentifierExpr : Expr {
     Word id;
     IdentifierExpr(SingleTokenSourceRange idLoc, Word id)
         : Expr(NodeKind::IdentifierExpr, idLoc), id(id) { }
-    LocalSourceRange identifierLocation() const { return packedToken(); }
-    Word identifierWord() const { return id; }
+    SingleTokenSourceRange identifierLocation() const { return packedToken(); }
+    WordAndLocation identifier() const { return { id, identifierLocation() }; }
 };
 struct CompoundExpr : Expr {
     CompoundExpr(SingleTokenSourceRange leftAngleLoc)
