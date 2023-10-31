@@ -33,3 +33,27 @@ fn test(x: int, y: int, a: int, b: int): {
     // a + b > 0                a + b - 1         >= 0      a*x + b*x - x >= 0, a*y + b*y - y >= 0
     // a * x + b * y <= 0       -a * x - b * y    >= 0      -a*x - b*y    >= 0
 }
+
+struct Node {
+    next: optional<id<Node>>;
+}
+fn proof_termination(first: id<Node>) {
+    var current = first;
+    loop {
+        if !current.next.has_value() {
+            break;
+        }
+        let next = current.next.value();
+
+        var check = first;
+        loop {
+            guard check != next;
+            if check == current {
+                break;
+            }
+            proof(check.next.has_value());
+            check = check.next.value();
+        }
+        current = next;
+    }
+}

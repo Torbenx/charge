@@ -8,22 +8,17 @@ MyType: object {
     constructor: (inout self, move    other: MyType); // move assignment
     constructor: (inout self, destroy other: MyType); // relocate assignment
 
-    constructor: (out[_] self, by-reference other: MyType);
+    constructor: (assign self, forward other: MyType);
 
     // deduction rules:
 
-    // by-reference
-    //               r-value -> 'move'
-    //   initialized l-value -> 'in'
-    // uninitialized l-value -> error!
-
-    // out[_]
+    // assign
     //               r-value -> error!
     //   initialized l-value -> 'inout'
     // uninitialized l-value -> 'out'
 
     // forward
-    //               r-value -> 'copy'
+    //               r-value -> 'move'
     //   initialized l-value -> 'in'
     // uninitialized l-value -> error!
 }
@@ -47,4 +42,11 @@ MyType: object {
     //               r-value -> 'var'
     //   initialized l-value -> 'let'
     // uninitialized l-value -> error!
+
+    // var = destroy, i.e. it is acctually a reference?
+    // --> Parameter passing:
+    //       | struct type | object type
+    //  -----|-------------|--------------------
+    //   let | by value    | deleting-reference
+    //   var | by value    | const-reference
 }
