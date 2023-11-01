@@ -114,7 +114,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
                     NamespaceDecl* global = par.parseModule();
                     // dump(global, par.wordTable);
                     SemanticContext sema;
-                    sema.check(global);
+                    sema.check(global->staticDecls());
                     break;
                 }
                 case TestMode::Benchmark: {

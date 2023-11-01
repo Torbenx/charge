@@ -12,7 +12,7 @@ static constexpr auto words = ConstWordStringTable(
     keyword("with"), keyword("template"), keyword("var"), keyword("let"), keyword("inout"), keyword("out"),
     keyword("static"), keyword("return"), keyword("has"), keyword("as"),
     // sema
-    "type");
+    "type", "function_literal");
 
 using node_stream_offset = aligned_t<4>;
 

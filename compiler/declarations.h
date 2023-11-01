@@ -127,7 +127,7 @@ struct StaticDeclContext : WordTable {
         using value_type = Decl*;
 
         StaticDeclContext* context;
-        uint32_t bucket;
+        int_t bucket;
 
         iterator& operator++() {
             do
@@ -225,6 +225,27 @@ struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
     TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
         : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext) { }
 };
+
+enum class ParameterModel : uint8_t {
+    Let,
+    Var,
+    InOut,
+    Out,
+};
+constexpr ParameterModel kindToModel(DeclKind kind) {
+    switch (kind) {
+        case DeclKind::LetParameter:
+            return ParameterModel::Let;
+        case DeclKind::VarParameter:
+            return ParameterModel::Var;
+        case DeclKind::InOutParameter:
+            return ParameterModel::InOut;
+        case DeclKind::OutParameter:
+            return ParameterModel::Out;
+        default:
+            VERIFY_NOT_REACHED();
+    }
+}
 struct FunctionDecl : StaticDecl, ParameterizedDecl {
     FunctionDecl(WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
         : StaticDecl(DeclKind::Function, name)
@@ -237,7 +258,16 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
 
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
+
+    struct CheckedParameter {
+        Word name;
+        ParameterModel model;
+        ConstantStreamInstructionOperand type;
+    };
+    std::vector<CheckedParameter> parameters;
+    ConstantStreamInstructionOperand returnType;
 };
+
 struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
 
     StaticVariableDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)

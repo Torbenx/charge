@@ -5,7 +5,9 @@
 #define ENUMERATE_INSTRUCTIONS           \
     INST(StaticVariableId, unary)        \
     INST(ForeignConstant, foreign_const) \
-    INST(Load, unary)
+    INST(Load, unary)                    \
+    INST(Nop, unary)                     \
+    INST(Call, call)
 
 enum class Opcode : uint16_t {
 
@@ -24,13 +26,16 @@ enum class Opcode : uint16_t {
 struct LoadValue {
     SSAName substance;
 };
+struct TypedValue : SSAName {
+    SSAName type;
+};
 struct ExprValue {
     std::variant<SSAName, LoadValue> value;
     SSAName type;
-};
-struct TypedValue {
-    SSAName value;
-    SSAName type;
+
+    TypedValue asValue() const {
+        return { std::get<0>(value), type };
+    }
 };
 
 struct SemanticContext {
@@ -44,11 +49,11 @@ struct SemanticContext {
 
     id<Decl> lookupFromInside(Decl*, WordAndLocation);
 
+    void check(StaticDeclContext*);
+    void requireSignature(Decl*);
     void signatureCheckTypeDecl(TypeDecl&);
     void signatureCheckStaticVariableDecl(StaticVariableDecl&);
     void signatureCheckFunctionDecl(FunctionDecl&);
+    void checkBody(FunctionDecl&);
 
-    void requireSignature(Decl*);
-
-    void check(NamespaceDecl*);
 };

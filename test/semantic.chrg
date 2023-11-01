@@ -2,4 +2,11 @@
 
 test_type: struct { }
 
-static foo: test_type;
+static test_var: test_type;
+
+return_type: struct { }
+test_func: (a: test_type) -> return_type { }
+
+call_test_func: () {
+    test_func(test_var);
+}

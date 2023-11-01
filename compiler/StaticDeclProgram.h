@@ -40,6 +40,8 @@ struct Instruction {
 
     constexpr Instruction(Opcode op, InstructionOperand a, InstructionOperand b, InstructionOperand c)
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c.encoded) { }
+    constexpr Instruction(Opcode op, InstructionOperand a, InstructionOperand b, uint16_t c)
+        : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c) { }
 };
 
 struct SSAName {
@@ -53,6 +55,16 @@ struct SSAName {
 
     constexpr ValuePhase phase() const { return m_phase; }
     constexpr uint16_t id() const { return m_id; }
+    constexpr InstructionOperand localize(ValuePhase targetPhase) const {
+        if (phase() == targetPhase)
+            return { false, id() };
+        if (std::to_underlying(phase()) + 1 == std::to_underlying(targetPhase))
+            return { true, id() };
+        VERIFY_NOT_REACHED();
+    }
+    constexpr ConstantStreamInstructionOperand localizeConstant() const {
+        return { localize(ValuePhase::Constant) };
+    }
 };
 
 struct InstructionStream {
@@ -66,7 +78,9 @@ struct InstructionStream {
     template<Opcode op, typename... Args>
     auto emit(Args... args);
 
-    InstructionOperand localize(SSAName name) const;
+    InstructionOperand localize(SSAName name) const {
+        return name.localize(stream_phase);
+    }
 
 private:
     // Must only be called directly before emitting an instruction into the stream.
@@ -74,6 +88,7 @@ private:
     SSAName emit_unary(Opcode op, SSAName in);
     SSAName emit_binary(Opcode op, SSAName in1, SSAName in2);
     SSAName emit_foreign_const(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant);
+    SSAName emit_call(Opcode op, SSAName argsBase, uint16_t count);
 };
 
 enum class ConstantType : uint8_t {
@@ -115,8 +130,4 @@ struct StaticDeclProgram {
     ConstantTable literalTable { ValuePhase::Literal };
     InstructionStream constantStream { ValuePhase::Constant };
     InstructionStream runtimeStream { ValuePhase::Runtime };
-
-    ConstantStreamInstructionOperand toConstantOperand(SSAName value) {
-        return ConstantStreamInstructionOperand(constantStream.localize(value));
-    }
 };
