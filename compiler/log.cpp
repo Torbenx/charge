@@ -6,7 +6,7 @@ void verify_failed(const char* condStr, const char* file, const char* func, int 
 }
 
 void handle_failure() {
-    std::abort();
+    throw std::runtime_error("");
 }
 
 void verify_not_reached(const char* file, const char* func, int line) {

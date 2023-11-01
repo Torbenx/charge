@@ -314,12 +314,35 @@ SingleTokenSourceRange Lexer::tokRange() const {
     return SingleTokenSourceRange(index);
 }
 
-SourcePosition Lexer::sourcePosition(LocalSourceLocation loc) const {
-    auto iter = tokenStream.data() + loc.tokenStreamOffset;
+static std::pair<const StreamToken*, uint32_t> findInStream(const Lexer* lex, LocalSourceLocation loc) {
+    auto iter = lex->tokenStream.data() + loc.tokenStreamOffset;
     auto offset = loc.isAtEnd ? iter->end() : iter->begin();
+    return { iter, offset };
+};
+
+SourcePosition Lexer::sourcePosition(LocalSourceLocation loc) const {
+    auto [iter, offset] = findInStream(this, loc);
     while (iter->token() != Token::Newline)
         --iter;
     return { .line = iter->lineNumber(), .column = offset - iter->begin() + 1 };
+}
+
+void Lexer::formatLine(std::ostream& out, LocalSourceRange highlight) const {
+    auto [beginIter, highlightBegin] = findInStream(this, highlight.first());
+    while (beginIter->token() != Token::Newline)
+        --beginIter;
+    auto [endIter, highlightEnd] = findInStream(this, highlight.last());
+    do {
+        ++endIter;
+    } while (endIter->token() != Token::Newline && endIter < tokenStream.end());
+    --endIter;
+    uint32_t beginOffset = (beginIter + 1)->begin();
+    uint32_t endOffset = endIter->end();
+    out << "    " << sourceBuffer.substr(beginOffset, endOffset - beginOffset) << '\n';
+    std::string highlightStr;
+    highlightStr.resize(highlightBegin - beginOffset, ' ');
+    highlightStr.resize(highlightEnd - beginOffset, '^');
+    out << "    " << highlightStr << '\n';
 }
 
 void Lexer::setSource(std::string_view source) {

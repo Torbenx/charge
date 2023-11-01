@@ -90,6 +90,7 @@ struct Lexer : LexerState {
 
     std::string_view source(int_t begin, int_t end) const;
     SourcePosition sourcePosition(LocalSourceLocation) const;
+    void formatLine(std::ostream&, LocalSourceRange highlight) const;
 
     // advance while skipping over comment and newline tokens
     void nextToken();

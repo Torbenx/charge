@@ -87,71 +87,78 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         VERIFY_NOT_REACHED();
     }
 
-    void runTest(std::string_view source) {
+    void runTest(std::filesystem::path file, std::string_view source) {
         Parser par;
-        par.Lexer::errorHandler = this;
-        par.Lexer::instrumenter = this;
-        par.Parser::errorHandler = this;
-        par.Parser::instrumenter = this;
-        par.setSource(source);
-        par.nextToken();
+        try {
+            par.Lexer::errorHandler = this;
+            par.Lexer::instrumenter = this;
+            par.Parser::errorHandler = this;
+            par.Parser::instrumenter = this;
+            par.setSource(source);
+            par.nextToken();
 
-        while (par.tok != Token::EOS) {
-            switch (testMode) {
-            case TestMode::Lexer: {
-                par.nextToken();
-                break;
-            }
-            case TestMode::Parser: {
-                std::cout << "------\n";
-                NamespaceDecl* global = par.parseModule();
-                // dump(global, par.wordTable);
-                break;
-            }
-            case TestMode::Semantic: {
-                std::cout << "------\n";
-                NamespaceDecl* global = par.parseModule();
-                // dump(global, par.wordTable);
-                SemanticContext sema;
-                sema.check(global);
-                break;
-            }
-            case TestMode::Benchmark: {
-                std::cout << "------\n";
-                using Clock = std::chrono::high_resolution_clock;
-                {
-                    // lexer test
-                    Parser par2;
-                    par2.sourceBuffer = par.sourceBuffer;
-                    auto start = Clock::now();
-                    do
+            while (par.tok != Token::EOS) {
+                switch (testMode) {
+                case TestMode::Lexer: {
+                    par.nextToken();
+                    break;
+                }
+                case TestMode::Parser: {
+                    std::cout << "------\n";
+                    NamespaceDecl* global = par.parseModule();
+                    // dump(global, par.wordTable);
+                    break;
+                }
+                case TestMode::Semantic: {
+                    std::cout << "------\n";
+                    NamespaceDecl* global = par.parseModule();
+                    // dump(global, par.wordTable);
+                    SemanticContext sema;
+                    sema.check(global);
+                    break;
+                }
+                case TestMode::Benchmark: {
+                    std::cout << "------\n";
+                    using Clock = std::chrono::high_resolution_clock;
+                    {
+                        // lexer test
+                        Parser par2;
+                        par2.sourceBuffer = par.sourceBuffer;
+                        auto start = Clock::now();
+                        do
+                            par2.nextToken();
+                        while (par2.tok != Token::EOS);
+                        auto stop = Clock::now();
+                        std::cout << "Lexing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+                        std::cout << " and produced " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                    }
+                    {
+                        // parse test
+                        Parser par2;
+                        par2.sourceBuffer = par.sourceBuffer;
+                        auto start = Clock::now();
                         par2.nextToken();
-                    while (par2.tok != Token::EOS);
-                    auto stop = Clock::now();
-                    std::cout << "Lexing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-                    std::cout << " and produced " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                        par2.parseModule();
+                        auto stop = Clock::now();
+                        std::cout << "Parsing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+                        std::cout << " and produced " << par2.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";
+                        std::cout << " and " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                    }
+                    return;
                 }
-                {
-                    // parse test
-                    Parser par2;
-                    par2.sourceBuffer = par.sourceBuffer;
-                    auto start = Clock::now();
-                    par2.nextToken();
-                    par2.parseModule();
-                    auto stop = Clock::now();
-                    std::cout << "Parsing file took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-                    std::cout << " and produced " << par2.nodeStream.offset.bytes() / 100'000 / 10.0 << "MB of nodes";
-                    std::cout << " and " << par2.tokenStream.offset.bytes() / 100'000 / 10.0 << "MB of tokens.\n";
+                default:
+                    error();
                 }
-                return;
             }
-            default:
-                error();
-            }
+            verify(commandQueue.empty());
+            for (auto test : unresolvedNodeTests)
+                expect_eq(test.expectedKind, nameString(test.node->kind()));
+        } catch (const std::exception& e) {
+            std::cout << "test " << file << " failed: what() = \"" << e.what() << "\"\n";
+            SourcePosition pos = par.sourcePosition(par.tokRange().first());
+            std::cout << "parser at " << file.string() << ":" << pos.line << ":" << pos.column << ", tok=" << nameString(par.tok) << "\n";
+            par.formatLine(std::cout, par.tokRange());
         }
-        verify(commandQueue.empty());
-        for (auto test : unresolvedNodeTests)
-            expect_eq(test.expectedKind, nameString(test.node->kind()));
     }
 
     void nextToken(Lexer* lex) override {
@@ -465,8 +472,9 @@ struct BadErrorHandler : Lexer::ErrorHandler {
 };
 
 int main() {
-    std::filesystem::path testDir { COMPILER_TEST_DIR };
-    for (const auto& entry : std::filesystem::directory_iterator(testDir)) {
+    namespace fs = std::filesystem;
+    fs::path testDir { COMPILER_TEST_DIR };
+    for (const auto& entry : fs::directory_iterator(testDir)) {
         if (!entry.is_regular_file())
             continue;
         if (entry.path().extension().string() != ".chrg")
@@ -486,7 +494,7 @@ int main() {
         sourceBuffer[length] = '\0';
 
         TestInstrumenter test;
-        test.runTest({ sourceBuffer.get(), (size_t)length });
+        test.runTest(fs::relative(fs::canonical(entry.path()), testDir), { sourceBuffer.get(), (size_t)length });
     }
 
     BadErrorHandler errorHandler;
