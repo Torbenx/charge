@@ -30,8 +30,6 @@ std::string_view nameString(DeclKind);
 
 template<typename T>
 constexpr bool isDeclType(DeclKind);
-template<typename T>
-constexpr T* dyn_cast(Decl* in);
 
 struct Decl {
     uint32_t kindBits : 6;
@@ -234,16 +232,16 @@ enum class ParameterModel : uint8_t {
 };
 constexpr ParameterModel kindToModel(DeclKind kind) {
     switch (kind) {
-        case DeclKind::LetParameter:
-            return ParameterModel::Let;
-        case DeclKind::VarParameter:
-            return ParameterModel::Var;
-        case DeclKind::InOutParameter:
-            return ParameterModel::InOut;
-        case DeclKind::OutParameter:
-            return ParameterModel::Out;
-        default:
-            VERIFY_NOT_REACHED();
+    case DeclKind::LetParameter:
+        return ParameterModel::Let;
+    case DeclKind::VarParameter:
+        return ParameterModel::Var;
+    case DeclKind::InOutParameter:
+        return ParameterModel::InOut;
+    case DeclKind::OutParameter:
+        return ParameterModel::Out;
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 struct FunctionDecl : StaticDecl, ParameterizedDecl {
@@ -265,7 +263,7 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
         ConstantStreamInstructionOperand type;
     };
     std::vector<CheckedParameter> parameters;
-    ConstantStreamInstructionOperand returnType;
+    std::optional<ConstantStreamInstructionOperand> returnType;
 };
 
 struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
@@ -321,7 +319,7 @@ constexpr bool isDeclType(DeclKind kind) {
 }
 
 template<typename Target>
-constexpr Target* dyn_cast(Decl* source) {
+constexpr std::optional<Target*> dyn_cast(Decl* source) {
     switch (source->kind()) {
 
 #define ANY_DECL(kind, type)                                         \
@@ -329,7 +327,7 @@ constexpr Target* dyn_cast(Decl* source) {
         if constexpr (std::derived_from<type, Target>) {             \
             return static_cast<Target*>(static_cast<type*>(source)); \
         } else {                                                     \
-            return nullptr;                                          \
+            return std::nullopt;                                     \
         }                                                            \
     }
 #include "declarations.inc"

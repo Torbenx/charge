@@ -16,19 +16,31 @@ enum class ValuePhase : uint8_t {
 
 struct InstructionOperand {
     static constexpr uint16_t MAX_ID = 0x7fff;
+
     uint16_t encoded;
     // constant: Is this a constant from the prespective of the stream
     //           the instruction is in?
     constexpr InstructionOperand(bool constant, uint16_t id)
         : encoded(id | (constant ? (uint16_t)0x8000 : (uint16_t)0)) { }
     constexpr InstructionOperand()
-        : InstructionOperand(true, MAX_ID) { }
+        : InstructionOperand(false, MAX_ID) { }
 
     bool constant() const { return encoded & (uint16_t)0x8000; }
     uint16_t id() const { return encoded & (uint16_t)0x7fff; }
+
+    constexpr bool operator==(const InstructionOperand&) const = default;
+};
+template<>
+struct optional_traits<InstructionOperand> {
+    static constexpr InstructionOperand empty_value = {};
 };
 struct ConstantStreamInstructionOperand : InstructionOperand {
     ValuePhase phase() const { return constant() ? ValuePhase::Literal : ValuePhase::Constant; }
+    constexpr bool operator==(const ConstantStreamInstructionOperand&) const = default;
+};
+template<>
+struct optional_traits<ConstantStreamInstructionOperand> {
+    static constexpr ConstantStreamInstructionOperand empty_value = {};
 };
 
 struct Instruction {

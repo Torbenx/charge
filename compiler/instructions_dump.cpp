@@ -153,18 +153,18 @@ struct Dumper : InstructionVisitor<Dumper> {
 }
 
 void dump(Decl* decl, WordStringTable& wordTable) {
-    auto* paramDecl = dyn_cast<ParameterizedDecl>(decl);
-    VERIFY(paramDecl != nullptr);
+    auto paramDecl = dyn_cast<ParameterizedDecl>(decl);
     std::cout << wordTable.view(decl->name) << ":\n";
-    if (auto* typeDecl = dyn_cast<TypeDecl>(decl)) {
+    if (auto typeDecl = dyn_cast<TypeDecl>(decl)) {
         // Nothing to do
-    } else if (auto* varDecl = dyn_cast<StaticVariableDecl>(decl)) {
+    } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
         std::cout << "  type = " << Dumper::format(varDecl->typeValue) << '\n';
         std::cout << '\n';
-    } else if (auto* fnDecl = dyn_cast<FunctionDecl>(decl)) {
+    } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
         for (auto param : fnDecl->parameters)
             std::cout << "  typeof(" << wordTable.view(param.name) << ") = " << Dumper::format(param.type) << '\n';
-        std::cout << "  return-type = " << Dumper::format(fnDecl->returnType) << '\n';
+        if (fnDecl->returnType)
+            std::cout << "  return-type = " << Dumper::format(*fnDecl->returnType) << '\n';
         std::cout << '\n';
     }
     Dumper dumper;

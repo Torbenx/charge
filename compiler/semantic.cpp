@@ -162,9 +162,10 @@ private:
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
             emit<Opcode::Nop>(targetStream, arguments[i]);
 
-        SSAName returnType = literalFold(fnDecl, fnDecl->returnType);
         SSAName callValue = emit<Opcode::Call>(targetStream, baseArg, arguments.size());
-        return ExprValue { callValue, returnType };
+        if (fnDecl->returnType)
+            return ExprValue { callValue, literalFold(fnDecl, *fnDecl->returnType) };
+        return ExprValue { {}, {} }; // FIXME: return optional or something
     }
     ExprValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
@@ -180,7 +181,7 @@ private:
         //  - For a type-decl a literal for the type.
         //  - For a function-decl a literal for the function.
 
-        if (auto* parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
+        if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
             if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
                 // TODO: Handle templates
                 VERIFY_NOT_REACHED();
@@ -188,13 +189,13 @@ private:
             if (isDeclType<TypeDecl>(decl->kind())) {
                 SSAName declLit = literalTable->emit(decl);
                 return { declLit, typeTypeLiteral() };
-            } else if (auto* varDecl = dyn_cast<StaticVariableDecl>(decl)) {
-                auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl));
+            } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
+                auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl.value()));
                 SSAName type = literalFold(varDeclLit, varDecl->typeValue);
                 SSAName value = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
                 return { LoadValue { value }, type };
-            } else if (auto* fnDecl = dyn_cast<FunctionDecl>(decl)) {
-                SSAName declLit = literalTable->emit(fnDecl);
+            } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
+                SSAName declLit = literalTable->emit(fnDecl.value());
                 return { declLit, functionLiteralTypeLiteral() };
             }
         }
@@ -328,11 +329,11 @@ void SemanticContext::requireSignature(Decl* d) {
         // TODO: Handle error
         VERIFY_NOT_REACHED();
     }
-    if (auto* decl = dyn_cast<TypeDecl>(d)) {
+    if (auto decl = dyn_cast<TypeDecl>(d)) {
         signatureCheckTypeDecl(*decl);
-    } else if (auto* decl = dyn_cast<FunctionDecl>(d)) {
+    } else if (auto decl = dyn_cast<FunctionDecl>(d)) {
         signatureCheckFunctionDecl(*decl);
-    } else if (auto* decl = dyn_cast<StaticVariableDecl>(d)) {
+    } else if (auto decl = dyn_cast<StaticVariableDecl>(d)) {
         signatureCheckStaticVariableDecl(*decl);
     } else {
         VERIFY_NOT_REACHED();
@@ -387,19 +388,19 @@ void SemanticContext::checkBody(FunctionDecl& d) {
 
 void SemanticContext::check(StaticDeclContext* parent) {
     for (Decl* child : *parent) {
-        if (auto* decl = dyn_cast<NamespaceDecl>(child)) {
+        if (auto decl = dyn_cast<NamespaceDecl>(child)) {
             check(decl->staticDecls());
-        } else if (auto* decl = dyn_cast<TypeDecl>(child)) {
+        } else if (auto decl = dyn_cast<TypeDecl>(child)) {
             requireSignature(child);
             check(decl->staticDecls());
-        } else if (auto* decl = dyn_cast<FunctionDecl>(child)) {
+        } else if (auto decl = dyn_cast<FunctionDecl>(child)) {
             requireSignature(child);
             checkBody(*decl);
         } else {
             requireSignature(child);
         }
 
-        if (auto* decl = dyn_cast<ParameterizedDecl>(child)) {
+        if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
             dump(child, *wordTable);
         }
     }
