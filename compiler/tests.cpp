@@ -114,6 +114,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
                     NamespaceDecl* global = par.parseModule();
                     // dump(global, par.wordTable);
                     SemanticContext sema;
+                    sema.wordTable = &par.wordTable;
                     sema.check(global->staticDecls());
                     break;
                 }

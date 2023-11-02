@@ -42,6 +42,8 @@ struct Instruction {
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c.encoded) { }
     constexpr Instruction(Opcode op, InstructionOperand a, InstructionOperand b, uint16_t c)
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c) { }
+
+    Opcode opcode() const { return (Opcode)op; }
 };
 
 struct SSAName {
@@ -87,7 +89,7 @@ private:
     SSAName allocateName();
     SSAName emit_unary(Opcode op, SSAName in);
     SSAName emit_binary(Opcode op, SSAName in1, SSAName in2);
-    SSAName emit_foreign_const(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant);
+    SSAName emit_foreign_constant(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant);
     SSAName emit_call(Opcode op, SSAName argsBase, uint16_t count);
 };
 

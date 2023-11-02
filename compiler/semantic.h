@@ -4,7 +4,7 @@
 
 #define ENUMERATE_INSTRUCTIONS           \
     INST(StaticVariableId, unary)        \
-    INST(ForeignConstant, foreign_const) \
+    INST(ForeignConstant, foreign_constant) \
     INST(Load, unary)                    \
     INST(Nop, unary)                     \
     INST(Call, call)
@@ -47,6 +47,8 @@ struct SemanticContext {
     ErrorHandler* errorHandler = nullptr;
     Instrumenter* instrumenter = nullptr;
 
+    WordStringTable* wordTable = nullptr;
+
     id<Decl> lookupFromInside(Decl*, WordAndLocation);
 
     void check(StaticDeclContext*);
@@ -57,3 +59,5 @@ struct SemanticContext {
     void checkBody(FunctionDecl&);
 
 };
+
+void dump(Decl*, WordStringTable&);

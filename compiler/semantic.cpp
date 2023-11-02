@@ -22,6 +22,7 @@ SSAName InstructionStream::allocateName() {
     size_t id = definitions.size();
     size_t definition = stream.size();
     VERIFY(definition <= (uint16_t)-1);
+    definitions.push_back(definition);
     return { stream_phase, id };
 }
 
@@ -35,7 +36,7 @@ SSAName InstructionStream::emit_binary(Opcode op, SSAName in1, SSAName in2) {
     stream.push_back({ op, localize(out), localize(in1), localize(in2) });
     return out;
 }
-SSAName InstructionStream::emit_foreign_const(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant) {
+SSAName InstructionStream::emit_foreign_constant(Opcode op, SSAName decl, ConstantStreamInstructionOperand constant) {
     SSAName out = allocateName();
     stream.push_back({ op, localize(out), localize(decl), constant });
     return out;
@@ -396,6 +397,10 @@ void SemanticContext::check(StaticDeclContext* parent) {
             checkBody(*decl);
         } else {
             requireSignature(child);
+        }
+
+        if (auto* decl = dyn_cast<ParameterizedDecl>(child)) {
+            dump(child, *wordTable);
         }
     }
 }
