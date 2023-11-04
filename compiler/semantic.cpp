@@ -137,7 +137,7 @@ private:
         //  4. By considering argument designations and argument count to resolve the callee and
         //     only falling back to 1. if there still isn't a unique match.
 
-        if (!literallyEqual(base.type, &functionLiteralType)) {
+        if (!literallyEqual(base.type(), &functionLiteralType)) {
             // TODO: handle more base types
             VERIFY_NOT_REACHED();
         }
@@ -150,8 +150,11 @@ private:
                 break;
             auto rawArg = maybeArg.value();
             auto param = fnDecl->parameters[arguments.size()];
-            if (rawArg.type.phase() == ValuePhase::Literal && param.type.phase() == ValuePhase::Literal) {
-                // TODO
+            if (rawArg.type().phase() == ValuePhase::Literal && param.type.phase() == ValuePhase::Literal) {
+                if (literalTable->get(rawArg.type().id()) != fnDecl->program.literalTable.get(param.type.id())) {
+                    // TODO: Handle error
+                    VERIFY_NOT_REACHED();
+                }
             } else {
                 VERIFY_NOT_REACHED();
             }
@@ -164,8 +167,8 @@ private:
 
         SSAName callValue = emit<Opcode::Call>(targetStream, baseArg, arguments.size());
         if (fnDecl->returnType)
-            return ExprValue { callValue, literalFold(fnDecl, *fnDecl->returnType) };
-        return ExprValue { {}, {} }; // FIXME: return optional or something
+            return TypedValue { callValue, literalFold(fnDecl, *fnDecl->returnType) };
+        return ExprValue::statement(); // FIXME: return optional or something
     }
     ExprValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
@@ -188,15 +191,15 @@ private:
             }
             if (isDeclType<TypeDecl>(decl->kind())) {
                 SSAName declLit = literalTable->emit(decl);
-                return { declLit, typeTypeLiteral() };
+                return TypedValue { declLit, typeTypeLiteral() };
             } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
                 auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl.value()));
                 SSAName type = literalFold(varDeclLit, varDecl->typeValue);
-                SSAName value = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
-                return { LoadValue { value }, type };
+                SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
+                return ExprValue::load(idValue, type);
             } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
                 SSAName declLit = literalTable->emit(fnDecl.value());
-                return { declLit, functionLiteralTypeLiteral() };
+                return TypedValue { declLit, functionLiteralTypeLiteral() };
             }
         }
         VERIFY_NOT_REACHED();
@@ -228,7 +231,7 @@ public:
         return literalTable->emit(&functionLiteralType);
     }
     TypedValue implicitToType(const ExprValue& in) {
-        if (literallyEqual(in.type, &typeType)) {
+        if (literallyEqual(in.type(), &typeType)) {
             return in.asValue();
         }
         VERIFY_NOT_REACHED();
@@ -246,13 +249,14 @@ public:
         return emit<Opcode::ForeignConstant>(constantStream, decl, constant);
     }
     TypedValue materializeIn(InstructionStream* stream, const ExprValue& in) {
-        return std::visit([&](auto val) -> TypedValue {
-            if constexpr (std::is_same_v<decltype(val), SSAName>)
-                return { val, in.type };
-            if constexpr (std::is_same_v<decltype(val), LoadValue>)
-                return { emit<Opcode::Load>(stream, val.substance), in.type };
-        },
-            in.value);
+        switch (in.kind()) {
+            case ExprValueKind::Value:
+                return in.asValue();
+            case ExprValueKind::Load:
+                return { emit<Opcode::Load>(stream, in.primary()), in.type() };
+            default:
+                VERIFY_NOT_REACHED();
+        }
     }
     TypedValue materialize(const ExprValue& in) { return materializeIn(targetStream, in); }
     TypedValue materializeConstant(const ExprValue& in) { return materializeIn(constantStream, in); }

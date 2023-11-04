@@ -121,6 +121,8 @@ struct TypedConstant {
         VERIFY(type == ConstantType::Decl);
         return (Decl*)(uintptr_t)encodedValue;
     }
+
+    bool operator==(const TypedConstant& other) const = default;
 };
 constexpr bool compareConstantsOfSameType(const TypedConstant& left, const TypedConstant& right) {
     VERIFY(left.type == right.type);

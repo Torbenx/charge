@@ -57,3 +57,9 @@ fn proof_termination(first: id<Node>) {
         current = next;
     }
 }
+
+trait sequence {
+    sub_sequence: type;
+    require sub_sequence == Self || (has(sequence)(sub_sequence) && sub_sequence::sub_sequence == sub_sequence);
+    proof has(sequence)(sub_sequence);
+}

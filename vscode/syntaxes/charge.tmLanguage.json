@@ -60,7 +60,7 @@
 		"controls": {
 			"patterns": [
 				{
-					"match": "\\b(if|elif|else|match|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is|guard|catch|try)\\b",
+					"match": "\\b(if|elif|else|match|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is|guard|catch|try|require)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.control.charge"

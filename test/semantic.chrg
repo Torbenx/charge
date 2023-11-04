@@ -8,6 +8,8 @@ static test_var3: test_type;
 static test_var4: test_type;
 static test_var5: test_type;
 
+other_type: struct { }
+
 return_type: struct { }
 test_func: (a: test_type, b: test_type, c: test_type, d: test_type, e: test_type) -> return_type { }
 
