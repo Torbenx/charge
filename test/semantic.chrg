@@ -1,6 +1,6 @@
 // semantic-test
 
-test_type: struct { }
+struct test_type { }
 
 static test_var1: test_type;
 static test_var2: test_type;
@@ -8,11 +8,11 @@ static test_var3: test_type;
 static test_var4: test_type;
 static test_var5: test_type;
 
-other_type: struct { }
+struct other_type { }
 
-return_type: struct { }
-test_func: (a: test_type, b: test_type, c: test_type, d: test_type, e: test_type) -> return_type { }
+struct return_type { }
+fn test_func(a: test_type, b: test_type, c: test_type, d: test_type, e: test_type) -> return_type { }
 
-call_test_func: () {
+fn call_test_func() {
     test_func(test_var1, test_var2, test_var3, test_var4, test_var5);
 }

@@ -151,6 +151,19 @@ void Parser::parseDeclaration() {
             VERIFY_NOT_REACHED();
         }
         parameterDeclContext->templateParameterCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
+        if (tok != Token::Word) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    if (tokWord() == words["fn"]) {
+        parseFunctionDecl(std::move(helper));
+        return;
+    }
+    if (tokWord() == words["struct"] || tokWord() == words["object"]) {
+        parseTypeDecl(std::move(helper));
+        return;
     }
 
     std::vector<WordAndLocation> attributes;
@@ -165,24 +178,7 @@ void Parser::parseDeclaration() {
     WordAndLocation name = attributes.back();
     attributes.pop_back();
 
-    if (tok != Token::Colon) {
-        parseVariableDecl(name, attributes, std::move(helper));
-        return;
-    }
-    auto colonToken = fullToken();
-    nextToken();
-
-    if (tok == Token::LeftParen) {
-        parseFunctionDecl(name, attributes, std::move(helper));
-    } else if (tok != Token::Word) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    } else if (tokWord() == words["struct"] || tokWord() == words["object"]) {
-        parseTypeDecl(name, attributes, std::move(helper));
-    } else {
-        reemitLastToken(colonToken);
-        parseVariableDecl(name, attributes, std::move(helper));
-    }
+    parseVariableDecl(name, attributes, std::move(helper));
 }
 
 void Parser::parseNamespaceDecl() {
@@ -223,12 +219,7 @@ void Parser::parseNamespaceDecl() {
     nextToken();
 }
 
-void Parser::parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper parameterHelper) {
-    if (attributes.size() != 0) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-
+void Parser::parseTypeDecl(ParameterDeclContextHelper parameterHelper) {
     VERIFY(tok == Token::Word);
     DeclKind kind;
     if (tokWord() == words["struct"])
@@ -237,6 +228,13 @@ void Parser::parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation
         kind = DeclKind::ObjectType;
     else
         VERIFY_NOT_REACHED();
+    nextToken();
+
+    if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    WordAndLocation name = tokWord();
     nextToken();
 
     if (tok != Token::LeftBrace) {
@@ -252,6 +250,33 @@ void Parser::parseTypeDecl(WordAndLocation name, std::span<const WordAndLocation
     }
     VERIFY(tok == Token::RightBrace);
     nextToken();
+}
+
+void Parser::parseFunctionDecl(ParameterDeclContextHelper helper) {
+    VERIFY(tok == Token::Word && tokWord() == words["fn"]);
+    nextToken();
+
+    if (tok != Token::Word) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    WordAndLocation name = tokWord();
+    nextToken();
+
+    VERIFY(tok == Token::LeftParen);
+    parseParameters();
+
+    Node* returnType = nextNodeLocation();
+    if (tok == Token::Arrow) {
+        nextToken();
+        parseExpression();
+    }
+    emitNode(EmptyNode());
+
+    Node* body = nextNodeLocation();
+    parseBodyExprOrStmt();
+
+    emitDecl<FunctionDecl>(name, helper.popContext(), returnType, body);
 }
 
 void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper helper) {
@@ -277,7 +302,6 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     }
 
     Node* typeExpr = nextNodeLocation();
-
     if (tok == Token::Colon) {
         nextToken();
         parseExpression();
@@ -298,28 +322,6 @@ void Parser::parseVariableDecl(WordAndLocation name, std::span<const WordAndLoca
     nextToken();
 
     emitDecl<StaticVariableDecl>(kind, name, helper.popContext(), typeExpr, initExpr);
-}
-
-void Parser::parseFunctionDecl(WordAndLocation name, std::span<const WordAndLocation> attributes, ParameterDeclContextHelper helper) {
-    if (attributes.size() != 0) {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
-    }
-
-    VERIFY(tok == Token::LeftParen);
-    parseParameters();
-
-    Node* returnType = nextNodeLocation();
-    if (tok == Token::Arrow) {
-        nextToken();
-        parseExpression();
-    }
-    emitNode(EmptyNode());
-
-    Node* body = nextNodeLocation();
-    parseBodyExprOrStmt();
-
-    emitDecl<FunctionDecl>(name, helper.popContext(), returnType, body);
 }
 
 void Parser::parseHasMemberDecl() {

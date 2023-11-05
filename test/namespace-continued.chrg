@@ -2,12 +2,12 @@
 
 namespace a {
 
-    test1: () { }
+    fn test1() { }
 
 }
 
 namespace a {
 
-    test2: () { }
+    fn test2() { }
 
 }
