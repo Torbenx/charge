@@ -10,7 +10,6 @@
 #endif
 
 NODE(EmptyNode, EmptyNode, Primary)
-NODE(Unresolved, Node, Primary)
 
 // ------ expressions ------
 EXPR(ConstraintExpr, UnaryOperatorExpr, Unary)

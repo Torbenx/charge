@@ -4,15 +4,15 @@ fn ftest() {
 
 //; primary expressions
 /> expect-node IdentifierExpr </ a;
-/> expect-node IdentifierExpr; expect-unresolved Parameterize; expect-node EmptyNode </ a<>;
+/> expect-node IdentifierExpr; expect-node Parameterize; expect-node EmptyNode </ a{};
 /> expect-node ParenthesizedExpr; expect-node EmptyNode </ ();
 /> expect-node CompoundExpr; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode; expect-node ExpressionStmt </ [a];
 
 //; postfix expressions
 /> expect-node IdentifierExpr; expect-node MemberAccessExpr </ a.b;
 /> expect-node IdentifierExpr; expect-node StaticAccessExpr </ a::b;
-/> expect-node IdentifierExpr; expect-node MemberAccessExpr; expect-unresolved Parameterize; expect-node EmptyNode </ a.b<>;
-/> expect-node IdentifierExpr; expect-node StaticAccessExpr; expect-unresolved Parameterize; expect-node EmptyNode </ a::b<>;
+/> expect-node IdentifierExpr; expect-node MemberAccessExpr; expect-node Parameterize; expect-node EmptyNode </ a.b{};
+/> expect-node IdentifierExpr; expect-node StaticAccessExpr; expect-node Parameterize; expect-node EmptyNode </ a::b{};
 /> expect-node IdentifierExpr; expect-node CallExpr; expect-node EmptyNode </ a();
 /> expect-node IdentifierExpr; expect-node IndexExpr; expect-node EmptyNode </ a[];
 /> expect-node IdentifierExpr; expect-node PostIncrementExpr </ a++;
@@ -41,7 +41,7 @@ fn ftest() {
 /> expect-node IdentifierExpr; expect-node ShiftRightExpr; expect-node IdentifierExpr </ a >> b;
 /> expect-node IdentifierExpr; expect-node CompareNotEqualExpr; expect-node IdentifierExpr </ a != b;
 /> expect-node IdentifierExpr; expect-node CompareEqualExpr; expect-node IdentifierExpr </ a == b;
-/> expect-node IdentifierExpr; expect-unresolved CompareLessExpr; expect-node IdentifierExpr </ a < b;
+/> expect-node IdentifierExpr; expect-node CompareLessExpr; expect-node IdentifierExpr </ a < b;
 /> expect-node IdentifierExpr; expect-node CompareLessEqualExpr; expect-node IdentifierExpr </ a <= b;
 /> expect-node IdentifierExpr; expect-node CompareGreaterExpr; expect-node IdentifierExpr </ a > b;
 /> expect-node IdentifierExpr; expect-node CompareGreaterEqualExpr; expect-node IdentifierExpr </ a >= b;
@@ -135,7 +135,7 @@ a(p = b, c);
 );
 
 a(foo = -b + z, bar = c);
-a<b.c<i, j, k>, c> + d;
+a{b.c{i, j, k}, blub = c} + d;
 
 } // expect-decl Function
 
@@ -196,22 +196,4 @@ struct Foo3 { has Bar as bar { fn test() { } } }
 
 // expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)
-struct Foo4 { static x; }
-
-
-fn testParameterizeVsLess() {
-    // expect-node IdentifierExpr; expect-unresolved CompareLessExpr; expect-node IdentifierExpr
-    // expect-unresolved Parameterize; expect-node IdentifierExpr; expect-node EmptyNode
-    // expect-node AdditionExpr; expect-node IdentifierExpr; expect-node ExpressionStmt
-    a < b < c > + d; //; a < b<c> + d
-
-    // expect-node IdentifierExpr; expect-unresolved CompareLessExpr; expect-node IdentifierExpr
-    // expect-node CompareLessEqualExpr; expect-node IdentifierExpr
-    // expect-node CompareGreaterExpr; expect-node IdentifierExpr; expect-node ExpressionStmt
-    a < b <= c > d;
-
-    // expect-node IdentifierExpr; expect-unresolved CompareLessExpr; expect-node IdentifierExpr
-    // expect-node LogicalAndExpr; expect-node IdentifierExpr
-    // expect-node CompareGreaterExpr; expect-node IdentifierExpr; expect-node ExpressionStmt
-    a < b && c > d;
-}
+struct Foo4: { static x; }

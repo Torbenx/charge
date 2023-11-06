@@ -54,11 +54,6 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
     };
     TestMode testMode = TestMode::Invalid;
     CommandQueue commandQueue;
-    struct UnresolvedNodeTest {
-        Node* node;
-        std::string_view expectedKind;
-    };
-    std::vector<UnresolvedNodeTest> unresolvedNodeTests;
 
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
@@ -66,8 +61,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test",
         "benchmark", "expect-expected-parameter-name", "expect-parameter-modifier-not-allowed",
         "expect-invalid-parameter-modifier", "expect-unexpected-after-parameter", "expect-expected-semicolon",
-        "expect-expected-function-body", "expect-expected-if-body", "expect-expected-else-body",
-        "expect-unresolved");
+        "expect-expected-function-body", "expect-expected-if-body", "expect-expected-else-body");
     WordStringTable wordTable { words };
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
@@ -152,8 +146,6 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
                 }
             }
             verify(commandQueue.empty());
-            for (auto test : unresolvedNodeTests)
-                expect_eq(test.expectedKind, nameString(test.node->kind()));
         } catch (const std::exception& e) {
             std::cout << "test " << file << " failed: what() = \"" << e.what() << "\"\n";
             SourcePosition pos = par.sourcePosition(par.tokRange().first());
@@ -195,15 +187,6 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
                     expect_eq(pair.value, par->wordTable.view(((IdentifierExpr*)node)->id), "", &cmd, &pair);
-                else
-                    invalidKey(&cmd, &pair);
-            }
-        } else if (commandQueue.top().command == words["expect-unresolved"]) {
-            auto cmd = commandQueue.pop();
-            expect_eq(node->kind(), NodeKind::Unresolved);
-            for (const auto& pair : cmd.pairs) {
-                if (pair.key == Word())
-                    unresolvedNodeTests.push_back({ node, pair.value });
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -431,6 +414,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         verifyNoPairs(cmd);
         // skip token
         par->nextToken();
+        
     }
     void expectedSemiColon(Parser*) override {
         auto cmd = popCommand(words["expect-expected-semicolon"]);

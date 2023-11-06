@@ -63,7 +63,6 @@ struct Node {
         return SingleTokenSourceRange(streamOffsetBits);
     }
     NodeKind kind() const { return NodeKind(kindBits); }
-    void setKind(NodeKind kind) { kindBits = std::to_underlying(kind); }
 };
 
 // statements
