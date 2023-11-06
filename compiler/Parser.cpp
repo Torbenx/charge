@@ -445,14 +445,12 @@ void Parser::parseBodyExprOrStmt() {
 
 // statements
 void Parser::parseSingleOrCompoundStmt() {
+    VERIFY(tok == Token::Colon);
+    nextToken();
     if (tok == Token::LeftBrace) {
         parseCompoundStmt();
-    } else if (tok == Token::Colon) {
-        nextToken();
-        parseStatement();
     } else {
-        // errorHandler;
-        VERIFY_NOT_REACHED();
+        parseStatement();
     }
 }
 
@@ -573,7 +571,7 @@ void Parser::parseIfExprOrStmt(bool statement) {
         }
         return;
     }
-    if (statement) {
+    if (tok == Token::Colon && statement) {
         emitNode(IfStmt(ifLoc));
         parseSingleOrCompoundStmt();
         return;
