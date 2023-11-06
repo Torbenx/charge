@@ -192,6 +192,12 @@ void Parser::parseNamespaceDecl() {
     WordAndLocation name = tokWord();
     nextToken();
 
+    if (tok != Token::Colon) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
+    nextToken();
+
     if (tok != Token::LeftBrace) {
         // errorHandler;
         VERIFY_NOT_REACHED();
@@ -235,6 +241,12 @@ void Parser::parseTypeDecl(ParameterDeclContextHelper parameterHelper) {
         VERIFY_NOT_REACHED();
     }
     WordAndLocation name = tokWord();
+    nextToken();
+
+    if (tok != Token::Colon) {
+        // errorHandler;
+        VERIFY_NOT_REACHED();
+    }
     nextToken();
 
     if (tok != Token::LeftBrace) {
@@ -347,8 +359,13 @@ void Parser::parseHasMemberDecl() {
     }
 
     HasMemberDecl* decl = emitDecl<HasMemberDecl>(name, typeExpr, initExpr);
-    if (tok == Token::LeftBrace) {
+    if (tok == Token::Colon) {
         StaticDeclContextHelper helper(this, decl->staticDecls());
+        nextToken();
+        if (tok != Token::LeftBrace) {
+            // errorHandler;
+            VERIFY_NOT_REACHED();
+        }
         nextToken();
         while (tok != Token::RightBrace) {
             parseDeclaration();
@@ -431,8 +448,8 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
 }
 
 void Parser::parseBodyExprOrStmt() {
-    if (tok == Token::LeftBrace) {
-        parseCompoundStmt();
+    if (tok == Token::Colon) {
+        parseSingleOrCompoundStmt();
     } else if (tok == Token::FatArrow) {
         nextToken();
         parseExpression();

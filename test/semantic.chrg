@@ -1,7 +1,7 @@
 // semantic-test
 
-struct test_type { }
-fn make() -> test_type { }
+struct test_type: { }
+fn make() -> test_type: { }
 
 static test_var1 = make();
 static test_var2 = make();
@@ -9,9 +9,9 @@ static test_var3 = make();
 static test_var4 = make();
 static test_var5 = make();
 
-struct return_type { }
-fn test_func(a: test_type, b: test_type, c: test_type, d: test_type, e: test_type) -> return_type { }
+struct return_type: { }
+fn test_func(a: test_type, b: test_type, c: test_type, d: test_type, e: test_type) -> return_type: { }
 
-fn call_test_func() {
+fn call_test_func(): {
     test_func(test_var1, test_var2, test_var3, test_var4, test_var5);
 }

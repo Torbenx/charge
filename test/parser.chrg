@@ -1,6 +1,6 @@
 // parser-test
 
-fn ftest() {
+fn ftest(): {
 
 //; primary expressions
 /> expect-node IdentifierExpr </ a;
@@ -139,15 +139,15 @@ a{b.c{i, j, k}, blub = c} + d;
 
 } // expect-decl Function
 
-/> expect-decl Function </ fn test1() { }
-/> expect-decl LetParameter; expect-decl Function </ fn test2(a) { }
+/> expect-decl Function </ fn test1(): { }
+/> expect-decl LetParameter; expect-decl Function </ fn test2(a): { }
 
 // expect-decl LetParameter name=a
 // expect-decl VarParameter name=b
 // expect-decl InOutParameter name=c
 // expect-decl OutParameter name=d
 // expect-decl Function name=test3
-fn test3(let a, var b, inout c, out d) { }
+fn test3(let a, var b, inout c, out d): { }
 
 // expect-identifier param_type; expect-node EmptyNode
 // expect-identifier param_init; expect-node EmptyNode
@@ -161,7 +161,7 @@ fn test4(param_name: param_type = param_init) -> return_type => body_expr;
 // expect-decl LetParameter name=a
 // expect-decl Function name=test5
 template(T: type)
-fn test5(a: T) { }
+fn test5(a: T): { }
 
 // expect-decl Namespace name=Namespace
 // expect-decl StructType name=Foo
@@ -171,12 +171,12 @@ fn test5(a: T) { }
 // expect-decl LetParameter name=b
 // expect-decl Function name=bar
 // expect-decl StaticLetVariable name=x
-namespace Namespace {
-    struct Foo {
-        fn foo(a) { }
+namespace Namespace: {
+    struct Foo: {
+        fn foo(a): { }
     }
-    object Bar {
-        fn bar(b) { }
+    object Bar: {
+        fn bar(b): { }
     }
     static x;
 }
@@ -190,9 +190,9 @@ static name: type = init;
 /> expect-decl StaticVarVariable </ static var b;
 
 // expect-decl StructType; expect-decl HasMember name=bar
-struct Foo2 { has Bar as bar; }
+struct Foo2: { has Bar as bar; }
 // expect-decl StructType; expect-decl HasMember; expect-decl Function name=test
-struct Foo3 { has Bar as bar { fn test() { } } }
+struct Foo3: { has Bar as bar: { fn test(): { } } }
 
 // expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)

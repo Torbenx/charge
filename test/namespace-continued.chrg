@@ -1,13 +1,13 @@
 // parser-test
 
-namespace a {
+namespace a: {
 
-    fn test1() { }
+    fn test1(): { }
 
 }
 
-namespace a {
+namespace a: {
 
-    fn test2() { }
+    fn test2(): { }
 
 }
