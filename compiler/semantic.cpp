@@ -124,7 +124,7 @@ private:
         // Because of overload resolution we don't know which implicit conversions to apply after
         // looking at just a subset of arguments. There are two kinds of solutions here:
         //  1. Don't allow implicit conversions and overload resolution at same time. So we either
-        //     perfrom implicit conversions on an not overloaded set OR call an overload without
+        //     perform implicit conversions on an not overloaded set OR call an overload without
         //     applying any conversions.
         //  + Simplicity
         //  + Fewer instruction
@@ -150,15 +150,9 @@ private:
                 break;
             auto rawArg = maybeArg.value();
             auto param = fnDecl->parameters[arguments.size()];
-            if (rawArg.type().phase() == ValuePhase::Literal && param.type.phase() == ValuePhase::Literal) {
-                if (literalTable->get(rawArg.type().id()) != fnDecl->program.literalTable.get(param.type.id())) {
-                    // TODO: Handle error
-                    VERIFY_NOT_REACHED();
-                }
-            } else {
-                VERIFY_NOT_REACHED();
-            }
-            arguments.push_back(materialize(rawArg));
+            TypedValue paramType = { literalFold(fnDecl, param.type), typeTypeLiteral() };
+            auto convertedArg = implicitConversion(paramType, rawArg);
+            arguments.push_back(convertedArg);
         }
         VERIFY(arguments.size() == fnDecl->parameters.size());
         SSAName baseArg = emit<Opcode::Nop>(targetStream, base.asValue());
@@ -168,7 +162,7 @@ private:
         SSAName callValue = emit<Opcode::Call>(targetStream, baseArg, arguments.size());
         if (fnDecl->returnType)
             return TypedValue { callValue, literalFold(fnDecl, *fnDecl->returnType) };
-        return ExprValue::statement(); // FIXME: return optional or something
+        return ExprValue::statement(); // FIXME: return unit type
     }
     ExprValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
@@ -195,8 +189,14 @@ private:
             } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
                 auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl.value()));
                 SSAName type = literalFold(varDeclLit, varDecl->typeValue);
-                SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
-                return ExprValue::load(idValue, type);
+                if (varDecl->kind() == DeclKind::StaticLetVariable) {
+                    SSAName constValue = literalFold(varDeclLit, varDecl->initValue);
+                    return TypedValue { constValue, type };
+                } else if (varDecl->kind() == DeclKind::StaticVarVariable) {
+                    SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
+                    return ExprValue::load(idValue, type);
+                } else
+                    VERIFY_NOT_REACHED();
             } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
                 SSAName declLit = literalTable->emit(fnDecl.value());
                 return TypedValue { declLit, functionLiteralTypeLiteral() };
@@ -230,40 +230,59 @@ public:
     SSAName functionLiteralTypeLiteral() {
         return literalTable->emit(&functionLiteralType);
     }
-    TypedValue implicitToType(const ExprValue& in) {
-        if (literallyEqual(in.type(), &typeType)) {
-            return in.asValue();
-        }
-        VERIFY_NOT_REACHED();
-    }
     bool literallyEqual(SSAName leftName, TypedConstant right) {
         if (leftName.phase() != ValuePhase::Literal)
             return false;
-        TypedConstant left = literalTable->get(leftName.id());
+        TypedConstant left = literalTable->get(leftName);
         return compareConstantsOfSameType(left, right);
     }
     template<std::derived_from<ParameterizedDecl> T>
     SSAName literalFold(DeclLiteral<T> decl, ConstantStreamInstructionOperand constant) {
         if (constant.phase() == ValuePhase::Literal)
-            return literalTable->emit(decl->program.literalTable.get(constant.id()));
-        return emit<Opcode::ForeignConstant>(constantStream, decl, constant);
+            return literalTable->emit(decl->program.literalTable.get(constant));
+        return constantStream->emit<Opcode::ForeignConstant>(decl, constant);
     }
-    TypedValue materializeIn(InstructionStream* stream, const ExprValue& in) {
+
+    TypedValue implicitToType(ExprValue in) {
+        if (literallyEqual(in.type(), &typeType)) {
+            return materialize(in);
+        }
+        // TODO: Implement more cases
+        VERIFY_NOT_REACHED();
+    }
+    TypedValue implicitConversion(TypedValue targetType, ExprValue sourceValue) {
+        VERIFY(literallyEqual(targetType.type(), &typeType));
+        if (targetType.phase() == ValuePhase::Literal && sourceValue.type().phase() == ValuePhase::Literal) {
+            if (compareConstantsOfSameType(literalTable->get(targetType), literalTable->get(sourceValue.type())))
+                return materialize(sourceValue);
+        }
+        // TODO: Implement more cases
+
+        // We only perform implicit conversions if the target type has no undeduced parameters.
+        // In that case we emit 'source-value.(implicit_cast<target-type>::convert)()' if we have
+        // seen it. Otherwise we emit 'proof typeof(source-value) == target-type'.
+        VERIFY_NOT_REACHED();
+    }
+
+    TypedValue materializeIn(InstructionStream* stream, ExprValue in) {
         switch (in.kind()) {
-            case ExprValueKind::Value:
-                return in.asValue();
-            case ExprValueKind::Load:
-                return { emit<Opcode::Load>(stream, in.primary()), in.type() };
-            default:
-                VERIFY_NOT_REACHED();
+        case ExprValueKind::Value:
+            return in.asValue();
+        case ExprValueKind::Load:
+            return { emit<Opcode::Load>(stream, in.primary()), in.type() };
+        default:
+            VERIFY_NOT_REACHED();
         }
     }
-    TypedValue materialize(const ExprValue& in) { return materializeIn(targetStream, in); }
-    TypedValue materializeConstant(const ExprValue& in) { return materializeIn(constantStream, in); }
+    TypedValue materialize(ExprValue in) { return materializeIn(targetStream, in); }
+    TypedValue materializeConstant(ExprValue in) { return materializeIn(constantStream, in); }
+
+    TypedValue typeOf(ExprValue in) { return { in.type(), typeTypeLiteral() }; }
+    TypedValue typeOf(TypedValue in) { return { in.type(), typeTypeLiteral() }; }
 
     DeclLiteral<> useDeclLiteral(SSAName lit) {
         VERIFY(lit.phase() == ValuePhase::Literal);
-        Decl* decl = literalTable->get(lit.id()).asDecl();
+        Decl* decl = literalTable->get(lit).asDecl();
         sema->requireSignature(decl);
         return { lit, decl };
     }
@@ -312,7 +331,7 @@ id<Decl> SemanticContext::lookupFromInside(Decl* d, WordAndLocation name) {
         case DeclKind::Function:
         case DeclKind::StaticLetVariable:
         case DeclKind::StaticVarVariable: {
-            ParameterizedDecl* decl = (ParameterizedDecl*)d;
+            ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
             Decl* parameterDecl = decl->parameterDecls()->find(name);
             if (parameterDecl)
                 return parameterDecl;
@@ -349,10 +368,22 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
     d.setStatus(DeclStatus::SignatureCheckInProgress);
 
     Generator g(this, &d.program.literalTable, &d.program.constantStream, &d.program.constantStream, &d);
-    auto typeExpr = g.visitExpression(d.typeExpr());
+    auto typeExpr = g.visitExpression(d.typeExpr())
+                        .transform([&g](ExprValue v) { return g.implicitToType(v); });
+
+    auto initExpr = g.visitExpression(d.initExpr())
+                        .or_else([] -> std::optional<ExprValue> {
+                            // TODO: Handle error
+                            VERIFY_NOT_REACHED();
+                        })
+                        .value();
     if (typeExpr.has_value()) {
-        d.typeValue = g.implicitToType(typeExpr.value()).localizeConstant();
+        initExpr = g.implicitConversion(typeExpr.value(), initExpr);
+    } else {
+        typeExpr = g.typeOf(initExpr);
     }
+    d.typeValue = typeExpr.value().localizeConstant();
+    d.initValue = g.materialize(initExpr).localizeConstant();
 
     d.setStatus(DeclStatus::SignatureChecked);
 }

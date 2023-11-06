@@ -125,7 +125,10 @@ struct Dumper : InstructionVisitor<Dumper> {
     }
     void visit_call(call_inst i) {
         printBase(i);
-        std::cout << format(i.base) << "(" << format(i.firstArgument()) << ".." << format(i.lastArgument()) << ")\n";
+        std::cout << format(i.base) << "(";
+        if (i.argumentCount > 0)
+            std::cout << format(i.firstArgument()) << ".." << format(i.lastArgument());
+        std::cout << ")\n";
     }
 
     void dump(InstructionStream& s) {
@@ -159,6 +162,7 @@ void dump(Decl* decl, WordStringTable& wordTable) {
         // Nothing to do
     } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
         std::cout << "  type = " << Dumper::format(varDecl->typeValue) << '\n';
+        std::cout << "  init = " << Dumper::format(varDecl->initValue) << '\n';
         std::cout << '\n';
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
         for (auto param : fnDecl->parameters)

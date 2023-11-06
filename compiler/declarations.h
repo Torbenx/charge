@@ -207,24 +207,9 @@ struct DeclaringStaticDecl : StaticDecl, private StaticDeclContext {
 
     StaticDeclContext* staticDecls() { return this; }
 };
-struct ParameterizedDecl {
-    relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
-    StaticDeclProgram program;
-    ParameterizedDecl(ParameterDeclContext* declContext)
-        : m_parameterDecls(this, declContext) { }
-
-    ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
-};
-struct NamespaceDecl : DeclaringStaticDecl {
-    NamespaceDecl(WordAndLocation name)
-        : DeclaringStaticDecl(DeclKind::Namespace, name) { }
-};
-struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
-    TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
-        : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext) { }
-};
-
 enum class ParameterModel : uint8_t {
+    Template,
+    ImplicitTemplate,
     Let,
     Var,
     InOut,
@@ -244,6 +229,29 @@ constexpr ParameterModel kindToModel(DeclKind kind) {
         VERIFY_NOT_REACHED();
     }
 }
+struct ParameterizedDecl {
+    relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
+    StaticDeclProgram program;
+    ParameterizedDecl(ParameterDeclContext* declContext)
+        : m_parameterDecls(this, declContext) { }
+
+    ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
+
+    struct CheckedParameter {
+        Word name;
+        ParameterModel model;
+        ConstantStreamInstructionOperand type;
+    };
+    std::vector<CheckedParameter> parameters;
+};
+struct NamespaceDecl : DeclaringStaticDecl {
+    NamespaceDecl(WordAndLocation name)
+        : DeclaringStaticDecl(DeclKind::Namespace, name) { }
+};
+struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
+    TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
+        : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext) { }
+};
 struct FunctionDecl : StaticDecl, ParameterizedDecl {
     FunctionDecl(WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
         : StaticDecl(DeclKind::Function, name)
@@ -257,12 +265,6 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 
-    struct CheckedParameter {
-        Word name;
-        ParameterModel model;
-        ConstantStreamInstructionOperand type;
-    };
-    std::vector<CheckedParameter> parameters;
     std::optional<ConstantStreamInstructionOperand> returnType;
 };
 
@@ -281,6 +283,7 @@ struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
     Node* initExpr() { return m_initExpr.get(this); }
 
     ConstantStreamInstructionOperand typeValue;
+    ConstantStreamInstructionOperand initValue;
 };
 struct HasMemberDecl : ParameterOrMemberDecl {
     StaticDeclContext m_staticDecls;

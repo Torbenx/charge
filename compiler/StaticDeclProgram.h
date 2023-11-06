@@ -66,6 +66,8 @@ struct SSAName {
         : m_phase(ValuePhase::Literal), m_id(0) { }
     constexpr SSAName(ValuePhase phase, size_t id)
         : m_phase(phase), m_id(id) { VERIFY(id <= InstructionOperand::MAX_ID); }
+    SSAName(ConstantStreamInstructionOperand operand)
+        : SSAName(operand.phase(), operand.id()) { }
 
     constexpr ValuePhase phase() const { return m_phase; }
     constexpr uint16_t id() const { return m_id; }
@@ -139,6 +141,10 @@ struct ConstantTable {
     SSAName emit(TypedConstant);
     TypedConstant get(uint16_t index) const {
         return { types[index], encodedValues[index] };
+    }
+    TypedConstant get(SSAName name) const {
+        VERIFY(name.phase() == ValuePhase::Literal);
+        return get(name.id());
     }
 };
 
