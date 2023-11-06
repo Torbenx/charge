@@ -716,32 +716,26 @@ void Parser::parsePrimaryExpr() {
     }
 }
 
-static bool parseDesignatedArgument(Parser* par, void (Parser::*parseArgument)()) {
-    if (par->tok == Token::Word) {
-        auto desToken = par->fullToken();
-        auto des = DesignateArgument(par->tokRange(), par->tokWord());
-        par->nextToken();
-        if (par->tok == Token::Equal) {
-            par->nextToken();
-            (par->*parseArgument)();
-            par->emitNode(des);
-            return true;
-        } else {
-            par->reemitLastToken(desToken);
-            (par->*parseArgument)();
-        }
-    } else {
-        (par->*parseArgument)();
-    }
-    return false;
-}
-
 void Parser::parseArguments() {
     VERIFY(isLeftBracket(tok));
     Token rightBracket = leftToRightBracket(tok);
     nextToken();
     while (tok != rightBracket) {
-        parseDesignatedArgument(this, &Parser::parseExpression);
+        if (tok == Token::Word) {
+            auto desToken = fullToken();
+            auto des = DesignateArgument(tokRange(), tokWord());
+            nextToken();
+            if (tok == Token::Equal) {
+                nextToken();
+                parseExpression();
+                emitNode(des);
+            } else {
+                reemitLastToken(desToken);
+                parseExpression();
+            }
+        } else {
+            parseExpression();
+        }
         if (tok == Token::Comma) {
             nextToken();
         } else if (tok != rightBracket) {
@@ -757,7 +751,6 @@ void Parser::parseParameterizeOrLess() {
     enum class State {
         Ambiguous,
         DisambiguousByComma,
-        DisambiguousByDesignator,
     };
     Node* node = emitNode(Node(NodeKind::Unresolved, tokRange()));
     State state = State::Ambiguous;
@@ -774,9 +767,7 @@ void Parser::parseParameterizeOrLess() {
     // break if we find '<' is a binary operator and
     // return directly if it is the beginning of a parameter list.
     for (;;) {
-        if (parseDesignatedArgument(this, &Parser::parseUnaryOperatorExpr)) {
-            state = State::DisambiguousByDesignator;
-        }
+        parseUnaryOperatorExpr();
         if (tok == Token::Greater) {
             emitNode(EmptyNode(tokRange()));
             node->setKind(NodeKind::Parameterize);
@@ -816,7 +807,7 @@ void Parser::parseParameterizeOrLess() {
     // The initial '<' is part of a relational chain.
     // We are after a unary expression here which compatible with what the upwards stack expects.
     // Therefore we can return and let the calling code take care of the rest.
-    if (state != State::Ambiguous) {
+    if (state == State::DisambiguousByComma) {
         // errorHandler;
         VERIFY_NOT_REACHED();
     }
