@@ -23,10 +23,10 @@ struct call_inst : inst {
     InstructionOperand base;
     uint16_t argumentCount;
     InstructionOperand firstArgument() const {
-        return InstructionOperand(base.constant(), base.id() + 1);
+        return InstructionOperand(false, out.id() - argumentCount);
     }
     InstructionOperand lastArgument() const {
-        return InstructionOperand(base.constant(), base.id() + argumentCount);
+        return InstructionOperand(false, out.id() - 1);
     }
 };
 

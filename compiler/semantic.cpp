@@ -193,11 +193,10 @@ private:
             arguments.push_back(argumentSubstance);
         }
         VERIFY(arguments.size() == fnDecl->parameters.size());
-        SSAName baseArg = emit<Opcode::Nop>(targetStream, base.asValue());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
             emit<Opcode::Nop>(targetStream, arguments[i]);
 
-        SSAName callValue = emit<Opcode::Call>(targetStream, baseArg, arguments.size());
+        SSAName callValue = emit<Opcode::Call>(targetStream, base.asValue(), arguments.size());
         for (SSAName tmp : temporaryAllocations) {
             emit<Opcode::Deallocate>(targetStream, tmp);
         }
