@@ -57,6 +57,7 @@ SSAName ConstantTable::emit(TypedConstant constant) {
 
 static TypeDecl typeType { DeclKind::StructType, { words["type"], SingleTokenSourceRange() }, nullptr };
 static TypeDecl functionLiteralType { DeclKind::StructType, { words["function_literal"], SingleTokenSourceRange() }, nullptr };
+static TypeDecl voidType { DeclKind::StructType, { words["void"], SingleTokenSourceRange() }, nullptr };
 
 template<typename T = Decl>
 struct DeclLiteral : SSAName {
@@ -144,15 +145,52 @@ private:
         auto fnDecl = useDeclLiteral<FunctionDecl>(base.asValue());
         std::vector<SSAName> arguments;
         arguments.reserve(fnDecl->parameters.size());
+        std::vector<SSAName> temporaryAllocations;
         for (;;) {
             auto maybeArg = visitExpr(ExpressionPrecedence::Statement);
             if (!maybeArg.has_value())
                 break;
-            auto rawArg = maybeArg.value();
+            ExprValue rawArg = maybeArg.value();
             auto param = fnDecl->parameters[arguments.size()];
-            TypedValue paramType = { literalFold(fnDecl, param.type), typeTypeLiteral() };
-            auto convertedArg = implicitConversion(paramType, rawArg);
-            arguments.push_back(convertedArg);
+            Type paramType = (Type)literalFold(fnDecl, param.type);
+            matchTypes(paramType, rawArg.type());
+
+            SSAName argumentSubstance;
+            switch (rawArg.category()) {
+            case ValueCategory::PValue: {
+                if (param.model == ParameterModel::InOut || param.model == ParameterModel::Out) {
+                    // TODO: Handle error
+                    VERIFY_NOT_REACHED();
+                }
+                argumentSubstance = emit<Opcode::Allocate>(targetStream, rawArg.type());
+                temporaryAllocations.push_back(argumentSubstance);
+                emit<Opcode::Store>(targetStream, argumentSubstance, rawArg.asValue());
+                break;
+            }
+            case ValueCategory::LValue: {
+                if (param.model == ParameterModel::In || param.model == ParameterModel::InOut) {
+                    argumentSubstance = rawArg.primary();
+                } else {
+                    // TODO: Handle error
+                    VERIFY_NOT_REACHED();
+                }
+                break;
+            }
+            case ValueCategory::RValue: {
+                if (param.model == ParameterModel::In) {
+                    requireValueType(paramType);
+                } else if (param.model == ParameterModel::InOut || param.model == ParameterModel::Out) {
+                    // TODO: Handle error
+                    VERIFY_NOT_REACHED();
+                }
+                argumentSubstance = rawArg.primary();
+                temporaryAllocations.push_back(argumentSubstance);
+                break;
+            }
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            arguments.push_back(argumentSubstance);
         }
         VERIFY(arguments.size() == fnDecl->parameters.size());
         SSAName baseArg = emit<Opcode::Nop>(targetStream, base.asValue());
@@ -160,9 +198,10 @@ private:
             emit<Opcode::Nop>(targetStream, arguments[i]);
 
         SSAName callValue = emit<Opcode::Call>(targetStream, baseArg, arguments.size());
-        if (fnDecl->returnType)
-            return TypedValue { callValue, literalFold(fnDecl, *fnDecl->returnType) };
-        return ExprValue::statement(); // FIXME: return unit type
+        for (SSAName tmp : temporaryAllocations) {
+            emit<Opcode::Deallocate>(targetStream, tmp);
+        }
+        return TypedValue { callValue, (Type)literalFold(fnDecl, fnDecl->returnType) };
     }
     ExprValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
@@ -188,13 +227,14 @@ private:
                 return TypedValue { declLit, typeTypeLiteral() };
             } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
                 auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl.value()));
-                SSAName type = literalFold(varDeclLit, varDecl->typeValue);
+                Type type = (Type)literalFold(varDeclLit, varDecl->typeValue);
                 if (varDecl->kind() == DeclKind::StaticLetVariable) {
                     SSAName constValue = literalFold(varDeclLit, varDecl->initValue);
+                    requireValueType(type);
                     return TypedValue { constValue, type };
                 } else if (varDecl->kind() == DeclKind::StaticVarVariable) {
                     SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
-                    return ExprValue::load(idValue, type);
+                    return ExprValue::lvalue(idValue, type);
                 } else
                     VERIFY_NOT_REACHED();
             } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
@@ -224,11 +264,11 @@ private:
 
 public:
     //
-    SSAName typeTypeLiteral() {
-        return literalTable->emit(&typeType);
+    Type typeTypeLiteral() {
+        return (Type)literalTable->emit(&typeType);
     }
-    SSAName functionLiteralTypeLiteral() {
-        return literalTable->emit(&functionLiteralType);
+    Type functionLiteralTypeLiteral() {
+        return (Type)literalTable->emit(&functionLiteralType);
     }
     bool literallyEqual(SSAName leftName, TypedConstant right) {
         if (leftName.phase() != ValuePhase::Literal)
@@ -239,22 +279,22 @@ public:
     template<std::derived_from<ParameterizedDecl> T>
     SSAName literalFold(DeclLiteral<T> decl, ConstantStreamInstructionOperand constant) {
         if (constant.phase() == ValuePhase::Literal)
-            return literalTable->emit(decl->program.literalTable.get(constant));
+            return literalTable->emit(decl->program.literalTable.get((SSAName)constant));
         return constantStream->emit<Opcode::ForeignConstant>(decl, constant);
     }
 
-    TypedValue implicitToType(ExprValue in) {
+    Type implicitToType(ExprValue in) {
         if (literallyEqual(in.type(), &typeType)) {
-            return materialize(in);
+            return (Type)materialize(in);
         }
         // TODO: Implement more cases
         VERIFY_NOT_REACHED();
     }
-    TypedValue implicitConversion(TypedValue targetType, ExprValue sourceValue) {
-        VERIFY(literallyEqual(targetType.type(), &typeType));
+    ExprValue implicitConversion(Type targetType, ExprValue sourceValue) {
         if (targetType.phase() == ValuePhase::Literal && sourceValue.type().phase() == ValuePhase::Literal) {
-            if (compareConstantsOfSameType(literalTable->get(targetType), literalTable->get(sourceValue.type())))
-                return materialize(sourceValue);
+            if (compareConstantsOfSameType(literalTable->get(targetType), literalTable->get(sourceValue.type()))) {
+                return sourceValue;
+            }
         }
         // TODO: Implement more cases
 
@@ -265,20 +305,24 @@ public:
     }
 
     TypedValue materializeIn(InstructionStream* stream, ExprValue in) {
-        switch (in.kind()) {
-        case ExprValueKind::Value:
+        switch (in.category()) {
+        case ValueCategory::PValue:
             return in.asValue();
-        case ExprValueKind::Load:
+        case ValueCategory::LValue:
+            requireValueType(in.type());
             return { emit<Opcode::Load>(stream, in.primary()), in.type() };
+        case ValueCategory::RValue: {
+            requireValueType(in.type());
+            TypedValue out = { emit<Opcode::Load>(stream, in.primary()), in.type() };
+            emit<Opcode::Deallocate>(stream, in.primary());
+            return out;
+        }
         default:
             VERIFY_NOT_REACHED();
         }
     }
     TypedValue materialize(ExprValue in) { return materializeIn(targetStream, in); }
     TypedValue materializeConstant(ExprValue in) { return materializeIn(constantStream, in); }
-
-    TypedValue typeOf(ExprValue in) { return { in.type(), typeTypeLiteral() }; }
-    TypedValue typeOf(TypedValue in) { return { in.type(), typeTypeLiteral() }; }
 
     DeclLiteral<> useDeclLiteral(SSAName lit) {
         VERIFY(lit.phase() == ValuePhase::Literal);
@@ -298,6 +342,13 @@ public:
     void transformEmitArgument(InstructionStream* out, SSAName& name) {
         if (name.phase() == ValuePhase::Literal && out->stream_phase == ValuePhase::Runtime)
             name = emit<Opcode::Nop>(constantStream, name);
+    }
+
+    void requireValueType(Type) { }
+
+    void matchTypes(Type target, Type source) {
+        VERIFY(target.phase() == ValuePhase::Literal && source.phase() == ValuePhase::Literal);
+        VERIFY(compareConstantsOfSameType(literalTable->get(target), literalTable->get(source)));
     }
 };
 
@@ -378,11 +429,12 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
                         })
                         .value();
     if (typeExpr.has_value()) {
-        initExpr = g.implicitConversion(typeExpr.value(), initExpr);
+        g.matchTypes(typeExpr.value(), initExpr.type());
     } else {
-        typeExpr = g.typeOf(initExpr);
+        typeExpr = initExpr.type();
     }
     d.typeValue = typeExpr.value().localizeConstant();
+    // FIXME: This only works for value types.
     d.initValue = g.materialize(initExpr).localizeConstant();
 
     d.setStatus(DeclStatus::SignatureChecked);
@@ -411,6 +463,8 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     auto returnTypeExpr = g.visitExpression(d.returnTypeExpr());
     if (returnTypeExpr.has_value())
         d.returnType = g.implicitToType(returnTypeExpr.value()).localizeConstant();
+    else
+        d.returnType = d.program.literalTable.emit(&voidType).localizeConstant();
 
     d.setStatus(DeclStatus::SignatureChecked);
 }

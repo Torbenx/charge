@@ -66,7 +66,7 @@ struct SSAName {
         : m_phase(ValuePhase::Literal), m_id(0) { }
     constexpr SSAName(ValuePhase phase, size_t id)
         : m_phase(phase), m_id(id) { VERIFY(id <= InstructionOperand::MAX_ID); }
-    SSAName(ConstantStreamInstructionOperand operand)
+    explicit SSAName(ConstantStreamInstructionOperand operand)
         : SSAName(operand.phase(), operand.id()) { }
 
     constexpr ValuePhase phase() const { return m_phase; }

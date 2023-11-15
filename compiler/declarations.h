@@ -265,7 +265,7 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 
-    std::optional<ConstantStreamInstructionOperand> returnType;
+    ConstantStreamInstructionOperand returnType;
 };
 
 struct StaticVariableDecl : StaticDecl, ParameterizedDecl {

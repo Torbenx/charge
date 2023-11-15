@@ -11,6 +11,10 @@ struct unary_inst : inst {
 private:
     InstructionOperand unused;
 };
+struct binary_inst : inst {
+    InstructionOperand left;
+    InstructionOperand right;
+};
 struct foreign_constant_inst : inst {
     InstructionOperand baseDecl;
     InstructionOperand foreignName;
@@ -119,6 +123,10 @@ struct Dumper : InstructionVisitor<Dumper> {
         printBase(i);
         std::cout << format(i.in) << '\n';
     }
+    void visit_binary(binary_inst i) {
+        printBase(i);
+        std::cout << format(i.left) << ' ' << format(i.right) << '\n';
+    }
     void visit_foreign_constant(foreign_constant_inst i) {
         printBase(i);
         std::cout << format(i.baseDecl) << ":" << format(i.foreignName, ValuePhase::Constant) << '\n';
@@ -167,8 +175,8 @@ void dump(Decl* decl, WordStringTable& wordTable) {
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
         for (auto param : fnDecl->parameters)
             std::cout << "  typeof(" << wordTable.view(param.name) << ") = " << Dumper::format(param.type) << '\n';
-        if (fnDecl->returnType)
-            std::cout << "  return-type = " << Dumper::format(*fnDecl->returnType) << '\n';
+
+        std::cout << "  return-type = " << Dumper::format(fnDecl->returnType) << '\n';
         std::cout << '\n';
     }
     Dumper dumper;

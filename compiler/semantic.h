@@ -7,7 +7,10 @@
     INST(ForeignConstant, foreign_constant) \
     INST(Load, unary)                       \
     INST(Nop, unary)                        \
-    INST(Call, call)
+    INST(Call, call)                        \
+    INST(Allocate, unary)                   \
+    INST(Deallocate, unary)                 \
+    INST(Store, binary)
 
 enum class Opcode : uint16_t {
 
@@ -17,26 +20,31 @@ enum class Opcode : uint16_t {
 
 };
 
-struct TypedValue : SSAName {
-    SSAName m_type;
-    SSAName type() const { return m_type; }
+struct Type : SSAName {
+    using SSAName::SSAName;
+    explicit Type(const SSAName& value)
+        : SSAName(value) { }
 };
-enum class ExprValueKind {
-    Statement,
-    Value,
-    Load,
+struct TypedValue : SSAName {
+    Type m_type;
+    Type type() const { return m_type; }
+};
+enum class ValueCategory {
+    Invalid,
+    PValue, // pure-value
+    LValue,
+    RValue,
 };
 struct ExprValue {
     uint16_t primaryId;
     uint16_t typeId;
     uint16_t primaryPhase : 2;
     uint16_t typePhase : 2;
-    uint16_t m_kind : 2;
+    uint16_t m_category : 2;
 
-    ExprValueKind kind() const { return (ExprValueKind)m_kind; }
-    bool isStatement() const { return kind() == ExprValueKind::Statement; }
-    bool valid() const { return !isStatement(); }
-    SSAName type() const {
+    ValueCategory category() const { return (ValueCategory)m_category; }
+    bool valid() const { return category() != ValueCategory::Invalid; }
+    Type type() const {
         VERIFY(valid());
         return { (ValuePhase)typePhase, typeId };
     }
@@ -45,26 +53,26 @@ struct ExprValue {
         return { (ValuePhase)primaryPhase, primaryId };
     }
     bool isLiteral() const {
-        return kind() == ExprValueKind::Value && primary().phase() == ValuePhase::Literal;
+        return category() == ValueCategory::PValue && primary().phase() == ValuePhase::Literal;
     }
     TypedValue asValue() const {
-        VERIFY(kind() == ExprValueKind::Value);
+        VERIFY(category() == ValueCategory::PValue);
         return { primary(), type() };
     }
 
-    ExprValue(ExprValueKind kind, SSAName primary, SSAName type)
+    ExprValue(ValueCategory category, SSAName primary, Type type)
         : primaryId(primary.id())
         , typeId(type.id())
         , primaryPhase(std::to_underlying(primary.phase()))
         , typePhase(std::to_underlying(type.phase()))
-        , m_kind(std::to_underlying(kind)) { }
+        , m_category(std::to_underlying(category)) { }
     ExprValue(TypedValue value)
-        : ExprValue(ExprValueKind::Value, value, value.type()) { }
-    static ExprValue statement() {
-        return ExprValue(ExprValueKind::Statement, {}, {});
+        : ExprValue(ValueCategory::PValue, value, value.type()) { }
+    static ExprValue lvalue(SSAName substance, Type type) {
+        return ExprValue(ValueCategory::LValue, substance, type);
     }
-    static ExprValue load(SSAName substance, SSAName type) {
-        return ExprValue(ExprValueKind::Load, substance, type);
+    static ExprValue rvalue(SSAName substance, Type type) {
+        return ExprValue(ValueCategory::RValue, substance, type);
     }
 };
 
