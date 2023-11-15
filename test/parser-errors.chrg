@@ -4,7 +4,7 @@
 fn test1(+a: type): { }
 
 // expect-parameter-modifier-not-allowed
-template(let T: type)
+template(in T: type)
 fn test2(): { }
 
 // expect-invalid-parameter-modifier

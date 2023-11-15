@@ -10,7 +10,7 @@ static constexpr auto words = ConstWordStringTable(
     // parser
     keyword("if"), keyword("else"), keyword("namespace"), keyword("struct"), keyword("object"), keyword("fn"),
     keyword("with"), keyword("template"), keyword("var"), keyword("let"), keyword("inout"), keyword("out"),
-    keyword("static"), keyword("return"), keyword("has"), keyword("as"),
+    keyword("static"), keyword("return"), keyword("has"), keyword("as"), keyword("in"),
     // sema
     "type", "function_literal");
 

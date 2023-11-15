@@ -140,35 +140,35 @@ a{b.c{i, j, k}, blub = c} + d;
 } // expect-decl Function
 
 /> expect-decl Function </ fn test1(): { }
-/> expect-decl LetParameter; expect-decl Function </ fn test2(a): { }
+/> expect-decl InParameter; expect-decl Function </ fn test2(a): { }
 
-// expect-decl LetParameter name=a
+// expect-decl InParameter name=a
 // expect-decl VarParameter name=b
 // expect-decl InOutParameter name=c
 // expect-decl OutParameter name=d
 // expect-decl Function name=test3
-fn test3(let a, var b, inout c, out d): { }
+fn test3(in a, var b, inout c, out d): { }
 
 // expect-identifier param_type; expect-node EmptyNode
 // expect-identifier param_init; expect-node EmptyNode
-// expect-decl LetParameter
+// expect-decl InParameter
 // expect-identifier return_type; expect-node EmptyNode
 // expect-identifier body_expr; expect-node EmptyNode
 // expect-decl Function
 fn test4(param_name: param_type = param_init) -> return_type => body_expr;
 
-// expect-decl LetParameter name=T
-// expect-decl LetParameter name=a
+// expect-decl InParameter name=T
+// expect-decl InParameter name=a
 // expect-decl Function name=test5
 template(T: type)
 fn test5(a: T): { }
 
 // expect-decl Namespace name=Namespace
 // expect-decl StructType name=Foo
-// expect-decl LetParameter name=a
+// expect-decl InParameter name=a
 // expect-decl Function name=foo
 // expect-decl ObjectType name=Bar
-// expect-decl LetParameter name=b
+// expect-decl InParameter name=b
 // expect-decl Function name=bar
 // expect-decl StaticLetVariable name=x
 namespace Namespace: {
@@ -194,6 +194,6 @@ struct Foo2: { has Bar as bar; }
 // expect-decl StructType; expect-decl HasMember; expect-decl Function name=test
 struct Foo3: { has Bar as bar: { fn test(): { } } }
 
-// expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
+// expect-decl InParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)
 struct Foo4: { static x; }

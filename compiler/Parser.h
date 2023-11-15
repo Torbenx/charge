@@ -149,7 +149,7 @@ struct Parser : Lexer {
     void parseHasMemberDecl();
     enum class ParameterParseOptions {
         None,
-        OnlyLetParameters,
+        OnlyInParameters,
     };
     int_t parseParameters(ParameterParseOptions = ParameterParseOptions::None);
     void parseBodyExprOrStmt();

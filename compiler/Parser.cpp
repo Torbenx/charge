@@ -150,7 +150,7 @@ void Parser::parseDeclaration() {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        parameterDeclContext->templateParameterCount = parseParameters(ParameterParseOptions::OnlyLetParameters);
+        parameterDeclContext->templateParameterCount = parseParameters(ParameterParseOptions::OnlyInParameters);
         if (tok != Token::Word) {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -391,15 +391,15 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             VERIFY(tok == Token::Word);
         }
 
-        DeclKind kind = DeclKind::LetParameter;
+        DeclKind kind = DeclKind::InParameter;
         WordAndLocation name = tokWord();
         nextToken();
         if (tok == Token::Word) {
-            if (opts == ParameterParseOptions::OnlyLetParameters) {
+            if (opts == ParameterParseOptions::OnlyInParameters) {
                 errorHandler->parameterModifierNotAllowed(this, name, tokWord());
             }
-            if (name == words["let"]) {
-                kind = DeclKind::LetParameter;
+            if (name == words["in"]) {
+                kind = DeclKind::InParameter;
             } else if (name == words["var"]) {
                 kind = DeclKind::VarParameter;
             } else if (name == words["inout"]) {
