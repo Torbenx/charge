@@ -68,8 +68,8 @@ struct DeclLiteral : SSAName {
 };
 
 struct StmtResult { };
-struct Generator : private NodeStreamVisitor<Generator, StmtResult, ExprValue> {
-    friend NodeStreamVisitor<Generator, StmtResult, ExprValue>;
+struct Generator : private NodeStreamVisitor<Generator, StmtResult, Value> {
+    friend NodeStreamVisitor<Generator, StmtResult, Value>;
     Generator(SemanticContext* sema, ConstantTable* literalTable, InstructionStream* constantStream, InstructionStream* targetStream, Decl* containingScope)
         : sema(sema), literalTable(literalTable), constantStream(constantStream), targetStream(targetStream), containingScope(containingScope) { }
 
@@ -80,7 +80,7 @@ struct Generator : private NodeStreamVisitor<Generator, StmtResult, ExprValue> {
     InstructionStream* targetStream = nullptr;
     Decl* containingScope = nullptr;
 
-    std::optional<ExprValue> visitExpression(Node* node) { return visitExpr(node); }
+    std::optional<Value> visitExpression(Node* node) { return visitExpr(node); }
     void visitBody(Node* node) {
         visitGeneric(node);
     }
@@ -93,10 +93,10 @@ private:
     }
 
     // statements
-    StmtResult visitExpressionStmt(ExpressionStmt&, ExprValue) {
+    StmtResult visitExpressionStmt(ExpressionStmt&, Value) {
         return {};
     }
-    StmtResult visitUpdateStmt(UpdateStmt&, ExprValue) {
+    StmtResult visitUpdateStmt(UpdateStmt&, Value) {
         VERIFY_NOT_REACHED();
     }
     StmtResult visitLetStmt(LetStmt&) { VERIFY_NOT_REACHED(); }
@@ -104,10 +104,10 @@ private:
         while (visitStmt().has_value()) { }
         return {};
     }
-    StmtResult visitIfStmt(IfStmt&, ExprValue) {
+    StmtResult visitIfStmt(IfStmt&, Value) {
         VERIFY_NOT_REACHED();
     }
-    StmtResult visitReturnStmt(ReturnStmt&, ExprValue) {
+    StmtResult visitReturnStmt(ReturnStmt&, Value) {
         VERIFY_NOT_REACHED();
     }
     StmtResult visitEmptyReturnStmt(EmptyReturnStmt&) {
@@ -115,13 +115,13 @@ private:
     }
 
     // expressions
-    ExprValue visitUnaryOperatorExpr(UnaryOperatorExpr&, ExprValue) {
+    Value visitUnaryOperatorExpr(UnaryOperatorExpr&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitBinaryOperatorExpr(BinaryOperatorExpr&, ExprValue) {
+    Value visitBinaryOperatorExpr(BinaryOperatorExpr&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitCallExpr(CallExpr&, ExprValue base) {
+    Value visitCallExpr(CallExpr&, Value base) {
         // Because of overload resolution we don't know which implicit conversions to apply after
         // looking at just a subset of arguments. There are two kinds of solutions here:
         //  1. Don't allow implicit conversions and overload resolution at same time. So we either
@@ -142,7 +142,7 @@ private:
             // TODO: handle more base types
             VERIFY_NOT_REACHED();
         }
-        auto fnDecl = useDeclLiteral<FunctionDecl>(base.asValue());
+        auto fnDecl = useDeclLiteral<FunctionDecl>(base.asPureValue());
         std::vector<SSAName> arguments;
         arguments.reserve(fnDecl->parameters.size());
         std::vector<SSAName> temporaryAllocations;
@@ -150,7 +150,7 @@ private:
             auto maybeArg = visitExpr(ExpressionPrecedence::Statement);
             if (!maybeArg.has_value())
                 break;
-            ExprValue rawArg = maybeArg.value();
+            Value rawArg = maybeArg.value();
             auto param = fnDecl->parameters[arguments.size()];
             Type paramType = (Type)literalFold(fnDecl, param.type);
             matchTypes(paramType, rawArg.type());
@@ -164,7 +164,7 @@ private:
                 }
                 argumentSubstance = emit<Opcode::Allocate>(targetStream, rawArg.type());
                 temporaryAllocations.push_back(argumentSubstance);
-                emit<Opcode::Store>(targetStream, argumentSubstance, rawArg.asValue());
+                emit<Opcode::Store>(targetStream, argumentSubstance, rawArg.asPureValue());
                 break;
             }
             case ValueCategory::LValue: {
@@ -196,19 +196,19 @@ private:
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
             emit<Opcode::Nop>(targetStream, arguments[i]);
 
-        SSAName callValue = emit<Opcode::Call>(targetStream, base.asValue(), arguments.size());
+        SSAName callValue = emit<Opcode::Call>(targetStream, base.asPureValue(), arguments.size());
         for (SSAName tmp : temporaryAllocations) {
             emit<Opcode::Deallocate>(targetStream, tmp);
         }
-        return TypedValue { callValue, (Type)literalFold(fnDecl, fnDecl->returnType) };
+        return PureValue { callValue, (Type)literalFold(fnDecl, fnDecl->returnType) };
     }
-    ExprValue visitParenthesizedExpr(ParenthesizedExpr&) {
+    Value visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitAccessExpr(AccessExpr&, ExprValue) {
+    Value visitAccessExpr(AccessExpr&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitIdentifierExpr(IdentifierExpr& e) {
+    Value visitIdentifierExpr(IdentifierExpr& e) {
         Decl* decl = sema->lookupFromInside(containingScope, e.identifier());
         // The value of an IdentifierExpr:
         //  - For a templated-decl a literal for the template.
@@ -223,41 +223,41 @@ private:
             }
             if (isDeclType<TypeDecl>(decl->kind())) {
                 SSAName declLit = literalTable->emit(decl);
-                return TypedValue { declLit, typeTypeLiteral() };
+                return PureValue { declLit, typeTypeLiteral() };
             } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
                 auto varDeclLit = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDecl.value()));
                 Type type = (Type)literalFold(varDeclLit, varDecl->typeValue);
                 if (varDecl->kind() == DeclKind::StaticLetVariable) {
                     SSAName constValue = literalFold(varDeclLit, varDecl->initValue);
                     requireValueType(type);
-                    return TypedValue { constValue, type };
+                    return PureValue { constValue, type };
                 } else if (varDecl->kind() == DeclKind::StaticVarVariable) {
                     SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
-                    return ExprValue::lvalue(idValue, type);
+                    return Value::lvalue(idValue, type);
                 } else
                     VERIFY_NOT_REACHED();
             } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
                 SSAName declLit = literalTable->emit(fnDecl.value());
-                return TypedValue { declLit, functionLiteralTypeLiteral() };
+                return PureValue { declLit, functionLiteralTypeLiteral() };
             }
         }
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitCompoundExpr(CompoundExpr&) {
+    Value visitCompoundExpr(CompoundExpr&) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitIfExpr(IfExpr&, ExprValue) {
+    Value visitIfExpr(IfExpr&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitCommaElseExpr(CommaElseExpr&, ExprValue) {
+    Value visitCommaElseExpr(CommaElseExpr&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitNumericLiteralExpr(NumericLiteralExpr&) { VERIFY_NOT_REACHED(); }
-    ExprValue visitCharacterLiteralExpr(CharacterLiteralExpr&) { VERIFY_NOT_REACHED(); }
-    ExprValue visitDesignateArgument(DesignateArgument&, ExprValue) {
+    Value visitNumericLiteralExpr(NumericLiteralExpr&) { VERIFY_NOT_REACHED(); }
+    Value visitCharacterLiteralExpr(CharacterLiteralExpr&) { VERIFY_NOT_REACHED(); }
+    Value visitDesignateArgument(DesignateArgument&, Value) {
         VERIFY_NOT_REACHED();
     }
-    ExprValue visitParameterize(Parameterize&, ExprValue) {
+    Value visitParameterize(Parameterize&, Value) {
         VERIFY_NOT_REACHED();
     }
 
@@ -282,14 +282,14 @@ public:
         return constantStream->emit<Opcode::ForeignConstant>(decl, constant);
     }
 
-    Type implicitToType(ExprValue in) {
+    Type implicitToType(Value in) {
         if (literallyEqual(in.type(), &typeType)) {
             return (Type)materialize(in);
         }
         // TODO: Implement more cases
         VERIFY_NOT_REACHED();
     }
-    ExprValue implicitConversion(Type targetType, ExprValue sourceValue) {
+    Value implicitConversion(Type targetType, Value sourceValue) {
         if (targetType.phase() == ValuePhase::Literal && sourceValue.type().phase() == ValuePhase::Literal) {
             if (compareConstantsOfSameType(literalTable->get(targetType), literalTable->get(sourceValue.type()))) {
                 return sourceValue;
@@ -303,16 +303,16 @@ public:
         VERIFY_NOT_REACHED();
     }
 
-    TypedValue materializeIn(InstructionStream* stream, ExprValue in) {
+    PureValue materializeIn(InstructionStream* stream, Value in) {
         switch (in.category()) {
         case ValueCategory::PValue:
-            return in.asValue();
+            return in.asPureValue();
         case ValueCategory::LValue:
             requireValueType(in.type());
             return { emit<Opcode::Load>(stream, in.primary()), in.type() };
         case ValueCategory::RValue: {
             requireValueType(in.type());
-            TypedValue out = { emit<Opcode::Load>(stream, in.primary()), in.type() };
+            PureValue out = { emit<Opcode::Load>(stream, in.primary()), in.type() };
             emit<Opcode::Deallocate>(stream, in.primary());
             return out;
         }
@@ -320,8 +320,8 @@ public:
             VERIFY_NOT_REACHED();
         }
     }
-    TypedValue materialize(ExprValue in) { return materializeIn(targetStream, in); }
-    TypedValue materializeConstant(ExprValue in) { return materializeIn(constantStream, in); }
+    PureValue materialize(Value in) { return materializeIn(targetStream, in); }
+    PureValue materializeConstant(Value in) { return materializeIn(constantStream, in); }
 
     DeclLiteral<> useDeclLiteral(SSAName lit) {
         VERIFY(lit.phase() == ValuePhase::Literal);
@@ -419,10 +419,10 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
 
     Generator g(this, &d.program.literalTable, &d.program.constantStream, &d.program.constantStream, &d);
     auto typeExpr = g.visitExpression(d.typeExpr())
-                        .transform([&g](ExprValue v) { return g.implicitToType(v); });
+                        .transform([&g](Value v) { return g.implicitToType(v); });
 
     auto initExpr = g.visitExpression(d.initExpr())
-                        .or_else([] -> std::optional<ExprValue> {
+                        .or_else([] -> std::optional<Value> {
                             // TODO: Handle error
                             VERIFY_NOT_REACHED();
                         })
