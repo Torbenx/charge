@@ -173,45 +173,59 @@ private:
             Type paramType = (Type)literalFold(fnDecl, param.type);
             matchTypes(paramType, rawArg.type());
 
-            SSAName argumentSubstance;
-            switch (rawArg.category()) {
-            case ValueCategory::PValue: {
-                if (param.model == ParameterModel::InOut || param.model == ParameterModel::Out) {
-                    // TODO: Handle error
-                    VERIFY_NOT_REACHED();
-                }
-                OwnedValue temporary = allocateRValue(rawArg.type());
-                argumentSubstance = temporary.primary();
+            SSAName argumentStorage;
+            switch (param.model) {
+            case ParameterModel::Var: {
+                OwnedValue temporary = makeRValue(std::move(rawArg));
+                argumentStorage = temporary.primary();
                 temporaryAllocations.push_back(std::move(temporary));
-                emit<Opcode::Store>(argumentSubstance, rawArg.asPureValue());
                 break;
             }
-            case ValueCategory::LValue: {
-                // TODO: For 'in' parameters of value type perform an extra copy.
-                // TODO: Handle 'var' parameters.
-                if (param.model == ParameterModel::In || param.model == ParameterModel::InOut) {
-                    argumentSubstance = rawArg.primary();
-                } else {
-                    // TODO: Handle error
+            case ParameterModel::In: {
+                switch (rawArg.category()) {
+                case ValueCategory::PValue: {
+                    OwnedValue temporary = makeRValue(std::move(rawArg));
+                    argumentStorage = temporary.primary();
+                    temporaryAllocations.push_back(std::move(temporary));
+                    break;
+                }
+                case ValueCategory::LValue: {
+                    // TODO: Make a copy for value types.
+                    argumentStorage = rawArg.primary();
+                    break;
+                }
+                case ValueCategory::RValue: {
+                    requireValueType(rawArg.type());
+                    argumentStorage = rawArg.primary();
+                    temporaryAllocations.push_back(std::move(rawArg));
+                    break;
+                }
+                default:
                     VERIFY_NOT_REACHED();
                 }
                 break;
             }
-            case ValueCategory::RValue: {
-                if (param.model == ParameterModel::In) {
-                    requireValueType(paramType);
-                } else if (param.model == ParameterModel::InOut || param.model == ParameterModel::Out) {
+            case ParameterModel::InOut:
+            case ParameterModel::Out: {
+                switch (rawArg.category()) {
+                case ValueCategory::LValue: {
+                    argumentStorage = rawArg.primary();
+                    break;
+                }
+                case ValueCategory::PValue:
+                case ValueCategory::RValue: {
                     // TODO: Handle error
                     VERIFY_NOT_REACHED();
                 }
-                argumentSubstance = rawArg.primary();
-                temporaryAllocations.push_back(std::move(rawArg));
+                default:
+                    VERIFY_NOT_REACHED();
+                }
                 break;
             }
             default:
                 VERIFY_NOT_REACHED();
             }
-            arguments.push_back(argumentSubstance);
+            arguments.push_back(argumentStorage);
         }
         Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
 
@@ -306,7 +320,7 @@ public:
 
     Type implicitToType(OwnedValue in) {
         if (literallyEqual(in.type(), &typeType)) {
-            return (Type)materialize(std::move(in));
+            return (Type)purify(std::move(in));
         }
         // TODO: Implement more cases
         VERIFY_NOT_REACHED();
@@ -325,7 +339,7 @@ public:
         VERIFY_NOT_REACHED();
     }
 
-    PureValue materialize(OwnedValue in) {
+    PureValue purify(OwnedValue in) {
         switch (in.category()) {
         case ValueCategory::PValue:
             return in.asPureValue();
@@ -471,7 +485,7 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
 
     if (d.kind() == DeclKind::StaticLetVariable) {
         g.requireValueType(initExpr.type());
-        p.value = ((Value)g.materialize(std::move(initExpr))).localizeConstant();
+        p.value = ((Value)g.purify(std::move(initExpr))).localizeConstant();
     } else if (d.kind() == DeclKind::StaticVarVariable) {
         OwnedValue storage = g.makeRValue(std::move(initExpr));
         p.value = storage.releaseValue().asLValue().localizeConstant();
