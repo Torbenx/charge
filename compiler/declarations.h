@@ -209,6 +209,7 @@ struct DeclaringStaticDecl : StaticDecl, private StaticDeclContext {
 enum class ParameterModel : uint8_t {
     Template,
     ImplicitTemplate,
+    Let,
     In,
     Var,
     InOut,
@@ -216,10 +217,12 @@ enum class ParameterModel : uint8_t {
 };
 constexpr ParameterModel kindToModel(DeclKind kind) {
     switch (kind) {
-    case DeclKind::InParameter:
-        return ParameterModel::In;
+    case DeclKind::LetParameter:
+        return ParameterModel::Let;
     case DeclKind::VarParameter:
         return ParameterModel::Var;
+    case DeclKind::InParameter:
+        return ParameterModel::In;
     case DeclKind::InOutParameter:
         return ParameterModel::InOut;
     case DeclKind::OutParameter:

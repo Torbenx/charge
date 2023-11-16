@@ -396,17 +396,19 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             VERIFY(tok == Token::Word);
         }
 
-        DeclKind kind = DeclKind::InParameter;
+        DeclKind kind = DeclKind::LetParameter;
         WordAndLocation name = tokWord();
         nextToken();
         if (tok == Token::Word) {
             if (opts == ParameterParseOptions::OnlyInParameters) {
                 errorHandler->parameterModifierNotAllowed(this, name, tokWord());
             }
-            if (name == words["in"]) {
-                kind = DeclKind::InParameter;
+            if (name == words["let"]) {
+                kind = DeclKind::LetParameter;
             } else if (name == words["var"]) {
                 kind = DeclKind::VarParameter;
+            } else if (name == words["in"]) {
+                kind = DeclKind::InParameter;
             } else if (name == words["inout"]) {
                 kind = DeclKind::InOutParameter;
             } else if (name == words["out"]) {

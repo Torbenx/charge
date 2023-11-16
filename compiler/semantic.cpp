@@ -173,11 +173,15 @@ private:
             Type paramType = (Type)literalFold(fnDecl, param.type);
             matchTypes(paramType, rawArg.type());
 
-            SSAName argumentStorage;
+            SSAName argumentName;
             switch (param.model) {
+            case ParameterModel::Let: {
+                argumentName = purify(std::move(rawArg));
+                break;
+            }
             case ParameterModel::Var: {
                 OwnedValue temporary = makeRValue(std::move(rawArg));
-                argumentStorage = temporary.primary();
+                argumentName = temporary.primary();
                 temporaryAllocations.push_back(std::move(temporary));
                 break;
             }
@@ -185,18 +189,17 @@ private:
                 switch (rawArg.category()) {
                 case ValueCategory::PValue: {
                     OwnedValue temporary = makeRValue(std::move(rawArg));
-                    argumentStorage = temporary.primary();
+                    argumentName = temporary.primary();
                     temporaryAllocations.push_back(std::move(temporary));
                     break;
                 }
                 case ValueCategory::LValue: {
-                    // TODO: Make a copy for value types.
-                    argumentStorage = rawArg.primary();
+                    argumentName = rawArg.primary();
                     break;
                 }
                 case ValueCategory::RValue: {
                     requireValueType(rawArg.type());
-                    argumentStorage = rawArg.primary();
+                    argumentName = rawArg.primary();
                     temporaryAllocations.push_back(std::move(rawArg));
                     break;
                 }
@@ -209,7 +212,7 @@ private:
             case ParameterModel::Out: {
                 switch (rawArg.category()) {
                 case ValueCategory::LValue: {
-                    argumentStorage = rawArg.primary();
+                    argumentName = rawArg.primary();
                     break;
                 }
                 case ValueCategory::PValue:
@@ -225,7 +228,7 @@ private:
             default:
                 VERIFY_NOT_REACHED();
             }
-            arguments.push_back(argumentStorage);
+            arguments.push_back(argumentName);
         }
         Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
 
@@ -375,6 +378,7 @@ public:
             return out;
         }
         case ValueCategory::LValue: {
+            // TODO: Implement copying.
             VERIFY_NOT_REACHED();
         }
         case ValueCategory::RValue: {
