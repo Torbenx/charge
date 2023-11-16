@@ -23,9 +23,12 @@ struct call_inst : inst {
     InstructionOperand base;
     uint16_t argumentCount;
     InstructionOperand firstArgument() const {
-        return InstructionOperand(false, out.id() - argumentCount);
+        return InstructionOperand(false, out.id() - argumentCount - 1);
     }
     InstructionOperand lastArgument() const {
+        return InstructionOperand(false, out.id() - 2);
+    }
+    InstructionOperand returnValue() const {
         return InstructionOperand(false, out.id() - 1);
     }
 };
@@ -136,7 +139,7 @@ struct Dumper : InstructionVisitor<Dumper> {
         std::cout << format(i.base) << "(";
         if (i.argumentCount > 0)
             std::cout << format(i.firstArgument()) << ".." << format(i.lastArgument());
-        std::cout << ")\n";
+        std::cout << ") -> " << format(i.returnValue()) << '\n';
     }
 
     void dump(InstructionStream& s) {

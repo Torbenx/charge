@@ -100,7 +100,9 @@ private:
     }
 
     // statements
-    StmtResult visitExpressionStmt(ExpressionStmt&, OwnedValue) {
+    StmtResult visitExpressionStmt(ExpressionStmt&, OwnedValue v) {
+        if (v.category() == ValueCategory::RValue)
+            deallocateRValue(std::move(v));
         return {};
     }
     StmtResult visitUpdateStmt(UpdateStmt&, OwnedValue) {
@@ -201,15 +203,18 @@ private:
             }
             arguments.push_back(argumentSubstance);
         }
+        Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
+
         VERIFY(arguments.size() == fnDecl->parameters.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
             emit<Opcode::Nop>(arguments[i]);
+        OwnedValue returnValue = allocateRValue(returnType);
+        emit<Opcode::Call>(base.asPureValue(), arguments.size());
 
-        SSAName callValue = emit<Opcode::Call>(base.asPureValue(), arguments.size());
         for (OwnedValue& tmp : temporaryAllocations) {
             deallocateRValue(std::move(tmp));
         }
-        return PureValue { callValue, (Type)literalFold(fnDecl, fnDecl->returnType) };
+        return returnValue;
     }
     OwnedValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();

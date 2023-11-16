@@ -10,7 +10,8 @@
     INST(Call, call)                        \
     INST(Allocate, unary)                   \
     INST(Deallocate, binary)                \
-    INST(Store, binary)
+    INST(Store, binary)                     \
+    INST(BindToStaticVariable, unary)
 
 enum class Opcode : uint16_t {
 
