@@ -86,10 +86,17 @@ struct Generator : private NodeStreamVisitor<Generator, StmtResult, OwnedValue> 
     }
 
 private:
+    void transformEmitArgumentForTargetStream(auto& arg)
+        requires(!std::convertible_to<decltype(arg), SSAName>)
+    { }
+    void transformEmitArgumentForTargetStream(SSAName& name) {
+        if (name.phase() == ValuePhase::Literal && targetStream->stream_phase == ValuePhase::Runtime)
+            name = constantStream->emit<Opcode::Nop>(name);
+    }
     template<Opcode op, typename... Args>
-    SSAName emit(InstructionStream* out, Args... args) {
-        (transformEmitArgument(out, args), ...);
-        return out->emit<op>(args...);
+    SSAName emit(Args... args) {
+        (transformEmitArgumentForTargetStream(args), ...);
+        return targetStream->emit<op>(args...);
     }
 
     // statements
@@ -162,10 +169,10 @@ private:
                     // TODO: Handle error
                     VERIFY_NOT_REACHED();
                 }
-                OwnedValue temporary = allocateRValue(targetStream, rawArg.type());
+                OwnedValue temporary = allocateRValue(rawArg.type());
                 argumentSubstance = temporary.primary();
                 temporaryAllocations.push_back(std::move(temporary));
-                emit<Opcode::Store>(targetStream, argumentSubstance, rawArg.asPureValue());
+                emit<Opcode::Store>(argumentSubstance, rawArg.asPureValue());
                 break;
             }
             case ValueCategory::LValue: {
@@ -196,11 +203,11 @@ private:
         }
         VERIFY(arguments.size() == fnDecl->parameters.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
-            emit<Opcode::Nop>(targetStream, arguments[i]);
+            emit<Opcode::Nop>(arguments[i]);
 
-        SSAName callValue = emit<Opcode::Call>(targetStream, base.asPureValue(), arguments.size());
+        SSAName callValue = emit<Opcode::Call>(base.asPureValue(), arguments.size());
         for (OwnedValue& tmp : temporaryAllocations) {
-            deallocateRValue(targetStream, std::move(tmp));
+            deallocateRValue(std::move(tmp));
         }
         return PureValue { callValue, (Type)literalFold(fnDecl, fnDecl->returnType) };
     }
@@ -234,7 +241,7 @@ private:
                     requireValueType(type);
                     return PureValue { constValue, type };
                 } else if (varDecl->kind() == DeclKind::StaticVarVariable) {
-                    SSAName idValue = emit<Opcode::StaticVariableId>(constantStream, varDeclLit);
+                    SSAName idValue = emit<Opcode::StaticVariableId>(varDeclLit);
                     return Value::lvalue(idValue, type);
                 } else
                     VERIFY_NOT_REACHED();
@@ -305,34 +312,32 @@ public:
         VERIFY_NOT_REACHED();
     }
 
-    PureValue materializeIn(InstructionStream* stream, OwnedValue in) {
+    PureValue materialize(OwnedValue in) {
         switch (in.category()) {
         case ValueCategory::PValue:
             return in.asPureValue();
         case ValueCategory::LValue:
             requireValueType(in.type());
-            return { emit<Opcode::Load>(stream, in.primary()), in.type() };
+            return { emit<Opcode::Load>(in.primary()), in.type() };
         case ValueCategory::RValue: {
             requireValueType(in.type());
-            PureValue out = { emit<Opcode::Load>(stream, in.primary()), in.type() };
-            deallocateRValue(stream, std::move(in));
+            PureValue out = { emit<Opcode::Load>(in.primary()), in.type() };
+            deallocateRValue(std::move(in));
             return out;
         }
         default:
             VERIFY_NOT_REACHED();
         }
     }
-    PureValue materialize(OwnedValue in) { return materializeIn(targetStream, std::move(in)); }
-    PureValue materializeConstant(OwnedValue in) { return materializeIn(constantStream, std::move(in)); }
 
-    OwnedValue allocateRValue(InstructionStream* stream, Type type) {
-        SSAName substance = emit<Opcode::Allocate>(stream, type);
+    OwnedValue allocateRValue(Type type) {
+        SSAName substance = emit<Opcode::Allocate>(type);
         return OwnedValue::rvalue(substance, type);
     }
-    void deallocateRValue(InstructionStream* stream, OwnedValue value) {
+    void deallocateRValue(OwnedValue value) {
         Value v = value.releaseValue();
         VERIFY(v.category() == ValueCategory::RValue);
-        emit<Opcode::Deallocate>(stream, v.type(), v.primary());
+        emit<Opcode::Deallocate>(v.type(), v.primary());
     }
 
     DeclLiteral<> useDeclLiteral(SSAName lit) {
@@ -345,14 +350,6 @@ public:
     DeclLiteral<T> useDeclLiteral(SSAName lit) {
         auto decl = useDeclLiteral(lit);
         return { (SSAName)decl, dyn_cast<T>(decl.decl) };
-    }
-
-    void transformEmitArgument(InstructionStream*, auto& arg)
-        requires(!std::convertible_to<decltype(arg), SSAName>)
-    { }
-    void transformEmitArgument(InstructionStream* out, SSAName& name) {
-        if (name.phase() == ValuePhase::Literal && out->stream_phase == ValuePhase::Runtime)
-            name = emit<Opcode::Nop>(constantStream, name);
     }
 
     void requireValueType(Type) { }

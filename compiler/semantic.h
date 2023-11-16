@@ -36,7 +36,7 @@ enum class ValueCategory {
     // l-value: A value with substance. The (pure) value is obtained by loading from the substance.
     LValue,
     // r-value: Like l-value but the substance is owned by the value. Anyone that uses an r-value
-    //          must be sure to deallocate the substance when done with the value. 
+    //          must be sure to deallocate the substance when done with the value.
     RValue,
 };
 struct Value {
