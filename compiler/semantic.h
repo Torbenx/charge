@@ -9,7 +9,7 @@
     INST(Nop, unary)                        \
     INST(Call, call)                        \
     INST(Allocate, unary)                   \
-    INST(Deallocate, unary)                 \
+    INST(Deallocate, binary)                \
     INST(Store, binary)
 
 enum class Opcode : uint16_t {
@@ -75,14 +75,52 @@ struct Value {
     static Value lvalue(SSAName substance, Type type) {
         return Value(ValueCategory::LValue, substance, type);
     }
-    static Value rvalue(SSAName substance, Type type) {
-        return Value(ValueCategory::RValue, substance, type);
+};
+
+// This class verifies that the storage for r-values has been deallocated when it is destructed.
+struct OwnedValue : Value {
+    static OwnedValue rvalue(SSAName substance, Type type) {
+        return { rvalue_tag(), substance, type };
     }
+    OwnedValue(Value value)
+        : Value(value) {
+        // Don't allow taking ownership of an r-value by an implicit convertsion.
+        VERIFY(category() != ValueCategory::RValue);
+    }
+    OwnedValue(PureValue value)
+        : Value(value) { }
+    OwnedValue(const OwnedValue&) = delete;
+    OwnedValue(OwnedValue&& other)
+        : Value(other) {
+        other.toMovedFromState();
+    }
+    OwnedValue& operator=(const OwnedValue&) = delete;
+    OwnedValue& operator=(OwnedValue&& other) {
+        *(Value*)this = other;
+        other.toMovedFromState();
+        return *this;
+    }
+    Value releaseValue() {
+        Value ret = *this;
+        toMovedFromState();
+        return ret;
+    }
+    ~OwnedValue() {
+        VERIFY(category() != ValueCategory::RValue);
+    }
+
+private:
+    void toMovedFromState() {
+        *(Value*)this = Value(ValueCategory::Invalid, SSAName(), Type());
+    }
+    struct rvalue_tag { };
+    OwnedValue(rvalue_tag, SSAName substance, Type type)
+        : Value(ValueCategory::RValue, substance, type) { }
 };
 
 struct SemanticContext {
     struct ErrorHandler {
-        virtual Value unresolvedIdentifier() = 0;
+        virtual OwnedValue unresolvedIdentifier() = 0;
     };
     struct Instrumenter { };
 
