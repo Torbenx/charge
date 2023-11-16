@@ -331,8 +331,8 @@ public:
     }
 
     OwnedValue allocateRValue(Type type) {
-        SSAName substance = emit<Opcode::Allocate>(type);
-        return OwnedValue::rvalue(substance, type);
+        SSAName storage = emit<Opcode::Allocate>(type);
+        return OwnedValue::rvalue(storage, type);
     }
     void deallocateRValue(OwnedValue value) {
         Value v = value.releaseValue();

@@ -12,14 +12,14 @@ fn test(): {
                                     //    'foo' when 'getVector()' throw an exception with some of its subobjects uninitialized.
                                     //  - Memory blocks would have to keep track of more information.
                                     //  - What are the semantics of being initialized?
-                                    //     - 'std::fully_initialized(inout arg_with_substance) -> bool'
-                                    //     - 'std::fully_uninitialized(inout arg_with_substance) -> bool'
+                                    //     - 'std::fully_initialized(inout arg_with_storage) -> bool'
+                                    //     - 'std::fully_uninitialized(inout arg_with_storage) -> bool'
                                     //     - all members being initialized is not the same as 'fully_initialized()'
                                     //     - seperate flag for each member AND the full type (recursively)
                                     //     - Does 'fully_initialized(obj)' imply 'fully_initialized(obj.member)' for all members?
                                     //        - This means that 'replace(obj.member)' itermediately has 'fully_initialized(obj) == false'.
                                     //          Can this (falsely) suggest that we have to call the constructor of 'obj' again?
-                                    //        - 'std::construtor_called_for(inout arg_with_substance) -> bool'?
+                                    //        - 'std::construtor_called_for(inout arg_with_storage) -> bool'?
 
     foo.vec.move_from(getVector()); // 'move_from' would have a 'mut' parameter. This parameter would effectively be a temporary,
                                     // the exact thing we are trying to avoid. It might be better to just have temporaries as a

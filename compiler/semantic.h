@@ -33,10 +33,10 @@ enum class ValueCategory {
     Invalid,
     // p-value: A pure value that directly corrisponds to a SSAName. Must be of value type.
     PValue,
-    // l-value: A value with substance. The (pure) value is obtained by loading from the substance.
+    // l-value: A value with storage. The (pure) value is obtained by loading from the storage.
     LValue,
-    // r-value: Like l-value but the substance is owned by the value. Anyone that uses an r-value
-    //          must be sure to deallocate the substance when done with the value.
+    // r-value: Like l-value but the storage is owned by the value. Anyone that uses an r-value
+    //          must be sure to deallocate the storage when done with the value.
     RValue,
 };
 struct Value {
@@ -72,15 +72,15 @@ struct Value {
         , m_category(std::to_underlying(category)) { }
     Value(PureValue value)
         : Value(ValueCategory::PValue, value, value.type()) { }
-    static Value lvalue(SSAName substance, Type type) {
-        return Value(ValueCategory::LValue, substance, type);
+    static Value lvalue(SSAName storage, Type type) {
+        return Value(ValueCategory::LValue, storage, type);
     }
 };
 
 // This class verifies that the storage for r-values has been deallocated when it is destructed.
 struct OwnedValue : Value {
-    static OwnedValue rvalue(SSAName substance, Type type) {
-        return { rvalue_tag(), substance, type };
+    static OwnedValue rvalue(SSAName storage, Type type) {
+        return { rvalue_tag(), storage, type };
     }
     OwnedValue(Value value)
         : Value(value) {
@@ -114,8 +114,8 @@ private:
         *(Value*)this = Value(ValueCategory::Invalid, SSAName(), Type());
     }
     struct rvalue_tag { };
-    OwnedValue(rvalue_tag, SSAName substance, Type type)
-        : Value(ValueCategory::RValue, substance, type) { }
+    OwnedValue(rvalue_tag, SSAName storage, Type type)
+        : Value(ValueCategory::RValue, storage, type) { }
 };
 
 struct SemanticContext {
