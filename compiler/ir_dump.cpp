@@ -96,7 +96,7 @@ struct Dumper : InstructionVisitor<Dumper> {
     FormattedOperand format(InstructionOperand operand) const {
         return format(operand, phase);
     }
-    static FormattedOperand format(ConstantStreamInstructionOperand operand) {
+    static FormattedOperand format(ConstantStreamOperand operand) {
         return format(operand, ValuePhase::Constant);
     }
     std::string_view instName(Opcode op) {
@@ -172,20 +172,22 @@ void dump(Decl* decl, WordStringTable& wordTable) {
     if (auto typeDecl = dyn_cast<TypeDecl>(decl)) {
         // Nothing to do
     } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
-        std::cout << "  type = " << Dumper::format(varDecl->typeValue) << '\n';
-        std::cout << "  init = " << Dumper::format(varDecl->initValue) << '\n';
+        auto* prog = varDecl->program();
+        std::cout << "  type = " << Dumper::format(prog->value.type) << '\n';
+        std::cout << "  value = " << Dumper::format(prog->value.primary) << '\n';
         std::cout << '\n';
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-        for (auto param : fnDecl->parameters)
+        auto* prog = fnDecl->program();
+        for (auto param : prog->parameters)
             std::cout << "  typeof(" << wordTable.view(param.name) << ") = " << Dumper::format(param.type) << '\n';
 
-        std::cout << "  return-type = " << Dumper::format(fnDecl->returnType) << '\n';
+        std::cout << "  return-type = " << Dumper::format(prog->returnType) << '\n';
         std::cout << '\n';
     }
     Dumper dumper;
-    dumper.dump(paramDecl->program.literalTable, wordTable);
+    dumper.dump(paramDecl->program()->literalTable, wordTable);
     std::cout << '\n';
-    dumper.dump(paramDecl->program.constantStream);
+    dumper.dump(paramDecl->program()->constantStream);
     std::cout << '\n';
-    dumper.dump(paramDecl->program.runtimeStream);
+    dumper.dump(paramDecl->program()->runtimeStream);
 }

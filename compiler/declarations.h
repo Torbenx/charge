@@ -1,6 +1,5 @@
 #pragma once
 
-#include "StaticDeclProgram.h"
 #include "StreamAllocator.h"
 #include "WordTable.h"
 #include "token.h"
@@ -229,33 +228,33 @@ constexpr ParameterModel kindToModel(DeclKind kind) {
         VERIFY_NOT_REACHED();
     }
 }
+struct DeclProgram;
 struct ParameterizedDecl {
     relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
-    StaticDeclProgram program;
-    ParameterizedDecl(ParameterDeclContext* declContext)
-        : m_parameterDecls(this, declContext) { }
+    relative_pointer<ParameterizedDecl, DeclProgram> m_program;
+    ParameterizedDecl(ParameterDeclContext* declContext, DeclProgram* program)
+        : m_parameterDecls(this, declContext), m_program(this, program) { }
 
     ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
 
-    struct CheckedParameter {
-        Word name;
-        ParameterModel model;
-        ConstantStreamInstructionOperand type;
-    };
-    std::vector<CheckedParameter> parameters;
+    DeclProgram* program() { return m_program.get(this); }
 };
 struct NamespaceDecl : DeclaringStaticDecl {
     NamespaceDecl(WordAndLocation name)
         : DeclaringStaticDecl(DeclKind::Namespace, name) { }
 };
 struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
-    TypeDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
-        : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext) { }
+    TypeDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
+        : DeclaringStaticDecl(kind, name), ParameterizedDecl(declContext, program) { }
+
+    static constinit const uint32_t DECL_PROGRAM_SIZE;
+    struct Program;
+    Program* program();
 };
 struct FunctionDecl : StaticDecl, ParameterizedDecl {
-    FunctionDecl(WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
+    FunctionDecl(DeclProgram* program, WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
         : StaticDecl(DeclKind::Function, name)
-        , ParameterizedDecl(declContext)
+        , ParameterizedDecl(declContext, program)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { }
 
@@ -265,14 +264,16 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 
-    ConstantStreamInstructionOperand returnType;
+    static constinit const uint32_t DECL_PROGRAM_SIZE;
+    struct Program;
+    Program* program();
 };
 
 struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
 
-    StaticVariableDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
+    StaticVariableDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
         : StaticDecl(kind, name)
-        , ParameterizedDecl(declContext)
+        , ParameterizedDecl(declContext, program)
         , m_typeExpr(this, typeExpr)
         , m_initExpr(this, initExpr) { VERIFY(isDeclType<StaticVariableDecl>(kind)); }
 
@@ -282,8 +283,9 @@ struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
     Node* typeExpr() { return m_typeExpr.get(this); }
     Node* initExpr() { return m_initExpr.get(this); }
 
-    ConstantStreamInstructionOperand typeValue;
-    ConstantStreamInstructionOperand initValue;
+    static constinit const uint32_t DECL_PROGRAM_SIZE;
+    struct Program;
+    Program* program();
 };
 struct HasMemberDecl : ParameterOrMemberDecl {
     StaticDeclContext m_staticDecls;

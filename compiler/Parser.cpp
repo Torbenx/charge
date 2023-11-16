@@ -65,7 +65,12 @@ void StaticDeclContext::addDecl(StaticDecl* decl) {
 }
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDeclInternal(Args&&... args) {
-    return std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
+    if constexpr (requires { { T::DECL_PROGRAM_SIZE } -> std::convertible_to<int_t>; }) {
+        auto* prog = (DeclProgram*)nodeStream.allocate(8, T::DECL_PROGRAM_SIZE);
+        return std::construct_at(nodeStream.template allocate<T>(), prog, std::forward<Args>(args)...);
+    } else {
+        return std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);
+    }
 }
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
