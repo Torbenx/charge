@@ -16,8 +16,8 @@
 
 /> expect-token LeftParen </ (
 /> expect-token RightParen </ )
-/> expect-token LeftAngle </ [
-/> expect-token RightAngle </ ]
+/> expect-token LeftSquare </ [
+/> expect-token RightSquare </ ]
 /> expect-token LeftBrace </ {
 /> expect-token RightBrace </ }
 /> expect-token Question </ ?

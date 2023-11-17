@@ -9,8 +9,8 @@ std::string_view toSmallString(Token tok) {
 
     case LeftParen: return "(";
     case RightParen: return ")";
-    case LeftAngle: return "[";
-    case RightAngle: return "]";
+    case LeftSquare: return "[";
+    case RightSquare: return "]";
     case LeftBrace: return "{";
     case RightBrace: return "}";
 
@@ -258,8 +258,8 @@ static constexpr auto table = makeTable({
     { 'a', 'z', Token::Word },
     { 'A', 'Z', Token::Word },
     { '_', Token::Word },
-    { '[', Token::LeftAngle },
-    { ']', Token::RightAngle },
+    { '[', Token::LeftSquare },
+    { ']', Token::RightSquare },
     { '{', Token::LeftBrace },
     { '}', Token::RightBrace },
     { '~', Token::Tilde },
@@ -347,7 +347,7 @@ void Lexer::formatLine(std::ostream& out, LocalSourceRange highlight) const {
 
 void Lexer::setSource(std::string_view source) {
     // reset all fields
-    (LexerState&)*this = { source };
+    (LexerState&)* this = { source };
 
     if (source.empty())
         return;

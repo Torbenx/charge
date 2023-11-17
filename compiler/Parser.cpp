@@ -690,7 +690,7 @@ void Parser::parsePostfixExprHere() {
                 emitNode(Parameterize(tokRange()));
                 parseArguments();
             }
-        } else if (tok == Token::LeftParen || tok == Token::LeftAngle) {
+        } else if (tok == Token::LeftParen || tok == Token::LeftSquare) {
             NodeKind kind = tok == Token::LeftParen ? NodeKind::CallExpr : NodeKind::IndexExpr;
             emitNode(CallExpr(kind, tokRange()));
             parseArguments();
@@ -715,20 +715,20 @@ void Parser::parsePrimaryExpr() {
     } else if (tok == Token::LeftParen) {
         emitNode(ParenthesizedExpr(tokRange()));
         parseArguments();
-    } else if (tok == Token::LeftAngle) {
+    } else if (tok == Token::LeftSquare) {
         emitNode(CompoundExpr(tokRange()));
         nextToken();
         for (;;) {
             auto kind = parseStatementInternal();
             if (kind == ParsedStatementKind::ExprStmtWithMissingSemiColon
-                && tok == Token::RightAngle) {
+                && tok == Token::RightSquare) {
                 break;
             }
             if (kind == ParsedStatementKind::ExprStmtWithMissingSemiColon) {
                 errorHandler->expectedSemiColon(this);
             }
         }
-        VERIFY(tok == Token::RightAngle);
+        VERIFY(tok == Token::RightSquare);
         emitNode(EmptyNode(tokRange()));
         nextToken();
     } else if (tok == Token::CharacterLiteral) {

@@ -8,8 +8,8 @@
 #define ENUMERTATE_TOKENS                \
     TOKEN(LeftParen) /* ( */             \
     TOKEN(RightParen) /* ) */            \
-    TOKEN(LeftAngle) /* [ */             \
-    TOKEN(RightAngle) /* ] */            \
+    TOKEN(LeftSquare) /* [ */            \
+    TOKEN(RightSquare) /* ] */           \
     TOKEN(LeftBrace) /* { */             \
     TOKEN(RightBrace) /* } */            \
                                          \
