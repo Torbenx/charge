@@ -76,7 +76,7 @@ template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDecl(Args&&... args) {
     T* decl = emitDeclInternal<T, Args...>(std::forward<Args>(args)...);
 
-    if constexpr (std::derived_from<T, ParameterOrMemberDecl>)
+    if constexpr (std::derived_from<T, ParameterDecl>)
         parameterDeclContext->addDecl(decl);
     else if constexpr (std::derived_from<T, StaticDecl>)
         staticDeclContext->addDecl(decl);
@@ -439,7 +439,7 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
         }
         emitNode(EmptyNode());
 
-        emitDecl<ParameterOrMemberDecl>(kind, name, typeExpr, initExpr);
+        emitDecl<ParameterDecl>(kind, name, typeExpr, initExpr);
         count += 1;
         if (tok == Token::Comma) {
             nextToken();

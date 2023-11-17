@@ -146,7 +146,7 @@ struct Dumper : InstructionVisitor<Dumper> {
         phase = s.stream_phase;
         visit(s);
     }
-    void dump(ConstantTable& t, WordStringTable& wordTable) {
+    void dump(ConstantTable& t, const WordStringTable& wordTable) {
         phase = t.table_phase;
         for (int_t i = 0; i < (int_t)t.encodedValues.size(); i++) {
             auto constant = t.get(i);
@@ -166,7 +166,7 @@ struct Dumper : InstructionVisitor<Dumper> {
 };
 }
 
-void dump(Decl* decl, WordStringTable& wordTable) {
+void dumpIR(Decl* decl, const WordStringTable& wordTable) {
     auto paramDecl = dyn_cast<ParameterizedDecl>(decl);
     std::cout << wordTable.view(decl->name) << ":\n";
     if (auto typeDecl = dyn_cast<TypeDecl>(decl)) {

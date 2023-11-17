@@ -506,6 +506,23 @@ void SemanticContext::signatureCheckTypeDecl(TypeDecl& d) {
 
     d.setStatus(DeclStatus::SignatureChecked);
 }
+
+static ParameterModel kindToModel(DeclKind kind) {
+    switch (kind) {
+    case DeclKind::LetParameter:
+        return ParameterModel::Let;
+    case DeclKind::VarParameter:
+        return ParameterModel::Var;
+    case DeclKind::InParameter:
+        return ParameterModel::In;
+    case DeclKind::InOutParameter:
+        return ParameterModel::InOut;
+    case DeclKind::OutParameter:
+        return ParameterModel::Out;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     VERIFY(d.status() == DeclStatus::Unchecked);
     auto& p = *d.program();
@@ -517,7 +534,7 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     auto parameterDecls = d.parameterDecls()->parameters();
     VERIFY(d.parameterDecls()->templateParameterCount == 0);
     p.parameters.reserve(parameterDecls.size());
-    for (ParameterOrMemberDecl* param : parameterDecls) {
+    for (ParameterDecl* param : parameterDecls) {
         auto typeExpr = g.visitExpression(param->typeExpr());
         VERIFY(typeExpr.has_value());
         p.parameters.push_back({ param->name, kindToModel(param->kind()),
@@ -554,7 +571,7 @@ void SemanticContext::check(StaticDeclContext* parent) {
         }
 
         if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
-            dump(child, *wordTable);
+            //dump(child, *wordTable);
         }
     }
 }

@@ -198,3 +198,7 @@ struct Foo3: { has Bar as bar: { fn test(): { } } }
 // expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)
 struct Foo4: { static x; }
+
+// expect-decl LetParameter; expect-decl StaticLetVariable
+template(T: type)
+static variable_template = init;

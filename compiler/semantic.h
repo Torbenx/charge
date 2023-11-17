@@ -285,6 +285,15 @@ struct DeclProgram {
     InstructionStream constantStream { ValuePhase::Constant };
     InstructionStream runtimeStream { ValuePhase::Runtime };
 };
+enum class ParameterModel : uint8_t {
+    Template,
+    ImplicitTemplate,
+    Let,
+    In,
+    Var,
+    InOut,
+    Out,
+};
 struct ParameterizedDeclProgram : DeclProgram {
     struct CheckedParameter {
         Word name;
@@ -322,4 +331,4 @@ struct SemanticContext {
     void checkBody(FunctionDecl&);
 };
 
-void dump(Decl*, WordStringTable&);
+void dumpIR(Decl*, const WordStringTable&);

@@ -6,7 +6,6 @@
 #include <ranges>
 
 struct Node;
-struct ParameterOrMemberDecl;
 struct Decl;
 struct StaticDecl;
 struct ParameterizedDecl;
@@ -49,20 +48,22 @@ struct Decl {
     void setStatus(DeclStatus status) { statusBits = std::to_underlying(status); }
     SingleTokenSourceRange nameLocation() const { return SingleTokenSourceRange(locationBits); }
 };
-// a parameter or (has-)member declaration
-struct ParameterOrMemberDecl : Decl {
-    relative_pointer<ParameterOrMemberDecl, Node> m_typeExpr;
-    relative_pointer<ParameterOrMemberDecl, Node> m_initExpr;
+struct VariableDecl {
+    relative_pointer<VariableDecl, Node> m_typeExpr;
+    relative_pointer<VariableDecl, Node> m_initExpr;
 
-    ParameterOrMemberDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : Decl(kind, name)
-        , m_typeExpr(this, typeExpr)
-        , m_initExpr(this, initExpr) {
-        VERIFY(isDeclType<ParameterOrMemberDecl>(kind));
-    }
+    VariableDecl(Node* typeExpr, Node* initExpr)
+        : m_typeExpr(this, typeExpr)
+        , m_initExpr(this, initExpr) { }
 
     Node* typeExpr() { return m_typeExpr.get(this); }
     Node* initExpr() { return m_initExpr.get(this); }
+};
+struct ParameterDecl : Decl, VariableDecl {
+    ParameterDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name), VariableDecl(typeExpr, initExpr) {
+        VERIFY(isDeclType<ParameterDecl>(kind));
+    }
 };
 
 struct StaticDeclContext : WordTable {
@@ -158,15 +159,15 @@ struct StaticDeclContext : WordTable {
 
 struct ParameterDeclContext {
     struct Entry {
-        Entry(ParameterDeclContext* ctx, ParameterOrMemberDecl* decl)
+        Entry(ParameterDeclContext* ctx, ParameterDecl* decl)
             : name(decl->name), decl(ctx, decl) { }
         Word name;
-        relative_pointer<ParameterDeclContext, ParameterOrMemberDecl> decl;
+        relative_pointer<ParameterDeclContext, ParameterDecl> decl;
     };
     std::vector<Entry> parameterDecls;
     int_t templateParameterCount = 0;
 
-    void addDecl(ParameterOrMemberDecl* decl) {
+    void addDecl(ParameterDecl* decl) {
         parameterDecls.push_back({ this, decl });
     }
 
@@ -206,31 +207,10 @@ struct DeclaringStaticDecl : StaticDecl, private StaticDeclContext {
 
     StaticDeclContext* staticDecls() { return this; }
 };
-enum class ParameterModel : uint8_t {
-    Template,
-    ImplicitTemplate,
-    Let,
-    In,
-    Var,
-    InOut,
-    Out,
+struct NamespaceDecl : DeclaringStaticDecl {
+    NamespaceDecl(WordAndLocation name)
+        : DeclaringStaticDecl(DeclKind::Namespace, name) { }
 };
-constexpr ParameterModel kindToModel(DeclKind kind) {
-    switch (kind) {
-    case DeclKind::LetParameter:
-        return ParameterModel::Let;
-    case DeclKind::VarParameter:
-        return ParameterModel::Var;
-    case DeclKind::InParameter:
-        return ParameterModel::In;
-    case DeclKind::InOutParameter:
-        return ParameterModel::InOut;
-    case DeclKind::OutParameter:
-        return ParameterModel::Out;
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
 struct DeclProgram;
 struct ParameterizedDecl {
     relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
@@ -241,10 +221,6 @@ struct ParameterizedDecl {
     ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
 
     DeclProgram* program() { return m_program.get(this); }
-};
-struct NamespaceDecl : DeclaringStaticDecl {
-    NamespaceDecl(WordAndLocation name)
-        : DeclaringStaticDecl(DeclKind::Namespace, name) { }
 };
 struct TypeDecl : DeclaringStaticDecl, ParameterizedDecl {
     TypeDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
@@ -272,43 +248,34 @@ struct FunctionDecl : StaticDecl, ParameterizedDecl {
     Program* program();
 };
 
-struct StaticVariableDecl : StaticDecl, ParameterizedDecl {
-
+struct StaticVariableDecl : StaticDecl, ParameterizedDecl, VariableDecl {
     StaticVariableDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
-        : StaticDecl(kind, name)
-        , ParameterizedDecl(declContext, program)
-        , m_typeExpr(this, typeExpr)
-        , m_initExpr(this, initExpr) { VERIFY(isDeclType<StaticVariableDecl>(kind)); }
-
-    relative_pointer<StaticVariableDecl, Node> m_typeExpr;
-    relative_pointer<StaticVariableDecl, Node> m_initExpr;
-
-    Node* typeExpr() { return m_typeExpr.get(this); }
-    Node* initExpr() { return m_initExpr.get(this); }
+        : StaticDecl(kind, name), ParameterizedDecl(declContext, program), VariableDecl(typeExpr, initExpr) {
+        VERIFY(isDeclType<StaticVariableDecl>(kind));
+    }
 
     static constinit const uint32_t DECL_PROGRAM_SIZE;
     struct Program;
     Program* program();
 };
-struct HasMemberDecl : ParameterOrMemberDecl {
+struct MemberDecl : Decl, VariableDecl {
+    MemberDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
+        : Decl(kind, name), VariableDecl(typeExpr, initExpr) { }
+};
+struct HasMemberDecl : MemberDecl {
     StaticDeclContext m_staticDecls;
 
     HasMemberDecl(WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : ParameterOrMemberDecl(DeclKind::HasMember, name, typeExpr, initExpr) { }
+        : MemberDecl(DeclKind::HasMember, name, typeExpr, initExpr) { }
 
     StaticDeclContext* staticDecls() { return &m_staticDecls; }
 };
-struct BlockVariableDecl : Decl {
-    relative_pointer<BlockVariableDecl, Node> m_typeExpr;
-    relative_pointer<BlockVariableDecl, Node> m_initExpr;
+struct BlockVariableDecl : Decl, VariableDecl {
 
     BlockVariableDecl(DeclKind kind, WordAndLocation name, Node* typeExpr, Node* initExpr)
-        : Decl(kind, name), m_typeExpr(this, typeExpr), m_initExpr(this, initExpr) {
+        : Decl(kind, name), VariableDecl(typeExpr, initExpr) {
         VERIFY(isDeclType<BlockVariableDecl>(kind));
     }
-
-    Node* typeExpr() { return m_typeExpr.get(this); }
-    Node* initExpr() { return m_initExpr.get(this); }
 };
 struct BlockDecl : Decl { };
 

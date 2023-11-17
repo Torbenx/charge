@@ -100,7 +100,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
                 case TestMode::Parser: {
                     std::cout << "------\n";
                     NamespaceDecl* global = par.parseModule();
-                    // dump(global, par.wordTable);
+                    // dumpSyntaxTree(global, par.wordTable);
                     break;
                 }
                 case TestMode::Semantic: {

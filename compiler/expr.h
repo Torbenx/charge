@@ -200,8 +200,8 @@ struct EmptyNode : Node {
     SingleTokenSourceRange location() const { return packedToken(); }
 };
 
-void dump(Node*, const WordStringTable&);
-void dump(Decl*, const WordStringTable&);
+void dumpSyntaxTree(Node*, const WordStringTable&);
+void dumpSyntaxTree(Decl*, const WordStringTable&);
 
 template<typename T>
 constexpr bool matchNodeType(NodeKind in) {
