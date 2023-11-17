@@ -175,10 +175,9 @@ private:
 
             SSAName argumentName;
             switch (param.model) {
-            case ParameterModel::Let: {
-                argumentName = purify(std::move(rawArg));
-                break;
-            }
+            case ParameterModel::Let:
+                requireValueType(rawArg.type());
+                [[fallthrough]];
             case ParameterModel::Var: {
                 OwnedValue temporary = makeRValue(std::move(rawArg));
                 argumentName = temporary.primary();

@@ -1,0 +1,29 @@
+// semantic-test
+
+struct Type: { }
+
+static pvalue: Type = rvalue();
+static var lvalue: Type = rvalue();
+fn rvalue() -> Type: { }
+
+fn test_let(let x: Type): { }
+fn test_var(var x: Type): { }
+fn test_in(in x: Type): { }
+fn test_inout(inout x: Type): { }
+fn test_out(out x: Type): { }
+
+fn test(): {
+    test_let(pvalue);
+    test_var(pvalue);
+    test_in(pvalue);
+
+    //; test_let(lvalue);
+    //; test_var(lvalue);
+    test_in(lvalue);
+    test_inout(lvalue);
+    test_out(lvalue);
+    
+    test_let(rvalue());
+    test_var(rvalue());
+    test_in(rvalue());
+}

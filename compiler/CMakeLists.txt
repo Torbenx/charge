@@ -9,6 +9,6 @@ add_executable(compiler
     semantic.cpp
     ir_dump.cpp
 )
-target_compile_options(compiler PRIVATE "-Wall;-Wextra;-Wsuggest-override;-fsized-deallocation")
+target_compile_options(compiler PRIVATE "-Wall;-Wextra;-Wsuggest-override;-Wimplicit-fallthrough;-fsized-deallocation")
 target_link_libraries(compiler PRIVATE fmt)
 target_compile_definitions(compiler PRIVATE COMPILER_TEST_DIR="${CMAKE_SOURCE_DIR}/test")
