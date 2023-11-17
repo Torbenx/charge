@@ -34,6 +34,11 @@ SSAName InstructionStream::allocateName() {
     return { stream_phase, id };
 }
 
+SSAName InstructionStream::emit_nullary(Opcode op) {
+    SSAName out = allocateName();
+    stream.push_back({ op, localize(out), Instruction::UNUSED_OPERAND, Instruction::UNUSED_OPERAND });
+    return out;
+}
 SSAName InstructionStream::emit_unary(Opcode op, SSAName in) {
     SSAName out = allocateName();
     stream.push_back({ op, localize(out), localize(in), Instruction::UNUSED_OPERAND });
@@ -170,7 +175,7 @@ private:
                 break;
             OwnedValue rawArg = std::move(maybeArg.value());
             auto param = fnDecl->parameters[arguments.size()];
-            Type paramType = (Type)literalFold(fnDecl, param.type);
+            Type paramType = literalFold(fnDecl, param.type);
             matchTypes(paramType, rawArg.type());
 
             SSAName argumentName;
@@ -251,6 +256,8 @@ private:
 
     OwnedValue visitIdentifierExpr(IdentifierExpr& e) {
         auto emitStaticDecl = [&](StaticDecl* decl) -> OwnedValue {
+            // For non-template StaticVariableDecls this is the l- or p-value for the variable.
+            // In all other cases this is a literal of appropriate type.
             if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
                 if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
                     // TODO: Handle templates
@@ -269,8 +276,16 @@ private:
             }
             VERIFY_NOT_REACHED();
         };
-        auto emitParameter = [&](Decl*) -> OwnedValue {
-            VERIFY_NOT_REACHED();
+        auto emitParameter = [&](ParameterizedDecl* declaringDecl, Word name) -> std::optional<OwnedValue> {
+            auto declaringProgram = declaringDecl->program();
+            for (auto param : declaringProgram->parameters) {
+                if (param.name == name) {
+                    VERIFY(targetStream->stream_phase == ValuePhase::Runtime);
+                    VERIFY(targetStream == &declaringProgram->runtimeStream);
+                    return Value::lvalue((SSAName)param.slot, (Type)param.type);
+                }
+            }
+            return {};
         };
         Decl* d = containingScope;
         Word name = e.identifier();
@@ -290,9 +305,9 @@ private:
             case DeclKind::StructType:
             case DeclKind::ObjectType: {
                 TypeDecl* decl = (TypeDecl*)d;
-                Decl* parameterDecl = decl->parameterDecls()->find(name);
-                if (parameterDecl)
-                    return emitParameter(parameterDecl);
+                auto parameter = emitParameter(decl, name);
+                if (parameter.has_value())
+                    return std::move(parameter.value());
                 auto staticDecls = decl->staticDecls()->decls(name);
                 if (!staticDecls.empty())
                     return emitStaticDecl(*staticDecls.begin());
@@ -304,9 +319,9 @@ private:
             case DeclKind::StaticLetVariable:
             case DeclKind::StaticVarVariable: {
                 ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
-                Decl* parameterDecl = decl->parameterDecls()->find(name);
-                if (parameterDecl)
-                    return emitParameter(parameterDecl);
+                auto parameter = emitParameter(decl, name);
+                if (parameter.has_value())
+                    return std::move(parameter.value());
                 d = ((StaticDecl*)d)->declaringDecl();
                 continue;
             }
@@ -419,8 +434,9 @@ public:
             return out;
         }
         case ValueCategory::LValue: {
-            // TODO: Implement copying.
-            VERIFY_NOT_REACHED();
+            // TODO: Implement copying object types.
+            requireValueType(in.type());
+            return makeRValue(purify(std::move(in)));
         }
         case ValueCategory::RValue: {
             return in;
@@ -533,16 +549,23 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     VERIFY(d.parameterDecls()->templateParameterCount == 0);
     p.parameters.reserve(parameterDecls.size());
     for (ParameterDecl* param : parameterDecls) {
-        auto typeExpr = g.visitExpression(param->typeExpr());
-        VERIFY(typeExpr.has_value());
-        p.parameters.push_back({ param->name, kindToModel(param->kind()),
-            g.implicitToType(std::move(typeExpr.value())).localizeConstant() });
+        auto type = g.visitExpression(param->typeExpr())
+                        .transform([&](OwnedValue type) { return g.implicitToType(std::move(type)); })
+                        .value();
+        SSAName slot = p.runtimeStream.emit<Opcode::ParameterSlot>();
+        p.parameters.push_back({
+            param->name,
+            kindToModel(param->kind()),
+            type.localizeConstant(),
+            slot.localizeRuntime(),
+        });
     }
-    auto returnTypeExpr = g.visitExpression(d.returnTypeExpr());
-    if (returnTypeExpr.has_value())
-        p.returnType = g.implicitToType(std::move(returnTypeExpr.value())).localizeConstant();
-    else
-        p.returnType = ((Type)p.literalTable.emit(&voidType)).localizeConstant();
+    auto returnType = g.visitExpression(d.returnTypeExpr())
+                          .transform([&](OwnedValue type) { return g.implicitToType(std::move(type)); })
+                          .or_else([&] -> std::optional<Type> { return (Type)p.literalTable.emit(&voidType); })
+                          .value();
+    p.returnType = returnType.localizeConstant();
+    p.returnSlot = p.runtimeStream.emit<Opcode::ReturnSlot>().localizeRuntime();
 
     d.setStatus(DeclStatus::SignatureChecked);
 }

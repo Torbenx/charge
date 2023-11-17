@@ -9,7 +9,9 @@
     INST(Call, call)                        \
     INST(Allocate, unary)                   \
     INST(Deallocate, binary)                \
-    INST(Store, binary)
+    INST(Store, binary)                     \
+    INST(ParameterSlot, nullary)            \
+    INST(ReturnSlot, nullary)
 
 enum class Opcode : uint16_t {
 
@@ -77,6 +79,11 @@ struct ConstantStreamValue {
         : category(category), primary(primary), type(type) { }
 };
 
+struct RuntimeStreamOperand : InstructionOperand {
+    ValuePhase phase() const { return constant() ? ValuePhase::Constant : ValuePhase::Runtime; }
+    constexpr bool operator==(const RuntimeStreamOperand&) const = default;
+};
+
 struct Instruction {
     static constexpr InstructionOperand UNUSED_OPERAND = {};
     uint64_t op : 16;
@@ -100,7 +107,9 @@ struct SSAName {
         : m_phase(ValuePhase::Literal), m_id(0) { }
     SSAName(ValuePhase phase, size_t id)
         : m_phase(phase), m_id(id) { VERIFY(id <= InstructionOperand::MAX_ID); }
-    SSAName(ConstantStreamOperand operand)
+    explicit SSAName(ConstantStreamOperand operand)
+        : SSAName(operand.phase(), operand.id()) { }
+    explicit SSAName(RuntimeStreamOperand operand)
         : SSAName(operand.phase(), operand.id()) { }
 
     ValuePhase phase() const { return m_phase; }
@@ -115,12 +124,17 @@ struct SSAName {
     ConstantStreamOperand localizeConstant() const {
         return { localize(ValuePhase::Constant) };
     }
+    RuntimeStreamOperand localizeRuntime() const {
+        return { localize(ValuePhase::Runtime) };
+    }
 };
 
 struct Type : SSAName {
-    using SSAName::SSAName;
+    Type() = default;
     explicit Type(SSAName value)
         : SSAName(value) { }
+    explicit Type(ConstantStreamTypeOperand operand)
+        : SSAName(operand) { }
     ConstantStreamTypeOperand localizeConstant() const {
         return { SSAName::localizeConstant() };
     }
@@ -140,7 +154,7 @@ struct Value {
     bool valid() const { return category() != ValueCategory::Invalid; }
     Type type() const {
         VERIFY(valid());
-        return { (ValuePhase)typePhase, typeId };
+        return (Type)SSAName { (ValuePhase)typePhase, typeId };
     }
     SSAName primary() const {
         VERIFY(valid());
@@ -256,6 +270,7 @@ struct InstructionStream {
 
     // Must only be called directly before emitting an instruction into the stream.
     SSAName allocateName();
+    SSAName emit_nullary(Opcode op);
     SSAName emit_unary(Opcode op, SSAName in);
     SSAName emit_binary(Opcode op, SSAName in1, SSAName in2);
     SSAName emit_foreign_constant(Opcode op, SSAName decl, ConstantStreamOperand constant);
@@ -280,11 +295,6 @@ struct ConstantTable {
     }
 };
 
-struct DeclProgram {
-    ConstantTable literalTable { ValuePhase::Literal };
-    InstructionStream constantStream { ValuePhase::Constant };
-    InstructionStream runtimeStream { ValuePhase::Runtime };
-};
 enum class ParameterModel : uint8_t {
     Template,
     ImplicitTemplate,
@@ -294,19 +304,25 @@ enum class ParameterModel : uint8_t {
     InOut,
     Out,
 };
-struct ParameterizedDeclProgram : DeclProgram {
+struct DeclProgram {
+    ConstantTable literalTable { ValuePhase::Literal };
+    InstructionStream constantStream { ValuePhase::Constant };
+    InstructionStream runtimeStream { ValuePhase::Runtime };
+
     struct CheckedParameter {
         Word name;
         ParameterModel model;
-        ConstantStreamOperand type;
+        ConstantStreamTypeOperand type;
+        RuntimeStreamOperand slot;
     };
     std::vector<CheckedParameter> parameters;
 };
-struct TypeDecl::Program : ParameterizedDeclProgram { };
-struct FunctionDecl::Program : ParameterizedDeclProgram {
+struct TypeDecl::Program : DeclProgram { };
+struct FunctionDecl::Program : DeclProgram {
     ConstantStreamTypeOperand returnType;
+    RuntimeStreamOperand returnSlot;
 };
-struct StaticVariableDecl::Program : ParameterizedDeclProgram {
+struct StaticVariableDecl::Program : DeclProgram {
     ConstantStreamValue value;
 };
 

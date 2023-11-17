@@ -171,14 +171,6 @@ struct ParameterDeclContext {
         parameterDecls.push_back({ this, decl });
     }
 
-    Decl* find(Word name) {
-        for (Entry entry : parameterDecls) {
-            if (entry.name == name)
-                return entry.decl.get(this);
-        }
-        return nullptr;
-    }
-
     auto parameters() {
         return std::ranges::views::transform(parameterDecls,
             [this](Entry entry) { return entry.decl.get(this); });

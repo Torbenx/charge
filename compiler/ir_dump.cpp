@@ -5,6 +5,11 @@ struct inst {
     InstructionOperand out;
 };
 
+struct nullary_inst : inst {
+private:
+    InstructionOperand unused1;
+    InstructionOperand unused2;
+};
 struct unary_inst : inst {
     InstructionOperand in;
 
@@ -122,6 +127,10 @@ struct Dumper : InstructionVisitor<Dumper> {
             std::cout << instName(i.opcode) << " ";
     }
 
+    void visit_nullary(nullary_inst i) {
+        printBase(i);
+        std::cout << '\n';
+    }
     void visit_unary(unary_inst i) {
         printBase(i);
         std::cout << format(i.in) << '\n';
