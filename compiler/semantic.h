@@ -97,6 +97,10 @@ struct Instruction {
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c) { }
 
     Opcode opcode() const { return (Opcode)op; }
+    void setOp(Opcode newOp) { op = std::to_underlying(newOp); }
+    void setA(InstructionOperand newA) { a = newA.encoded; }
+    void setB(InstructionOperand newB) { b = newB.encoded; }
+    void setC(InstructionOperand newC) { c = newC.encoded; }
 };
 
 struct SSAName {

@@ -84,13 +84,19 @@ struct DeclLiteral : SSAName {
 struct StmtResult { };
 struct Generator : private NodeStreamVisitor<Generator, StmtResult, OwnedValue> {
     friend NodeStreamVisitor<Generator, StmtResult, OwnedValue>;
-    Generator(SemanticContext* sema, ConstantTable* literalTable, InstructionStream* constantStream, InstructionStream* targetStream, Decl* containingScope)
-        : sema(sema), literalTable(literalTable), constantStream(constantStream), targetStream(targetStream), containingScope(containingScope) { }
+    Generator(SemanticContext* sema, DeclProgram* program, InstructionStream* targetStream, Decl* containingScope)
+        : sema(sema)
+        , literalTable(&program->literalTable)
+        , constantStream(&program->constantStream)
+        , runtimeStream(&program->runtimeStream)
+        , targetStream(targetStream)
+        , containingScope(containingScope) { }
 
     SemanticContext* sema = nullptr;
 
     ConstantTable* literalTable = nullptr;
     InstructionStream* constantStream = nullptr;
+    InstructionStream* runtimeStream = nullptr;
     InstructionStream* targetStream = nullptr;
     Decl* containingScope = nullptr;
 
@@ -425,6 +431,14 @@ public:
         VERIFY(v.category() == ValueCategory::RValue);
         emit<Opcode::Deallocate>(v.type(), v.primary());
     }
+    void bindRValueToSlot(SSAName slot, OwnedValue value) {
+        VERIFY(value.category() == ValueCategory::RValue);
+        auto& inst = definingInstruction(value.primary());
+        VERIFY(inst.opcode() == Opcode::Allocate);
+        inst.setOp(Opcode::Nop);
+        inst.setB(slot.localize(value.primary().phase()));
+        value.releaseValue();
+    }
 
     OwnedValue makeRValue(OwnedValue in) {
         switch (in.category()) {
@@ -460,6 +474,17 @@ public:
         VERIFY(target.phase() == ValuePhase::Literal && source.phase() == ValuePhase::Literal);
         VERIFY(compareConstantsOfSameType(literalTable->get(target), literalTable->get(source)));
     }
+
+    Instruction& definingInstruction(SSAName value) {
+        InstructionStream* stream;
+        if (value.phase() == ValuePhase::Constant)
+            stream = constantStream;
+        else if (value.phase() == ValuePhase::Runtime)
+            stream = runtimeStream;
+        else
+            VERIFY_NOT_REACHED();
+        return stream->stream[stream->definitions[value.id()]];
+    }
 };
 
 void SemanticContext::requireSignature(Decl* d) {
@@ -486,7 +511,11 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
     std::construct_at(&p);
     d.setStatus(DeclStatus::SignatureCheckInProgress);
 
-    Generator g(this, &p.literalTable, &p.constantStream, &p.constantStream, &d);
+    SSAName returnSlot;
+    if (d.kind() == DeclKind::StaticVarVariable)
+        returnSlot = p.constantStream.emit<Opcode::ReturnSlot>();
+
+    Generator g(this, &p, &p.constantStream, &d);
     auto typeExpr = g.visitExpression(d.typeExpr())
                         .transform([&g](OwnedValue v) { return g.implicitToType(std::move(v)); });
 
@@ -501,11 +530,11 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
     }
 
     if (d.kind() == DeclKind::StaticLetVariable) {
-        g.requireValueType(initExpr.type());
         p.value = ((Value)g.purify(std::move(initExpr))).localizeConstant();
     } else if (d.kind() == DeclKind::StaticVarVariable) {
-        OwnedValue storage = g.makeRValue(std::move(initExpr));
-        p.value = storage.releaseValue().asLValue().localizeConstant();
+        Type type = initExpr.type();
+        g.bindRValueToSlot(returnSlot, g.makeRValue(std::move(initExpr)));
+        p.value = Value::lvalue(returnSlot, type).localizeConstant();
     } else
         VERIFY_NOT_REACHED();
 
@@ -543,7 +572,7 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     std::construct_at(&p);
     d.setStatus(DeclStatus::SignatureCheckInProgress);
 
-    Generator g(this, &p.literalTable, &p.constantStream, &p.constantStream, &d);
+    Generator g(this, &p, &p.constantStream, &d);
 
     auto parameterDecls = d.parameterDecls()->parameters();
     VERIFY(d.parameterDecls()->templateParameterCount == 0);
@@ -573,7 +602,7 @@ void SemanticContext::checkBody(FunctionDecl& d) {
     requireSignature(&d);
     auto& p = *d.program();
 
-    Generator g(this, &p.literalTable, &p.constantStream, &p.runtimeStream, &d);
+    Generator g(this, &p, &p.runtimeStream, &d);
     g.visitBody(d.body());
 }
 
