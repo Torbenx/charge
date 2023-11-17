@@ -60,12 +60,19 @@ SSAName InstructionStream::emit_call(Opcode op, SSAName argsBase, uint16_t count
     return out;
 }
 
-SSAName ConstantTable::emit(TypedConstant constant) {
-    VERIFY(encodedValues.size() == types.size());
-    size_t id = encodedValues.size();
-    encodedValues.push_back(constant.encodedValue);
-    types.push_back(constant.type);
-    return { table_phase, id };
+SSAName DeclProgram::emitLiteral(TypedConstant constant) {
+    VERIFY(encodedLiteralValues.size() == literalTypes.size());
+    VERIFY(encodedLiteralValues.size() == literalConstants.size());
+    for (int_t i = 0; i < (int_t)encodedLiteralValues.size(); i++) {
+        if (literalTypes[i] == constant.type && encodedLiteralValues[i] == constant.encodedValue)
+            return { ValuePhase::Literal, (uint16_t)i };
+    }
+
+    SSAName name = { ValuePhase::Literal, encodedLiteralValues.size() };
+    encodedLiteralValues.push_back(constant.encodedValue);
+    literalTypes.push_back(constant.type);
+    literalConstants.push_back(constantStream.emit<Opcode::Nop>(name).id());
+    return name;
 }
 
 static TypeDecl typeType { nullptr, DeclKind::StructType, { words["type"], SingleTokenSourceRange() }, nullptr };
@@ -86,17 +93,13 @@ struct Generator : private NodeStreamVisitor<Generator, StmtResult, OwnedValue> 
     friend NodeStreamVisitor<Generator, StmtResult, OwnedValue>;
     Generator(SemanticContext* sema, DeclProgram* program, InstructionStream* targetStream, Decl* containingScope)
         : sema(sema)
-        , literalTable(&program->literalTable)
-        , constantStream(&program->constantStream)
-        , runtimeStream(&program->runtimeStream)
+        , program(program)
         , targetStream(targetStream)
         , containingScope(containingScope) { }
 
     SemanticContext* sema = nullptr;
 
-    ConstantTable* literalTable = nullptr;
-    InstructionStream* constantStream = nullptr;
-    InstructionStream* runtimeStream = nullptr;
+    DeclProgram* program = nullptr;
     InstructionStream* targetStream = nullptr;
     Decl* containingScope = nullptr;
 
@@ -111,7 +114,7 @@ private:
     { }
     void transformEmitArgumentForTargetStream(SSAName& name) {
         if (name.phase() == ValuePhase::Literal && targetStream->stream_phase == ValuePhase::Runtime)
-            name = constantStream->emit<Opcode::Nop>(name);
+            name = { ValuePhase::Constant, program->literalConstants[name.id()] };
     }
     template<Opcode op, typename... Args>
     SSAName emit(Args... args) {
@@ -270,13 +273,13 @@ private:
                     VERIFY_NOT_REACHED();
                 }
                 if (isDeclType<TypeDecl>(decl->kind())) {
-                    SSAName declLit = literalTable->emit(decl);
+                    SSAName declLit = program->emitLiteral(decl);
                     return PureValue { declLit, typeTypeLiteral() };
                 } else if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
-                    auto varDecl = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDeclPtr.value()));
+                    auto varDecl = useDeclLiteral<StaticVariableDecl>(program->emitLiteral(varDeclPtr.value()));
                     return literalFold(varDecl, varDecl->value);
                 } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-                    SSAName declLit = literalTable->emit(fnDecl.value());
+                    SSAName declLit = program->emitLiteral(fnDecl.value());
                     return PureValue { declLit, functionLiteralTypeLiteral() };
                 }
             }
@@ -357,22 +360,22 @@ private:
 
 public:
     Type typeTypeLiteral() {
-        return (Type)literalTable->emit(&typeType);
+        return (Type)program->emitLiteral(&typeType);
     }
     Type functionLiteralTypeLiteral() {
-        return (Type)literalTable->emit(&functionLiteralType);
+        return (Type)program->emitLiteral(&functionLiteralType);
     }
     bool literallyEqual(SSAName leftName, TypedConstant right) {
         if (leftName.phase() != ValuePhase::Literal)
             return false;
-        TypedConstant left = literalTable->get(leftName);
+        TypedConstant left = program->literal(leftName);
         return compareConstantsOfSameType(left, right);
     }
     template<typename T>
     SSAName literalFold(DeclLiteral<T> decl, ConstantStreamOperand constant) {
         if (constant.phase() == ValuePhase::Literal)
-            return literalTable->emit(decl->literalTable.get((SSAName)constant));
-        return constantStream->emit<Opcode::ForeignConstant>(decl, constant);
+            return program->emitLiteral(decl->literal((SSAName)constant));
+        return program->constantStream.emit<Opcode::ForeignConstant>(decl, constant);
     }
     template<typename T>
     Type literalFold(DeclLiteral<T> decl, ConstantStreamTypeOperand constant) {
@@ -392,7 +395,7 @@ public:
     }
     OwnedValue implicitConversion(Type targetType, OwnedValue sourceValue) {
         if (targetType.phase() == ValuePhase::Literal && sourceValue.type().phase() == ValuePhase::Literal) {
-            if (compareConstantsOfSameType(literalTable->get(targetType), literalTable->get(sourceValue.type()))) {
+            if (compareConstantsOfSameType(program->literal(targetType), program->literal(sourceValue.type()))) {
                 return sourceValue;
             }
         }
@@ -431,13 +434,14 @@ public:
         VERIFY(v.category() == ValueCategory::RValue);
         emit<Opcode::Deallocate>(v.type(), v.primary());
     }
-    void bindRValueToSlot(SSAName slot, OwnedValue value) {
-        VERIFY(value.category() == ValueCategory::RValue);
-        auto& inst = definingInstruction(value.primary());
+    Value bindRValueToSlot(SSAName slot, OwnedValue value) {
+        Value v = value.releaseValue();
+        VERIFY(v.category() == ValueCategory::RValue);
+        auto& inst = definingInstruction(v.primary());
         VERIFY(inst.opcode() == Opcode::Allocate);
         inst.setOp(Opcode::Nop);
-        inst.setB(slot.localize(value.primary().phase()));
-        value.releaseValue();
+        inst.setB(slot.localize(v.primary().phase()));
+        return { ValueCategory::LValue, slot, v.type() };
     }
 
     OwnedValue makeRValue(OwnedValue in) {
@@ -463,7 +467,7 @@ public:
     template<std::derived_from<Decl> T>
     DeclLiteral<T> useDeclLiteral(SSAName lit) {
         VERIFY(lit.phase() == ValuePhase::Literal);
-        Decl* decl = literalTable->get(lit).asDecl();
+        Decl* decl = program->literal(lit).asDecl();
         sema->requireSignature(decl);
         return { lit, dyn_cast<T>(decl) };
     }
@@ -472,15 +476,15 @@ public:
 
     void matchTypes(Type target, Type source) {
         VERIFY(target.phase() == ValuePhase::Literal && source.phase() == ValuePhase::Literal);
-        VERIFY(compareConstantsOfSameType(literalTable->get(target), literalTable->get(source)));
+        VERIFY(compareConstantsOfSameType(program->literal(target), program->literal(source)));
     }
 
     Instruction& definingInstruction(SSAName value) {
         InstructionStream* stream;
         if (value.phase() == ValuePhase::Constant)
-            stream = constantStream;
+            stream = &program->constantStream;
         else if (value.phase() == ValuePhase::Runtime)
-            stream = runtimeStream;
+            stream = &program->runtimeStream;
         else
             VERIFY_NOT_REACHED();
         return stream->stream[stream->definitions[value.id()]];
@@ -530,11 +534,9 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
     }
 
     if (d.kind() == DeclKind::StaticLetVariable) {
-        p.value = ((Value)g.purify(std::move(initExpr))).localizeConstant();
+        p.value = Value(g.purify(std::move(initExpr))).localizeConstant();
     } else if (d.kind() == DeclKind::StaticVarVariable) {
-        Type type = initExpr.type();
-        g.bindRValueToSlot(returnSlot, g.makeRValue(std::move(initExpr)));
-        p.value = Value::lvalue(returnSlot, type).localizeConstant();
+        p.value = g.bindRValueToSlot(returnSlot, g.makeRValue(std::move(initExpr))).localizeConstant();
     } else
         VERIFY_NOT_REACHED();
 
@@ -591,7 +593,7 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
     }
     auto returnType = g.visitExpression(d.returnTypeExpr())
                           .transform([&](OwnedValue type) { return g.implicitToType(std::move(type)); })
-                          .or_else([&] -> std::optional<Type> { return (Type)p.literalTable.emit(&voidType); })
+                          .or_else([&] -> std::optional<Type> { return (Type)p.emitLiteral(&voidType); })
                           .value();
     p.returnType = returnType.localizeConstant();
     p.returnSlot = p.runtimeStream.emit<Opcode::ReturnSlot>().localizeRuntime();

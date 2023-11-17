@@ -155,10 +155,10 @@ struct Dumper : InstructionVisitor<Dumper> {
         phase = s.stream_phase;
         visit(s);
     }
-    void dump(ConstantTable& t, const WordStringTable& wordTable) {
-        phase = t.table_phase;
-        for (int_t i = 0; i < (int_t)t.encodedValues.size(); i++) {
-            auto constant = t.get(i);
+    void dumpLiterals(DeclProgram& p, const WordStringTable& wordTable) {
+        phase = ValuePhase::Literal;
+        for (int_t i = 0; i < (int_t)p.encodedLiteralValues.size(); i++) {
+            auto constant = p.literal(i);
             printLHS(InstructionOperand(false, i));
             switch (constant.type) {
             case ConstantType::Decl: {
@@ -194,7 +194,7 @@ void dumpIR(Decl* decl, const WordStringTable& wordTable) {
         std::cout << '\n';
     }
     Dumper dumper;
-    dumper.dump(paramDecl->program()->literalTable, wordTable);
+    dumper.dumpLiterals(*paramDecl->program(), wordTable);
     std::cout << '\n';
     dumper.dump(paramDecl->program()->constantStream);
     std::cout << '\n';

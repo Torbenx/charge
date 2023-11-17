@@ -281,24 +281,6 @@ struct InstructionStream {
     SSAName emit_call(Opcode op, SSAName argsBase, uint16_t count);
 };
 
-struct ConstantTable {
-    std::vector<uint64_t> encodedValues;
-    std::vector<ConstantType> types;
-    ValuePhase table_phase;
-
-    constexpr ConstantTable(ValuePhase phase)
-        : table_phase(phase) { }
-
-    SSAName emit(TypedConstant);
-    TypedConstant get(uint16_t index) const {
-        return { types[index], encodedValues[index] };
-    }
-    TypedConstant get(SSAName name) const {
-        VERIFY(name.phase() == ValuePhase::Literal);
-        return get(name.id());
-    }
-};
-
 enum class ParameterModel : uint8_t {
     Template,
     ImplicitTemplate,
@@ -309,9 +291,20 @@ enum class ParameterModel : uint8_t {
     Out,
 };
 struct DeclProgram {
-    ConstantTable literalTable { ValuePhase::Literal };
+    std::vector<uint64_t> encodedLiteralValues;
+    std::vector<ConstantType> literalTypes;
+    std::vector<uint16_t> literalConstants;
     InstructionStream constantStream { ValuePhase::Constant };
     InstructionStream runtimeStream { ValuePhase::Runtime };
+
+    TypedConstant literal(uint16_t index) const {
+        return { literalTypes[index], encodedLiteralValues[index] };
+    }
+    TypedConstant literal(SSAName name) const {
+        VERIFY(name.phase() == ValuePhase::Literal);
+        return literal(name.id());
+    }
+    SSAName emitLiteral(TypedConstant);
 
     struct CheckedParameter {
         Word name;
