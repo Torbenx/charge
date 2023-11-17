@@ -248,31 +248,73 @@ private:
     OwnedValue visitAccessExpr(AccessExpr&, OwnedValue) {
         VERIFY_NOT_REACHED();
     }
-    OwnedValue visitIdentifierExpr(IdentifierExpr& e) {
-        Decl* decl = sema->lookupFromInside(containingScope, e.identifier());
-        // The value of an IdentifierExpr:
-        //  - For a templated-decl a literal for the template.
-        //  - For a variable-decl the hypothetical value of the load.
-        //  - For a type-decl a literal for the type.
-        //  - For a function-decl a literal for the function.
 
-        if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
-            if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
-                // TODO: Handle templates
+    OwnedValue visitIdentifierExpr(IdentifierExpr& e) {
+        auto emitStaticDecl = [&](StaticDecl* decl) -> OwnedValue {
+            if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
+                if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
+                    // TODO: Handle templates
+                    VERIFY_NOT_REACHED();
+                }
+                if (isDeclType<TypeDecl>(decl->kind())) {
+                    SSAName declLit = literalTable->emit(decl);
+                    return PureValue { declLit, typeTypeLiteral() };
+                } else if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
+                    auto varDecl = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDeclPtr.value()));
+                    return literalFold(varDecl, varDecl->value);
+                } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
+                    SSAName declLit = literalTable->emit(fnDecl.value());
+                    return PureValue { declLit, functionLiteralTypeLiteral() };
+                }
+            }
+            VERIFY_NOT_REACHED();
+        };
+        auto emitParameter = [&](Decl*) -> OwnedValue {
+            VERIFY_NOT_REACHED();
+        };
+        Decl* d = containingScope;
+        Word name = e.identifier();
+        for (;;) {
+            VERIFY(d != nullptr);
+            switch (d->kind()) {
+
+            case DeclKind::Namespace: {
+                NamespaceDecl* decl = (NamespaceDecl*)d;
+                auto staticDecls = decl->staticDecls()->decls(name);
+                if (!staticDecls.empty())
+                    return emitStaticDecl(*staticDecls.begin());
+                d = decl->declaringDecl();
+                continue;
+            }
+
+            case DeclKind::StructType:
+            case DeclKind::ObjectType: {
+                TypeDecl* decl = (TypeDecl*)d;
+                Decl* parameterDecl = decl->parameterDecls()->find(name);
+                if (parameterDecl)
+                    return emitParameter(parameterDecl);
+                auto staticDecls = decl->staticDecls()->decls(name);
+                if (!staticDecls.empty())
+                    return emitStaticDecl(*staticDecls.begin());
+                d = decl->declaringDecl();
+                continue;
+            }
+
+            case DeclKind::Function:
+            case DeclKind::StaticLetVariable:
+            case DeclKind::StaticVarVariable: {
+                ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
+                Decl* parameterDecl = decl->parameterDecls()->find(name);
+                if (parameterDecl)
+                    return emitParameter(parameterDecl);
+                d = ((StaticDecl*)d)->declaringDecl();
+                continue;
+            }
+
+            default:
                 VERIFY_NOT_REACHED();
             }
-            if (isDeclType<TypeDecl>(decl->kind())) {
-                SSAName declLit = literalTable->emit(decl);
-                return PureValue { declLit, typeTypeLiteral() };
-            } else if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
-                auto varDecl = useDeclLiteral<StaticVariableDecl>(literalTable->emit(varDeclPtr.value()));
-                return literalFold(varDecl, varDecl->value);
-            } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-                SSAName declLit = literalTable->emit(fnDecl.value());
-                return PureValue { declLit, functionLiteralTypeLiteral() };
-            }
         }
-        VERIFY_NOT_REACHED();
     }
     OwnedValue visitCompoundExpr(CompoundExpr&) {
         VERIFY_NOT_REACHED();
@@ -404,50 +446,6 @@ public:
     }
 };
 
-id<Decl> SemanticContext::lookupFromInside(Decl* d, WordAndLocation name) {
-    for (;;) {
-        VERIFY(d != nullptr);
-        switch (d->kind()) {
-
-        case DeclKind::Namespace: {
-            NamespaceDecl* decl = (NamespaceDecl*)d;
-            auto staticDecls = decl->staticDecls()->decls(name);
-            if (!staticDecls.empty())
-                return *staticDecls.begin();
-            d = decl->declaringDecl();
-            continue;
-        }
-
-        case DeclKind::StructType:
-        case DeclKind::ObjectType: {
-            TypeDecl* decl = (TypeDecl*)d;
-            Decl* parameterDecl = decl->parameterDecls()->find(name);
-            if (parameterDecl)
-                return parameterDecl;
-            auto staticDecls = decl->staticDecls()->decls(name);
-            if (!staticDecls.empty())
-                return *staticDecls.begin();
-            d = decl->declaringDecl();
-            continue;
-        }
-
-        case DeclKind::Function:
-        case DeclKind::StaticLetVariable:
-        case DeclKind::StaticVarVariable: {
-            ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
-            Decl* parameterDecl = decl->parameterDecls()->find(name);
-            if (parameterDecl)
-                return parameterDecl;
-            d = ((StaticDecl*)d)->declaringDecl();
-            continue;
-        }
-
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-}
-
 void SemanticContext::requireSignature(Decl* d) {
     if (d->signatureChecked())
         return;
@@ -571,7 +569,7 @@ void SemanticContext::check(StaticDeclContext* parent) {
         }
 
         if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
-            //dump(child, *wordTable);
+            dumpIR(child, *wordTable);
         }
     }
 }

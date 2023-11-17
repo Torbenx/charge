@@ -67,16 +67,16 @@ struct ParameterDecl : Decl, VariableDecl {
 };
 
 struct StaticDeclContext : WordTable {
-    using relative_t = relative_pointer<StaticDeclContext, Decl>;
+    using relative_t = relative_pointer<StaticDeclContext, StaticDecl>;
 
-    Decl* getFromBucket(uint32_t bucket) {
+    StaticDecl* getFromBucket(uint32_t bucket) {
         return std::bit_cast<relative_t>(entries[bucket].payload).get(this);
     }
 
     struct named_iterator_end { };
     struct named_iterator {
         using difference_type = int_t;
-        using value_type = Decl*;
+        using value_type = StaticDecl*;
 
         StaticDeclContext* context;
         LookupState state;
@@ -122,7 +122,7 @@ struct StaticDeclContext : WordTable {
 
     struct iterator {
         using difference_type = int_t;
-        using value_type = Decl*;
+        using value_type = StaticDecl*;
 
         StaticDeclContext* context;
         int_t bucket;
@@ -149,7 +149,7 @@ struct StaticDeclContext : WordTable {
             ++it;
             return it;
         }
-        Decl* operator*() const { return context->getFromBucket(bucket); }
+        value_type operator*() const { return context->getFromBucket(bucket); }
         bool operator==(const iterator&) const = default;
     };
     iterator begin() { return iterator(this, -1)++; }

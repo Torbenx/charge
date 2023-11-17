@@ -321,8 +321,6 @@ struct SemanticContext {
 
     WordStringTable* wordTable = nullptr;
 
-    id<Decl> lookupFromInside(Decl*, WordAndLocation);
-
     void check(StaticDeclContext*);
     void requireSignature(Decl*);
     void signatureCheckTypeDecl(TypeDecl&);
