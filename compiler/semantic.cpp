@@ -153,109 +153,7 @@ private:
     OwnedValue visitBinaryOperatorExpr(BinaryOperatorExpr&, OwnedValue) {
         VERIFY_NOT_REACHED();
     }
-    OwnedValue visitCallExpr(CallExpr&, OwnedValue base) {
-        // Because of overload resolution we don't know which implicit conversions to apply after
-        // looking at just a subset of arguments. There are two kinds of solutions here:
-        //  1. Don't allow implicit conversions and overload resolution at same time. So we either
-        //     perform implicit conversions on an not overloaded set OR call an overload without
-        //     applying any conversions.
-        //  + Simplicity
-        //  + Fewer instruction
-        //  + There is no 'best match' logic required
-        //  2. We emit extra 'nop's after evaluating each argument that we later be retroactively
-        //     turn into calls to the required conversion functions.
-        //  + Can handle operator overloading
-        // We can also combine these approaches in several ways:
-        //  3. By only applying user-defined implicit conversions if there is a Rust like '.into()'.
-        //  4. By considering argument designations and argument count to resolve the callee and
-        //     only falling back to 1. if there still isn't a unique match.
-
-        if (!literallyEqual(base.type(), &functionLiteralType)) {
-            // TODO: handle more base types
-            VERIFY_NOT_REACHED();
-        }
-        auto fnDecl = useDeclLiteral<FunctionDecl>(base.asPureValue());
-        std::vector<SSAName> arguments;
-        arguments.reserve(fnDecl->parameters.size());
-        std::vector<OwnedValue> temporaryAllocations;
-        for (;;) {
-            auto maybeArg = visitExpr(ExpressionPrecedence::Statement);
-            if (!maybeArg.has_value())
-                break;
-            OwnedValue rawArg = std::move(maybeArg.value());
-            auto param = fnDecl->parameters[arguments.size()];
-            Type paramType = literalFold(fnDecl, param.type);
-            matchTypes(paramType, rawArg.type());
-
-            SSAName argumentName;
-            switch (param.model) {
-            case ParameterModel::Let:
-                requireValueType(rawArg.type());
-                [[fallthrough]];
-            case ParameterModel::Var: {
-                OwnedValue temporary = makeRValue(std::move(rawArg));
-                argumentName = temporary.primary();
-                temporaryAllocations.push_back(std::move(temporary));
-                break;
-            }
-            case ParameterModel::In: {
-                switch (rawArg.category()) {
-                case ValueCategory::PValue: {
-                    OwnedValue temporary = makeRValue(std::move(rawArg));
-                    argumentName = temporary.primary();
-                    temporaryAllocations.push_back(std::move(temporary));
-                    break;
-                }
-                case ValueCategory::LValue: {
-                    argumentName = rawArg.primary();
-                    break;
-                }
-                case ValueCategory::RValue: {
-                    requireValueType(rawArg.type());
-                    argumentName = rawArg.primary();
-                    temporaryAllocations.push_back(std::move(rawArg));
-                    break;
-                }
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-                break;
-            }
-            case ParameterModel::InOut:
-            case ParameterModel::Out: {
-                switch (rawArg.category()) {
-                case ValueCategory::LValue: {
-                    argumentName = rawArg.primary();
-                    break;
-                }
-                case ValueCategory::PValue:
-                case ValueCategory::RValue: {
-                    // TODO: Handle error
-                    VERIFY_NOT_REACHED();
-                }
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-                break;
-            }
-            default:
-                VERIFY_NOT_REACHED();
-            }
-            arguments.push_back(argumentName);
-        }
-        Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
-
-        VERIFY(arguments.size() == fnDecl->parameters.size());
-        for (int_t i = 0; i < (int_t)arguments.size(); i++)
-            emit<Opcode::Nop>(arguments[i]);
-        OwnedValue returnValue = allocateRValue(returnType);
-        emit<Opcode::Call>(base.asPureValue(), arguments.size());
-
-        for (OwnedValue& tmp : temporaryAllocations) {
-            deallocateRValue(std::move(tmp));
-        }
-        return returnValue;
-    }
+    OwnedValue visitCallExpr(CallExpr&, OwnedValue base);
     OwnedValue visitParenthesizedExpr(ParenthesizedExpr&) {
         VERIFY_NOT_REACHED();
     }
@@ -263,83 +161,7 @@ private:
         VERIFY_NOT_REACHED();
     }
 
-    OwnedValue visitIdentifierExpr(IdentifierExpr& e) {
-        auto emitStaticDecl = [&](StaticDecl* decl) -> OwnedValue {
-            // For non-template StaticVariableDecls this is the l- or p-value for the variable.
-            // In all other cases this is a literal of appropriate type.
-            if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
-                if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
-                    // TODO: Handle templates
-                    VERIFY_NOT_REACHED();
-                }
-                if (isDeclType<TypeDecl>(decl->kind())) {
-                    SSAName declLit = program->emitLiteral(decl);
-                    return PureValue { declLit, typeTypeLiteral() };
-                } else if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
-                    auto varDecl = useDeclLiteral<StaticVariableDecl>(program->emitLiteral(varDeclPtr.value()));
-                    return literalFold(varDecl, varDecl->value);
-                } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-                    SSAName declLit = program->emitLiteral(fnDecl.value());
-                    return PureValue { declLit, functionLiteralTypeLiteral() };
-                }
-            }
-            VERIFY_NOT_REACHED();
-        };
-        auto emitParameter = [&](ParameterizedDecl* declaringDecl, Word name) -> std::optional<OwnedValue> {
-            auto declaringProgram = declaringDecl->program();
-            for (auto param : declaringProgram->parameters) {
-                if (param.name == name) {
-                    VERIFY(targetStream->stream_phase == ValuePhase::Runtime);
-                    VERIFY(targetStream == &declaringProgram->runtimeStream);
-                    return Value::lvalue((SSAName)param.slot, (Type)param.type);
-                }
-            }
-            return {};
-        };
-        Decl* d = containingScope;
-        Word name = e.identifier();
-        for (;;) {
-            VERIFY(d != nullptr);
-            switch (d->kind()) {
-
-            case DeclKind::Namespace: {
-                NamespaceDecl* decl = (NamespaceDecl*)d;
-                auto staticDecls = decl->staticDecls()->decls(name);
-                if (!staticDecls.empty())
-                    return emitStaticDecl(*staticDecls.begin());
-                d = decl->declaringDecl();
-                continue;
-            }
-
-            case DeclKind::StructType:
-            case DeclKind::ObjectType: {
-                TypeDecl* decl = (TypeDecl*)d;
-                auto parameter = emitParameter(decl, name);
-                if (parameter.has_value())
-                    return std::move(parameter.value());
-                auto staticDecls = decl->staticDecls()->decls(name);
-                if (!staticDecls.empty())
-                    return emitStaticDecl(*staticDecls.begin());
-                d = decl->declaringDecl();
-                continue;
-            }
-
-            case DeclKind::Function:
-            case DeclKind::StaticLetVariable:
-            case DeclKind::StaticVarVariable: {
-                ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
-                auto parameter = emitParameter(decl, name);
-                if (parameter.has_value())
-                    return std::move(parameter.value());
-                d = ((StaticDecl*)d)->declaringDecl();
-                continue;
-            }
-
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }
-    }
+    OwnedValue visitIdentifierExpr(IdentifierExpr& e);
     OwnedValue visitCompoundExpr(CompoundExpr&) {
         VERIFY_NOT_REACHED();
     }
@@ -624,6 +446,188 @@ void SemanticContext::check(StaticDeclContext* parent) {
 
         if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
             dumpIR(child, *wordTable);
+        }
+    }
+}
+
+OwnedValue Generator::visitCallExpr(CallExpr&, OwnedValue base) {
+    // Because of overload resolution we don't know which implicit conversions to apply after
+    // looking at just a subset of arguments. There are two kinds of solutions here:
+    //  1. Don't allow implicit conversions and overload resolution at same time. So we either
+    //     perform implicit conversions on an not overloaded set OR call an overload without
+    //     applying any conversions.
+    //  + Simplicity
+    //  + Fewer instruction
+    //  + There is no 'best match' logic required
+    //  2. We emit extra 'nop's after evaluating each argument that we later be retroactively
+    //     turn into calls to the required conversion functions.
+    //  + Can handle operator overloading
+    // We can also combine these approaches in several ways:
+    //  3. By only applying user-defined implicit conversions if there is a Rust like '.into()'.
+    //  4. By considering argument designations and argument count to resolve the callee and
+    //     only falling back to 1. if there still isn't a unique match.
+
+    if (!literallyEqual(base.type(), &functionLiteralType)) {
+        // TODO: handle more base types
+        VERIFY_NOT_REACHED();
+    }
+    auto fnDecl = useDeclLiteral<FunctionDecl>(base.asPureValue());
+    std::vector<SSAName> arguments;
+    arguments.reserve(fnDecl->parameters.size());
+    std::vector<OwnedValue> temporaryAllocations;
+    for (;;) {
+        auto maybeArg = visitExpr(ExpressionPrecedence::Statement);
+        if (!maybeArg.has_value())
+            break;
+        OwnedValue rawArg = std::move(maybeArg.value());
+        auto param = fnDecl->parameters[arguments.size()];
+        Type paramType = literalFold(fnDecl, param.type);
+        matchTypes(paramType, rawArg.type());
+
+        SSAName argumentName;
+        switch (param.model) {
+        case ParameterModel::Let:
+            requireValueType(rawArg.type());
+            [[fallthrough]];
+        case ParameterModel::Var: {
+            OwnedValue temporary = makeRValue(std::move(rawArg));
+            argumentName = temporary.primary();
+            temporaryAllocations.push_back(std::move(temporary));
+            break;
+        }
+        case ParameterModel::In: {
+            switch (rawArg.category()) {
+            case ValueCategory::PValue: {
+                OwnedValue temporary = makeRValue(std::move(rawArg));
+                argumentName = temporary.primary();
+                temporaryAllocations.push_back(std::move(temporary));
+                break;
+            }
+            case ValueCategory::LValue: {
+                argumentName = rawArg.primary();
+                break;
+            }
+            case ValueCategory::RValue: {
+                requireValueType(rawArg.type());
+                argumentName = rawArg.primary();
+                temporaryAllocations.push_back(std::move(rawArg));
+                break;
+            }
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            break;
+        }
+        case ParameterModel::InOut:
+        case ParameterModel::Out: {
+            switch (rawArg.category()) {
+            case ValueCategory::LValue: {
+                argumentName = rawArg.primary();
+                break;
+            }
+            case ValueCategory::PValue:
+            case ValueCategory::RValue: {
+                // TODO: Handle error
+                VERIFY_NOT_REACHED();
+            }
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            break;
+        }
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        arguments.push_back(argumentName);
+    }
+    Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
+
+    VERIFY(arguments.size() == fnDecl->parameters.size());
+    for (int_t i = 0; i < (int_t)arguments.size(); i++)
+        emit<Opcode::Nop>(arguments[i]);
+    OwnedValue returnValue = allocateRValue(returnType);
+    emit<Opcode::Call>(base.asPureValue(), arguments.size());
+
+    for (OwnedValue& tmp : temporaryAllocations) {
+        deallocateRValue(std::move(tmp));
+    }
+    return returnValue;
+}
+
+OwnedValue Generator::visitIdentifierExpr(IdentifierExpr& e) {
+    auto emitStaticDecl = [&](StaticDecl* decl) -> OwnedValue {
+        // For non-template StaticVariableDecls this is the l- or p-value for the variable.
+        // In all other cases this is a literal of appropriate type.
+        if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl)) {
+            if (parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
+                // TODO: Handle templates
+                VERIFY_NOT_REACHED();
+            }
+            if (isDeclType<TypeDecl>(decl->kind())) {
+                SSAName declLit = program->emitLiteral(decl);
+                return PureValue { declLit, typeTypeLiteral() };
+            } else if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
+                auto varDecl = useDeclLiteral<StaticVariableDecl>(program->emitLiteral(varDeclPtr.value()));
+                return literalFold(varDecl, varDecl->value);
+            } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
+                SSAName declLit = program->emitLiteral(fnDecl.value());
+                return PureValue { declLit, functionLiteralTypeLiteral() };
+            }
+        }
+        VERIFY_NOT_REACHED();
+    };
+    auto emitParameter = [&](ParameterizedDecl* declaringDecl, Word name) -> std::optional<OwnedValue> {
+        auto declaringProgram = declaringDecl->program();
+        for (auto param : declaringProgram->parameters) {
+            if (param.name == name) {
+                VERIFY(targetStream->stream_phase == ValuePhase::Runtime);
+                VERIFY(targetStream == &declaringProgram->runtimeStream);
+                return Value::lvalue((SSAName)param.slot, (Type)param.type);
+            }
+        }
+        return {};
+    };
+    Decl* d = containingScope;
+    Word name = e.identifier();
+    for (;;) {
+        VERIFY(d != nullptr);
+        switch (d->kind()) {
+
+        case DeclKind::Namespace: {
+            NamespaceDecl* decl = (NamespaceDecl*)d;
+            auto staticDecls = decl->staticDecls()->decls(name);
+            if (!staticDecls.empty())
+                return emitStaticDecl(*staticDecls.begin());
+            d = decl->declaringDecl();
+            continue;
+        }
+
+        case DeclKind::StructType:
+        case DeclKind::ObjectType: {
+            TypeDecl* decl = (TypeDecl*)d;
+            auto parameter = emitParameter(decl, name);
+            if (parameter.has_value())
+                return std::move(parameter.value());
+            auto staticDecls = decl->staticDecls()->decls(name);
+            if (!staticDecls.empty())
+                return emitStaticDecl(*staticDecls.begin());
+            d = decl->declaringDecl();
+            continue;
+        }
+
+        case DeclKind::Function:
+        case DeclKind::StaticLetVariable:
+        case DeclKind::StaticVarVariable: {
+            ParameterizedDecl* decl = dyn_cast<ParameterizedDecl>(d);
+            auto parameter = emitParameter(decl, name);
+            if (parameter.has_value())
+                return std::move(parameter.value());
+            d = ((StaticDecl*)d)->declaringDecl();
+            continue;
+        }
+
+        default:
+            VERIFY_NOT_REACHED();
         }
     }
 }
