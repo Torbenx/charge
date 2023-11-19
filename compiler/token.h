@@ -141,10 +141,10 @@ struct CharacterLiteral {
     char character = '\0';
 };
 
-using TokenData = std::variant<std::nullopt_t, Word, NumericLiteral, CharacterLiteral>;
+using TokenData = std::variant<std::monostate, Word, NumericLiteral, CharacterLiteral>;
 struct TokenWithData {
     Token tok = Token::Invalid;
-    TokenData tokData = std::nullopt;
+    TokenData tokData = {};
     bool valid() const;
 };
 

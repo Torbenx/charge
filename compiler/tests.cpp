@@ -374,7 +374,7 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         verifyNoPairs(cmd);
         // emit EOS token
         lex->tok = Token::EOS;
-        lex->tokData = std::nullopt;
+        lex->tokData = {};
         return LexerAction::AcceptState;
     }
     LexerAction invalidCharacterLiteral(Lexer* lex, int_t, int_t endOffset) override {

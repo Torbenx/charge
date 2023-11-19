@@ -238,7 +238,7 @@ bool TokenWithData::valid() const {
         return std::holds_alternative<NumericLiteral>(tokData);
     if (tok == Token::CharacterLiteral)
         return std::holds_alternative<CharacterLiteral>(tokData);
-    return std::holds_alternative<std::nullopt_t>(tokData);
+    return std::holds_alternative<std::monostate>(tokData);
 }
 bool Lexer::valid() const {
     if (sourceBuffer.empty())
@@ -340,7 +340,7 @@ void Lexer::nextToken() {
 
         tokBegin = sourceOffset;
         tok = Token::Invalid;
-        tokData = std::nullopt;
+        tokData = {};
 
         char c0 = sourceBuffer[sourceOffset + 0];
         char c1 = sourceBuffer[sourceOffset + 1];
@@ -366,10 +366,10 @@ void Lexer::nextToken() {
             switch (lookupResult) {
                 using Result = decltype(lookupResult);
             case Result::Invalid: {
-                char c0 = sourceBuffer[sourceOffset + 0];
+                char c0 = sourceBuffer[sourceOffset];
                 if (c0 == '\0' && sourceOffset == (int_t)sourceBuffer.length()) {
                     this->tok = Token::EOS;
-                    return;
+                    break;
                 }
                 HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
             }
