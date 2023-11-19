@@ -414,7 +414,6 @@ struct TestInstrumenter : Lexer::Instrumenter, Lexer::ErrorHandler, Parser::Inst
         verifyNoPairs(cmd);
         // skip token
         par->nextToken();
-        
     }
     void expectedSemiColon(Parser*) override {
         auto cmd = popCommand(words["expect-expected-semicolon"]);
@@ -471,12 +470,13 @@ int main() {
         stream.seekg(0, std::ios::end);
         int_t length = stream.tellg();
         VERIFY(length >= 0);
-        auto sourceBuffer = std::make_unique<char[]>(length + 1);
+        auto sourceBuffer = std::make_unique<char[]>(length + 2);
         stream.seekg(0, std::ios::beg);
         stream.read(sourceBuffer.get(), length);
         stream.close();
         VERIFY(stream.good());
         sourceBuffer[length] = '\0';
+        sourceBuffer[length + 1] = '\0';
 
         TestInstrumenter test;
         test.runTest(fs::relative(fs::canonical(entry.path()), testDir), { sourceBuffer.get(), (size_t)length });

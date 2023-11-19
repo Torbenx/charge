@@ -33,8 +33,8 @@ struct LexerState : TokenWithData {
     // These two fields should only be accessed by the Lexer interals.
     // To get the range of the current token the tokenStream should be used
     // as after reemitLastToken() these will not have the correct values.
-    uint32_t tokBegin = 0;
-    uint32_t sourceOffset = 0;
+    int_t tokBegin = 0;
+    int_t sourceOffset = 0;
 
     uint32_t lineNumber = 1;
 

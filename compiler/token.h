@@ -5,81 +5,85 @@
 #include <utility>
 #include <variant>
 
-#define ENUMERTATE_TOKENS                \
-    TOKEN(LeftParen) /* ( */             \
-    TOKEN(RightParen) /* ) */            \
-    TOKEN(LeftSquare) /* [ */            \
-    TOKEN(RightSquare) /* ] */           \
-    TOKEN(LeftBrace) /* { */             \
-    TOKEN(RightBrace) /* } */            \
-                                         \
-    /* begin unary */                    \
-    TOKEN(Question) /* ? */              \
-    TOKEN(Exclaim) /* ! */               \
-    TOKEN(Tilde) /* ~ */                 \
-    TOKEN(PlusPlus) /* ++ */             \
-    TOKEN(MinusMinus) /* -- */           \
-    /* begin binary */                   \
-    TOKEN(Plus) /* + */                  \
-    TOKEN(Minus) /* - */                 \
-    TOKEN(Star) /* * */                  \
-    /* end unary */                      \
-    TOKEN(Amp) /* & */                   \
-    TOKEN(Hat) /* ^ */                   \
-    TOKEN(Vert) /* | */                  \
-    TOKEN(Slash) /* / */                 \
-    TOKEN(Percent) /* % */               \
-    TOKEN(LessLess) /* << */             \
-    TOKEN(GreaterGreater) /* >> */       \
-    TOKEN(ExclaimEqual) /* != */         \
-    TOKEN(EqualEqual) /* == */           \
-    TOKEN(Less) /* < */                  \
-    TOKEN(LessEqual) /* <= */            \
-    TOKEN(Greater) /* > */               \
-    TOKEN(GreaterEqual) /* >= */         \
-    TOKEN(AmpAmp) /* && */               \
-    TOKEN(VertVert) /* || */             \
-    /* end binary */                     \
-    /* begin update */                   \
-    TOKEN(Equal) /* = */                 \
-    TOKEN(PlusEqual) /* += */            \
-    TOKEN(MinusEqual) /* -= */           \
-    TOKEN(StarEqual) /* *= */            \
-    TOKEN(AmpEqual) /* &= */             \
-    TOKEN(HatEqual) /* ^= */             \
-    TOKEN(VertEqual) /* |= */            \
-    TOKEN(SlashEqual) /* /= */           \
-    TOKEN(PercentEqual) /* %= */         \
-    TOKEN(LessLessEqual) /* <<= */       \
-    TOKEN(GreaterGreaterEqual) /* >>= */ \
-    TOKEN(AmpAmpEqual) /* &&= */         \
-    TOKEN(VertVertEqual) /* ||= */       \
-    /* end update */                     \
-                                         \
-    TOKEN(Comma) /* , */                 \
-    TOKEN(Point) /* . */                 \
-    TOKEN(Colon) /* : */                 \
-    TOKEN(ColonColon) /* :: */           \
-    TOKEN(SemiColon) /* ; */             \
-    TOKEN(FatArrow) /* => */             \
-    TOKEN(DoubleArrow) /* <=> */         \
-    TOKEN(Arrow) /* -> */                \
-    TOKEN(Word) /* abc123 */             \
-    TOKEN(NumericLiteral) /* 123 */      \
-    TOKEN(CharacterLiteral) /* 'a' */    \
-                                         \
-    TOKEN(EOS)                           \
-                                         \
-    TOKEN(LineComment) /* // */          \
-    TOKEN(BlockComment) /* /> ... </ */  \
+#define ENUMERATE_PUNCTUATION_TOKENS \
+    PUNC(LeftParen, "(")             \
+    PUNC(RightParen, ")")            \
+    PUNC(LeftSquare, "[")            \
+    PUNC(RightSquare, "]")           \
+    PUNC(LeftBrace, "{")             \
+    PUNC(RightBrace, "}")            \
+                                     \
+    /* begin unary */                \
+    PUNC(Question, "?")              \
+    PUNC(Exclaim, "!")               \
+    PUNC(Tilde, "~")                 \
+    PUNC(PlusPlus, "++")             \
+    PUNC(MinusMinus, "--")           \
+    /* begin binary */               \
+    PUNC(Plus, "+")                  \
+    PUNC(Minus, "-")                 \
+    PUNC(Star, "*")                  \
+    /* end unary */                  \
+    PUNC(Amp, "&")                   \
+    PUNC(Hat, "^")                   \
+    PUNC(Vert, "|")                  \
+    PUNC(Slash, "/")                 \
+    PUNC(Percent, "%")               \
+    PUNC(LessLess, "<<")             \
+    PUNC(GreaterGreater, ">>")       \
+    PUNC(AmpAmp, "&&")               \
+    PUNC(VertVert, "||")             \
+    PUNC(ExclaimEqual, "!=")         \
+    PUNC(EqualEqual, "==")           \
+    PUNC(Less, "<")                  \
+    PUNC(LessEqual, "<=")            \
+    PUNC(Greater, ">")               \
+    PUNC(GreaterEqual, ">=")         \
+    /* end binary */                 \
+    /* begin update */               \
+    PUNC(Equal, "=")                 \
+    PUNC(PlusEqual, "+=")            \
+    PUNC(MinusEqual, "-=")           \
+    PUNC(StarEqual, "*=")            \
+    PUNC(AmpEqual, "&=")             \
+    PUNC(HatEqual, "^=")             \
+    PUNC(VertEqual, "|=")            \
+    PUNC(SlashEqual, "/=")           \
+    PUNC(PercentEqual, "%=")         \
+    PUNC(LessLessEqual, "<<=")       \
+    PUNC(GreaterGreaterEqual, ">>=") \
+    PUNC(AmpAmpEqual, "&&=")         \
+    PUNC(VertVertEqual, "||=")       \
+    /* end update */                 \
+                                     \
+    PUNC(Comma, ",")                 \
+    PUNC(Point, ".")                 \
+    PUNC(Colon, ":")                 \
+    PUNC(ColonColon, "::")           \
+    PUNC(SemiColon, ";")             \
+    PUNC(FatArrow, "=>")             \
+    PUNC(DoubleArrow, "<=>")         \
+    PUNC(Arrow, "->")
+
+#define ENUMERTATE_TOKENS               \
+    TOKEN(Word) /* abc123 */            \
+    TOKEN(NumericLiteral) /* 123 */     \
+    TOKEN(CharacterLiteral) /* 'a' */   \
+                                        \
+    TOKEN(EOS)                          \
+                                        \
+    TOKEN(LineComment) /* // */         \
+    TOKEN(BlockComment) /* /> ... </ */ \
     TOKEN(Newline)
 
 enum class Token : uint32_t {
     Invalid,
-
+#define PUNC(t, spelling) t,
 #define TOKEN(t) t,
     ENUMERTATE_TOKENS
+    ENUMERATE_PUNCTUATION_TOKENS
 #undef TOKEN
+#undef PUNC
 
         COUNT,
 
@@ -88,7 +92,7 @@ enum class Token : uint32_t {
     FirstUnaryOp = Question,
     FirstBinaryOp = Plus,
     LastUnaryOp = Star,
-    LastBinaryOp = VertVert,
+    LastBinaryOp = GreaterEqual,
     FirstUpdateOp = Equal,
     LastUpdateOp = VertVertEqual,
     FirstComment = LineComment,

@@ -10,6 +10,7 @@
 
 struct Word {
     static constexpr int ID_BITS = 3;
+    static constexpr uint32_t MAX_ID = (1u << ID_BITS) - 1;
     static constexpr uint32_t iterateHash(uint32_t hash, uint8_t c) {
         return hash + (hash >> 5) + (hash << 7) + (c << 26) + c;
     }
@@ -22,7 +23,6 @@ struct Word {
             hash = iterateHash(hash, c);
         return finalizeHash(hash);
     }
-    static constexpr uint8_t KEYWORD_ID = (1u << ID_BITS) - 1;
 
     uint32_t id : ID_BITS = 0;
     uint32_t hashBits : (32 - ID_BITS) = 0;
@@ -31,7 +31,7 @@ struct Word {
     constexpr Word(uint8_t id, uint32_t hash)
         : id(id), hashBits(hash >> ID_BITS) { }
     constexpr uint32_t hash() const { return hashBits << ID_BITS; }
-    constexpr bool keyword() const { return id == KEYWORD_ID; }
+    constexpr bool keyword() const { return id == 0; }
     constexpr bool operator==(const Word& other) const {
         return id == other.id && hashBits == other.hashBits;
     }
@@ -71,7 +71,6 @@ struct WordTableView {
 
     struct LookupState {
         uint32_t bucket;
-        uint32_t probeIndex = 0;
     };
     struct FindResult : LookupState {
         bool found = false;
@@ -80,8 +79,7 @@ struct WordTableView {
         return { .bucket = hashToBucket(hash) };
     }
     constexpr void advanceLookup(LookupState& state) const {
-        state.probeIndex += 1;
-        state.bucket = modSize(state.bucket + state.probeIndex);
+        state.bucket = modSize(state.bucket + 1);
     }
     constexpr FindResult findWord(Word) const;
     constexpr FindResult continueFindWord(Word, LookupState) const;
@@ -100,6 +98,7 @@ struct WordTable : WordTableView {
     constexpr WordTable(const WordTable& other);
     constexpr ~WordTable();
 
+    constexpr void rehash();
     constexpr void maybeRehash();
 
     constexpr int_t entryCount() const { return usedBuckets; }
@@ -132,7 +131,9 @@ constexpr WordTableView::FindResult WordTableView::continueFindWord(Word word, L
 constexpr void WordTable::maybeRehash() {
     if (usedBuckets * MAX_LOAD_RATIO.denom <= bucketCount() * MAX_LOAD_RATIO.nom)
         return;
-
+    rehash();
+}
+constexpr void WordTable::rehash() {
     uint32_t oldSize = bucketCount();
     Entry* oldEntries = entries;
     std::allocator<Entry> allocator;
@@ -190,13 +191,7 @@ private:
     template<typename... Ts>
     friend struct ConstWordStringTable;
 
-    struct FindResult {
-        bool found;
-        bool seenKeyword;
-        uint32_t bucket;
-        int maxId;
-    };
-    constexpr FindResult findBucket(uint32_t hash, std::string_view str) const;
+    constexpr Word insertInternal(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId);
 
     char* stringStorage = nullptr;
     uint32_t stringStorageOffset = 0;
@@ -246,24 +241,28 @@ public:
 };
 
 // the table must have at least one free slot
-constexpr WordStringTable::FindResult WordStringTable::findBucket(uint32_t hash, std::string_view str) const {
-    VERIFY(!str.empty());
+constexpr Word WordStringTable::insertInternal(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId) {
     LookupState state = beginLookup(hash);
-    int maxId = -1;
-    bool seenKeyword = false;
     for (;;) {
         Entry& entry = entries[state.bucket];
-        if (entry.empty())
-            return { false, seenKeyword, state.bucket, maxId };
+        if (entry.empty()) {
+            Word word(firstValidId, hash);
+            entry.word = word;
+            entry.payload = allocateStorage(str);
+            usedBuckets += 1;
+
+            maybeRehash();
+            return word;
+        }
 
         if (entry.word.hash() == hash) {
-            if (getStorage(entry.payload) == str)
-                return { true, seenKeyword, state.bucket, maxId }; // found it
+            if (getStorage(entry.payload) == str) [[likely]]
+                return entry.word;
             // hash collision, keep track of the highest seen id
-            if (entry.word.keyword())
-                seenKeyword = true;
-            else if ((int)entry.word.id > maxId)
-                maxId = entry.word.id;
+            if (entry.word.id >= firstValidId) {
+                firstValidId = entry.word.id + 1;
+                VERIFY(firstValidId < firstInvalidId);
+            }
         }
 
         advanceLookup(state);
@@ -337,32 +336,13 @@ constexpr Word WordStringTable::get(std::string_view str) {
 constexpr Word WordStringTable::getWithHash(std::string_view str, uint32_t hash) {
     if (str.empty())
         return Word();
-    auto r = findBucket(hash, str);
-    if (r.found)
-        return entries[r.bucket].word;
-
-    uint32_t id = r.maxId + 1;
-    VERIFY(id < Word::KEYWORD_ID - 1);
-    Word word = { (uint8_t)id, hash };
-    entries[r.bucket].word = word;
-    entries[r.bucket].payload = allocateStorage(str);
-    usedBuckets += 1;
-
-    maybeRehash();
-    return word;
+    return insertInternal(str, hash, 1, Word::MAX_ID + 1);
 }
 constexpr Word WordStringTable::insertKeyword(std::string_view str) {
     uint32_t hash = Word::hash(str);
-    auto r = findBucket(hash, str);
-    VERIFY(!r.found);
-    VERIFY(!r.seenKeyword);
-
-    Word word = { Word::KEYWORD_ID, hash };
-    entries[r.bucket].word = word;
-    entries[r.bucket].payload = allocateStorage(str);
-    usedBuckets += 1;
-
-    maybeRehash();
+    VERIFY(hash != 0);
+    Word word = insertInternal(str, hash, 0, 1);
+    VERIFY(word.id == 0);
     return word;
 }
 constexpr std::string_view WordStringTable::view(Word word) const {

@@ -1,76 +1,26 @@
 #include "Parser.h"
 #include <array>
+#include <ranges>
 
-std::string_view toSmallString(Token tok) {
-    using enum Token;
-    // clang-format off
-    switch (tok) {
-    case Invalid: return "inval";
-
-    case LeftParen: return "(";
-    case RightParen: return ")";
-    case LeftSquare: return "[";
-    case RightSquare: return "]";
-    case LeftBrace: return "{";
-    case RightBrace: return "}";
-
-    case Exclaim: return "!";
-    case Tilde: return "~";
-    case PlusPlus: return "++";
-    case MinusMinus: return "--";
-    case Plus: return "+";
-    case Minus: return "-";
-    case Amp: return "&";
-    case AmpAmp: return "&&";
-    case Hat: return "^";
-    case Vert: return "|";
-    case VertVert: return "||";
-    case Star: return "*";
-    case Slash: return "/";
-    case Percent: return "%";
-    case LessLess: return "<<";
-    case GreaterGreater: return ">>";
-    case ExclaimEqual: return "!=";
-    case EqualEqual: return "==";
-    case Less: return "<";
-    case LessEqual: return "<=";
-    case Greater: return ">";
-    case GreaterEqual: return ">=";
-    case PlusEqual: return "+=";
-    case MinusEqual: return "-=";
-    case AmpEqual: return "&=";
-    case AmpAmpEqual: return "&&=";
-    case HatEqual: return "^=";
-    case VertEqual: return "|=";
-    case VertVertEqual: return "||=";
-    case StarEqual: return "*=";
-    case SlashEqual: return "/=";
-    case PercentEqual: return "%=";
-    case LessLessEqual: return "<<=";
-    case GreaterGreaterEqual: return ">>=";
-
-    case Equal: return "=";
-    case Question: return "?";
-    case Comma: return ",";
-    case Point: return ".";
-    case Colon: return ":";
-    case ColonColon: return "::";
-    case SemiColon: return ";";
-    case FatArrow: return "=>";
-    case DoubleArrow: return "<=>";
-    case Arrow: return "->";
-    case Word: return "word";
-    case NumericLiteral: return "num";
-    case CharacterLiteral: return "char";
-
-    case LineComment: return "//";
-    case BlockComment: return "/>";
-
-    case Newline: return "newline";
-
-    case EOS: return "EOS";
-    case COUNT:
+std::string_view toSmallString(Token token) {
+    switch (token) {
+    case Token::Invalid:
+        return "Invalid";
+    default:
         VERIFY_NOT_REACHED();
+
+#define PUNC(t, sp) \
+    case Token::t:  \
+        return sp;
+#define TOKEN(t)   \
+    case Token::t: \
+        return #t;
+
+        ENUMERTATE_TOKENS
+        ENUMERATE_PUNCTUATION_TOKENS
+
+#undef TOKEN
+#undef PUNC
     }
     // clang-format on
 }
@@ -78,48 +28,53 @@ std::string_view nameString(Token token) {
     switch (token) {
     case Token::Invalid:
         return "Invalid";
-    case Token::COUNT:
+    default:
         VERIFY_NOT_REACHED();
 
+#define PUNC(t, sp) \
+    case Token::t:  \
+        return #t;
 #define TOKEN(t)   \
     case Token::t: \
         return #t;
 
         ENUMERTATE_TOKENS
+        ENUMERATE_PUNCTUATION_TOKENS
 
-#undef token
+#undef TOKEN
+#undef PUNC
     }
 }
 
 // advances offset to the next non-whitespace character
-static void skipTabsAndSpaces(Lexer& lex) {
-    while (lex.sourceBuffer[lex.sourceOffset] == ' ' || lex.sourceBuffer[lex.sourceOffset] == '\t')
-        lex.sourceOffset += 1;
+static void skipTabsAndSpaces(std::string_view sourceBuffer, int_t& sourceOffset) {
+    while (sourceBuffer[sourceOffset] == ' ' || sourceBuffer[sourceOffset] == '\t')
+        sourceOffset += 1;
 }
 
 static bool isEndOfLineCharacter(uint8_t c) {
     return c == '\n' || c == '\r';
 }
 // advances offset to the next new line character
-static void skipToEndOfLine(Lexer& lex) {
-    while (!isEndOfLineCharacter(lex.sourceBuffer[lex.sourceOffset]))
-        lex.sourceOffset += 1;
+static void skipToEndOfLine(std::string_view sourceBuffer, int_t& sourceOffset) {
+    while (!isEndOfLineCharacter(sourceBuffer[sourceOffset]))
+        sourceOffset += 1;
 }
 
 // advances offset to the next '</'
-static void skipToEndOfBlockComment(Lexer& lex) {
-    while (lex.sourceBuffer[lex.sourceOffset] != '\0'
-        && !(lex.sourceBuffer[lex.sourceOffset] == '<' && lex.sourceBuffer[lex.sourceOffset + 1] == '/')) {
-        lex.sourceOffset += 1;
+static void skipToEndOfBlockComment(std::string_view sourceBuffer, int_t& sourceOffset) {
+    while (sourceBuffer[sourceOffset] != '\0'
+        && !(sourceBuffer[sourceOffset] == '<' && sourceBuffer[sourceOffset + 1] == '/')) {
+        sourceOffset += 1;
     }
 }
 
-static void skipToEndOfCharacterLiteral(Lexer& lex) {
+static void skipToEndOfCharacterLiteral(std::string_view sourceBuffer, int_t& sourceOffset) {
     for (;;) {
-        auto c = lex.sourceBuffer[lex.sourceOffset];
+        auto c = sourceBuffer[sourceOffset];
         if (c == '\'' || c == '\n' || c == '\r' || c == '\0')
             break;
-        lex.sourceOffset += 1;
+        sourceOffset += 1;
     }
 }
 
@@ -128,144 +83,149 @@ static bool isBulkWordCharacter(uint8_t c) {
         || (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
-namespace lookup_table1 {
+static constexpr Token binaryToUpdateOp(Token in) {
+    return Token(std::to_underlying(in) - std::to_underlying(Token::Plus)
+        + std::to_underlying(Token::PlusEqual));
+}
 
-struct Input {
-    Token bare;
-    Token repeat = bare;
-    Token equal = bare;
-    Token arrow = bare;
-    Token repeatEqual = repeat;
-    Token repeatArrow = repeat;
-    Token equalArrow = equal;
-    Token repeatEqualArrow = repeatEqual;
-};
-struct InputRange : Input {
-    uint8_t first, last;
-    constexpr InputRange(char target, Input input)
-        : Input(input), first(target), last(target) { }
-    constexpr InputRange(uint8_t first, uint8_t last, Input input)
-        : Input(input), first(first), last(last) { }
-};
+namespace lexer_lookup_table {
 
-struct Output {
-    static_assert(std::to_underlying(Token::COUNT) <= 1 << 6);
-    uint8_t token : 6 = 0;
-    uint8_t advance : 2 = 0;
-    constexpr Output() = default;
-    constexpr Output(Token token, int_t advance)
-        : token(std::to_underlying(token)), advance(advance) {
-        VERIFY(advance < 4);
-    }
+struct CharacterRange {
+    char first;
+    char last;
+    constexpr CharacterRange()
+        : first('\0'), last(127) { }
+    constexpr CharacterRange(char c)
+        : first(c), last(c) { }
+    constexpr CharacterRange(char first, char last)
+        : first(first), last(last) { }
+    constexpr auto range() const { return std::views::iota((size_t)first, (size_t)last + 1); }
+    constexpr auto begin() const { return range().begin(); }
+    constexpr auto end() const { return range().end(); }
 };
 
-static constexpr int_t getOffset(uint8_t character, bool repeat, bool equal, bool arrow) {
-    VERIFY(character >= 0x20 && character < 0x40);
-    return (character - 0x20) | (repeat << 5) | (equal << 6) | (arrow << 7);
-}
-
-static constexpr auto makeTable(std::initializer_list<InputRange> inputs) {
-    std::array<Output, 0x20 * 8> output = {};
-    for (auto input : inputs) {
-        for (uint8_t c = input.first; c <= input.last; c++) {
-            int_t bareAdvance = 1;
-            output[getOffset(c, false, false, false)] = { input.bare, 1 };
-            int_t equalAdvance = bareAdvance + (input.equal == input.bare ? 0 : 1);
-            output[getOffset(c, false, true, false)] = { input.equal, equalAdvance };
-            output[getOffset(c, false, false, true)] = { input.arrow, bareAdvance + (input.arrow == input.bare ? 0 : 1) };
-            output[getOffset(c, false, true, true)] = { input.equalArrow, equalAdvance + (input.equalArrow == input.equal ? 0 : 1) };
-            int_t repeatAdvance = input.repeat == input.bare ? bareAdvance : bareAdvance + 1;
-            output[getOffset(c, true, false, false)] = { input.repeat, repeatAdvance };
-            int_t repeatEqualAdvance = repeatAdvance + (input.repeatEqual == input.repeat ? 0 : 1);
-            output[getOffset(c, true, true, false)] = { input.repeatEqual, repeatEqualAdvance };
-            output[getOffset(c, true, false, true)] = { input.repeatArrow, repeatAdvance + (input.repeatArrow == input.repeat ? 0 : 1) };
-            output[getOffset(c, true, true, true)] = { input.repeatEqualArrow, repeatEqualAdvance + (input.repeatEqualArrow == input.repeatEqual ? 0 : 1) };
-        }
-    }
-    return output;
-}
-
-static constexpr auto table = makeTable({
-    { '(', { Token::LeftParen } },
-    { ')', { Token::RightParen } },
-    { '?', { Token::Question } },
-    { ',', { Token::Comma } },
-    { '.', { Token::Point } },
-    { ';', { Token::SemiColon } },
-    { ':', { .bare = Token::Colon, .repeat = Token::ColonColon } },
-
-    { '!', { .bare = Token::Exclaim, .equal = Token::ExclaimEqual } },
-    { '%', { .bare = Token::Percent, .equal = Token::PercentEqual } },
-    { '*', { .bare = Token::Star, .equal = Token::StarEqual } },
-
-    { '/', { .bare = Token::Slash, .repeat = Token::LineComment, .equal = Token::SlashEqual, .arrow = Token::BlockComment } },
-
-    { '=', { .bare = Token::Equal, .repeat = Token::EqualEqual, .arrow = Token::FatArrow } },
-
-    { '+', { .bare = Token::Plus, .repeat = Token::PlusPlus, .equal = Token::PlusEqual } },
-    { '-', { .bare = Token::Minus, .repeat = Token::MinusMinus, .equal = Token::MinusEqual, .arrow = Token::Arrow } },
-
-    { '&', { .bare = Token::Amp, .repeat = Token::AmpAmp, .equal = Token::AmpEqual, .repeatEqual = Token::AmpAmpEqual } },
-
-    { '<', { .bare = Token::Less, .repeat = Token::LessLess, .equal = Token::LessEqual, .repeatEqual = Token::LessLessEqual, .equalArrow = Token::DoubleArrow } },
-    { '>', { .bare = Token::Greater, .repeat = Token::GreaterGreater, .equal = Token::GreaterEqual, .repeatEqual = Token::GreaterGreaterEqual } },
-
-    { '0', '9', { Token::NumericLiteral } },
-    { '\'', { Token::CharacterLiteral } },
-    { '$', { Token::Word } },
-    { '#', { Token::Word } },
-});
-
-static constexpr std::pair<Token, int_t> lookup(uint8_t character, bool repeat, bool equal, bool arrow) {
-    Output out = table[getOffset(character, repeat, equal, arrow)];
-    return { (Token)out.token, (int_t)out.advance };
-}
-
-}
-
-namespace lookup_table2 {
-
-struct Input {
-    uint8_t first;
-    uint8_t last;
+struct Punctuation {
     Token token;
-    constexpr Input(uint8_t character, Token token)
-        : first(character), last(character), token(token) { }
-    constexpr Input(uint8_t first, uint8_t last, Token token)
-        : first(first), last(last), token(token) { }
+    std::string_view spelling;
 };
+constexpr auto sortedPunctuations() {
+#define PUNC(name, spelling) Punctuation { Token::name, spelling },
+    std::array punctuations = { ENUMERATE_PUNCTUATION_TOKENS };
+#undef PUNC
+    std::sort(punctuations.begin(), punctuations.end(),
+        [](Punctuation l, Punctuation r) { return l.spelling.length() < r.spelling.length(); });
 
-struct Output {
-    Token token : 8 = Token::Invalid;
-};
-
-static constexpr int_t getOffset(uint8_t character) {
-    VERIFY(character >= 0x40 && character < 0x80);
-    return character - 0x40;
+    return punctuations;
 }
 
-static constexpr auto makeTable(std::initializer_list<Input> inputs) {
-    std::array<Output, 0x40> output = {};
-    for (auto input : inputs) {
-        for (uint8_t c = input.first; c <= input.last; c++) {
-            output[getOffset(c)] = Output { input.token };
+enum class Result : uint8_t {
+    Invalid,
+    NewlineLF,
+    NewlineCRLF,
+    LineComment,
+    BlockComment,
+    PunctuationPossiblyDoubleArrow,
+    Word,
+    NumbericLiteral,
+    CharacterLiteral,
+};
+
+struct Input {
+    CharacterRange c0;
+    CharacterRange c1;
+    Result result;
+    constexpr Input(CharacterRange c0, Result result)
+        : c0(c0), c1(), result(result) { }
+    constexpr Input(CharacterRange c0, CharacterRange c1, Result result)
+        : c0(c0), c1(c1), result(result) { }
+};
+
+constexpr auto makeTable(std::initializer_list<Input> inputs) {
+    std::array<uint8_t, 128 * 128> output = {};
+
+    auto put = [&output](size_t t0, size_t t1, uint8_t r) constexpr {
+        output[(t0 << 7) | t1] = r;
+    };
+    auto encodePunctuation = [](Punctuation p) constexpr -> uint8_t {
+        VERIFY(p.spelling.length() == 1 || p.spelling.length() == 2);
+        return std::to_underlying(p.token) | (p.spelling.length() << 6);
+    };
+    auto encodePunctuationExtenededByEqual = [](Token baseToken) constexpr -> uint8_t {
+        return std::to_underlying(baseToken) | (uint8_t)0b1100'0000;
+    };
+
+    // punctuations
+    auto punctuations = sortedPunctuations();
+    for (auto punc : punctuations) {
+        if (punc.spelling.length() > 2)
+            continue;
+        std::vector<Punctuation> possibleExtensions;
+        for (auto other : punctuations) {
+            if (other.spelling.length() > punc.spelling.length() && other.spelling.starts_with(punc.spelling))
+                possibleExtensions.push_back(other);
+        }
+        auto hasExtension = [&possibleExtensions, &punc](char c) {
+            return std::find_if(possibleExtensions.begin(),
+                       possibleExtensions.end(),
+                       [&](Punctuation ext) { return ext.spelling[punc.spelling.length()] == c; })
+                != possibleExtensions.end();
+        };
+        if (punc.spelling.length() == 1) {
+            for (auto c : CharacterRange()) {
+                if (hasExtension(c)) {
+                    // This will be written later.
+                } else {
+                    put(punc.spelling[0], c, encodePunctuation(punc));
+                }
+            }
+        } else if (possibleExtensions.empty()) {
+            put(punc.spelling[0], punc.spelling[1], encodePunctuation(punc));
+        } else {
+            VERIFY(possibleExtensions.size() == 1);
+            auto extension = possibleExtensions.front();
+            VERIFY(extension.spelling.length() == 3);
+            char extensionChar = extension.spelling[2];
+            if (extensionChar == '=') {
+                VERIFY(binaryToUpdateOp(punc.token) == extension.token);
+                put(punc.spelling[0], punc.spelling[1], encodePunctuationExtenededByEqual(punc.token));
+            } else if (extensionChar == '>') {
+                VERIFY(extension.token == Token::DoubleArrow);
+                put(punc.spelling[0], punc.spelling[1], std::to_underlying(Result::PunctuationPossiblyDoubleArrow));
+            } else
+                VERIFY_NOT_REACHED();
         }
     }
+
+    // other tokens
+    for (Input in : inputs) {
+        for (auto c0 : in.c0) {
+            for (auto c1 : in.c1)
+                put(c0, c1, std::to_underlying(in.result));
+        }
+    }
+
     return output;
 }
 
-static constexpr auto table = makeTable({
-    { 'a', 'z', Token::Word },
-    { 'A', 'Z', Token::Word },
-    { '_', Token::Word },
-    { '[', Token::LeftSquare },
-    { ']', Token::RightSquare },
-    { '{', Token::LeftBrace },
-    { '}', Token::RightBrace },
-    { '~', Token::Tilde },
+constexpr auto table = makeTable({
+    { { '0', '9' }, Result::NumbericLiteral },
+    { '\'', Result::CharacterLiteral },
+
+    { '$', Result::Word },
+    { '#', Result::Word },
+    { '_', Result::Word },
+    { { 'a', 'z' }, Result::Word },
+    { { 'A', 'Z' }, Result::Word },
+
+    { '/', '/', Result::LineComment },
+    { '/', '>', Result::BlockComment },
+    { '\n', Result::NewlineLF },
+    { '\r', '\n', Result::NewlineCRLF },
 });
 
-static constexpr Token lookup(uint8_t character) { return table[getOffset(character)].token; }
+constexpr Result lookup(char c0, char c1) {
+    return (Result)table[((size_t)c0 << 7) | (size_t)c1];
+}
 
 }
 
@@ -376,110 +336,125 @@ void Lexer::nextToken() {
     }
 
     for (;;) {
-        skipTabsAndSpaces(*this);
+        skipTabsAndSpaces(sourceBuffer, sourceOffset);
 
         tokBegin = sourceOffset;
         tok = Token::Invalid;
         tokData = std::nullopt;
-        auto head = sourceBuffer[sourceOffset];
-        if (head == '\0' && sourceOffset == sourceBuffer.length()) {
-            tok = Token::EOS;
-            break;
+
+        char c0 = sourceBuffer[sourceOffset + 0];
+        char c1 = sourceBuffer[sourceOffset + 1];
+        if (c0 < 0 || c0 > 127) [[unlikely]] {
+            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
         }
-        if (head == '\n') {
-            tok = Token::Newline;
-            lineNumber += 1;
-            sourceOffset += 1;
-            tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
-            continue;
-        }
-        if (head == '\r' && sourceBuffer[sourceOffset + 1] == '\n') {
-            tok = Token::Newline;
-            lineNumber += 1;
-            sourceOffset += 2;
-            tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
-            continue;
-        }
-        int_t advance = 0;
-        if (head <= 0x20 || head >= 0x7f) [[unlikely]] {
-            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, sourceBuffer[sourceOffset]));
-        } else if (head < 0x40) {
-            bool repeat = sourceBuffer[sourceOffset + 1] == head;
-            bool equal = sourceBuffer[sourceOffset + 1 + (repeat ? 1 : 0)] == '=';
-            bool arrow = sourceBuffer[sourceOffset + 1 + (repeat ? 1 : 0) + (equal ? 1 : 0)] == '>';
-            std::tie(tok, advance) = lookup_table1::lookup(head, repeat, equal, arrow);
-            if (tok == Token::Invalid) [[unlikely]] {
-                HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, sourceBuffer[sourceOffset]));
-            }
-        } else if (head == '|') {
-            bool repeat = sourceBuffer[sourceOffset + 1] == '|';
-            bool equal = sourceBuffer[sourceOffset + 1 + (repeat ? 1 : 0)] == '=';
-            std::tie(tok, advance) = repeat
-                ? (equal ? std::make_tuple(Token::VertVertEqual, 3) : std::make_tuple(Token::VertVert, 2))
-                : (equal ? std::make_tuple(Token::VertEqual, 2) : std::make_tuple(Token::Vert, 1));
-        } else if (head == '^') {
-            std::tie(tok, advance) = sourceBuffer[sourceOffset + 1] == '='
-                ? std::make_tuple(Token::HatEqual, 2)
-                : std::make_tuple(Token::Hat, 1);
-        } else {
-            tok = lookup_table2::lookup(head);
-            advance = 1;
-            if (tok == Token::Invalid) [[unlikely]] {
-                HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, sourceBuffer[sourceOffset]));
-            }
+        if (c1 < 0 || c1 > 127) [[unlikely]] {
+            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c1));
         }
 
-        if (tok == Token::Word) {
-            uint32_t hash = 0;
-            do {
-                hash = Word::iterateHash(hash, sourceBuffer[sourceOffset]);
-                sourceOffset += 1;
-            } while (isBulkWordCharacter(sourceBuffer[sourceOffset]));
-            hash = Word::finalizeHash(hash);
-            tokData = wordTable.getWithHash(source(tokBegin, sourceOffset), hash);
-        } else if (tok == Token::NumericLiteral) {
-            // TODO: implement parsing num literals
-            for (;;) {
-                char c = sourceBuffer[sourceOffset];
-                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
-                    sourceOffset += 1;
-                else
-                    break;
-            }
-            tokData = NumericLiteral();
-        } else if (tok == Token::CharacterLiteral) {
-            sourceOffset += 1;
-            skipToEndOfCharacterLiteral(*this);
-            if (sourceBuffer[sourceOffset] != '\'') [[unlikely]] {
-                HANDLE_LEXER_ACTION(errorHandler->unterminatedCharacterLiteral(this, tokBegin, sourceOffset));
-            }
-            int_t literalBegin = tokBegin + 1;
-            int_t literalLength = sourceOffset - literalBegin;
-            sourceOffset += 1;
-            if (literalLength != 1 || (uint8_t)sourceBuffer[literalBegin] >= 0x80) [[unlikely]] {
-                HANDLE_LEXER_ACTION(errorHandler->invalidCharacterLiteral(this, literalBegin, literalBegin + literalLength));
-            }
-            tokData = CharacterLiteral { sourceBuffer[literalBegin] };
-        } else if (tok == Token::LineComment) {
-            skipToEndOfLine(*this);
-            tokenStream.emit(StreamToken::make(tok, tokBegin, sourceOffset));
-            if (instrumenter)
-                instrumenter->handleComment(this);
-            continue;
-        } else if (tok == Token::BlockComment) {
-            skipToEndOfBlockComment(*this);
-            if (sourceBuffer[sourceOffset] == '\0') [[unlikely]] {
-                HANDLE_LEXER_ACTION(errorHandler->unterminatedBlockComment(this, tokBegin));
-            }
-            sourceOffset += 2;
-            tokenStream.emit(StreamToken::make(tok, tokBegin, sourceOffset));
-            if (instrumenter)
-                instrumenter->handleComment(this);
-            continue;
-        } else {
+        auto lookupResult = lexer_lookup_table::lookup(c0, c1);
+
+        if (std::to_underlying(lookupResult) >= (uint8_t)0b1100'0000) {
+            Token baseToken = Token(std::to_underlying(lookupResult) & (uint8_t)0b0011'1111);
+            bool b = sourceBuffer[sourceOffset + 2] == '=';
+            tok = b ? binaryToUpdateOp(baseToken) : baseToken;
+            sourceOffset += b ? 3 : 2;
+        } else if (std::to_underlying(lookupResult) >= (uint8_t)0b0100'0000) {
+            auto advance = std::to_underlying(lookupResult) >> 6;
             sourceOffset += advance;
+            tok = Token(std::to_underlying(lookupResult) & (uint8_t)0b0011'1111);
+        } else {
+            switch (lookupResult) {
+                using Result = decltype(lookupResult);
+            case Result::Invalid: {
+                char c0 = sourceBuffer[sourceOffset + 0];
+                if (c0 == '\0' && sourceOffset == (int_t)sourceBuffer.length()) {
+                    this->tok = Token::EOS;
+                    return;
+                }
+                HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
+            }
+            case Result::NewlineLF:
+            case Result::NewlineCRLF: {
+                tok = Token::Newline;
+                lineNumber += 1;
+                sourceOffset += lookupResult == Result::NewlineCRLF ? 2 : 1;
+                tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
+                continue;
+            }
+            case Result::LineComment: {
+                tok = Token::LineComment;
+                skipToEndOfLine(sourceBuffer, sourceOffset);
+                tokenStream.emit(StreamToken::make(Token::LineComment, tokBegin, sourceOffset));
+                if (instrumenter)
+                    instrumenter->handleComment(this);
+                continue;
+            }
+            case Result::BlockComment: {
+                tok = Token::BlockComment;
+                skipToEndOfBlockComment(sourceBuffer, sourceOffset);
+                if (sourceBuffer[sourceOffset] == '\0') [[unlikely]] {
+                    HANDLE_LEXER_ACTION(errorHandler->unterminatedBlockComment(this, tokBegin));
+                }
+                sourceOffset += 2;
+                tokenStream.emit(StreamToken::make(Token::BlockComment, tokBegin, sourceOffset));
+                if (instrumenter)
+                    instrumenter->handleComment(this);
+                continue;
+            }
+            case Result::PunctuationPossiblyDoubleArrow: {
+                if (sourceBuffer[sourceOffset + 2] == '>') {
+                    tok = Token::DoubleArrow;
+                    sourceOffset += 3;
+                } else {
+                    tok = Token::LessEqual;
+                    sourceOffset += 2;
+                }
+                break;
+            }
+            case Result::Word: {
+                tok = Token::Word;
+                uint32_t hash = 0;
+                do {
+                    hash = Word::iterateHash(hash, sourceBuffer[sourceOffset]);
+                    sourceOffset += 1;
+                } while (isBulkWordCharacter(sourceBuffer[sourceOffset]));
+                hash = Word::finalizeHash(hash);
+                tokData = wordTable.getWithHash(source(tokBegin, sourceOffset), hash);
+                break;
+            }
+            case Result::NumbericLiteral: {
+                tok = Token::NumericLiteral;
+                // TODO: implement parsing num literals
+                for (;;) {
+                    char c = sourceBuffer[sourceOffset];
+                    if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
+                        sourceOffset += 1;
+                    else
+                        break;
+                }
+                tokData = NumericLiteral();
+                break;
+            }
+            case Result::CharacterLiteral: {
+                tok = Token::CharacterLiteral;
+                sourceOffset += 1;
+                skipToEndOfCharacterLiteral(sourceBuffer, sourceOffset);
+                if (sourceBuffer[sourceOffset] != '\'') [[unlikely]] {
+                    HANDLE_LEXER_ACTION(errorHandler->unterminatedCharacterLiteral(this, tokBegin, sourceOffset));
+                }
+                int_t literalBegin = tokBegin + 1;
+                int_t literalLength = sourceOffset - literalBegin;
+                sourceOffset += 1;
+                if (literalLength != 1 || (uint8_t)sourceBuffer[literalBegin] >= 0x80) [[unlikely]] {
+                    HANDLE_LEXER_ACTION(errorHandler->invalidCharacterLiteral(this, literalBegin, literalBegin + literalLength));
+                }
+                tokData = CharacterLiteral { sourceBuffer[literalBegin] };
+                break;
+            }
+            default:
+                VERIFY_NOT_REACHED();
+            }
         }
-
         break;
     }
     tokenStream.emit(StreamToken::make(tok, tokBegin, sourceOffset));
