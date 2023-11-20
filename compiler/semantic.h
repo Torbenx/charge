@@ -58,6 +58,9 @@ struct optional_traits<InstructionOperand> {
     static constexpr InstructionOperand empty_value = {};
 };
 struct ConstantStreamOperand : InstructionOperand {
+    ConstantStreamOperand() = default;
+    explicit ConstantStreamOperand(InstructionOperand op)
+        : InstructionOperand(op) { }
     ValuePhase phase() const { return constant() ? ValuePhase::Literal : ValuePhase::Constant; }
     constexpr bool operator==(const ConstantStreamOperand&) const = default;
 };
@@ -80,8 +83,15 @@ struct ConstantStreamValue {
 };
 
 struct RuntimeStreamOperand : InstructionOperand {
+    RuntimeStreamOperand() = default;
+    explicit RuntimeStreamOperand(InstructionOperand op)
+        : InstructionOperand(op) { }
     ValuePhase phase() const { return constant() ? ValuePhase::Constant : ValuePhase::Runtime; }
     constexpr bool operator==(const RuntimeStreamOperand&) const = default;
+    ConstantStreamOperand asConstant() const {
+        VERIFY(phase() == ValuePhase::Constant);
+        return ConstantStreamOperand(InstructionOperand(false, id()));
+    }
 };
 
 struct Instruction {
@@ -126,10 +136,10 @@ struct SSAName {
         VERIFY_NOT_REACHED();
     }
     ConstantStreamOperand localizeConstant() const {
-        return { localize(ValuePhase::Constant) };
+        return ConstantStreamOperand { localize(ValuePhase::Constant) };
     }
     RuntimeStreamOperand localizeRuntime() const {
-        return { localize(ValuePhase::Runtime) };
+        return RuntimeStreamOperand { localize(ValuePhase::Runtime) };
     }
 };
 
@@ -336,6 +346,7 @@ struct SemanticContext {
 
     void check(StaticDeclContext*);
     void requireSignature(Decl*);
+    void signatureCheckTemplateParameters(StaticDecl*, ParameterizedDecl&);
     void signatureCheckTypeDecl(TypeDecl&);
     void signatureCheckStaticVariableDecl(StaticVariableDecl&);
     void signatureCheckFunctionDecl(FunctionDecl&);
