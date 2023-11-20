@@ -23,7 +23,7 @@ std::string_view nameString(NodeKind kind) {
 #define NODE(kind, type, prec) \
     case NodeKind::kind:       \
         return #kind;
-#include "nodes.h"
+#include "nodes.inc"
 
     default:
         VERIFY_NOT_REACHED();
@@ -35,7 +35,7 @@ ExpressionPrecedence precedenceOf(NodeKind node) {
 #define NODE(kind, type, prec) \
     case NodeKind::kind:       \
         return ExpressionPrecedence::prec;
-#include "nodes.h"
+#include "nodes.inc"
 
     default:
         VERIFY_NOT_REACHED();

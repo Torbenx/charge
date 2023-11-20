@@ -76,7 +76,7 @@ public:
             VERIFY_NOT_REACHED();                                                    \
         break;                                                                       \
     }
-#include "nodes.h"
+#include "nodes.inc"
 
         default:
             VERIFY_NOT_REACHED();
@@ -100,7 +100,7 @@ public:
         }                                                                                                     \
         break;                                                                                                \
     }
-#include "nodes.h"
+#include "nodes.inc"
 
             default:
                 VERIFY_NOT_REACHED();

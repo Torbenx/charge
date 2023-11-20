@@ -38,7 +38,7 @@ enum class ExpressionPrecedence : uint8_t {
 enum class NodeKind : uint8_t {
 
 #define NODE(kind, type, prec) kind,
-#include "nodes.h"
+#include "nodes.inc"
 
     COUNT,
 };
@@ -210,7 +210,7 @@ constexpr bool matchNodeType(NodeKind in) {
 #define NODE(kind, type, prec) \
     case NodeKind::kind:       \
         return std::is_same_v<T, type>;
-#include "nodes.h"
+#include "nodes.inc"
 
     default:
         VERIFY_NOT_REACHED();
@@ -223,7 +223,7 @@ constexpr bool isNodeType(NodeKind in) {
 #define NODE(kind, type, prec) \
     case NodeKind::kind:       \
         return std::derived_from<type, T>;
-#include "nodes.h"
+#include "nodes.inc"
 
     default:
         VERIFY_NOT_REACHED();
