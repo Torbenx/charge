@@ -83,152 +83,6 @@ static bool isBulkWordCharacter(uint8_t c) {
         || (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
-static constexpr Token binaryToUpdateOp(Token in) {
-    return Token(std::to_underlying(in) - std::to_underlying(Token::Plus)
-        + std::to_underlying(Token::PlusEqual));
-}
-
-namespace lexer_lookup_table {
-
-struct CharacterRange {
-    char first;
-    char last;
-    constexpr CharacterRange()
-        : first('\0'), last(127) { }
-    constexpr CharacterRange(char c)
-        : first(c), last(c) { }
-    constexpr CharacterRange(char first, char last)
-        : first(first), last(last) { }
-    constexpr auto range() const { return std::views::iota((size_t)first, (size_t)last + 1); }
-    constexpr auto begin() const { return range().begin(); }
-    constexpr auto end() const { return range().end(); }
-};
-
-struct Punctuation {
-    Token token;
-    std::string_view spelling;
-};
-constexpr auto sortedPunctuations() {
-#define PUNC(name, spelling) Punctuation { Token::name, spelling },
-    std::array punctuations = { ENUMERATE_PUNCTUATION_TOKENS };
-#undef PUNC
-    std::sort(punctuations.begin(), punctuations.end(),
-        [](Punctuation l, Punctuation r) { return l.spelling.length() < r.spelling.length(); });
-
-    return punctuations;
-}
-
-enum class Result : uint8_t {
-    Invalid,
-    NewlineLF,
-    NewlineCRLF,
-    LineComment,
-    BlockComment,
-    PunctuationPossiblyDoubleArrow,
-    Word,
-    NumbericLiteral,
-    CharacterLiteral,
-};
-
-struct Input {
-    CharacterRange c0;
-    CharacterRange c1;
-    Result result;
-    constexpr Input(CharacterRange c0, Result result)
-        : c0(c0), c1(), result(result) { }
-    constexpr Input(CharacterRange c0, CharacterRange c1, Result result)
-        : c0(c0), c1(c1), result(result) { }
-};
-
-constexpr auto makeTable(std::initializer_list<Input> inputs) {
-    std::array<uint8_t, 128 * 128> output = {};
-
-    auto put = [&output](size_t t0, size_t t1, uint8_t r) constexpr {
-        output[(t0 << 7) | t1] = r;
-    };
-    auto encodePunctuation = [](Punctuation p) constexpr -> uint8_t {
-        VERIFY(p.spelling.length() == 1 || p.spelling.length() == 2);
-        return std::to_underlying(p.token) | (p.spelling.length() << 6);
-    };
-    auto encodePunctuationExtenededByEqual = [](Token baseToken) constexpr -> uint8_t {
-        return std::to_underlying(baseToken) | (uint8_t)0b1100'0000;
-    };
-
-    // punctuations
-    auto punctuations = sortedPunctuations();
-    for (auto punc : punctuations) {
-        if (punc.spelling.length() > 2)
-            continue;
-        std::vector<Punctuation> possibleExtensions;
-        for (auto other : punctuations) {
-            if (other.spelling.length() > punc.spelling.length() && other.spelling.starts_with(punc.spelling))
-                possibleExtensions.push_back(other);
-        }
-        auto hasExtension = [&possibleExtensions, &punc](char c) {
-            return std::find_if(possibleExtensions.begin(),
-                       possibleExtensions.end(),
-                       [&](Punctuation ext) { return ext.spelling[punc.spelling.length()] == c; })
-                != possibleExtensions.end();
-        };
-        if (punc.spelling.length() == 1) {
-            for (auto c : CharacterRange()) {
-                if (hasExtension(c)) {
-                    // This will be written later.
-                } else {
-                    put(punc.spelling[0], c, encodePunctuation(punc));
-                }
-            }
-        } else if (possibleExtensions.empty()) {
-            put(punc.spelling[0], punc.spelling[1], encodePunctuation(punc));
-        } else {
-            VERIFY(possibleExtensions.size() == 1);
-            auto extension = possibleExtensions.front();
-            VERIFY(extension.spelling.length() == 3);
-            char extensionChar = extension.spelling[2];
-            if (extensionChar == '=') {
-                VERIFY(binaryToUpdateOp(punc.token) == extension.token);
-                put(punc.spelling[0], punc.spelling[1], encodePunctuationExtenededByEqual(punc.token));
-            } else if (extensionChar == '>') {
-                VERIFY(extension.token == Token::DoubleArrow);
-                put(punc.spelling[0], punc.spelling[1], std::to_underlying(Result::PunctuationPossiblyDoubleArrow));
-            } else
-                VERIFY_NOT_REACHED();
-        }
-    }
-
-    // other tokens
-    for (Input in : inputs) {
-        for (auto c0 : in.c0) {
-            for (auto c1 : in.c1)
-                put(c0, c1, std::to_underlying(in.result));
-        }
-    }
-
-    return output;
-}
-
-constexpr auto table = makeTable({
-    { { '0', '9' }, Result::NumbericLiteral },
-    { '\'', Result::CharacterLiteral },
-
-    { '$', Result::Word },
-    { '#', Result::Word },
-    { '_', Result::Word },
-    { { 'a', 'z' }, Result::Word },
-    { { 'A', 'Z' }, Result::Word },
-
-    { '/', '/', Result::LineComment },
-    { '/', '>', Result::BlockComment },
-    { '\n', Result::NewlineLF },
-    { '\r', '\n', Result::NewlineCRLF },
-});
-
-constexpr Result lookup(char c0, char c1) {
-    return (Result)table[((size_t)c0 << 7) | (size_t)c1];
-}
-
-}
-
 bool TokenWithData::valid() const {
     if (tok <= Token::Invalid || tok >= Token::COUNT)
         return false;
@@ -342,54 +196,58 @@ void Lexer::nextToken() {
         tok = Token::Invalid;
         tokData = {};
 
-        char c0 = sourceBuffer[sourceOffset + 0];
-        char c1 = sourceBuffer[sourceOffset + 1];
-        if (c0 < 0 || c0 > 127) [[unlikely]] {
-            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
-        }
-        if (c1 < 0 || c1 > 127) [[unlikely]] {
-            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c1));
-        }
-
-        auto lookupResult = lexer_lookup_table::lookup(c0, c1);
-
-        if (std::to_underlying(lookupResult) >= (uint8_t)0b1100'0000) {
-            Token baseToken = Token(std::to_underlying(lookupResult) & (uint8_t)0b0011'1111);
-            bool b = sourceBuffer[sourceOffset + 2] == '=';
-            tok = b ? binaryToUpdateOp(baseToken) : baseToken;
-            sourceOffset += b ? 3 : 2;
-        } else if (std::to_underlying(lookupResult) >= (uint8_t)0b0100'0000) {
-            auto advance = std::to_underlying(lookupResult) >> 6;
-            sourceOffset += advance;
-            tok = Token(std::to_underlying(lookupResult) & (uint8_t)0b0011'1111);
-        } else {
-            switch (lookupResult) {
-                using Result = decltype(lookupResult);
-            case Result::Invalid: {
-                char c0 = sourceBuffer[sourceOffset];
-                if (c0 == '\0' && sourceOffset == (int_t)sourceBuffer.length()) {
-                    this->tok = Token::EOS;
-                    break;
-                }
-                HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
+        char c0 = sourceBuffer[sourceOffset];
+        switch (c0) {
+        case '\0': {
+            if (sourceOffset == (int_t)sourceBuffer.length()) {
+                tok = Token::EOS;
+                break;
             }
-            case Result::NewlineLF:
-            case Result::NewlineCRLF: {
-                tok = Token::Newline;
-                lineNumber += 1;
-                sourceOffset += lookupResult == Result::NewlineCRLF ? 2 : 1;
-                tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
-                continue;
+            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, '\0'));
+        }
+        case '\n': {
+            tok = Token::Newline;
+            lineNumber += 1;
+            sourceOffset += 1;
+            tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
+            continue;
+        }
+        case '\r': {
+            tok = Token::Newline;
+            lineNumber += 1;
+            if (sourceBuffer[sourceOffset + 1] == '\n')
+                sourceOffset += 2;
+            else
+                sourceOffset += 1;
+            tokenStream.emit(StreamToken::makeNewline(lineNumber, sourceOffset));
+            continue;
+        }
+        case '\'': {
+            tok = Token::CharacterLiteral;
+            sourceOffset += 1;
+            skipToEndOfCharacterLiteral(sourceBuffer, sourceOffset);
+            if (sourceBuffer[sourceOffset] != '\'') [[unlikely]] {
+                HANDLE_LEXER_ACTION(errorHandler->unterminatedCharacterLiteral(this, tokBegin, sourceOffset));
             }
-            case Result::LineComment: {
+            int_t literalBegin = tokBegin + 1;
+            int_t literalLength = sourceOffset - literalBegin;
+            sourceOffset += 1;
+            if (literalLength != 1 || (uint8_t)sourceBuffer[literalBegin] >= 0x80) [[unlikely]] {
+                HANDLE_LEXER_ACTION(errorHandler->invalidCharacterLiteral(this, literalBegin, literalBegin + literalLength));
+            }
+            tokData = CharacterLiteral { sourceBuffer[literalBegin] };
+            break;
+        }
+        case '/': {
+            char c1 = sourceBuffer[sourceOffset + 1];
+            if (c1 == '/') {
                 tok = Token::LineComment;
                 skipToEndOfLine(sourceBuffer, sourceOffset);
                 tokenStream.emit(StreamToken::make(Token::LineComment, tokBegin, sourceOffset));
                 if (instrumenter)
                     instrumenter->handleComment(this);
                 continue;
-            }
-            case Result::BlockComment: {
+            } else if (c1 == '>') {
                 tok = Token::BlockComment;
                 skipToEndOfBlockComment(sourceBuffer, sourceOffset);
                 if (sourceBuffer[sourceOffset] == '\0') [[unlikely]] {
@@ -400,60 +258,155 @@ void Lexer::nextToken() {
                 if (instrumenter)
                     instrumenter->handleComment(this);
                 continue;
+            } else if (c1 == '=') {
+                tok = Token::SlashEqual;
+                sourceOffset += 2;
+            } else {
+                tok = Token::Slash;
+                sourceOffset += 1;
             }
-            case Result::PunctuationPossiblyDoubleArrow: {
-                if (sourceBuffer[sourceOffset + 2] == '>') {
+            break;
+        }
+        case '<': {
+            char c1 = sourceBuffer[sourceOffset + 1];
+            char c2 = sourceBuffer[sourceOffset + 2];
+            if (c1 == '=') {
+                if (c2 == '>') {
                     tok = Token::DoubleArrow;
                     sourceOffset += 3;
                 } else {
                     tok = Token::LessEqual;
                     sourceOffset += 2;
                 }
-                break;
+            } else if (c1 == '<') {
+                if (c2 == '=') {
+                    tok = Token::LessLessEqual;
+                    sourceOffset += 3;
+                } else {
+                    tok = Token::LessLess;
+                    sourceOffset += 2;
+                }
+            } else {
+                tok = Token::Less;
+                sourceOffset += 1;
             }
-            case Result::Word: {
-                tok = Token::Word;
-                uint32_t hash = 0;
-                do {
-                    hash = Word::iterateHash(hash, sourceBuffer[sourceOffset]);
+            break;
+        }
+        // clang-format off
+        case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':
+        case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+        case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M':
+        case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': 
+        case '_': case '$': case '#': {
+            tok = Token::Word;
+            uint32_t hash = 0;
+            do {
+                hash = Word::iterateHash(hash, sourceBuffer[sourceOffset]);
+                sourceOffset += 1;
+            } while (isBulkWordCharacter(sourceBuffer[sourceOffset]));
+            hash = Word::finalizeHash(hash);
+            tokData = wordTable.getWithHash(source(tokBegin, sourceOffset), hash);
+            break;
+        }
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
+            tok = Token::NumericLiteral;
+            // TODO: implement parsing num literals
+            for (;;) {
+                char c = sourceBuffer[sourceOffset];
+                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
                     sourceOffset += 1;
-                } while (isBulkWordCharacter(sourceBuffer[sourceOffset]));
-                hash = Word::finalizeHash(hash);
-                tokData = wordTable.getWithHash(source(tokBegin, sourceOffset), hash);
-                break;
+                else
+                    break;
             }
-            case Result::NumbericLiteral: {
-                tok = Token::NumericLiteral;
-                // TODO: implement parsing num literals
-                for (;;) {
-                    char c = sourceBuffer[sourceOffset];
-                    if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
-                        sourceOffset += 1;
-                    else
-                        break;
-                }
-                tokData = NumericLiteral();
-                break;
-            }
-            case Result::CharacterLiteral: {
-                tok = Token::CharacterLiteral;
+            tokData = NumericLiteral();
+            break;
+        }
+        // always one character punctuations
+        case '(': { tok = Token::LeftParen;   sourceOffset += 1; break; }
+        case ')': { tok = Token::RightParen;  sourceOffset += 1; break; }
+        case '[': { tok = Token::LeftSquare;  sourceOffset += 1; break; }
+        case ']': { tok = Token::RightSquare; sourceOffset += 1; break; }
+        case '{': { tok = Token::LeftBrace;   sourceOffset += 1; break; }
+        case '}': { tok = Token::RightBrace;  sourceOffset += 1; break; }
+        case '?': { tok = Token::Question;    sourceOffset += 1; break; }
+        case ',': { tok = Token::Comma;       sourceOffset += 1; break; }
+        case '.': { tok = Token::Point;       sourceOffset += 1; break; }
+        case '~': { tok = Token::Tilde;       sourceOffset += 1; break; }
+        case ';': { tok = Token::SemiColon;   sourceOffset += 1; break; }
+        // only followed by equal
+        case '!': { if (sourceBuffer[sourceOffset + 1] == '=') { tok = Token::ExclaimEqual; sourceOffset += 2; } else { tok = Token::Exclaim; sourceOffset += 1; } break; }
+        case '*': { if (sourceBuffer[sourceOffset + 1] == '=') { tok = Token::StarEqual;    sourceOffset += 2; } else { tok = Token::Star;    sourceOffset += 1; } break; }
+        case '^': { if (sourceBuffer[sourceOffset + 1] == '=') { tok = Token::HatEqual;     sourceOffset += 2; } else { tok = Token::Hat;     sourceOffset += 1; } break; }
+        case '%': { if (sourceBuffer[sourceOffset + 1] == '=') { tok = Token::PercentEqual; sourceOffset += 2; } else { tok = Token::Percent; sourceOffset += 1; } break; }
+        // & | >
+        case '&': { char c1 = sourceBuffer[sourceOffset + 1]; char c2 = sourceBuffer[sourceOffset + 2]; 
+                    if (c1 == '&') { if (c2 == '=') { tok = Token::AmpAmpEqual;         sourceOffset += 3; } else { tok = Token::AmpAmp;         sourceOffset += 2; } }
+                                else if (c1 == '=') { tok = Token::AmpEqual;            sourceOffset += 2; } else { tok = Token::Amp;            sourceOffset += 1; } break; }
+        case '|': { char c1 = sourceBuffer[sourceOffset + 1]; char c2 = sourceBuffer[sourceOffset + 2]; 
+                    if (c1 == '|') { if (c2 == '=') { tok = Token::VertVertEqual;       sourceOffset += 3; } else { tok = Token::VertVert;       sourceOffset += 2; } }
+                                else if (c1 == '=') { tok = Token::VertEqual;           sourceOffset += 2; } else { tok = Token::Vert;           sourceOffset += 1; } break; }
+        case '>': { char c1 = sourceBuffer[sourceOffset + 1]; char c2 = sourceBuffer[sourceOffset + 2]; 
+                    if (c1 == '>') { if (c2 == '=') { tok = Token::GreaterGreaterEqual; sourceOffset += 3; } else { tok = Token::GreaterGreater; sourceOffset += 2; } }
+                                else if (c1 == '=') { tok = Token::GreaterEqual;        sourceOffset += 2; } else { tok = Token::Greater;        sourceOffset += 1; } break; }
+        // clang-format on
+        case '+': {
+            char c1 = sourceBuffer[sourceOffset + 1];
+            if (c1 == '+') {
+                tok = Token::PlusPlus;
+                sourceOffset += 2;
+            } else if (c1 == '=') {
+                tok = Token::PlusEqual;
+                sourceOffset += 2;
+            } else {
+                tok = Token::Plus;
                 sourceOffset += 1;
-                skipToEndOfCharacterLiteral(sourceBuffer, sourceOffset);
-                if (sourceBuffer[sourceOffset] != '\'') [[unlikely]] {
-                    HANDLE_LEXER_ACTION(errorHandler->unterminatedCharacterLiteral(this, tokBegin, sourceOffset));
-                }
-                int_t literalBegin = tokBegin + 1;
-                int_t literalLength = sourceOffset - literalBegin;
+            }
+            break;
+        }
+        case '-': {
+            char c1 = sourceBuffer[sourceOffset + 1];
+            if (c1 == '-') {
+                tok = Token::MinusMinus;
+                sourceOffset += 2;
+            } else if (c1 == '=') {
+                tok = Token::MinusEqual;
+                sourceOffset += 2;
+            } else if (c1 == '>') {
+                tok = Token::Arrow;
+                sourceOffset += 2;
+            } else {
+                tok = Token::Minus;
                 sourceOffset += 1;
-                if (literalLength != 1 || (uint8_t)sourceBuffer[literalBegin] >= 0x80) [[unlikely]] {
-                    HANDLE_LEXER_ACTION(errorHandler->invalidCharacterLiteral(this, literalBegin, literalBegin + literalLength));
-                }
-                tokData = CharacterLiteral { sourceBuffer[literalBegin] };
-                break;
             }
-            default:
-                VERIFY_NOT_REACHED();
+            break;
+        }
+        case '=': {
+            char c1 = sourceBuffer[sourceOffset + 1];
+            if (c1 == '=') {
+                tok = Token::EqualEqual;
+                sourceOffset += 2;
+            } else if (c1 == '>') {
+                tok = Token::FatArrow;
+                sourceOffset += 2;
+            } else {
+                tok = Token::Equal;
+                sourceOffset += 1;
             }
+            break;
+        }
+        case ':': {
+            if (sourceBuffer[sourceOffset + 1] == ':') {
+                tok = Token::ColonColon;
+                sourceOffset += 2;
+            } else {
+                tok = Token::Colon;
+                sourceOffset += 1;
+            }
+            break;
+        }
+        default: {
+            HANDLE_LEXER_ACTION(errorHandler->invalidCharacter(this, c0));
+        }
         }
         break;
     }
