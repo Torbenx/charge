@@ -155,7 +155,7 @@ void Parser::parseDeclaration() {
             // errorHandler;
             VERIFY_NOT_REACHED();
         }
-        parameterDeclContext->templateParameterCount = parseParameters(ParameterParseOptions::OnlyInParameters);
+        parameterDeclContext->templateParameterCount = parseParameters(ParametersFor::Template);
         if (tok != Token::Word) {
             // errorHandler;
             VERIFY_NOT_REACHED();
@@ -281,7 +281,7 @@ void Parser::parseFunctionDecl(ParameterDeclContextHelper helper) {
     nextToken();
 
     VERIFY(tok == Token::LeftParen);
-    parseParameters();
+    parseParameters(ParametersFor::Function);
 
     Node* returnType = nextNodeLocation();
     if (tok == Token::Arrow) {
@@ -385,7 +385,7 @@ void Parser::parseHasMemberDecl() {
     }
 }
 
-int_t Parser::parseParameters(ParameterParseOptions opts) {
+int_t Parser::parseParameters(ParametersFor paramsFor) {
     VERIFY(tok == Token::LeftParen);
     nextToken();
     int_t count = 0;
@@ -396,11 +396,11 @@ int_t Parser::parseParameters(ParameterParseOptions opts) {
             VERIFY(tok == Token::Word);
         }
 
-        DeclKind kind = DeclKind::LetParameter;
+        DeclKind kind = paramsFor == ParametersFor::Template ? DeclKind::TemplateParameter : DeclKind::LetParameter;
         WordAndLocation name = tokWord();
         nextToken();
         if (tok == Token::Word) {
-            if (opts == ParameterParseOptions::OnlyInParameters) {
+            if (paramsFor != ParametersFor::Function) {
                 errorHandler->parameterModifierNotAllowed(this, name, tokWord());
             }
             if (name == words["let"]) {

@@ -23,6 +23,7 @@ TREE_DECL(VarParameter, ParameterDecl)
 TREE_DECL(InParameter, ParameterDecl)
 TREE_DECL(InOutParameter, ParameterDecl)
 TREE_DECL(OutParameter, ParameterDecl)
+TREE_DECL(TemplateParameter, ParameterDecl)
 TREE_DECL(BlockLetVariable, BlockVariableDecl)
 TREE_DECL(BlockVarVariable, BlockVariableDecl)
 

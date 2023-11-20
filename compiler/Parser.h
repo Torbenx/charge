@@ -147,11 +147,11 @@ struct Parser : Lexer {
     void parseFunctionDecl(ParameterDeclContextHelper);
     void parseVariableDecl(WordAndLocation name, std::span<const WordAndLocation>, ParameterDeclContextHelper);
     void parseHasMemberDecl();
-    enum class ParameterParseOptions {
-        None,
-        OnlyInParameters,
+    enum class ParametersFor {
+        Template,
+        Function,
     };
-    int_t parseParameters(ParameterParseOptions = ParameterParseOptions::None);
+    int_t parseParameters(ParametersFor);
     void parseBodyExprOrStmt();
 
     void parseSingleOrCompoundStmt();

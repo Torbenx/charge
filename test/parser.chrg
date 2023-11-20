@@ -142,12 +142,14 @@ a{b.c{i, j, k}, blub = c} + d;
 /> expect-decl Function </ fn test1(): { }
 /> expect-decl LetParameter; expect-decl Function </ fn test2(a): { }
 
+// expect-decl TemplateParameter name=T
 // expect-decl LetParameter name=a
 // expect-decl VarParameter name=b
 // expect-decl InParameter name=c
 // expect-decl InOutParameter name=d
 // expect-decl OutParameter name=e
 // expect-decl Function name=test3
+template(T)
 fn test3(let a, var b, in c, inout d, out e): { }
 
 // expect-identifier param_type; expect-node EmptyNode
@@ -158,7 +160,7 @@ fn test3(let a, var b, in c, inout d, out e): { }
 // expect-decl Function
 fn test4(param_name: param_type = param_init) -> return_type => body_expr;
 
-// expect-decl LetParameter name=T
+// expect-decl TemplateParameter name=T
 // expect-decl LetParameter name=a
 // expect-decl Function name=test5
 template(T: type)
@@ -195,10 +197,10 @@ struct Foo2: { has Bar as bar; }
 // expect-decl StructType; expect-decl HasMember; expect-decl Function name=test
 struct Foo3: { has Bar as bar: { fn test(): { } } }
 
-// expect-decl LetParameter; expect-decl StructType; expect-decl StaticLetVariable
+// expect-decl TemplateParameter; expect-decl StructType; expect-decl StaticLetVariable
 template(T: type)
 struct Foo4: { static x; }
 
-// expect-decl LetParameter; expect-decl StaticLetVariable
+// expect-decl TemplateParameter; expect-decl StaticLetVariable
 template(T: type)
 static variable_template = init;
