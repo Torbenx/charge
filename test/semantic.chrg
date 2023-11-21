@@ -18,8 +18,16 @@ fn call_test_func(): {
     test_func(test_var1, test_var2, test_var3, test_var4, test_var5);
 }
 
-
-template(T)
-fn test_template(a): {
-    
+template(outer_parameter)
+struct outer_struct: {
+    template(inner_parameter)
+    struct inner_struct: {
+        template(T)
+        fn test_template(a): {
+            a;
+            T;
+            inner_parameter;
+            outer_parameter;
+        }
+    }
 }

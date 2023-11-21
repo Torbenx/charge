@@ -181,6 +181,30 @@ struct Dumper : InstructionVisitor<Dumper> {
 void dumpIR(Decl* decl, const WordStringTable& wordTable) {
     auto paramDecl = dyn_cast<ParameterizedDecl>(decl);
     std::cout << wordTable.view(decl->name) << ":\n";
+    auto* prog = dyn_cast<ParameterizedDecl>(decl)->program();
+    for (auto param : prog->parameters) {
+        std::cout << "  " << [&] -> std::string_view {
+            switch (param.model) {
+            case ParameterModel::Template:
+                return "template";
+            case ParameterModel::ImplicitTemplate:
+                return "(implicit)";
+            case ParameterModel::Let:
+                return "let";
+            case ParameterModel::Var:
+                return "var";
+            case ParameterModel::In:
+                return "in";
+            case ParameterModel::InOut:
+                return "inout";
+            case ParameterModel::Out:
+                return "out";
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }() << " ";
+        std::cout << wordTable.view(param.name) << ": " << Dumper::format(param.type) << " -> " << Dumper::format(param.slot) << '\n';
+    }
     if (auto typeDecl = dyn_cast<TypeDecl>(decl)) {
         // Nothing to do
     } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
@@ -189,32 +213,7 @@ void dumpIR(Decl* decl, const WordStringTable& wordTable) {
         std::cout << "  value = " << Dumper::format(prog->value.primary) << '\n';
         std::cout << '\n';
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-        auto* prog = fnDecl->program();
-        for (auto param : prog->parameters) {
-            std::cout << "  " << [&] -> std::string_view {
-                switch (param.model) {
-                case ParameterModel::Template:
-                    return "template";
-                case ParameterModel::ImplicitTemplate:
-                    return "(implicit)";
-                case ParameterModel::Let:
-                    return "let";
-                case ParameterModel::Var:
-                    return "var";
-                case ParameterModel::In:
-                    return "in";
-                case ParameterModel::InOut:
-                    return "inout";
-                case ParameterModel::Out:
-                    return "out";
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-            }() << " ";
-            std::cout << wordTable.view(param.name) << ": " << Dumper::format(param.type) << " -> " << Dumper::format(param.slot) << '\n';
-        }
-
-        std::cout << "  return-type = " << Dumper::format(prog->returnType) << '\n';
+        std::cout << "  return-type = " << Dumper::format(fnDecl->program()->returnType) << '\n';
         std::cout << '\n';
     }
     Dumper dumper;

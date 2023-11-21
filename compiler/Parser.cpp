@@ -1,4 +1,5 @@
 #include "Parser.h"
+#include "semantic.h"
 
 template<bool (*test)(NodeKind)>
 static constexpr NodeKind firstInstance() {
@@ -65,8 +66,8 @@ void StaticDeclContext::addDecl(StaticDecl* decl) {
 }
 template<std::derived_from<Decl> T, typename... Args>
 T* Parser::emitDeclInternal(Args&&... args) {
-    if constexpr (requires { { T::DECL_PROGRAM_SIZE } -> std::convertible_to<int_t>; }) {
-        auto* prog = (DeclProgram*)nodeStream.allocate(8, T::DECL_PROGRAM_SIZE);
+    if constexpr (requires { std::derived_from<typename T::Program, DeclProgram>; }) {
+        DeclProgram* prog = nodeStream.template allocate<typename T::Program>();
         return std::construct_at(nodeStream.template allocate<T>(), prog, std::forward<Args>(args)...);
     } else {
         return std::construct_at(nodeStream.template allocate<T>(), std::forward<Args>(args)...);

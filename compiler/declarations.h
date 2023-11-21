@@ -178,24 +178,29 @@ struct ParameterDeclContext {
 };
 
 struct DeclaringStaticDecl;
+struct ParameterizedDecl;
 struct StaticDecl : Decl {
+    relative_pointer<StaticDecl, ParameterDeclContext> m_parameterDecls;
     relative_pointer<StaticDecl, DeclaringStaticDecl> m_declaringDecl;
-    using Decl::Decl;
+    StaticDecl(DeclKind kind, WordAndLocation name)
+        : Decl(kind, name), m_parameterDecls(this, nullptr) { }
+    StaticDecl(DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
+        : Decl(kind, name), m_parameterDecls(this, declContext) { }
 
-    void setDeclaringStaticDecl(DeclaringStaticDecl* decl) {
-        m_declaringDecl = { this, decl };
-    }
-    DeclaringStaticDecl* declaringDecl() {
-        return m_declaringDecl.get(this);
-    }
+    void setDeclaringStaticDecl(DeclaringStaticDecl* decl) { m_declaringDecl = { this, decl }; }
+    DeclaringStaticDecl* declaringDecl() { return m_declaringDecl.get(this); }
+
+private:
+    ParameterDeclContext* parameterDeclsImpl() { return m_parameterDecls.get(this); }
+    friend ParameterizedDecl;
 };
+
 // A static declaration declaring other static declarations.
 struct DeclaringStaticDecl : StaticDecl, private StaticDeclContext {
     static constexpr DeclaringStaticDecl* fromContext(StaticDeclContext* ctx) {
         return (DeclaringStaticDecl*)ctx;
     }
-    DeclaringStaticDecl(DeclKind kind, WordAndLocation name)
-        : StaticDecl(kind, name) { VERIFY(isDeclType<DeclaringStaticDecl>(kind)); }
+    using StaticDecl::StaticDecl;
 
     StaticDeclContext* staticDecls() { return this; }
 };
@@ -205,32 +210,28 @@ struct NamespaceDecl : DeclaringStaticDecl {
 };
 struct DeclProgram;
 struct ParameterizedDecl {
-    relative_pointer<ParameterizedDecl, ParameterDeclContext> m_parameterDecls;
-    relative_pointer<ParameterizedDecl, DeclProgram> m_program;
-    ParameterizedDecl(ParameterDeclContext* declContext, DeclProgram* program)
-        : m_parameterDecls(this, declContext), m_program(this, program) { }
+    ParameterizedDecl(DeclProgram* prog) { VERIFY(program() == prog); }
 
-    Decl* theDecl() { return reinterpret_cast<Decl*>(this + 1); }
-    ParameterDeclContext* parameterDecls() { return m_parameterDecls.get(this); }
+    StaticDecl* theDecl() { return reinterpret_cast<StaticDecl*>(this); }
+    ParameterDeclContext* parameterDecls() { return theDecl()->parameterDeclsImpl(); }
 
     using Program = DeclProgram;
-    DeclProgram* program() { return m_program.get(this); }
+    DeclProgram* program();
 };
 struct TypeDecl : ParameterizedDecl, DeclaringStaticDecl {
     TypeDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext)
-        : ParameterizedDecl(declContext, program), DeclaringStaticDecl(kind, name) {
+        : ParameterizedDecl(program), DeclaringStaticDecl(kind, name, declContext) {
         VERIFY(isDeclType<TypeDecl>(kind));
         VERIFY(ParameterizedDecl::theDecl() == this);
     }
 
-    static constinit const uint32_t DECL_PROGRAM_SIZE;
     struct Program;
     Program* program();
 };
 struct FunctionDecl : ParameterizedDecl, StaticDecl {
     FunctionDecl(DeclProgram* program, WordAndLocation name, ParameterDeclContext* declContext, Node* returnTypeExpr, Node* body)
-        : ParameterizedDecl(declContext, program)
-        , StaticDecl(DeclKind::Function, name)
+        : ParameterizedDecl(program)
+        , StaticDecl(DeclKind::Function, name, declContext)
         , m_returnTypeExpr(this, returnTypeExpr)
         , m_body(this, body) { VERIFY(ParameterizedDecl::theDecl() == this); }
 
@@ -240,19 +241,17 @@ struct FunctionDecl : ParameterizedDecl, StaticDecl {
     Node* returnTypeExpr() { return m_returnTypeExpr.get(this); }
     Node* body() { return m_body.get(this); }
 
-    static constinit const uint32_t DECL_PROGRAM_SIZE;
     struct Program;
     Program* program();
 };
 
 struct StaticVariableDecl : ParameterizedDecl, StaticDecl, VariableDecl {
     StaticVariableDecl(DeclProgram* program, DeclKind kind, WordAndLocation name, ParameterDeclContext* declContext, Node* typeExpr, Node* initExpr)
-        : ParameterizedDecl(declContext, program), StaticDecl(kind, name), VariableDecl(typeExpr, initExpr) {
+        : ParameterizedDecl(program), StaticDecl(kind, name, declContext), VariableDecl(typeExpr, initExpr) {
         VERIFY(isDeclType<StaticVariableDecl>(kind));
         VERIFY(ParameterizedDecl::theDecl() == this);
     }
 
-    static constinit const uint32_t DECL_PROGRAM_SIZE;
     struct Program;
     Program* program();
 };

@@ -300,6 +300,12 @@ enum class ParameterModel : uint8_t {
     InOut,
     Out,
 };
+struct CheckedParameter {
+    Word name;
+    ParameterModel model;
+    ConstantStreamTypeOperand type;
+    RuntimeStreamOperand slot;
+};
 struct DeclProgram {
     std::vector<uint64_t> encodedLiteralValues;
     std::vector<ConstantType> literalTypes;
@@ -316,22 +322,22 @@ struct DeclProgram {
     }
     SSAName emitLiteral(TypedConstant);
 
-    struct CheckedParameter {
-        Word name;
-        ParameterModel model;
-        ConstantStreamTypeOperand type;
-        RuntimeStreamOperand slot;
-    };
     std::vector<CheckedParameter> parameters;
+    std::optional<ConstantStreamOperand> completeDeclaringDecl;
+
+    ParameterizedDecl* theParameterizedDecl() { return reinterpret_cast<ParameterizedDecl*>(this + 1); }
+    StaticDecl* theDecl() { return theParameterizedDecl()->theDecl(); }
 };
 struct TypeDecl::Program : DeclProgram { };
-struct FunctionDecl::Program : DeclProgram {
+struct CheckedFunctionDecl {
     ConstantStreamTypeOperand returnType;
     RuntimeStreamOperand returnSlot;
 };
-struct StaticVariableDecl::Program : DeclProgram {
+struct FunctionDecl::Program : CheckedFunctionDecl, DeclProgram { };
+struct CheckedStaticVariableDecl {
     ConstantStreamValue value;
 };
+struct StaticVariableDecl::Program : CheckedStaticVariableDecl, DeclProgram { };
 
 struct SemanticContext {
     struct ErrorHandler {
@@ -346,7 +352,7 @@ struct SemanticContext {
 
     void check(StaticDeclContext*);
     void requireSignature(Decl*);
-    void signatureCheckTemplateParameters(StaticDecl*, ParameterizedDecl&);
+    void signatureCheckTemplateParameters(ParameterizedDecl&);
     void signatureCheckTypeDecl(TypeDecl&);
     void signatureCheckStaticVariableDecl(StaticVariableDecl&);
     void signatureCheckFunctionDecl(FunctionDecl&);
