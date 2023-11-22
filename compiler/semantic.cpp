@@ -125,12 +125,7 @@ struct Generator : private NodeStreamVisitor<Generator, StmtResult, OwnedValue> 
         return visitTypeExpression(node)
             .or_else([&]() -> std::optional<Type> {
                 Type slot = (Type)program->constantStream.emit<Opcode::ParameterSlot>();
-                program->parameters.push_back({
-                    Word(),
-                    ParameterModel::ImplicitTemplate,
-                    typeTypeLiteral().localizeConstant(),
-                    slot.localizeRuntime(),
-                });
+                program->addImplicitTemplateParameter(typeTypeLiteral().localizeConstant(), slot.localizeRuntime());
                 return slot;
             })
             .value();
@@ -232,10 +227,10 @@ public:
         sema->requireSignature(decl);
         auto res = dyn_cast<T>(decl);
         VERIFY(res.has_value());
-        VERIFY(res->parameterDecls()->templateParameterCount == 0);
+        VERIFY(!res->program()->templatedOrDeclaredInTemplate());
         return { lit, res };
     }
-    CompleteDecl<ParameterizedDecl> selfCompleteDecl() {
+    CompleteDecl<ParameterizedDecl> thisCompleteDecl() {
         return { {}, program->theParameterizedDecl() };
     }
     SSAName literalFold(CompleteDeclBase decl, ConstantStreamOperand constant) {
@@ -253,9 +248,15 @@ public:
     }
     CompleteDecl<ParameterizedDecl> declaringDecl(CompleteDeclBase decl) {
         return {
-            literalFold(decl, decl->completeDeclaringDecl.value()),
-            dyn_cast<ParameterizedDecl>(decl->theDecl()->declaringDecl())
+            literalFold(decl, decl->completeDeclaringDeclSlot.value()),
+            dyn_cast<ParameterizedDecl>(decl->theDecl()->declaringDecl()).value()
         };
+    }
+    CompleteDecl<ParameterizedDecl> completeDeclFor(ParameterizedDecl* targetDecl) {
+        auto currentDecl = thisCompleteDecl();
+        while (currentDecl->theParameterizedDecl() != targetDecl)
+            currentDecl = declaringDecl(currentDecl);
+        return currentDecl;
     }
 
     Type implicitToType(OwnedValue in) {
@@ -263,19 +264,6 @@ public:
             return (Type)purify(std::move(in));
         }
         // TODO: Implement more cases
-        VERIFY_NOT_REACHED();
-    }
-    OwnedValue implicitConversion(Type targetType, OwnedValue sourceValue) {
-        if (targetType.phase() == ValuePhase::Literal && sourceValue.type().phase() == ValuePhase::Literal) {
-            if (compareConstantsOfSameType(program->literal(targetType), program->literal(sourceValue.type()))) {
-                return sourceValue;
-            }
-        }
-        // TODO: Implement more cases
-
-        // We only perform implicit conversions if the target type has no undeduced parameters.
-        // In that case we emit 'source-value.(implicit_cast<target-type>::convert)()' if we have
-        // seen it. Otherwise we emit 'proof typeof(source-value) == target-type'.
         VERIFY_NOT_REACHED();
     }
 
@@ -379,12 +367,10 @@ void SemanticContext::signatureCheckTemplateParameters(ParameterizedDecl& d) {
     Generator g(this, &p, &p.constantStream, d.theDecl());
 
     DeclaringStaticDecl* declaringDecl = d.theDecl()->declaringDecl();
-    if (auto declaringParamDecl = dyn_cast<ParameterizedDecl>(declaringDecl)) {
-        if (declaringParamDecl->parameterDecls()->templateParameterCount > 0) {
-            p.completeDeclaringDecl = p.constantStream.emit<Opcode::ParameterSlot>().localizeConstant();
-        } else {
-            p.completeDeclaringDecl = p.emitLiteral(declaringDecl).localizeConstant();
-        }
+    if (auto parameterizedDeclaringDecl = dyn_cast<ParameterizedDecl>(declaringDecl)) {
+        requireSignature(declaringDecl);
+        if (parameterizedDeclaringDecl->program()->templatedOrDeclaredInTemplate())
+            p.completeDeclaringDeclSlot = p.constantStream.emit<Opcode::ParameterSlot>().localizeConstant();
     }
 
     auto* declContext = d.parameterDecls();
@@ -393,12 +379,7 @@ void SemanticContext::signatureCheckTemplateParameters(ParameterizedDecl& d) {
         VERIFY(param->kind() == DeclKind::TemplateParameter);
         auto type = g.visitTypeExpressionOrCreateImplicitTemplateParameter(param->typeExpr());
         SSAName slot = p.constantStream.emit<Opcode::ParameterSlot>();
-        p.parameters.push_back({
-            param->name,
-            ParameterModel::Template,
-            type.localizeConstant(),
-            slot.localizeRuntime(),
-        });
+        p.addTemplateParameter(param->name, type.localizeConstant(), slot.localizeRuntime());
     }
 }
 
@@ -479,12 +460,7 @@ void SemanticContext::signatureCheckFunctionDecl(FunctionDecl& d) {
         auto* param = declContext->parameters()[i];
         auto type = g.visitTypeExpressionOrCreateImplicitTemplateParameter(param->typeExpr());
         SSAName slot = p.runtimeStream.emit<Opcode::ParameterSlot>();
-        p.parameters.push_back({
-            param->name,
-            kindToModel(param->kind()),
-            type.localizeConstant(),
-            slot.localizeRuntime(),
-        });
+        p.addParameter(param->name, kindToModel(param->kind()), type.localizeConstant(), slot.localizeRuntime());
     }
     auto returnType = g.visitTypeExpression(d.returnTypeExpr())
                           .or_else([&] -> std::optional<Type> { return (Type)p.emitLiteral(&voidType); })
@@ -626,18 +602,13 @@ OwnedValue Generator::visitCallExpr(CallExpr&, OwnedValue base) {
     return returnValue;
 }
 
-static Type literalTypeForDecl(Generator& g, StaticDecl* decl) {
-    bool isTemplate = false;
-    if (auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl);
-        parameterizedDecl.has_value() && parameterizedDecl->parameterDecls()->templateParameterCount > 0) {
-        isTemplate = true;
-    }
-    switch (decl->kind()) {
+static Type literalNonTemplateTypeForDecl(Generator& g, DeclKind decl) {
+    switch (decl) {
     case DeclKind::StructType:
     case DeclKind::ObjectType:
-        return (Type)g.program->emitLiteral(isTemplate ? &typeTemplateLiteralType : &typeType);
+        return (Type)g.program->emitLiteral(&typeType);
     case DeclKind::Function:
-        return (Type)g.program->emitLiteral(isTemplate ? &functionTemplateLiteralType : &functionLiteralType);
+        return (Type)g.program->emitLiteral(&functionLiteralType);
     case DeclKind::StaticLetVariable:
     case DeclKind::StaticVarVariable:
         VERIFY_NOT_REACHED();
@@ -647,16 +618,46 @@ static Type literalTypeForDecl(Generator& g, StaticDecl* decl) {
         VERIFY_NOT_REACHED();
     }
 }
+static Type literalTemplateTypeForDecl(Generator& g, DeclKind decl) {
+    switch (decl) {
+    case DeclKind::StructType:
+    case DeclKind::ObjectType:
+        return (Type)g.program->emitLiteral(&typeTemplateLiteralType);
+    case DeclKind::Function:
+        return (Type)g.program->emitLiteral(&functionTemplateLiteralType);
+    case DeclKind::StaticLetVariable:
+    case DeclKind::StaticVarVariable:
+        VERIFY_NOT_REACHED();
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 static OwnedValue emitStaticDeclReference(Generator& g, StaticDecl* decl) {
-    // For non-template StaticVariableDecls this is the l- or p-value for the variable.
+    // For non-template static variables this is the l- or p-value for the variable.
     // In all other cases this is a literal of appropriate type.
-    SSAName declLit = g.program->emitLiteral(decl);
-    if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl);
-        varDeclPtr.has_value() && varDeclPtr->parameterDecls()->templateParameterCount == 0) {
-        auto varDecl = g.useCompleteDecl<StaticVariableDecl>(declLit);
+
+    SSAName declLiteral = g.program->emitLiteral(decl);
+    auto parameterizedDecl = dyn_cast<ParameterizedDecl>(decl);
+    if (!parameterizedDecl.has_value()) {
+        VERIFY(decl->kind() == DeclKind::Namespace);
+        return PureValue { declLiteral, (Type)g.program->emitLiteral(&namespaceType) };
+    }
+
+    g.sema->requireSignature(decl);
+    if (parameterizedDecl->program()->templated())
+        return PureValue { declLiteral, literalTemplateTypeForDecl(g, decl->kind()) };
+
+    SSAName completeDecl = declLiteral;
+    if (parameterizedDecl->program()->declaredInTemplate()) {
+        // TODO: parameterize...
+        VERIFY_NOT_REACHED();
+    }
+
+    if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
+        auto varDecl = g.useCompleteDecl<StaticVariableDecl>(completeDecl);
         return g.literalFold(varDecl, varDecl->value);
     }
-    return PureValue { declLit, literalTypeForDecl(g, decl) };
+    return PureValue { completeDecl, literalNonTemplateTypeForDecl(g, decl->kind()) };
 }
 
 static OwnedValue emitParameterReference(Generator& g, ParameterizedDecl* declaringDecl, CheckedParameter param) {
@@ -665,12 +666,9 @@ static OwnedValue emitParameterReference(Generator& g, ParameterizedDecl* declar
         return Value::lvalue((SSAName)param.slot, (Type)param.type);
     }
 
-    auto currentDecl = g.selfCompleteDecl();
-    while (currentDecl->theParameterizedDecl() != declaringDecl)
-        currentDecl = g.declaringDecl(currentDecl);
-
-    SSAName value = g.literalFold(currentDecl, param.slot.asConstant());
-    Type type = g.literalFold(currentDecl, param.type);
+    auto completeDeclringDecl = g.completeDeclFor(declaringDecl);
+    SSAName value = g.literalFold(completeDeclringDecl, param.slot.asConstant());
+    Type type = g.literalFold(completeDeclringDecl, param.type);
     return PureValue { value, type };
 }
 static std::optional<OwnedValue> maybeEmitParameterReference(Generator& g, ParameterizedDecl* declaringDecl, Word name) {

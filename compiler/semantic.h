@@ -323,7 +323,22 @@ struct DeclProgram {
     SSAName emitLiteral(TypedConstant);
 
     std::vector<CheckedParameter> parameters;
-    std::optional<ConstantStreamOperand> completeDeclaringDecl;
+    std::optional<ConstantStreamOperand> completeDeclaringDeclSlot;
+    bool m_hasAnyTemplateParameters = false;
+    void addParameter(Word name, ParameterModel model, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
+        parameters.push_back({ name, model, type, slot });
+    }
+    void addTemplateParameter(Word name, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
+        m_hasAnyTemplateParameters = true;
+        parameters.push_back({ name, ParameterModel::Template, type, slot });
+    }
+    void addImplicitTemplateParameter(ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
+        m_hasAnyTemplateParameters = true;
+        parameters.push_back({ Word(), ParameterModel::ImplicitTemplate, type, slot });
+    }
+    bool templated() { return m_hasAnyTemplateParameters; }
+    bool declaredInTemplate() { return completeDeclaringDeclSlot.has_value(); }
+    bool templatedOrDeclaredInTemplate() { return templated() || declaredInTemplate(); }
 
     ParameterizedDecl* theParameterizedDecl() { return reinterpret_cast<ParameterizedDecl*>(this + 1); }
     StaticDecl* theDecl() { return theParameterizedDecl()->theDecl(); }
