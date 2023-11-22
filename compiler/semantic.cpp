@@ -243,9 +243,6 @@ public:
     Type literalFold(CompleteDeclBase decl, ConstantStreamTypeOperand constant) {
         return (Type)literalFold(decl, (ConstantStreamOperand)constant);
     }
-    Value literalFold(CompleteDeclBase decl, ConstantStreamValue value) {
-        return { value.category, literalFold(decl, value.primary), literalFold(decl, value.type) };
-    }
     CompleteDecl<ParameterizedDecl> declaringDecl(CompleteDeclBase decl) {
         return {
             literalFold(decl, decl->completeDeclaringDeclSlot.value()),
@@ -408,10 +405,12 @@ void SemanticContext::signatureCheckStaticVariableDecl(StaticVariableDecl& d) {
         g.matchTypes(typeExpr.value(), initExpr.type());
     }
 
+    p.type = initExpr.type().localizeConstant();
     if (d.kind() == DeclKind::StaticLetVariable) {
-        p.value = Value(g.purify(std::move(initExpr))).localizeConstant();
+        p.value = g.purify(std::move(initExpr)).localizeConstant();
     } else if (d.kind() == DeclKind::StaticVarVariable) {
-        p.value = g.bindRValueToSlot(returnSlot, g.makeRValue(std::move(initExpr))).localizeConstant();
+        g.bindRValueToSlot(returnSlot, g.makeRValue(std::move(initExpr)));
+        p.value = returnSlot.localizeConstant();
     } else
         VERIFY_NOT_REACHED();
 
@@ -655,7 +654,11 @@ static OwnedValue emitStaticDeclReference(Generator& g, StaticDecl* decl) {
 
     if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
         auto varDecl = g.useCompleteDecl<StaticVariableDecl>(completeDecl);
-        return g.literalFold(varDecl, varDecl->value);
+        return Value {
+            varDeclPtr->kind() == DeclKind::StaticLetVariable ? ValueCategory::PValue : ValueCategory::LValue,
+            g.literalFold(varDecl, varDecl->value),
+            g.literalFold(varDecl, varDecl->type)
+        };
     }
     return PureValue { completeDecl, literalNonTemplateTypeForDecl(g, decl->kind()) };
 }

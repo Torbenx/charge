@@ -22,10 +22,10 @@ template(outer_parameter)
 struct outer_struct: {
     template(inner_parameter)
     struct inner_struct: {
-        template(T)
-        fn test_template(a): {
-            a;
-            T;
+        template(template_parameter)
+        fn test_template(function_parameter): {
+            function_parameter;
+            template_parameter;
             inner_parameter;
             outer_parameter;
         }

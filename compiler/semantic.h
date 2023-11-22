@@ -73,14 +73,6 @@ template<>
 struct optional_traits<ConstantStreamTypeOperand> {
     static constexpr ConstantStreamTypeOperand empty_value = {};
 };
-struct ConstantStreamValue {
-    ValueCategory category = ValueCategory::Invalid;
-    ConstantStreamOperand primary;
-    ConstantStreamTypeOperand type;
-    ConstantStreamValue() = default;
-    ConstantStreamValue(ValueCategory category, ConstantStreamOperand primary, ConstantStreamTypeOperand type)
-        : category(category), primary(primary), type(type) { }
-};
 
 struct RuntimeStreamOperand : InstructionOperand {
     RuntimeStreamOperand() = default;
@@ -184,9 +176,6 @@ struct Value {
     Value asLValue() const {
         VERIFY(category() == ValueCategory::LValue || category() == ValueCategory::RValue);
         return { ValueCategory::LValue, primary(), type() };
-    }
-    ConstantStreamValue localizeConstant() const {
-        return { category(), primary().localizeConstant(), type().localizeConstant() };
     }
 
     Value(ValueCategory category, SSAName primary, Type type)
@@ -350,7 +339,8 @@ struct CheckedFunctionDecl {
 };
 struct FunctionDecl::Program : CheckedFunctionDecl, DeclProgram { };
 struct CheckedStaticVariableDecl {
-    ConstantStreamValue value;
+    ConstantStreamOperand value;
+    ConstantStreamTypeOperand type;
 };
 struct StaticVariableDecl::Program : CheckedStaticVariableDecl, DeclProgram { };
 

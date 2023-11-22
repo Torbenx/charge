@@ -17,8 +17,8 @@ fn test(): {
     test_var(pvalue);
     test_in(pvalue);
 
-    //; test_let(lvalue);
-    //; test_var(lvalue);
+    test_let(lvalue);
+    test_var(lvalue);
     test_in(lvalue);
     test_inout(lvalue);
     test_out(lvalue);

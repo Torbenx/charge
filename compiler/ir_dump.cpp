@@ -209,8 +209,8 @@ void dumpIR(Decl* decl, const WordStringTable& wordTable) {
         // Nothing to do
     } else if (auto varDecl = dyn_cast<StaticVariableDecl>(decl)) {
         auto* prog = varDecl->program();
-        std::cout << "  type = " << Dumper::format(prog->value.type) << '\n';
-        std::cout << "  value = " << Dumper::format(prog->value.primary) << '\n';
+        std::cout << "  type = " << Dumper::format(prog->type) << '\n';
+        std::cout << "  value = " << Dumper::format(prog->value) << '\n';
         std::cout << '\n';
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
         std::cout << "  return-type = " << Dumper::format(fnDecl->program()->returnType) << '\n';
