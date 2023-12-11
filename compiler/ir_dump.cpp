@@ -5,11 +5,6 @@ struct inst {
     InstructionOperand out;
 };
 
-struct nullary_inst : inst {
-private:
-    InstructionOperand unused1;
-    InstructionOperand unused2;
-};
 struct unary_inst : inst {
     InstructionOperand in;
 
@@ -36,6 +31,12 @@ struct call_inst : inst {
     InstructionOperand returnValue() const {
         return InstructionOperand(false, out.id() - 1);
     }
+};
+struct parameter_slot_inst : inst {
+    uint16_t index;
+
+private:
+    InstructionOperand unused;
 };
 
 template<typename Impl>
@@ -130,10 +131,6 @@ struct Dumper : InstructionVisitor<Dumper> {
             std::cout << instName(i.opcode) << " ";
     }
 
-    void visit_nullary(nullary_inst i) {
-        printBase(i);
-        std::cout << '\n';
-    }
     void visit_unary(unary_inst i) {
         printBase(i);
         std::cout << format(i.in) << '\n';
@@ -152,6 +149,10 @@ struct Dumper : InstructionVisitor<Dumper> {
         if (i.argumentCount > 0)
             std::cout << format(i.firstArgument()) << ".." << format(i.lastArgument());
         std::cout << ") -> " << format(i.returnValue()) << '\n';
+    }
+    void visit_parameter_slot(parameter_slot_inst i) {
+        printBase(i);
+        std::cout << i.index << '\n';
     }
 
     void dump(InstructionStream& s) {
@@ -182,28 +183,11 @@ void dumpIR(Decl* decl, const WordStringTable& wordTable) {
     auto paramDecl = dyn_cast<ParameterizedDecl>(decl);
     std::cout << wordTable.view(decl->name) << ":\n";
     auto* prog = dyn_cast<ParameterizedDecl>(decl)->program();
-    for (auto param : prog->parameters) {
-        std::cout << "  " << [&] -> std::string_view {
-            switch (param.model) {
-            case ParameterModel::Template:
-                return "template";
-            case ParameterModel::ImplicitTemplate:
-                return "(implicit)";
-            case ParameterModel::Let:
-                return "let";
-            case ParameterModel::Var:
-                return "var";
-            case ParameterModel::In:
-                return "in";
-            case ParameterModel::InOut:
-                return "inout";
-            case ParameterModel::Out:
-                return "out";
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }() << " ";
-        std::cout << wordTable.view(param.name) << ": " << Dumper::format(param.type) << " -> " << Dumper::format(param.slot) << '\n';
+    for (auto param : prog->templateParameters) {
+        std::cout << "  " << (param.implicit ? "implicit template" : "template");
+        if (!param.name.empty())
+            std::cout << " " << wordTable.view(param.name);
+        std::cout << " @" << Dumper::format(param.slot) << ": " << Dumper::format(param.type) << '\n';
     }
     if (auto typeDecl = dyn_cast<TypeDecl>(decl)) {
         // Nothing to do
@@ -213,7 +197,29 @@ void dumpIR(Decl* decl, const WordStringTable& wordTable) {
         std::cout << "  value = " << Dumper::format(prog->value) << '\n';
         std::cout << '\n';
     } else if (auto fnDecl = dyn_cast<FunctionDecl>(decl)) {
-        std::cout << "  return-type = " << Dumper::format(fnDecl->program()->returnType) << '\n';
+        for (auto param : fnDecl->program()->runtimeParameters) {
+            std::cout << "  " << [&] -> std::string_view {
+                switch (param.model) {
+                case ParameterModel::Let:
+                    return "let";
+                case ParameterModel::Var:
+                    return "var";
+                case ParameterModel::In:
+                    return "in";
+                case ParameterModel::InOut:
+                    return "inout";
+                case ParameterModel::Out:
+                    return "out";
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+            }();
+            if (!param.name.empty())
+                std::cout << " " << wordTable.view(param.name);
+            std::cout << " @" << Dumper::format(param.slot) << ": " << Dumper::format(param.type) << '\n';
+        }
+        std::cout << "  return-slot @" << Dumper::format(fnDecl->program()->returnSlot);
+        std::cout << ": " << Dumper::format(fnDecl->program()->returnType) << '\n';
         std::cout << '\n';
     }
     Dumper dumper;

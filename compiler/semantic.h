@@ -2,16 +2,16 @@
 
 #include "expr.h"
 
-#define ENUMERATE_INSTRUCTIONS              \
-    INST(ForeignConstant, foreign_constant) \
-    INST(Load, unary)                       \
-    INST(Nop, unary)                        \
-    INST(Call, call)                        \
-    INST(Allocate, unary)                   \
-    INST(Deallocate, binary)                \
-    INST(Store, binary)                     \
-    INST(ParameterSlot, nullary)            \
-    INST(ReturnSlot, nullary)
+#define ENUMERATE_INSTRUCTIONS                  \
+    INST(ForeignConstant, foreign_constant)     \
+    INST(Load, unary)                           \
+    INST(Nop, unary)                            \
+    INST(Call, call)                            \
+    INST(Allocate, unary)                       \
+    INST(Deallocate, binary)                    \
+    INST(Store, binary)                         \
+    INST(ConstantParameterSlot, parameter_slot) \
+    INST(RuntimeParameterSlot, parameter_slot)
 
 enum class Opcode : uint16_t {
 
@@ -97,6 +97,8 @@ struct Instruction {
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c.encoded) { }
     Instruction(Opcode op, InstructionOperand a, InstructionOperand b, uint16_t c)
         : op(std::to_underlying(op)), a(a.encoded), b(b.encoded), c(c) { }
+    Instruction(Opcode op, InstructionOperand a, uint16_t b, InstructionOperand c)
+        : op(std::to_underlying(op)), a(a.encoded), b(b), c(c.encoded) { }
 
     Opcode opcode() const { return (Opcode)op; }
     void setOp(Opcode newOp) { op = std::to_underlying(newOp); }
@@ -155,6 +157,7 @@ struct Value {
     uint16_t primaryPhase : 2;
     uint16_t typePhase : 2;
     uint16_t m_category : 2;
+    std::optional<ConstantStreamOperand> completeDeclaringDeclBinding;
 
     ValueCategory category() const { return (ValueCategory)m_category; }
     bool valid() const { return category() != ValueCategory::Invalid; }
@@ -176,6 +179,13 @@ struct Value {
     Value asLValue() const {
         VERIFY(category() == ValueCategory::LValue || category() == ValueCategory::RValue);
         return { ValueCategory::LValue, primary(), type() };
+    }
+
+    Value withCompleteDeclaringDecl(std::optional<SSAName> completeDeclaringDecl) const {
+        Value out = *this;
+        out.completeDeclaringDeclBinding = completeDeclaringDecl.and_then(
+            [](SSAName val) -> std::optional<ConstantStreamOperand> { return val.localizeConstant(); });
+        return out;
     }
 
     Value(ValueCategory category, SSAName primary, Type type)
@@ -273,25 +283,16 @@ struct InstructionStream {
 
     // Must only be called directly before emitting an instruction into the stream.
     SSAName allocateName();
-    SSAName emit_nullary(Opcode op);
+    SSAName emit_parameter_slot(Opcode op, uint16_t index);
     SSAName emit_unary(Opcode op, SSAName in);
     SSAName emit_binary(Opcode op, SSAName in1, SSAName in2);
     SSAName emit_foreign_constant(Opcode op, SSAName decl, ConstantStreamOperand constant);
     SSAName emit_call(Opcode op, SSAName argsBase, uint16_t count);
 };
 
-enum class ParameterModel : uint8_t {
-    Template,
-    ImplicitTemplate,
-    Let,
-    In,
-    Var,
-    InOut,
-    Out,
-};
-struct CheckedParameter {
+struct CheckedTemplateParameter {
     Word name;
-    ParameterModel model;
+    bool implicit;
     ConstantStreamTypeOperand type;
     RuntimeStreamOperand slot;
 };
@@ -311,33 +312,49 @@ struct DeclProgram {
     }
     SSAName emitLiteral(TypedConstant);
 
-    std::vector<CheckedParameter> parameters;
+    std::vector<CheckedTemplateParameter> templateParameters;
     std::optional<ConstantStreamOperand> completeDeclaringDeclSlot;
-    bool m_hasAnyTemplateParameters = false;
-    void addParameter(Word name, ParameterModel model, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
-        parameters.push_back({ name, model, type, slot });
+    void addTemplateParameter(Word name, bool implicit, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
+        templateParameters.push_back({ name, implicit, type, slot });
     }
-    void addTemplateParameter(Word name, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
-        m_hasAnyTemplateParameters = true;
-        parameters.push_back({ name, ParameterModel::Template, type, slot });
+    bool templated() const { return templateParameters.size() > 0; }
+    bool declaredInTemplate() const { return completeDeclaringDeclSlot.has_value(); }
+    bool templatedOrDeclaredInTemplate() const { return templated() || declaredInTemplate(); }
+    int_t constantParameterSlotCount() const {
+        return (declaredInTemplate() ? 1 : 0) + templateParameters.size();
     }
-    void addImplicitTemplateParameter(ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
-        m_hasAnyTemplateParameters = true;
-        parameters.push_back({ Word(), ParameterModel::ImplicitTemplate, type, slot });
-    }
-    bool templated() { return m_hasAnyTemplateParameters; }
-    bool declaredInTemplate() { return completeDeclaringDeclSlot.has_value(); }
-    bool templatedOrDeclaredInTemplate() { return templated() || declaredInTemplate(); }
+    bool hasConstantParameters() const { return templatedOrDeclaredInTemplate(); }
 
     ParameterizedDecl* theParameterizedDecl() { return reinterpret_cast<ParameterizedDecl*>(this + 1); }
     StaticDecl* theDecl() { return theParameterizedDecl()->theDecl(); }
 };
+
 struct TypeDecl::Program : DeclProgram { };
+
+enum class ParameterModel : uint8_t {
+    Let,
+    Var,
+    In,
+    InOut,
+    Out,
+};
+struct CheckedRuntimeParameter {
+    Word name;
+    ParameterModel model;
+    ConstantStreamTypeOperand type;
+    RuntimeStreamOperand slot;
+};
 struct CheckedFunctionDecl {
+    std::vector<CheckedRuntimeParameter> runtimeParameters;
     ConstantStreamTypeOperand returnType;
     RuntimeStreamOperand returnSlot;
+
+    void addRuntimeParameter(Word name, ParameterModel model, ConstantStreamTypeOperand type, RuntimeStreamOperand slot) {
+        runtimeParameters.push_back({ name, model, type, slot });
+    }
 };
 struct FunctionDecl::Program : CheckedFunctionDecl, DeclProgram { };
+
 struct CheckedStaticVariableDecl {
     ConstantStreamOperand value;
     ConstantStreamTypeOperand type;
