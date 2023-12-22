@@ -604,9 +604,12 @@ OwnedValue Generator::visitCallExpr(CallExpr&, OwnedValue base) {
     Type returnType = (Type)literalFold(fnDecl, fnDecl->returnType);
 
     VERIFY(arguments.size() == fnDecl->runtimeParameters.size());
+
+    OwnedValue returnValue = allocateRValue(returnType);
+    arguments.push_back(returnValue.asLValue().primary());
+
     for (int_t i = 0; i < (int_t)arguments.size(); i++)
         emit<Opcode::Nop>(arguments[i]);
-    OwnedValue returnValue = allocateRValue(returnType);
     emit<Opcode::Call>(base.asPureValue(), arguments.size());
 
     for (OwnedValue& tmp : temporaryAllocations) {
@@ -665,21 +668,22 @@ static OwnedValue emitStaticDeclReference(Generator& g, StaticDecl* decl) {
         return Value(PureValue { declLiteral, literalTemplateTypeForDecl(g, decl->kind()) })
             .withCompleteDeclaringDecl(completeDeclaringDecl);
 
-    SSAName completeDecl = declLiteral;
-    if (parameterizedDecl->program()->declaredInTemplate()) {
-        // TODO: parameterize...
-        VERIFY_NOT_REACHED();
+    SSAName outCompleteDecl = declLiteral;
+    if (completeDeclaringDecl.has_value()) {
+        // Declared in template
+        g.program->constantStream.emit<Opcode::Nop>(completeDeclaringDecl.value());
+        outCompleteDecl = g.program->constantStream.emit<Opcode::Parameterize>(declLiteral, 1);
     }
 
     if (auto varDeclPtr = dyn_cast<StaticVariableDecl>(decl)) {
-        auto varDecl = g.useCompleteDecl<StaticVariableDecl>(completeDecl);
+        auto varDecl = g.useCompleteDecl<StaticVariableDecl>(outCompleteDecl);
         return Value {
             varDeclPtr->kind() == DeclKind::StaticLetVariable ? ValueCategory::PValue : ValueCategory::LValue,
             g.literalFold(varDecl, varDecl->value),
             g.literalFold(varDecl, varDecl->type)
         };
     }
-    return PureValue { completeDecl, literalNonTemplateTypeForDecl(g, decl->kind()) };
+    return PureValue { outCompleteDecl, literalNonTemplateTypeForDecl(g, decl->kind()) };
 }
 
 static std::optional<OwnedValue> maybeEmitTemplateParameterReference(Generator& g, ParameterizedDecl* declaringDecl, Word name) {

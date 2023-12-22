@@ -35,8 +35,10 @@ struct outer_struct: {
 template(parameter)
 struct templated_type: {
     static x = make();
+    fn f(): { }
 
     fn y(): {
         //; x;
+        f;
     }
 }

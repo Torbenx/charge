@@ -7,6 +7,7 @@
     INST(Load, unary)                           \
     INST(Nop, unary)                            \
     INST(Call, call)                            \
+    INST(Parameterize, call)                    \
     INST(Allocate, unary)                       \
     INST(Deallocate, binary)                    \
     INST(Store, binary)                         \
@@ -28,10 +29,13 @@ enum class ValuePhase : uint8_t {
 };
 enum class ValueCategory : uint8_t {
     Invalid,
+
     // p-value: A pure value that directly corrisponds to a SSAName. Must be of value type.
     PValue,
+
     // l-value: A value with storage. The (pure) value is obtained by loading from the storage.
     LValue,
+
     // r-value: Like l-value but the storage is owned by the value. Anyone that uses an r-value
     //          must be sure to deallocate the storage when done with the value.
     RValue,
