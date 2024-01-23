@@ -1,0 +1,111 @@
+
+#include "WordTable.h"
+#include "nodes.h"
+#include <utility>
+
+static bool isWordBulkCharacter(uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c == '_' || c == '$';
+}
+
+static bool isWordFirstCharacter(uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || c == '_' || c == '$';
+}
+
+enum class ScopeKind : char {
+    IfExpr,
+    Paren = ')',
+    Square = ']',
+    Brace = '}',
+};
+static char scopeKindToRightBracket(ScopeKind scope) {
+    return std::to_underlying(scope);
+}
+static bool isBracketScope(ScopeKind scope) {
+    return std::to_underlying(scope) >= ' ';
+}
+struct Scope {
+    ScopeKind kind;
+    size_t beginNode;
+};
+
+std::vector<Node> parse(std::string_view sourceBuffer) {
+    int_t tokBegin = 0;
+    int_t tokEnd = 0;
+    NodeKind tokKind = (NodeKind)0;
+    size_t data1 = 0;
+
+    std::vector<Node> nodes;
+    std::vector<Scope> scopes;
+
+    WordStringTable wordTable { words };
+
+    auto beginScope = [&](ScopeKind kind) {
+        scopes.push_back({ kind, nodes.size() });
+    };
+    auto endScope = [&](ScopeKind kind) {
+        VERIFY(!scopes.empty());
+        VERIFY(scopes.back().kind == kind);
+        scopes.pop_back();
+    };
+    auto reachedEOS = [&]() {
+        VERIFY(scopes.empty());
+        return nodes;
+    };
+
+    auto readWord = [&]() {
+        uint32_t hash = 0;
+        do {
+            hash = Word::iterateHash(hash, sourceBuffer[tokEnd]);
+            tokEnd += 1;
+        } while (isWordBulkCharacter(sourceBuffer[tokEnd]));
+        hash = Word::finalizeHash(hash);
+        return wordTable.getWithHash(sourceBuffer.substr(tokBegin, tokEnd - tokBegin), hash);
+    };
+
+    auto skipWhitespace = [&]() {
+        while (sourceBuffer[tokEnd] == ' ' || sourceBuffer[tokEnd] == '\t')
+            tokEnd += 1;
+    };
+
+    // advances offset to the next '*/'
+    auto skipToEndOfBlockComment = [&]() {
+        while (tokEnd < (int_t)sourceBuffer.size()
+            && !(sourceBuffer[tokEnd] == '*' && sourceBuffer[tokEnd + 1] == '/')) {
+            tokEnd += 1;
+        }
+    };
+
+    // advances offset to the next new line character
+    auto skipToEndOfLine = [&]() {
+        while (tokEnd < (int_t)sourceBuffer.size()
+            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
+            tokEnd += 1;
+        }
+    };
+
+    auto skipToEndOfCharacterLiteral = [&]() {
+        while (tokEnd < (int_t)sourceBuffer.size() && sourceBuffer[tokEnd] != '\''
+            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
+            tokEnd += 1;
+        }
+    };
+
+    tokKind = NodeKind::Newline;
+    goto expression;
+
+#define TODO() VERIFY_NOT_REACHED()
+
+    // GENERATED CODE HERE
+}
+
+std::string_view nameString(NodeKind kind) {
+    switch (kind) {
+#define NODE(kind, type, prec) \
+    case NodeKind::kind:       \
+        return #kind;
+
+#include "nodes.inc"
+    }
+}
