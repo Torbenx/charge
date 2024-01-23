@@ -505,9 +505,9 @@ void SemanticContext::check(StaticDeclContext* parent) {
             requireSignature(child);
         }
 
-        if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
-            dumpIR(child, *wordTable);
-        }
+        // if (auto decl = dyn_cast<ParameterizedDecl>(child)) {
+        //     dumpIR(child, *wordTable);
+        // }
     }
 }
 

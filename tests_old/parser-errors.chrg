@@ -17,11 +17,11 @@ fn test4(a ;): { }
 fn test5() => a
 
 fn test6(): {
-    /> expect-expected-semicolon </ a
-    /> expect-expected-semicolon </ return a
-    /> expect-expected-semicolon </ let a = b
-    /> expect-expected-semicolon </ a += b
+    /* expect-expected-semicolon */ a
+    /* expect-expected-semicolon */ return a
+    /* expect-expected-semicolon */ let a = b
+    /* expect-expected-semicolon */ a += b
 }
 fn test7(): {
-    /> expect-expected-semicolon </ [a a];
+    /* expect-expected-semicolon */ [a a];
 }

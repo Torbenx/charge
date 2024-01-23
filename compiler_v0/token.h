@@ -65,15 +65,15 @@
     PUNC(DoubleArrow, "<=>")         \
     PUNC(Arrow, "->")
 
-#define ENUMERTATE_TOKENS               \
-    TOKEN(Word) /* abc123 */            \
-    TOKEN(NumericLiteral) /* 123 */     \
-    TOKEN(CharacterLiteral) /* 'a' */   \
-                                        \
-    TOKEN(EOS)                          \
-                                        \
-    TOKEN(LineComment) /* // */         \
-    TOKEN(BlockComment) /* /> ... </ */ \
+#define ENUMERTATE_TOKENS             \
+    TOKEN(Word) /* abc123 */          \
+    TOKEN(NumericLiteral) /* 123 */   \
+    TOKEN(CharacterLiteral) /* 'a' */ \
+                                      \
+    TOKEN(EOS)                        \
+                                      \
+    TOKEN(LineComment) /* // */       \
+    TOKEN(BlockComment) /* */         \
     TOKEN(Newline)
 
 enum class Token : uint32_t {
@@ -81,11 +81,11 @@ enum class Token : uint32_t {
 #define PUNC(t, spelling) t,
 #define TOKEN(t) t,
     ENUMERTATE_TOKENS
-    ENUMERATE_PUNCTUATION_TOKENS
+        ENUMERATE_PUNCTUATION_TOKENS
 #undef TOKEN
 #undef PUNC
 
-        COUNT,
+            COUNT,
 
     FirstBracket = LeftParen,
     LastBracket = RightBrace,

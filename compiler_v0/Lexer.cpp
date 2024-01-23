@@ -61,10 +61,10 @@ static void skipToEndOfLine(std::string_view sourceBuffer, int_t& sourceOffset) 
         sourceOffset += 1;
 }
 
-// advances offset to the next '</'
+// advances offset to the next '*/'
 static void skipToEndOfBlockComment(std::string_view sourceBuffer, int_t& sourceOffset) {
     while (sourceBuffer[sourceOffset] != '\0'
-        && !(sourceBuffer[sourceOffset] == '<' && sourceBuffer[sourceOffset + 1] == '/')) {
+        && !(sourceBuffer[sourceOffset] == '*' && sourceBuffer[sourceOffset + 1] == '/')) {
         sourceOffset += 1;
     }
 }
@@ -247,7 +247,7 @@ void Lexer::nextToken() {
                 if (instrumenter)
                     instrumenter->handleComment(this);
                 continue;
-            } else if (c1 == '>') {
+            } else if (c1 == '*') {
                 tok = Token::BlockComment;
                 skipToEndOfBlockComment(sourceBuffer, sourceOffset);
                 if (sourceBuffer[sourceOffset] == '\0') [[unlikely]] {

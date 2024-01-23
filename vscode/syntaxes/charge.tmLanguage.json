@@ -37,12 +37,11 @@
 					"match": "(//).*$\\n",
 					"name": "comment.line.double-slash"
 				}
-				
 			]
 		},
 		"block-comment": {
-			"begin": "/>",
-			"end": "</",
+			"begin": "/\\*",
+			"end": "\\*/",
 			"name": "comment.block.charge"
 		},
 		"decl-keywords": {
