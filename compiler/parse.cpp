@@ -25,107 +25,94 @@ static char scopeKindToRightBracket(ScopeKind scope) {
 static bool isBracketScope(ScopeKind scope) {
     return std::to_underlying(scope) >= ' ';
 }
-struct Scope {
-    ScopeKind kind;
-    size_t beginNode;
+
+struct ParseStackState {
+    std::vector<Node> nodes;
+    std::vector<ScopeKind> scopes;
+    WordStringTable wordTable { words };
+    const char* sourceBufferEnd;
+
+    ParseStackState(std::string_view sourceBuf)
+        : sourceBufferEnd(sourceBuf.end()) { }
 };
 
-std::vector<Node> parse(std::string_view sourceBuffer) {
-    int_t tokBegin = 0;
-    int_t tokEnd = 0;
-    NodeKind tokKind = (NodeKind)0;
-    size_t data1 = 0;
+static void beginScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
+    scopes.push_back(kind);
+}
 
-    std::vector<Node> nodes;
-    std::vector<Scope> scopes;
+static void endScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
+    VERIFY(!scopes.empty());
+    VERIFY(scopes.back() == kind);
+    scopes.pop_back();
+}
 
-    WordStringTable wordTable { words };
+static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
+    state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
+}
 
-    auto beginScope = [&](ScopeKind kind) {
-        scopes.push_back({ kind, nodes.size() });
-    };
-    auto endScope = [&](ScopeKind kind) {
-        VERIFY(!scopes.empty());
-        VERIFY(scopes.back().kind == kind);
-        scopes.pop_back();
-    };
-    auto reachedEOS = [&]() {
-        VERIFY(scopes.empty());
-        return nodes;
-    };
+[[nodiscard]] static const char* readWord(const char* position, Word& outWord, WordStringTable& wordTable) {
+    const char* wordStart = position;
+    uint32_t hash = 0;
+    do {
+        hash = Word::iterateHash(hash, position[0]);
+        position += 1;
+    } while (isWordBulkCharacter(position[0]));
+    hash = Word::finalizeHash(hash);
+    outWord = wordTable.getWithHash(std::string_view(wordStart, position), hash);
+    return position;
+}
 
-    auto readWord = [&]() {
-        uint32_t hash = 0;
-        do {
-            hash = Word::iterateHash(hash, sourceBuffer[tokEnd]);
-            tokEnd += 1;
-        } while (isWordBulkCharacter(sourceBuffer[tokEnd]));
-        hash = Word::finalizeHash(hash);
-        return wordTable.getWithHash(sourceBuffer.substr(tokBegin, tokEnd - tokBegin), hash);
-    };
+[[nodiscard]] static const char* skipWhitespace(const char* position) {
+    while (position[0] == ' ' || position[0] == '\t')
+        position += 1;
+    return position;
+}
 
-    auto skipWhitespace = [&]() {
-        while (sourceBuffer[tokEnd] == ' ' || sourceBuffer[tokEnd] == '\t')
-            tokEnd += 1;
-    };
+// advances offset to the next '*/'
+[[nodiscard]] static const char* skipToEndOfBlockComment(const char* position) {
+    while (position[0] != '\0' && !(position[0] == '*' && position[1] == '/')) {
+        position += 1;
+    }
+    return position;
+};
 
-    // advances offset to the next '*/'
-    auto skipToEndOfBlockComment = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size()
-            && !(sourceBuffer[tokEnd] == '*' && sourceBuffer[tokEnd + 1] == '/')) {
-            tokEnd += 1;
-        }
-    };
+// advances offset to the next new line character
+[[nodiscard]] static const char* skipToEndOfLine(const char* position) {
+    while (position[0] != '\0' && position[0] != '\n' && position[0] != '\r') {
+        position += 1;
+    }
+    return position;
+};
 
-    // advances offset to the next new line character
-    auto skipToEndOfLine = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size()
-            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
-            tokEnd += 1;
-        }
-    };
+[[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
+    while (position[0] && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
+        position += 1;
+    }
+    return position;
+};
 
-    auto skipToEndOfCharacterLiteral = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size() && sourceBuffer[tokEnd] != '\''
-            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
-            tokEnd += 1;
-        }
-    };
-
-    tokKind = NodeKind::Newline;
-    goto expression;
-
-#define TODO() VERIFY_NOT_REACHED()
-
-immediate_right_bracket_or_expression : {
-    nodes.push_back({ tokKind, (uint32_t)tokBegin, (uint32_t)tokEnd });
-    ScopeKind scopeKind = (ScopeKind)data1;
+[[nodiscard]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
+    const char* tokBegin;
     for (;;) {
-        skipWhitespace();
+        tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
-        tokKind = (NodeKind)0;
-        data1 = 0;
-        if (sourceBuffer[tokEnd] == '/') {
-            if (sourceBuffer[tokEnd + 1] == '/') {
-                tokEnd += 2;
-                skipToEndOfLine();
-                nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                continue;
-            }
-            if (sourceBuffer[tokEnd + 1] == '*') {
-                tokEnd += 2;
-                skipToEndOfBlockComment();
-                tokEnd += 2;
-                nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                continue;
-            }
+        if (std::string_view(tokEnd, 2) == "//") {
+            tokEnd = skipToEndOfLine(tokEnd);
+            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            continue;
         }
-        if (sourceBuffer[tokEnd] == '\r') {
+        if (std::string_view(tokEnd, 2) == "/*") {
+            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd += 2;
+            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            continue;
+        }
+        if (tokEnd[0] == '\n') {
             tokEnd += 1;
             continue;
         }
-        if (sourceBuffer[tokEnd] == '\n') {
-            if (sourceBuffer[tokEnd + 1] == '\n') {
+        if (tokEnd[0] == '\r') {
+            if (tokEnd[1] == '\n') {
                 tokEnd += 2;
                 continue;
             }
@@ -134,31 +121,75 @@ immediate_right_bracket_or_expression : {
         }
         break;
     } // retry-loop
-    if (sourceBuffer[tokEnd] == scopeKindToRightBracket(scopeKind)) {
+    return tokEnd;
+}
+
+static std::vector<Node> reachedEOS(ParseStackState& state) {
+    VERIFY(state.scopes.empty());
+    return state.nodes;
+}
+
+std::vector<Node> parse(std::string_view sourceBuf) {
+    ParseStackState state(sourceBuf);
+    const char* sourceBufferBegin = sourceBuf.begin();
+    const char* tokBegin = sourceBufferBegin;
+    const char* tokEnd = sourceBufferBegin;
+    NodeKind tokKind = (NodeKind)0;
+    size_t data1 = 0;
+
+    tokKind = NodeKind::Newline;
+    goto expression;
+
+#define TODO() VERIFY_NOT_REACHED()
+
+check_for_designated_argument : {
+    Word word;
+    tokEnd = readWord(tokEnd, word, state.wordTable);
+    auto savedBegin = tokBegin;
+    auto savedEnd = tokEnd;
+    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    if (std::string_view(tokEnd, 1) == "=") {
+        char next = tokEnd[1];
+        if (next != '=' && next != '>') {
+            tokEnd += 1;
+            tokKind = NodeKind::DesignateArgument;
+            goto expression;
+        }
+    }
+    emitNode(NodeKind::IdentifierExpr, savedBegin, savedEnd, state, sourceBufferBegin);
+    goto after_expression_dispatch;
+}
+begin_argument_scope : {
+    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    ScopeKind scopeKind = (ScopeKind)data1;
+    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
         tokEnd += 1;
         tokKind = NodeKind::EmptyNode;
         goto after_expression;
     }
-    beginScope(scopeKind);
+    beginScope(scopeKind, state.scopes);
+    if (isWordFirstCharacter(tokEnd[0])) {
+        goto check_for_designated_argument;
+    }
     goto expression_dispatch;
 }
 
 expression:
-    nodes.push_back({ tokKind, (uint32_t)tokBegin, (uint32_t)tokEnd });
+    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
     for (;;) {
-        skipWhitespace();
+        tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
         tokKind = (NodeKind)0;
         data1 = 0;
     expression_dispatch:
-        fmt::println("expression: {}", sourceBuffer.substr(tokEnd, 1));
-        switch (sourceBuffer[tokEnd]) {
+        switch (tokEnd[0]) {
         case '\n': {
             tokEnd += 1;
             continue;
         }
         case '\r': {
-            if (sourceBuffer[tokEnd + 1] == '\n') {
+            if (tokEnd[1] == '\n') {
                 tokEnd += 2;
                 continue;
             }
@@ -166,7 +197,7 @@ expression:
             continue;
         }
         case '!': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -176,7 +207,7 @@ expression:
             goto expression;
         }
         case '%': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -185,9 +216,9 @@ expression:
             TODO();
         }
         case '&': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '&') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -206,14 +237,14 @@ expression:
             tokEnd += 1;
             tokKind = NodeKind::ParenthesizedExpr;
             data1 = (size_t)ScopeKind::Paren;
-            goto immediate_right_bracket_or_expression;
+            goto begin_argument_scope;
         }
         case ')': {
             tokEnd += 1;
             TODO();
         }
         case '*': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -223,7 +254,7 @@ expression:
             goto expression;
         }
         case '+': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '+') {
                 tokEnd += 2;
                 tokKind = NodeKind::PreIncrementExpr;
@@ -242,7 +273,7 @@ expression:
             TODO();
         }
         case '-': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '-') {
                 tokEnd += 2;
                 tokKind = NodeKind::PreDecrementExpr;
@@ -265,18 +296,18 @@ expression:
             TODO();
         }
         case '/': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '*') {
                 tokEnd += 2;
-                skipToEndOfBlockComment();
+                tokEnd = skipToEndOfBlockComment(tokEnd);
                 tokEnd += 2;
-                nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
+                emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
                 continue;
             }
             if (next == '/') {
                 tokEnd += 2;
-                skipToEndOfLine();
-                nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
+                tokEnd = skipToEndOfLine(tokEnd);
+                emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
                 continue;
             }
             if (next == '=') {
@@ -287,7 +318,7 @@ expression:
             TODO();
         }
         case ':': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == ':') {
                 tokEnd += 2;
                 TODO();
@@ -300,9 +331,9 @@ expression:
             TODO();
         }
         case '<': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '<') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -311,7 +342,7 @@ expression:
                 TODO();
             }
             if (next == '=') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '>') {
                     tokEnd += 3;
                     TODO();
@@ -323,7 +354,7 @@ expression:
             TODO();
         }
         case '=': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -336,13 +367,13 @@ expression:
             TODO();
         }
         case '>': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
             }
             if (next == '>') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -366,7 +397,7 @@ expression:
             TODO();
         }
         case '^': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -379,13 +410,13 @@ expression:
             TODO();
         }
         case '|': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
             }
             if (next == '|') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -460,17 +491,18 @@ expression:
         case '#':
         case '$':
         case '_': {
-            auto word = readWord();
+            Word word;
+            tokEnd = readWord(tokEnd, word, state.wordTable);
             if (word == words["if"]) {
-                beginScope(ScopeKind::IfExpr);
+                beginScope(ScopeKind::IfExpr, state.scopes);
                 continue;
             }
             tokKind = NodeKind::IdentifierExpr;
             goto after_expression;
         }
         default: {
-            if (sourceBuffer[tokEnd] == '\0' && tokEnd == (int_t)sourceBuffer.length()) {
-                return reachedEOS();
+            if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
+                return reachedEOS(state);
             }
             TODO();
         }
@@ -479,21 +511,20 @@ expression:
     } // retry-loop
 
 after_expression:
-    nodes.push_back({ tokKind, (uint32_t)tokBegin, (uint32_t)tokEnd });
+    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
     for (;;) {
-        skipWhitespace();
+        tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
         tokKind = (NodeKind)0;
         data1 = 0;
     after_expression_dispatch:
-        fmt::println("after_expression: {}", sourceBuffer.substr(tokEnd, 1));
-        switch (sourceBuffer[tokEnd]) {
+        switch (tokEnd[0]) {
         case '\n': {
             tokEnd += 1;
             continue;
         }
         case '\r': {
-            if (sourceBuffer[tokEnd + 1] == '\n') {
+            if (tokEnd[1] == '\n') {
                 tokEnd += 2;
                 continue;
             }
@@ -501,7 +532,7 @@ after_expression:
             continue;
         }
         case '!': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 tokKind = NodeKind::CompareNotEqualExpr;
@@ -511,7 +542,7 @@ after_expression:
             TODO();
         }
         case '%': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -521,9 +552,9 @@ after_expression:
             goto expression;
         }
         case '&': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '&') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -544,16 +575,16 @@ after_expression:
             tokEnd += 1;
             tokKind = NodeKind::CallExpr;
             data1 = (size_t)ScopeKind::Paren;
-            goto immediate_right_bracket_or_expression;
+            goto begin_argument_scope;
         }
         case ')': {
             tokEnd += 1;
-            endScope(ScopeKind::Paren);
+            endScope(ScopeKind::Paren, state.scopes);
             tokKind = NodeKind::EmptyNode;
             goto after_expression;
         }
         case '*': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -563,7 +594,7 @@ after_expression:
             goto expression;
         }
         case '+': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '+') {
                 tokEnd += 2;
                 tokKind = NodeKind::PostIncrementExpr;
@@ -579,94 +610,31 @@ after_expression:
         }
         case ',': {
             tokEnd += 1;
-            for (;;) {
-                skipWhitespace();
-                tokBegin = tokEnd;
-                tokKind = (NodeKind)0;
-                data1 = 0;
-                if (sourceBuffer[tokEnd] == '/') {
-                    if (sourceBuffer[tokEnd + 1] == '/') {
-                        tokEnd += 2;
-                        skipToEndOfLine();
-                        nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                        continue;
-                    }
-                    if (sourceBuffer[tokEnd + 1] == '*') {
-                        tokEnd += 2;
-                        skipToEndOfBlockComment();
-                        tokEnd += 2;
-                        nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                        continue;
-                    }
-                }
-                if (sourceBuffer[tokEnd] == '\r') {
-                    tokEnd += 1;
-                    continue;
-                }
-                if (sourceBuffer[tokEnd] == '\n') {
-                    if (sourceBuffer[tokEnd + 1] == '\n') {
-                        tokEnd += 2;
-                        continue;
-                    }
-                    tokEnd += 1;
-                    continue;
-                }
-                break;
-            } // retry-loop
-            if (sourceBuffer.substr(tokEnd, 4) == "else" && !isWordBulkCharacter(sourceBuffer[tokEnd + 4])) {
+            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            if (std::string_view(tokEnd, 4) == "else" && !isWordBulkCharacter(tokEnd[4])) {
                 tokEnd += 4;
-                for (;;) {
-                    skipWhitespace();
-                    tokBegin = tokEnd;
-                    tokKind = (NodeKind)0;
-                    data1 = 0;
-                    if (sourceBuffer[tokEnd] == '/') {
-                        if (sourceBuffer[tokEnd + 1] == '/') {
-                            tokEnd += 2;
-                            skipToEndOfLine();
-                            nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                            continue;
-                        }
-                        if (sourceBuffer[tokEnd + 1] == '*') {
-                            tokEnd += 2;
-                            skipToEndOfBlockComment();
-                            tokEnd += 2;
-                            nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                            continue;
-                        }
-                    }
-                    if (sourceBuffer[tokEnd] == '\r') {
-                        tokEnd += 1;
-                        continue;
-                    }
-                    if (sourceBuffer[tokEnd] == '\n') {
-                        if (sourceBuffer[tokEnd + 1] == '\n') {
-                            tokEnd += 2;
-                            continue;
-                        }
-                        tokEnd += 1;
-                        continue;
-                    }
-                    break;
-                } // retry-loop
-                if (sourceBuffer.substr(tokEnd, 2) == "=>") {
+                tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                if (std::string_view(tokEnd, 2) == "=>") {
                     tokEnd += 2;
                     tokKind = NodeKind::CommaElseExpr;
                     goto expression;
                 }
                 TODO();
             }
-            if (sourceBuffer.substr(tokEnd, 4) == "elif" && !isWordBulkCharacter(sourceBuffer[tokEnd + 4])) {
+            if (std::string_view(tokEnd, 4) == "elif" && !isWordBulkCharacter(tokEnd[4])) {
                 TODO();
             }
-            if (!scopes.empty()) {
-                auto scopeKind = scopes.back().kind;
+            if (!state.scopes.empty()) {
+                auto scopeKind = state.scopes.back();
                 if (isBracketScope(scopeKind)) {
-                    if (sourceBuffer[tokEnd] == scopeKindToRightBracket(scopeKind)) {
-                        endScope(scopeKind);
+                    if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
+                        endScope(scopeKind, state.scopes);
                         tokEnd += 1;
                         tokKind = NodeKind::EmptyNode;
                         goto after_expression;
+                    }
+                    if (isWordFirstCharacter(tokEnd[0])) {
+                        goto check_for_designated_argument;
                     }
                     goto expression_dispatch;
                 }
@@ -674,7 +642,7 @@ after_expression:
             TODO();
         }
         case '-': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '-') {
                 tokEnd += 2;
                 tokKind = NodeKind::PostDecrementExpr;
@@ -694,60 +662,28 @@ after_expression:
         }
         case '.': {
             tokEnd += 1;
-            for (;;) {
-                skipWhitespace();
-                tokBegin = tokEnd;
-                tokKind = (NodeKind)0;
-                data1 = 0;
-                if (sourceBuffer[tokEnd] == '/') {
-                    if (sourceBuffer[tokEnd + 1] == '/') {
-                        tokEnd += 2;
-                        skipToEndOfLine();
-                        nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                        continue;
-                    }
-                    if (sourceBuffer[tokEnd + 1] == '*') {
-                        tokEnd += 2;
-                        skipToEndOfBlockComment();
-                        tokEnd += 2;
-                        nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                        continue;
-                    }
-                }
-                if (sourceBuffer[tokEnd] == '\r') {
-                    tokEnd += 1;
-                    continue;
-                }
-                if (sourceBuffer[tokEnd] == '\n') {
-                    if (sourceBuffer[tokEnd + 1] == '\n') {
-                        tokEnd += 2;
-                        continue;
-                    }
-                    tokEnd += 1;
-                    continue;
-                }
-                break;
-            } // retry-loop
-            if (isWordFirstCharacter(sourceBuffer[tokEnd])) {
-                auto word = readWord();
+            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            if (isWordFirstCharacter(tokEnd[0])) {
+                Word word;
+                tokEnd = readWord(tokEnd, word, state.wordTable);
                 tokKind = NodeKind::MemberAccessExpr;
                 goto after_expression;
             }
             TODO();
         }
         case '/': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '*') {
                 tokEnd += 2;
-                skipToEndOfBlockComment();
+                tokEnd = skipToEndOfBlockComment(tokEnd);
                 tokEnd += 2;
-                nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
+                emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
                 continue;
             }
             if (next == '/') {
                 tokEnd += 2;
-                skipToEndOfLine();
-                nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
+                tokEnd = skipToEndOfLine(tokEnd);
+                emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
                 continue;
             }
             if (next == '=') {
@@ -759,45 +695,13 @@ after_expression:
             goto expression;
         }
         case ':': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == ':') {
                 tokEnd += 2;
-                for (;;) {
-                    skipWhitespace();
-                    tokBegin = tokEnd;
-                    tokKind = (NodeKind)0;
-                    data1 = 0;
-                    if (sourceBuffer[tokEnd] == '/') {
-                        if (sourceBuffer[tokEnd + 1] == '/') {
-                            tokEnd += 2;
-                            skipToEndOfLine();
-                            nodes.push_back({ NodeKind::LineComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                            continue;
-                        }
-                        if (sourceBuffer[tokEnd + 1] == '*') {
-                            tokEnd += 2;
-                            skipToEndOfBlockComment();
-                            tokEnd += 2;
-                            nodes.push_back({ NodeKind::BlockComment, (uint32_t)tokBegin, (uint32_t)tokEnd });
-                            continue;
-                        }
-                    }
-                    if (sourceBuffer[tokEnd] == '\r') {
-                        tokEnd += 1;
-                        continue;
-                    }
-                    if (sourceBuffer[tokEnd] == '\n') {
-                        if (sourceBuffer[tokEnd + 1] == '\n') {
-                            tokEnd += 2;
-                            continue;
-                        }
-                        tokEnd += 1;
-                        continue;
-                    }
-                    break;
-                } // retry-loop
-                if (isWordFirstCharacter(sourceBuffer[tokEnd])) {
-                    auto word = readWord();
+                tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                if (isWordFirstCharacter(tokEnd[0])) {
+                    Word word;
+                    tokEnd = readWord(tokEnd, word, state.wordTable);
                     tokKind = NodeKind::StaticAccessExpr;
                     goto after_expression;
                 }
@@ -812,9 +716,9 @@ after_expression:
             goto expression;
         }
         case '<': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '<') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -824,7 +728,7 @@ after_expression:
                 goto expression;
             }
             if (next == '=') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '>') {
                     tokEnd += 3;
                     TODO();
@@ -838,7 +742,7 @@ after_expression:
             goto expression;
         }
         case '=': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 tokKind = NodeKind::CompareEqualExpr;
@@ -846,7 +750,7 @@ after_expression:
             }
             if (next == '>') {
                 tokEnd += 2;
-                endScope(ScopeKind::IfExpr);
+                endScope(ScopeKind::IfExpr, state.scopes);
                 tokKind = NodeKind::IfExpr;
                 goto expression;
             }
@@ -854,14 +758,14 @@ after_expression:
             TODO();
         }
         case '>': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 tokKind = NodeKind::CompareGreaterEqualExpr;
                 goto expression;
             }
             if (next == '>') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -882,16 +786,16 @@ after_expression:
             tokEnd += 1;
             tokKind = NodeKind::IndexExpr;
             data1 = (size_t)ScopeKind::Square;
-            goto immediate_right_bracket_or_expression;
+            goto begin_argument_scope;
         }
         case ']': {
             tokEnd += 1;
-            endScope(ScopeKind::Square);
+            endScope(ScopeKind::Square, state.scopes);
             tokKind = NodeKind::EmptyNode;
             goto after_expression;
         }
         case '^': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
@@ -904,16 +808,16 @@ after_expression:
             tokEnd += 1;
             tokKind = NodeKind::Parameterize;
             data1 = (size_t)ScopeKind::Brace;
-            goto immediate_right_bracket_or_expression;
+            goto begin_argument_scope;
         }
         case '|': {
-            char next = sourceBuffer[tokEnd + 1];
+            char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
                 TODO();
             }
             if (next == '|') {
-                char next = sourceBuffer[tokEnd + 2];
+                char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
                     TODO();
@@ -928,7 +832,7 @@ after_expression:
         }
         case '}': {
             tokEnd += 1;
-            endScope(ScopeKind::Brace);
+            endScope(ScopeKind::Brace, state.scopes);
             tokKind = NodeKind::EmptyNode;
             goto after_expression;
         }
@@ -991,12 +895,13 @@ after_expression:
         case '#':
         case '$':
         case '_': {
-            auto word = readWord();
+            Word word;
+            tokEnd = readWord(tokEnd, word, state.wordTable);
             TODO();
         }
         default: {
-            if (sourceBuffer[tokEnd] == '\0' && tokEnd == (int_t)sourceBuffer.length()) {
-                return reachedEOS();
+            if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
+                return reachedEOS(state);
             }
             TODO();
         }

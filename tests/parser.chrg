@@ -9,6 +9,12 @@
 /* expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode */ (a, b);
 /* expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode */ (a, b,);
 /* expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode */ (a, /**/ b, /**/);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p = a);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p = a,);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p /**/ = a, /**/);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p = a, q = b);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p = a, q = b,);
+/* expect-node ParenthesizedExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node DesignateArgument; expect-node IdentifierExpr; expect-node EmptyNode */ (p /**/ = a, /**/ q = /**/ b, /**/);
 
 //; postfix expressions
 /* expect-node IdentifierExpr; expect-node Parameterize; expect-node EmptyNode */ a{};
@@ -64,3 +70,9 @@ a{
 //; conditional expressions
 /* expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr */ if a => b;
 /* expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr */ a, else => b;
+
+//; test comma-else in arguments
+// expect-node ParenthesizedExpr;
+// expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr
+// expect-node IdentifierExpr; expect-node EmptyNode
+(a, else => b, c);

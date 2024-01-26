@@ -203,7 +203,7 @@ private:
     constexpr void clearPointers();
 
 public:
-    WordStringTable()
+    constexpr WordStringTable()
         : WordTable() { }
     template<typename... Ts>
     constexpr WordStringTable(const ConstWordStringTable<Ts...>&);

@@ -25,72 +25,117 @@ static char scopeKindToRightBracket(ScopeKind scope) {
 static bool isBracketScope(ScopeKind scope) {
     return std::to_underlying(scope) >= ' ';
 }
-struct Scope {
-    ScopeKind kind;
-    size_t beginNode;
+
+struct ParseStackState {
+    std::vector<Node> nodes;
+    std::vector<ScopeKind> scopes;
+    WordStringTable wordTable { words };
+    const char* sourceBufferEnd;
+
+    ParseStackState(std::string_view sourceBuf)
+        : sourceBufferEnd(sourceBuf.end()) { }
 };
 
-std::vector<Node> parse(std::string_view sourceBuffer) {
-    int_t tokBegin = 0;
-    int_t tokEnd = 0;
+static void beginScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
+    scopes.push_back(kind);
+}
+
+static void endScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
+    VERIFY(!scopes.empty());
+    VERIFY(scopes.back() == kind);
+    scopes.pop_back();
+}
+
+static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
+    state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
+}
+
+[[nodiscard]] static const char* readWord(const char* position, Word& outWord, WordStringTable& wordTable) {
+    const char* wordStart = position;
+    uint32_t hash = 0;
+    do {
+        hash = Word::iterateHash(hash, position[0]);
+        position += 1;
+    } while (isWordBulkCharacter(position[0]));
+    hash = Word::finalizeHash(hash);
+    outWord = wordTable.getWithHash(std::string_view(wordStart, position), hash);
+    return position;
+}
+
+[[nodiscard]] static const char* skipWhitespace(const char* position) {
+    while (position[0] == ' ' || position[0] == '\t')
+        position += 1;
+    return position;
+}
+
+// advances offset to the next '*/'
+[[nodiscard]] static const char* skipToEndOfBlockComment(const char* position) {
+    while (position[0] != '\0' && !(position[0] == '*' && position[1] == '/')) {
+        position += 1;
+    }
+    return position;
+};
+
+// advances offset to the next new line character
+[[nodiscard]] static const char* skipToEndOfLine(const char* position) {
+    while (position[0] != '\0' && position[0] != '\n' && position[0] != '\r') {
+        position += 1;
+    }
+    return position;
+};
+
+[[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
+    while (position[0] && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
+        position += 1;
+    }
+    return position;
+};
+
+[[nodiscard]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
+    const char* tokBegin;
+    for (;;) {
+        tokEnd = skipWhitespace(tokEnd);
+        tokBegin = tokEnd;
+        if (std::string_view(tokEnd, 2) == "//") {
+            tokEnd = skipToEndOfLine(tokEnd);
+            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            continue;
+        }
+        if (std::string_view(tokEnd, 2) == "/*") {
+            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd += 2;
+            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            continue;
+        }
+        if (tokEnd[0] == '\n') {
+            tokEnd += 1;
+            continue;
+        }
+        if (tokEnd[0] == '\r') {
+            if (tokEnd[1] == '\n') {
+                tokEnd += 2;
+                continue;
+            }
+            tokEnd += 1;
+            continue;
+        }
+        break;
+    } // retry-loop
+    return tokEnd;
+}
+
+static std::vector<Node> reachedEOS(ParseStackState& state) {
+    VERIFY(state.scopes.empty());
+    return state.nodes;
+}
+
+std::vector<Node> parse(std::string_view sourceBuf) {
+    ParseStackState state(sourceBuf);
+    const char* sourceBufferBegin = sourceBuf.begin();
+    const char* tokBegin = sourceBufferBegin;
+    const char* tokEnd = sourceBufferBegin;
     NodeKind tokKind = (NodeKind)0;
     size_t data1 = 0;
-
-    std::vector<Node> nodes;
-    std::vector<Scope> scopes;
-
-    WordStringTable wordTable { words };
-
-    auto beginScope = [&](ScopeKind kind) {
-        scopes.push_back({ kind, nodes.size() });
-    };
-    auto endScope = [&](ScopeKind kind) {
-        VERIFY(!scopes.empty());
-        VERIFY(scopes.back().kind == kind);
-        scopes.pop_back();
-    };
-    auto reachedEOS = [&]() {
-        VERIFY(scopes.empty());
-        return nodes;
-    };
-
-    auto readWord = [&]() {
-        uint32_t hash = 0;
-        do {
-            hash = Word::iterateHash(hash, sourceBuffer[tokEnd]);
-            tokEnd += 1;
-        } while (isWordBulkCharacter(sourceBuffer[tokEnd]));
-        hash = Word::finalizeHash(hash);
-        return wordTable.getWithHash(sourceBuffer.substr(tokBegin, tokEnd - tokBegin), hash);
-    };
-
-    auto skipWhitespace = [&]() {
-        while (sourceBuffer[tokEnd] == ' ' || sourceBuffer[tokEnd] == '\t')
-            tokEnd += 1;
-    };
-
-    // advances offset to the next '*/'
-    auto skipToEndOfBlockComment = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size()
-            && !(sourceBuffer[tokEnd] == '*' && sourceBuffer[tokEnd + 1] == '/')) {
-            tokEnd += 1;
-        }
-    };
-
-    // advances offset to the next new line character
-    auto skipToEndOfLine = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size()
-            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
-            tokEnd += 1;
-        }
-    };
-
-    auto skipToEndOfCharacterLiteral = [&]() {
-        while (tokEnd < (int_t)sourceBuffer.size() && sourceBuffer[tokEnd] != '\''
-            && sourceBuffer[tokEnd] != '\n' && sourceBuffer[tokEnd] != '\r') {
-            tokEnd += 1;
-        }
-    };
 
     tokKind = NodeKind::Newline;
     goto expression;
