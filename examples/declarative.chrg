@@ -1,0 +1,8 @@
+type (
+    name = "my_type",
+    $member (
+        name = "my_member",
+        type = int
+    ),
+    constructor = (in value: int) => (my_member = value)
+)

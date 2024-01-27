@@ -152,7 +152,7 @@ check_for_designated_argument : {
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
     if (std::string_view(tokEnd, 1) == "=") {
         char next = tokEnd[1];
-        if (next != '=' && next != '>') {
+        if (next != '>' && next != '=') {
             tokEnd += 1;
             tokKind = NodeKind::DesignateArgument;
             goto expression;
@@ -176,7 +176,7 @@ begin_argument_scope : {
     }
     goto expression_dispatch;
 }
-single_or_compound_statement: {
+single_or_compound_statement : {
     emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
     if (std::string_view(tokEnd, 1) == "{") {

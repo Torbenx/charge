@@ -446,7 +446,7 @@ with indent():
     emitLabelLine("}")
 
     # single_or_compound_statment
-    emitLabelLine("single_or_compound_statement: {")
+    emitLabelLine("single_or_compound_statement : {")
     emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
     emitInlineTokenAdvancer()
     def compoundStatement():
