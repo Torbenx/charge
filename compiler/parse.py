@@ -140,6 +140,7 @@ def emitCheckFor(punc, handler):
     with indent():
         if len(puncs) == 1:
             assert(puncs[0] == punc)
+            emitLine("tokEnd += " + str(len(punc)) + ";")
             handler()
         else:
             possibleContinuations = set()
@@ -159,32 +160,7 @@ def emitCheckFor(punc, handler):
     emitLine("}")
 
 def emitInlineTokenAdvancer():
-    # with RetryLoop():
-    #     emitCheckFor(Punctuation.SlashSlash, lambda: emitLineCommentHandler())
-    #     emitCheckFor(Punctuation.SlashStar, lambda: emitBlockCommentHandler())
-    #     emitLine("if (tokEnd[0] == '\\n') {")
-    #     with indent():
-    #         emitLineFeedHandler()
-    #     emitLine("}")
-    #     emitLine("if (tokEnd[0] == '\\r') {")
-    #     with indent():
-    #         emitCarriageReturnHandler()
-    #     emitLine("}")
-    #     emitLine("break;")
     emitLine("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
-
-class RetryLoop(IndentHelper):
-    def __enter__(self):
-        emitLine("for (;;) {")
-        super().__enter__()
-        emitLine("tokEnd = skipWhitespace(tokEnd);")
-        emitLine("tokBegin = tokEnd;")
-        emitLine("tokKind = (NodeKind)0;")
-        emitLine("data1 = 0;")
-
-    def __exit__(self, *args):
-        super().__exit__(*args)
-        emitLine("} // retry-loop")
 
 
 def emitSwitch(stateName, handler):
@@ -193,9 +169,15 @@ def emitSwitch(stateName, handler):
     # store
     emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
 
-    with RetryLoop():
+    emitLabelLine(stateName + "_continue:")
+    emitLine("for (;;) {")
+    with indent():
+        emitLine("tokEnd = skipWhitespace(tokEnd);")
+        emitLine("tokBegin = tokEnd;")
+        emitLine("tokKind = (NodeKind)0;")
+        emitLine("data1 = 0;")
         emitLabelLine(stateName + "_dispatch:")
-        # emitLine("fmt::println(\"" + stateName + ": {}\", tokEnd[0]);")
+        emitLine("fmt::println(\"" + stateName + ": {}\", tokEnd[0]);")
         emitLine("switch (tokEnd[0]) {")
 
         # newline
@@ -243,6 +225,7 @@ def emitSwitch(stateName, handler):
         emitLine("} // switch")
 
         emitLine("VERIFY_NOT_REACHED();")
+    emitLine("} // retry-loop")
 
 class ExpressionHandler:
     def punctuation(self, punc: Punctuation):
@@ -273,6 +256,23 @@ class ExpressionHandler:
         emitLine("}")
         emitLine("tokKind = NodeKind::IdentifierExpr;")
         emitLine("goto after_expression;")
+
+class StatementHandler(ExpressionHandler):
+    def punctuation(self, punc: Punctuation):
+        if punc is Punctuation.RightBrace:
+            emitLine("endScope(ScopeKind::CompoundStmt, state.scopes);")
+            emitLine("tokKind = NodeKind::EmptyNode;")
+            emitLine("goto statement;")
+        else:
+            super().punctuation(punc)
+
+    def word(self):
+        emitLine("if (word == words[\"if\"]) {")
+        with indent():
+            emitLine("beginScope(ScopeKind::IfExprOrStmt, state.scopes);")
+            emitLine("goto expression_continue;")
+        emitLine("}")
+        super().word()
 
 class AfterExpressionHandler:
     def punctuation(self, punc: Punctuation):
@@ -384,11 +384,25 @@ class AfterExpressionHandler:
             emitLine("TODO();")
         elif punc is Punctuation.SemiColon:
             emitLine("tokKind = NodeKind::ExpressionStmt;")
-            emitLine("goto expression;")
+            emitLine("goto statement;")
         elif punc is Punctuation.FatArrow:
-            emitLine("endScope(ScopeKind::IfExpr, state.scopes);")
-            emitLine("tokKind = NodeKind::IfExpr;")
-            emitLine("goto expression;")
+            emitLine("auto scopeKind = state.scopes.back();")
+            emitLine("if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {")
+            with indent():
+                emitLine("endScope(scopeKind, state.scopes);")
+                emitLine("tokKind = NodeKind::IfExpr;")
+                emitLine("goto expression;")
+            emitLine("}")
+            emitLine("TODO();")
+        elif punc is Punctuation.Colon:
+            emitLine("auto scopeKind = state.scopes.back();")
+            emitLine("if (scopeKind == ScopeKind::IfExprOrStmt) {")
+            with indent():
+                emitLine("endScope(scopeKind, state.scopes);")
+                emitLine("tokKind = NodeKind::IfStmt;")
+                emitLine("goto single_or_compound_statement;")
+            emitLine("}")
+            emitLine("TODO();")
         else:
             emitLine("TODO();")
 
@@ -431,8 +445,22 @@ with indent():
     emitLine("goto expression_dispatch;")
     emitLabelLine("}")
 
+    # single_or_compound_statment
+    emitLabelLine("single_or_compound_statement: {")
+    emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
+    emitInlineTokenAdvancer()
+    def compoundStatement():
+        emitLine("beginScope(ScopeKind::CompoundStmt, state.scopes);")
+        emitLine("tokKind = NodeKind::CompoundStmt;")
+        emitLine("goto statement;")
+    emitCheckFor(Punctuation.LeftBrace, compoundStatement)
+    emitLine("goto statement_dispatch;")
+    emitLabelLine("}")
+
     emitLineNoIndent()
 
+    emitSwitch("statement", StatementHandler())
+    emitLineNoIndent()
     emitSwitch("expression", ExpressionHandler())
     emitLineNoIndent()
     emitSwitch("after_expression", AfterExpressionHandler())
