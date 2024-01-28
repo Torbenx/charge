@@ -60,13 +60,13 @@ class Punctuation(enum.StrEnum):
 outputIndentation = 0
 generatedLines = []
 
-def emitLine(line: str = ""):
+def line(line: str = ""):
     generatedLines.append('    ' * outputIndentation + line)
 
-def emitLabelLine(line: str):
+def labelLine(line: str):
     generatedLines.append('    ' * (outputIndentation - 1) + line)
 
-def emitLineNoIndent(line: str = ""):
+def lineNoIndent(line: str = ""):
     generatedLines.append(line)
 
 def indent():
@@ -81,31 +81,31 @@ class IndentHelper:
         global outputIndentation
         outputIndentation -= 1
 
-def emitLineFeedHandler():
-    emitLine("tokEnd += 1;")
-    emitLine("continue;")
+def lineFeedHandler():
+    line("tokEnd += 1;")
+    line("continue;")
 
-def emitCarriageReturnHandler():
-    emitLine("if (tokEnd[1] == '\\n') {")
+def carriageReturnHandler():
+    line("if (tokEnd[1] == '\\n') {")
     with indent():
-        emitLine("tokEnd += 2;")
-        emitLine("continue;")
-    emitLine("}")
-    emitLine("tokEnd += 1;")
-    emitLine("continue;")
+        line("tokEnd += 2;")
+        line("continue;")
+    line("}")
+    line("tokEnd += 1;")
+    line("continue;")
 
-def emitLineCommentHandler():
-    emitLine("tokEnd = skipToEndOfLine(tokEnd);")
-    emitLine("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-    emitLine("continue;")
+def lineCommentHandler():
+    line("tokEnd = skipToEndOfLine(tokEnd);")
+    line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+    line("continue;")
 
-def emitBlockCommentHandler():
-    emitLine("tokEnd = skipToEndOfBlockComment(tokEnd);")
-    emitLine("tokEnd += 2;")
-    emitLine("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-    emitLine("continue;")
+def blockCommentHandler():
+    line("tokEnd = skipToEndOfBlockComment(tokEnd);")
+    line("tokEnd += 2;")
+    line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+    line("continue;")
 
-def emitLinearIf(commonPrefix: str, handler):
+def linearIf(commonPrefix: str, handler):
     puncs = list(filter(lambda p: (p.startswith(commonPrefix)), Punctuation))
     possibleContinuations = set()
     exactMatch: Punctuation | None = None
@@ -118,114 +118,144 @@ def emitLinearIf(commonPrefix: str, handler):
     assert(exactMatch != None)
 
     if possibleContinuations:
-        emitLine("char next = tokEnd[" + str(len(commonPrefix)) + "];")
+        line("char next = tokEnd[" + str(len(commonPrefix)) + "];")
     for character in sorted(possibleContinuations):
-        emitLine("if (next == '" + character + "') {")
+        line("if (next == '" + character + "') {")
         with indent():
-            emitLinearIf(commonPrefix + character, handler)
-        emitLine("}")
+            linearIf(commonPrefix + character, handler)
+        line("}")
 
-    emitLine("tokEnd += " + str(len(exactMatch)) + ";")
+    line("tokEnd += " + str(len(exactMatch)) + ";")
     if exactMatch is Punctuation.SlashSlash:
-        emitLineCommentHandler()
+        lineCommentHandler()
     elif exactMatch is Punctuation.SlashStar:
-        emitBlockCommentHandler()
+        blockCommentHandler()
     else:
         handler.punctuation(exactMatch)
 
-def emitCheckFor(punc, handler):
+def checkFor(punc, handler):
     puncs = list(filter(lambda p: (p.startswith(punc)), Punctuation))
     assert(len(puncs) > 0)
-    emitLine("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\") {")
+    line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\") {")
     with indent():
         if len(puncs) == 1:
             assert(puncs[0] == punc)
-            emitLine("tokEnd += " + str(len(punc)) + ";")
+            line("tokEnd += " + str(len(punc)) + ";")
             handler()
         else:
             possibleContinuations = set()
             for p in puncs:
                 if p != punc:
                     possibleContinuations.add(p[len(punc)])
-            emitLine("char next = tokEnd[" + str(len(punc)) + "];")
+            line("char next = tokEnd[" + str(len(punc)) + "];")
             condition = ""
             for c in possibleContinuations:
                 condition += " && next != '" + c + "'"
             condition = condition[4:]
-            emitLine("if (" + condition + ") {")
+            line("if (" + condition + ") {")
             with indent():
-                emitLine("tokEnd += " + str(len(punc)) + ";")
+                line("tokEnd += " + str(len(punc)) + ";")
                 handler()
-            emitLine("}")
-    emitLine("}")
+            line("}")
+    line("}")
 
-def emitInlineTokenAdvancer():
-    emitLine("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
+class InlineAdvancerCertificate:
+    pass
 
+def inlineTokenAdvancer():
+    line("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
+    line("tokBegin = tokEnd;")
+    return InlineAdvancerCertificate()
+
+def pushScope(scopeKindExpr):
+    line("scopePosition = pushScope(" + scopeKindExpr + ", scopePosition);")
+
+def popScope(scopeKindExpr):
+    line("scopePosition = popScope(" + scopeKindExpr + ", scopePosition);")
+
+def peekScope(scopeKindVariableName):
+    line("auto " + scopeKindVariableName + " = peekScope(scopePosition);")
+
+def emitNode(nodeKindExpr, beginExpr, endExpr):
+    line("emitNode(" + nodeKindExpr + ", " + beginExpr +", " + endExpr + ", state, sourceBufferBegin);")
+
+def emitNodeFromLocals():
+    emitNode("nodeKind", "tokBegin", "tokEnd")
+
+def gotoStateAndSave(stateName, nodeKindExpr):
+    line("nodeKind = " + nodeKindExpr + ";")
+    line("goto " + stateName + ";")
+
+def gotoStateNoSave(stateName):
+    line("goto " + stateName + "_continue;")
+
+def gotoStateAlreadyAdvanced(stateName, advance):
+    assert(type(advance) == InlineAdvancerCertificate)
+    line("goto " + stateName + "_dispatch;")
 
 def emitSwitch(stateName, handler):
-    emitLabelLine(stateName + ":")
+    labelLine(stateName + ":")
 
     # store
-    emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
+    emitNodeFromLocals()
 
-    emitLabelLine(stateName + "_continue:")
-    emitLine("for (;;) {")
+    labelLine(stateName + "_continue:")
+    line("for (;;) {")
     with indent():
-        emitLine("tokEnd = skipWhitespace(tokEnd);")
-        emitLine("tokBegin = tokEnd;")
-        emitLine("tokKind = (NodeKind)0;")
-        emitLine("data1 = 0;")
-        emitLabelLine(stateName + "_dispatch:")
-        emitLine("fmt::println(\"" + stateName + ": {}\", tokEnd[0]);")
-        emitLine("switch (tokEnd[0]) {")
+        line("tokEnd = skipWhitespace(tokEnd);")
+        line("tokBegin = tokEnd;")
+        line("nodeKind = (NodeKind)0;")
+        line("data1 = 0;")
+        labelLine(stateName + "_dispatch:")
+        line("fmt::println(\"" + stateName + ": {}\", tokEnd[0]);")
+        line("switch (tokEnd[0]) {")
 
         # newline
-        emitLine("case '\\n': {")
+        line("case '\\n': {")
         with indent():
-            emitLineFeedHandler()
-        emitLine("}")
-        emitLine("case '\\r': {")
+            lineFeedHandler()
+        line("}")
+        line("case '\\r': {")
         with indent():
-            emitCarriageReturnHandler()
-        emitLine("}")
+            carriageReturnHandler()
+        line("}")
 
         # punctuations
         firstCharacters = set()
         for punc in Punctuation:
             firstCharacters.add(punc[0])
         for character in sorted(firstCharacters):
-            emitLine("case '" + character + "': {")
+            line("case '" + character + "': {")
             with indent():
-                emitLinearIf(str(character), handler)
-            emitLine("}")
+                linearIf(str(character), handler)
+            line("}")
 
         # word
         for character in list(string.ascii_lowercase) + list(string.ascii_uppercase):
-            emitLine("case '" + character + "':")
-        emitLine("case '#':")
-        emitLine("case '$':")
-        emitLine("case '_': {")
+            line("case '" + character + "':")
+        line("case '#':")
+        line("case '$':")
+        line("case '_': {")
         with indent():
-            emitLine("Word word;")
-            emitLine("tokEnd = readWord(tokEnd, word, state.wordTable);")
+            line("Word word;")
+            line("tokEnd = readWord(tokEnd, word, state.wordTable);")
             handler.word()
-        emitLine("}")
+        line("}")
 
         # default
-        emitLine("default: {")
+        line("default: {")
         with indent():
-            emitLine("if (tokEnd[0] == '\\0' && tokEnd == state.sourceBufferEnd) {")
+            line("if (tokEnd[0] == '\\0' && tokEnd == state.sourceBufferEnd) {")
             with indent():
-                emitLine("return reachedEOS(state);")
-            emitLine("}")
-            emitLine("TODO();")
-        emitLine("}")
+                line("return reachedEOS(state, scopePosition);")
+            line("}")
+            line("TODO();")
+        line("}")
 
-        emitLine("} // switch")
+        line("} // switch")
 
-        emitLine("VERIFY_NOT_REACHED();")
-    emitLine("} // retry-loop")
+        line("VERIFY_NOT_REACHED();")
+    line("} // retry-loop")
 
 class ExpressionHandler:
     def punctuation(self, punc: Punctuation):
@@ -239,39 +269,36 @@ class ExpressionHandler:
             Punctuation.Star: "DereferenceExpr",
         }
         if punc in prefixOps:
-            emitLine("tokKind = NodeKind::" + prefixOps[punc] + ";")
-            emitLine("goto expression;")
+            gotoStateAndSave("expression", "NodeKind::" + prefixOps[punc])
         elif punc is Punctuation.LeftParen:
-            emitLine("tokKind = NodeKind::ParenthesizedExpr;")
-            emitLine("data1 = (size_t)ScopeKind::Paren;")
-            emitLine("goto begin_argument_scope;")
+            line("nodeKind = NodeKind::ParenthesizedExpr;")
+            line("data1 = (size_t)ScopeKind::Paren;")
+            line("goto begin_argument_scope;")
         else:
-            emitLine("TODO();")
+            line("TODO();")
 
     def word(self):
-        emitLine("if (word == words[\"if\"]) {")
+        line("if (word == words[\"if\"]) {")
         with indent():
-            emitLine("beginScope(ScopeKind::IfExpr, state.scopes);")
-            emitLine("continue;")
-        emitLine("}")
-        emitLine("tokKind = NodeKind::IdentifierExpr;")
-        emitLine("goto after_expression;")
+            pushScope("ScopeKind::IfExpr")
+            line("continue;")
+        line("}")
+        gotoStateAndSave("after_expression", "NodeKind::IdentifierExpr")
 
 class StatementHandler(ExpressionHandler):
     def punctuation(self, punc: Punctuation):
         if punc is Punctuation.RightBrace:
-            emitLine("endScope(ScopeKind::CompoundStmt, state.scopes);")
-            emitLine("tokKind = NodeKind::EmptyNode;")
-            emitLine("goto statement;")
+            popScope("ScopeKind::CompoundStmt")
+            gotoStateAndSave("statement", "NodeKind::EmptyNode;")
         else:
             super().punctuation(punc)
 
     def word(self):
-        emitLine("if (word == words[\"if\"]) {")
+        line("if (word == words[\"if\"]) {")
         with indent():
-            emitLine("beginScope(ScopeKind::IfExprOrStmt, state.scopes);")
-            emitLine("goto expression_continue;")
-        emitLine("}")
+            pushScope("ScopeKind::IfExprOrStmt")
+            gotoStateNoSave("expression")
+        line("}")
         super().word()
 
 class AfterExpressionHandler:
@@ -301,168 +328,152 @@ class AfterExpressionHandler:
             Punctuation.GreaterEqual: "CompareGreaterEqualExpr",
         }
         if punc in postfixOps:
-            emitLine("tokKind = NodeKind::" + postfixOps[punc] + ";")
-            emitLine("goto after_expression;")
+            gotoStateAndSave("after_expression", "NodeKind::" + postfixOps[punc])
         elif punc in binaryOps:
-            emitLine("tokKind = NodeKind::" + binaryOps[punc] + ";")
-            emitLine("goto expression;")
+            gotoStateAndSave("expression", "NodeKind::" + binaryOps[punc])
         elif punc is Punctuation.Point or punc is Punctuation.ColonColon:
-            emitInlineTokenAdvancer()
-            emitLine("if (isWordFirstCharacter(tokEnd[0])) {")
+            inlineTokenAdvancer()
+            line("if (isWordFirstCharacter(tokEnd[0])) {")
             with indent():
-                emitLine("Word word;")
-                emitLine("tokEnd = readWord(tokEnd, word, state.wordTable);")
-                emitLine("tokKind = NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr;")
-                emitLine("goto after_expression;")
-            emitLine("}")
-            emitLine("TODO();")
+                line("Word word;")
+                line("tokEnd = readWord(tokEnd, word, state.wordTable);")
+                gotoStateAndSave("after_expression", "NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr")
+            line("}")
+            line("TODO();")
         elif punc is Punctuation.LeftParen:
-            emitLine("tokKind = NodeKind::CallExpr;")
-            emitLine("data1 = (size_t)ScopeKind::Paren;")
-            emitLine("goto begin_argument_scope;")
+            line("nodeKind = NodeKind::CallExpr;")
+            line("data1 = (size_t)ScopeKind::Paren;")
+            line("goto begin_argument_scope;")
         elif punc is Punctuation.LeftSquare:
-            emitLine("tokKind = NodeKind::IndexExpr;")
-            emitLine("data1 = (size_t)ScopeKind::Square;")
-            emitLine("goto begin_argument_scope;")
+            line("nodeKind = NodeKind::IndexExpr;")
+            line("data1 = (size_t)ScopeKind::Square;")
+            line("goto begin_argument_scope;")
         elif punc is Punctuation.LeftBrace:
-            emitLine("tokKind = NodeKind::Parameterize;")
-            emitLine("data1 = (size_t)ScopeKind::Brace;")
-            emitLine("goto begin_argument_scope;")
+            line("nodeKind = NodeKind::Parameterize;")
+            line("data1 = (size_t)ScopeKind::Brace;")
+            line("goto begin_argument_scope;")
         elif punc is Punctuation.RightParen:
-            emitLine("endScope(ScopeKind::Paren, state.scopes);")
-            emitLine("tokKind = NodeKind::EmptyNode;")
-            emitLine("goto after_expression;")
+            popScope("ScopeKind::Paren")
+            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
         elif punc is Punctuation.RightSquare:
-            emitLine("endScope(ScopeKind::Square, state.scopes);")
-            emitLine("tokKind = NodeKind::EmptyNode;")
-            emitLine("goto after_expression;")
+            popScope("ScopeKind::Square")
+            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
         elif punc is Punctuation.RightBrace:
-            emitLine("endScope(ScopeKind::Brace, state.scopes);")
-            emitLine("tokKind = NodeKind::EmptyNode;")
-            emitLine("goto after_expression;")
+            popScope("ScopeKind::Brace")
+            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
         elif punc is Punctuation.Comma:
-            emitInlineTokenAdvancer()
+            advance1 = inlineTokenAdvancer()
 
             # comma-else
-            emitLine("if (std::string_view(tokEnd, 4) == \"else\" && !isWordBulkCharacter(tokEnd[4])) {")
+            line("if (std::string_view(tokEnd, 4) == \"else\" && !isWordBulkCharacter(tokEnd[4])) {")
             with indent():
-                emitLine("tokEnd += 4;")
-                emitInlineTokenAdvancer()
-                emitLine("if (std::string_view(tokEnd, 2) == \"=>\") {")
+                line("tokEnd += 4;")
+                advance2 = inlineTokenAdvancer()
+                line("if (std::string_view(tokEnd, 2) == \"=>\") {")
                 with indent():
-                    emitLine("tokEnd += 2;")
-                    emitLine("tokKind = NodeKind::CommaElseExpr;")
-                    emitLine("goto expression;")
-                emitLine("}")
-                emitLine("TODO();")
-            emitLine("}")
-            emitLine("if (std::string_view(tokEnd, 4) == \"elif\" && !isWordBulkCharacter(tokEnd[4])) {")
+                    line("tokEnd += 2;")
+                    gotoStateAndSave("expression", "NodeKind::CommaElseExpr")
+                line("}")
+                line("TODO();")
+            line("}")
+            line("if (std::string_view(tokEnd, 4) == \"elif\" && !isWordBulkCharacter(tokEnd[4])) {")
             with indent():
-                emitLine("TODO();")
-            emitLine("}")
+                line("TODO();")
+            line("}")
 
             # lists
-            emitLine("if (!state.scopes.empty()) {")
+            peekScope("scopeKind")
+            line("if (isBracketScope(scopeKind)) {")
             with indent():
-                emitLine("auto scopeKind = state.scopes.back();")
-                emitLine("if (isBracketScope(scopeKind)) {")
+                line("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
                 with indent():
-                    emitLine("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
-                    with indent():
-                        emitLine("endScope(scopeKind, state.scopes);")
-                        emitLine("tokEnd += 1;")
-                        emitLine("tokKind = NodeKind::EmptyNode;")
-                        emitLine("goto after_expression;")
-                    emitLine("}")
-                    emitLine("if (isWordFirstCharacter(tokEnd[0])) {")
-                    with indent():
-                        emitLine("goto check_for_designated_argument;")
-                    emitLine("}")
-                    emitLine("goto expression_dispatch;")
-                emitLine("}")
-            emitLine("}")
-            emitLine("TODO();")
+                    popScope("scopeKind")
+                    line("tokEnd += 1;")
+                    gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
+                line("}")
+                line("if (isWordFirstCharacter(tokEnd[0])) {")
+                with indent():
+                    line("goto check_for_designated_argument;")
+                line("}")
+                gotoStateAlreadyAdvanced("expression", advance1)
+            line("}")
+            line("TODO();")
         elif punc is Punctuation.SemiColon:
-            emitLine("tokKind = NodeKind::ExpressionStmt;")
-            emitLine("goto statement;")
+            gotoStateAndSave("statement", "NodeKind::ExpressionStmt")
         elif punc is Punctuation.FatArrow:
-            emitLine("auto scopeKind = state.scopes.back();")
-            emitLine("if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {")
+            peekScope("scopeKind")
+            line("if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {")
             with indent():
-                emitLine("endScope(scopeKind, state.scopes);")
-                emitLine("tokKind = NodeKind::IfExpr;")
-                emitLine("goto expression;")
-            emitLine("}")
-            emitLine("TODO();")
+                popScope("scopeKind")
+                gotoStateAndSave("expression", "NodeKind::IfExpr")
+            line("}")
+            line("TODO();")
         elif punc is Punctuation.Colon:
-            emitLine("auto scopeKind = state.scopes.back();")
-            emitLine("if (scopeKind == ScopeKind::IfExprOrStmt) {")
+            peekScope("scopeKind")
+            line("if (scopeKind == ScopeKind::IfExprOrStmt) {")
             with indent():
-                emitLine("endScope(scopeKind, state.scopes);")
-                emitLine("tokKind = NodeKind::IfStmt;")
-                emitLine("goto single_or_compound_statement;")
-            emitLine("}")
-            emitLine("TODO();")
+                popScope("scopeKind")
+                line("nodeKind = NodeKind::IfStmt;")
+                line("goto single_or_compound_statement;")
+            line("}")
+            line("TODO();")
         else:
-            emitLine("TODO();")
+            line("TODO();")
 
     def word(self):
-        emitLine("TODO();")
+        line("TODO();")
 
 # generate
 with indent():
     # check_for_designated_argument
-    emitLabelLine("check_for_designated_argument : {")
-    emitLine("Word word;")
-    emitLine("tokEnd = readWord(tokEnd, word, state.wordTable);")
-    emitLine("auto savedBegin = tokBegin;")
-    emitLine("auto savedEnd = tokEnd;")
-    emitInlineTokenAdvancer()
+    labelLine("check_for_designated_argument : {")
+    line("Word word;")
+    line("tokEnd = readWord(tokEnd, word, state.wordTable);")
+    line("auto savedBegin = tokBegin;")
+    line("auto savedEnd = tokEnd;")
+    advance = inlineTokenAdvancer()
     def designatedArgument():
-        emitLine("tokKind = NodeKind::DesignateArgument;")
-        emitLine("goto expression;")
-    emitCheckFor(Punctuation.Equal, designatedArgument)
-    emitLine("emitNode(NodeKind::IdentifierExpr, savedBegin, savedEnd, state, sourceBufferBegin);")
-    emitLine("goto after_expression_dispatch;")
-    emitLabelLine("}")
+        gotoStateAndSave("expression", "NodeKind::DesignateArgument")
+    checkFor(Punctuation.Equal, designatedArgument)
+    emitNode("NodeKind::IdentifierExpr", "savedBegin", "savedEnd")
+    gotoStateAlreadyAdvanced("after_expression", advance)
+    labelLine("}")
 
     # begin_argument_scope
-    emitLabelLine("begin_argument_scope : {")
-    emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
-    emitLine("ScopeKind scopeKind = (ScopeKind)data1;")
-    emitInlineTokenAdvancer()
-    emitLine("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
+    labelLine("begin_argument_scope : {")
+    emitNodeFromLocals()
+    line("ScopeKind scopeKind = (ScopeKind)data1;")
+    advance = inlineTokenAdvancer()
+    line("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
     with indent():
-        emitLine("tokEnd += 1;")
-        emitLine("tokKind = NodeKind::EmptyNode;")
-        emitLine("goto after_expression;")
-    emitLine("}")
-    emitLine("beginScope(scopeKind, state.scopes);")
-    emitLine("if (isWordFirstCharacter(tokEnd[0])) {")
+        line("tokEnd += 1;")
+        gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
+    line("}")
+    pushScope("scopeKind")
+    line("if (isWordFirstCharacter(tokEnd[0])) {")
     with indent():
-        emitLine("goto check_for_designated_argument;")
-    emitLine("}")
-    emitLine("goto expression_dispatch;")
-    emitLabelLine("}")
+        line("goto check_for_designated_argument;")
+    line("}")
+    gotoStateAlreadyAdvanced("expression", advance)
+    labelLine("}")
 
     # single_or_compound_statment
-    emitLabelLine("single_or_compound_statement : {")
-    emitLine("emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);")
-    emitInlineTokenAdvancer()
+    labelLine("single_or_compound_statement : {")
+    emitNodeFromLocals()
+    advance = inlineTokenAdvancer()
     def compoundStatement():
-        emitLine("beginScope(ScopeKind::CompoundStmt, state.scopes);")
-        emitLine("tokKind = NodeKind::CompoundStmt;")
-        emitLine("goto statement;")
-    emitCheckFor(Punctuation.LeftBrace, compoundStatement)
-    emitLine("goto statement_dispatch;")
-    emitLabelLine("}")
+        pushScope("ScopeKind::CompoundStmt")
+        gotoStateAndSave("statement", "NodeKind::CompoundStmt")
+    checkFor(Punctuation.LeftBrace, compoundStatement)
+    gotoStateAlreadyAdvanced("statement", advance)
+    labelLine("}")
 
-    emitLineNoIndent()
+    lineNoIndent()
 
     emitSwitch("statement", StatementHandler())
-    emitLineNoIndent()
+    lineNoIndent()
     emitSwitch("expression", ExpressionHandler())
-    emitLineNoIndent()
+    lineNoIndent()
     emitSwitch("after_expression", AfterExpressionHandler())
 
 # combine/write

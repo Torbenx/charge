@@ -14,6 +14,7 @@ static bool isWordFirstCharacter(uint8_t c) {
 }
 
 enum class ScopeKind : char {
+    Invalid,
     IfExpr,
     IfExprOrStmt,
     CompoundStmt,
@@ -30,7 +31,6 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    std::vector<ScopeKind> scopes;
     WordStringTable wordTable { words };
     const char* sourceBufferEnd;
 
@@ -38,14 +38,25 @@ struct ParseStackState {
         : sourceBufferEnd(sourceBuf.end()) { }
 };
 
-static void beginScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
-    scopes.push_back(kind);
+static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
+
+static ScopeKind* pushScope(ScopeKind kind, ScopeKind* position) {
+    uintptr_t scopeBufferEnd = ((uintptr_t)position & ~(uintptr_t)(SCOPE_BUFFER_SIZE - 1)) + SCOPE_BUFFER_SIZE;
+    VERIFY((uintptr_t)position < scopeBufferEnd);
+    position[0] = kind;
+    position += 1;
+    return position;
 }
 
-static void endScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
-    VERIFY(!scopes.empty());
-    VERIFY(scopes.back() == kind);
-    scopes.pop_back();
+static ScopeKind* popScope(ScopeKind kind, ScopeKind* position) {
+    VERIFY(kind != ScopeKind::Invalid);
+    position -= 1;
+    VERIFY(position[0] == kind);
+    return position;
+}
+
+static ScopeKind peekScope(ScopeKind* position) {
+    return position[-1];
 }
 
 static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
@@ -126,20 +137,26 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-static std::vector<Node> reachedEOS(ParseStackState& state) {
-    VERIFY(state.scopes.empty());
+static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
+    scopePosition -= 1;
+    VERIFY(scopePosition[0] == ScopeKind::Invalid);
+    VERIFY(((uintptr_t)scopePosition & (uintptr_t)(SCOPE_BUFFER_SIZE - 1)) == 0);
     return state.nodes;
 }
 
 std::vector<Node> parse(std::string_view sourceBuf) {
+    ScopeKind* scopePosition = new (std::align_val_t(SCOPE_BUFFER_SIZE)) ScopeKind[SCOPE_BUFFER_SIZE];
+    scopePosition[0] = ScopeKind::Invalid;
+    scopePosition += 1;
+
     ParseStackState state(sourceBuf);
     const char* sourceBufferBegin = sourceBuf.begin();
     const char* tokBegin = sourceBufferBegin;
     const char* tokEnd = sourceBufferBegin;
-    NodeKind tokKind = (NodeKind)0;
+    NodeKind nodeKind = (NodeKind)0;
     size_t data1 = 0;
 
-    tokKind = NodeKind::Newline;
+    nodeKind = NodeKind::Newline;
     goto expression;
 
 #define TODO() VERIFY_NOT_REACHED()
@@ -150,11 +167,12 @@ check_for_designated_argument : {
     auto savedBegin = tokBegin;
     auto savedEnd = tokEnd;
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "=") {
         char next = tokEnd[1];
         if (next != '>' && next != '=') {
             tokEnd += 1;
-            tokKind = NodeKind::DesignateArgument;
+            nodeKind = NodeKind::DesignateArgument;
             goto expression;
         }
     }
@@ -162,39 +180,41 @@ check_for_designated_argument : {
     goto after_expression_dispatch;
 }
 begin_argument_scope : {
-    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
     ScopeKind scopeKind = (ScopeKind)data1;
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
     if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
         tokEnd += 1;
-        tokKind = NodeKind::EmptyNode;
+        nodeKind = NodeKind::EmptyNode;
         goto after_expression;
     }
-    beginScope(scopeKind, state.scopes);
+    scopePosition = pushScope(scopeKind, scopePosition);
     if (isWordFirstCharacter(tokEnd[0])) {
         goto check_for_designated_argument;
     }
     goto expression_dispatch;
 }
 single_or_compound_statement : {
-    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "{") {
         tokEnd += 1;
-        beginScope(ScopeKind::CompoundStmt, state.scopes);
-        tokKind = NodeKind::CompoundStmt;
+        scopePosition = pushScope(ScopeKind::CompoundStmt, scopePosition);
+        nodeKind = NodeKind::CompoundStmt;
         goto statement;
     }
     goto statement_dispatch;
 }
 
 statement:
-    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
 statement_continue:
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
-        tokKind = (NodeKind)0;
+        nodeKind = (NodeKind)0;
         data1 = 0;
     statement_dispatch:
         fmt::println("statement: {}", tokEnd[0]);
@@ -218,7 +238,7 @@ statement_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::LogicalNotExpr;
+            nodeKind = NodeKind::LogicalNotExpr;
             goto expression;
         }
         case '%': {
@@ -250,7 +270,7 @@ statement_continue:
         }
         case '(': {
             tokEnd += 1;
-            tokKind = NodeKind::ParenthesizedExpr;
+            nodeKind = NodeKind::ParenthesizedExpr;
             data1 = (size_t)ScopeKind::Paren;
             goto begin_argument_scope;
         }
@@ -265,14 +285,14 @@ statement_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::DereferenceExpr;
+            nodeKind = NodeKind::DereferenceExpr;
             goto expression;
         }
         case '+': {
             char next = tokEnd[1];
             if (next == '+') {
                 tokEnd += 2;
-                tokKind = NodeKind::PreIncrementExpr;
+                nodeKind = NodeKind::PreIncrementExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -280,7 +300,7 @@ statement_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::PlusExpr;
+            nodeKind = NodeKind::PlusExpr;
             goto expression;
         }
         case ',': {
@@ -291,7 +311,7 @@ statement_continue:
             char next = tokEnd[1];
             if (next == '-') {
                 tokEnd += 2;
-                tokKind = NodeKind::PreDecrementExpr;
+                nodeKind = NodeKind::PreDecrementExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -303,7 +323,7 @@ statement_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::NegateExpr;
+            nodeKind = NodeKind::NegateExpr;
             goto expression;
         }
         case '.': {
@@ -444,13 +464,13 @@ statement_continue:
         }
         case '}': {
             tokEnd += 1;
-            endScope(ScopeKind::CompoundStmt, state.scopes);
-            tokKind = NodeKind::EmptyNode;
+            scopePosition = popScope(ScopeKind::CompoundStmt, scopePosition);
+            nodeKind = NodeKind::EmptyNode;;
             goto statement;
         }
         case '~': {
             tokEnd += 1;
-            tokKind = NodeKind::BitwiseNotExpr;
+            nodeKind = NodeKind::BitwiseNotExpr;
             goto expression;
         }
         case 'a':
@@ -511,19 +531,19 @@ statement_continue:
             Word word;
             tokEnd = readWord(tokEnd, word, state.wordTable);
             if (word == words["if"]) {
-                beginScope(ScopeKind::IfExprOrStmt, state.scopes);
+                scopePosition = pushScope(ScopeKind::IfExprOrStmt, scopePosition);
                 goto expression_continue;
             }
             if (word == words["if"]) {
-                beginScope(ScopeKind::IfExpr, state.scopes);
+                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
                 continue;
             }
-            tokKind = NodeKind::IdentifierExpr;
+            nodeKind = NodeKind::IdentifierExpr;
             goto after_expression;
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state);
+                return reachedEOS(state, scopePosition);
             }
             TODO();
         }
@@ -532,12 +552,12 @@ statement_continue:
     } // retry-loop
 
 expression:
-    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
 expression_continue:
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
-        tokKind = (NodeKind)0;
+        nodeKind = (NodeKind)0;
         data1 = 0;
     expression_dispatch:
         fmt::println("expression: {}", tokEnd[0]);
@@ -561,7 +581,7 @@ expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::LogicalNotExpr;
+            nodeKind = NodeKind::LogicalNotExpr;
             goto expression;
         }
         case '%': {
@@ -593,7 +613,7 @@ expression_continue:
         }
         case '(': {
             tokEnd += 1;
-            tokKind = NodeKind::ParenthesizedExpr;
+            nodeKind = NodeKind::ParenthesizedExpr;
             data1 = (size_t)ScopeKind::Paren;
             goto begin_argument_scope;
         }
@@ -608,14 +628,14 @@ expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::DereferenceExpr;
+            nodeKind = NodeKind::DereferenceExpr;
             goto expression;
         }
         case '+': {
             char next = tokEnd[1];
             if (next == '+') {
                 tokEnd += 2;
-                tokKind = NodeKind::PreIncrementExpr;
+                nodeKind = NodeKind::PreIncrementExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -623,7 +643,7 @@ expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::PlusExpr;
+            nodeKind = NodeKind::PlusExpr;
             goto expression;
         }
         case ',': {
@@ -634,7 +654,7 @@ expression_continue:
             char next = tokEnd[1];
             if (next == '-') {
                 tokEnd += 2;
-                tokKind = NodeKind::PreDecrementExpr;
+                nodeKind = NodeKind::PreDecrementExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -646,7 +666,7 @@ expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::NegateExpr;
+            nodeKind = NodeKind::NegateExpr;
             goto expression;
         }
         case '.': {
@@ -791,7 +811,7 @@ expression_continue:
         }
         case '~': {
             tokEnd += 1;
-            tokKind = NodeKind::BitwiseNotExpr;
+            nodeKind = NodeKind::BitwiseNotExpr;
             goto expression;
         }
         case 'a':
@@ -852,15 +872,15 @@ expression_continue:
             Word word;
             tokEnd = readWord(tokEnd, word, state.wordTable);
             if (word == words["if"]) {
-                beginScope(ScopeKind::IfExpr, state.scopes);
+                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
                 continue;
             }
-            tokKind = NodeKind::IdentifierExpr;
+            nodeKind = NodeKind::IdentifierExpr;
             goto after_expression;
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state);
+                return reachedEOS(state, scopePosition);
             }
             TODO();
         }
@@ -869,12 +889,12 @@ expression_continue:
     } // retry-loop
 
 after_expression:
-    emitNode(tokKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
 after_expression_continue:
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         tokBegin = tokEnd;
-        tokKind = (NodeKind)0;
+        nodeKind = (NodeKind)0;
         data1 = 0;
     after_expression_dispatch:
         fmt::println("after_expression: {}", tokEnd[0]);
@@ -895,7 +915,7 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                tokKind = NodeKind::CompareNotEqualExpr;
+                nodeKind = NodeKind::CompareNotEqualExpr;
                 goto expression;
             }
             tokEnd += 1;
@@ -908,7 +928,7 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::RemainderExpr;
+            nodeKind = NodeKind::RemainderExpr;
             goto expression;
         }
         case '&': {
@@ -920,7 +940,7 @@ after_expression_continue:
                     TODO();
                 }
                 tokEnd += 2;
-                tokKind = NodeKind::LogicalAndExpr;
+                nodeKind = NodeKind::LogicalAndExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -928,19 +948,19 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::BitwiseAndExpr;
+            nodeKind = NodeKind::BitwiseAndExpr;
             goto expression;
         }
         case '(': {
             tokEnd += 1;
-            tokKind = NodeKind::CallExpr;
+            nodeKind = NodeKind::CallExpr;
             data1 = (size_t)ScopeKind::Paren;
             goto begin_argument_scope;
         }
         case ')': {
             tokEnd += 1;
-            endScope(ScopeKind::Paren, state.scopes);
-            tokKind = NodeKind::EmptyNode;
+            scopePosition = popScope(ScopeKind::Paren, scopePosition);
+            nodeKind = NodeKind::EmptyNode;
             goto after_expression;
         }
         case '*': {
@@ -950,14 +970,14 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::MultiplyExpr;
+            nodeKind = NodeKind::MultiplyExpr;
             goto expression;
         }
         case '+': {
             char next = tokEnd[1];
             if (next == '+') {
                 tokEnd += 2;
-                tokKind = NodeKind::PostIncrementExpr;
+                nodeKind = NodeKind::PostIncrementExpr;
                 goto after_expression;
             }
             if (next == '=') {
@@ -965,18 +985,20 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::AdditionExpr;
+            nodeKind = NodeKind::AdditionExpr;
             goto expression;
         }
         case ',': {
             tokEnd += 1;
             tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            tokBegin = tokEnd;
             if (std::string_view(tokEnd, 4) == "else" && !isWordBulkCharacter(tokEnd[4])) {
                 tokEnd += 4;
                 tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                tokBegin = tokEnd;
                 if (std::string_view(tokEnd, 2) == "=>") {
                     tokEnd += 2;
-                    tokKind = NodeKind::CommaElseExpr;
+                    nodeKind = NodeKind::CommaElseExpr;
                     goto expression;
                 }
                 TODO();
@@ -984,20 +1006,18 @@ after_expression_continue:
             if (std::string_view(tokEnd, 4) == "elif" && !isWordBulkCharacter(tokEnd[4])) {
                 TODO();
             }
-            if (!state.scopes.empty()) {
-                auto scopeKind = state.scopes.back();
-                if (isBracketScope(scopeKind)) {
-                    if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
-                        endScope(scopeKind, state.scopes);
-                        tokEnd += 1;
-                        tokKind = NodeKind::EmptyNode;
-                        goto after_expression;
-                    }
-                    if (isWordFirstCharacter(tokEnd[0])) {
-                        goto check_for_designated_argument;
-                    }
-                    goto expression_dispatch;
+            auto scopeKind = peekScope(scopePosition);
+            if (isBracketScope(scopeKind)) {
+                if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
+                    scopePosition = popScope(scopeKind, scopePosition);
+                    tokEnd += 1;
+                    nodeKind = NodeKind::EmptyNode;
+                    goto after_expression;
                 }
+                if (isWordFirstCharacter(tokEnd[0])) {
+                    goto check_for_designated_argument;
+                }
+                goto expression_dispatch;
             }
             TODO();
         }
@@ -1005,7 +1025,7 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '-') {
                 tokEnd += 2;
-                tokKind = NodeKind::PostDecrementExpr;
+                nodeKind = NodeKind::PostDecrementExpr;
                 goto after_expression;
             }
             if (next == '=') {
@@ -1017,16 +1037,17 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::SubtractionExpr;
+            nodeKind = NodeKind::SubtractionExpr;
             goto expression;
         }
         case '.': {
             tokEnd += 1;
             tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            tokBegin = tokEnd;
             if (isWordFirstCharacter(tokEnd[0])) {
                 Word word;
                 tokEnd = readWord(tokEnd, word, state.wordTable);
-                tokKind = NodeKind::MemberAccessExpr;
+                nodeKind = NodeKind::MemberAccessExpr;
                 goto after_expression;
             }
             TODO();
@@ -1051,7 +1072,7 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::DivideExpr;
+            nodeKind = NodeKind::DivideExpr;
             goto expression;
         }
         case ':': {
@@ -1059,26 +1080,27 @@ after_expression_continue:
             if (next == ':') {
                 tokEnd += 2;
                 tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                tokBegin = tokEnd;
                 if (isWordFirstCharacter(tokEnd[0])) {
                     Word word;
                     tokEnd = readWord(tokEnd, word, state.wordTable);
-                    tokKind = NodeKind::StaticAccessExpr;
+                    nodeKind = NodeKind::StaticAccessExpr;
                     goto after_expression;
                 }
                 TODO();
             }
             tokEnd += 1;
-            auto scopeKind = state.scopes.back();
+            auto scopeKind = peekScope(scopePosition);
             if (scopeKind == ScopeKind::IfExprOrStmt) {
-                endScope(scopeKind, state.scopes);
-                tokKind = NodeKind::IfStmt;
+                scopePosition = popScope(scopeKind, scopePosition);
+                nodeKind = NodeKind::IfStmt;
                 goto single_or_compound_statement;
             }
             TODO();
         }
         case ';': {
             tokEnd += 1;
-            tokKind = NodeKind::ExpressionStmt;
+            nodeKind = NodeKind::ExpressionStmt;
             goto statement;
         }
         case '<': {
@@ -1090,7 +1112,7 @@ after_expression_continue:
                     TODO();
                 }
                 tokEnd += 2;
-                tokKind = NodeKind::ShiftLeftExpr;
+                nodeKind = NodeKind::ShiftLeftExpr;
                 goto expression;
             }
             if (next == '=') {
@@ -1100,26 +1122,26 @@ after_expression_continue:
                     TODO();
                 }
                 tokEnd += 2;
-                tokKind = NodeKind::CompareLessEqualExpr;
+                nodeKind = NodeKind::CompareLessEqualExpr;
                 goto expression;
             }
             tokEnd += 1;
-            tokKind = NodeKind::CompareLessExpr;
+            nodeKind = NodeKind::CompareLessExpr;
             goto expression;
         }
         case '=': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                tokKind = NodeKind::CompareEqualExpr;
+                nodeKind = NodeKind::CompareEqualExpr;
                 goto expression;
             }
             if (next == '>') {
                 tokEnd += 2;
-                auto scopeKind = state.scopes.back();
+                auto scopeKind = peekScope(scopePosition);
                 if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {
-                    endScope(scopeKind, state.scopes);
-                    tokKind = NodeKind::IfExpr;
+                    scopePosition = popScope(scopeKind, scopePosition);
+                    nodeKind = NodeKind::IfExpr;
                     goto expression;
                 }
                 TODO();
@@ -1131,7 +1153,7 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                tokKind = NodeKind::CompareGreaterEqualExpr;
+                nodeKind = NodeKind::CompareGreaterEqualExpr;
                 goto expression;
             }
             if (next == '>') {
@@ -1141,11 +1163,11 @@ after_expression_continue:
                     TODO();
                 }
                 tokEnd += 2;
-                tokKind = NodeKind::ShiftRightExpr;
+                nodeKind = NodeKind::ShiftRightExpr;
                 goto expression;
             }
             tokEnd += 1;
-            tokKind = NodeKind::CompareGreaterExpr;
+            nodeKind = NodeKind::CompareGreaterExpr;
             goto expression;
         }
         case '?': {
@@ -1154,14 +1176,14 @@ after_expression_continue:
         }
         case '[': {
             tokEnd += 1;
-            tokKind = NodeKind::IndexExpr;
+            nodeKind = NodeKind::IndexExpr;
             data1 = (size_t)ScopeKind::Square;
             goto begin_argument_scope;
         }
         case ']': {
             tokEnd += 1;
-            endScope(ScopeKind::Square, state.scopes);
-            tokKind = NodeKind::EmptyNode;
+            scopePosition = popScope(ScopeKind::Square, scopePosition);
+            nodeKind = NodeKind::EmptyNode;
             goto after_expression;
         }
         case '^': {
@@ -1171,12 +1193,12 @@ after_expression_continue:
                 TODO();
             }
             tokEnd += 1;
-            tokKind = NodeKind::BitwiseXorExpr;
+            nodeKind = NodeKind::BitwiseXorExpr;
             goto expression;
         }
         case '{': {
             tokEnd += 1;
-            tokKind = NodeKind::Parameterize;
+            nodeKind = NodeKind::Parameterize;
             data1 = (size_t)ScopeKind::Brace;
             goto begin_argument_scope;
         }
@@ -1193,17 +1215,17 @@ after_expression_continue:
                     TODO();
                 }
                 tokEnd += 2;
-                tokKind = NodeKind::LogicalOrExpr;
+                nodeKind = NodeKind::LogicalOrExpr;
                 goto expression;
             }
             tokEnd += 1;
-            tokKind = NodeKind::BitwiseOrExpr;
+            nodeKind = NodeKind::BitwiseOrExpr;
             goto expression;
         }
         case '}': {
             tokEnd += 1;
-            endScope(ScopeKind::Brace, state.scopes);
-            tokKind = NodeKind::EmptyNode;
+            scopePosition = popScope(ScopeKind::Brace, scopePosition);
+            nodeKind = NodeKind::EmptyNode;
             goto after_expression;
         }
         case '~': {
@@ -1271,7 +1293,7 @@ after_expression_continue:
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state);
+                return reachedEOS(state, scopePosition);
             }
             TODO();
         }

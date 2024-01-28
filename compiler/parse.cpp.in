@@ -14,6 +14,7 @@ static bool isWordFirstCharacter(uint8_t c) {
 }
 
 enum class ScopeKind : char {
+    Invalid,
     IfExpr,
     IfExprOrStmt,
     CompoundStmt,
@@ -30,7 +31,6 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    std::vector<ScopeKind> scopes;
     WordStringTable wordTable { words };
     const char* sourceBufferEnd;
 
@@ -38,14 +38,25 @@ struct ParseStackState {
         : sourceBufferEnd(sourceBuf.end()) { }
 };
 
-static void beginScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
-    scopes.push_back(kind);
+static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
+
+static ScopeKind* pushScope(ScopeKind kind, ScopeKind* position) {
+    uintptr_t scopeBufferEnd = ((uintptr_t)position & ~(uintptr_t)(SCOPE_BUFFER_SIZE - 1)) + SCOPE_BUFFER_SIZE;
+    VERIFY((uintptr_t)position < scopeBufferEnd);
+    position[0] = kind;
+    position += 1;
+    return position;
 }
 
-static void endScope(ScopeKind kind, std::vector<ScopeKind>& scopes) {
-    VERIFY(!scopes.empty());
-    VERIFY(scopes.back() == kind);
-    scopes.pop_back();
+static ScopeKind* popScope(ScopeKind kind, ScopeKind* position) {
+    VERIFY(kind != ScopeKind::Invalid);
+    position -= 1;
+    VERIFY(position[0] == kind);
+    return position;
+}
+
+static ScopeKind peekScope(ScopeKind* position) {
+    return position[-1];
 }
 
 static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
@@ -126,20 +137,26 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-static std::vector<Node> reachedEOS(ParseStackState& state) {
-    VERIFY(state.scopes.empty());
+static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
+    scopePosition -= 1;
+    VERIFY(scopePosition[0] == ScopeKind::Invalid);
+    VERIFY(((uintptr_t)scopePosition & (uintptr_t)(SCOPE_BUFFER_SIZE - 1)) == 0);
     return state.nodes;
 }
 
 std::vector<Node> parse(std::string_view sourceBuf) {
+    ScopeKind* scopePosition = new (std::align_val_t(SCOPE_BUFFER_SIZE)) ScopeKind[SCOPE_BUFFER_SIZE];
+    scopePosition[0] = ScopeKind::Invalid;
+    scopePosition += 1;
+
     ParseStackState state(sourceBuf);
     const char* sourceBufferBegin = sourceBuf.begin();
     const char* tokBegin = sourceBufferBegin;
     const char* tokEnd = sourceBufferBegin;
-    NodeKind tokKind = (NodeKind)0;
+    NodeKind nodeKind = (NodeKind)0;
     size_t data1 = 0;
 
-    tokKind = NodeKind::Newline;
+    nodeKind = NodeKind::Newline;
     goto expression;
 
 #define TODO() VERIFY_NOT_REACHED()
