@@ -1,4 +1,3 @@
-
 #include "nodes.h"
 #include <utility>
 
@@ -162,7 +161,8 @@ std::vector<Node> parse(std::string_view sourceBuf) {
     nodeKind = NodeKind::Newline;
     goto expression;
 
-#define TODO() VERIFY_NOT_REACHED()
+#define TODO_PARSE() VERIFY_NOT_REACHED()
+#define TODO_ERROR(error) VERIFY_NOT_REACHED()
 
     // GENERATED CODE HERE
 }

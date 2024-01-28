@@ -166,6 +166,16 @@ def checkFor(punc, handler):
             line("}")
     line("}")
 
+class ErrorHandler:
+    def punctuation(self, punc: Punctuation):
+        line("TODO_ERROR(\"invalid token for state\");")
+
+    def keyword(self, keyword: str):
+        line("TODO_ERROR(\"invalid token for state\");")
+
+    def identifier(self):
+        line("TODO_ERROR(\"invalid token for state\");")
+
 class InlineAdvancerCertificate:
     pass
 
@@ -274,7 +284,7 @@ def generateState(stateName, handler):
             with indent():
                 line("return reachedEOS(state, scopePosition);")
             line("}")
-            line("TODO();")
+            line("TODO_ERROR(\"invalid character\");")
         line("}")
 
         line("} // switch")
@@ -287,7 +297,7 @@ def generateState(stateName, handler):
 
     line("} // retry-loop")
 
-class ExpressionHandler:
+class ExpressionHandler(ErrorHandler):
     def punctuation(self, punc: Punctuation):
         prefixOps = {
             Punctuation.Exclaim: "LogicalNotExpr",
@@ -305,14 +315,14 @@ class ExpressionHandler:
             line("data1 = (size_t)ScopeKind::Paren;")
             line("goto begin_argument_scope;")
         else:
-            line("TODO();")
+            super().punctuation(punc)
 
     def keyword(self, keyword):
         if keyword == "if":
             pushScope("ScopeKind::IfExpr")
             gotoStateNoSave("expression")
         else:
-            line("TODO();")
+            super().keyword(keyword)
 
     def identifier(self):
         gotoStateAndSave("after_expression", "NodeKind::IdentifierExpr")
@@ -330,9 +340,9 @@ class StatementHandler(ExpressionHandler):
             pushScope("ScopeKind::IfExprOrStmt")
             gotoStateNoSave("expression")
         else:
-            line("TODO();")
+            super().keyword(keyword)
 
-class AfterExpressionHandler:
+class AfterExpressionHandler(ErrorHandler):
     def punctuation(self, punc: Punctuation):
         postfixOps = {
             Punctuation.PlusPlus: "PostIncrementExpr",
@@ -369,7 +379,7 @@ class AfterExpressionHandler:
                 inlineIdentifier()
                 gotoStateAndSave("after_expression", "NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr")
             line("}")
-            line("TODO();")
+            line("TODO_ERROR(\"junk after access punctuation\");")
         elif punc is Punctuation.LeftParen:
             line("nodeKind = NodeKind::CallExpr;")
             line("data1 = (size_t)ScopeKind::Paren;")
@@ -404,11 +414,11 @@ class AfterExpressionHandler:
                     line("tokEnd += 2;")
                     gotoStateAndSave("expression", "NodeKind::CommaElseExpr")
                 line("}")
-                line("TODO();")
+                line("TODO_ERROR(\"junk after comma-else\");")
             line("}")
             line("if (std::string_view(tokEnd, 4) == \"elif\" && !isWordBulkCharacter(tokEnd[4])) {")
             with indent():
-                line("TODO();")
+                line("TODO_PARSE();")
             line("}")
 
             # lists
@@ -427,7 +437,7 @@ class AfterExpressionHandler:
                 line("}")
                 gotoStateAlreadyAdvanced("expression", advance1)
             line("}")
-            line("TODO();")
+            line("TODO_ERROR(\"invalid scope for comma\");")
         elif punc is Punctuation.SemiColon:
             gotoStateAndSave("statement", "NodeKind::ExpressionStmt")
         elif punc is Punctuation.FatArrow:
@@ -437,7 +447,7 @@ class AfterExpressionHandler:
                 popScope("scopeKind")
                 gotoStateAndSave("expression", "NodeKind::IfExpr")
             line("}")
-            line("TODO();")
+            line("TODO_ERROR(\"invalid scope for fat-arrow\");")
         elif punc is Punctuation.Colon:
             peekScope("scopeKind")
             line("if (scopeKind == ScopeKind::IfExprOrStmt) {")
@@ -446,15 +456,9 @@ class AfterExpressionHandler:
                 line("nodeKind = NodeKind::IfStmt;")
                 line("goto single_or_compound_statement;")
             line("}")
-            line("TODO();")
+            line("TODO_ERROR(\"invalid scope for colon\");")
         else:
-            line("TODO();")
-
-    def keyword(self, keyword):
-        line("TODO();")
-
-    def identifier(self):
-        line("TODO();")
+            super().punctuation(punc)
 
 # generate
 with indent():

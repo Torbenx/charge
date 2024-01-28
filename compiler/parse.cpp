@@ -1,5 +1,3 @@
-
-#include "WordTable.h"
 #include "nodes.h"
 #include <utility>
 
@@ -31,7 +29,6 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    WordStringTable wordTable { words };
     const char* sourceBufferEnd;
 
     ParseStackState(std::string_view sourceBuf)
@@ -63,15 +60,10 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
 }
 
-[[nodiscard]] static const char* readWord(const char* position, Word& outWord, WordStringTable& wordTable) {
-    const char* wordStart = position;
-    uint32_t hash = 0;
+[[nodiscard]] static const char* skipToEndOfIdentifier(const char* position) {
     do {
-        hash = Word::iterateHash(hash, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    hash = Word::finalizeHash(hash);
-    outWord = wordTable.getWithHash(std::string_view(wordStart, position), hash);
     return position;
 }
 
@@ -137,6 +129,15 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
+struct ScopeBuffer {
+    ScopeKind* buffer;
+    ScopeBuffer()
+        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
+    ~ScopeBuffer() {
+        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
+    }
+};
+
 static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
     scopePosition -= 1;
     VERIFY(scopePosition[0] == ScopeKind::Invalid);
@@ -144,8 +145,13 @@ static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosi
     return state.nodes;
 }
 
+enum class LexerError {
+    InvalidCharacter,
+};
+
 std::vector<Node> parse(std::string_view sourceBuf) {
-    ScopeKind* scopePosition = new (std::align_val_t(SCOPE_BUFFER_SIZE)) ScopeKind[SCOPE_BUFFER_SIZE];
+    ScopeBuffer scopeBuffer;
+    ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 
@@ -159,18 +165,18 @@ std::vector<Node> parse(std::string_view sourceBuf) {
     nodeKind = NodeKind::Newline;
     goto expression;
 
-#define TODO() VERIFY_NOT_REACHED()
+#define TODO_PARSE() VERIFY_NOT_REACHED()
+#define TODO_ERROR(error) VERIFY_NOT_REACHED()
 
 check_for_designated_argument : {
-    Word word;
-    tokEnd = readWord(tokEnd, word, state.wordTable);
+    tokEnd = skipToEndOfIdentifier(tokEnd);
     auto savedBegin = tokBegin;
     auto savedEnd = tokEnd;
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
     tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "=") {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
+        if (next != '=' && next != '>') {
             tokEnd += 1;
             nodeKind = NodeKind::DesignateArgument;
             goto expression;
@@ -235,7 +241,7 @@ statement_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::LogicalNotExpr;
@@ -245,10 +251,10 @@ statement_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '&': {
             char next = tokEnd[1];
@@ -256,17 +262,17 @@ statement_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '(': {
             tokEnd += 1;
@@ -276,13 +282,13 @@ statement_continue:
         }
         case ')': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '*': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::DereferenceExpr;
@@ -297,7 +303,7 @@ statement_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::PlusExpr;
@@ -305,7 +311,7 @@ statement_continue:
         }
         case ',': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '-': {
             char next = tokEnd[1];
@@ -316,11 +322,11 @@ statement_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::NegateExpr;
@@ -328,7 +334,7 @@ statement_continue:
         }
         case '.': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '/': {
             char next = tokEnd[1];
@@ -347,23 +353,23 @@ statement_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ':': {
             char next = tokEnd[1];
             if (next == ':') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ';': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '<': {
             char next = tokEnd[1];
@@ -371,101 +377,101 @@ statement_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '=') {
                 char next = tokEnd[2];
                 if (next == '>') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '=': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '>': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '?': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '[': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ']': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '^': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '{': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '|': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '|') {
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '}': {
             tokEnd += 1;
             scopePosition = popScope(ScopeKind::CompoundStmt, scopePosition);
-            nodeKind = NodeKind::EmptyNode;;
+            nodeKind = NodeKind::EmptyNode;
             goto statement;
         }
         case '~': {
@@ -473,32 +479,190 @@ statement_continue:
             nodeKind = NodeKind::BitwiseNotExpr;
             goto expression;
         }
-        case 'a':
-        case 'b':
-        case 'c':
-        case 'd':
-        case 'e':
-        case 'f':
-        case 'g':
-        case 'h':
-        case 'i':
-        case 'j':
-        case 'k':
-        case 'l':
-        case 'm':
-        case 'n':
-        case 'o':
-        case 'p':
-        case 'q':
-        case 'r':
-        case 's':
-        case 't':
-        case 'u':
-        case 'v':
-        case 'w':
-        case 'x':
-        case 'y':
-        case 'z':
+        case 'a': {
+            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'b': {
+            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'c': {
+            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'd': {
+            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'e': {
+            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'f': {
+            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+                tokEnd += 7;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'g': {
+            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'i': {
+            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                scopePosition = pushScope(ScopeKind::IfExprOrStmt, scopePosition);
+                goto expression_continue;
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'l': {
+            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'm': {
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'n': {
+            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+                tokEnd += 9;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'o': {
+            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'r': {
+            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 's': {
+            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 't': {
+            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'v': {
+            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
+        case 'w': {
+            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto statement_identifier_case;
+        }
         case 'A':
         case 'B':
         case 'C':
@@ -525,30 +689,32 @@ statement_continue:
         case 'X':
         case 'Y':
         case 'Z':
+        case 'h':
+        case 'j':
+        case 'k':
+        case 'p':
+        case 'q':
+        case 'u':
+        case 'x':
+        case 'y':
+        case 'z':
         case '#':
         case '$':
         case '_': {
-            Word word;
-            tokEnd = readWord(tokEnd, word, state.wordTable);
-            if (word == words["if"]) {
-                scopePosition = pushScope(ScopeKind::IfExprOrStmt, scopePosition);
-                goto expression_continue;
-            }
-            if (word == words["if"]) {
-                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
-                continue;
-            }
-            nodeKind = NodeKind::IdentifierExpr;
-            goto after_expression;
+            goto statement_identifier_case;
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
                 return reachedEOS(state, scopePosition);
             }
-            TODO();
+            TODO_ERROR("invalid character");
         }
         } // switch
         VERIFY_NOT_REACHED();
+    statement_identifier_case:
+        tokEnd = skipToEndOfIdentifier(tokEnd);
+        nodeKind = NodeKind::IdentifierExpr;
+        goto after_expression;
     } // retry-loop
 
 expression:
@@ -578,7 +744,7 @@ expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::LogicalNotExpr;
@@ -588,10 +754,10 @@ expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '&': {
             char next = tokEnd[1];
@@ -599,17 +765,17 @@ expression_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '(': {
             tokEnd += 1;
@@ -619,13 +785,13 @@ expression_continue:
         }
         case ')': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '*': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::DereferenceExpr;
@@ -640,7 +806,7 @@ expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::PlusExpr;
@@ -648,7 +814,7 @@ expression_continue:
         }
         case ',': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '-': {
             char next = tokEnd[1];
@@ -659,11 +825,11 @@ expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::NegateExpr;
@@ -671,7 +837,7 @@ expression_continue:
         }
         case '.': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '/': {
             char next = tokEnd[1];
@@ -690,23 +856,23 @@ expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ':': {
             char next = tokEnd[1];
             if (next == ':') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ';': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '<': {
             char next = tokEnd[1];
@@ -714,132 +880,290 @@ expression_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '=') {
                 char next = tokEnd[2];
                 if (next == '>') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '=': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '>': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '?': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '[': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case ']': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '^': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '{': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '|': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '|') {
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '}': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '~': {
             tokEnd += 1;
             nodeKind = NodeKind::BitwiseNotExpr;
             goto expression;
         }
-        case 'a':
-        case 'b':
-        case 'c':
-        case 'd':
-        case 'e':
-        case 'f':
-        case 'g':
-        case 'h':
-        case 'i':
-        case 'j':
-        case 'k':
-        case 'l':
-        case 'm':
-        case 'n':
-        case 'o':
-        case 'p':
-        case 'q':
-        case 'r':
-        case 's':
-        case 't':
-        case 'u':
-        case 'v':
-        case 'w':
-        case 'x':
-        case 'y':
-        case 'z':
+        case 'a': {
+            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'b': {
+            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'c': {
+            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'd': {
+            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'e': {
+            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'f': {
+            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+                tokEnd += 7;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'g': {
+            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'i': {
+            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
+                goto expression_continue;
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'l': {
+            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'm': {
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'n': {
+            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+                tokEnd += 9;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'o': {
+            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'r': {
+            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 's': {
+            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 't': {
+            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'v': {
+            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
+        case 'w': {
+            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto expression_identifier_case;
+        }
         case 'A':
         case 'B':
         case 'C':
@@ -866,26 +1190,32 @@ expression_continue:
         case 'X':
         case 'Y':
         case 'Z':
+        case 'h':
+        case 'j':
+        case 'k':
+        case 'p':
+        case 'q':
+        case 'u':
+        case 'x':
+        case 'y':
+        case 'z':
         case '#':
         case '$':
         case '_': {
-            Word word;
-            tokEnd = readWord(tokEnd, word, state.wordTable);
-            if (word == words["if"]) {
-                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
-                continue;
-            }
-            nodeKind = NodeKind::IdentifierExpr;
-            goto after_expression;
+            goto expression_identifier_case;
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
                 return reachedEOS(state, scopePosition);
             }
-            TODO();
+            TODO_ERROR("invalid character");
         }
         } // switch
         VERIFY_NOT_REACHED();
+    expression_identifier_case:
+        tokEnd = skipToEndOfIdentifier(tokEnd);
+        nodeKind = NodeKind::IdentifierExpr;
+        goto after_expression;
     } // retry-loop
 
 after_expression:
@@ -919,13 +1249,13 @@ after_expression_continue:
                 goto expression;
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '%': {
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::RemainderExpr;
@@ -937,7 +1267,7 @@ after_expression_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
                 nodeKind = NodeKind::LogicalAndExpr;
@@ -945,7 +1275,7 @@ after_expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::BitwiseAndExpr;
@@ -967,7 +1297,7 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::MultiplyExpr;
@@ -982,7 +1312,7 @@ after_expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::AdditionExpr;
@@ -1001,10 +1331,10 @@ after_expression_continue:
                     nodeKind = NodeKind::CommaElseExpr;
                     goto expression;
                 }
-                TODO();
+                TODO_ERROR("junk after comma-else");
             }
             if (std::string_view(tokEnd, 4) == "elif" && !isWordBulkCharacter(tokEnd[4])) {
-                TODO();
+                TODO_PARSE();
             }
             auto scopeKind = peekScope(scopePosition);
             if (isBracketScope(scopeKind)) {
@@ -1019,7 +1349,7 @@ after_expression_continue:
                 }
                 goto expression_dispatch;
             }
-            TODO();
+            TODO_ERROR("invalid scope for comma");
         }
         case '-': {
             char next = tokEnd[1];
@@ -1030,11 +1360,11 @@ after_expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '>') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::SubtractionExpr;
@@ -1045,12 +1375,11 @@ after_expression_continue:
             tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
             tokBegin = tokEnd;
             if (isWordFirstCharacter(tokEnd[0])) {
-                Word word;
-                tokEnd = readWord(tokEnd, word, state.wordTable);
+                tokEnd = skipToEndOfIdentifier(tokEnd);
                 nodeKind = NodeKind::MemberAccessExpr;
                 goto after_expression;
             }
-            TODO();
+            TODO_ERROR("junk after access punctuation");
         }
         case '/': {
             char next = tokEnd[1];
@@ -1069,7 +1398,7 @@ after_expression_continue:
             }
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::DivideExpr;
@@ -1082,12 +1411,11 @@ after_expression_continue:
                 tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
                 tokBegin = tokEnd;
                 if (isWordFirstCharacter(tokEnd[0])) {
-                    Word word;
-                    tokEnd = readWord(tokEnd, word, state.wordTable);
+                    tokEnd = skipToEndOfIdentifier(tokEnd);
                     nodeKind = NodeKind::StaticAccessExpr;
                     goto after_expression;
                 }
-                TODO();
+                TODO_ERROR("junk after access punctuation");
             }
             tokEnd += 1;
             auto scopeKind = peekScope(scopePosition);
@@ -1096,7 +1424,7 @@ after_expression_continue:
                 nodeKind = NodeKind::IfStmt;
                 goto single_or_compound_statement;
             }
-            TODO();
+            TODO_ERROR("invalid scope for colon");
         }
         case ';': {
             tokEnd += 1;
@@ -1109,7 +1437,7 @@ after_expression_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
                 nodeKind = NodeKind::ShiftLeftExpr;
@@ -1119,7 +1447,7 @@ after_expression_continue:
                 char next = tokEnd[2];
                 if (next == '>') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
                 nodeKind = NodeKind::CompareLessEqualExpr;
@@ -1144,10 +1472,10 @@ after_expression_continue:
                     nodeKind = NodeKind::IfExpr;
                     goto expression;
                 }
-                TODO();
+                TODO_ERROR("invalid scope for fat-arrow");
             }
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '>': {
             char next = tokEnd[1];
@@ -1160,7 +1488,7 @@ after_expression_continue:
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
                 nodeKind = NodeKind::ShiftRightExpr;
@@ -1172,7 +1500,7 @@ after_expression_continue:
         }
         case '?': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
         case '[': {
             tokEnd += 1;
@@ -1190,7 +1518,7 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             tokEnd += 1;
             nodeKind = NodeKind::BitwiseXorExpr;
@@ -1206,13 +1534,13 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == '=') {
                 tokEnd += 2;
-                TODO();
+                TODO_ERROR("invalid token for state");
             }
             if (next == '|') {
                 char next = tokEnd[2];
                 if (next == '=') {
                     tokEnd += 3;
-                    TODO();
+                    TODO_ERROR("invalid token for state");
                 }
                 tokEnd += 2;
                 nodeKind = NodeKind::LogicalOrExpr;
@@ -1230,34 +1558,191 @@ after_expression_continue:
         }
         case '~': {
             tokEnd += 1;
-            TODO();
+            TODO_ERROR("invalid token for state");
         }
-        case 'a':
-        case 'b':
-        case 'c':
-        case 'd':
-        case 'e':
-        case 'f':
-        case 'g':
-        case 'h':
-        case 'i':
-        case 'j':
-        case 'k':
-        case 'l':
-        case 'm':
-        case 'n':
-        case 'o':
-        case 'p':
-        case 'q':
-        case 'r':
-        case 's':
-        case 't':
-        case 'u':
-        case 'v':
-        case 'w':
-        case 'x':
-        case 'y':
-        case 'z':
+        case 'a': {
+            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'b': {
+            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'c': {
+            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'd': {
+            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'e': {
+            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'f': {
+            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+                tokEnd += 7;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'g': {
+            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'i': {
+            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+                tokEnd += 2;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'l': {
+            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'm': {
+            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'n': {
+            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+                tokEnd += 9;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'o': {
+            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'r': {
+            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 's': {
+            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+                tokEnd += 6;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 't': {
+            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+                tokEnd += 8;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'v': {
+            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+                tokEnd += 3;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
+        case 'w': {
+            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+                tokEnd += 5;
+                TODO_ERROR("invalid token for state");
+            }
+            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+                tokEnd += 4;
+                TODO_ERROR("invalid token for state");
+            }
+            goto after_expression_identifier_case;
+        }
         case 'A':
         case 'B':
         case 'C':
@@ -1284,21 +1769,31 @@ after_expression_continue:
         case 'X':
         case 'Y':
         case 'Z':
+        case 'h':
+        case 'j':
+        case 'k':
+        case 'p':
+        case 'q':
+        case 'u':
+        case 'x':
+        case 'y':
+        case 'z':
         case '#':
         case '$':
         case '_': {
-            Word word;
-            tokEnd = readWord(tokEnd, word, state.wordTable);
-            TODO();
+            goto after_expression_identifier_case;
         }
         default: {
             if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
                 return reachedEOS(state, scopePosition);
             }
-            TODO();
+            TODO_ERROR("invalid character");
         }
         } // switch
         VERIFY_NOT_REACHED();
+    after_expression_identifier_case:
+        tokEnd = skipToEndOfIdentifier(tokEnd);
+        TODO_ERROR("invalid token for state");
     } // retry-loop
 }
 
