@@ -1,5 +1,4 @@
 
-#include "WordTable.h"
 #include "nodes.h"
 #include <utility>
 
@@ -31,7 +30,6 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    WordStringTable wordTable { words };
     const char* sourceBufferEnd;
 
     ParseStackState(std::string_view sourceBuf)
@@ -63,15 +61,10 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
 }
 
-[[nodiscard]] static const char* readWord(const char* position, Word& outWord, WordStringTable& wordTable) {
-    const char* wordStart = position;
-    uint32_t hash = 0;
+[[nodiscard]] static const char* skipToEndOfIdentifier(const char* position) {
     do {
-        hash = Word::iterateHash(hash, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    hash = Word::finalizeHash(hash);
-    outWord = wordTable.getWithHash(std::string_view(wordStart, position), hash);
     return position;
 }
 
@@ -137,6 +130,15 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
+struct ScopeBuffer {
+    ScopeKind* buffer;
+    ScopeBuffer()
+        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
+    ~ScopeBuffer() {
+        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
+    }
+};
+
 static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
     scopePosition -= 1;
     VERIFY(scopePosition[0] == ScopeKind::Invalid);
@@ -145,7 +147,8 @@ static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosi
 }
 
 std::vector<Node> parse(std::string_view sourceBuf) {
-    ScopeKind* scopePosition = new (std::align_val_t(SCOPE_BUFFER_SIZE)) ScopeKind[SCOPE_BUFFER_SIZE];
+    ScopeBuffer scopeBuffer;
+    ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 

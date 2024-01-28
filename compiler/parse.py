@@ -56,6 +56,13 @@ class Punctuation(enum.StrEnum):
     SlashSlash = "//"
     SlashStar = "/*"
 
+keywords = [
+    "if", "elif", "else", "match", "for", "while", "do", "return", "break", "continue", "loop", "guard", "try", "catch", "with", "analysis", "assert",
+    "namespace", "struct", "trait", "object", "fn", "static",
+    "template",
+    "var", "let", "in", "inout", "out", "forward", "assign",
+    "true", "false",
+]
 
 outputIndentation = 0
 generatedLines = []
@@ -167,6 +174,10 @@ def inlineTokenAdvancer():
     line("tokBegin = tokEnd;")
     return InlineAdvancerCertificate()
 
+def inlineIdentifier():
+    # TODO: Handle keywords
+    line("tokEnd = skipToEndOfIdentifier(tokEnd);")
+
 def pushScope(scopeKindExpr):
     line("scopePosition = pushScope(" + scopeKindExpr + ", scopePosition);")
 
@@ -193,10 +204,10 @@ def gotoStateAlreadyAdvanced(stateName, advance):
     assert(type(advance) == InlineAdvancerCertificate)
     line("goto " + stateName + "_dispatch;")
 
-def emitSwitch(stateName, handler):
+def generateState(stateName, handler):
     labelLine(stateName + ":")
 
-    # store
+    # save
     emitNodeFromLocals()
 
     labelLine(stateName + "_continue:")
@@ -231,15 +242,29 @@ def emitSwitch(stateName, handler):
             line("}")
 
         # word
-        for character in list(string.ascii_lowercase) + list(string.ascii_uppercase):
+        identifierBeginCharacters = set(string.ascii_lowercase) | set(string.ascii_uppercase)
+        keywordBeginCharacters = {k[0] for k in keywords}
+
+        for character in sorted(keywordBeginCharacters):
+            line("case '" + character + "': {")
+            with indent():
+                for keyword in keywords:
+                    if keyword.startswith(character):
+                        line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
+                        with indent():
+                            line("tokEnd += " + str(len(keyword))+ ";")
+                            handler.keyword(keyword)
+                        line("}")
+                line("goto " + stateName + "_identifier_case;")
+            line("}")
+
+        for character in sorted(identifierBeginCharacters - keywordBeginCharacters):
             line("case '" + character + "':")
         line("case '#':")
         line("case '$':")
         line("case '_': {")
         with indent():
-            line("Word word;")
-            line("tokEnd = readWord(tokEnd, word, state.wordTable);")
-            handler.word()
+            line("goto " + stateName + "_identifier_case;")
         line("}")
 
         # default
@@ -255,6 +280,11 @@ def emitSwitch(stateName, handler):
         line("} // switch")
 
         line("VERIFY_NOT_REACHED();")
+
+        labelLine(stateName + "_identifier_case:")
+        line("tokEnd = skipToEndOfIdentifier(tokEnd);")
+        handler.identifier()
+
     line("} // retry-loop")
 
 class ExpressionHandler:
@@ -277,29 +307,30 @@ class ExpressionHandler:
         else:
             line("TODO();")
 
-    def word(self):
-        line("if (word == words[\"if\"]) {")
-        with indent():
+    def keyword(self, keyword):
+        if keyword == "if":
             pushScope("ScopeKind::IfExpr")
-            line("continue;")
-        line("}")
+            gotoStateNoSave("expression")
+        else:
+            line("TODO();")
+
+    def identifier(self):
         gotoStateAndSave("after_expression", "NodeKind::IdentifierExpr")
 
 class StatementHandler(ExpressionHandler):
     def punctuation(self, punc: Punctuation):
         if punc is Punctuation.RightBrace:
             popScope("ScopeKind::CompoundStmt")
-            gotoStateAndSave("statement", "NodeKind::EmptyNode;")
+            gotoStateAndSave("statement", "NodeKind::EmptyNode")
         else:
             super().punctuation(punc)
 
-    def word(self):
-        line("if (word == words[\"if\"]) {")
-        with indent():
+    def keyword(self, keyword):
+        if keyword == "if":
             pushScope("ScopeKind::IfExprOrStmt")
             gotoStateNoSave("expression")
-        line("}")
-        super().word()
+        else:
+            line("TODO();")
 
 class AfterExpressionHandler:
     def punctuation(self, punc: Punctuation):
@@ -335,8 +366,7 @@ class AfterExpressionHandler:
             inlineTokenAdvancer()
             line("if (isWordFirstCharacter(tokEnd[0])) {")
             with indent():
-                line("Word word;")
-                line("tokEnd = readWord(tokEnd, word, state.wordTable);")
+                inlineIdentifier()
                 gotoStateAndSave("after_expression", "NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr")
             line("}")
             line("TODO();")
@@ -420,15 +450,17 @@ class AfterExpressionHandler:
         else:
             line("TODO();")
 
-    def word(self):
+    def keyword(self, keyword):
+        line("TODO();")
+
+    def identifier(self):
         line("TODO();")
 
 # generate
 with indent():
     # check_for_designated_argument
     labelLine("check_for_designated_argument : {")
-    line("Word word;")
-    line("tokEnd = readWord(tokEnd, word, state.wordTable);")
+    inlineIdentifier()
     line("auto savedBegin = tokBegin;")
     line("auto savedEnd = tokEnd;")
     advance = inlineTokenAdvancer()
@@ -470,11 +502,11 @@ with indent():
 
     lineNoIndent()
 
-    emitSwitch("statement", StatementHandler())
+    generateState("statement", StatementHandler())
     lineNoIndent()
-    emitSwitch("expression", ExpressionHandler())
+    generateState("expression", ExpressionHandler())
     lineNoIndent()
-    emitSwitch("after_expression", AfterExpressionHandler())
+    generateState("after_expression", AfterExpressionHandler())
 
 # combine/write
 currentDir = pathlib.Path(__file__).parent.resolve()
