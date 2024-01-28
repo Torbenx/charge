@@ -204,7 +204,8 @@ def emitNodeFromLocals():
     emitNode("nodeKind", "tokBegin", "tokEnd")
 
 def gotoStateAndSave(stateName, nodeKindExpr):
-    line("nodeKind = " + nodeKindExpr + ";")
+    if nodeKindExpr != "nodeKind":
+        line("nodeKind = " + nodeKindExpr + ";")
     line("goto " + stateName + ";")
 
 def gotoStateNoSave(stateName):
@@ -373,13 +374,8 @@ class AfterExpressionHandler(ErrorHandler):
         elif punc in binaryOps:
             gotoStateAndSave("expression", "NodeKind::" + binaryOps[punc])
         elif punc is Punctuation.Point or punc is Punctuation.ColonColon:
-            inlineTokenAdvancer()
-            line("if (isWordFirstCharacter(tokEnd[0])) {")
-            with indent():
-                inlineIdentifier()
-                gotoStateAndSave("after_expression", "NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr")
-            line("}")
-            line("TODO_ERROR(\"junk after access punctuation\");")
+            line("nodeKind = NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr;")
+            line("goto handle_access_punctuation;")
         elif punc is Punctuation.LeftParen:
             line("nodeKind = NodeKind::CallExpr;")
             line("data1 = (size_t)ScopeKind::Paren;")
@@ -502,6 +498,17 @@ with indent():
         gotoStateAndSave("statement", "NodeKind::CompoundStmt")
     checkFor(Punctuation.LeftBrace, compoundStatement)
     gotoStateAlreadyAdvanced("statement", advance)
+    labelLine("}")
+
+    # handle_access_punctuation
+    labelLine("handle_access_punctuation : {")
+    inlineTokenAdvancer()
+    line("if (isWordFirstCharacter(tokEnd[0])) {")
+    with indent():
+        inlineIdentifier()
+        gotoStateAndSave("after_expression", "nodeKind")
+    line("}")
+    line("TODO_ERROR(\"junk after access punctuation\");")
     labelLine("}")
 
     lineNoIndent()

@@ -145,10 +145,6 @@ static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosi
     return state.nodes;
 }
 
-enum class LexerError {
-    InvalidCharacter,
-};
-
 std::vector<Node> parse(std::string_view sourceBuf) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
@@ -176,7 +172,7 @@ check_for_designated_argument : {
     tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "=") {
         char next = tokEnd[1];
-        if (next != '=' && next != '>') {
+        if (next != '>' && next != '=') {
             tokEnd += 1;
             nodeKind = NodeKind::DesignateArgument;
             goto expression;
@@ -212,6 +208,15 @@ single_or_compound_statement : {
         goto statement;
     }
     goto statement_dispatch;
+}
+handle_access_punctuation : {
+    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        tokEnd = skipToEndOfIdentifier(tokEnd);
+        goto after_expression;
+    }
+    TODO_ERROR("junk after access punctuation");
 }
 
 statement:
@@ -1372,14 +1377,8 @@ after_expression_continue:
         }
         case '.': {
             tokEnd += 1;
-            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-            tokBegin = tokEnd;
-            if (isWordFirstCharacter(tokEnd[0])) {
-                tokEnd = skipToEndOfIdentifier(tokEnd);
-                nodeKind = NodeKind::MemberAccessExpr;
-                goto after_expression;
-            }
-            TODO_ERROR("junk after access punctuation");
+            nodeKind = NodeKind::MemberAccessExpr;
+            goto handle_access_punctuation;
         }
         case '/': {
             char next = tokEnd[1];
@@ -1408,14 +1407,8 @@ after_expression_continue:
             char next = tokEnd[1];
             if (next == ':') {
                 tokEnd += 2;
-                tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-                tokBegin = tokEnd;
-                if (isWordFirstCharacter(tokEnd[0])) {
-                    tokEnd = skipToEndOfIdentifier(tokEnd);
-                    nodeKind = NodeKind::StaticAccessExpr;
-                    goto after_expression;
-                }
-                TODO_ERROR("junk after access punctuation");
+                nodeKind = NodeKind::StaticAccessExpr;
+                goto handle_access_punctuation;
             }
             tokEnd += 1;
             auto scopeKind = peekScope(scopePosition);
