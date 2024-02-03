@@ -1,5 +1,9 @@
-#include "nodes.h"
+#include "parse.h"
 #include <utility>
+
+using namespace std::string_view_literals;
+
+namespace parse {
 
 static bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -16,16 +20,10 @@ enum class ScopeKind : char {
     IfExpr,
     IfExprOrStmt,
     CompoundStmt,
-    Paren = ')',
-    Square = ']',
-    Brace = '}',
+    Paren,
+    Square,
+    Brace,
 };
-static char scopeKindToRightBracket(ScopeKind scope) {
-    return std::to_underlying(scope);
-}
-static bool isBracketScope(ScopeKind scope) {
-    return std::to_underlying(scope) >= ' ';
-}
 
 struct ParseStackState {
     std::vector<Node> nodes;
@@ -148,34 +146,60 @@ static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosi
     return state.nodes;
 }
 
-std::vector<Node> parse(std::string_view sourceBuf) {
+std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 
     ParseStackState state;
-    const char* sourceBufferBegin = sourceBuf.begin();
-    const char* tokBegin = sourceBufferBegin;
-    const char* tokEnd = sourceBufferBegin;
+    const char* tokBegin = sourceBufferPosition;
+    const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
 
     const char* savedTokenBegin = nullptr;
     const char* savedTokenEnd = nullptr;
     NodeKind nodeKind = (NodeKind)0;
 
-    goto expression_no_emit;
+    State parseState = State::Statement;
+    Token errorToken = (Token)0;
 
-#define TODO_PARSE() VERIFY_NOT_REACHED()
-#define TODO_ERROR(error) VERIFY_NOT_REACHED()
-
+    switch (parseState) {
+    case State::Expression:
+        goto expression_no_emit;
+    case State::AfterExpression:
+        goto after_expression_no_emit;
+    case State::Statement:
+        goto statement_no_emit;
+    case State::SingleOrCompoundStatement:
+        VERIFY_NOT_REACHED();
+    case State::CommaAfterExpression:
+        VERIFY_NOT_REACHED();
+    case State::CommaElse:
+        VERIFY_NOT_REACHED();
+    case State::CheckDesignatedArgument:
+        VERIFY_NOT_REACHED();
+    case State::MaybeDesignatedArgument:
+        VERIFY_NOT_REACHED();
+    case State::FirstArgumentParen:
+        goto first_argument_paren_no_emit;
+    case State::FirstArgumentSquare:
+        VERIFY_NOT_REACHED();
+    case State::FirstArgumentBrace:
+        VERIFY_NOT_REACHED();
+    case State::AccessPunctuation:
+        goto access_punctuation_no_emit;
+    case State::Error:
+        VERIFY_NOT_REACHED();
+    }
     // SwitchState expression
 expression_with_emit:
     emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
 expression_no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-expression_no_whitespace:
+    parseState = State::Expression;
+expression_as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -194,7 +218,8 @@ expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::ExclaimEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::LogicalNotExpr
@@ -207,11 +232,13 @@ expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PercentEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Percent;
+        goto handle_parse_error;
     }
     case '&': {
         char next = tokEnd[1];
@@ -220,20 +247,24 @@ expression_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::AmpAmpEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::AmpAmp;
+            goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::AmpEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Amp;
+        goto handle_parse_error;
     }
     case '(': {
         tokEnd += 1;
@@ -245,14 +276,16 @@ expression_no_whitespace:
     case ')': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::RightParen;
+        goto handle_parse_error;
     }
     case '*': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::StarEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::DereferenceExpr
@@ -272,7 +305,8 @@ expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PlusEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::PlusExpr
@@ -283,7 +317,8 @@ expression_no_whitespace:
     case ',': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Comma;
+        goto handle_parse_error;
     }
     case '-': {
         char next = tokEnd[1];
@@ -297,12 +332,14 @@ expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::NegateExpr
@@ -313,7 +350,8 @@ expression_no_whitespace:
     case '.': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Point;
+        goto handle_parse_error;
     }
     case '/': {
         char next = tokEnd[1];
@@ -333,27 +371,32 @@ expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::SlashEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Slash;
+        goto handle_parse_error;
     }
     case ':': {
         char next = tokEnd[1];
         if (next == ':') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::ColonColon;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Colon;
+        goto handle_parse_error;
     }
     case ';': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::SemiColon;
+        goto handle_parse_error;
     }
     case '<': {
         char next = tokEnd[1];
@@ -362,122 +405,139 @@ expression_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessLessEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::LessLess;
+            goto handle_parse_error;
         }
         if (next == '=') {
             char next = tokEnd[2];
             if (next == '>') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessEqualGreater;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::LessEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Less;
+        goto handle_parse_error;
     }
     case '=': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::EqualEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::EqualGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Equal;
+        goto handle_parse_error;
     }
     case '>': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::GreaterEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::GreaterGreaterEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::GreaterGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
-    }
-    case '?': {
-        tokEnd += 1;
-        // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Greater;
+        goto handle_parse_error;
     }
     case '[': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::LeftSqure;
+        goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::RightSqure;
+        goto handle_parse_error;
     }
     case '^': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::HatEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Hat;
+        goto handle_parse_error;
     }
     case '{': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::LeftBrace;
+        goto handle_parse_error;
     }
     case '|': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::VertEqual;
+            goto handle_parse_error;
         }
         if (next == '|') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::VertVertEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::VertVert;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Vert;
+        goto handle_parse_error;
     }
     case '}': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::RightBrace;
+        goto handle_parse_error;
     }
     case '~': {
         tokEnd += 1;
@@ -487,220 +547,252 @@ expression_no_whitespace:
         goto expression_with_emit;
     }
     case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Analysis;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assert;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assign;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Break;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'c': {
-        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Catch;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Continue;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Do;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Elif;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Else;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'f': {
-        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::False;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::Fn;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::For;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            errorToken = Token::Forward;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Guard;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // pushScope ScopeKind::IfExpr
             scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
             // next expression
             goto expression_no_emit;
         }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::In;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Inout;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'l': {
-        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Let;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Loop;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Match;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
             tokEnd += 9;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Namespace;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Object;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Out;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Return;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Static;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Struct;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 't': {
-        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Template;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Trait;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::True;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Try;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Var;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
     case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::While;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::With;
+            goto handle_parse_error;
         }
         goto expression_identifier_case;
     }
@@ -762,7 +854,8 @@ after_expression_with_emit:
 after_expression_no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-after_expression_no_whitespace:
+    parseState = State::AfterExpression;
+after_expression_as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -787,14 +880,16 @@ after_expression_no_whitespace:
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Exclaim;
+        goto handle_parse_error;
     }
     case '%': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PercentEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::RemainderExpr
@@ -809,7 +904,8 @@ after_expression_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::AmpAmpEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // emitNode NodeKind::LogicalAndExpr
@@ -820,7 +916,8 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::AmpEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::BitwiseAndExpr
@@ -849,7 +946,8 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::StarEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::MultiplyExpr
@@ -869,7 +967,8 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PlusEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::AdditionExpr
@@ -883,13 +982,15 @@ after_expression_no_whitespace:
         // inlined comma_after_expression
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        if (std::string_view(tokEnd, 4) == "else" && !isWordBulkCharacter(tokEnd[4])) {
+        parseState = State::CommaAfterExpression;
+        if (std::string_view(tokEnd, 4) == "else"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // next comma_else
             // inlined comma_else
             tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
             tokBegin = tokEnd;
-            if (std::string_view(tokEnd, 2) == "=>") {
+            parseState = State::CommaElse;
+            if (std::string_view(tokEnd, 2) == "=>"sv) {
                 tokEnd += 2;
                 // emitNode NodeKind::CommaElseExpr
                 carriedEmitNodeKind = NodeKind::CommaElseExpr;
@@ -897,9 +998,9 @@ after_expression_no_whitespace:
                 goto expression_with_emit;
             }
             // then error
-            goto error_no_whitespace;
+            goto error_as_then;
         }
-        if (std::string_view(tokEnd, 1) == ")") {
+        if (std::string_view(tokEnd, 1) == ")"sv) {
             tokEnd += 1;
             // popScope ScopeKind::Paren
             scopePosition = popScope(scopePosition, ScopeKind::Paren);
@@ -908,7 +1009,7 @@ after_expression_no_whitespace:
             // next after_expression
             goto after_expression_with_emit;
         }
-        if (std::string_view(tokEnd, 1) == "]") {
+        if (std::string_view(tokEnd, 1) == "]"sv) {
             tokEnd += 1;
             // popScope ScopeKind::Square
             scopePosition = popScope(scopePosition, ScopeKind::Square);
@@ -917,7 +1018,7 @@ after_expression_no_whitespace:
             // next after_expression
             goto after_expression_with_emit;
         }
-        if (std::string_view(tokEnd, 1) == "}") {
+        if (std::string_view(tokEnd, 1) == "}"sv) {
             tokEnd += 1;
             // popScope ScopeKind::Brace
             scopePosition = popScope(scopePosition, ScopeKind::Brace);
@@ -927,7 +1028,7 @@ after_expression_no_whitespace:
             goto after_expression_with_emit;
         }
         // then check_designated_argument
-        goto check_designated_argument_no_whitespace;
+        goto check_designated_argument_as_then;
     }
     case '-': {
         char next = tokEnd[1];
@@ -941,12 +1042,14 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::SubtractionExpr
@@ -979,7 +1082,8 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::SlashEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::DivideExpr
@@ -1006,7 +1110,8 @@ after_expression_no_whitespace:
         emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        if (std::string_view(tokEnd, 1) == "{") {
+        parseState = State::SingleOrCompoundStatement;
+        if (std::string_view(tokEnd, 1) == "{"sv) {
             tokEnd += 1;
             // pushScope ScopeKind::CompoundStmt
             scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
@@ -1016,7 +1121,7 @@ after_expression_no_whitespace:
             goto statement_with_emit;
         }
         // then statement
-        goto statement_no_whitespace;
+        goto statement_as_then;
     }
     case ';': {
         tokEnd += 1;
@@ -1036,7 +1141,8 @@ after_expression_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessLessEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // emitNode NodeKind::ShiftLeftExpr
@@ -1049,7 +1155,8 @@ after_expression_no_whitespace:
             if (next == '>') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessEqualGreater;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // emitNode NodeKind::CompareLessEqualExpr
@@ -1083,7 +1190,8 @@ after_expression_no_whitespace:
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Equal;
+        goto handle_parse_error;
     }
     case '>': {
         char next = tokEnd[1];
@@ -1099,7 +1207,8 @@ after_expression_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::GreaterGreaterEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // emitNode NodeKind::ShiftRightExpr
@@ -1113,11 +1222,6 @@ after_expression_no_whitespace:
         // next expression
         goto expression_with_emit;
     }
-    case '?': {
-        tokEnd += 1;
-        // error
-        VERIFY_NOT_REACHED();
-    }
     case '[': {
         tokEnd += 1;
         // emitNode NodeKind::IndexExpr
@@ -1127,7 +1231,8 @@ after_expression_no_whitespace:
         emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        if (std::string_view(tokEnd, 1) == "]") {
+        parseState = State::FirstArgumentSquare;
+        if (std::string_view(tokEnd, 1) == "]"sv) {
             tokEnd += 1;
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
@@ -1137,7 +1242,7 @@ after_expression_no_whitespace:
         // pushScope ScopeKind::Square
         scopePosition = pushScope(scopePosition, ScopeKind::Square);
         // then check_designated_argument
-        goto check_designated_argument_no_whitespace;
+        goto check_designated_argument_as_then;
     }
     case ']': {
         tokEnd += 1;
@@ -1153,7 +1258,8 @@ after_expression_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::HatEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::BitwiseXorExpr
@@ -1170,7 +1276,8 @@ after_expression_no_whitespace:
         emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        if (std::string_view(tokEnd, 1) == "}") {
+        parseState = State::FirstArgumentBrace;
+        if (std::string_view(tokEnd, 1) == "}"sv) {
             tokEnd += 1;
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
@@ -1180,21 +1287,23 @@ after_expression_no_whitespace:
         // pushScope ScopeKind::Brace
         scopePosition = pushScope(scopePosition, ScopeKind::Brace);
         // then check_designated_argument
-        goto check_designated_argument_no_whitespace;
+        goto check_designated_argument_as_then;
     }
     case '|': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::VertEqual;
+            goto handle_parse_error;
         }
         if (next == '|') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::VertVertEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // emitNode NodeKind::LogicalOrExpr
@@ -1220,221 +1329,255 @@ after_expression_no_whitespace:
     case '~': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Tilde;
+        goto handle_parse_error;
     }
     case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Analysis;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assert;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assign;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Break;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'c': {
-        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Catch;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Continue;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Do;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Elif;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Else;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'f': {
-        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::False;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::Fn;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::For;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            errorToken = Token::Forward;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Guard;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::If;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::In;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Inout;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'l': {
-        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Let;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Loop;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Match;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
             tokEnd += 9;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Namespace;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Object;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Out;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Return;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Static;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Struct;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 't': {
-        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Template;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Trait;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::True;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Try;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Var;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
     case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::While;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::With;
+            goto handle_parse_error;
         }
         goto after_expression_identifier_case;
     }
@@ -1486,7 +1629,8 @@ after_expression_no_whitespace:
 after_expression_identifier_case:
     tokEnd = skipToEndOfIdentifier(tokEnd);
     // error
-    VERIFY_NOT_REACHED();
+    errorToken = Token::Identifier;
+    goto handle_parse_error;
 
     // SwitchState statement
 statement_with_emit:
@@ -1494,7 +1638,8 @@ statement_with_emit:
 statement_no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-statement_no_whitespace:
+    parseState = State::Statement;
+statement_as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -1513,7 +1658,8 @@ statement_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::ExclaimEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::LogicalNotExpr
@@ -1526,11 +1672,13 @@ statement_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PercentEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Percent;
+        goto handle_parse_error;
     }
     case '&': {
         char next = tokEnd[1];
@@ -1539,20 +1687,24 @@ statement_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::AmpAmpEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::AmpAmp;
+            goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::AmpEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Amp;
+        goto handle_parse_error;
     }
     case '(': {
         tokEnd += 1;
@@ -1564,14 +1716,16 @@ statement_no_whitespace:
     case ')': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::RightParen;
+        goto handle_parse_error;
     }
     case '*': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::StarEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::DereferenceExpr
@@ -1591,7 +1745,8 @@ statement_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::PlusEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::PlusExpr
@@ -1602,7 +1757,8 @@ statement_no_whitespace:
     case ',': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Comma;
+        goto handle_parse_error;
     }
     case '-': {
         char next = tokEnd[1];
@@ -1616,12 +1772,14 @@ statement_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::MinusGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // emitNode NodeKind::NegateExpr
@@ -1632,7 +1790,8 @@ statement_no_whitespace:
     case '.': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Point;
+        goto handle_parse_error;
     }
     case '/': {
         char next = tokEnd[1];
@@ -1652,27 +1811,32 @@ statement_no_whitespace:
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::SlashEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Slash;
+        goto handle_parse_error;
     }
     case ':': {
         char next = tokEnd[1];
         if (next == ':') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::ColonColon;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Colon;
+        goto handle_parse_error;
     }
     case ';': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::SemiColon;
+        goto handle_parse_error;
     }
     case '<': {
         char next = tokEnd[1];
@@ -1681,117 +1845,133 @@ statement_no_whitespace:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessLessEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::LessLess;
+            goto handle_parse_error;
         }
         if (next == '=') {
             char next = tokEnd[2];
             if (next == '>') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::LessEqualGreater;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::LessEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Less;
+        goto handle_parse_error;
     }
     case '=': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::EqualEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::EqualGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Equal;
+        goto handle_parse_error;
     }
     case '>': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::GreaterEqual;
+            goto handle_parse_error;
         }
         if (next == '>') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::GreaterGreaterEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::GreaterGreater;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
-    }
-    case '?': {
-        tokEnd += 1;
-        // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Greater;
+        goto handle_parse_error;
     }
     case '[': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::LeftSqure;
+        goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::RightSqure;
+        goto handle_parse_error;
     }
     case '^': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::HatEqual;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Hat;
+        goto handle_parse_error;
     }
     case '{': {
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::LeftBrace;
+        goto handle_parse_error;
     }
     case '|': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::VertEqual;
+            goto handle_parse_error;
         }
         if (next == '|') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                VERIFY_NOT_REACHED();
+                errorToken = Token::VertVertEqual;
+                goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::VertVert;
+            goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        VERIFY_NOT_REACHED();
+        errorToken = Token::Vert;
+        goto handle_parse_error;
     }
     case '}': {
         tokEnd += 1;
@@ -1814,220 +1994,252 @@ statement_no_whitespace:
         goto expression_with_emit;
     }
     case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Analysis;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assert;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Assign;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Break;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'c': {
-        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Catch;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Continue;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Do;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Elif;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Else;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'f': {
-        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::False;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::Fn;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::For;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            errorToken = Token::Forward;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Guard;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // pushScope ScopeKind::IfExprOrStmt
             scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
             // next expression
             goto expression_no_emit;
         }
-        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
             tokEnd += 2;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::In;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Inout;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'l': {
-        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Let;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Loop;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Match;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
             tokEnd += 9;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Namespace;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Object;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Out;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Return;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Static;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
             tokEnd += 6;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Struct;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 't': {
-        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            VERIFY_NOT_REACHED();
-        }
-        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
             tokEnd += 8;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Template;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Trait;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::True;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Try;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
             tokEnd += 3;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::Var;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
     case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
             tokEnd += 5;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::While;
+            goto handle_parse_error;
         }
-        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
             tokEnd += 4;
             // error
-            VERIFY_NOT_REACHED();
+            errorToken = Token::With;
+            goto handle_parse_error;
         }
         goto statement_identifier_case;
     }
@@ -2084,7 +2296,7 @@ statement_identifier_case:
     goto after_expression_with_emit;
 
     // LinearState check_designated_argument
-check_designated_argument_no_whitespace:
+check_designated_argument_as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         tokEnd = skipToEndOfIdentifier(tokEnd);
         // savedToken = tok
@@ -2094,7 +2306,8 @@ check_designated_argument_no_whitespace:
         // inlined maybe_designated_argument
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        if (std::string_view(tokEnd, 1) == "=") {
+        parseState = State::MaybeDesignatedArgument;
+        if (std::string_view(tokEnd, 1) == "="sv) {
             char next = tokEnd[1];
             if (next != '=' && next != '>') {
                 tokEnd += 1;
@@ -2107,17 +2320,19 @@ check_designated_argument_no_whitespace:
         // emitNode NodeKind::IdentifierExpr, savedToken
         emitNode(NodeKind::IdentifierExpr, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
         // then after_expression
-        goto after_expression_no_whitespace;
+        goto after_expression_as_then;
     }
     // then expression
-    goto expression_no_whitespace;
+    goto expression_as_then;
 
     // LinearState first_argument_paren
 first_argument_paren_with_emit:
     emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+first_argument_paren_no_emit:
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
     tokBegin = tokEnd;
-    if (std::string_view(tokEnd, 1) == ")") {
+    parseState = State::FirstArgumentParen;
+    if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
@@ -2127,12 +2342,13 @@ first_argument_paren_with_emit:
     // pushScope ScopeKind::Paren
     scopePosition = pushScope(scopePosition, ScopeKind::Paren);
     // then check_designated_argument
-    goto check_designated_argument_no_whitespace;
+    goto check_designated_argument_as_then;
 
     // LinearState access_punctuation
 access_punctuation_no_emit:
     tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
     tokBegin = tokEnd;
+    parseState = State::AccessPunctuation;
     if (isWordFirstCharacter(tokEnd[0])) {
         tokEnd = skipToEndOfIdentifier(tokEnd);
         // emitNode nodeKind
@@ -2141,11 +2357,638 @@ access_punctuation_no_emit:
         goto after_expression_with_emit;
     }
     // then error
-    goto error_no_whitespace;
+    goto error_as_then;
 
-
-error_no_whitespace:
+    // SwitchState error
+error_as_then:
+    switch (tokEnd[0]) {
+    case '\n':
+    case '\r':
+        VERIFY_NOT_REACHED();
+    case '!': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::ExclaimEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Exclaim;
+        goto handle_parse_error;
+    }
+    case '%': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::PercentEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Percent;
+        goto handle_parse_error;
+    }
+    case '&': {
+        char next = tokEnd[1];
+        if (next == '&') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                errorToken = Token::AmpAmpEqual;
+                goto handle_parse_error;
+            }
+            tokEnd += 2;
+            // error
+            errorToken = Token::AmpAmp;
+            goto handle_parse_error;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::AmpEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Amp;
+        goto handle_parse_error;
+    }
+    case '(': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::LeftParen;
+        goto handle_parse_error;
+    }
+    case ')': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::RightParen;
+        goto handle_parse_error;
+    }
+    case '*': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::StarEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Star;
+        goto handle_parse_error;
+    }
+    case '+': {
+        char next = tokEnd[1];
+        if (next == '+') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::PlusPlus;
+            goto handle_parse_error;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::PlusEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Plus;
+        goto handle_parse_error;
+    }
+    case ',': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::Comma;
+        goto handle_parse_error;
+    }
+    case '-': {
+        char next = tokEnd[1];
+        if (next == '-') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::MinusMinus;
+            goto handle_parse_error;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::MinusEqual;
+            goto handle_parse_error;
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::MinusGreater;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Minus;
+        goto handle_parse_error;
+    }
+    case '.': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::Point;
+        goto handle_parse_error;
+    }
+    case '/': {
+        char next = tokEnd[1];
+        if (next == '*') {
+            tokEnd += 2;
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '/') {
+            tokEnd += 2;
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::SlashEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Slash;
+        goto handle_parse_error;
+    }
+    case ':': {
+        char next = tokEnd[1];
+        if (next == ':') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::ColonColon;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Colon;
+        goto handle_parse_error;
+    }
+    case ';': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::SemiColon;
+        goto handle_parse_error;
+    }
+    case '<': {
+        char next = tokEnd[1];
+        if (next == '<') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                errorToken = Token::LessLessEqual;
+                goto handle_parse_error;
+            }
+            tokEnd += 2;
+            // error
+            errorToken = Token::LessLess;
+            goto handle_parse_error;
+        }
+        if (next == '=') {
+            char next = tokEnd[2];
+            if (next == '>') {
+                tokEnd += 3;
+                // error
+                errorToken = Token::LessEqualGreater;
+                goto handle_parse_error;
+            }
+            tokEnd += 2;
+            // error
+            errorToken = Token::LessEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Less;
+        goto handle_parse_error;
+    }
+    case '=': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::EqualEqual;
+            goto handle_parse_error;
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::EqualGreater;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Equal;
+        goto handle_parse_error;
+    }
+    case '>': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::GreaterEqual;
+            goto handle_parse_error;
+        }
+        if (next == '>') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                errorToken = Token::GreaterGreaterEqual;
+                goto handle_parse_error;
+            }
+            tokEnd += 2;
+            // error
+            errorToken = Token::GreaterGreater;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Greater;
+        goto handle_parse_error;
+    }
+    case '[': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::LeftSqure;
+        goto handle_parse_error;
+    }
+    case ']': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::RightSqure;
+        goto handle_parse_error;
+    }
+    case '^': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::HatEqual;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Hat;
+        goto handle_parse_error;
+    }
+    case '{': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::LeftBrace;
+        goto handle_parse_error;
+    }
+    case '|': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            errorToken = Token::VertEqual;
+            goto handle_parse_error;
+        }
+        if (next == '|') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                errorToken = Token::VertVertEqual;
+                goto handle_parse_error;
+            }
+            tokEnd += 2;
+            // error
+            errorToken = Token::VertVert;
+            goto handle_parse_error;
+        }
+        tokEnd += 1;
+        // error
+        errorToken = Token::Vert;
+        goto handle_parse_error;
+    }
+    case '}': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::RightBrace;
+        goto handle_parse_error;
+    }
+    case '~': {
+        tokEnd += 1;
+        // error
+        errorToken = Token::Tilde;
+        goto handle_parse_error;
+    }
+    case 'a': {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Analysis;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Assert;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Assign;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'b': {
+        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Break;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'c': {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Catch;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Continue;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'd': {
+        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::Do;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'e': {
+        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Elif;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Else;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'f': {
+        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::False;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::Fn;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::For;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            errorToken = Token::Forward;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'g': {
+        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Guard;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'i': {
+        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::If;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            errorToken = Token::In;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Inout;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'l': {
+        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Let;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::Loop;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'm': {
+        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Match;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'n': {
+        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
+            tokEnd += 9;
+            // error
+            errorToken = Token::Namespace;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'o': {
+        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Object;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Out;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'r': {
+        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Return;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 's': {
+        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Static;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            errorToken = Token::Struct;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 't': {
+        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            errorToken = Token::Template;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::Trait;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::True;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Try;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'v': {
+        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            errorToken = Token::Var;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'w': {
+        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            errorToken = Token::While;
+            goto handle_parse_error;
+        }
+        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            errorToken = Token::With;
+            goto handle_parse_error;
+        }
+        goto error_identifier_case;
+    }
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+    case 'G':
+    case 'H':
+    case 'I':
+    case 'J':
+    case 'K':
+    case 'L':
+    case 'M':
+    case 'N':
+    case 'O':
+    case 'P':
+    case 'Q':
+    case 'R':
+    case 'S':
+    case 'T':
+    case 'U':
+    case 'V':
+    case 'W':
+    case 'X':
+    case 'Y':
+    case 'Z':
+    case 'h':
+    case 'j':
+    case 'k':
+    case 'p':
+    case 'q':
+    case 'u':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '#':
+    case '$':
+    case '_': {
+        goto error_identifier_case;
+    }
+    default: {
+        return state.nodes;
+    }
+    } // switch
     VERIFY_NOT_REACHED();
+error_identifier_case:
+    tokEnd = skipToEndOfIdentifier(tokEnd);
+    // error
+    errorToken = Token::Identifier;
+    goto handle_parse_error;
+
+
+handle_parse_error:
+    errorHandler->invalidToken(parseState, errorToken);
+    return {};
 }
 
 std::string_view nameString(NodeKind kind) {
@@ -2156,4 +2999,6 @@ std::string_view nameString(NodeKind kind) {
 
 #include "nodes.inc"
     }
+}
+
 }

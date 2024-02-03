@@ -1,5 +1,9 @@
-#include "nodes.h"
+#include "parse.h"
 #include <utility>
+
+using namespace std::string_view_literals;
+
+namespace parse {
 
 static bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -16,16 +20,10 @@ enum class ScopeKind : char {
     IfExpr,
     IfExprOrStmt,
     CompoundStmt,
-    Paren = ')',
-    Square = ']',
-    Brace = '}',
+    Paren,
+    Square,
+    Brace,
 };
-static char scopeKindToRightBracket(ScopeKind scope) {
-    return std::to_underlying(scope);
-}
-static bool isBracketScope(ScopeKind scope) {
-    return std::to_underlying(scope) >= ' ';
-}
 
 struct ParseStackState {
     std::vector<Node> nodes;
@@ -148,31 +146,29 @@ static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosi
     return state.nodes;
 }
 
-std::vector<Node> parse(std::string_view sourceBuf) {
+std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 
     ParseStackState state;
-    const char* sourceBufferBegin = sourceBuf.begin();
-    const char* tokBegin = sourceBufferBegin;
-    const char* tokEnd = sourceBufferBegin;
+    const char* tokBegin = sourceBufferPosition;
+    const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
 
     const char* savedTokenBegin = nullptr;
     const char* savedTokenEnd = nullptr;
     NodeKind nodeKind = (NodeKind)0;
 
-    goto expression_no_emit;
-
-#define TODO_PARSE() VERIFY_NOT_REACHED()
-#define TODO_ERROR(error) VERIFY_NOT_REACHED()
+    State parseState = State::Statement;
+    Token errorToken = (Token)0;
 
     // GENERATED CODE HERE
 
-error_no_whitespace:
-    VERIFY_NOT_REACHED();
+handle_parse_error:
+    errorHandler->invalidToken(parseState, errorToken);
+    return {};
 }
 
 std::string_view nameString(NodeKind kind) {
@@ -183,4 +179,6 @@ std::string_view nameString(NodeKind kind) {
 
 #include "nodes.inc"
     }
+}
+
 }

@@ -2,21 +2,43 @@ import string
 import pathlib
 import dataclasses
 
-punctuations = [
+punctuationTokens = [
     "(", ")", "[", "]", "{", "}",
-    "?", "!", "~", "++", "--", "+", "-", "*",
+    "!", "~", "++", "--", "+", "-", "*",
     "&", "^", "|", "/", "%", "<<", ">>", "&&", "||", "!=", "==", "<", "<=", ">", ">=",
     "=", "+=", "-=", "*=", "&=", "^=", "|=", "/=", "%=", "<<=", ">>=", "&&=", "||=",
     ",", ".", ":", "::", ";", "=>", "<=>", "->",
-    "//", "/*"
 ]
-keywords = [
+
+punctuations = punctuationTokens + ["//", "/*"]
+punctuationAlphabet = "".join(sorted({p[0] for p in punctuations}))
+keywords = sorted([
     "if", "elif", "else", "match", "for", "while", "do", "return", "break", "continue", "loop", "guard", "try", "catch", "with", "analysis", "assert",
     "namespace", "struct", "trait", "object", "fn", "static",
     "template",
     "var", "let", "in", "inout", "out", "forward", "assign",
     "true", "false",
-]
+])
+
+def punctuationCppName(punc):
+    characterNames = {
+        '(': "LeftParen", ')': "RightParen", '[': "LeftSqure", ']': "RightSqure", '{': "LeftBrace", '}': "RightBrace",
+        '!': "Exclaim", '~': "Tilde", '+': "Plus", '-': "Minus", '*': "Star",
+        '&': "Amp", '^': "Hat", '|': "Vert", '/': "Slash", '%': "Percent", '<': "Less", '>': "Greater",
+        '=': "Equal", ',': "Comma", '.': "Point", ';': "SemiColon", ':': "Colon"
+    }
+    return "".join([characterNames[c] for c in punc])
+
+def keywordCppName(keyword):
+    return keyword[0].upper() + keyword[1:]
+
+def stateCppName(name):
+    parts = name.split('_')
+    parts = [p[0].upper() + p[1:] for p in parts]
+    return "".join(parts)
+
+def identifierCppName():
+    return "Identifier"
 
 indentationStep = ' ' * 4
 
@@ -97,6 +119,7 @@ class AssignInstruction:
 
 @dataclasses.dataclass
 class ErrorInstruction:
+    tokenCppName: str
     def format(self):
         return "error"
 
@@ -176,7 +199,7 @@ class Parser:
         return self.parseWord(string.ascii_lowercase + string.ascii_uppercase + "_:.")
 
     def parsePunctuation(self):
-        return self.parseWord("()[]{}?!~+-*&^|/%<>=,.;:")
+        return self.parseWord(punctuationAlphabet)
 
     def parseError(self, s):
         raise Exception(s + " at line " + str(self.lineNumber))
@@ -327,14 +350,20 @@ def linearIf(commonPrefix: str, state):
 
     line("tokEnd += " + str(len(exactMatch)) + ";")
     if exactMatch == "//":
-        line("tokEnd = skipToEndOfLine(tokEnd);")
-        line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-        line("goto " + state.name + "_no_emit;")
+        if onlyUsedAsThen(state):
+            line("VERIFY_NOT_REACHED();")
+        else:
+            line("tokEnd = skipToEndOfLine(tokEnd);")
+            line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+            line("goto " + state.name + "_no_emit;")
     elif exactMatch == "/*":
-        line("tokEnd = skipToEndOfBlockComment(tokEnd);")
-        line("tokEnd += 2;")
-        line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-        line("goto " + state.name + "_no_emit;")
+        if onlyUsedAsThen(state):
+            line("VERIFY_NOT_REACHED();")
+        else:
+            line("tokEnd = skipToEndOfBlockComment(tokEnd);")
+            line("tokEnd += 2;")
+            line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+            line("goto " + state.name + "_no_emit;")
     else:
         foundState, case = recurse(state, lambda s: s.punctuationCase(exactMatch))
         generateCaseBody(foundState, case)
@@ -342,7 +371,7 @@ def linearIf(commonPrefix: str, state):
 def checkForPunctuation(punc, handler):
     puncs = list(filter(lambda p: (p.startswith(punc)), punctuations))
     assert(len(puncs) > 0)
-    line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\") {")
+    line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\"sv) {")
     with indent():
         if len(puncs) == 1:
             assert(puncs[0] == punc)
@@ -366,7 +395,7 @@ def checkForPunctuation(punc, handler):
     line("}")
 
 def checkForKeyword(keyword, handler):
-    line("if (std::string_view(tokEnd, " + str(len(keyword)) + ") == \"" + keyword + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
+    line("if (std::string_view(tokEnd, " + str(len(keyword)) + ") == \"" + keyword + "\"sv && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
     with indent():
         line("tokEnd += " + str(len(keyword)) + ";")
         handler()
@@ -382,14 +411,16 @@ def emitNode(nodeKindExpr, beginExpr, endExpr):
 def emitCarriedNode():
     emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
-errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
-errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
-errorCases += [IdentifierCase([ErrorInstruction()])]
+def rememberState(state):
+    line("parseState = State::" + stateCppName(state.name) + ";")
+
+errorCases  = [PunctuationCase(p, [ErrorInstruction(punctuationCppName(p))]) for p in punctuations]
+errorCases += [KeywordCase(k, [ErrorInstruction(keywordCppName(k))]) for k in keywords]
+errorCases += [IdentifierCase([ErrorInstruction(identifierCppName())])]
 errorState = State("SwitchState", "error", "", [], errorCases)
+states += [errorState]
 
 def findState(name: str) -> State:
-    if name == "error":
-        return errorState
     global states
     for s in states:
         if s.name == name:
@@ -415,22 +446,28 @@ def generateSwitchState(state):
     line("switch (tokEnd[0]) {")
 
     # newline
-    line("case '\\n': {")
-    with indent():
-        line("tokEnd += 1;")
-        line("goto " + state.name + "_no_emit;")
-    line("}")
-
-    line("case '\\r': {")
-    with indent():
-        line("if (tokEnd[1] == '\\n') {")
+    if onlyUsedAsThen(state):
+        line("case '\\n':")
+        line("case '\\r':")
         with indent():
-            line("tokEnd += 2;")
+            line("VERIFY_NOT_REACHED();")
+    else:
+        line("case '\\n': {")
+        with indent():
+            line("tokEnd += 1;")
             line("goto " + state.name + "_no_emit;")
         line("}")
-        line("tokEnd += 1;")
-        line("goto " + state.name + "_no_emit;")
-    line("}")
+
+        line("case '\\r': {")
+        with indent():
+            line("if (tokEnd[1] == '\\n') {")
+            with indent():
+                line("tokEnd += 2;")
+                line("goto " + state.name + "_no_emit;")
+            line("}")
+            line("tokEnd += 1;")
+            line("goto " + state.name + "_no_emit;")
+        line("}")
 
     # punctuations
     firstCharacters = {p[0] for p in punctuations}
@@ -449,7 +486,7 @@ def generateSwitchState(state):
         with indent():
             for keyword in keywords:
                 if keyword.startswith(character):
-                    line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
+                    line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\"sv && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
                     with indent():
                         line("tokEnd += " + str(len(keyword))+ ";")
                         foundState, case = recurse(state, lambda s: s.keywordCase(keyword))
@@ -470,8 +507,8 @@ def generateSwitchState(state):
     # default
     line("default: {")
     with indent():
+        # TODO: This should be an error
         line("return state.nodes;")
-        #line("TODO_ERROR(\"invalid character\");")
     line("}")
 
     line("} // switch")
@@ -499,7 +536,7 @@ def generateLinearState(state):
     if not thenCase is None:
         generateCaseBody(state, thenCase)
     line("// then " + state.thenState)
-    line("goto " + state.thenState + "_no_whitespace;")
+    line("goto " + state.thenState + "_as_then;")
 
 def generateCaseBody(state, case):
     for inst in case.instructions:
@@ -521,6 +558,7 @@ def generateCaseBody(state, case):
                 if inst.carriesEmitNode:
                     emitCarriedNode()
                 inlineTokenAdvancer()
+                rememberState(newState)
                 generateState(newState)
             else:
                 line("goto " + newState.name + ("_with_emit" if inst.carriesEmitNode else "_no_emit") + ";")
@@ -545,7 +583,8 @@ def generateCaseBody(state, case):
                 line("return state.nodes;")
             line("}")
         elif type(inst) is ErrorInstruction:
-            line("VERIFY_NOT_REACHED();")
+            line("errorToken = Token::" + inst.tokenCppName + ";")
+            line("goto handle_parse_error;")
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
 
@@ -562,26 +601,42 @@ for state in states:
 def shouldBeInlined(state):
     return len(state.origins) == 1 and state.kind == "LinearState"
 
+def onlyUsedAsThen(state):
+    if [o for o in state.origins if type(o) is NextInstruction]:
+        return False
+    return True
+
+line("switch (parseState) {")
+for state in states:
+    line("case State::" + stateCppName(state.name) + ":")
+    with indent():
+        if shouldBeInlined(state) or onlyUsedAsThen(state):
+            line("VERIFY_NOT_REACHED();")
+        else:
+            line("goto " + state.name + "_no_emit;")
+line("}")
+
 for state in states:
     if len(state.origins) == 0:
         raise Exception("unused state '" + state.name + "'")
     if not shouldBeInlined(state):
         line("// " + state.kind + " " + state.name)
-        label1Used = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitNode]
-        if label1Used:
+        withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitNode]
+        if withEmitLabelUsed:
             labelLine(state.name + "_with_emit:")
             emitCarriedNode()
-        label2Used = state.kind == "SwitchState" or [o for o in state.origins if type(o) is NextInstruction and not o.carriesEmitNode]
-        if label2Used:
+        noEmitLabelUsed = not onlyUsedAsThen(state)
+        if noEmitLabelUsed:
             labelLine(state.name + "_no_emit:")
-        if label1Used or label2Used:
+        if noEmitLabelUsed or withEmitLabelUsed:
             if state.kind == "SwitchState":
                 line("tokEnd = skipWhitespace(tokEnd);")
                 line("tokBegin = tokEnd;")
             else:
                 inlineTokenAdvancer()
+            rememberState(state)
         if [o for o in state.origins if type(o) is State]:
-            labelLine(state.name + "_no_whitespace:")
+            labelLine(state.name + "_as_then:")
 
         generateState(state)
 
@@ -593,6 +648,7 @@ with open(currentDir / "parse.cpp.in", "r") as f:
     inputLines = f.readlines()
 
 outputLines = []
+lineEnding = None
 for inputLine in inputLines:
     strippedLine = inputLine.lstrip(' ')
     if strippedLine.startswith("// GENERATED CODE HERE"):
@@ -607,4 +663,61 @@ for inputLine in inputLines:
         outputLines.append(inputLine)
 
 with open(currentDir / "parse.cpp", "w") as f:
+    f.writelines(outputLines)
+
+# generate .h
+generatedLines = []
+outputIndentation = 0
+lineNoIndent("#pragma once")
+lineNoIndent()
+lineNoIndent("#include \"types.h\"")
+lineNoIndent()
+line("namespace parse {")
+
+tokenCounter = 0
+
+line("enum class Punctuation : uint8_t {")
+with indent():
+    line("BEGIN = " + str(tokenCounter) + ",")
+    for punc in punctuationTokens:
+        line(punctuationCppName(punc) + " = " + str(tokenCounter) + ", // " + punc)
+        tokenCounter += 1
+    line("END = " + str(tokenCounter) + ",")
+line("};")
+
+line("enum class Keyword : uint8_t {")
+with indent():
+    line("BEGIN = " + str(tokenCounter) + ",")
+    for keyword in keywords:
+        line(keywordCppName(keyword) + " = " + str(tokenCounter) + ", // " + keyword)
+        tokenCounter += 1
+    line("END = " + str(tokenCounter) + ",")
+line("};")
+
+tokenCounter2 = 0
+line("enum class Token : uint8_t {")
+with indent():
+    for punc in punctuationTokens:
+        line(punctuationCppName(punc) + " = " + str(tokenCounter2) + ", // " + punc)
+        tokenCounter2 += 1
+    for keyword in keywords:
+        line(keywordCppName(keyword) + " = " + str(tokenCounter2) + ", // " + keyword)
+        tokenCounter2 += 1
+    assert(tokenCounter2 == tokenCounter)
+    line("Identifier = " + str(tokenCounter2) + ",")
+line("};")
+
+line("enum class State {")
+with indent():
+    for state in states:
+        line(stateCppName(state.name) + ",")
+line("};")
+lineNoIndent()
+line("}")
+
+
+outputLines = []
+for generatedLine in generatedLines:
+    outputLines.append(generatedLine + lineEnding)
+with open(currentDir / "parse_gen.h", "w") as f:
     f.writelines(outputLines)

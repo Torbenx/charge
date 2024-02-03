@@ -1,6 +1,6 @@
 #include "WordTable.h"
 #include "log.h"
-#include "nodes.h"
+#include "parse.h"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -75,7 +75,8 @@ struct TestInstrumenter {
     }
 
     void runTest(std::filesystem::path file, std::string_view source) {
-        auto nodes = parse(source);
+        using NodeKind = parse::NodeKind;
+        auto nodes = parse::parseExpression(source.data(), source.data(), nullptr);
 
         for (auto node : nodes) {
             std::cout << nameString(node.kind) << '\n';
