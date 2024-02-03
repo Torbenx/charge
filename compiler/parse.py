@@ -1,61 +1,15 @@
-import enum
 import string
 import pathlib
+import dataclasses
 
-class Punctuation(enum.StrEnum):
-    LeftParen = "("
-    RightParen = ")"
-    LeftSquare = "["
-    RightSquare = "]"
-    LeftBrace = "{"
-    RightBrace = "}"
-    Question = "?"
-    Exclaim = "!"
-    Tilde = "~"
-    PlusPlus = "++"
-    MinusMinus = "--"
-    Plus = "+"
-    Minus = "-"
-    Star = "*"
-    Amp = "&"
-    Hat = "^"
-    Vert = "|"
-    Slash = "/"
-    Percent = "%"
-    LessLess = "<<"
-    GreaterGreater = ">>"
-    AmpAmp = "&&"
-    VertVert = "||"
-    ExclaimEqual = "!="
-    EqualEqual = "=="
-    Less = "<"
-    LessEqual = "<="
-    Greater = ">"
-    GreaterEqual = ">="
-    Equal = "="
-    PlusEqual = "+="
-    MinusEqual = "-="
-    StarEqual = "*="
-    AmpEqual = "&="
-    HatEqual = "^="
-    VertEqual = "|="
-    SlashEqual = "/="
-    PercentEqual = "%="
-    LessLessEqual = "<<="
-    GreaterGreaterEqual = ">>="
-    AmpAmpEqual = "&&="
-    VertVertEqual = "||="
-    Comma = ","
-    Point = "."
-    Colon = ":"
-    ColonColon = "::"
-    SemiColon = ";"
-    FatArrow = "=>"
-    DoubleArrow = "<=>"
-    Arrow = "->"
-    SlashSlash = "//"
-    SlashStar = "/*"
-
+punctuations = [
+    "(", ")", "[", "]", "{", "}",
+    "?", "!", "~", "++", "--", "+", "-", "*",
+    "&", "^", "|", "/", "%", "<<", ">>", "&&", "||", "!=", "==", "<", "<=", ">", ">=",
+    "=", "+=", "-=", "*=", "&=", "^=", "|=", "/=", "%=", "<<=", ">>=", "&&=", "||=",
+    ",", ".", ":", "::", ";", "=>", "<=>", "->",
+    "//", "/*"
+]
 keywords = [
     "if", "elif", "else", "match", "for", "while", "do", "return", "break", "continue", "loop", "guard", "try", "catch", "with", "analysis", "assert",
     "namespace", "struct", "trait", "object", "fn", "static",
@@ -64,7 +18,270 @@ keywords = [
     "true", "false",
 ]
 
-outputIndentation = 0
+indentationStep = ' ' * 4
+
+currentDir = pathlib.Path(__file__).parent.resolve()
+
+with open(currentDir / "parse.txt", "r") as f:
+    lines = f.readlines()
+
+class Case:
+    def __init__(self, instructions):
+        self.instructions = instructions
+
+    def __repr__(self):
+        return type(self).__name__ + " " + str(self.instructions)
+
+class PunctuationCase(Case):
+    def __init__(self, punctuation, instructions):
+        super().__init__(instructions)
+        self.punctuation = punctuation
+
+class KeywordCase(Case):
+    def __init__(self, keyword, instructions):
+        super().__init__(instructions)
+        self.keyword = keyword
+
+class IdentifierCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+
+class ThenCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+
+@dataclasses.dataclass
+class NextInstruction:
+    newState: str
+    carriesEmitNode: bool = False
+    def format(self):
+        return "next " + self.newState
+
+@dataclasses.dataclass
+class EmitNodeInstruction:
+    nodeKindExpr: str
+    tokenExpr: str | None = None
+    delayed: bool = False
+    def format(self):
+        ret = "emitNode " + self.nodeKindExpr
+        if not self.tokenExpr is None:
+            ret += ", " + self.tokenExpr
+        return ret
+
+@dataclasses.dataclass
+class PushScopeInstruction:
+    scopeKindExpr: str
+    def format(self):
+        return "pushScope " + self.scopeKindExpr
+
+@dataclasses.dataclass
+class PopScopeInstruction:
+    scopeKindExprs: list[str]
+    def format(self):
+        ret = "popScope " + self.scopeKindExprs[0]
+        for expr in self.scopeKindExprs[1:]:
+            ret += ", " + expr
+        return ret
+
+@dataclasses.dataclass
+class ExitIfUnscopedInstruction:
+    def format(self):
+        return "exitIfUnscoped"
+
+@dataclasses.dataclass
+class AssignInstruction:
+    leftName: str
+    rightExpr: str
+    def format(self):
+        return self.leftName + " = " + self.rightExpr
+
+@dataclasses.dataclass
+class ErrorInstruction:
+    def format(self):
+        return "error"
+
+@dataclasses.dataclass
+class State:
+    kind: str
+    name: str
+    thenState: str
+    parameters: list[str]
+    cases: list[Case]
+
+    def punctuationCase(self, punc: str) -> PunctuationCase | None:
+        for c in self.cases:
+            if type(c) is PunctuationCase and c.punctuation == punc:
+                return c
+        return None
+
+    def keywordCase(self, keyword: str) -> KeywordCase | None:
+        for c in self.cases:
+            if type(c) is KeywordCase and c.keyword == keyword:
+                return c
+        return None
+
+    def identifierCase(self) -> IdentifierCase | None:
+        for c in self.cases:
+            if type(c) is IdentifierCase:
+                return c
+        return None
+
+    def thenCase(self) -> ThenCase | None:
+        for c in self.cases:
+            if type(c) is ThenCase:
+                return c
+        return None
+
+class Parser:
+    def __init__(self, lines):
+        self.lines = lines
+        self.line = ""
+        self.lineNumber = 0
+        self.advanceLine()
+
+    def lineEmpty(self):
+        return len(self.line.lstrip("\r\n ")) == 0
+
+    def lineLevel(self):
+        if self.line.startswith(indentationStep * 2):
+            return 2
+        if self.line.startswith(indentationStep):
+            return 1
+        return 0
+
+    def atEnd(self):
+        return len(self.lines) == 0
+
+    def advanceLine(self):
+        if not self.lineEmpty():
+            self.parseError("expected empty line")
+        while not self.atEnd():
+            self.lineNumber += 1
+            self.line = self.lines[0]
+            self.lines = self.lines[1:]
+            if not self.lineEmpty():
+                break
+
+    def parseWord(self, alphabet = string.ascii_lowercase + string.ascii_uppercase + "_"):
+        while len(self.line) != 0 and self.line[0] == ' ':
+            self.line = self.line[1:]
+        remaining = self.line.lstrip(alphabet)
+        word = self.line[:len(self.line) - len(remaining)]
+        if len(word) == 0:
+            self.parseError("expected word")
+        self.line = remaining
+        return word
+
+    def parseExpr(self):
+        return self.parseWord(string.ascii_lowercase + string.ascii_uppercase + "_:.")
+
+    def parsePunctuation(self):
+        return self.parseWord("()[]{}?!~+-*&^|/%<>=,.;:")
+
+    def parseError(self, s):
+        raise Exception(s + " at line " + str(self.lineNumber))
+
+    def parseStates(self):
+        states = []
+        while not self.atEnd():
+            if self.lineLevel() != 0:
+                self.parseError("expected level 0")
+            stateKind = self.parseWord()
+            if stateKind != "SwitchState" and stateKind != "LinearState":
+                self.parseError("invalid state")
+            name = self.parseWord()
+
+            if self.line[0] != '(':
+                self.parseError("expected '('")
+            self.line = self.line[1:]
+
+            parameters = []
+            while self.line[0] != ')':
+                param = self.parseWord()
+                if self.line[0] == ',':
+                    self.line = self.line[1:]
+                parameters.append(param)
+            self.line = self.line[1:]
+
+            thenWord = self.parseWord()
+            if thenWord != "then":
+                self.parseError("expected 'then'")
+            thenState = self.parseWord()
+            self.advanceLine()
+            cases = self.parseCases()
+            states.append(State(stateKind, name, thenState, parameters, cases))
+        return states
+
+    def parseCases(self):
+        cases = []
+        while self.lineLevel() == 1:
+            caseKind = self.parseWord()
+            if caseKind == "punctuation":
+                punc = self.parsePunctuation()
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(PunctuationCase(punc, instructions))
+            elif caseKind == "keyword":
+                keyword = self.parseWord()
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(KeywordCase(keyword, instructions))
+            elif caseKind == "identifier":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(IdentifierCase(instructions))
+            elif caseKind == "then":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(ThenCase(instructions))
+            else:
+                self.parseError("invalid case '" + caseKind + "'")
+        return cases
+
+    def parseInstructions(self):
+        instructions = []
+        while self.lineLevel() == 2:
+            first = self.parseWord()
+            if first == "next":
+                delayed = False
+                if len(instructions) > 0 and type(instructions[-1]) == EmitNodeInstruction and instructions[-1].tokenExpr is None:
+                    instructions[-1].delayed = True
+                    delayed = True
+                instructions.append(NextInstruction(self.parseWord(), delayed))
+            elif first == "emitNode":
+                nodeKindExpr = self.parseExpr()
+                while self.line[0] == ' ':
+                    self.line = self.line[1:]
+                tokenExpr = None
+                if self.line[0] == ',':
+                    self.line = self.line[1:]
+                    tokenExpr = self.parseExpr()
+                instructions.append(EmitNodeInstruction(nodeKindExpr, tokenExpr))
+            elif first == "pushScope":
+                instructions.append(PushScopeInstruction(self.parseExpr()))
+            elif first == "popScope":
+                scopes = []
+                while not self.lineEmpty():
+                    scopes.append(self.parseExpr())
+                    if self.line[0] == ',':
+                        self.line = self.line[1:]
+                instructions.append(PopScopeInstruction(scopes))
+            elif first == "exitIfUnscoped":
+                instructions.append(ExitIfUnscopedInstruction())
+            else:
+                while self.line[0] == ' ':
+                    self.line = self.line[1:]
+                if self.line[0] != '=':
+                    self.parseError("invalid instruction")
+                self.line = self.line[1:]
+                instructions.append(AssignInstruction(first, self.parseExpr()))
+            self.advanceLine()
+
+        return instructions
+
+states = Parser(lines).parseStates()
+
+outputIndentation = 1
 generatedLines = []
 
 def line(line: str = ""):
@@ -88,34 +305,10 @@ class IndentHelper:
         global outputIndentation
         outputIndentation -= 1
 
-def lineFeedHandler():
-    line("tokEnd += 1;")
-    line("continue;")
-
-def carriageReturnHandler():
-    line("if (tokEnd[1] == '\\n') {")
-    with indent():
-        line("tokEnd += 2;")
-        line("continue;")
-    line("}")
-    line("tokEnd += 1;")
-    line("continue;")
-
-def lineCommentHandler():
-    line("tokEnd = skipToEndOfLine(tokEnd);")
-    line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-    line("continue;")
-
-def blockCommentHandler():
-    line("tokEnd = skipToEndOfBlockComment(tokEnd);")
-    line("tokEnd += 2;")
-    line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-    line("continue;")
-
-def linearIf(commonPrefix: str, handler):
-    puncs = list(filter(lambda p: (p.startswith(commonPrefix)), Punctuation))
+def linearIf(commonPrefix: str, state):
+    puncs = list(filter(lambda p: (p.startswith(commonPrefix)), punctuations))
     possibleContinuations = set()
-    exactMatch: Punctuation | None = None
+    exactMatch: str | None = None
     for p in puncs:
         if len(p) == len(commonPrefix):
             assert(exactMatch == None)
@@ -129,19 +322,25 @@ def linearIf(commonPrefix: str, handler):
     for character in sorted(possibleContinuations):
         line("if (next == '" + character + "') {")
         with indent():
-            linearIf(commonPrefix + character, handler)
+            linearIf(commonPrefix + character, state)
         line("}")
 
     line("tokEnd += " + str(len(exactMatch)) + ";")
-    if exactMatch is Punctuation.SlashSlash:
-        lineCommentHandler()
-    elif exactMatch is Punctuation.SlashStar:
-        blockCommentHandler()
+    if exactMatch == "//":
+        line("tokEnd = skipToEndOfLine(tokEnd);")
+        line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+        line("goto " + state.name + "_no_emit;")
+    elif exactMatch == "/*":
+        line("tokEnd = skipToEndOfBlockComment(tokEnd);")
+        line("tokEnd += 2;")
+        line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
+        line("goto " + state.name + "_no_emit;")
     else:
-        handler.punctuation(exactMatch)
+        foundState, case = recurse(state, lambda s: s.punctuationCase(exactMatch))
+        generateCaseBody(foundState, case)
 
-def checkFor(punc, handler):
-    puncs = list(filter(lambda p: (p.startswith(punc)), Punctuation))
+def checkForPunctuation(punc, handler):
+    puncs = list(filter(lambda p: (p.startswith(punc)), punctuations))
     assert(len(puncs) > 0)
     line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\") {")
     with indent():
@@ -166,358 +365,227 @@ def checkFor(punc, handler):
             line("}")
     line("}")
 
-class ErrorHandler:
-    def punctuation(self, punc: Punctuation):
-        line("TODO_ERROR(\"invalid token for state\");")
-
-    def keyword(self, keyword: str):
-        line("TODO_ERROR(\"invalid token for state\");")
-
-    def identifier(self):
-        line("TODO_ERROR(\"invalid token for state\");")
-
-class InlineAdvancerCertificate:
-    pass
+def checkForKeyword(keyword, handler):
+    line("if (std::string_view(tokEnd, " + str(len(keyword)) + ") == \"" + keyword + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
+    with indent():
+        line("tokEnd += " + str(len(keyword)) + ";")
+        handler()
+    line("}")
 
 def inlineTokenAdvancer():
     line("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
     line("tokBegin = tokEnd;")
-    return InlineAdvancerCertificate()
-
-def inlineIdentifier():
-    # TODO: Handle keywords
-    line("tokEnd = skipToEndOfIdentifier(tokEnd);")
-
-def pushScope(scopeKindExpr):
-    line("scopePosition = pushScope(" + scopeKindExpr + ", scopePosition);")
-
-def popScope(scopeKindExpr):
-    line("scopePosition = popScope(" + scopeKindExpr + ", scopePosition);")
-
-def peekScope(scopeKindVariableName):
-    line("auto " + scopeKindVariableName + " = peekScope(scopePosition);")
 
 def emitNode(nodeKindExpr, beginExpr, endExpr):
     line("emitNode(" + nodeKindExpr + ", " + beginExpr +", " + endExpr + ", state, sourceBufferBegin);")
 
-def emitNodeFromLocals():
-    emitNode("nodeKind", "tokBegin", "tokEnd")
+def emitCarriedNode():
+    emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
-def gotoStateAndSave(stateName, nodeKindExpr):
-    if nodeKindExpr != "nodeKind":
-        line("nodeKind = " + nodeKindExpr + ";")
-    line("goto " + stateName + ";")
+errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
+errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
+errorCases += [IdentifierCase([ErrorInstruction()])]
+errorState = State("SwitchState", "error", "", [], errorCases)
 
-def gotoStateNoSave(stateName):
-    line("goto " + stateName + "_continue;")
+def findState(name: str) -> State:
+    if name == "error":
+        return errorState
+    global states
+    for s in states:
+        if s.name == name:
+            return s
+    raise Exception("state '" + name + "' undefined")
 
-def gotoStateAlreadyAdvanced(stateName, advance):
-    assert(type(advance) == InlineAdvancerCertificate)
-    line("goto " + stateName + "_dispatch;")
+def recurse(state, f):
+    while True:
+        val = f(state)
+        if not val is None:
+            return state, val
+        state = findState(state.thenState)
 
-def generateState(stateName, handler):
-    labelLine(stateName + ":")
+def generateState(state):
+    if state.kind == "SwitchState":
+        generateSwitchState(state)
+    elif state.kind == "LinearState":
+        generateLinearState(state)
+    else:
+        assert(False)
 
-    # save
-    emitNodeFromLocals()
+def generateSwitchState(state):
+    line("switch (tokEnd[0]) {")
 
-    labelLine(stateName + "_continue:")
-    line("for (;;) {")
-    with indent():
-        line("tokEnd = skipWhitespace(tokEnd);")
-        line("tokBegin = tokEnd;")
-        line("nodeKind = (NodeKind)0;")
-        line("data1 = 0;")
-        labelLine(stateName + "_dispatch:")
-        line("fmt::println(\"" + stateName + ": {}\", tokEnd[0]);")
-        line("switch (tokEnd[0]) {")
-
-        # newline
-        line("case '\\n': {")
-        with indent():
-            lineFeedHandler()
-        line("}")
-        line("case '\\r': {")
-        with indent():
-            carriageReturnHandler()
-        line("}")
-
-        # punctuations
-        firstCharacters = set()
-        for punc in Punctuation:
-            firstCharacters.add(punc[0])
-        for character in sorted(firstCharacters):
-            line("case '" + character + "': {")
-            with indent():
-                linearIf(str(character), handler)
-            line("}")
-
-        # word
-        identifierBeginCharacters = set(string.ascii_lowercase) | set(string.ascii_uppercase)
-        keywordBeginCharacters = {k[0] for k in keywords}
-
-        for character in sorted(keywordBeginCharacters):
-            line("case '" + character + "': {")
-            with indent():
-                for keyword in keywords:
-                    if keyword.startswith(character):
-                        line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
-                        with indent():
-                            line("tokEnd += " + str(len(keyword))+ ";")
-                            handler.keyword(keyword)
-                        line("}")
-                line("goto " + stateName + "_identifier_case;")
-            line("}")
-
-        for character in sorted(identifierBeginCharacters - keywordBeginCharacters):
-            line("case '" + character + "':")
-        line("case '#':")
-        line("case '$':")
-        line("case '_': {")
-        with indent():
-            line("goto " + stateName + "_identifier_case;")
-        line("}")
-
-        # default
-        line("default: {")
-        with indent():
-            line("if (tokEnd[0] == '\\0' && tokEnd == state.sourceBufferEnd) {")
-            with indent():
-                line("return reachedEOS(state, scopePosition);")
-            line("}")
-            line("TODO_ERROR(\"invalid character\");")
-        line("}")
-
-        line("} // switch")
-
-        line("VERIFY_NOT_REACHED();")
-
-        labelLine(stateName + "_identifier_case:")
-        line("tokEnd = skipToEndOfIdentifier(tokEnd);")
-        handler.identifier()
-
-    line("} // retry-loop")
-
-class ExpressionHandler(ErrorHandler):
-    def punctuation(self, punc: Punctuation):
-        prefixOps = {
-            Punctuation.Exclaim: "LogicalNotExpr",
-            Punctuation.Tilde: "BitwiseNotExpr",
-            Punctuation.Plus: "PlusExpr",
-            Punctuation.Minus: "NegateExpr",
-            Punctuation.PlusPlus: "PreIncrementExpr",
-            Punctuation.MinusMinus: "PreDecrementExpr",
-            Punctuation.Star: "DereferenceExpr",
-        }
-        if punc in prefixOps:
-            gotoStateAndSave("expression", "NodeKind::" + prefixOps[punc])
-        elif punc is Punctuation.LeftParen:
-            line("nodeKind = NodeKind::ParenthesizedExpr;")
-            line("data1 = (size_t)ScopeKind::Paren;")
-            line("goto begin_argument_scope;")
-        else:
-            super().punctuation(punc)
-
-    def keyword(self, keyword):
-        if keyword == "if":
-            pushScope("ScopeKind::IfExpr")
-            gotoStateNoSave("expression")
-        else:
-            super().keyword(keyword)
-
-    def identifier(self):
-        gotoStateAndSave("after_expression", "NodeKind::IdentifierExpr")
-
-class StatementHandler(ExpressionHandler):
-    def punctuation(self, punc: Punctuation):
-        if punc is Punctuation.RightBrace:
-            popScope("ScopeKind::CompoundStmt")
-            gotoStateAndSave("statement", "NodeKind::EmptyNode")
-        else:
-            super().punctuation(punc)
-
-    def keyword(self, keyword):
-        if keyword == "if":
-            pushScope("ScopeKind::IfExprOrStmt")
-            gotoStateNoSave("expression")
-        else:
-            super().keyword(keyword)
-
-class AfterExpressionHandler(ErrorHandler):
-    def punctuation(self, punc: Punctuation):
-        postfixOps = {
-            Punctuation.PlusPlus: "PostIncrementExpr",
-            Punctuation.MinusMinus: "PostDecrementExpr",
-        }
-        binaryOps = {
-            Punctuation.Plus: "AdditionExpr",
-            Punctuation.Minus: "SubtractionExpr",
-            Punctuation.Star: "MultiplyExpr",
-            Punctuation.Amp: "BitwiseAndExpr",
-            Punctuation.Hat: "BitwiseXorExpr",
-            Punctuation.Vert: "BitwiseOrExpr",
-            Punctuation.Slash: "DivideExpr",
-            Punctuation.Percent: "RemainderExpr",
-            Punctuation.LessLess: "ShiftLeftExpr",
-            Punctuation.GreaterGreater: "ShiftRightExpr",
-            Punctuation.AmpAmp: "LogicalAndExpr",
-            Punctuation.VertVert: "LogicalOrExpr",
-            Punctuation.ExclaimEqual: "CompareNotEqualExpr",
-            Punctuation.EqualEqual: "CompareEqualExpr",
-            Punctuation.Less: "CompareLessExpr",
-            Punctuation.LessEqual: "CompareLessEqualExpr",
-            Punctuation.Greater: "CompareGreaterExpr",
-            Punctuation.GreaterEqual: "CompareGreaterEqualExpr",
-        }
-        if punc in postfixOps:
-            gotoStateAndSave("after_expression", "NodeKind::" + postfixOps[punc])
-        elif punc in binaryOps:
-            gotoStateAndSave("expression", "NodeKind::" + binaryOps[punc])
-        elif punc is Punctuation.Point or punc is Punctuation.ColonColon:
-            line("nodeKind = NodeKind::" + ("Member" if punc is Punctuation.Point else "Static") + "AccessExpr;")
-            line("goto handle_access_punctuation;")
-        elif punc is Punctuation.LeftParen:
-            line("nodeKind = NodeKind::CallExpr;")
-            line("data1 = (size_t)ScopeKind::Paren;")
-            line("goto begin_argument_scope;")
-        elif punc is Punctuation.LeftSquare:
-            line("nodeKind = NodeKind::IndexExpr;")
-            line("data1 = (size_t)ScopeKind::Square;")
-            line("goto begin_argument_scope;")
-        elif punc is Punctuation.LeftBrace:
-            line("nodeKind = NodeKind::Parameterize;")
-            line("data1 = (size_t)ScopeKind::Brace;")
-            line("goto begin_argument_scope;")
-        elif punc is Punctuation.RightParen:
-            popScope("ScopeKind::Paren")
-            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
-        elif punc is Punctuation.RightSquare:
-            popScope("ScopeKind::Square")
-            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
-        elif punc is Punctuation.RightBrace:
-            popScope("ScopeKind::Brace")
-            gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
-        elif punc is Punctuation.Comma:
-            advance1 = inlineTokenAdvancer()
-
-            # comma-else
-            line("if (std::string_view(tokEnd, 4) == \"else\" && !isWordBulkCharacter(tokEnd[4])) {")
-            with indent():
-                line("tokEnd += 4;")
-                advance2 = inlineTokenAdvancer()
-                line("if (std::string_view(tokEnd, 2) == \"=>\") {")
-                with indent():
-                    line("tokEnd += 2;")
-                    gotoStateAndSave("expression", "NodeKind::CommaElseExpr")
-                line("}")
-                line("TODO_ERROR(\"junk after comma-else\");")
-            line("}")
-            line("if (std::string_view(tokEnd, 4) == \"elif\" && !isWordBulkCharacter(tokEnd[4])) {")
-            with indent():
-                line("TODO_PARSE();")
-            line("}")
-
-            # lists
-            peekScope("scopeKind")
-            line("if (isBracketScope(scopeKind)) {")
-            with indent():
-                line("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
-                with indent():
-                    popScope("scopeKind")
-                    line("tokEnd += 1;")
-                    gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
-                line("}")
-                line("if (isWordFirstCharacter(tokEnd[0])) {")
-                with indent():
-                    line("goto check_for_designated_argument;")
-                line("}")
-                gotoStateAlreadyAdvanced("expression", advance1)
-            line("}")
-            line("TODO_ERROR(\"invalid scope for comma\");")
-        elif punc is Punctuation.SemiColon:
-            gotoStateAndSave("statement", "NodeKind::ExpressionStmt")
-        elif punc is Punctuation.FatArrow:
-            peekScope("scopeKind")
-            line("if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {")
-            with indent():
-                popScope("scopeKind")
-                gotoStateAndSave("expression", "NodeKind::IfExpr")
-            line("}")
-            line("TODO_ERROR(\"invalid scope for fat-arrow\");")
-        elif punc is Punctuation.Colon:
-            peekScope("scopeKind")
-            line("if (scopeKind == ScopeKind::IfExprOrStmt) {")
-            with indent():
-                popScope("scopeKind")
-                line("nodeKind = NodeKind::IfStmt;")
-                line("goto single_or_compound_statement;")
-            line("}")
-            line("TODO_ERROR(\"invalid scope for colon\");")
-        else:
-            super().punctuation(punc)
-
-# generate
-with indent():
-    # check_for_designated_argument
-    labelLine("check_for_designated_argument : {")
-    inlineIdentifier()
-    line("auto savedBegin = tokBegin;")
-    line("auto savedEnd = tokEnd;")
-    advance = inlineTokenAdvancer()
-    def designatedArgument():
-        gotoStateAndSave("expression", "NodeKind::DesignateArgument")
-    checkFor(Punctuation.Equal, designatedArgument)
-    emitNode("NodeKind::IdentifierExpr", "savedBegin", "savedEnd")
-    gotoStateAlreadyAdvanced("after_expression", advance)
-    labelLine("}")
-
-    # begin_argument_scope
-    labelLine("begin_argument_scope : {")
-    emitNodeFromLocals()
-    line("ScopeKind scopeKind = (ScopeKind)data1;")
-    advance = inlineTokenAdvancer()
-    line("if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {")
+    # newline
+    line("case '\\n': {")
     with indent():
         line("tokEnd += 1;")
-        gotoStateAndSave("after_expression", "NodeKind::EmptyNode")
+        line("goto " + state.name + "_no_emit;")
     line("}")
-    pushScope("scopeKind")
-    line("if (isWordFirstCharacter(tokEnd[0])) {")
+
+    line("case '\\r': {")
     with indent():
-        line("goto check_for_designated_argument;")
+        line("if (tokEnd[1] == '\\n') {")
+        with indent():
+            line("tokEnd += 2;")
+            line("goto " + state.name + "_no_emit;")
+        line("}")
+        line("tokEnd += 1;")
+        line("goto " + state.name + "_no_emit;")
     line("}")
-    gotoStateAlreadyAdvanced("expression", advance)
-    labelLine("}")
 
-    # single_or_compound_statment
-    labelLine("single_or_compound_statement : {")
-    emitNodeFromLocals()
-    advance = inlineTokenAdvancer()
-    def compoundStatement():
-        pushScope("ScopeKind::CompoundStmt")
-        gotoStateAndSave("statement", "NodeKind::CompoundStmt")
-    checkFor(Punctuation.LeftBrace, compoundStatement)
-    gotoStateAlreadyAdvanced("statement", advance)
-    labelLine("}")
+    # punctuations
+    firstCharacters = {p[0] for p in punctuations}
+    for character in sorted(firstCharacters):
+        line("case '" + character + "': {")
+        with indent():
+            linearIf(str(character), state)
+        line("}")
 
-    # handle_access_punctuation
-    labelLine("handle_access_punctuation : {")
-    inlineTokenAdvancer()
-    line("if (isWordFirstCharacter(tokEnd[0])) {")
+    # word
+    identifierBeginCharacters = set(string.ascii_lowercase) | set(string.ascii_uppercase)
+    keywordBeginCharacters = {k[0] for k in keywords}
+
+    for character in sorted(keywordBeginCharacters):
+        line("case '" + character + "': {")
+        with indent():
+            for keyword in keywords:
+                if keyword.startswith(character):
+                    line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\" && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
+                    with indent():
+                        line("tokEnd += " + str(len(keyword))+ ";")
+                        foundState, case = recurse(state, lambda s: s.keywordCase(keyword))
+                        generateCaseBody(foundState, case)
+                    line("}")
+            line("goto " + state.name + "_identifier_case;")
+        line("}")
+
+    for character in sorted(identifierBeginCharacters - keywordBeginCharacters):
+        line("case '" + character + "':")
+    line("case '#':")
+    line("case '$':")
+    line("case '_': {")
     with indent():
-        inlineIdentifier()
-        gotoStateAndSave("after_expression", "nodeKind")
+        line("goto " + state.name + "_identifier_case;")
     line("}")
-    line("TODO_ERROR(\"junk after access punctuation\");")
-    labelLine("}")
 
-    lineNoIndent()
+    # default
+    line("default: {")
+    with indent():
+        line("return state.nodes;")
+        #line("TODO_ERROR(\"invalid character\");")
+    line("}")
 
-    generateState("statement", StatementHandler())
-    lineNoIndent()
-    generateState("expression", ExpressionHandler())
-    lineNoIndent()
-    generateState("after_expression", AfterExpressionHandler())
+    line("} // switch")
+
+    line("VERIFY_NOT_REACHED();")
+
+    labelLine(state.name + "_identifier_case:")
+    line("tokEnd = skipToEndOfIdentifier(tokEnd);")
+    foundState, case = recurse(state, lambda s: s.identifierCase())
+    generateCaseBody(foundState, case)
+
+def generateLinearState(state):
+    for c in state.cases:
+        if type(c) == PunctuationCase:
+            checkForPunctuation(c.punctuation, lambda: generateCaseBody(state, c))
+        elif type(c) == KeywordCase:
+            checkForKeyword(c.keyword, lambda: generateCaseBody(state, c))
+        elif type(c) == IdentifierCase:
+            line("if (isWordFirstCharacter(tokEnd[0])) {")
+            with indent():
+                line("tokEnd = skipToEndOfIdentifier(tokEnd);")
+                generateCaseBody(state, c)
+            line("}")
+    thenCase = state.thenCase()
+    if not thenCase is None:
+        generateCaseBody(state, thenCase)
+    line("// then " + state.thenState)
+    line("goto " + state.thenState + "_no_whitespace;")
+
+def generateCaseBody(state, case):
+    for inst in case.instructions:
+        line("// " + inst.format())
+        if type(inst) is EmitNodeInstruction:
+            if inst.delayed:
+                assert(inst.tokenExpr is None)
+                line("carriedEmitNodeKind = "+ inst.nodeKindExpr + ";")
+            elif inst.tokenExpr is None:
+                emitNode(inst.nodeKindExpr, "tokBegin", "tokEnd")
+            else:
+                emitNode(inst.nodeKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
+        elif type(inst) is NextInstruction:
+            newState = findState(inst.newState)
+            if shouldBeInlined(newState):
+                line("// inlined " + newState.name)
+                assert(newState.origins == [inst])
+                assert(newState.kind == "LinearState")
+                if inst.carriesEmitNode:
+                    emitCarriedNode()
+                inlineTokenAdvancer()
+                generateState(newState)
+            else:
+                line("goto " + newState.name + ("_with_emit" if inst.carriesEmitNode else "_no_emit") + ";")
+        elif type(inst) is AssignInstruction:
+            if inst.leftName == "savedToken":
+                line("savedTokenBegin = " + inst.rightExpr + "Begin;")
+                line("savedTokenEnd = " + inst.rightExpr + "End;")
+            elif inst.leftName == "nodeKind":
+                line("nodeKind = " + inst.rightExpr + ";")
+            else:
+                assert(False)
+        elif type(inst) is PushScopeInstruction:
+            line("scopePosition = pushScope(scopePosition, " + inst.scopeKindExpr + ");")
+        elif type(inst) is PopScopeInstruction:
+            scopes = ""
+            for expr in inst.scopeKindExprs:
+                scopes += ", " + expr
+            line("scopePosition = popScope(scopePosition" + scopes + ");")
+        elif type(inst) is ExitIfUnscopedInstruction:
+            line("if (ScopeBuffer::toIndex(scopePosition) == 0) {")
+            with indent():
+                line("return state.nodes;")
+            line("}")
+        elif type(inst) is ErrorInstruction:
+            line("VERIFY_NOT_REACHED();")
+        else:
+            raise Exception("invalid instruction \"" + inst.format() + "\"")
+
+for state in states:
+    state.origins = []
+    for s in states:
+        if s.thenState == state.name:
+            state.origins.append(s)
+        for c in s.cases:
+            inst = c.instructions[-1]
+            if type(inst) == NextInstruction and inst.newState == state.name:
+                state.origins.append(inst)
+
+def shouldBeInlined(state):
+    return len(state.origins) == 1 and state.kind == "LinearState"
+
+for state in states:
+    if len(state.origins) == 0:
+        raise Exception("unused state '" + state.name + "'")
+    if not shouldBeInlined(state):
+        line("// " + state.kind + " " + state.name)
+        label1Used = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitNode]
+        if label1Used:
+            labelLine(state.name + "_with_emit:")
+            emitCarriedNode()
+        label2Used = state.kind == "SwitchState" or [o for o in state.origins if type(o) is NextInstruction and not o.carriesEmitNode]
+        if label2Used:
+            labelLine(state.name + "_no_emit:")
+        if label1Used or label2Used:
+            if state.kind == "SwitchState":
+                line("tokEnd = skipWhitespace(tokEnd);")
+                line("tokBegin = tokEnd;")
+            else:
+                inlineTokenAdvancer()
+        if [o for o in state.origins if type(o) is State]:
+            labelLine(state.name + "_no_whitespace:")
+
+        generateState(state)
+
+        lineNoIndent()
 
 # combine/write
 currentDir = pathlib.Path(__file__).parent.resolve()

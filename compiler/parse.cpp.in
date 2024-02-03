@@ -29,26 +29,38 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    const char* sourceBufferEnd;
-
-    ParseStackState(std::string_view sourceBuf)
-        : sourceBufferEnd(sourceBuf.end()) { }
 };
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
-static ScopeKind* pushScope(ScopeKind kind, ScopeKind* position) {
-    uintptr_t scopeBufferEnd = ((uintptr_t)position & ~(uintptr_t)(SCOPE_BUFFER_SIZE - 1)) + SCOPE_BUFFER_SIZE;
-    VERIFY((uintptr_t)position < scopeBufferEnd);
+struct ScopeBuffer {
+    static size_t toIndex(ScopeKind* position) {
+        return (uintptr_t)position & (SCOPE_BUFFER_SIZE - 1);
+    }
+
+    ScopeKind* buffer;
+    ScopeBuffer()
+        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
+    ~ScopeBuffer() {
+        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
+    }
+};
+
+static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
+    auto index = ScopeBuffer::toIndex(position);
+    VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
     position[0] = kind;
     position += 1;
     return position;
 }
 
-static ScopeKind* popScope(ScopeKind kind, ScopeKind* position) {
-    VERIFY(kind != ScopeKind::Invalid);
+template<typename... Args>
+static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
+    static_assert((std::is_same_v<Args, ScopeKind> && ...));
+    auto index = ScopeBuffer::toIndex(position);
+    VERIFY(index != 0);
     position -= 1;
-    VERIFY(position[0] == kind);
+    VERIFY(((position[0] == kinds) || ...));
     return position;
 }
 
@@ -129,15 +141,6 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-struct ScopeBuffer {
-    ScopeKind* buffer;
-    ScopeBuffer()
-        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
-    ~ScopeBuffer() {
-        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
-    }
-};
-
 static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
     scopePosition -= 1;
     VERIFY(scopePosition[0] == ScopeKind::Invalid);
@@ -151,20 +154,25 @@ std::vector<Node> parse(std::string_view sourceBuf) {
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 
-    ParseStackState state(sourceBuf);
+    ParseStackState state;
     const char* sourceBufferBegin = sourceBuf.begin();
     const char* tokBegin = sourceBufferBegin;
     const char* tokEnd = sourceBufferBegin;
-    NodeKind nodeKind = (NodeKind)0;
-    size_t data1 = 0;
+    NodeKind carriedEmitNodeKind = (NodeKind)0;
 
-    nodeKind = NodeKind::Newline;
-    goto expression;
+    const char* savedTokenBegin = nullptr;
+    const char* savedTokenEnd = nullptr;
+    NodeKind nodeKind = (NodeKind)0;
+
+    goto expression_no_emit;
 
 #define TODO_PARSE() VERIFY_NOT_REACHED()
 #define TODO_ERROR(error) VERIFY_NOT_REACHED()
 
     // GENERATED CODE HERE
+
+error_no_whitespace:
+    VERIFY_NOT_REACHED();
 }
 
 std::string_view nameString(NodeKind kind) {

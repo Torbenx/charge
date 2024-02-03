@@ -29,26 +29,38 @@ static bool isBracketScope(ScopeKind scope) {
 
 struct ParseStackState {
     std::vector<Node> nodes;
-    const char* sourceBufferEnd;
-
-    ParseStackState(std::string_view sourceBuf)
-        : sourceBufferEnd(sourceBuf.end()) { }
 };
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
-static ScopeKind* pushScope(ScopeKind kind, ScopeKind* position) {
-    uintptr_t scopeBufferEnd = ((uintptr_t)position & ~(uintptr_t)(SCOPE_BUFFER_SIZE - 1)) + SCOPE_BUFFER_SIZE;
-    VERIFY((uintptr_t)position < scopeBufferEnd);
+struct ScopeBuffer {
+    static size_t toIndex(ScopeKind* position) {
+        return (uintptr_t)position & (SCOPE_BUFFER_SIZE - 1);
+    }
+
+    ScopeKind* buffer;
+    ScopeBuffer()
+        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
+    ~ScopeBuffer() {
+        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
+    }
+};
+
+static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
+    auto index = ScopeBuffer::toIndex(position);
+    VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
     position[0] = kind;
     position += 1;
     return position;
 }
 
-static ScopeKind* popScope(ScopeKind kind, ScopeKind* position) {
-    VERIFY(kind != ScopeKind::Invalid);
+template<typename... Args>
+static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
+    static_assert((std::is_same_v<Args, ScopeKind> && ...));
+    auto index = ScopeBuffer::toIndex(position);
+    VERIFY(index != 0);
     position -= 1;
-    VERIFY(position[0] == kind);
+    VERIFY(((position[0] == kinds) || ...));
     return position;
 }
 
@@ -129,15 +141,6 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-struct ScopeBuffer {
-    ScopeKind* buffer;
-    ScopeBuffer()
-        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
-    ~ScopeBuffer() {
-        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
-    }
-};
-
 static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
     scopePosition -= 1;
     VERIFY(scopePosition[0] == ScopeKind::Invalid);
@@ -151,1643 +154,1998 @@ std::vector<Node> parse(std::string_view sourceBuf) {
     scopePosition[0] = ScopeKind::Invalid;
     scopePosition += 1;
 
-    ParseStackState state(sourceBuf);
+    ParseStackState state;
     const char* sourceBufferBegin = sourceBuf.begin();
     const char* tokBegin = sourceBufferBegin;
     const char* tokEnd = sourceBufferBegin;
-    NodeKind nodeKind = (NodeKind)0;
-    size_t data1 = 0;
+    NodeKind carriedEmitNodeKind = (NodeKind)0;
 
-    nodeKind = NodeKind::Newline;
-    goto expression;
+    const char* savedTokenBegin = nullptr;
+    const char* savedTokenEnd = nullptr;
+    NodeKind nodeKind = (NodeKind)0;
+
+    goto expression_no_emit;
 
 #define TODO_PARSE() VERIFY_NOT_REACHED()
 #define TODO_ERROR(error) VERIFY_NOT_REACHED()
 
-check_for_designated_argument : {
-    tokEnd = skipToEndOfIdentifier(tokEnd);
-    auto savedBegin = tokBegin;
-    auto savedEnd = tokEnd;
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    // SwitchState expression
+expression_with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+expression_no_emit:
+    tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-    if (std::string_view(tokEnd, 1) == "=") {
+expression_no_whitespace:
+    switch (tokEnd[0]) {
+    case '\n': {
+        tokEnd += 1;
+        goto expression_no_emit;
+    }
+    case '\r': {
+        if (tokEnd[1] == '\n') {
+            tokEnd += 2;
+            goto expression_no_emit;
+        }
+        tokEnd += 1;
+        goto expression_no_emit;
+    }
+    case '!': {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
-            tokEnd += 1;
-            nodeKind = NodeKind::DesignateArgument;
-            goto expression;
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
         }
-    }
-    emitNode(NodeKind::IdentifierExpr, savedBegin, savedEnd, state, sourceBufferBegin);
-    goto after_expression_dispatch;
-}
-begin_argument_scope : {
-    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-    ScopeKind scopeKind = (ScopeKind)data1;
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-    tokBegin = tokEnd;
-    if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
         tokEnd += 1;
-        nodeKind = NodeKind::EmptyNode;
-        goto after_expression;
+        // emitNode NodeKind::LogicalNotExpr
+        carriedEmitNodeKind = NodeKind::LogicalNotExpr;
+        // next expression
+        goto expression_with_emit;
     }
-    scopePosition = pushScope(scopeKind, scopePosition);
-    if (isWordFirstCharacter(tokEnd[0])) {
-        goto check_for_designated_argument;
-    }
-    goto expression_dispatch;
-}
-single_or_compound_statement : {
-    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-    tokBegin = tokEnd;
-    if (std::string_view(tokEnd, 1) == "{") {
+    case '%': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
         tokEnd += 1;
-        scopePosition = pushScope(ScopeKind::CompoundStmt, scopePosition);
-        nodeKind = NodeKind::CompoundStmt;
-        goto statement;
+        // error
+        VERIFY_NOT_REACHED();
     }
-    goto statement_dispatch;
-}
-handle_access_punctuation : {
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    case '&': {
+        char next = tokEnd[1];
+        if (next == '&') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '(': {
+        tokEnd += 1;
+        // emitNode NodeKind::ParenthesizedExpr
+        carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
+        // next first_argument_paren
+        goto first_argument_paren_with_emit;
+    }
+    case ')': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '*': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::DereferenceExpr
+        carriedEmitNodeKind = NodeKind::DereferenceExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '+': {
+        char next = tokEnd[1];
+        if (next == '+') {
+            tokEnd += 2;
+            // emitNode NodeKind::PreIncrementExpr
+            carriedEmitNodeKind = NodeKind::PreIncrementExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::PlusExpr
+        carriedEmitNodeKind = NodeKind::PlusExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case ',': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '-': {
+        char next = tokEnd[1];
+        if (next == '-') {
+            tokEnd += 2;
+            // emitNode NodeKind::PreDecrementExpr
+            carriedEmitNodeKind = NodeKind::PreDecrementExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::NegateExpr
+        carriedEmitNodeKind = NodeKind::NegateExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '.': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '/': {
+        char next = tokEnd[1];
+        if (next == '*') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd += 2;
+            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto expression_no_emit;
+        }
+        if (next == '/') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfLine(tokEnd);
+            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto expression_no_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ':': {
+        char next = tokEnd[1];
+        if (next == ':') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ';': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '<': {
+        char next = tokEnd[1];
+        if (next == '<') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '=') {
+            char next = tokEnd[2];
+            if (next == '>') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '=': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '>': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '?': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '[': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ']': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '^': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '{': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '|': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '|') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '}': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '~': {
+        tokEnd += 1;
+        // emitNode NodeKind::BitwiseNotExpr
+        carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case 'a': {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'b': {
+        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'c': {
+        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'd': {
+        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'e': {
+        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'f': {
+        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'g': {
+        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'i': {
+        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression_no_emit;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'l': {
+        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'm': {
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'n': {
+        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+            tokEnd += 9;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'o': {
+        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'r': {
+        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 's': {
+        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 't': {
+        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'v': {
+        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'w': {
+        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto expression_identifier_case;
+    }
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+    case 'G':
+    case 'H':
+    case 'I':
+    case 'J':
+    case 'K':
+    case 'L':
+    case 'M':
+    case 'N':
+    case 'O':
+    case 'P':
+    case 'Q':
+    case 'R':
+    case 'S':
+    case 'T':
+    case 'U':
+    case 'V':
+    case 'W':
+    case 'X':
+    case 'Y':
+    case 'Z':
+    case 'h':
+    case 'j':
+    case 'k':
+    case 'p':
+    case 'q':
+    case 'u':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '#':
+    case '$':
+    case '_': {
+        goto expression_identifier_case;
+    }
+    default: {
+        return state.nodes;
+    }
+    } // switch
+    VERIFY_NOT_REACHED();
+expression_identifier_case:
+    tokEnd = skipToEndOfIdentifier(tokEnd);
+    // emitNode NodeKind::IdentifierExpr
+    carriedEmitNodeKind = NodeKind::IdentifierExpr;
+    // next after_expression
+    goto after_expression_with_emit;
+
+    // SwitchState after_expression
+after_expression_with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+after_expression_no_emit:
+    tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-    if (isWordFirstCharacter(tokEnd[0])) {
-        tokEnd = skipToEndOfIdentifier(tokEnd);
-        goto after_expression;
+after_expression_no_whitespace:
+    switch (tokEnd[0]) {
+    case '\n': {
+        tokEnd += 1;
+        goto after_expression_no_emit;
     }
-    TODO_ERROR("junk after access punctuation");
-}
-
-statement:
-    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-statement_continue:
-    for (;;) {
-        tokEnd = skipWhitespace(tokEnd);
-        tokBegin = tokEnd;
-        nodeKind = (NodeKind)0;
-        data1 = 0;
-    statement_dispatch:
-        fmt::println("statement: {}", tokEnd[0]);
-        switch (tokEnd[0]) {
-        case '\n': {
-            tokEnd += 1;
-            continue;
+    case '\r': {
+        if (tokEnd[1] == '\n') {
+            tokEnd += 2;
+            goto after_expression_no_emit;
         }
-        case '\r': {
-            if (tokEnd[1] == '\n') {
-                tokEnd += 2;
-                continue;
-            }
-            tokEnd += 1;
-            continue;
+        tokEnd += 1;
+        goto after_expression_no_emit;
+    }
+    case '!': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // emitNode NodeKind::CompareNotEqualExpr
+            carriedEmitNodeKind = NodeKind::CompareNotEqualExpr;
+            // next expression
+            goto expression_with_emit;
         }
-        case '!': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::LogicalNotExpr;
-            goto expression;
-        }
-        case '%': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '&': {
-            char next = tokEnd[1];
-            if (next == '&') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '(': {
-            tokEnd += 1;
-            nodeKind = NodeKind::ParenthesizedExpr;
-            data1 = (size_t)ScopeKind::Paren;
-            goto begin_argument_scope;
-        }
-        case ')': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '*': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::DereferenceExpr;
-            goto expression;
-        }
-        case '+': {
-            char next = tokEnd[1];
-            if (next == '+') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PreIncrementExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::PlusExpr;
-            goto expression;
-        }
-        case ',': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '-': {
-            char next = tokEnd[1];
-            if (next == '-') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PreDecrementExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::NegateExpr;
-            goto expression;
-        }
-        case '.': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '/': {
-            char next = tokEnd[1];
-            if (next == '*') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfBlockComment(tokEnd);
-                tokEnd += 2;
-                emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '/') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfLine(tokEnd);
-                emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ':': {
-            char next = tokEnd[1];
-            if (next == ':') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ';': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '<': {
-            char next = tokEnd[1];
-            if (next == '<') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '=') {
-                char next = tokEnd[2];
-                if (next == '>') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '=': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '>': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '?': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '[': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ']': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '^': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '{': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '|': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '|') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '}': {
-            tokEnd += 1;
-            scopePosition = popScope(ScopeKind::CompoundStmt, scopePosition);
-            nodeKind = NodeKind::EmptyNode;
-            goto statement;
-        }
-        case '~': {
-            tokEnd += 1;
-            nodeKind = NodeKind::BitwiseNotExpr;
-            goto expression;
-        }
-        case 'a': {
-            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'b': {
-            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'c': {
-            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'd': {
-            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'e': {
-            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'f': {
-            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-                tokEnd += 7;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'g': {
-            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'i': {
-            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                scopePosition = pushScope(ScopeKind::IfExprOrStmt, scopePosition);
-                goto expression_continue;
-            }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'l': {
-            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'm': {
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'n': {
-            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
-                tokEnd += 9;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'o': {
-            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'r': {
-            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 's': {
-            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 't': {
-            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'v': {
-            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'w': {
-            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto statement_identifier_case;
-        }
-        case 'A':
-        case 'B':
-        case 'C':
-        case 'D':
-        case 'E':
-        case 'F':
-        case 'G':
-        case 'H':
-        case 'I':
-        case 'J':
-        case 'K':
-        case 'L':
-        case 'M':
-        case 'N':
-        case 'O':
-        case 'P':
-        case 'Q':
-        case 'R':
-        case 'S':
-        case 'T':
-        case 'U':
-        case 'V':
-        case 'W':
-        case 'X':
-        case 'Y':
-        case 'Z':
-        case 'h':
-        case 'j':
-        case 'k':
-        case 'p':
-        case 'q':
-        case 'u':
-        case 'x':
-        case 'y':
-        case 'z':
-        case '#':
-        case '$':
-        case '_': {
-            goto statement_identifier_case;
-        }
-        default: {
-            if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state, scopePosition);
-            }
-            TODO_ERROR("invalid character");
-        }
-        } // switch
+        tokEnd += 1;
+        // error
         VERIFY_NOT_REACHED();
-    statement_identifier_case:
-        tokEnd = skipToEndOfIdentifier(tokEnd);
-        nodeKind = NodeKind::IdentifierExpr;
-        goto after_expression;
-    } // retry-loop
-
-expression:
-    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-expression_continue:
-    for (;;) {
-        tokEnd = skipWhitespace(tokEnd);
+    }
+    case '%': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::RemainderExpr
+        carriedEmitNodeKind = NodeKind::RemainderExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '&': {
+        char next = tokEnd[1];
+        if (next == '&') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // emitNode NodeKind::LogicalAndExpr
+            carriedEmitNodeKind = NodeKind::LogicalAndExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::BitwiseAndExpr
+        carriedEmitNodeKind = NodeKind::BitwiseAndExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '(': {
+        tokEnd += 1;
+        // emitNode NodeKind::CallExpr
+        carriedEmitNodeKind = NodeKind::CallExpr;
+        // next first_argument_paren
+        goto first_argument_paren_with_emit;
+    }
+    case ')': {
+        tokEnd += 1;
+        // popScope ScopeKind::Paren
+        scopePosition = popScope(scopePosition, ScopeKind::Paren);
+        // emitNode NodeKind::EmptyNode
+        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // next after_expression
+        goto after_expression_with_emit;
+    }
+    case '*': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::MultiplyExpr
+        carriedEmitNodeKind = NodeKind::MultiplyExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '+': {
+        char next = tokEnd[1];
+        if (next == '+') {
+            tokEnd += 2;
+            // emitNode NodeKind::PostIncrementExpr
+            carriedEmitNodeKind = NodeKind::PostIncrementExpr;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::AdditionExpr
+        carriedEmitNodeKind = NodeKind::AdditionExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case ',': {
+        tokEnd += 1;
+        // next comma_after_expression
+        // inlined comma_after_expression
+        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
-        nodeKind = (NodeKind)0;
-        data1 = 0;
-    expression_dispatch:
-        fmt::println("expression: {}", tokEnd[0]);
-        switch (tokEnd[0]) {
-        case '\n': {
-            tokEnd += 1;
-            continue;
-        }
-        case '\r': {
-            if (tokEnd[1] == '\n') {
-                tokEnd += 2;
-                continue;
-            }
-            tokEnd += 1;
-            continue;
-        }
-        case '!': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::LogicalNotExpr;
-            goto expression;
-        }
-        case '%': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '&': {
-            char next = tokEnd[1];
-            if (next == '&') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '(': {
-            tokEnd += 1;
-            nodeKind = NodeKind::ParenthesizedExpr;
-            data1 = (size_t)ScopeKind::Paren;
-            goto begin_argument_scope;
-        }
-        case ')': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '*': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::DereferenceExpr;
-            goto expression;
-        }
-        case '+': {
-            char next = tokEnd[1];
-            if (next == '+') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PreIncrementExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::PlusExpr;
-            goto expression;
-        }
-        case ',': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '-': {
-            char next = tokEnd[1];
-            if (next == '-') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PreDecrementExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::NegateExpr;
-            goto expression;
-        }
-        case '.': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '/': {
-            char next = tokEnd[1];
-            if (next == '*') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfBlockComment(tokEnd);
-                tokEnd += 2;
-                emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '/') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfLine(tokEnd);
-                emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ':': {
-            char next = tokEnd[1];
-            if (next == ':') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ';': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '<': {
-            char next = tokEnd[1];
-            if (next == '<') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '=') {
-                char next = tokEnd[2];
-                if (next == '>') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '=': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '>': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '>') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '?': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '[': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case ']': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '^': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '{': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '|': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '|') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '}': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '~': {
-            tokEnd += 1;
-            nodeKind = NodeKind::BitwiseNotExpr;
-            goto expression;
-        }
-        case 'a': {
-            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'b': {
-            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'c': {
-            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'd': {
-            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'e': {
-            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'f': {
-            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-                tokEnd += 7;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'g': {
-            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'i': {
-            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                scopePosition = pushScope(ScopeKind::IfExpr, scopePosition);
-                goto expression_continue;
-            }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'l': {
-            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'm': {
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'n': {
-            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
-                tokEnd += 9;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'o': {
-            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'r': {
-            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 's': {
-            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 't': {
-            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'v': {
-            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'w': {
-            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto expression_identifier_case;
-        }
-        case 'A':
-        case 'B':
-        case 'C':
-        case 'D':
-        case 'E':
-        case 'F':
-        case 'G':
-        case 'H':
-        case 'I':
-        case 'J':
-        case 'K':
-        case 'L':
-        case 'M':
-        case 'N':
-        case 'O':
-        case 'P':
-        case 'Q':
-        case 'R':
-        case 'S':
-        case 'T':
-        case 'U':
-        case 'V':
-        case 'W':
-        case 'X':
-        case 'Y':
-        case 'Z':
-        case 'h':
-        case 'j':
-        case 'k':
-        case 'p':
-        case 'q':
-        case 'u':
-        case 'x':
-        case 'y':
-        case 'z':
-        case '#':
-        case '$':
-        case '_': {
-            goto expression_identifier_case;
-        }
-        default: {
-            if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state, scopePosition);
-            }
-            TODO_ERROR("invalid character");
-        }
-        } // switch
-        VERIFY_NOT_REACHED();
-    expression_identifier_case:
-        tokEnd = skipToEndOfIdentifier(tokEnd);
-        nodeKind = NodeKind::IdentifierExpr;
-        goto after_expression;
-    } // retry-loop
-
-after_expression:
-    emitNode(nodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-after_expression_continue:
-    for (;;) {
-        tokEnd = skipWhitespace(tokEnd);
-        tokBegin = tokEnd;
-        nodeKind = (NodeKind)0;
-        data1 = 0;
-    after_expression_dispatch:
-        fmt::println("after_expression: {}", tokEnd[0]);
-        switch (tokEnd[0]) {
-        case '\n': {
-            tokEnd += 1;
-            continue;
-        }
-        case '\r': {
-            if (tokEnd[1] == '\n') {
-                tokEnd += 2;
-                continue;
-            }
-            tokEnd += 1;
-            continue;
-        }
-        case '!': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                nodeKind = NodeKind::CompareNotEqualExpr;
-                goto expression;
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '%': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::RemainderExpr;
-            goto expression;
-        }
-        case '&': {
-            char next = tokEnd[1];
-            if (next == '&') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                nodeKind = NodeKind::LogicalAndExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::BitwiseAndExpr;
-            goto expression;
-        }
-        case '(': {
-            tokEnd += 1;
-            nodeKind = NodeKind::CallExpr;
-            data1 = (size_t)ScopeKind::Paren;
-            goto begin_argument_scope;
-        }
-        case ')': {
-            tokEnd += 1;
-            scopePosition = popScope(ScopeKind::Paren, scopePosition);
-            nodeKind = NodeKind::EmptyNode;
-            goto after_expression;
-        }
-        case '*': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::MultiplyExpr;
-            goto expression;
-        }
-        case '+': {
-            char next = tokEnd[1];
-            if (next == '+') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PostIncrementExpr;
-                goto after_expression;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::AdditionExpr;
-            goto expression;
-        }
-        case ',': {
-            tokEnd += 1;
+        if (std::string_view(tokEnd, 4) == "else" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // next comma_else
+            // inlined comma_else
             tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
             tokBegin = tokEnd;
-            if (std::string_view(tokEnd, 4) == "else" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-                tokBegin = tokEnd;
-                if (std::string_view(tokEnd, 2) == "=>") {
-                    tokEnd += 2;
-                    nodeKind = NodeKind::CommaElseExpr;
-                    goto expression;
-                }
-                TODO_ERROR("junk after comma-else");
+            if (std::string_view(tokEnd, 2) == "=>") {
+                tokEnd += 2;
+                // emitNode NodeKind::CommaElseExpr
+                carriedEmitNodeKind = NodeKind::CommaElseExpr;
+                // next expression
+                goto expression_with_emit;
             }
-            if (std::string_view(tokEnd, 4) == "elif" && !isWordBulkCharacter(tokEnd[4])) {
-                TODO_PARSE();
-            }
-            auto scopeKind = peekScope(scopePosition);
-            if (isBracketScope(scopeKind)) {
-                if (tokEnd[0] == scopeKindToRightBracket(scopeKind)) {
-                    scopePosition = popScope(scopeKind, scopePosition);
-                    tokEnd += 1;
-                    nodeKind = NodeKind::EmptyNode;
-                    goto after_expression;
-                }
-                if (isWordFirstCharacter(tokEnd[0])) {
-                    goto check_for_designated_argument;
-                }
-                goto expression_dispatch;
-            }
-            TODO_ERROR("invalid scope for comma");
+            // then error
+            goto error_no_whitespace;
         }
-        case '-': {
-            char next = tokEnd[1];
-            if (next == '-') {
-                tokEnd += 2;
-                nodeKind = NodeKind::PostDecrementExpr;
-                goto after_expression;
-            }
+        if (std::string_view(tokEnd, 1) == ")") {
+            tokEnd += 1;
+            // popScope ScopeKind::Paren
+            scopePosition = popScope(scopePosition, ScopeKind::Paren);
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        if (std::string_view(tokEnd, 1) == "]") {
+            tokEnd += 1;
+            // popScope ScopeKind::Square
+            scopePosition = popScope(scopePosition, ScopeKind::Square);
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        if (std::string_view(tokEnd, 1) == "}") {
+            tokEnd += 1;
+            // popScope ScopeKind::Brace
+            scopePosition = popScope(scopePosition, ScopeKind::Brace);
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        // then check_designated_argument
+        goto check_designated_argument_no_whitespace;
+    }
+    case '-': {
+        char next = tokEnd[1];
+        if (next == '-') {
+            tokEnd += 2;
+            // emitNode NodeKind::PostDecrementExpr
+            carriedEmitNodeKind = NodeKind::PostDecrementExpr;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::SubtractionExpr
+        carriedEmitNodeKind = NodeKind::SubtractionExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '.': {
+        tokEnd += 1;
+        // nodeKind = NodeKind::MemberAccessExpr
+        nodeKind = NodeKind::MemberAccessExpr;
+        // next access_punctuation
+        goto access_punctuation_no_emit;
+    }
+    case '/': {
+        char next = tokEnd[1];
+        if (next == '*') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd += 2;
+            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto after_expression_no_emit;
+        }
+        if (next == '/') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfLine(tokEnd);
+            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto after_expression_no_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::DivideExpr
+        carriedEmitNodeKind = NodeKind::DivideExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case ':': {
+        char next = tokEnd[1];
+        if (next == ':') {
+            tokEnd += 2;
+            // nodeKind = NodeKind::StaticAccessExpr
+            nodeKind = NodeKind::StaticAccessExpr;
+            // next access_punctuation
+            goto access_punctuation_no_emit;
+        }
+        tokEnd += 1;
+        // popScope ScopeKind::IfExprOrStmt
+        scopePosition = popScope(scopePosition, ScopeKind::IfExprOrStmt);
+        // emitNode NodeKind::IfStmt
+        carriedEmitNodeKind = NodeKind::IfStmt;
+        // next single_or_compound_statement
+        // inlined single_or_compound_statement
+        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        tokBegin = tokEnd;
+        if (std::string_view(tokEnd, 1) == "{") {
+            tokEnd += 1;
+            // pushScope ScopeKind::CompoundStmt
+            scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
+            // emitNode NodeKind::CompoundStmt
+            carriedEmitNodeKind = NodeKind::CompoundStmt;
+            // next statement
+            goto statement_with_emit;
+        }
+        // then statement
+        goto statement_no_whitespace;
+    }
+    case ';': {
+        tokEnd += 1;
+        // exitIfUnscoped
+        if (ScopeBuffer::toIndex(scopePosition) == 0) {
+            return state.nodes;
+        }
+        // emitNode NodeKind::ExpressionStmt
+        carriedEmitNodeKind = NodeKind::ExpressionStmt;
+        // next statement
+        goto statement_with_emit;
+    }
+    case '<': {
+        char next = tokEnd[1];
+        if (next == '<') {
+            char next = tokEnd[2];
             if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
             }
+            tokEnd += 2;
+            // emitNode NodeKind::ShiftLeftExpr
+            carriedEmitNodeKind = NodeKind::ShiftLeftExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            char next = tokEnd[2];
             if (next == '>') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::SubtractionExpr;
-            goto expression;
-        }
-        case '.': {
-            tokEnd += 1;
-            nodeKind = NodeKind::MemberAccessExpr;
-            goto handle_access_punctuation;
-        }
-        case '/': {
-            char next = tokEnd[1];
-            if (next == '*') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfBlockComment(tokEnd);
-                tokEnd += 2;
-                emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '/') {
-                tokEnd += 2;
-                tokEnd = skipToEndOfLine(tokEnd);
-                emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-                continue;
-            }
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::DivideExpr;
-            goto expression;
-        }
-        case ':': {
-            char next = tokEnd[1];
-            if (next == ':') {
-                tokEnd += 2;
-                nodeKind = NodeKind::StaticAccessExpr;
-                goto handle_access_punctuation;
-            }
-            tokEnd += 1;
-            auto scopeKind = peekScope(scopePosition);
-            if (scopeKind == ScopeKind::IfExprOrStmt) {
-                scopePosition = popScope(scopeKind, scopePosition);
-                nodeKind = NodeKind::IfStmt;
-                goto single_or_compound_statement;
-            }
-            TODO_ERROR("invalid scope for colon");
-        }
-        case ';': {
-            tokEnd += 1;
-            nodeKind = NodeKind::ExpressionStmt;
-            goto statement;
-        }
-        case '<': {
-            char next = tokEnd[1];
-            if (next == '<') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                nodeKind = NodeKind::ShiftLeftExpr;
-                goto expression;
-            }
-            if (next == '=') {
-                char next = tokEnd[2];
-                if (next == '>') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                nodeKind = NodeKind::CompareLessEqualExpr;
-                goto expression;
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::CompareLessExpr;
-            goto expression;
-        }
-        case '=': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                nodeKind = NodeKind::CompareEqualExpr;
-                goto expression;
-            }
-            if (next == '>') {
-                tokEnd += 2;
-                auto scopeKind = peekScope(scopePosition);
-                if (scopeKind == ScopeKind::IfExpr || scopeKind == ScopeKind::IfExprOrStmt) {
-                    scopePosition = popScope(scopeKind, scopePosition);
-                    nodeKind = NodeKind::IfExpr;
-                    goto expression;
-                }
-                TODO_ERROR("invalid scope for fat-arrow");
-            }
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '>': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                nodeKind = NodeKind::CompareGreaterEqualExpr;
-                goto expression;
-            }
-            if (next == '>') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                nodeKind = NodeKind::ShiftRightExpr;
-                goto expression;
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::CompareGreaterExpr;
-            goto expression;
-        }
-        case '?': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case '[': {
-            tokEnd += 1;
-            nodeKind = NodeKind::IndexExpr;
-            data1 = (size_t)ScopeKind::Square;
-            goto begin_argument_scope;
-        }
-        case ']': {
-            tokEnd += 1;
-            scopePosition = popScope(ScopeKind::Square, scopePosition);
-            nodeKind = NodeKind::EmptyNode;
-            goto after_expression;
-        }
-        case '^': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::BitwiseXorExpr;
-            goto expression;
-        }
-        case '{': {
-            tokEnd += 1;
-            nodeKind = NodeKind::Parameterize;
-            data1 = (size_t)ScopeKind::Brace;
-            goto begin_argument_scope;
-        }
-        case '|': {
-            char next = tokEnd[1];
-            if (next == '=') {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (next == '|') {
-                char next = tokEnd[2];
-                if (next == '=') {
-                    tokEnd += 3;
-                    TODO_ERROR("invalid token for state");
-                }
-                tokEnd += 2;
-                nodeKind = NodeKind::LogicalOrExpr;
-                goto expression;
-            }
-            tokEnd += 1;
-            nodeKind = NodeKind::BitwiseOrExpr;
-            goto expression;
-        }
-        case '}': {
-            tokEnd += 1;
-            scopePosition = popScope(ScopeKind::Brace, scopePosition);
-            nodeKind = NodeKind::EmptyNode;
-            goto after_expression;
-        }
-        case '~': {
-            tokEnd += 1;
-            TODO_ERROR("invalid token for state");
-        }
-        case 'a': {
-            if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'b': {
-            if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'c': {
-            if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'd': {
-            if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'e': {
-            if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'f': {
-            if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
                 tokEnd += 3;
-                TODO_ERROR("invalid token for state");
+                // error
+                VERIFY_NOT_REACHED();
             }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
-                tokEnd += 7;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
+            tokEnd += 2;
+            // emitNode NodeKind::CompareLessEqualExpr
+            carriedEmitNodeKind = NodeKind::CompareLessEqualExpr;
+            // next expression
+            goto expression_with_emit;
         }
-        case 'g': {
-            if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
+        tokEnd += 1;
+        // emitNode NodeKind::CompareLessExpr
+        carriedEmitNodeKind = NodeKind::CompareLessExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '=': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // emitNode NodeKind::CompareEqualExpr
+            carriedEmitNodeKind = NodeKind::CompareEqualExpr;
+            // next expression
+            goto expression_with_emit;
         }
-        case 'i': {
-            if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
-                tokEnd += 2;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
+        if (next == '>') {
+            tokEnd += 2;
+            // popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+            scopePosition = popScope(scopePosition, ScopeKind::IfExpr, ScopeKind::IfExprOrStmt);
+            // emitNode NodeKind::IfExpr
+            carriedEmitNodeKind = NodeKind::IfExpr;
+            // next expression
+            goto expression_with_emit;
         }
-        case 'l': {
-            if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'm': {
-            if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'n': {
-            if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
-                tokEnd += 9;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'o': {
-            if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'r': {
-            if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 's': {
-            if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
-                tokEnd += 6;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 't': {
-            if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
-                tokEnd += 8;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'v': {
-            if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
-                tokEnd += 3;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'w': {
-            if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
-                tokEnd += 5;
-                TODO_ERROR("invalid token for state");
-            }
-            if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
-                tokEnd += 4;
-                TODO_ERROR("invalid token for state");
-            }
-            goto after_expression_identifier_case;
-        }
-        case 'A':
-        case 'B':
-        case 'C':
-        case 'D':
-        case 'E':
-        case 'F':
-        case 'G':
-        case 'H':
-        case 'I':
-        case 'J':
-        case 'K':
-        case 'L':
-        case 'M':
-        case 'N':
-        case 'O':
-        case 'P':
-        case 'Q':
-        case 'R':
-        case 'S':
-        case 'T':
-        case 'U':
-        case 'V':
-        case 'W':
-        case 'X':
-        case 'Y':
-        case 'Z':
-        case 'h':
-        case 'j':
-        case 'k':
-        case 'p':
-        case 'q':
-        case 'u':
-        case 'x':
-        case 'y':
-        case 'z':
-        case '#':
-        case '$':
-        case '_': {
-            goto after_expression_identifier_case;
-        }
-        default: {
-            if (tokEnd[0] == '\0' && tokEnd == state.sourceBufferEnd) {
-                return reachedEOS(state, scopePosition);
-            }
-            TODO_ERROR("invalid character");
-        }
-        } // switch
+        tokEnd += 1;
+        // error
         VERIFY_NOT_REACHED();
-    after_expression_identifier_case:
+    }
+    case '>': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // emitNode NodeKind::CompareGreaterEqualExpr
+            carriedEmitNodeKind = NodeKind::CompareGreaterEqualExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '>') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // emitNode NodeKind::ShiftRightExpr
+            carriedEmitNodeKind = NodeKind::ShiftRightExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::CompareGreaterExpr
+        carriedEmitNodeKind = NodeKind::CompareGreaterExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '?': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '[': {
+        tokEnd += 1;
+        // emitNode NodeKind::IndexExpr
+        carriedEmitNodeKind = NodeKind::IndexExpr;
+        // next first_argument_square
+        // inlined first_argument_square
+        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        tokBegin = tokEnd;
+        if (std::string_view(tokEnd, 1) == "]") {
+            tokEnd += 1;
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        // pushScope ScopeKind::Square
+        scopePosition = pushScope(scopePosition, ScopeKind::Square);
+        // then check_designated_argument
+        goto check_designated_argument_no_whitespace;
+    }
+    case ']': {
+        tokEnd += 1;
+        // popScope ScopeKind::Square
+        scopePosition = popScope(scopePosition, ScopeKind::Square);
+        // emitNode NodeKind::EmptyNode
+        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // next after_expression
+        goto after_expression_with_emit;
+    }
+    case '^': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::BitwiseXorExpr
+        carriedEmitNodeKind = NodeKind::BitwiseXorExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '{': {
+        tokEnd += 1;
+        // emitNode NodeKind::Parameterize
+        carriedEmitNodeKind = NodeKind::Parameterize;
+        // next first_argument_brace
+        // inlined first_argument_brace
+        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        tokBegin = tokEnd;
+        if (std::string_view(tokEnd, 1) == "}") {
+            tokEnd += 1;
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_expression
+            goto after_expression_with_emit;
+        }
+        // pushScope ScopeKind::Brace
+        scopePosition = pushScope(scopePosition, ScopeKind::Brace);
+        // then check_designated_argument
+        goto check_designated_argument_no_whitespace;
+    }
+    case '|': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '|') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // emitNode NodeKind::LogicalOrExpr
+            carriedEmitNodeKind = NodeKind::LogicalOrExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::BitwiseOrExpr
+        carriedEmitNodeKind = NodeKind::BitwiseOrExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '}': {
+        tokEnd += 1;
+        // popScope ScopeKind::Brace
+        scopePosition = popScope(scopePosition, ScopeKind::Brace);
+        // emitNode NodeKind::EmptyNode
+        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // next after_expression
+        goto after_expression_with_emit;
+    }
+    case '~': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case 'a': {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'b': {
+        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'c': {
+        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'd': {
+        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'e': {
+        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'f': {
+        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'g': {
+        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'i': {
+        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'l': {
+        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'm': {
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'n': {
+        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+            tokEnd += 9;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'o': {
+        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'r': {
+        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 's': {
+        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 't': {
+        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'v': {
+        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'w': {
+        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto after_expression_identifier_case;
+    }
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+    case 'G':
+    case 'H':
+    case 'I':
+    case 'J':
+    case 'K':
+    case 'L':
+    case 'M':
+    case 'N':
+    case 'O':
+    case 'P':
+    case 'Q':
+    case 'R':
+    case 'S':
+    case 'T':
+    case 'U':
+    case 'V':
+    case 'W':
+    case 'X':
+    case 'Y':
+    case 'Z':
+    case 'h':
+    case 'j':
+    case 'k':
+    case 'p':
+    case 'q':
+    case 'u':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '#':
+    case '$':
+    case '_': {
+        goto after_expression_identifier_case;
+    }
+    default: {
+        return state.nodes;
+    }
+    } // switch
+    VERIFY_NOT_REACHED();
+after_expression_identifier_case:
+    tokEnd = skipToEndOfIdentifier(tokEnd);
+    // error
+    VERIFY_NOT_REACHED();
+
+    // SwitchState statement
+statement_with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+statement_no_emit:
+    tokEnd = skipWhitespace(tokEnd);
+    tokBegin = tokEnd;
+statement_no_whitespace:
+    switch (tokEnd[0]) {
+    case '\n': {
+        tokEnd += 1;
+        goto statement_no_emit;
+    }
+    case '\r': {
+        if (tokEnd[1] == '\n') {
+            tokEnd += 2;
+            goto statement_no_emit;
+        }
+        tokEnd += 1;
+        goto statement_no_emit;
+    }
+    case '!': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::LogicalNotExpr
+        carriedEmitNodeKind = NodeKind::LogicalNotExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '%': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '&': {
+        char next = tokEnd[1];
+        if (next == '&') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '(': {
+        tokEnd += 1;
+        // emitNode NodeKind::ParenthesizedExpr
+        carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
+        // next first_argument_paren
+        goto first_argument_paren_with_emit;
+    }
+    case ')': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '*': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::DereferenceExpr
+        carriedEmitNodeKind = NodeKind::DereferenceExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '+': {
+        char next = tokEnd[1];
+        if (next == '+') {
+            tokEnd += 2;
+            // emitNode NodeKind::PreIncrementExpr
+            carriedEmitNodeKind = NodeKind::PreIncrementExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::PlusExpr
+        carriedEmitNodeKind = NodeKind::PlusExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case ',': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '-': {
+        char next = tokEnd[1];
+        if (next == '-') {
+            tokEnd += 2;
+            // emitNode NodeKind::PreDecrementExpr
+            carriedEmitNodeKind = NodeKind::PreDecrementExpr;
+            // next expression
+            goto expression_with_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // emitNode NodeKind::NegateExpr
+        carriedEmitNodeKind = NodeKind::NegateExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case '.': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '/': {
+        char next = tokEnd[1];
+        if (next == '*') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd += 2;
+            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto statement_no_emit;
+        }
+        if (next == '/') {
+            tokEnd += 2;
+            tokEnd = skipToEndOfLine(tokEnd);
+            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            goto statement_no_emit;
+        }
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ':': {
+        char next = tokEnd[1];
+        if (next == ':') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ';': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '<': {
+        char next = tokEnd[1];
+        if (next == '<') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '=') {
+            char next = tokEnd[2];
+            if (next == '>') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '=': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '>': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '>') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '?': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '[': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case ']': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '^': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '{': {
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '|': {
+        char next = tokEnd[1];
+        if (next == '=') {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (next == '|') {
+            char next = tokEnd[2];
+            if (next == '=') {
+                tokEnd += 3;
+                // error
+                VERIFY_NOT_REACHED();
+            }
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        tokEnd += 1;
+        // error
+        VERIFY_NOT_REACHED();
+    }
+    case '}': {
+        tokEnd += 1;
+        // popScope ScopeKind::CompoundStmt
+        scopePosition = popScope(scopePosition, ScopeKind::CompoundStmt);
+        // exitIfUnscoped
+        if (ScopeBuffer::toIndex(scopePosition) == 0) {
+            return state.nodes;
+        }
+        // emitNode NodeKind::EmptyNode
+        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // next statement
+        goto statement_with_emit;
+    }
+    case '~': {
+        tokEnd += 1;
+        // emitNode NodeKind::BitwiseNotExpr
+        carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
+        // next expression
+        goto expression_with_emit;
+    }
+    case 'a': {
+        if (std::string_view(tokEnd + 1, 7) == "nalysis" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssert" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "ssign" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'b': {
+        if (std::string_view(tokEnd + 1, 4) == "reak" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'c': {
+        if (std::string_view(tokEnd + 1, 7) == "ontinue" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'd': {
+        if (std::string_view(tokEnd + 1, 1) == "o" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'e': {
+        if (std::string_view(tokEnd + 1, 3) == "lif" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "lse" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'f': {
+        if (std::string_view(tokEnd + 1, 2) == "or" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 6) == "orward" && !isWordBulkCharacter(tokEnd[7])) {
+            tokEnd += 7;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "alse" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'g': {
+        if (std::string_view(tokEnd + 1, 4) == "uard" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'i': {
+        if (std::string_view(tokEnd + 1, 1) == "f" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // pushScope ScopeKind::IfExprOrStmt
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
+            // next expression
+            goto expression_no_emit;
+        }
+        if (std::string_view(tokEnd + 1, 1) == "n" && !isWordBulkCharacter(tokEnd[2])) {
+            tokEnd += 2;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "nout" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'l': {
+        if (std::string_view(tokEnd + 1, 3) == "oop" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "et" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'm': {
+        if (std::string_view(tokEnd + 1, 4) == "atch" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'n': {
+        if (std::string_view(tokEnd + 1, 8) == "amespace" && !isWordBulkCharacter(tokEnd[9])) {
+            tokEnd += 9;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'o': {
+        if (std::string_view(tokEnd + 1, 5) == "bject" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 2) == "ut" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'r': {
+        if (std::string_view(tokEnd + 1, 5) == "eturn" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 's': {
+        if (std::string_view(tokEnd + 1, 5) == "truct" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 5) == "tatic" && !isWordBulkCharacter(tokEnd[6])) {
+            tokEnd += 6;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 't': {
+        if (std::string_view(tokEnd + 1, 2) == "ry" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 4) == "rait" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 7) == "emplate" && !isWordBulkCharacter(tokEnd[8])) {
+            tokEnd += 8;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "rue" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'v': {
+        if (std::string_view(tokEnd + 1, 2) == "ar" && !isWordBulkCharacter(tokEnd[3])) {
+            tokEnd += 3;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'w': {
+        if (std::string_view(tokEnd + 1, 4) == "hile" && !isWordBulkCharacter(tokEnd[5])) {
+            tokEnd += 5;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        if (std::string_view(tokEnd + 1, 3) == "ith" && !isWordBulkCharacter(tokEnd[4])) {
+            tokEnd += 4;
+            // error
+            VERIFY_NOT_REACHED();
+        }
+        goto statement_identifier_case;
+    }
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+    case 'G':
+    case 'H':
+    case 'I':
+    case 'J':
+    case 'K':
+    case 'L':
+    case 'M':
+    case 'N':
+    case 'O':
+    case 'P':
+    case 'Q':
+    case 'R':
+    case 'S':
+    case 'T':
+    case 'U':
+    case 'V':
+    case 'W':
+    case 'X':
+    case 'Y':
+    case 'Z':
+    case 'h':
+    case 'j':
+    case 'k':
+    case 'p':
+    case 'q':
+    case 'u':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '#':
+    case '$':
+    case '_': {
+        goto statement_identifier_case;
+    }
+    default: {
+        return state.nodes;
+    }
+    } // switch
+    VERIFY_NOT_REACHED();
+statement_identifier_case:
+    tokEnd = skipToEndOfIdentifier(tokEnd);
+    // emitNode NodeKind::IdentifierExpr
+    carriedEmitNodeKind = NodeKind::IdentifierExpr;
+    // next after_expression
+    goto after_expression_with_emit;
+
+    // LinearState check_designated_argument
+check_designated_argument_no_whitespace:
+    if (isWordFirstCharacter(tokEnd[0])) {
         tokEnd = skipToEndOfIdentifier(tokEnd);
-        TODO_ERROR("invalid token for state");
-    } // retry-loop
+        // savedToken = tok
+        savedTokenBegin = tokBegin;
+        savedTokenEnd = tokEnd;
+        // next maybe_designated_argument
+        // inlined maybe_designated_argument
+        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        tokBegin = tokEnd;
+        if (std::string_view(tokEnd, 1) == "=") {
+            char next = tokEnd[1];
+            if (next != '=' && next != '>') {
+                tokEnd += 1;
+                // emitNode NodeKind::DesignateArgument, savedToken
+                emitNode(NodeKind::DesignateArgument, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+                // next expression
+                goto expression_no_emit;
+            }
+        }
+        // emitNode NodeKind::IdentifierExpr, savedToken
+        emitNode(NodeKind::IdentifierExpr, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+        // then after_expression
+        goto after_expression_no_whitespace;
+    }
+    // then expression
+    goto expression_no_whitespace;
+
+    // LinearState first_argument_paren
+first_argument_paren_with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
+    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
+    if (std::string_view(tokEnd, 1) == ")") {
+        tokEnd += 1;
+        // emitNode NodeKind::EmptyNode
+        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // next after_expression
+        goto after_expression_with_emit;
+    }
+    // pushScope ScopeKind::Paren
+    scopePosition = pushScope(scopePosition, ScopeKind::Paren);
+    // then check_designated_argument
+    goto check_designated_argument_no_whitespace;
+
+    // LinearState access_punctuation
+access_punctuation_no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+    tokBegin = tokEnd;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        tokEnd = skipToEndOfIdentifier(tokEnd);
+        // emitNode nodeKind
+        carriedEmitNodeKind = nodeKind;
+        // next after_expression
+        goto after_expression_with_emit;
+    }
+    // then error
+    goto error_no_whitespace;
+
+
+error_no_whitespace:
+    VERIFY_NOT_REACHED();
 }
 
 std::string_view nameString(NodeKind kind) {

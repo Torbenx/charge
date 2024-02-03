@@ -1,0 +1,218 @@
+SwitchState expression() then error
+    punctuation !
+        emitNode NodeKind::LogicalNotExpr
+        next expression
+    punctuation ~
+        emitNode NodeKind::BitwiseNotExpr
+        next expression
+    punctuation +
+        emitNode NodeKind::PlusExpr
+        next expression
+    punctuation -
+        emitNode NodeKind::NegateExpr
+        next expression
+    punctuation ++
+        emitNode NodeKind::PreIncrementExpr
+        next expression
+    punctuation --
+        emitNode NodeKind::PreDecrementExpr
+        next expression
+    punctuation *
+        emitNode NodeKind::DereferenceExpr
+        next expression
+
+    punctuation (
+        emitNode NodeKind::ParenthesizedExpr
+        next first_argument_paren
+
+    keyword if
+        pushScope ScopeKind::IfExpr
+        next expression
+
+    identifier
+        emitNode NodeKind::IdentifierExpr
+        next after_expression
+
+SwitchState after_expression() then error
+    punctuation ++
+        emitNode NodeKind::PostIncrementExpr
+        next after_expression
+    punctuation --
+        emitNode NodeKind::PostDecrementExpr
+        next after_expression
+
+    punctuation +
+        emitNode NodeKind::AdditionExpr
+        next expression
+    punctuation -
+        emitNode NodeKind::SubtractionExpr
+        next expression
+    punctuation *
+        emitNode NodeKind::MultiplyExpr
+        next expression
+    punctuation &
+        emitNode NodeKind::BitwiseAndExpr
+        next expression
+    punctuation ^
+        emitNode NodeKind::BitwiseXorExpr
+        next expression
+    punctuation |
+        emitNode NodeKind::BitwiseOrExpr
+        next expression
+    punctuation /
+        emitNode NodeKind::DivideExpr
+        next expression
+    punctuation %
+        emitNode NodeKind::RemainderExpr
+        next expression
+    punctuation <<
+        emitNode NodeKind::ShiftLeftExpr
+        next expression
+    punctuation >>
+        emitNode NodeKind::ShiftRightExpr
+        next expression
+    punctuation &&
+        emitNode NodeKind::LogicalAndExpr
+        next expression
+    punctuation ||
+        emitNode NodeKind::LogicalOrExpr
+        next expression
+    punctuation !=
+        emitNode NodeKind::CompareNotEqualExpr
+        next expression
+    punctuation ==
+        emitNode NodeKind::CompareEqualExpr
+        next expression
+    punctuation <
+        emitNode NodeKind::CompareLessExpr
+        next expression
+    punctuation <=
+        emitNode NodeKind::CompareLessEqualExpr
+        next expression
+    punctuation >
+        emitNode NodeKind::CompareGreaterExpr
+        next expression
+    punctuation >=
+        emitNode NodeKind::CompareGreaterEqualExpr
+        next expression
+
+    punctuation .
+        nodeKind = NodeKind::MemberAccessExpr
+        next access_punctuation
+    punctuation ::
+        nodeKind = NodeKind::StaticAccessExpr
+        next access_punctuation
+
+    punctuation (
+        emitNode NodeKind::CallExpr
+        next first_argument_paren
+    punctuation [
+        emitNode NodeKind::IndexExpr
+        next first_argument_square
+    punctuation {
+        emitNode NodeKind::Parameterize
+        next first_argument_brace
+
+    punctuation )
+        popScope ScopeKind::Paren
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    punctuation ]
+        popScope ScopeKind::Square
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    punctuation }
+        popScope ScopeKind::Brace
+        emitNode NodeKind::EmptyNode
+        next after_expression
+
+    punctuation ,
+        next comma_after_expression
+
+    punctuation ;
+        exitIfUnscoped
+        emitNode NodeKind::ExpressionStmt
+        next statement
+
+    punctuation =>
+        popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+        emitNode NodeKind::IfExpr
+        next expression
+    punctuation :
+        popScope ScopeKind::IfExprOrStmt
+        emitNode NodeKind::IfStmt
+        next single_or_compound_statement
+
+SwitchState statement() then expression
+    keyword if
+        pushScope ScopeKind::IfExprOrStmt
+        next expression
+    punctuation }
+        popScope ScopeKind::CompoundStmt
+        exitIfUnscoped
+        emitNode NodeKind::EmptyNode
+        next statement
+
+LinearState single_or_compound_statement() then statement
+    punctuation {
+        pushScope ScopeKind::CompoundStmt
+        emitNode NodeKind::CompoundStmt
+        next statement
+
+LinearState comma_after_expression() then check_designated_argument
+    keyword else
+        next comma_else
+
+    punctuation )
+        popScope ScopeKind::Paren
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    punctuation ]
+        popScope ScopeKind::Square
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    punctuation }
+        popScope ScopeKind::Brace
+        emitNode NodeKind::EmptyNode
+        next after_expression
+
+LinearState comma_else() then error
+    punctuation =>
+        emitNode NodeKind::CommaElseExpr
+        next expression
+
+LinearState check_designated_argument() then expression
+    identifier
+        savedToken = tok
+        next maybe_designated_argument
+LinearState maybe_designated_argument(savedToken) then after_expression
+    punctuation =
+        emitNode NodeKind::DesignateArgument, savedToken
+        next expression
+    then
+        emitNode NodeKind::IdentifierExpr, savedToken
+
+LinearState first_argument_paren() then check_designated_argument
+    punctuation )
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    then
+        pushScope ScopeKind::Paren
+LinearState first_argument_square() then check_designated_argument
+    punctuation ]
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    then
+        pushScope ScopeKind::Square
+LinearState first_argument_brace() then check_designated_argument
+    punctuation }
+        emitNode NodeKind::EmptyNode
+        next after_expression
+    then
+        pushScope ScopeKind::Brace
+
+LinearState access_punctuation(nodeKind) then error
+    identifier
+        emitNode nodeKind
+        next after_expression
+
