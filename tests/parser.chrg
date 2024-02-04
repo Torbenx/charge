@@ -1,4 +1,6 @@
 
+if false: {
+
 //; primary expressions
 /* expect-node IdentifierExpr */ a;
 
@@ -80,3 +82,5 @@ a{
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ if a: b;
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt */ if a: { }
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode */ if a: { b; }
+
+}

@@ -12,13 +12,6 @@ punctuationTokens = [
 
 punctuations = punctuationTokens + ["//", "/*"]
 punctuationAlphabet = "".join(sorted({p[0] for p in punctuations}))
-keywords = sorted([
-    "if", "elif", "else", "match", "for", "while", "do", "return", "break", "continue", "loop", "guard", "try", "catch", "with", "analysis", "assert",
-    "namespace", "struct", "trait", "object", "fn", "static",
-    "template",
-    "var", "let", "in", "inout", "out", "forward", "assign",
-    "true", "false",
-])
 
 def punctuationCppName(punc):
     characterNames = {
@@ -137,11 +130,17 @@ class State:
                 return c
         return None
 
+    def punctuationCases(self) -> [PunctuationCase]:
+        return [c for c in self.cases if type(c) is PunctuationCase]
+
     def keywordCase(self, keyword: str) -> KeywordCase | None:
         for c in self.cases:
             if type(c) is KeywordCase and c.keyword == keyword:
                 return c
         return None
+
+    def keywordCases(self) -> [KeywordCase]:
+        return [c for c in self.cases if type(c) is KeywordCase]
 
     def identifierCase(self) -> IdentifierCase | None:
         for c in self.cases:
@@ -366,7 +365,7 @@ def linearIf(commonPrefix: str, state):
             line("goto " + state.name + "_no_emit;")
     else:
         foundState, case = recurse(state, lambda s: s.punctuationCase(exactMatch))
-        generateCaseBody(foundState, case)
+        generateCaseBody(case)
 
 def checkForPunctuation(punc, handler):
     puncs = list(filter(lambda p: (p.startswith(punc)), punctuations))
@@ -394,13 +393,6 @@ def checkForPunctuation(punc, handler):
             line("}")
     line("}")
 
-def checkForKeyword(keyword, handler):
-    line("if (std::string_view(tokEnd, " + str(len(keyword)) + ") == \"" + keyword + "\"sv && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
-    with indent():
-        line("tokEnd += " + str(len(keyword)) + ";")
-        handler()
-    line("}")
-
 def inlineTokenAdvancer():
     line("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
     line("tokBegin = tokEnd;")
@@ -414,8 +406,36 @@ def emitCarriedNode():
 def rememberState(state):
     line("parseState = State::" + stateCppName(state.name) + ";")
 
+def readWord():
+    line("{")
+    with indent():
+        line("auto wordAndPos = readWord(tokEnd, state.wordTable);")
+        line("tokEnd = wordAndPos.position;")
+        line("word = wordAndPos.word;")
+    line("}")
+
+def generateWordCase(state):
+    if state.name == "error":
+        # TODO: Map keywords to keyword tokens
+        labelLine("error_keyword_check:")
+        line("VERIFY_NOT_REACHED();")
+    else:
+        readWord()
+        line("if (word.keyword()) {")
+        with indent():
+            labelLine("[[maybe_unused]] " + state.name + "_keyword_check:")
+            for c in state.keywordCases():
+                line("if (word == words[\"" + c.keyword + "\"]) {")
+                with indent():
+                    generateCaseBody(c)
+                line("}")
+            assert(state.thenCase() is None)
+            line("goto " + state.thenState + "_keyword_check;")
+        line("}")
+        foundState, idCase = recurse(state, lambda s: s.identifierCase())
+        generateCaseBody(idCase)
+
 errorCases  = [PunctuationCase(p, [ErrorInstruction(punctuationCppName(p))]) for p in punctuations]
-errorCases += [KeywordCase(k, [ErrorInstruction(keywordCppName(k))]) for k in keywords]
 errorCases += [IdentifierCase([ErrorInstruction(identifierCppName())])]
 errorState = State("SwitchState", "error", "", [], errorCases)
 states += [errorState]
@@ -478,67 +498,43 @@ def generateSwitchState(state):
         line("}")
 
     # word
-    identifierBeginCharacters = set(string.ascii_lowercase) | set(string.ascii_uppercase)
-    keywordBeginCharacters = {k[0] for k in keywords}
-
-    for character in sorted(keywordBeginCharacters):
-        line("case '" + character + "': {")
-        with indent():
-            for keyword in keywords:
-                if keyword.startswith(character):
-                    line("if (std::string_view(tokEnd + 1, " + str(len(keyword) - 1) + ") == \"" + keyword[1:] + "\"sv && !isWordBulkCharacter(tokEnd[" + str(len(keyword)) + "])) {")
-                    with indent():
-                        line("tokEnd += " + str(len(keyword))+ ";")
-                        foundState, case = recurse(state, lambda s: s.keywordCase(keyword))
-                        generateCaseBody(foundState, case)
-                    line("}")
-            line("goto " + state.name + "_identifier_case;")
-        line("}")
-
-    for character in sorted(identifierBeginCharacters - keywordBeginCharacters):
+    for character in string.ascii_lowercase + string.ascii_uppercase:
         line("case '" + character + "':")
     line("case '#':")
     line("case '$':")
-    line("case '_': {")
+    line("case '_':")
     with indent():
-        line("goto " + state.name + "_identifier_case;")
-    line("}")
+        line("goto " + state.name + "_word_case;")
 
     # default
     line("default: {")
     with indent():
-        # TODO: This should be an error
-        line("return state.nodes;")
+        line("VERIFY_NOT_REACHED();")
     line("}")
 
     line("} // switch")
 
     line("VERIFY_NOT_REACHED();")
 
-    labelLine(state.name + "_identifier_case:")
-    line("tokEnd = skipToEndOfIdentifier(tokEnd);")
-    foundState, case = recurse(state, lambda s: s.identifierCase())
-    generateCaseBody(foundState, case)
+    labelLine(state.name + "_word_case:")
+    generateWordCase(state)
 
 def generateLinearState(state):
-    for c in state.cases:
-        if type(c) == PunctuationCase:
-            checkForPunctuation(c.punctuation, lambda: generateCaseBody(state, c))
-        elif type(c) == KeywordCase:
-            checkForKeyword(c.keyword, lambda: generateCaseBody(state, c))
-        elif type(c) == IdentifierCase:
-            line("if (isWordFirstCharacter(tokEnd[0])) {")
-            with indent():
-                line("tokEnd = skipToEndOfIdentifier(tokEnd);")
-                generateCaseBody(state, c)
-            line("}")
+    for c in state.punctuationCases():
+        checkForPunctuation(c.punctuation, lambda: generateCaseBody(c))
+    if state.keywordCases() or not state.identifierCase() is None:
+        assert(state.thenCase() is None)
+        line("if (isWordFirstCharacter(tokEnd[0])) {")
+        with indent():
+            generateWordCase(state)
+        line("}")
     thenCase = state.thenCase()
     if not thenCase is None:
-        generateCaseBody(state, thenCase)
+        generateCaseBody(thenCase)
     line("// then " + state.thenState)
     line("goto " + state.thenState + "_as_then;")
 
-def generateCaseBody(state, case):
+def generateCaseBody(case):
     for inst in case.instructions:
         line("// " + inst.format())
         if type(inst) is EmitNodeInstruction:
@@ -578,7 +574,7 @@ def generateCaseBody(state, case):
                 scopes += ", " + expr
             line("scopePosition = popScope(scopePosition" + scopes + ");")
         elif type(inst) is ExitIfUnscopedInstruction:
-            line("if (ScopeBuffer::toIndex(scopePosition) == 0) {")
+            line("if (scopePosition[0] == ScopeKind::Invalid) {")
             with indent():
                 line("return state.nodes;")
             line("}")
@@ -685,23 +681,11 @@ with indent():
     line("END = " + str(tokenCounter) + ",")
 line("};")
 
-line("enum class Keyword : uint8_t {")
-with indent():
-    line("BEGIN = " + str(tokenCounter) + ",")
-    for keyword in keywords:
-        line(keywordCppName(keyword) + " = " + str(tokenCounter) + ", // " + keyword)
-        tokenCounter += 1
-    line("END = " + str(tokenCounter) + ",")
-line("};")
-
 tokenCounter2 = 0
 line("enum class Token : uint8_t {")
 with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + " = " + str(tokenCounter2) + ", // " + punc)
-        tokenCounter2 += 1
-    for keyword in keywords:
-        line(keywordCppName(keyword) + " = " + str(tokenCounter2) + ", // " + keyword)
         tokenCounter2 += 1
     assert(tokenCounter2 == tokenCounter)
     line("Identifier = " + str(tokenCounter2) + ",")

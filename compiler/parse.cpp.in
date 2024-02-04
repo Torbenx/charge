@@ -1,3 +1,4 @@
+#include "WordTable.h"
 #include "parse.h"
 #include <utility>
 
@@ -27,6 +28,7 @@ enum class ScopeKind : char {
 
 struct ParseStackState {
     std::vector<Node> nodes;
+    WordStringTable wordTable { words };
 };
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
@@ -47,34 +49,41 @@ struct ScopeBuffer {
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     auto index = ScopeBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
-    position[0] = kind;
     position += 1;
+    position[0] = kind;
     return position;
 }
 
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
-    auto index = ScopeBuffer::toIndex(position);
-    VERIFY(index != 0);
-    position -= 1;
     VERIFY(((position[0] == kinds) || ...));
+    position -= 1;
     return position;
 }
 
 static ScopeKind peekScope(ScopeKind* position) {
-    return position[-1];
+    return position[0];
 }
 
-static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
+[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
     state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
 }
 
-[[nodiscard]] static const char* skipToEndOfIdentifier(const char* position) {
+struct WordAndPosition {
+    const char* position;
+    Word word;
+};
+[[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, WordStringTable& wordTable) {
+    const char* wordBegin = position;
+    uint32_t hash = 0;
     do {
+        hash = Word::iterateHash(hash, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    return position;
+    hash = Word::finalizeHash(hash);
+    Word word = wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    return { position, word };
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -106,7 +115,7 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return position;
 };
 
-[[nodiscard]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
+[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
     const char* tokBegin;
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
@@ -139,23 +148,16 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
-    scopePosition -= 1;
-    VERIFY(scopePosition[0] == ScopeKind::Invalid);
-    VERIFY(((uintptr_t)scopePosition & (uintptr_t)(SCOPE_BUFFER_SIZE - 1)) == 0);
-    return state.nodes;
-}
-
 std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
-    scopePosition += 1;
 
     ParseStackState state;
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
+    Word word;
 
     const char* savedTokenBegin = nullptr;
     const char* savedTokenEnd = nullptr;

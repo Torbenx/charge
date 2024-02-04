@@ -56,43 +56,6 @@ enum class Punctuation : uint8_t {
     MinusGreater = 48, // ->
     END = 49,
 };
-enum class Keyword : uint8_t {
-    BEGIN = 49,
-    Analysis = 49, // analysis
-    Assert = 50, // assert
-    Assign = 51, // assign
-    Break = 52, // break
-    Catch = 53, // catch
-    Continue = 54, // continue
-    Do = 55, // do
-    Elif = 56, // elif
-    Else = 57, // else
-    False = 58, // false
-    Fn = 59, // fn
-    For = 60, // for
-    Forward = 61, // forward
-    Guard = 62, // guard
-    If = 63, // if
-    In = 64, // in
-    Inout = 65, // inout
-    Let = 66, // let
-    Loop = 67, // loop
-    Match = 68, // match
-    Namespace = 69, // namespace
-    Object = 70, // object
-    Out = 71, // out
-    Return = 72, // return
-    Static = 73, // static
-    Struct = 74, // struct
-    Template = 75, // template
-    Trait = 76, // trait
-    True = 77, // true
-    Try = 78, // try
-    Var = 79, // var
-    While = 80, // while
-    With = 81, // with
-    END = 82,
-};
 enum class Token : uint8_t {
     LeftParen = 0, // (
     RightParen = 1, // )
@@ -143,40 +106,7 @@ enum class Token : uint8_t {
     EqualGreater = 46, // =>
     LessEqualGreater = 47, // <=>
     MinusGreater = 48, // ->
-    Analysis = 49, // analysis
-    Assert = 50, // assert
-    Assign = 51, // assign
-    Break = 52, // break
-    Catch = 53, // catch
-    Continue = 54, // continue
-    Do = 55, // do
-    Elif = 56, // elif
-    Else = 57, // else
-    False = 58, // false
-    Fn = 59, // fn
-    For = 60, // for
-    Forward = 61, // forward
-    Guard = 62, // guard
-    If = 63, // if
-    In = 64, // in
-    Inout = 65, // inout
-    Let = 66, // let
-    Loop = 67, // loop
-    Match = 68, // match
-    Namespace = 69, // namespace
-    Object = 70, // object
-    Out = 71, // out
-    Return = 72, // return
-    Static = 73, // static
-    Struct = 74, // struct
-    Template = 75, // template
-    Trait = 76, // trait
-    True = 77, // true
-    Try = 78, // try
-    Var = 79, // var
-    While = 80, // while
-    With = 81, // with
-    Identifier = 82,
+    Identifier = 49,
 };
 enum class State {
     Expression,

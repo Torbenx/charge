@@ -30,6 +30,9 @@ struct Word {
     constexpr Word() = default;
     constexpr Word(uint8_t id, uint32_t hash)
         : id(id), hashBits(hash >> ID_BITS) { }
+    static constexpr Word fromUint(uint32_t in) {
+        return Word(in >> (32 - ID_BITS), in & MAX_ID);
+    }
     constexpr uint32_t hash() const { return hashBits << ID_BITS; }
     constexpr bool keyword() const { return id == 0; }
     constexpr bool operator==(const Word& other) const {

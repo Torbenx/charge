@@ -1,8 +1,17 @@
 #pragma once
 
+#include "WordTable.h"
 #include "parse_gen.h"
 
 #include <vector>
+
+inline constexpr ConstWordStringTable words(
+    keyword("if"), keyword("elif"), keyword("else"), keyword("match"), keyword("for"), keyword("while"), keyword("do"),
+    keyword("return"), keyword("break"), keyword("continue"), keyword("loop"), keyword("guard"), keyword("try"), keyword("catch"),
+    keyword("with"), keyword("analysis"), keyword("assert"),
+    keyword("namespace"), keyword("struct"), keyword("trait"), keyword("object"), keyword("fn"), keyword("static"),
+    keyword("template"),
+    keyword("var"), keyword("let"), keyword("in"), keyword("inout"), keyword("out"), keyword("forward"), keyword("assign"));
 
 namespace parse {
 

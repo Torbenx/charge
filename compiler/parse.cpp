@@ -1,3 +1,4 @@
+#include "WordTable.h"
 #include "parse.h"
 #include <utility>
 
@@ -27,6 +28,7 @@ enum class ScopeKind : char {
 
 struct ParseStackState {
     std::vector<Node> nodes;
+    WordStringTable wordTable { words };
 };
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
@@ -47,34 +49,41 @@ struct ScopeBuffer {
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     auto index = ScopeBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
-    position[0] = kind;
     position += 1;
+    position[0] = kind;
     return position;
 }
 
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
-    auto index = ScopeBuffer::toIndex(position);
-    VERIFY(index != 0);
-    position -= 1;
     VERIFY(((position[0] == kinds) || ...));
+    position -= 1;
     return position;
 }
 
 static ScopeKind peekScope(ScopeKind* position) {
-    return position[-1];
+    return position[0];
 }
 
-static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
+[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
     state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
 }
 
-[[nodiscard]] static const char* skipToEndOfIdentifier(const char* position) {
+struct WordAndPosition {
+    const char* position;
+    Word word;
+};
+[[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, WordStringTable& wordTable) {
+    const char* wordBegin = position;
+    uint32_t hash = 0;
     do {
+        hash = Word::iterateHash(hash, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    return position;
+    hash = Word::finalizeHash(hash);
+    Word word = wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    return { position, word };
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -106,7 +115,7 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return position;
 };
 
-[[nodiscard]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
+[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
     const char* tokBegin;
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
@@ -139,23 +148,16 @@ static void emitNode(NodeKind kind, const char* begin, const char* end, ParseSta
     return tokEnd;
 }
 
-static std::vector<Node> reachedEOS(ParseStackState& state, ScopeKind* scopePosition) {
-    scopePosition -= 1;
-    VERIFY(scopePosition[0] == ScopeKind::Invalid);
-    VERIFY(((uintptr_t)scopePosition & (uintptr_t)(SCOPE_BUFFER_SIZE - 1)) == 0);
-    return state.nodes;
-}
-
 std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
-    scopePosition += 1;
 
     ParseStackState state;
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
+    Word word;
 
     const char* savedTokenBegin = nullptr;
     const char* savedTokenEnd = nullptr;
@@ -546,256 +548,32 @@ expression_as_then:
         // next expression
         goto expression_with_emit;
     }
-    case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Analysis;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assert;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assign;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Break;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'c': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Catch;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Continue;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Do;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Elif;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Else;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'f': {
-        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::False;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Fn;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::For;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            errorToken = Token::Forward;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Guard;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // pushScope ScopeKind::IfExpr
-            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
-            // next expression
-            goto expression_no_emit;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::In;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Inout;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'l': {
-        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Let;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Loop;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Match;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
-            tokEnd += 9;
-            // error
-            errorToken = Token::Namespace;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Object;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Out;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Return;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Static;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Struct;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 't': {
-        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Template;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Trait;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::True;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Try;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Var;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
-    case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::While;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::With;
-            goto handle_parse_error;
-        }
-        goto expression_identifier_case;
-    }
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
     case 'A':
     case 'B':
     case 'C':
@@ -822,27 +600,31 @@ expression_as_then:
     case 'X':
     case 'Y':
     case 'Z':
-    case 'h':
-    case 'j':
-    case 'k':
-    case 'p':
-    case 'q':
-    case 'u':
-    case 'x':
-    case 'y':
-    case 'z':
     case '#':
     case '$':
-    case '_': {
-        goto expression_identifier_case;
-    }
+    case '_':
+        goto expression_word_case;
     default: {
-        return state.nodes;
+        VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-expression_identifier_case:
-    tokEnd = skipToEndOfIdentifier(tokEnd);
+expression_word_case:
+    {
+        auto wordAndPos = readWord(tokEnd, state.wordTable);
+        tokEnd = wordAndPos.position;
+        word = wordAndPos.word;
+    }
+    if (word.keyword()) {
+    [[maybe_unused]] expression_keyword_check:
+        if (word == words["if"]) {
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression_no_emit;
+        }
+        goto error_keyword_check;
+    }
     // emitNode NodeKind::IdentifierExpr
     carriedEmitNodeKind = NodeKind::IdentifierExpr;
     // next after_expression
@@ -983,23 +765,6 @@ after_expression_as_then:
         tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
         tokBegin = tokEnd;
         parseState = State::CommaAfterExpression;
-        if (std::string_view(tokEnd, 4) == "else"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // next comma_else
-            // inlined comma_else
-            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
-            tokBegin = tokEnd;
-            parseState = State::CommaElse;
-            if (std::string_view(tokEnd, 2) == "=>"sv) {
-                tokEnd += 2;
-                // emitNode NodeKind::CommaElseExpr
-                carriedEmitNodeKind = NodeKind::CommaElseExpr;
-                // next expression
-                goto expression_with_emit;
-            }
-            // then error
-            goto error_as_then;
-        }
         if (std::string_view(tokEnd, 1) == ")"sv) {
             tokEnd += 1;
             // popScope ScopeKind::Paren
@@ -1026,6 +791,55 @@ after_expression_as_then:
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
             goto after_expression_with_emit;
+        }
+        if (isWordFirstCharacter(tokEnd[0])) {
+            {
+                auto wordAndPos = readWord(tokEnd, state.wordTable);
+                tokEnd = wordAndPos.position;
+                word = wordAndPos.word;
+            }
+            if (word.keyword()) {
+            [[maybe_unused]] comma_after_expression_keyword_check:
+                if (word == words["else"]) {
+                    // next comma_else
+                    // inlined comma_else
+                    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                    tokBegin = tokEnd;
+                    parseState = State::CommaElse;
+                    if (std::string_view(tokEnd, 2) == "=>"sv) {
+                        tokEnd += 2;
+                        // emitNode NodeKind::CommaElseExpr
+                        carriedEmitNodeKind = NodeKind::CommaElseExpr;
+                        // next expression
+                        goto expression_with_emit;
+                    }
+                    // then error
+                    goto error_as_then;
+                }
+                goto check_designated_argument_keyword_check;
+            }
+            // savedToken = tok
+            savedTokenBegin = tokBegin;
+            savedTokenEnd = tokEnd;
+            // next maybe_designated_argument
+            // inlined maybe_designated_argument
+            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            tokBegin = tokEnd;
+            parseState = State::MaybeDesignatedArgument;
+            if (std::string_view(tokEnd, 1) == "="sv) {
+                char next = tokEnd[1];
+                if (next != '=' && next != '>') {
+                    tokEnd += 1;
+                    // emitNode NodeKind::DesignateArgument, savedToken
+                    emitNode(NodeKind::DesignateArgument, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+                    // next expression
+                    goto expression_no_emit;
+                }
+            }
+            // emitNode NodeKind::IdentifierExpr, savedToken
+            emitNode(NodeKind::IdentifierExpr, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+            // then after_expression
+            goto after_expression_as_then;
         }
         // then check_designated_argument
         goto check_designated_argument_as_then;
@@ -1126,7 +940,7 @@ after_expression_as_then:
     case ';': {
         tokEnd += 1;
         // exitIfUnscoped
-        if (ScopeBuffer::toIndex(scopePosition) == 0) {
+        if (scopePosition[0] == ScopeKind::Invalid) {
             return state.nodes;
         }
         // emitNode NodeKind::ExpressionStmt
@@ -1332,255 +1146,32 @@ after_expression_as_then:
         errorToken = Token::Tilde;
         goto handle_parse_error;
     }
-    case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Analysis;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assert;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assign;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Break;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'c': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Catch;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Continue;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Do;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Elif;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Else;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'f': {
-        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::False;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Fn;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::For;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            errorToken = Token::Forward;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Guard;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::If;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::In;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Inout;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'l': {
-        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Let;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Loop;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Match;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
-            tokEnd += 9;
-            // error
-            errorToken = Token::Namespace;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Object;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Out;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Return;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Static;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Struct;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 't': {
-        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Template;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Trait;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::True;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Try;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Var;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
-    case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::While;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::With;
-            goto handle_parse_error;
-        }
-        goto after_expression_identifier_case;
-    }
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
     case 'A':
     case 'B':
     case 'C':
@@ -1607,27 +1198,25 @@ after_expression_as_then:
     case 'X':
     case 'Y':
     case 'Z':
-    case 'h':
-    case 'j':
-    case 'k':
-    case 'p':
-    case 'q':
-    case 'u':
-    case 'x':
-    case 'y':
-    case 'z':
     case '#':
     case '$':
-    case '_': {
-        goto after_expression_identifier_case;
-    }
+    case '_':
+        goto after_expression_word_case;
     default: {
-        return state.nodes;
+        VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-after_expression_identifier_case:
-    tokEnd = skipToEndOfIdentifier(tokEnd);
+after_expression_word_case:
+    {
+        auto wordAndPos = readWord(tokEnd, state.wordTable);
+        tokEnd = wordAndPos.position;
+        word = wordAndPos.word;
+    }
+    if (word.keyword()) {
+    [[maybe_unused]] after_expression_keyword_check:
+        goto error_keyword_check;
+    }
     // error
     errorToken = Token::Identifier;
     goto handle_parse_error;
@@ -1978,7 +1567,7 @@ statement_as_then:
         // popScope ScopeKind::CompoundStmt
         scopePosition = popScope(scopePosition, ScopeKind::CompoundStmt);
         // exitIfUnscoped
-        if (ScopeBuffer::toIndex(scopePosition) == 0) {
+        if (scopePosition[0] == ScopeKind::Invalid) {
             return state.nodes;
         }
         // emitNode NodeKind::EmptyNode
@@ -1993,256 +1582,32 @@ statement_as_then:
         // next expression
         goto expression_with_emit;
     }
-    case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Analysis;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assert;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assign;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Break;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'c': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Catch;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Continue;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Do;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Elif;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Else;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'f': {
-        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::False;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Fn;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::For;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            errorToken = Token::Forward;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Guard;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // pushScope ScopeKind::IfExprOrStmt
-            scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
-            // next expression
-            goto expression_no_emit;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::In;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Inout;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'l': {
-        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Let;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Loop;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Match;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
-            tokEnd += 9;
-            // error
-            errorToken = Token::Namespace;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Object;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Out;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Return;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Static;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Struct;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 't': {
-        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Template;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Trait;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::True;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Try;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Var;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
-    case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::While;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::With;
-            goto handle_parse_error;
-        }
-        goto statement_identifier_case;
-    }
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
     case 'A':
     case 'B':
     case 'C':
@@ -2269,27 +1634,31 @@ statement_as_then:
     case 'X':
     case 'Y':
     case 'Z':
-    case 'h':
-    case 'j':
-    case 'k':
-    case 'p':
-    case 'q':
-    case 'u':
-    case 'x':
-    case 'y':
-    case 'z':
     case '#':
     case '$':
-    case '_': {
-        goto statement_identifier_case;
-    }
+    case '_':
+        goto statement_word_case;
     default: {
-        return state.nodes;
+        VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-statement_identifier_case:
-    tokEnd = skipToEndOfIdentifier(tokEnd);
+statement_word_case:
+    {
+        auto wordAndPos = readWord(tokEnd, state.wordTable);
+        tokEnd = wordAndPos.position;
+        word = wordAndPos.word;
+    }
+    if (word.keyword()) {
+    [[maybe_unused]] statement_keyword_check:
+        if (word == words["if"]) {
+            // pushScope ScopeKind::IfExprOrStmt
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
+            // next expression
+            goto expression_no_emit;
+        }
+        goto expression_keyword_check;
+    }
     // emitNode NodeKind::IdentifierExpr
     carriedEmitNodeKind = NodeKind::IdentifierExpr;
     // next after_expression
@@ -2298,7 +1667,15 @@ statement_identifier_case:
     // LinearState check_designated_argument
 check_designated_argument_as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
-        tokEnd = skipToEndOfIdentifier(tokEnd);
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] check_designated_argument_keyword_check:
+            goto expression_keyword_check;
+        }
         // savedToken = tok
         savedTokenBegin = tokBegin;
         savedTokenEnd = tokEnd;
@@ -2350,7 +1727,15 @@ access_punctuation_no_emit:
     tokBegin = tokEnd;
     parseState = State::AccessPunctuation;
     if (isWordFirstCharacter(tokEnd[0])) {
-        tokEnd = skipToEndOfIdentifier(tokEnd);
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] access_punctuation_keyword_check:
+            goto error_keyword_check;
+        }
         // emitNode nodeKind
         carriedEmitNodeKind = nodeKind;
         // next after_expression
@@ -2685,255 +2070,32 @@ error_as_then:
         errorToken = Token::Tilde;
         goto handle_parse_error;
     }
-    case 'a': {
-        if (std::string_view(tokEnd + 1, 7) == "nalysis"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Analysis;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssert"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assert;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "ssign"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Assign;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'b': {
-        if (std::string_view(tokEnd + 1, 4) == "reak"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Break;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'c': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Catch;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 7) == "ontinue"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Continue;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'd': {
-        if (std::string_view(tokEnd + 1, 1) == "o"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Do;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'e': {
-        if (std::string_view(tokEnd + 1, 3) == "lif"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Elif;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "lse"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Else;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'f': {
-        if (std::string_view(tokEnd + 1, 4) == "alse"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::False;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::Fn;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "or"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::For;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 6) == "orward"sv && !isWordBulkCharacter(tokEnd[7])) {
-            tokEnd += 7;
-            // error
-            errorToken = Token::Forward;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'g': {
-        if (std::string_view(tokEnd + 1, 4) == "uard"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Guard;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'i': {
-        if (std::string_view(tokEnd + 1, 1) == "f"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::If;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 1) == "n"sv && !isWordBulkCharacter(tokEnd[2])) {
-            tokEnd += 2;
-            // error
-            errorToken = Token::In;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "nout"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Inout;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'l': {
-        if (std::string_view(tokEnd + 1, 2) == "et"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Let;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "oop"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::Loop;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'm': {
-        if (std::string_view(tokEnd + 1, 4) == "atch"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Match;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'n': {
-        if (std::string_view(tokEnd + 1, 8) == "amespace"sv && !isWordBulkCharacter(tokEnd[9])) {
-            tokEnd += 9;
-            // error
-            errorToken = Token::Namespace;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'o': {
-        if (std::string_view(tokEnd + 1, 5) == "bject"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Object;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ut"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Out;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'r': {
-        if (std::string_view(tokEnd + 1, 5) == "eturn"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Return;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 's': {
-        if (std::string_view(tokEnd + 1, 5) == "tatic"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Static;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 5) == "truct"sv && !isWordBulkCharacter(tokEnd[6])) {
-            tokEnd += 6;
-            // error
-            errorToken = Token::Struct;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 't': {
-        if (std::string_view(tokEnd + 1, 7) == "emplate"sv && !isWordBulkCharacter(tokEnd[8])) {
-            tokEnd += 8;
-            // error
-            errorToken = Token::Template;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 4) == "rait"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::Trait;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "rue"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::True;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 2) == "ry"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Try;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'v': {
-        if (std::string_view(tokEnd + 1, 2) == "ar"sv && !isWordBulkCharacter(tokEnd[3])) {
-            tokEnd += 3;
-            // error
-            errorToken = Token::Var;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
-    case 'w': {
-        if (std::string_view(tokEnd + 1, 4) == "hile"sv && !isWordBulkCharacter(tokEnd[5])) {
-            tokEnd += 5;
-            // error
-            errorToken = Token::While;
-            goto handle_parse_error;
-        }
-        if (std::string_view(tokEnd + 1, 3) == "ith"sv && !isWordBulkCharacter(tokEnd[4])) {
-            tokEnd += 4;
-            // error
-            errorToken = Token::With;
-            goto handle_parse_error;
-        }
-        goto error_identifier_case;
-    }
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
     case 'A':
     case 'B':
     case 'C':
@@ -2960,30 +2122,18 @@ error_as_then:
     case 'X':
     case 'Y':
     case 'Z':
-    case 'h':
-    case 'j':
-    case 'k':
-    case 'p':
-    case 'q':
-    case 'u':
-    case 'x':
-    case 'y':
-    case 'z':
     case '#':
     case '$':
-    case '_': {
-        goto error_identifier_case;
-    }
+    case '_':
+        goto error_word_case;
     default: {
-        return state.nodes;
+        VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-error_identifier_case:
-    tokEnd = skipToEndOfIdentifier(tokEnd);
-    // error
-    errorToken = Token::Identifier;
-    goto handle_parse_error;
+error_word_case:
+error_keyword_check:
+    VERIFY_NOT_REACHED();
 
 
 handle_parse_error:
