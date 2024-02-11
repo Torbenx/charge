@@ -26,11 +26,6 @@ enum class ScopeKind : char {
     Brace,
 };
 
-struct ParseStackState {
-    std::vector<Node> nodes;
-    WordStringTable wordTable { words };
-};
-
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
 struct ScopeBuffer {
@@ -66,8 +61,16 @@ static ScopeKind peekScope(ScopeKind* position) {
     return position[0];
 }
 
-[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
-    state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
+static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
+    return { (uint32_t)(position - state.lines.back().begin), (uint32_t)state.lines.size() - 1 };
+}
+
+[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, uint32_t data, ParseState& state) {
+    state.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
+}
+
+static void markLineBegin(const char* position, ParseState& state) {
+    state.lines.push_back({ position });
 }
 
 struct WordAndPosition {
@@ -115,52 +118,55 @@ struct WordAndPosition {
     return position;
 };
 
-[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
-    const char* tokBegin;
+[[gnu::noinline]] static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
+    state.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+}
+
+[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
-        tokBegin = tokEnd;
+        const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
             tokEnd = skipToEndOfLine(tokEnd);
-            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
             continue;
         }
         if (tokEnd[0] == '\n') {
             tokEnd += 1;
+            markLineBegin(tokEnd, state);
             continue;
         }
         if (tokEnd[0] == '\r') {
             if (tokEnd[1] == '\n') {
                 tokEnd += 2;
-                continue;
+            } else {
+                tokEnd += 1;
             }
-            tokEnd += 1;
+            markLineBegin(tokEnd, state);
             continue;
         }
         break;
-    } // retry-loop
+    }
     return tokEnd;
 }
 
-std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
+void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
 
-    ParseStackState state;
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
     Word word;
+    uint32_t nodeData = 0;
 
-    const char* savedTokenBegin = nullptr;
-    const char* savedTokenEnd = nullptr;
     NodeKind nodeKind = (NodeKind)0;
 
     State parseState = State::Statement;
@@ -168,11 +174,11 @@ std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sou
 
     switch (parseState) {
     case State::Expression:
-        goto expression_no_emit;
+        goto expression$no_emit;
     case State::AfterExpression:
-        goto after_expression_no_emit;
+        goto after_expression$no_emit;
     case State::Statement:
-        goto statement_no_emit;
+        goto statement$no_emit;
     case State::SingleOrCompoundStatement:
         VERIFY_NOT_REACHED();
     case State::CommaAfterExpression:
@@ -184,36 +190,39 @@ std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sou
     case State::MaybeDesignatedArgument:
         VERIFY_NOT_REACHED();
     case State::FirstArgumentParen:
-        goto first_argument_paren_no_emit;
+        goto first_argument_paren$no_emit;
     case State::FirstArgumentSquare:
         VERIFY_NOT_REACHED();
     case State::FirstArgumentBrace:
         VERIFY_NOT_REACHED();
     case State::AccessPunctuation:
-        goto access_punctuation_no_emit;
+        goto access_punctuation$no_emit;
     case State::Error:
         VERIFY_NOT_REACHED();
     }
     // SwitchState expression
-expression_with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-expression_no_emit:
+expression$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::Expression;
-expression_as_then:
+expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        goto expression_no_emit;
+        markLineBegin(tokEnd, state);
+        goto expression$no_emit;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
             tokEnd += 2;
-            goto expression_no_emit;
+        } else {
+            tokEnd += 1;
         }
-        tokEnd += 1;
-        goto expression_no_emit;
+        markLineBegin(tokEnd, state);
+        goto expression$no_emit;
     }
     case '!': {
         char next = tokEnd[1];
@@ -227,7 +236,7 @@ expression_as_then:
         // emitNode NodeKind::LogicalNotExpr
         carriedEmitNodeKind = NodeKind::LogicalNotExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '%': {
         char next = tokEnd[1];
@@ -273,7 +282,7 @@ expression_as_then:
         // emitNode NodeKind::ParenthesizedExpr
         carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
         // next first_argument_paren
-        goto first_argument_paren_with_emit;
+        goto first_argument_paren$with_emit;
     }
     case ')': {
         tokEnd += 1;
@@ -293,7 +302,7 @@ expression_as_then:
         // emitNode NodeKind::DereferenceExpr
         carriedEmitNodeKind = NodeKind::DereferenceExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '+': {
         char next = tokEnd[1];
@@ -302,7 +311,7 @@ expression_as_then:
             // emitNode NodeKind::PreIncrementExpr
             carriedEmitNodeKind = NodeKind::PreIncrementExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -314,7 +323,7 @@ expression_as_then:
         // emitNode NodeKind::PlusExpr
         carriedEmitNodeKind = NodeKind::PlusExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case ',': {
         tokEnd += 1;
@@ -329,7 +338,7 @@ expression_as_then:
             // emitNode NodeKind::PreDecrementExpr
             carriedEmitNodeKind = NodeKind::PreDecrementExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -347,7 +356,7 @@ expression_as_then:
         // emitNode NodeKind::NegateExpr
         carriedEmitNodeKind = NodeKind::NegateExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '.': {
         tokEnd += 1;
@@ -361,14 +370,14 @@ expression_as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto expression_no_emit;
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            goto expression$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto expression_no_emit;
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            goto expression$no_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -546,7 +555,7 @@ expression_as_then:
         // emitNode NodeKind::BitwiseNotExpr
         carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case 'a':
     case 'b':
@@ -603,53 +612,57 @@ expression_as_then:
     case '#':
     case '$':
     case '_':
-        goto expression_word_case;
+        goto expression$word_case;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-expression_word_case:
+expression$word_case:
     {
         auto wordAndPos = readWord(tokEnd, state.wordTable);
         tokEnd = wordAndPos.position;
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] expression_keyword_check:
+    [[maybe_unused]] expression$keyword_check:
         if (word == words["if"]) {
             // pushScope ScopeKind::IfExpr
             scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
             // next expression
-            goto expression_no_emit;
+            goto expression$no_emit;
         }
-        goto error_keyword_check;
+        goto error$keyword_check;
     }
+    nodeData = word.asUint();
     // emitNode NodeKind::IdentifierExpr
     carriedEmitNodeKind = NodeKind::IdentifierExpr;
     // next after_expression
-    goto after_expression_with_emit;
+    goto after_expression$with_emit;
 
     // SwitchState after_expression
-after_expression_with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-after_expression_no_emit:
+after_expression$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+after_expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::AfterExpression;
-after_expression_as_then:
+after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        goto after_expression_no_emit;
+        markLineBegin(tokEnd, state);
+        goto after_expression$no_emit;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
             tokEnd += 2;
-            goto after_expression_no_emit;
+        } else {
+            tokEnd += 1;
         }
-        tokEnd += 1;
-        goto after_expression_no_emit;
+        markLineBegin(tokEnd, state);
+        goto after_expression$no_emit;
     }
     case '!': {
         char next = tokEnd[1];
@@ -658,7 +671,7 @@ after_expression_as_then:
             // emitNode NodeKind::CompareNotEqualExpr
             carriedEmitNodeKind = NodeKind::CompareNotEqualExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         tokEnd += 1;
         // error
@@ -677,7 +690,7 @@ after_expression_as_then:
         // emitNode NodeKind::RemainderExpr
         carriedEmitNodeKind = NodeKind::RemainderExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '&': {
         char next = tokEnd[1];
@@ -693,7 +706,7 @@ after_expression_as_then:
             // emitNode NodeKind::LogicalAndExpr
             carriedEmitNodeKind = NodeKind::LogicalAndExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -705,14 +718,14 @@ after_expression_as_then:
         // emitNode NodeKind::BitwiseAndExpr
         carriedEmitNodeKind = NodeKind::BitwiseAndExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '(': {
         tokEnd += 1;
         // emitNode NodeKind::CallExpr
         carriedEmitNodeKind = NodeKind::CallExpr;
         // next first_argument_paren
-        goto first_argument_paren_with_emit;
+        goto first_argument_paren$with_emit;
     }
     case ')': {
         tokEnd += 1;
@@ -721,7 +734,7 @@ after_expression_as_then:
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
         // next after_expression
-        goto after_expression_with_emit;
+        goto after_expression$with_emit;
     }
     case '*': {
         char next = tokEnd[1];
@@ -735,7 +748,7 @@ after_expression_as_then:
         // emitNode NodeKind::MultiplyExpr
         carriedEmitNodeKind = NodeKind::MultiplyExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '+': {
         char next = tokEnd[1];
@@ -744,7 +757,7 @@ after_expression_as_then:
             // emitNode NodeKind::PostIncrementExpr
             carriedEmitNodeKind = NodeKind::PostIncrementExpr;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -756,13 +769,13 @@ after_expression_as_then:
         // emitNode NodeKind::AdditionExpr
         carriedEmitNodeKind = NodeKind::AdditionExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case ',': {
         tokEnd += 1;
         // next comma_after_expression
         // inlined comma_after_expression
-        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        tokEnd = inlineAdvancer(tokEnd, state);
         tokBegin = tokEnd;
         parseState = State::CommaAfterExpression;
         if (std::string_view(tokEnd, 1) == ")"sv) {
@@ -772,7 +785,7 @@ after_expression_as_then:
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         if (std::string_view(tokEnd, 1) == "]"sv) {
             tokEnd += 1;
@@ -781,7 +794,7 @@ after_expression_as_then:
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         if (std::string_view(tokEnd, 1) == "}"sv) {
             tokEnd += 1;
@@ -790,7 +803,7 @@ after_expression_as_then:
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         if (isWordFirstCharacter(tokEnd[0])) {
             {
@@ -799,11 +812,11 @@ after_expression_as_then:
                 word = wordAndPos.word;
             }
             if (word.keyword()) {
-            [[maybe_unused]] comma_after_expression_keyword_check:
+            [[maybe_unused]] comma_after_expression$keyword_check:
                 if (word == words["else"]) {
                     // next comma_else
                     // inlined comma_else
-                    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+                    tokEnd = inlineAdvancer(tokEnd, state);
                     tokBegin = tokEnd;
                     parseState = State::CommaElse;
                     if (std::string_view(tokEnd, 2) == "=>"sv) {
@@ -811,38 +824,38 @@ after_expression_as_then:
                         // emitNode NodeKind::CommaElseExpr
                         carriedEmitNodeKind = NodeKind::CommaElseExpr;
                         // next expression
-                        goto expression_with_emit;
+                        goto expression$with_emit;
                     }
                     // then error
-                    goto error_as_then;
+                    goto error$as_then;
                 }
-                goto check_designated_argument_keyword_check;
+                goto check_designated_argument$keyword_check;
             }
-            // savedToken = tok
-            savedTokenBegin = tokBegin;
-            savedTokenEnd = tokEnd;
+            nodeData = word.asUint();
+            // emitNode NodeKind::IdentifierExpr
+            carriedEmitNodeKind = NodeKind::IdentifierExpr;
             // next maybe_designated_argument
             // inlined maybe_designated_argument
-            tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+            emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+            nodeData = 0;
+            tokEnd = inlineAdvancer(tokEnd, state);
             tokBegin = tokEnd;
             parseState = State::MaybeDesignatedArgument;
             if (std::string_view(tokEnd, 1) == "="sv) {
                 char next = tokEnd[1];
                 if (next != '=' && next != '>') {
                     tokEnd += 1;
-                    // emitNode NodeKind::DesignateArgument, savedToken
-                    emitNode(NodeKind::DesignateArgument, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+                    // updateKind NodeKind::DesignateArgument
+                    state.nodes.back().setKind(NodeKind::DesignateArgument);
                     // next expression
-                    goto expression_no_emit;
+                    goto expression$no_emit;
                 }
             }
-            // emitNode NodeKind::IdentifierExpr, savedToken
-            emitNode(NodeKind::IdentifierExpr, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
             // then after_expression
-            goto after_expression_as_then;
+            goto after_expression$as_then;
         }
         // then check_designated_argument
-        goto check_designated_argument_as_then;
+        goto check_designated_argument$as_then;
     }
     case '-': {
         char next = tokEnd[1];
@@ -851,7 +864,7 @@ after_expression_as_then:
             // emitNode NodeKind::PostDecrementExpr
             carriedEmitNodeKind = NodeKind::PostDecrementExpr;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -869,14 +882,14 @@ after_expression_as_then:
         // emitNode NodeKind::SubtractionExpr
         carriedEmitNodeKind = NodeKind::SubtractionExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '.': {
         tokEnd += 1;
         // nodeKind = NodeKind::MemberAccessExpr
         nodeKind = NodeKind::MemberAccessExpr;
         // next access_punctuation
-        goto access_punctuation_no_emit;
+        goto access_punctuation$no_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -884,14 +897,14 @@ after_expression_as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto after_expression_no_emit;
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            goto after_expression$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto after_expression_no_emit;
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            goto after_expression$no_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -903,7 +916,7 @@ after_expression_as_then:
         // emitNode NodeKind::DivideExpr
         carriedEmitNodeKind = NodeKind::DivideExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case ':': {
         char next = tokEnd[1];
@@ -912,7 +925,7 @@ after_expression_as_then:
             // nodeKind = NodeKind::StaticAccessExpr
             nodeKind = NodeKind::StaticAccessExpr;
             // next access_punctuation
-            goto access_punctuation_no_emit;
+            goto access_punctuation$no_emit;
         }
         tokEnd += 1;
         // popScope ScopeKind::IfExprOrStmt
@@ -921,8 +934,9 @@ after_expression_as_then:
         carriedEmitNodeKind = NodeKind::IfStmt;
         // next single_or_compound_statement
         // inlined single_or_compound_statement
-        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+        nodeData = 0;
+        tokEnd = inlineAdvancer(tokEnd, state);
         tokBegin = tokEnd;
         parseState = State::SingleOrCompoundStatement;
         if (std::string_view(tokEnd, 1) == "{"sv) {
@@ -932,21 +946,21 @@ after_expression_as_then:
             // emitNode NodeKind::CompoundStmt
             carriedEmitNodeKind = NodeKind::CompoundStmt;
             // next statement
-            goto statement_with_emit;
+            goto statement$with_emit;
         }
         // then statement
-        goto statement_as_then;
+        goto statement$as_then;
     }
     case ';': {
         tokEnd += 1;
         // exitIfUnscoped
         if (scopePosition[0] == ScopeKind::Invalid) {
-            return state.nodes;
+            return;
         }
         // emitNode NodeKind::ExpressionStmt
         carriedEmitNodeKind = NodeKind::ExpressionStmt;
         // next statement
-        goto statement_with_emit;
+        goto statement$with_emit;
     }
     case '<': {
         char next = tokEnd[1];
@@ -962,7 +976,7 @@ after_expression_as_then:
             // emitNode NodeKind::ShiftLeftExpr
             carriedEmitNodeKind = NodeKind::ShiftLeftExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             char next = tokEnd[2];
@@ -976,13 +990,13 @@ after_expression_as_then:
             // emitNode NodeKind::CompareLessEqualExpr
             carriedEmitNodeKind = NodeKind::CompareLessEqualExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         tokEnd += 1;
         // emitNode NodeKind::CompareLessExpr
         carriedEmitNodeKind = NodeKind::CompareLessExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '=': {
         char next = tokEnd[1];
@@ -991,7 +1005,7 @@ after_expression_as_then:
             // emitNode NodeKind::CompareEqualExpr
             carriedEmitNodeKind = NodeKind::CompareEqualExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '>') {
             tokEnd += 2;
@@ -1000,7 +1014,7 @@ after_expression_as_then:
             // emitNode NodeKind::IfExpr
             carriedEmitNodeKind = NodeKind::IfExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         tokEnd += 1;
         // error
@@ -1014,7 +1028,7 @@ after_expression_as_then:
             // emitNode NodeKind::CompareGreaterEqualExpr
             carriedEmitNodeKind = NodeKind::CompareGreaterEqualExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '>') {
             char next = tokEnd[2];
@@ -1028,13 +1042,13 @@ after_expression_as_then:
             // emitNode NodeKind::ShiftRightExpr
             carriedEmitNodeKind = NodeKind::ShiftRightExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         tokEnd += 1;
         // emitNode NodeKind::CompareGreaterExpr
         carriedEmitNodeKind = NodeKind::CompareGreaterExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '[': {
         tokEnd += 1;
@@ -1042,8 +1056,9 @@ after_expression_as_then:
         carriedEmitNodeKind = NodeKind::IndexExpr;
         // next first_argument_square
         // inlined first_argument_square
-        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+        nodeData = 0;
+        tokEnd = inlineAdvancer(tokEnd, state);
         tokBegin = tokEnd;
         parseState = State::FirstArgumentSquare;
         if (std::string_view(tokEnd, 1) == "]"sv) {
@@ -1051,12 +1066,12 @@ after_expression_as_then:
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         // pushScope ScopeKind::Square
         scopePosition = pushScope(scopePosition, ScopeKind::Square);
         // then check_designated_argument
-        goto check_designated_argument_as_then;
+        goto check_designated_argument$as_then;
     }
     case ']': {
         tokEnd += 1;
@@ -1065,7 +1080,7 @@ after_expression_as_then:
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
         // next after_expression
-        goto after_expression_with_emit;
+        goto after_expression$with_emit;
     }
     case '^': {
         char next = tokEnd[1];
@@ -1079,7 +1094,7 @@ after_expression_as_then:
         // emitNode NodeKind::BitwiseXorExpr
         carriedEmitNodeKind = NodeKind::BitwiseXorExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '{': {
         tokEnd += 1;
@@ -1087,8 +1102,9 @@ after_expression_as_then:
         carriedEmitNodeKind = NodeKind::Parameterize;
         // next first_argument_brace
         // inlined first_argument_brace
-        emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+        nodeData = 0;
+        tokEnd = inlineAdvancer(tokEnd, state);
         tokBegin = tokEnd;
         parseState = State::FirstArgumentBrace;
         if (std::string_view(tokEnd, 1) == "}"sv) {
@@ -1096,12 +1112,12 @@ after_expression_as_then:
             // emitNode NodeKind::EmptyNode
             carriedEmitNodeKind = NodeKind::EmptyNode;
             // next after_expression
-            goto after_expression_with_emit;
+            goto after_expression$with_emit;
         }
         // pushScope ScopeKind::Brace
         scopePosition = pushScope(scopePosition, ScopeKind::Brace);
         // then check_designated_argument
-        goto check_designated_argument_as_then;
+        goto check_designated_argument$as_then;
     }
     case '|': {
         char next = tokEnd[1];
@@ -1123,13 +1139,13 @@ after_expression_as_then:
             // emitNode NodeKind::LogicalOrExpr
             carriedEmitNodeKind = NodeKind::LogicalOrExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         tokEnd += 1;
         // emitNode NodeKind::BitwiseOrExpr
         carriedEmitNodeKind = NodeKind::BitwiseOrExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '}': {
         tokEnd += 1;
@@ -1138,7 +1154,7 @@ after_expression_as_then:
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
         // next after_expression
-        goto after_expression_with_emit;
+        goto after_expression$with_emit;
     }
     case '~': {
         tokEnd += 1;
@@ -1201,46 +1217,50 @@ after_expression_as_then:
     case '#':
     case '$':
     case '_':
-        goto after_expression_word_case;
+        goto after_expression$word_case;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-after_expression_word_case:
+after_expression$word_case:
     {
         auto wordAndPos = readWord(tokEnd, state.wordTable);
         tokEnd = wordAndPos.position;
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] after_expression_keyword_check:
-        goto error_keyword_check;
+    [[maybe_unused]] after_expression$keyword_check:
+        goto error$keyword_check;
     }
+    nodeData = word.asUint();
     // error
     errorToken = Token::Identifier;
     goto handle_parse_error;
 
     // SwitchState statement
-statement_with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-statement_no_emit:
+statement$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+statement$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::Statement;
-statement_as_then:
+statement$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        goto statement_no_emit;
+        markLineBegin(tokEnd, state);
+        goto statement$no_emit;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
             tokEnd += 2;
-            goto statement_no_emit;
+        } else {
+            tokEnd += 1;
         }
-        tokEnd += 1;
-        goto statement_no_emit;
+        markLineBegin(tokEnd, state);
+        goto statement$no_emit;
     }
     case '!': {
         char next = tokEnd[1];
@@ -1254,7 +1274,7 @@ statement_as_then:
         // emitNode NodeKind::LogicalNotExpr
         carriedEmitNodeKind = NodeKind::LogicalNotExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '%': {
         char next = tokEnd[1];
@@ -1300,7 +1320,7 @@ statement_as_then:
         // emitNode NodeKind::ParenthesizedExpr
         carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
         // next first_argument_paren
-        goto first_argument_paren_with_emit;
+        goto first_argument_paren$with_emit;
     }
     case ')': {
         tokEnd += 1;
@@ -1320,7 +1340,7 @@ statement_as_then:
         // emitNode NodeKind::DereferenceExpr
         carriedEmitNodeKind = NodeKind::DereferenceExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '+': {
         char next = tokEnd[1];
@@ -1329,7 +1349,7 @@ statement_as_then:
             // emitNode NodeKind::PreIncrementExpr
             carriedEmitNodeKind = NodeKind::PreIncrementExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -1341,7 +1361,7 @@ statement_as_then:
         // emitNode NodeKind::PlusExpr
         carriedEmitNodeKind = NodeKind::PlusExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case ',': {
         tokEnd += 1;
@@ -1356,7 +1376,7 @@ statement_as_then:
             // emitNode NodeKind::PreDecrementExpr
             carriedEmitNodeKind = NodeKind::PreDecrementExpr;
             // next expression
-            goto expression_with_emit;
+            goto expression$with_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -1374,7 +1394,7 @@ statement_as_then:
         // emitNode NodeKind::NegateExpr
         carriedEmitNodeKind = NodeKind::NegateExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case '.': {
         tokEnd += 1;
@@ -1388,14 +1408,14 @@ statement_as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto statement_no_emit;
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            goto statement$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
-            goto statement_no_emit;
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            goto statement$no_emit;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -1568,19 +1588,19 @@ statement_as_then:
         scopePosition = popScope(scopePosition, ScopeKind::CompoundStmt);
         // exitIfUnscoped
         if (scopePosition[0] == ScopeKind::Invalid) {
-            return state.nodes;
+            return;
         }
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
         // next statement
-        goto statement_with_emit;
+        goto statement$with_emit;
     }
     case '~': {
         tokEnd += 1;
         // emitNode NodeKind::BitwiseNotExpr
         carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
         // next expression
-        goto expression_with_emit;
+        goto expression$with_emit;
     }
     case 'a':
     case 'b':
@@ -1637,35 +1657,36 @@ statement_as_then:
     case '#':
     case '$':
     case '_':
-        goto statement_word_case;
+        goto statement$word_case;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-statement_word_case:
+statement$word_case:
     {
         auto wordAndPos = readWord(tokEnd, state.wordTable);
         tokEnd = wordAndPos.position;
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] statement_keyword_check:
+    [[maybe_unused]] statement$keyword_check:
         if (word == words["if"]) {
             // pushScope ScopeKind::IfExprOrStmt
             scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
             // next expression
-            goto expression_no_emit;
+            goto expression$no_emit;
         }
-        goto expression_keyword_check;
+        goto expression$keyword_check;
     }
+    nodeData = word.asUint();
     // emitNode NodeKind::IdentifierExpr
     carriedEmitNodeKind = NodeKind::IdentifierExpr;
     // next after_expression
-    goto after_expression_with_emit;
+    goto after_expression$with_emit;
 
     // LinearState check_designated_argument
-check_designated_argument_as_then:
+check_designated_argument$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, state.wordTable);
@@ -1673,40 +1694,41 @@ check_designated_argument_as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] check_designated_argument_keyword_check:
-            goto expression_keyword_check;
+        [[maybe_unused]] check_designated_argument$keyword_check:
+            goto expression$keyword_check;
         }
-        // savedToken = tok
-        savedTokenBegin = tokBegin;
-        savedTokenEnd = tokEnd;
+        nodeData = word.asUint();
+        // emitNode NodeKind::IdentifierExpr
+        carriedEmitNodeKind = NodeKind::IdentifierExpr;
         // next maybe_designated_argument
         // inlined maybe_designated_argument
-        tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+        emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+        nodeData = 0;
+        tokEnd = inlineAdvancer(tokEnd, state);
         tokBegin = tokEnd;
         parseState = State::MaybeDesignatedArgument;
         if (std::string_view(tokEnd, 1) == "="sv) {
             char next = tokEnd[1];
             if (next != '=' && next != '>') {
                 tokEnd += 1;
-                // emitNode NodeKind::DesignateArgument, savedToken
-                emitNode(NodeKind::DesignateArgument, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
+                // updateKind NodeKind::DesignateArgument
+                state.nodes.back().setKind(NodeKind::DesignateArgument);
                 // next expression
-                goto expression_no_emit;
+                goto expression$no_emit;
             }
         }
-        // emitNode NodeKind::IdentifierExpr, savedToken
-        emitNode(NodeKind::IdentifierExpr, savedTokenBegin, savedTokenEnd, state, sourceBufferBegin);
         // then after_expression
-        goto after_expression_as_then;
+        goto after_expression$as_then;
     }
     // then expression
-    goto expression_as_then;
+    goto expression$as_then;
 
     // LinearState first_argument_paren
-first_argument_paren_with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, tokEnd, state, sourceBufferBegin);
-first_argument_paren_no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+first_argument_paren$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+first_argument_paren$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentParen;
     if (std::string_view(tokEnd, 1) == ")"sv) {
@@ -1714,16 +1736,16 @@ first_argument_paren_no_emit:
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
         // next after_expression
-        goto after_expression_with_emit;
+        goto after_expression$with_emit;
     }
     // pushScope ScopeKind::Paren
     scopePosition = pushScope(scopePosition, ScopeKind::Paren);
     // then check_designated_argument
-    goto check_designated_argument_as_then;
+    goto check_designated_argument$as_then;
 
     // LinearState access_punctuation
-access_punctuation_no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);
+access_punctuation$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::AccessPunctuation;
     if (isWordFirstCharacter(tokEnd[0])) {
@@ -1733,19 +1755,20 @@ access_punctuation_no_emit:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] access_punctuation_keyword_check:
-            goto error_keyword_check;
+        [[maybe_unused]] access_punctuation$keyword_check:
+            goto error$keyword_check;
         }
+        nodeData = word.asUint();
         // emitNode nodeKind
         carriedEmitNodeKind = nodeKind;
         // next after_expression
-        goto after_expression_with_emit;
+        goto after_expression$with_emit;
     }
     // then error
-    goto error_as_then;
+    goto error$as_then;
 
     // SwitchState error
-error_as_then:
+error$as_then:
     switch (tokEnd[0]) {
     case '\n':
     case '\r':
@@ -2125,20 +2148,20 @@ error_as_then:
     case '#':
     case '$':
     case '_':
-        goto error_word_case;
+        goto error$word_case;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-error_word_case:
-error_keyword_check:
+error$word_case:
+error$keyword_check:
     VERIFY_NOT_REACHED();
 
 
 handle_parse_error:
     errorHandler->invalidToken(parseState, errorToken);
-    return {};
+    return;
 }
 
 std::string_view nameString(NodeKind kind) {

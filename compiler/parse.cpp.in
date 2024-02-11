@@ -26,11 +26,6 @@ enum class ScopeKind : char {
     Brace,
 };
 
-struct ParseStackState {
-    std::vector<Node> nodes;
-    WordStringTable wordTable { words };
-};
-
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
 struct ScopeBuffer {
@@ -66,8 +61,16 @@ static ScopeKind peekScope(ScopeKind* position) {
     return position[0];
 }
 
-[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, const char* end, ParseStackState& state, const char* sourceBufferBegin) {
-    state.nodes.push_back({ kind, (uint32_t)(begin - sourceBufferBegin), (uint32_t)(end - sourceBufferBegin) });
+static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
+    return { (uint32_t)(position - state.lines.back().begin), (uint32_t)state.lines.size() - 1 };
+}
+
+[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, uint32_t data, ParseState& state) {
+    state.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
+}
+
+static void markLineBegin(const char* position, ParseState& state) {
+    state.lines.push_back({ position });
 }
 
 struct WordAndPosition {
@@ -115,52 +118,55 @@ struct WordAndPosition {
     return position;
 };
 
-[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseStackState& state, const char* sourceBufferBegin) {
-    const char* tokBegin;
+[[gnu::noinline]] static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
+    state.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+}
+
+[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
-        tokBegin = tokEnd;
+        const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
             tokEnd = skipToEndOfLine(tokEnd);
-            emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
             continue;
         }
         if (tokEnd[0] == '\n') {
             tokEnd += 1;
+            markLineBegin(tokEnd, state);
             continue;
         }
         if (tokEnd[0] == '\r') {
             if (tokEnd[1] == '\n') {
                 tokEnd += 2;
-                continue;
+            } else {
+                tokEnd += 1;
             }
-            tokEnd += 1;
+            markLineBegin(tokEnd, state);
             continue;
         }
         break;
-    } // retry-loop
+    }
     return tokEnd;
 }
 
-std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sourceBufferPosition, ErrorHandler* errorHandler) {
+void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
 
-    ParseStackState state;
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
     NodeKind carriedEmitNodeKind = (NodeKind)0;
     Word word;
+    uint32_t nodeData = 0;
 
-    const char* savedTokenBegin = nullptr;
-    const char* savedTokenEnd = nullptr;
     NodeKind nodeKind = (NodeKind)0;
 
     State parseState = State::Statement;
@@ -170,7 +176,7 @@ std::vector<Node> parseExpression(const char* sourceBufferBegin, const char* sou
 
 handle_parse_error:
     errorHandler->invalidToken(parseState, errorToken);
-    return {};
+    return;
 }
 
 std::string_view nameString(NodeKind kind) {

@@ -10,11 +10,7 @@
 #endif
 
 NODE(EmptyNode, EmptyNode, Primary)
-NODE(Newline, Newline, Newline)
-NODE(BlockComment, Comment, Comment)
-NODE(LineComment, Comment, Comment)
 NODE(EOS, EOS, EOS)
-NODE(Comma, Comma, Comma)
 
 // ------ expressions ------
 EXPR(ConstraintExpr, UnaryOperatorExpr, Unary)

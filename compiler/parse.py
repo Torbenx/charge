@@ -84,6 +84,12 @@ class EmitNodeInstruction:
         return ret
 
 @dataclasses.dataclass
+class UpdateKindInstruction:
+    nodeKindExpr: str
+    def format(self):
+        return "updateKind " + self.nodeKindExpr
+
+@dataclasses.dataclass
 class PushScopeInstruction:
     scopeKindExpr: str
     def format(self):
@@ -279,6 +285,8 @@ class Parser:
                     self.line = self.line[1:]
                     tokenExpr = self.parseExpr()
                 instructions.append(EmitNodeInstruction(nodeKindExpr, tokenExpr))
+            elif first == "updateKind":
+                instructions.append(UpdateKindInstruction(self.parseExpr()))
             elif first == "pushScope":
                 instructions.append(PushScopeInstruction(self.parseExpr()))
             elif first == "popScope":
@@ -353,16 +361,16 @@ def linearIf(commonPrefix: str, state):
             line("VERIFY_NOT_REACHED();")
         else:
             line("tokEnd = skipToEndOfLine(tokEnd);")
-            line("emitNode(NodeKind::LineComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-            line("goto " + state.name + "_no_emit;")
+            line("emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);")
+            line("goto " + state.name + "$no_emit;")
     elif exactMatch == "/*":
         if onlyUsedAsThen(state):
             line("VERIFY_NOT_REACHED();")
         else:
             line("tokEnd = skipToEndOfBlockComment(tokEnd);")
             line("tokEnd += 2;")
-            line("emitNode(NodeKind::BlockComment, tokBegin, tokEnd, state, sourceBufferBegin);")
-            line("goto " + state.name + "_no_emit;")
+            line("emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);")
+            line("goto " + state.name + "$no_emit;")
     else:
         foundState, case = recurse(state, lambda s: s.punctuationCase(exactMatch))
         generateCaseBody(case)
@@ -394,16 +402,18 @@ def checkForPunctuation(punc, handler):
     line("}")
 
 def inlineTokenAdvancer():
-    line("tokEnd = inlineAdvancer(tokEnd, state, sourceBufferBegin);")
+    line("tokEnd = inlineAdvancer(tokEnd, state);")
     line("tokBegin = tokEnd;")
 
 def emitNode(nodeKindExpr, beginExpr, endExpr):
-    line("emitNode(" + nodeKindExpr + ", " + beginExpr +", " + endExpr + ", state, sourceBufferBegin);")
+    line("emitNode(" + nodeKindExpr + ", " + beginExpr +", nodeData, state);")
+    line("nodeData = 0;")
 
 def emitCarriedNode():
     emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
 def rememberState(state):
+    # line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def readWord():
@@ -417,21 +427,22 @@ def readWord():
 def generateWordCase(state):
     if state.name == "error":
         # TODO: Map keywords to keyword tokens
-        labelLine("error_keyword_check:")
+        labelLine("error$keyword_check:")
         line("VERIFY_NOT_REACHED();")
     else:
         readWord()
         line("if (word.keyword()) {")
         with indent():
-            labelLine("[[maybe_unused]] " + state.name + "_keyword_check:")
+            labelLine("[[maybe_unused]] " + state.name + "$keyword_check:")
             for c in state.keywordCases():
                 line("if (word == words[\"" + c.keyword + "\"]) {")
                 with indent():
                     generateCaseBody(c)
                 line("}")
             assert(state.thenCase() is None)
-            line("goto " + state.thenState + "_keyword_check;")
+            line("goto " + state.thenState + "$keyword_check;")
         line("}")
+        line("nodeData = word.asUint();")
         foundState, idCase = recurse(state, lambda s: s.identifierCase())
         generateCaseBody(idCase)
 
@@ -475,7 +486,8 @@ def generateSwitchState(state):
         line("case '\\n': {")
         with indent():
             line("tokEnd += 1;")
-            line("goto " + state.name + "_no_emit;")
+            line("markLineBegin(tokEnd, state);")
+            line("goto " + state.name + "$no_emit;")
         line("}")
 
         line("case '\\r': {")
@@ -483,10 +495,12 @@ def generateSwitchState(state):
             line("if (tokEnd[1] == '\\n') {")
             with indent():
                 line("tokEnd += 2;")
-                line("goto " + state.name + "_no_emit;")
+            line("} else {")
+            with indent():
+                line("tokEnd += 1;")
             line("}")
-            line("tokEnd += 1;")
-            line("goto " + state.name + "_no_emit;")
+            line("markLineBegin(tokEnd, state);")
+            line("goto " + state.name + "$no_emit;")
         line("}")
 
     # punctuations
@@ -504,7 +518,7 @@ def generateSwitchState(state):
     line("case '$':")
     line("case '_':")
     with indent():
-        line("goto " + state.name + "_word_case;")
+        line("goto " + state.name + "$word_case;")
 
     # default
     line("default: {")
@@ -516,7 +530,7 @@ def generateSwitchState(state):
 
     line("VERIFY_NOT_REACHED();")
 
-    labelLine(state.name + "_word_case:")
+    labelLine(state.name + "$word_case:")
     generateWordCase(state)
 
 def generateLinearState(state):
@@ -532,7 +546,7 @@ def generateLinearState(state):
     if not thenCase is None:
         generateCaseBody(thenCase)
     line("// then " + state.thenState)
-    line("goto " + state.thenState + "_as_then;")
+    line("goto " + state.thenState + "$as_then;")
 
 def generateCaseBody(case):
     for inst in case.instructions:
@@ -545,6 +559,8 @@ def generateCaseBody(case):
                 emitNode(inst.nodeKindExpr, "tokBegin", "tokEnd")
             else:
                 emitNode(inst.nodeKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
+        elif type(inst) is UpdateKindInstruction:
+            line("state.nodes.back().setKind(" + inst.nodeKindExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
@@ -557,12 +573,9 @@ def generateCaseBody(case):
                 rememberState(newState)
                 generateState(newState)
             else:
-                line("goto " + newState.name + ("_with_emit" if inst.carriesEmitNode else "_no_emit") + ";")
+                line("goto " + newState.name + ("$with_emit" if inst.carriesEmitNode else "$no_emit") + ";")
         elif type(inst) is AssignInstruction:
-            if inst.leftName == "savedToken":
-                line("savedTokenBegin = " + inst.rightExpr + "Begin;")
-                line("savedTokenEnd = " + inst.rightExpr + "End;")
-            elif inst.leftName == "nodeKind":
+            if inst.leftName == "nodeKind":
                 line("nodeKind = " + inst.rightExpr + ";")
             else:
                 assert(False)
@@ -576,7 +589,7 @@ def generateCaseBody(case):
         elif type(inst) is ExitIfUnscopedInstruction:
             line("if (scopePosition[0] == ScopeKind::Invalid) {")
             with indent():
-                line("return state.nodes;")
+                line("return;")
             line("}")
         elif type(inst) is ErrorInstruction:
             line("errorToken = Token::" + inst.tokenCppName + ";")
@@ -609,7 +622,7 @@ for state in states:
         if shouldBeInlined(state) or onlyUsedAsThen(state):
             line("VERIFY_NOT_REACHED();")
         else:
-            line("goto " + state.name + "_no_emit;")
+            line("goto " + state.name + "$no_emit;")
 line("}")
 
 for state in states:
@@ -619,11 +632,11 @@ for state in states:
         line("// " + state.kind + " " + state.name)
         withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitNode]
         if withEmitLabelUsed:
-            labelLine(state.name + "_with_emit:")
+            labelLine(state.name + "$with_emit:")
             emitCarriedNode()
         noEmitLabelUsed = not onlyUsedAsThen(state)
         if noEmitLabelUsed:
-            labelLine(state.name + "_no_emit:")
+            labelLine(state.name + "$no_emit:")
         if noEmitLabelUsed or withEmitLabelUsed:
             if state.kind == "SwitchState":
                 line("tokEnd = skipWhitespace(tokEnd);")
@@ -632,7 +645,7 @@ for state in states:
                 inlineTokenAdvancer()
             rememberState(state)
         if [o for o in state.origins if type(o) is State]:
-            labelLine(state.name + "_as_then:")
+            labelLine(state.name + "$as_then:")
 
         generateState(state)
 

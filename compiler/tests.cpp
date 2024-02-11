@@ -20,7 +20,7 @@ static bool isCommandEndChar(uint8_t c) {
     return c == '\r' || c == '\n' || c == ';';
 }
 
-struct TestInstrumenter {
+struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter> {
     struct Pair {
         Word key;
         std::string_view value;
@@ -74,44 +74,52 @@ struct TestInstrumenter {
         VERIFY_NOT_REACHED();
     }
 
-    void runTest(std::filesystem::path file, std::string_view source) {
-        using NodeKind = parse::NodeKind;
-        auto nodes = parse::parseExpression(source.data(), source.data(), nullptr);
+    void visitWhitespace(const parse::Output& output, parse::WhitespaceInfo info) {
+        if (info.tag() == parse::WhitespaceKind::LineComment) {
+            handleComment(output.whitespaceSpelling(info).substr(2));
+        }
+        if (info.tag() == parse::WhitespaceKind::BlockComment) {
+            auto spelling = output.whitespaceSpelling(info);
+            handleComment(spelling.substr(2, spelling.length() - 4));
+        }
+    }
 
-        for (auto node : nodes) {
-            std::cout << nameString(node.kind) << '\n';
-            auto nodeSource = source.substr(node.begin, node.end - node.begin);
-            if (node.kind == NodeKind::LineComment) {
-                handleComment(nodeSource.substr(2));
-                continue;
+    void visitNode(const parse::Output& output, parse::Node node) {
+        std::cout << nameString(node.kind()) << '\n';
+
+        if (commandQueue.empty())
+            return;
+        if (commandQueue.top().command == words["expect-node"]) {
+            auto cmd = commandQueue.pop();
+            for (const auto& pair : cmd.pairs) {
+                if (pair.key == Word())
+                    expect_eq(pair.value, nameString(node.kind()), "", &cmd, &pair);
+                //else if (pair.key == words["packed-range-begin-column"])
+                //    expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
+                else
+                    invalidKey(&cmd, &pair);
             }
-            if (node.kind == NodeKind::BlockComment) {
-                handleComment(nodeSource.substr(2, nodeSource.length() - 4));
-                continue;
-            }
-            if (commandQueue.empty())
-                continue;
-            if (commandQueue.top().command == words["expect-node"]) {
-                auto cmd = commandQueue.pop();
-                for (const auto& pair : cmd.pairs) {
-                    if (pair.key == Word())
-                        expect_eq(pair.value, nameString(node.kind), "", &cmd, &pair);
-                    //else if (pair.key == words["packed-range-begin-column"])
-                    //    expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
-                    else
-                        invalidKey(&cmd, &pair);
-                }
-            } else if (commandQueue.top().command == words["expect-identifier"]) {
-                auto cmd = commandQueue.pop();
-                expect_eq(node.kind, NodeKind::IdentifierExpr);
-                for (const auto& pair : cmd.pairs) {
-                    if (pair.key == Word())
-                        expect_eq(pair.value, nodeSource, "", &cmd, &pair);
-                    else
-                        invalidKey(&cmd, &pair);
-                }
+        } else if (commandQueue.top().command == words["expect-identifier"]) {
+            auto cmd = commandQueue.pop();
+            expect_eq(node.kind(), parse::NodeKind::IdentifierExpr);
+            for (const auto& pair : cmd.pairs) {
+                if (pair.key == Word())
+                    expect_eq(pair.value, output.wordTable.view(Word::fromUint(node.data())), "", &cmd, &pair);
+                else
+                    invalidKey(&cmd, &pair);
             }
         }
+    }
+
+    void runTest(std::filesystem::path file, std::string_view source) {
+        parse::Output output(source);
+        parse::parseExpression(source.data(), output, nullptr);
+        // TODO: Do this somewhere else
+        auto endLoc = parse::SourceLocation(0, output.lines.size());
+        output.nodes.push_back({ parse::NodeKind::EOS, endLoc });
+        output.whitespace.push_back({ { parse::WhitespaceKind::EOS, endLoc } });
+
+        visit(output);
     }
 
     void handleComment(std::string_view comment) {

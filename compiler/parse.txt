@@ -183,14 +183,12 @@ LinearState comma_else() then error
 
 LinearState check_designated_argument() then expression
     identifier
-        savedToken = tok
+        emitNode NodeKind::IdentifierExpr
         next maybe_designated_argument
-LinearState maybe_designated_argument(savedToken) then after_expression
+LinearState maybe_designated_argument() then after_expression
     punctuation =
-        emitNode NodeKind::DesignateArgument, savedToken
+        updateKind NodeKind::DesignateArgument
         next expression
-    then
-        emitNode NodeKind::IdentifierExpr, savedToken
 
 LinearState first_argument_paren() then check_designated_argument
     punctuation )
