@@ -51,15 +51,21 @@ class PunctuationCase(Case):
     def __init__(self, punctuation, instructions):
         super().__init__(instructions)
         self.punctuation = punctuation
+    def cppName(self):
+        return punctuationCppName(self.punctuation)
 
 class KeywordCase(Case):
     def __init__(self, keyword, instructions):
         super().__init__(instructions)
         self.keyword = keyword
+    def cppName(self):
+        return keywordCppName(self.keyword)
 
 class IdentifierCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
+    def cppName(self):
+        return punctuationCppName(identifierCppName())
 
 class ThenCase(Case):
     def __init__(self, instructions):
@@ -118,7 +124,6 @@ class AssignInstruction:
 
 @dataclasses.dataclass
 class ErrorInstruction:
-    tokenCppName: str
     def format(self):
         return "error"
 
@@ -413,7 +418,7 @@ def emitCarriedNode():
     emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
 def rememberState(state):
-    # line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
+    line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def readWord():
@@ -428,6 +433,7 @@ def generateWordCase(state):
     if state.name == "error":
         # TODO: Map keywords to keyword tokens
         labelLine("error$keyword_check:")
+        labelLine("error$identifier_case:")
         line("VERIFY_NOT_REACHED();")
     else:
         readWord()
@@ -439,15 +445,22 @@ def generateWordCase(state):
                 with indent():
                     generateCaseBody(c)
                 line("}")
-            assert(state.thenCase() is None)
+            if not state.thenCase() is None:
+                generateCaseBody(state.thenCase())
             line("goto " + state.thenState + "$keyword_check;")
         line("}")
         line("nodeData = word.asUint();")
+        if not state.thenCase() is None:
+            generateCaseBody(state.thenCase())
         foundState, idCase = recurse(state, lambda s: s.identifierCase())
-        generateCaseBody(idCase)
+        if state == foundState:
+            labelLine("[[maybe_unused]] " + state.name + "$identifier_case:")
+            generateCaseBody(idCase)
+        else:
+            line("goto " + foundState.name + "$identifier_case;")
 
-errorCases  = [PunctuationCase(p, [ErrorInstruction(punctuationCppName(p))]) for p in punctuations]
-errorCases += [IdentifierCase([ErrorInstruction(identifierCppName())])]
+errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
+errorCases += [IdentifierCase([ErrorInstruction()])]
 errorState = State("SwitchState", "error", "", [], errorCases)
 states += [errorState]
 
@@ -537,7 +550,6 @@ def generateLinearState(state):
     for c in state.punctuationCases():
         checkForPunctuation(c.punctuation, lambda: generateCaseBody(c))
     if state.keywordCases() or not state.identifierCase() is None:
-        assert(state.thenCase() is None)
         line("if (isWordFirstCharacter(tokEnd[0])) {")
         with indent():
             generateWordCase(state)
@@ -547,6 +559,10 @@ def generateLinearState(state):
         generateCaseBody(thenCase)
     line("// then " + state.thenState)
     line("goto " + state.thenState + "$as_then;")
+
+def generateError(case):
+    line("errorToken = Token::" + case.cppName() + ";")
+    line("goto handle_parse_error;")
 
 def generateCaseBody(case):
     for inst in case.instructions:
@@ -585,15 +601,22 @@ def generateCaseBody(case):
             scopes = ""
             for expr in inst.scopeKindExprs:
                 scopes += ", " + expr
-            line("scopePosition = popScope(scopePosition" + scopes + ");")
+            line("{")
+            with indent():
+                line("auto result = popScope(scopePosition" + scopes + ");")
+                line("if (result == nullptr) {")
+                with indent():
+                    generateError(case)
+                line("}")
+                line("scopePosition = result;")
+            line("}")
         elif type(inst) is ExitIfUnscopedInstruction:
             line("if (scopePosition[0] == ScopeKind::Invalid) {")
             with indent():
                 line("return;")
             line("}")
         elif type(inst) is ErrorInstruction:
-            line("errorToken = Token::" + inst.tokenCppName + ";")
-            line("goto handle_parse_error;")
+            generateError(case)
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
 
@@ -682,39 +705,68 @@ lineNoIndent()
 lineNoIndent("#include \"types.h\"")
 lineNoIndent()
 line("namespace parse {")
+lineNoIndent()
 
-tokenCounter = 0
-
-line("enum class Punctuation : uint8_t {")
-with indent():
-    line("BEGIN = " + str(tokenCounter) + ",")
-    for punc in punctuationTokens:
-        line(punctuationCppName(punc) + " = " + str(tokenCounter) + ", // " + punc)
-        tokenCounter += 1
-    line("END = " + str(tokenCounter) + ",")
-line("};")
-
-tokenCounter2 = 0
 line("enum class Token : uint8_t {")
 with indent():
     for punc in punctuationTokens:
-        line(punctuationCppName(punc) + " = " + str(tokenCounter2) + ", // " + punc)
-        tokenCounter2 += 1
-    assert(tokenCounter2 == tokenCounter)
-    line("Identifier = " + str(tokenCounter2) + ",")
+        line(punctuationCppName(punc) + ", // " + punc)
+    line(identifierCppName() + ",")
 line("};")
+line("std::string_view nameString(Token);")
+lineNoIndent()
 
 line("enum class State {")
 with indent():
     for state in states:
         line(stateCppName(state.name) + ",")
 line("};")
+line("std::string_view nameString(State);")
 lineNoIndent()
 line("}")
-
 
 outputLines = []
 for generatedLine in generatedLines:
     outputLines.append(generatedLine + lineEnding)
 with open(currentDir / "parse_gen.h", "w") as f:
+    f.writelines(outputLines)
+
+# generate .cpp
+generatedLines = []
+outputIndentation = 0
+lineNoIndent("#include \"parse.h\"")
+lineNoIndent()
+line("namespace parse {")
+lineNoIndent()
+
+line("std::string_view nameString(Token token) {")
+with indent():
+    line("switch (token) {")
+    for punc in punctuationTokens:
+        line("case Token::" + punctuationCppName(punc) + ":")
+        with indent():
+            line("return \"" + punctuationCppName(punc) + "\";")
+    line("case Token::" + identifierCppName() + ":")
+    with indent():
+        line("return \"" + identifierCppName() + "\";")
+    line("}")
+line("}")
+lineNoIndent()
+
+line("std::string_view nameString(State state) {")
+with indent():
+    line("switch (state) {")
+    for state in states:
+        line("case State::" + stateCppName(state.name) + ":")
+        with indent():
+            line("return \"" + stateCppName(state.name) + "\";")
+    line("}")
+line("}")
+lineNoIndent()
+line("}")
+
+outputLines = []
+for generatedLine in generatedLines:
+    outputLines.append(generatedLine + lineEnding)
+with open(currentDir / "parse_gen.cpp", "w") as f:
     f.writelines(outputLines)

@@ -96,6 +96,67 @@ SwitchState after_expression() then error
         emitNode NodeKind::CompareGreaterEqualExpr
         next expression
 
+    punctuation +=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::AdditionUpdateStmt
+        next expression
+    punctuation -=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::SubtractionUpdateStmt
+        next expression
+    punctuation *=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::MultiplyUpdateStmt
+        next expression
+    punctuation &=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::BitwiseAndUpdateStmt
+        next expression
+    punctuation ^=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::BitwiseXorUpdateStmt
+        next expression
+    punctuation |=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::BitwiseOrUpdateStmt
+        next expression
+    punctuation /=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::DivideUpdateStmt
+        next expression
+    punctuation %=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::RemainderUpdateStmt
+        next expression
+    punctuation <<=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::ShiftLeftUpdateStmt
+        next expression
+    punctuation >>=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::ShiftRightUpdateStmt
+        next expression
+    punctuation &&=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::LogicalAndUpdateStmt
+        next expression
+    punctuation ||=
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::LogicalOrUpdateStmt
+        next expression
+
     punctuation .
         nodeKind = NodeKind::MemberAccessExpr
         next access_punctuation
@@ -114,14 +175,17 @@ SwitchState after_expression() then error
         next first_argument_brace
 
     punctuation )
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Paren
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation ]
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Square
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation }
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Brace
         emitNode NodeKind::EmptyNode
         next after_expression
@@ -130,6 +194,7 @@ SwitchState after_expression() then error
         next comma_after_expression
 
     punctuation ;
+        popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
         exitIfUnscoped
         emitNode NodeKind::ExpressionStmt
         next statement
@@ -140,18 +205,32 @@ SwitchState after_expression() then error
         next expression
     punctuation :
         popScope ScopeKind::IfExprOrStmt
+        popScope ScopeKind::LeftExpr
         emitNode NodeKind::IfStmt
         next single_or_compound_statement
+    punctuation =
+        popScope ScopeKind::VariableType, ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::AssignStmt
+        next expression
 
-SwitchState statement() then expression
+LinearState statement() then expression
     keyword if
+        pushScope ScopeKind::LeftExpr
         pushScope ScopeKind::IfExprOrStmt
         next expression
+    keyword let
+        next check_var_after_let
+    keyword var
+        nodeKind = NodeKind::VarStmt
+        next local_declaration
     punctuation }
         popScope ScopeKind::CompoundStmt
         exitIfUnscoped
         emitNode NodeKind::EmptyNode
         next statement
+    then
+        pushScope ScopeKind::LeftExpr
 
 LinearState single_or_compound_statement() then statement
     punctuation {
@@ -164,14 +243,17 @@ LinearState comma_after_expression() then check_designated_argument
         next comma_else
 
     punctuation )
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Paren
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation ]
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Square
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation }
+        popScope ScopeKind::RightExpr
         popScope ScopeKind::Brace
         emitNode NodeKind::EmptyNode
         next after_expression
@@ -196,21 +278,46 @@ LinearState first_argument_paren() then check_designated_argument
         next after_expression
     then
         pushScope ScopeKind::Paren
+        pushScope ScopeKind::RightExpr
 LinearState first_argument_square() then check_designated_argument
     punctuation ]
         emitNode NodeKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
+        pushScope ScopeKind::RightExpr
 LinearState first_argument_brace() then check_designated_argument
     punctuation }
         emitNode NodeKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Brace
+        pushScope ScopeKind::RightExpr
 
 LinearState access_punctuation(nodeKind) then error
     identifier
         emitNode nodeKind
         next after_expression
 
+LinearState check_var_after_let() then local_declaration
+    keyword var
+        nodeKind = NodeKind::VarStmt
+        next local_declaration
+    then
+        nodeKind = NodeKind::LetStmt
+LinearState local_declaration(nodeKind) then error
+    identifier
+        emitNode nodeKind
+        next after_local_declaration_id
+LinearState after_local_declaration_id() then error
+    punctuation :
+        pushScope ScopeKind::VariableType
+        next expression
+    punctuation =
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::AssignStmt
+        next expression
+    punctuation ;
+        emitNode NodeKind::AssignStmt
+        emitNode NodeKind::ExpressionStmt
+        next statement

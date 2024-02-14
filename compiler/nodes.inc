@@ -82,6 +82,7 @@ STMT(IfStmt, IfStmt, Statement)
 STMT(ReturnStmt, ReturnStmt, Statement)
 STMT(EmptyReturnStmt, EmptyReturnStmt, Primary)
 STMT(LetStmt, LetStmt, Primary)
+STMT(VarStmt, LetStmt, Primary)
 
 #undef EXPR
 #undef STMT

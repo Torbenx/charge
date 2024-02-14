@@ -20,7 +20,7 @@ static bool isCommandEndChar(uint8_t c) {
     return c == '\r' || c == '\n' || c == ';';
 }
 
-struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter> {
+struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHandler {
     struct Pair {
         Word key;
         std::string_view value;
@@ -113,7 +113,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter> {
 
     void runTest(std::filesystem::path file, std::string_view source) {
         parse::Output output(source);
-        parse::parseExpression(source.data(), output, nullptr);
+        parse::parseExpression(source.data(), output, this);
         // TODO: Do this somewhere else
         auto endLoc = parse::SourceLocation(0, output.lines.size());
         output.nodes.push_back({ parse::NodeKind::EOS, endLoc });
@@ -251,6 +251,22 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter> {
             VERIFY_NOT_REACHED();
         }
         return cmd;
+    }
+
+    void invalidToken(parse::Token token, parse::State state, parse::ScopeKind* scopes, parse::Output& output) override {
+        fmt::println("");
+        fmt::println(
+            "Invalid token '{}' for state '{}' and scope '{}' on line {}",
+            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), output.lines.size());
+        fmt::println("scopes:");
+        for (;;) {
+            fmt::println("  {}", parse::nameString(*scopes));
+            if (*scopes == parse::ScopeKind::Invalid)
+                break;
+            scopes -= 1;
+        }
+        fmt::println("");
+        VERIFY_NOT_REACHED();
     }
 };
 

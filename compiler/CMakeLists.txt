@@ -3,7 +3,10 @@ cmake_minimum_required(VERSION 3.18)
 find_package (Python3 COMPONENTS Interpreter REQUIRED)
 
 add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse.cpp"
-                   COMMAND ${Python3_EXECUTABLE} ARGS "${CMAKE_CURRENT_SOURCE_DIR}/parse.py"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/parse_gen.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/parse_gen.h"
+                   COMMAND ${Python3_EXECUTABLE}
+                   ARGS "${CMAKE_CURRENT_SOURCE_DIR}/parse.py"
                    DEPENDS parse.txt parse.py parse.cpp.in)
 
 add_executable(compiler
@@ -11,6 +14,7 @@ add_executable(compiler
     log.h
     parse.cpp
     parse.h
+    parse_gen.cpp
     parse_gen.h
     tests.cpp
     types.h

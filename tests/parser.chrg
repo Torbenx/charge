@@ -73,6 +73,21 @@ a{
 /* expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr */ if a => b;
 /* expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr */ a, else => b;
 
+//; update statements
+/* expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr */ a = b;
+/* expect-node IdentifierExpr; expect-node AdditionUpdateStmt; expect-node IdentifierExpr */ a += b;
+/* expect-node IdentifierExpr; expect-node SubtractionUpdateStmt; expect-node IdentifierExpr */ a -= b;
+/* expect-node IdentifierExpr; expect-node MultiplyUpdateStmt; expect-node IdentifierExpr */ a *= b;
+/* expect-node IdentifierExpr; expect-node DivideUpdateStmt; expect-node IdentifierExpr */ a /= b;
+/* expect-node IdentifierExpr; expect-node RemainderUpdateStmt; expect-node IdentifierExpr */ a %= b;
+/* expect-node IdentifierExpr; expect-node BitwiseAndUpdateStmt; expect-node IdentifierExpr */ a &= b;
+/* expect-node IdentifierExpr; expect-node BitwiseXorUpdateStmt; expect-node IdentifierExpr */ a ^= b;
+/* expect-node IdentifierExpr; expect-node BitwiseOrUpdateStmt; expect-node IdentifierExpr */ a |= b;
+/* expect-node IdentifierExpr; expect-node ShiftLeftUpdateStmt; expect-node IdentifierExpr */ a <<= b;
+/* expect-node IdentifierExpr; expect-node ShiftRightUpdateStmt; expect-node IdentifierExpr */ a >>= b;
+/* expect-node IdentifierExpr; expect-node LogicalAndUpdateStmt; expect-node IdentifierExpr */ a &&= b;
+/* expect-node IdentifierExpr; expect-node LogicalOrUpdateStmt; expect-node IdentifierExpr */ a ||= b;
+
 //; test comma-else in arguments
 // expect-node ParenthesizedExpr;
 // expect-node IdentifierExpr; expect-node CommaElseExpr; expect-node IdentifierExpr
@@ -82,5 +97,23 @@ a{
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ if a: b;
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt */ if a: { }
 /* expect-node IdentifierExpr; expect-node IfStmt; expect-node CompoundStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode */ if a: { b; }
+
+/* expect-node LetStmt; expect-node AssignStmt; expect-node ExpressionStmt */ let a1;
+/* expect-node VarStmt; expect-node AssignStmt; expect-node ExpressionStmt */ var a2;
+/* expect-node LetStmt; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ let a4 = init;
+/* expect-node LetStmt; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ let a3: type = init;
+
+/* expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ a = b;
+
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode
+// expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
+(a, b) = c;
+
+// expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr; expect-node EmptyNode
+// expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
+(if a => b) = c;
+
+//; TODO: This should be an error
+a, b;
 
 }

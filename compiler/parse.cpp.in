@@ -16,16 +16,6 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$';
 }
 
-enum class ScopeKind : char {
-    Invalid,
-    IfExpr,
-    IfExprOrStmt,
-    CompoundStmt,
-    Paren,
-    Square,
-    Brace,
-};
-
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
 struct ScopeBuffer {
@@ -52,7 +42,8 @@ static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
-    VERIFY(((position[0] == kinds) || ...));
+    if (((position[0] != kinds) && ...))
+        return nullptr;
     position -= 1;
     return position;
 }
@@ -175,7 +166,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
     // GENERATED CODE HERE
 
 handle_parse_error:
-    errorHandler->invalidToken(parseState, errorToken);
+    errorHandler->invalidToken(errorToken, parseState, scopePosition, state);
     return;
 }
 
@@ -186,6 +177,16 @@ std::string_view nameString(NodeKind kind) {
         return #kind;
 
 #include "nodes.inc"
+    }
+}
+
+std::string_view nameString(ScopeKind kind) {
+    switch (kind) {
+#define SCOPE(kind)       \
+    case ScopeKind::kind: \
+        return #kind;
+        ENUMERATE_SCOPE_KINDS
+#undef SCOPE
     }
 }
 

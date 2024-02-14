@@ -23,6 +23,25 @@ enum class NodeKind : uint8_t {
 };
 std::string_view nameString(NodeKind);
 
+#define ENUMERATE_SCOPE_KINDS \
+    SCOPE(Invalid)            \
+    SCOPE(IfExpr)             \
+    SCOPE(IfExprOrStmt)       \
+    SCOPE(CompoundStmt)       \
+    SCOPE(Paren)              \
+    SCOPE(Square)             \
+    SCOPE(Brace)              \
+    SCOPE(LeftExpr)           \
+    SCOPE(RightExpr)          \
+    SCOPE(VariableType)
+
+enum class ScopeKind : uint8_t {
+#define SCOPE(kind) kind,
+    ENUMERATE_SCOPE_KINDS
+#undef SCOPE
+};
+std::string_view nameString(ScopeKind);
+
 struct SourceLocation {
     SourceLocation(uint32_t offsetInLine, uint32_t lineIndex)
         : m_offsetInLine(offsetInLine), m_lineIndex(lineIndex) { }
@@ -149,7 +168,7 @@ struct OutputVisitor {
 
 struct ErrorHandler {
     virtual void invalidCharaceter() { }
-    virtual void invalidToken(State, Token) { }
+    virtual void invalidToken(Token, State, ScopeKind*, Output&) { }
     virtual ~ErrorHandler() = default;
 };
 
