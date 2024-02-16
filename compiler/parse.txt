@@ -195,9 +195,8 @@ SwitchState after_expression() then error
 
     punctuation ;
         popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
-        exitIfUnscoped
         emitNode NodeKind::ExpressionStmt
-        next statement
+        next after_statement
 
     punctuation =>
         popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
@@ -206,6 +205,8 @@ SwitchState after_expression() then error
     punctuation :
         popScope ScopeKind::IfExprOrStmt
         popScope ScopeKind::LeftExpr
+        popScope ScopeKind::PlainStatement
+        pushScope ScopeKind::IfBranch
         emitNode NodeKind::IfStmt
         next single_or_compound_statement
     punctuation =
@@ -213,6 +214,13 @@ SwitchState after_expression() then error
         pushScope ScopeKind::RightExpr
         emitNode NodeKind::AssignStmt
         next expression
+
+LinearState single_or_compound_statement() then statement
+    punctuation {
+        pushScope ScopeKind::CompoundStmt
+        pushScope ScopeKind::PlainStatement
+        emitNode NodeKind::CompoundStmt
+        next statement
 
 LinearState statement() then expression
     keyword if
@@ -225,18 +233,22 @@ LinearState statement() then expression
         nodeKind = NodeKind::VarStmt
         next local_declaration
     punctuation }
+        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         popScope ScopeKind::CompoundStmt
-        exitIfUnscoped
         emitNode NodeKind::EmptyNode
-        next statement
+        next after_statement
     then
         pushScope ScopeKind::LeftExpr
 
-LinearState single_or_compound_statement() then statement
-    punctuation {
-        pushScope ScopeKind::CompoundStmt
-        emitNode NodeKind::CompoundStmt
-        next statement
+LinearState after_statement() then statement
+    keyword else
+        popScope ScopeKind::IfBranch
+        pushScope ScopeKind::ElseBranch
+        next else_branch
+    then
+        exitIfUnscoped
+        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        pushScope ScopeKind::PlainStatement
 
 LinearState comma_after_expression() then check_designated_argument
     keyword else
@@ -262,6 +274,11 @@ LinearState comma_else() then error
     punctuation =>
         emitNode NodeKind::CommaElseExpr
         next expression
+
+LinearState else_branch() then error
+    punctuation :
+        emitNode NodeKind::ElseStmt
+        next single_or_compound_statement
 
 LinearState check_designated_argument() then expression
     identifier

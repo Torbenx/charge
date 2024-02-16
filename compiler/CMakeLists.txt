@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 
-find_package (Python3 COMPONENTS Interpreter REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/parse_gen.cpp"

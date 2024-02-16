@@ -32,6 +32,7 @@ struct ScopeBuffer {
 };
 
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
+    // fmt::println("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
     position += 1;
@@ -41,6 +42,7 @@ static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
 
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
+    // fmt::println("popScope {}", nameString(*position));
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
     if (((position[0] != kinds) && ...))
         return nullptr;
@@ -160,7 +162,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
 
     NodeKind nodeKind = (NodeKind)0;
 
-    State parseState = State::Statement;
+    State parseState = State::SingleOrCompoundStatement;
     Token errorToken = (Token)0;
 
     switch (parseState) {
@@ -168,13 +170,17 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
         goto expression$no_emit;
     case State::AfterExpression:
         goto after_expression$no_emit;
+    case State::SingleOrCompoundStatement:
+        goto single_or_compound_statement$no_emit;
     case State::Statement:
         goto statement$no_emit;
-    case State::SingleOrCompoundStatement:
-        VERIFY_NOT_REACHED();
+    case State::AfterStatement:
+        goto after_statement$no_emit;
     case State::CommaAfterExpression:
         VERIFY_NOT_REACHED();
     case State::CommaElse:
+        VERIFY_NOT_REACHED();
+    case State::ElseBranch:
         VERIFY_NOT_REACHED();
     case State::CheckDesignatedArgument:
         VERIFY_NOT_REACHED();
@@ -958,6 +964,7 @@ after_expression$as_then:
                 goto check_designated_argument$keyword_check;
             }
             nodeData = word.asUint();
+        [[maybe_unused]] comma_after_expression$identifier_case:
             goto check_designated_argument$identifier_case;
         }
         // then check_designated_argument
@@ -1076,27 +1083,21 @@ after_expression$as_then:
             }
             scopePosition = result;
         }
+        // popScope ScopeKind::PlainStatement
+        {
+            auto result = popScope(scopePosition, ScopeKind::PlainStatement);
+            if (result == nullptr) {
+                errorToken = Token::Colon;
+                goto handle_parse_error;
+            }
+            scopePosition = result;
+        }
+        // pushScope ScopeKind::IfBranch
+        scopePosition = pushScope(scopePosition, ScopeKind::IfBranch);
         // emitNode NodeKind::IfStmt
         carriedEmitNodeKind = NodeKind::IfStmt;
         // next single_or_compound_statement
-        // inlined single_or_compound_statement
-        emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-        nodeData = 0;
-        tokEnd = inlineAdvancer(tokEnd, state);
-        tokBegin = tokEnd;
-        fmt::println("single_or_compound_statement: {}", *tokEnd);
-        parseState = State::SingleOrCompoundStatement;
-        if (std::string_view(tokEnd, 1) == "{"sv) {
-            tokEnd += 1;
-            // pushScope ScopeKind::CompoundStmt
-            scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
-            // emitNode NodeKind::CompoundStmt
-            carriedEmitNodeKind = NodeKind::CompoundStmt;
-            // next statement
-            goto statement$with_emit;
-        }
-        // then statement
-        goto statement$as_then;
+        goto single_or_compound_statement$with_emit;
     }
     case ';': {
         tokEnd += 1;
@@ -1109,14 +1110,10 @@ after_expression$as_then:
             }
             scopePosition = result;
         }
-        // exitIfUnscoped
-        if (scopePosition[0] == ScopeKind::Invalid) {
-            return;
-        }
         // emitNode NodeKind::ExpressionStmt
         carriedEmitNodeKind = NodeKind::ExpressionStmt;
-        // next statement
-        goto statement$with_emit;
+        // next after_statement
+        goto after_statement$with_emit;
     }
     case '<': {
         char next = tokEnd[1];
@@ -1507,7 +1504,31 @@ after_expression$word_case:
         goto error$keyword_check;
     }
     nodeData = word.asUint();
+[[maybe_unused]] after_expression$identifier_case:
     goto error$identifier_case;
+
+    // LinearState single_or_compound_statement
+single_or_compound_statement$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+single_or_compound_statement$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    fmt::println("single_or_compound_statement: {}", *tokEnd);
+    parseState = State::SingleOrCompoundStatement;
+    if (std::string_view(tokEnd, 1) == "{"sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::CompoundStmt
+        scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
+        // pushScope ScopeKind::PlainStatement
+        scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
+        // emitNode NodeKind::CompoundStmt
+        carriedEmitNodeKind = NodeKind::CompoundStmt;
+        // next statement
+        goto statement$with_emit;
+    }
+    // then statement
+    goto statement$as_then;
 
     // LinearState statement
 statement$with_emit:
@@ -1521,6 +1542,15 @@ statement$no_emit:
 statement$as_then:
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
+        // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        {
+            auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
+            if (result == nullptr) {
+                errorToken = Token::RightBrace;
+                goto handle_parse_error;
+            }
+            scopePosition = result;
+        }
         // popScope ScopeKind::CompoundStmt
         {
             auto result = popScope(scopePosition, ScopeKind::CompoundStmt);
@@ -1530,14 +1560,10 @@ statement$as_then:
             }
             scopePosition = result;
         }
-        // exitIfUnscoped
-        if (scopePosition[0] == ScopeKind::Invalid) {
-            return;
-        }
         // emitNode NodeKind::EmptyNode
         carriedEmitNodeKind = NodeKind::EmptyNode;
-        // next statement
-        goto statement$with_emit;
+        // next after_statement
+        goto after_statement$with_emit;
     }
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -1581,6 +1607,7 @@ statement$as_then:
                         goto local_declaration$keyword_check;
                     }
                     nodeData = word.asUint();
+                [[maybe_unused]] check_var_after_let$identifier_case:
                     // nodeKind = NodeKind::LetStmt
                     nodeKind = NodeKind::LetStmt;
                     goto local_declaration$identifier_case;
@@ -1601,6 +1628,7 @@ statement$as_then:
             goto expression$keyword_check;
         }
         nodeData = word.asUint();
+    [[maybe_unused]] statement$identifier_case:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         goto expression$identifier_case;
@@ -1609,6 +1637,105 @@ statement$as_then:
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
     // then expression
     goto expression$as_then;
+
+    // LinearState after_statement
+after_statement$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+after_statement$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    fmt::println("after_statement: {}", *tokEnd);
+    parseState = State::AfterStatement;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] after_statement$keyword_check:
+            if (word == words["else"]) {
+                // popScope ScopeKind::IfBranch
+                {
+                    auto result = popScope(scopePosition, ScopeKind::IfBranch);
+                    if (result == nullptr) {
+                        errorToken = Token::Else;
+                        goto handle_parse_error;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ElseBranch
+                scopePosition = pushScope(scopePosition, ScopeKind::ElseBranch);
+                // next else_branch
+                // inlined else_branch
+                tokEnd = inlineAdvancer(tokEnd, state);
+                tokBegin = tokEnd;
+                fmt::println("else_branch: {}", *tokEnd);
+                parseState = State::ElseBranch;
+                if (std::string_view(tokEnd, 1) == ":"sv) {
+                    char next = tokEnd[1];
+                    if (next != ':') {
+                        tokEnd += 1;
+                        // emitNode NodeKind::ElseStmt
+                        carriedEmitNodeKind = NodeKind::ElseStmt;
+                        // next single_or_compound_statement
+                        goto single_or_compound_statement$with_emit;
+                    }
+                }
+                // then error
+                goto error$as_then;
+            }
+            // exitIfUnscoped
+            if (scopePosition[0] == ScopeKind::Invalid) {
+                return;
+            }
+            // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+            {
+                auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
+                if (result == nullptr) {
+                    goto error$as_then;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::PlainStatement
+            scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
+            goto statement$keyword_check;
+        }
+        nodeData = word.asUint();
+    [[maybe_unused]] after_statement$identifier_case:
+        // exitIfUnscoped
+        if (scopePosition[0] == ScopeKind::Invalid) {
+            return;
+        }
+        // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        {
+            auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // pushScope ScopeKind::PlainStatement
+        scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
+        goto statement$identifier_case;
+    }
+    // exitIfUnscoped
+    if (scopePosition[0] == ScopeKind::Invalid) {
+        return;
+    }
+    // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+    {
+        auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
+        if (result == nullptr) {
+            goto error$as_then;
+        }
+        scopePosition = result;
+    }
+    // pushScope ScopeKind::PlainStatement
+    scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
+    // then statement
+    goto statement$as_then;
 
     // LinearState check_designated_argument
 check_designated_argument$as_then:
@@ -1636,7 +1763,7 @@ check_designated_argument$as_then:
         parseState = State::MaybeDesignatedArgument;
         if (std::string_view(tokEnd, 1) == "="sv) {
             char next = tokEnd[1];
-            if (next != '>' && next != '=') {
+            if (next != '=' && next != '>') {
                 tokEnd += 1;
                 // updateKind NodeKind::DesignateArgument
                 state.nodes.back().setKind(NodeKind::DesignateArgument);
@@ -1740,7 +1867,7 @@ local_declaration$as_then:
         }
         if (std::string_view(tokEnd, 1) == "="sv) {
             char next = tokEnd[1];
-            if (next != '>' && next != '=') {
+            if (next != '=' && next != '>') {
                 tokEnd += 1;
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);

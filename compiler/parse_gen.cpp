@@ -102,6 +102,68 @@ std::string_view nameString(Token token) {
         return "LessEqualGreater";
     case Token::MinusGreater:
         return "MinusGreater";
+    case Token::If:
+        return "If";
+    case Token::Elif:
+        return "Elif";
+    case Token::Else:
+        return "Else";
+    case Token::Match:
+        return "Match";
+    case Token::For:
+        return "For";
+    case Token::While:
+        return "While";
+    case Token::Do:
+        return "Do";
+    case Token::Return:
+        return "Return";
+    case Token::Break:
+        return "Break";
+    case Token::Continue:
+        return "Continue";
+    case Token::Loop:
+        return "Loop";
+    case Token::Guard:
+        return "Guard";
+    case Token::Try:
+        return "Try";
+    case Token::Catch:
+        return "Catch";
+    case Token::With:
+        return "With";
+    case Token::Analysis:
+        return "Analysis";
+    case Token::Assert:
+        return "Assert";
+    case Token::Namespace:
+        return "Namespace";
+    case Token::Struct:
+        return "Struct";
+    case Token::Trait:
+        return "Trait";
+    case Token::Object:
+        return "Object";
+    case Token::Fn:
+        return "Fn";
+    case Token::Static:
+        return "Static";
+    case Token::Template:
+        return "Template";
+    case Token::Var:
+        return "Var";
+    case Token::Let:
+        return "Let";
+    case Token::In:
+        return "In";
+    case Token::Inout:
+        return "Inout";
+    case Token::Out:
+        return "Out";
+    case Token::Forward:
+        return "Forward";
+    case Token::Assign:
+        return "Assign";
     case Token::Identifier:
         return "Identifier";
     }
@@ -113,14 +175,18 @@ std::string_view nameString(State state) {
         return "Expression";
     case State::AfterExpression:
         return "AfterExpression";
-    case State::Statement:
-        return "Statement";
     case State::SingleOrCompoundStatement:
         return "SingleOrCompoundStatement";
+    case State::Statement:
+        return "Statement";
+    case State::AfterStatement:
+        return "AfterStatement";
     case State::CommaAfterExpression:
         return "CommaAfterExpression";
     case State::CommaElse:
         return "CommaElse";
+    case State::ElseBranch:
+        return "ElseBranch";
     case State::CheckDesignatedArgument:
         return "CheckDesignatedArgument";
     case State::MaybeDesignatedArgument:

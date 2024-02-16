@@ -10,6 +10,15 @@ punctuationTokens = [
     ",", ".", ":", "::", ";", "=>", "<=>", "->",
 ]
 
+keywords = [
+    "if", "elif", "else", "match", "for", "while", "do",
+    "return", "break", "continue", "loop", "guard", "try", "catch",
+    "with", "analysis", "assert",
+    "namespace", "struct", "trait", "object", "fn", "static",
+    "template",
+    "var", "let", "in", "inout", "out", "forward", "assign"
+]
+
 punctuations = punctuationTokens + ["//", "/*"]
 punctuationAlphabet = "".join(sorted({p[0] for p in punctuations}))
 
@@ -450,14 +459,13 @@ def generateWordCase(state):
             line("goto " + state.thenState + "$keyword_check;")
         line("}")
         line("nodeData = word.asUint();")
-        if not state.thenCase() is None:
-            generateCaseBody(state.thenCase())
-        foundState, idCase = recurse(state, lambda s: s.identifierCase())
-        if state == foundState:
-            labelLine("[[maybe_unused]] " + state.name + "$identifier_case:")
-            generateCaseBody(idCase)
+        labelLine("[[maybe_unused]] " + state.name + "$identifier_case:")
+        if not state.identifierCase() is None:
+            generateCaseBody(state.identifierCase())
         else:
-            line("goto " + foundState.name + "$identifier_case;")
+            if not state.thenCase() is None:
+                generateCaseBody(state.thenCase())
+            line("goto " + state.thenState + "$identifier_case;")
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
 errorCases += [IdentifierCase([ErrorInstruction()])]
@@ -561,8 +569,11 @@ def generateLinearState(state):
     line("goto " + state.thenState + "$as_then;")
 
 def generateError(case):
-    line("errorToken = Token::" + case.cppName() + ";")
-    line("goto handle_parse_error;")
+    if type(case) is ThenCase:
+        line("goto error$as_then;")
+    else:
+        line("errorToken = Token::" + case.cppName() + ";")
+        line("goto handle_parse_error;")
 
 def generateCaseBody(case):
     for inst in case.instructions:
@@ -702,15 +713,23 @@ generatedLines = []
 outputIndentation = 0
 lineNoIndent("#pragma once")
 lineNoIndent()
-lineNoIndent("#include \"types.h\"")
+lineNoIndent("#include \"WordTable.h\"")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
+
+line("inline constexpr ConstWordStringTable words {")
+with indent():
+    for keyword in keywords:
+        line("keyword(\"" + keyword + "\"),")
+line("};")
 
 line("enum class Token : uint8_t {")
 with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + ", // " + punc)
+    for keyword in keywords:
+        line(keywordCppName(keyword) + ", // " + keyword)
     line(identifierCppName() + ",")
 line("};")
 line("std::string_view nameString(Token);")
@@ -746,6 +765,10 @@ with indent():
         line("case Token::" + punctuationCppName(punc) + ":")
         with indent():
             line("return \"" + punctuationCppName(punc) + "\";")
+    for keyword in keywords:
+        line("case Token::" + keywordCppName(keyword) + ":")
+        with indent():
+            line("return \"" + keywordCppName(keyword) + "\";")
     line("case Token::" + identifierCppName() + ":")
     with indent():
         line("return \"" + identifierCppName() + "\";")

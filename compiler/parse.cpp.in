@@ -32,6 +32,7 @@ struct ScopeBuffer {
 };
 
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
+    // fmt::println("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
     position += 1;
@@ -41,6 +42,7 @@ static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
 
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
+    // fmt::println("popScope {}", nameString(*position));
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
     if (((position[0] != kinds) && ...))
         return nullptr;
@@ -160,7 +162,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
 
     NodeKind nodeKind = (NodeKind)0;
 
-    State parseState = State::Statement;
+    State parseState = State::SingleOrCompoundStatement;
     Token errorToken = (Token)0;
 
     // GENERATED CODE HERE

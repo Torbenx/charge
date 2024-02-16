@@ -1,9 +1,42 @@
 #pragma once
 
-#include "types.h"
+#include "WordTable.h"
 
 namespace parse {
 
+inline constexpr ConstWordStringTable words {
+    keyword("if"),
+    keyword("elif"),
+    keyword("else"),
+    keyword("match"),
+    keyword("for"),
+    keyword("while"),
+    keyword("do"),
+    keyword("return"),
+    keyword("break"),
+    keyword("continue"),
+    keyword("loop"),
+    keyword("guard"),
+    keyword("try"),
+    keyword("catch"),
+    keyword("with"),
+    keyword("analysis"),
+    keyword("assert"),
+    keyword("namespace"),
+    keyword("struct"),
+    keyword("trait"),
+    keyword("object"),
+    keyword("fn"),
+    keyword("static"),
+    keyword("template"),
+    keyword("var"),
+    keyword("let"),
+    keyword("in"),
+    keyword("inout"),
+    keyword("out"),
+    keyword("forward"),
+    keyword("assign"),
+};
 enum class Token : uint8_t {
     LeftParen, // (
     RightParen, // )
@@ -54,6 +87,37 @@ enum class Token : uint8_t {
     EqualGreater, // =>
     LessEqualGreater, // <=>
     MinusGreater, // ->
+    If, // if
+    Elif, // elif
+    Else, // else
+    Match, // match
+    For, // for
+    While, // while
+    Do, // do
+    Return, // return
+    Break, // break
+    Continue, // continue
+    Loop, // loop
+    Guard, // guard
+    Try, // try
+    Catch, // catch
+    With, // with
+    Analysis, // analysis
+    Assert, // assert
+    Namespace, // namespace
+    Struct, // struct
+    Trait, // trait
+    Object, // object
+    Fn, // fn
+    Static, // static
+    Template, // template
+    Var, // var
+    Let, // let
+    In, // in
+    Inout, // inout
+    Out, // out
+    Forward, // forward
+    Assign, // assign
     Identifier,
 };
 std::string_view nameString(Token);
@@ -61,10 +125,12 @@ std::string_view nameString(Token);
 enum class State {
     Expression,
     AfterExpression,
-    Statement,
     SingleOrCompoundStatement,
+    Statement,
+    AfterStatement,
     CommaAfterExpression,
     CommaElse,
+    ElseBranch,
     CheckDesignatedArgument,
     MaybeDesignatedArgument,
     FirstArgumentParen,
