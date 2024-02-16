@@ -224,7 +224,7 @@ LinearState single_or_compound_statement() then statement
 
 LinearState statement() then expression
     keyword if
-        pushScope ScopeKind::LeftExpr
+        pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
         pushScope ScopeKind::IfExprOrStmt
         next expression
     keyword let

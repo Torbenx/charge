@@ -182,7 +182,8 @@ class Parser:
         self.advanceLine()
 
     def lineEmpty(self):
-        return len(self.line.lstrip("\r\n ")) == 0
+        rem = self.line.lstrip(" ")
+        return len(rem) == 0 or rem[0] == '#' or rem[0] == '\r' or rem[0] == '\n'
 
     def lineLevel(self):
         if self.line.startswith(indentationStep * 2):
@@ -350,7 +351,7 @@ class IndentHelper:
         outputIndentation -= 1
 
 def linearIf(commonPrefix: str, state):
-    puncs = list(filter(lambda p: (p.startswith(commonPrefix)), punctuations))
+    puncs = sorted(filter(lambda p: (p.startswith(commonPrefix)), punctuations))
     possibleContinuations = set()
     exactMatch: str | None = None
     for p in puncs:
@@ -390,7 +391,7 @@ def linearIf(commonPrefix: str, state):
         generateCaseBody(case)
 
 def checkForPunctuation(punc, handler):
-    puncs = list(filter(lambda p: (p.startswith(punc)), punctuations))
+    puncs = sorted(filter(lambda p: (p.startswith(punc)), punctuations))
     assert(len(puncs) > 0)
     line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\"sv) {")
     with indent():
