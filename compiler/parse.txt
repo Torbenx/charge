@@ -222,6 +222,16 @@ LinearState single_or_compound_statement() then statement
         emitNode NodeKind::CompoundStmt
         next statement
 
+LinearState after_statement() then statement
+    keyword else
+        popScope ScopeKind::IfBranch
+        pushScope ScopeKind::ElseBranch
+        next else_branch
+    then
+        exitIfUnscoped
+        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        pushScope ScopeKind::PlainStatement
+
 LinearState statement() then expression
     keyword if
         pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
@@ -239,16 +249,6 @@ LinearState statement() then expression
         next after_statement
     then
         pushScope ScopeKind::LeftExpr
-
-LinearState after_statement() then statement
-    keyword else
-        popScope ScopeKind::IfBranch
-        pushScope ScopeKind::ElseBranch
-        next else_branch
-    then
-        exitIfUnscoped
-        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
-        pushScope ScopeKind::PlainStatement
 
 LinearState comma_after_expression() then check_designated_argument
     keyword else
@@ -337,4 +337,4 @@ LinearState after_local_declaration_id() then error
     punctuation ;
         emitNode NodeKind::AssignStmt
         emitNode NodeKind::ExpressionStmt
-        next statement
+        next after_statement

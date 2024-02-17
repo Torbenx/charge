@@ -116,6 +116,10 @@ if a: { b; } else: { c; }
 /* expect-node LetStmt; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt */ let a4: type = init;
 /* expect-node VarStmt; expect-node AssignStmt; expect-node ExpressionStmt */ let var a5;
 
+// expect-node IdentifierExpr; expect-node IfStmt; expect-node LetStmt; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node ElseStmt; expect-node LetStmt; expect-node AssignStmt; expect-node ExpressionStmt
+if a: let b; else: let c;
+
 // expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IdentifierExpr; expect-node EmptyNode
 // expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 (a, b) = c;
