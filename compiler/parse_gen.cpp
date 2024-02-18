@@ -175,18 +175,10 @@ std::string_view nameString(State state) {
         return "Expression";
     case State::AfterExpression:
         return "AfterExpression";
-    case State::SingleOrCompoundStatement:
-        return "SingleOrCompoundStatement";
-    case State::AfterStatement:
-        return "AfterStatement";
-    case State::Statement:
-        return "Statement";
     case State::CommaAfterExpression:
         return "CommaAfterExpression";
     case State::CommaElse:
         return "CommaElse";
-    case State::ElseBranch:
-        return "ElseBranch";
     case State::CheckDesignatedArgument:
         return "CheckDesignatedArgument";
     case State::MaybeDesignatedArgument:
@@ -199,6 +191,14 @@ std::string_view nameString(State state) {
         return "FirstArgumentBrace";
     case State::AccessPunctuation:
         return "AccessPunctuation";
+    case State::SingleOrCompoundStatement:
+        return "SingleOrCompoundStatement";
+    case State::AfterStatement:
+        return "AfterStatement";
+    case State::Statement:
+        return "Statement";
+    case State::ElseBranch:
+        return "ElseBranch";
     case State::CheckVarAfterLet:
         return "CheckVarAfterLet";
     case State::VariableDeclaration:

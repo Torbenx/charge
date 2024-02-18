@@ -1,3 +1,6 @@
+
+# --- Expressions
+
 SwitchState expression() then error
     punctuation !
         emitNode NodeKind::LogicalNotExpr
@@ -227,43 +230,6 @@ SwitchState after_expression() then error
         emitNode NodeKind::AssignStmt
         next expression
 
-LinearState single_or_compound_statement() then statement
-    punctuation {
-        pushScope ScopeKind::CompoundStmt
-        pushScope ScopeKind::PlainStatement
-        emitNode NodeKind::CompoundStmt
-        next statement
-
-LinearState after_statement() then statement
-    keyword else
-        popScope ScopeKind::IfBranch
-        pushScope ScopeKind::ElseBranch
-        next else_branch
-    then
-        ifScope ScopeKind::FunctionBody
-            popScope ScopeKind::FunctionBody
-            then after_declaration
-        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
-        pushScope ScopeKind::PlainStatement
-
-LinearState statement() then expression
-    keyword if
-        pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
-        pushScope ScopeKind::IfExprOrStmt
-        next expression
-    keyword let
-        next check_var_after_let
-    keyword var
-        nodeKind = NodeKind::VarStmt
-        next variable_declaration
-    punctuation }
-        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
-        popScope ScopeKind::CompoundStmt
-        emitNode NodeKind::EmptyNode
-        next after_statement
-    then
-        pushScope ScopeKind::LeftExpr
-
 LinearState comma_after_expression() then error
     keyword else
         next comma_else
@@ -305,11 +271,6 @@ LinearState comma_else() then error
         emitNode NodeKind::CommaElseExpr
         next expression
 
-LinearState else_branch() then error
-    punctuation :
-        emitNode NodeKind::ElseStmt
-        next single_or_compound_statement
-
 LinearState check_designated_argument() then expression
     identifier
         emitNode NodeKind::IdentifierExpr
@@ -342,6 +303,52 @@ LinearState access_punctuation(nodeKind) then error
     identifier
         emitNode nodeKind
         next after_expression
+
+# --- Statements
+
+LinearState single_or_compound_statement() then statement
+    punctuation {
+        pushScope ScopeKind::CompoundStmt
+        pushScope ScopeKind::PlainStatement
+        emitNode NodeKind::CompoundStmt
+        next statement
+
+LinearState after_statement() then statement
+    keyword else
+        popScope ScopeKind::IfBranch
+        pushScope ScopeKind::ElseBranch
+        next else_branch
+    then
+        ifScope ScopeKind::FunctionBody
+            popScope ScopeKind::FunctionBody
+            then after_declaration
+        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        pushScope ScopeKind::PlainStatement
+
+LinearState statement() then expression
+    keyword if
+        pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
+        pushScope ScopeKind::IfExprOrStmt
+        next expression
+    keyword let
+        next check_var_after_let
+    keyword var
+        nodeKind = NodeKind::VarStmt
+        next variable_declaration
+    punctuation }
+        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        popScope ScopeKind::CompoundStmt
+        emitNode NodeKind::EmptyNode
+        next after_statement
+    then
+        pushScope ScopeKind::LeftExpr
+
+LinearState else_branch() then error
+    punctuation :
+        emitNode NodeKind::ElseStmt
+        next single_or_compound_statement
+
+# --- Variable declaration
 
 LinearState check_var_after_let() then variable_declaration
     keyword var

@@ -74,7 +74,7 @@ class IdentifierCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
     def cppName(self):
-        return punctuationCppName(identifierCppName())
+        return identifierCppName()
 
 class ThenCase(Case):
     def __init__(self, instructions):
@@ -370,6 +370,8 @@ states = Parser(lines).parseStates()
 outputIndentation = 1
 generatedLines = []
 
+generateStateDebug = False
+
 def line(line: str = ""):
     generatedLines.append('    ' * outputIndentation + line)
 
@@ -428,8 +430,7 @@ def linearIf(commonPrefix: str, state):
             line("emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);")
             line("goto " + state.name + "$no_emit;")
     else:
-        foundState, case = recurse(state, lambda s: s.punctuationCase(exactMatch))
-        generateCaseBody(case)
+        recurse(state, lambda s: s.punctuationCase(exactMatch), lambda case: generateCaseBody(case))
 
 def checkForPunctuation(punc, handler):
     puncs = sorted(filter(lambda p: (p.startswith(punc)), punctuations))
@@ -469,7 +470,8 @@ def emitCarriedNode():
     emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
 def rememberState(state):
-    #line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
+    if generateStateDebug:
+        line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def readWord():
@@ -481,35 +483,26 @@ def readWord():
     line("}")
 
 def generateWordCase(state):
-    if state.name == "error":
-        # TODO: Map keywords to keyword tokens
-        labelLine("error$keyword_check:")
-        labelLine("error$identifier_case:")
-        line("VERIFY_NOT_REACHED();")
-    else:
-        readWord()
-        line("if (word.keyword()) {")
-        with indent():
+    readWord()
+    line("if (word.keyword()) {")
+    with indent():
+        if state.keywordCases():
             labelLine("[[maybe_unused]] " + state.name + "$keyword_check:")
             for c in state.keywordCases():
                 line("if (word == words[\"" + c.keyword + "\"]) {")
                 with indent():
                     generateCaseBody(c)
                 line("}")
-            if not state.thenCase() is None:
-                generateCaseBody(state.thenCase(), "keyword_check")
-            line("goto " + state.thenState + "$keyword_check;")
-        line("}")
-        line("nodeData = word.asUint();")
-        labelLine("[[maybe_unused]] " + state.name + "$identifier_case:")
-        if not state.identifierCase() is None:
-            generateCaseBody(state.identifierCase())
+        if state.name == "error":
+            line("VERIFY_NOT_REACHED();")
         else:
-            if not state.thenCase() is None:
-                generateCaseBody(state.thenCase(), "identifier_case")
-            line("goto " + state.thenState + "$identifier_case;")
+            recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
+    line("}")
+    line("nodeData = word.asUint();")
+    recurse(state, lambda s: s.identifierCase(), lambda case: generateCaseBody(case))
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
+errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
 errorCases += [IdentifierCase([ErrorInstruction()])]
 errorState = State("SwitchState", "error", "", [], errorCases)
 states += [errorState]
@@ -521,11 +514,18 @@ def findState(name: str) -> State:
             return s
     raise Exception("state '" + name + "' undefined")
 
-def recurse(state, f):
+def recurse(state, check, func):
     while True:
-        val = f(state)
-        if not val is None:
-            return state, val
+        val = check(state)
+        if val:
+            func(val)
+            return
+        thenCase = state.thenCase()
+        if not thenCase is None:
+            generateCaseBody(thenCase, lambda target: recurse(findState(target), check, func))
+        line("// -> " + state.thenState)
+        if generateStateDebug:
+            line("fmt::println(\" -> " + state.thenState + "\");")
         state = findState(state.thenState)
 
 def generateState(state):
@@ -600,11 +600,11 @@ def generateLinearState(state):
     for c in state.punctuationCases():
         checkForPunctuation(c.punctuation, lambda: generateCaseBody(c))
 
-    #if state.keywordCases() or not state.identifierCase() is None:
-    line("if (isWordFirstCharacter(tokEnd[0])) {")
-    with indent():
-        generateWordCase(state)
-    line("}")
+    if state.keywordCases() or state.identifierCase():
+        line("if (isWordFirstCharacter(tokEnd[0])) {")
+        with indent():
+            generateWordCase(state)
+        line("}")
 
     endCase = state.endCase()
     if not endCase is None:
@@ -615,10 +615,14 @@ def generateLinearState(state):
         line("}")
 
     thenCase = state.thenCase()
+    def generateThenJump(target):
+        if generateStateDebug:
+            line("fmt::println(\" -> " + target + "\");")
+        line("goto " + target + "$as_then;")
     if not thenCase is None:
-        generateCaseBody(thenCase)
+        generateCaseBody(thenCase, lambda target: generateThenJump(target))
     line("// then " + state.thenState)
-    line("goto " + state.thenState + "$as_then;")
+    generateThenJump(state.thenState)
 
 def generateError(case):
     if type(case) is ThenCase:
@@ -627,10 +631,10 @@ def generateError(case):
         line("errorToken = Token::" + case.cppName() + ";")
         line("goto handle_parse_error;")
 
-def generateCaseBody(case, thenLabel = "as_then"):
-    generateInstructions(case, case.instructions, thenLabel)
+def generateCaseBody(case, thenHandler = lambda target: line("xxxx")):
+    generateInstructions(case, case.instructions, thenHandler)
 
-def generateInstructions(case, instructions, thenLabel):
+def generateInstructions(case, instructions, thenHandler):
     for inst in instructions:
         line("// " + inst.format())
         if type(inst) is EmitNodeInstruction:
@@ -683,10 +687,10 @@ def generateInstructions(case, instructions, thenLabel):
             check = check[4:]
             line("if (" + check + ") {")
             with indent():
-                generateInstructions(case, inst.instructions, thenLabel)
+                generateInstructions(case, inst.instructions, thenHandler)
             line("}")
         elif type(inst) is ThenInstruction:
-            line("goto " + inst.newState + "$" + thenLabel + ";")
+            thenHandler(inst.newState)
         elif type(inst) is ErrorInstruction:
             generateError(case)
         else:
@@ -709,7 +713,8 @@ for state in states:
 
 
 def shouldBeInlined(state):
-    return len(state.origins) == 1 and state.kind == "LinearState" and type(state.origins[0]) is NextInstruction
+    #return len(state.origins) == 1 and state.kind == "LinearState" and type(state.origins[0]) is NextInstruction
+    return False
 
 def onlyUsedAsThen(state):
     if [o for o in state.origins if type(o) is NextInstruction]:
