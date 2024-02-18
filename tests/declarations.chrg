@@ -1,0 +1,30 @@
+
+// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node InOutParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node OutParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node VarParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node CompoundStmt; expect-node EmptyNode
+fn f1(in x, inout y, out z, var a, let b, c): { }
+
+// expect-node InParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
+// expect-node CompoundStmt; expect-node EmptyNode
+fn f2(in x = init): { }
+
+// expect-node InParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node CompoundStmt; expect-node EmptyNode
+fn f3(in x: type): { }
+
+// expect-node InParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
+// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node CompoundStmt; expect-node EmptyNode
+fn f4(in x = init, in y): { }
+
+// expect-node InParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node CompoundStmt; expect-node EmptyNode
+fn f5(in x: type, in y): { }
+
+// expect-node IdentifierExpr; expect-node CompoundStmt; expect-node EmptyNode
+fn f6() -> type: { }

@@ -177,10 +177,10 @@ std::string_view nameString(State state) {
         return "AfterExpression";
     case State::SingleOrCompoundStatement:
         return "SingleOrCompoundStatement";
-    case State::Statement:
-        return "Statement";
     case State::AfterStatement:
         return "AfterStatement";
+    case State::Statement:
+        return "Statement";
     case State::CommaAfterExpression:
         return "CommaAfterExpression";
     case State::CommaElse:
@@ -201,10 +201,36 @@ std::string_view nameString(State state) {
         return "AccessPunctuation";
     case State::CheckVarAfterLet:
         return "CheckVarAfterLet";
-    case State::LocalDeclaration:
-        return "LocalDeclaration";
-    case State::AfterLocalDeclarationId:
-        return "AfterLocalDeclarationId";
+    case State::VariableDeclaration:
+        return "VariableDeclaration";
+    case State::AfterVariableDeclarationId:
+        return "AfterVariableDeclarationId";
+    case State::AfterParameters:
+        return "AfterParameters";
+    case State::FirstParameter:
+        return "FirstParameter";
+    case State::Parameter:
+        return "Parameter";
+    case State::NoDeclaration:
+        return "NoDeclaration";
+    case State::NamespaceDeclaration:
+        return "NamespaceDeclaration";
+    case State::NamespaceDeclarationId:
+        return "NamespaceDeclarationId";
+    case State::AfterNamespaceDeclarationId:
+        return "AfterNamespaceDeclarationId";
+    case State::NamespaceDeclarationBody:
+        return "NamespaceDeclarationBody";
+    case State::TemplatedDeclaration:
+        return "TemplatedDeclaration";
+    case State::FunctionDeclarationId:
+        return "FunctionDeclarationId";
+    case State::AfterFunctionDeclarationId:
+        return "AfterFunctionDeclarationId";
+    case State::AfterFunctionParameters:
+        return "AfterFunctionParameters";
+    case State::AfterDeclaration:
+        return "AfterDeclaration";
     case State::Error:
         return "Error";
     }

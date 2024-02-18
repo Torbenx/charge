@@ -1,5 +1,5 @@
 
-{
+fn test(): {
 
 //; primary expressions
 /* expect-node IdentifierExpr */ a;
@@ -127,8 +127,5 @@ if a: let b; else: let c;
 // expect-node ParenthesizedExpr; expect-node IdentifierExpr; expect-node IfExpr; expect-node IdentifierExpr; expect-node EmptyNode
 // expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 (if a => b) = c;
-
-//; TODO: This should be an error
-a, b;
 
 }

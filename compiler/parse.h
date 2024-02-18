@@ -27,7 +27,13 @@ std::string_view nameString(NodeKind);
     SCOPE(VariableType)       \
     SCOPE(IfBranch)           \
     SCOPE(ElseBranch)         \
-    SCOPE(PlainStatement)
+    SCOPE(PlainStatement)     \
+    SCOPE(Argument)           \
+    SCOPE(Parameter)          \
+    SCOPE(Namespace)          \
+    SCOPE(FunctionBody)       \
+    SCOPE(ReturnType)         \
+    SCOPE(FunctionParameters)
 
 enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,

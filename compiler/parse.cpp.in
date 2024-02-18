@@ -162,7 +162,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
 
     NodeKind nodeKind = (NodeKind)0;
 
-    State parseState = State::SingleOrCompoundStatement;
+    State parseState = State::NamespaceDeclaration;
     Token errorToken = (Token)0;
 
     // GENERATED CODE HERE

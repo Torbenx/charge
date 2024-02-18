@@ -85,6 +85,12 @@ STMT(EmptyReturnStmt, EmptyReturnStmt, Primary)
 STMT(LetStmt, LetStmt, Primary)
 STMT(VarStmt, LetStmt, Primary)
 
+STMT(InParameter, Parameter, Primary)
+STMT(InOutParameter, Parameter, Primary)
+STMT(OutParameter, Parameter, Primary)
+STMT(LetParameter, Parameter, Primary)
+STMT(VarParameter, Parameter, Primary)
+
 #undef EXPR
 #undef STMT
 #undef NODE

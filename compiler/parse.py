@@ -80,12 +80,22 @@ class ThenCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
 
+class EndCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+
 @dataclasses.dataclass
 class NextInstruction:
     newState: str
     carriesEmitNode: bool = False
     def format(self):
         return "next " + self.newState
+
+@dataclasses.dataclass
+class ThenInstruction:
+    newState: str
+    def format(self):
+        return "then " + self.newState
 
 @dataclasses.dataclass
 class EmitNodeInstruction:
@@ -120,16 +130,22 @@ class PopScopeInstruction:
         return ret
 
 @dataclasses.dataclass
-class ExitIfUnscopedInstruction:
-    def format(self):
-        return "exitIfUnscoped"
-
-@dataclasses.dataclass
 class AssignInstruction:
     leftName: str
     rightExpr: str
     def format(self):
         return self.leftName + " = " + self.rightExpr
+
+@dataclasses.dataclass
+class IfScopeInstruction:
+    scopeKindExprs: list[str]
+    instructions: list
+
+    def format(self):
+        ret = "ifScope " + self.scopeKindExprs[0]
+        for expr in self.scopeKindExprs[1:]:
+            ret += ", " + expr
+        return ret
 
 @dataclasses.dataclass
 class ErrorInstruction:
@@ -174,6 +190,12 @@ class State:
                 return c
         return None
 
+    def endCase(self) -> EndCase | None:
+        for c in self.cases:
+            if type(c) is EndCase:
+                return c
+        return None
+
 class Parser:
     def __init__(self, lines):
         self.lines = lines
@@ -186,14 +208,15 @@ class Parser:
         return len(rem) == 0 or rem[0] == '#' or rem[0] == '\r' or rem[0] == '\n'
 
     def lineLevel(self):
-        if self.line.startswith(indentationStep * 2):
-            return 2
-        if self.line.startswith(indentationStep):
-            return 1
-        return 0
+        level = 0
+        copy = self.line
+        while copy.startswith(indentationStep):
+            level += 1
+            copy = copy[len(indentationStep):]
+        return level
 
     def atEnd(self):
-        return len(self.lines) == 0
+        return len(self.lines) == 0 and self.lineEmpty()
 
     def advanceLine(self):
         if not self.lineEmpty():
@@ -277,13 +300,17 @@ class Parser:
                 self.advanceLine()
                 instructions = self.parseInstructions()
                 cases.append(ThenCase(instructions))
+            elif caseKind == "end":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(EndCase(instructions))
             else:
                 self.parseError("invalid case '" + caseKind + "'")
         return cases
 
-    def parseInstructions(self):
+    def parseInstructions(self, level = 2):
         instructions = []
-        while self.lineLevel() == 2:
+        while self.lineLevel() == level:
             first = self.parseWord()
             if first == "next":
                 delayed = False
@@ -291,6 +318,7 @@ class Parser:
                     instructions[-1].delayed = True
                     delayed = True
                 instructions.append(NextInstruction(self.parseWord(), delayed))
+                self.advanceLine()
             elif first == "emitNode":
                 nodeKindExpr = self.parseExpr()
                 while self.line[0] == ' ':
@@ -300,10 +328,13 @@ class Parser:
                     self.line = self.line[1:]
                     tokenExpr = self.parseExpr()
                 instructions.append(EmitNodeInstruction(nodeKindExpr, tokenExpr))
+                self.advanceLine()
             elif first == "updateKind":
                 instructions.append(UpdateKindInstruction(self.parseExpr()))
+                self.advanceLine()
             elif first == "pushScope":
                 instructions.append(PushScopeInstruction(self.parseExpr()))
+                self.advanceLine()
             elif first == "popScope":
                 scopes = []
                 while not self.lineEmpty():
@@ -311,8 +342,18 @@ class Parser:
                     if self.line[0] == ',':
                         self.line = self.line[1:]
                 instructions.append(PopScopeInstruction(scopes))
-            elif first == "exitIfUnscoped":
-                instructions.append(ExitIfUnscopedInstruction())
+                self.advanceLine()
+            elif first == "ifScope":
+                scopes = []
+                while not self.lineEmpty():
+                    scopes.append(self.parseExpr())
+                    if self.line[0] == ',':
+                        self.line = self.line[1:]
+                self.advanceLine()
+                instructions.append(IfScopeInstruction(scopes, self.parseInstructions(level + 1)))
+            elif first == "then":
+                instructions.append(ThenInstruction(self.parseWord()))
+                self.advanceLine()
             else:
                 while self.line[0] == ' ':
                     self.line = self.line[1:]
@@ -320,7 +361,7 @@ class Parser:
                     self.parseError("invalid instruction")
                 self.line = self.line[1:]
                 instructions.append(AssignInstruction(first, self.parseExpr()))
-            self.advanceLine()
+                self.advanceLine()
 
         return instructions
 
@@ -428,7 +469,7 @@ def emitCarriedNode():
     emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
 
 def rememberState(state):
-    line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
+    #line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def readWord():
@@ -456,7 +497,7 @@ def generateWordCase(state):
                     generateCaseBody(c)
                 line("}")
             if not state.thenCase() is None:
-                generateCaseBody(state.thenCase())
+                generateCaseBody(state.thenCase(), "keyword_check")
             line("goto " + state.thenState + "$keyword_check;")
         line("}")
         line("nodeData = word.asUint();")
@@ -465,7 +506,7 @@ def generateWordCase(state):
             generateCaseBody(state.identifierCase())
         else:
             if not state.thenCase() is None:
-                generateCaseBody(state.thenCase())
+                generateCaseBody(state.thenCase(), "identifier_case")
             line("goto " + state.thenState + "$identifier_case;")
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
@@ -558,11 +599,21 @@ def generateSwitchState(state):
 def generateLinearState(state):
     for c in state.punctuationCases():
         checkForPunctuation(c.punctuation, lambda: generateCaseBody(c))
-    if state.keywordCases() or not state.identifierCase() is None:
-        line("if (isWordFirstCharacter(tokEnd[0])) {")
+
+    #if state.keywordCases() or not state.identifierCase() is None:
+    line("if (isWordFirstCharacter(tokEnd[0])) {")
+    with indent():
+        generateWordCase(state)
+    line("}")
+
+    endCase = state.endCase()
+    if not endCase is None:
+        line("if (tokEnd[0] == '\\0') {")
         with indent():
-            generateWordCase(state)
+            generateCaseBody(endCase)
+            line("return;")
         line("}")
+
     thenCase = state.thenCase()
     if not thenCase is None:
         generateCaseBody(thenCase)
@@ -576,8 +627,11 @@ def generateError(case):
         line("errorToken = Token::" + case.cppName() + ";")
         line("goto handle_parse_error;")
 
-def generateCaseBody(case):
-    for inst in case.instructions:
+def generateCaseBody(case, thenLabel = "as_then"):
+    generateInstructions(case, case.instructions, thenLabel)
+
+def generateInstructions(case, instructions, thenLabel):
+    for inst in instructions:
         line("// " + inst.format())
         if type(inst) is EmitNodeInstruction:
             if inst.delayed:
@@ -622,15 +676,28 @@ def generateCaseBody(case):
                 line("}")
                 line("scopePosition = result;")
             line("}")
-        elif type(inst) is ExitIfUnscopedInstruction:
-            line("if (scopePosition[0] == ScopeKind::Invalid) {")
+        elif type(inst) is IfScopeInstruction:
+            check = ""
+            for scope in inst.scopeKindExprs:
+                check += " || scopePosition[0] == " + scope
+            check = check[4:]
+            line("if (" + check + ") {")
             with indent():
-                line("return;")
+                generateInstructions(case, inst.instructions, thenLabel)
             line("}")
+        elif type(inst) is ThenInstruction:
+            line("goto " + inst.newState + "$" + thenLabel + ";")
         elif type(inst) is ErrorInstruction:
             generateError(case)
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
+
+def collectOrigins(state, instructions):
+    for inst in instructions:
+        if (type(inst) is NextInstruction or type(inst) is ThenInstruction) and inst.newState == state.name:
+            state.origins.append(inst)
+        if type(inst) is IfScopeInstruction:
+            collectOrigins(state, inst.instructions)
 
 for state in states:
     state.origins = []
@@ -638,12 +705,11 @@ for state in states:
         if s.thenState == state.name:
             state.origins.append(s)
         for c in s.cases:
-            inst = c.instructions[-1]
-            if type(inst) == NextInstruction and inst.newState == state.name:
-                state.origins.append(inst)
+            collectOrigins(state, c.instructions)
+
 
 def shouldBeInlined(state):
-    return len(state.origins) == 1 and state.kind == "LinearState"
+    return len(state.origins) == 1 and state.kind == "LinearState" and type(state.origins[0]) is NextInstruction
 
 def onlyUsedAsThen(state):
     if [o for o in state.origins if type(o) is NextInstruction]:
@@ -679,7 +745,7 @@ for state in states:
             else:
                 inlineTokenAdvancer()
             rememberState(state)
-        if [o for o in state.origins if type(o) is State]:
+        if [o for o in state.origins if not type(o) is NextInstruction]:
             labelLine(state.name + "$as_then:")
 
         generateState(state)

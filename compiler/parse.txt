@@ -175,17 +175,25 @@ SwitchState after_expression() then error
         next first_argument_brace
 
     punctuation )
-        popScope ScopeKind::RightExpr
+        ifScope ScopeKind::RightExpr
+            popScope ScopeKind::RightExpr
+            popScope ScopeKind::Parameter
+            emitNode NodeKind::ExpressionStmt
+            next after_parameters
+        ifScope ScopeKind::VariableType
+            popScope ScopeKind::VariableType
+            popScope ScopeKind::Parameter
+            emitNode NodeKind::AssignStmt
+            emitNode NodeKind::ExpressionStmt
+            next after_parameters
         popScope ScopeKind::Paren
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation ]
-        popScope ScopeKind::RightExpr
         popScope ScopeKind::Square
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation }
-        popScope ScopeKind::RightExpr
         popScope ScopeKind::Brace
         emitNode NodeKind::EmptyNode
         next after_expression
@@ -203,6 +211,10 @@ SwitchState after_expression() then error
         emitNode NodeKind::IfExpr
         next expression
     punctuation :
+        ifScope ScopeKind::ReturnType
+            popScope ScopeKind::ReturnType
+            pushScope ScopeKind::FunctionBody
+            next single_or_compound_statement
         popScope ScopeKind::IfExprOrStmt
         popScope ScopeKind::LeftExpr
         popScope ScopeKind::PlainStatement
@@ -228,7 +240,9 @@ LinearState after_statement() then statement
         pushScope ScopeKind::ElseBranch
         next else_branch
     then
-        exitIfUnscoped
+        ifScope ScopeKind::FunctionBody
+            popScope ScopeKind::FunctionBody
+            then after_declaration
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         pushScope ScopeKind::PlainStatement
 
@@ -241,7 +255,7 @@ LinearState statement() then expression
         next check_var_after_let
     keyword var
         nodeKind = NodeKind::VarStmt
-        next local_declaration
+        next variable_declaration
     punctuation }
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         popScope ScopeKind::CompoundStmt
@@ -250,25 +264,41 @@ LinearState statement() then expression
     then
         pushScope ScopeKind::LeftExpr
 
-LinearState comma_after_expression() then check_designated_argument
+LinearState comma_after_expression() then error
     keyword else
         next comma_else
 
     punctuation )
-        popScope ScopeKind::RightExpr
         popScope ScopeKind::Paren
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation ]
-        popScope ScopeKind::RightExpr
         popScope ScopeKind::Square
         emitNode NodeKind::EmptyNode
         next after_expression
     punctuation }
-        popScope ScopeKind::RightExpr
         popScope ScopeKind::Brace
         emitNode NodeKind::EmptyNode
         next after_expression
+
+    then
+        ifScope ScopeKind::Parameter
+            then parameter
+        ifScope ScopeKind::VariableType
+            popScope ScopeKind::VariableType
+            popScope ScopeKind::Parameter
+            pushScope ScopeKind::Parameter
+            emitNode NodeKind::AssignStmt
+            emitNode NodeKind::ExpressionStmt
+            then parameter
+        ifScope ScopeKind::RightExpr
+            popScope ScopeKind::RightExpr
+            popScope ScopeKind::Parameter
+            pushScope ScopeKind::Parameter
+            emitNode NodeKind::ExpressionStmt
+            then parameter
+        ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
+            then check_designated_argument
 
 LinearState comma_else() then error
     punctuation =>
@@ -295,38 +325,35 @@ LinearState first_argument_paren() then check_designated_argument
         next after_expression
     then
         pushScope ScopeKind::Paren
-        pushScope ScopeKind::RightExpr
 LinearState first_argument_square() then check_designated_argument
     punctuation ]
         emitNode NodeKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
-        pushScope ScopeKind::RightExpr
 LinearState first_argument_brace() then check_designated_argument
     punctuation }
         emitNode NodeKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Brace
-        pushScope ScopeKind::RightExpr
 
 LinearState access_punctuation(nodeKind) then error
     identifier
         emitNode nodeKind
         next after_expression
 
-LinearState check_var_after_let() then local_declaration
+LinearState check_var_after_let() then variable_declaration
     keyword var
         nodeKind = NodeKind::VarStmt
-        next local_declaration
+        next variable_declaration
     then
         nodeKind = NodeKind::LetStmt
-LinearState local_declaration(nodeKind) then error
+LinearState variable_declaration(nodeKind) then error
     identifier
         emitNode nodeKind
-        next after_local_declaration_id
-LinearState after_local_declaration_id() then error
+        next after_variable_declaration_id
+LinearState after_variable_declaration_id() then error
     punctuation :
         pushScope ScopeKind::VariableType
         next expression
@@ -338,3 +365,90 @@ LinearState after_local_declaration_id() then error
         emitNode NodeKind::AssignStmt
         emitNode NodeKind::ExpressionStmt
         next after_statement
+    punctuation ,
+        popScope ScopeKind::Parameter
+        pushScope ScopeKind::Parameter
+        emitNode NodeKind::AssignStmt
+        emitNode NodeKind::ExpressionStmt
+        next parameter
+    punctuation )
+        popScope ScopeKind::Parameter
+        emitNode NodeKind::AssignStmt
+        emitNode NodeKind::ExpressionStmt
+        next after_parameters
+
+# --- Parameters
+
+LinearState after_parameters() then error
+    then
+        ifScope ScopeKind::FunctionParameters
+            popScope ScopeKind::FunctionParameters
+            then after_function_parameters
+
+LinearState first_parameter() then parameter
+    punctuation )
+        next after_parameters
+    then
+        pushScope ScopeKind::Parameter
+
+LinearState parameter() then variable_declaration
+    keyword in
+        nodeKind = NodeKind::InParameter
+        next variable_declaration
+    keyword inout
+        nodeKind = NodeKind::InOutParameter
+        next variable_declaration
+    keyword out
+        nodeKind = NodeKind::OutParameter
+        next variable_declaration
+    keyword let
+        nodeKind = NodeKind::LetParameter
+        next variable_declaration
+    keyword var
+        nodeKind = NodeKind::VarParameter
+        next variable_declaration
+    then
+        nodeKind = NodeKind::LetParameter
+
+# --- Declarations
+
+LinearState no_declaration() then error
+    punctuation }
+        popScope ScopeKind::Namespace
+        next after_declaration
+    end
+
+LinearState namespace_declaration() then templated_declaration
+    keyword namespace
+        next namespace_declaration_id
+LinearState namespace_declaration_id() then error
+    identifier
+        next after_namespace_declaration_id
+LinearState after_namespace_declaration_id() then error
+    punctuation :
+        next namespace_declaration_body
+LinearState namespace_declaration_body() then error
+    punctuation {
+        pushScope ScopeKind::Namespace
+        next namespace_declaration
+
+LinearState templated_declaration() then no_declaration
+    keyword fn
+        next function_declaration_id
+
+LinearState function_declaration_id() then error
+    identifier
+        next after_function_declaration_id
+LinearState after_function_declaration_id() then error
+    punctuation (
+        pushScope ScopeKind::FunctionParameters
+        next first_parameter
+LinearState after_function_parameters() then error
+    punctuation :
+        pushScope ScopeKind::FunctionBody
+        next single_or_compound_statement
+    punctuation ->
+        pushScope ScopeKind::ReturnType
+        next expression
+
+LinearState after_declaration() then namespace_declaration
