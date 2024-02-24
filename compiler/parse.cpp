@@ -162,6 +162,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
 
     NodeKind nodeKind = (NodeKind)0;
 
+    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
     State parseState = State::NamespaceDeclaration;
     Token errorToken = (Token)0;
 
@@ -224,6 +225,16 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
         goto after_function_declaration_id$no_emit;
     case State::AfterFunctionParameters:
         VERIFY_NOT_REACHED();
+    case State::TypeDeclarationId:
+        goto type_declaration_id$no_emit;
+    case State::AfterTypeDeclarationId:
+        goto after_type_declaration_id$no_emit;
+    case State::TypeDeclarationBody:
+        goto type_declaration_body$no_emit;
+    case State::MemberDeclaration:
+        goto member_declaration$no_emit;
+    case State::AfterStatic:
+        goto after_static$no_emit;
     case State::AfterDeclaration:
         goto after_declaration$no_emit;
     case State::Error:
@@ -1064,6 +1075,20 @@ after_expression$as_then:
             goto access_punctuation$no_emit;
         }
         tokEnd += 1;
+        // ifScope ScopeKind::HasTypeExpr
+        if (scopePosition[0] == ScopeKind::HasTypeExpr) {
+            // popScope ScopeKind::HasTypeExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
+                if (result == nullptr) {
+                    errorToken = Token::Colon;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // next type_declaration_body
+            goto type_declaration_body$no_emit;
+        }
         // ifScope ScopeKind::ReturnType
         if (scopePosition[0] == ScopeKind::ReturnType) {
             // popScope ScopeKind::ReturnType
@@ -1116,9 +1141,42 @@ after_expression$as_then:
     }
     case ';': {
         tokEnd += 1;
-        // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
+        // ifScope ScopeKind::HasTypeExpr
+        if (scopePosition[0] == ScopeKind::HasTypeExpr) {
+            // popScope ScopeKind::HasTypeExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
+                if (result == nullptr) {
+                    errorToken = Token::SemiColon;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // emitNode NodeKind::EmptyNode
+            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // next after_declaration
+            goto after_declaration$with_emit;
+        }
+        // ifScope ScopeKind::VariableType
+        if (scopePosition[0] == ScopeKind::VariableType) {
+            // popScope ScopeKind::VariableType
+            {
+                auto result = popScope(scopePosition, ScopeKind::VariableType);
+                if (result == nullptr) {
+                    errorToken = Token::SemiColon;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitNode NodeKind::AssignStmt
+            emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
+            nodeData = 0;
+        }
+        // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
         {
-            auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType);
+            auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr);
             if (result == nullptr) {
                 errorToken = Token::SemiColon;
                 goto handle_parse_error;
@@ -1810,7 +1868,7 @@ maybe_designated_argument$no_emit:
     parseState = State::MaybeDesignatedArgument;
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '=' && next != '>') {
+        if (next != '>' && next != '=') {
             tokEnd += 1;
             // updateKind NodeKind::DesignateArgument
             state.nodes.back().setKind(NodeKind::DesignateArgument);
@@ -1969,7 +2027,27 @@ after_statement$no_emit:
                     scopePosition = result;
                 }
                 // then after_declaration
-                // -> namespace_declaration
+                // ifScope ScopeKind::Type
+                if (scopePosition[0] == ScopeKind::Type) {
+                    // then member_declaration
+                    goto member_declaration$keyword_check;
+                }
+                // ifScope ScopeKind::Namespace
+                if (scopePosition[0] == ScopeKind::Namespace) {
+                    // then namespace_declaration
+                    goto namespace_declaration$keyword_check;
+                }
+                // -> error
+                goto error$keyword_check;
+            }
+            // ifScope ScopeKind::Type
+            if (scopePosition[0] == ScopeKind::Type) {
+                // then member_declaration
+                goto member_declaration$keyword_check;
+            }
+            // ifScope ScopeKind::Namespace
+            if (scopePosition[0] == ScopeKind::Namespace) {
+                // then namespace_declaration
                 goto namespace_declaration$keyword_check;
             }
             // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
@@ -1997,7 +2075,40 @@ after_statement$no_emit:
                 scopePosition = result;
             }
             // then after_declaration
-            // -> namespace_declaration
+            // ifScope ScopeKind::Type
+            if (scopePosition[0] == ScopeKind::Type) {
+                // then member_declaration
+                // emitNode NodeKind::MemberDecl
+                carriedEmitNodeKind = NodeKind::MemberDecl;
+                // next after_variable_declaration_id
+                goto after_variable_declaration_id$with_emit;
+            }
+            // ifScope ScopeKind::Namespace
+            if (scopePosition[0] == ScopeKind::Namespace) {
+                // then namespace_declaration
+                // -> templated_declaration
+                // -> no_declaration
+                // -> error
+                // error
+                errorToken = Token::Identifier;
+                goto handle_parse_error;
+            }
+            // -> error
+            // error
+            errorToken = Token::Identifier;
+            goto handle_parse_error;
+        }
+        // ifScope ScopeKind::Type
+        if (scopePosition[0] == ScopeKind::Type) {
+            // then member_declaration
+            // emitNode NodeKind::MemberDecl
+            carriedEmitNodeKind = NodeKind::MemberDecl;
+            // next after_variable_declaration_id
+            goto after_variable_declaration_id$with_emit;
+        }
+        // ifScope ScopeKind::Namespace
+        if (scopePosition[0] == ScopeKind::Namespace) {
+            // then namespace_declaration
             // -> templated_declaration
             // -> no_declaration
             // -> error
@@ -2036,6 +2147,16 @@ after_statement$no_emit:
         }
         // then after_declaration
         goto after_declaration$as_then;
+    }
+    // ifScope ScopeKind::Type
+    if (scopePosition[0] == ScopeKind::Type) {
+        // then member_declaration
+        goto member_declaration$as_then;
+    }
+    // ifScope ScopeKind::Namespace
+    if (scopePosition[0] == ScopeKind::Namespace) {
+        // then namespace_declaration
+        goto namespace_declaration$as_then;
     }
     // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
     {
@@ -2231,7 +2352,7 @@ after_variable_declaration_id$no_emit:
     }
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '=' && next != '>') {
+        if (next != '>' && next != '=') {
             tokEnd += 1;
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -2404,9 +2525,9 @@ parameter$as_then:
 no_declaration$as_then:
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
-        // popScope ScopeKind::Namespace
+        // popScope ScopeKind::Namespace, ScopeKind::Type
         {
-            auto result = popScope(scopePosition, ScopeKind::Namespace);
+            auto result = popScope(scopePosition, ScopeKind::Namespace, ScopeKind::Type);
             if (result == nullptr) {
                 errorToken = Token::RightBrace;
                 goto handle_parse_error;
@@ -2521,6 +2642,22 @@ templated_declaration$as_then:
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
+            if (word == words["struct"]) {
+                // nodeKind = NodeKind::StructTypeDecl
+                nodeKind = NodeKind::StructTypeDecl;
+                // next type_declaration_id
+                goto type_declaration_id$no_emit;
+            }
+            if (word == words["object"]) {
+                // nodeKind = NodeKind::ObjectTypeDecl
+                nodeKind = NodeKind::ObjectTypeDecl;
+                // next type_declaration_id
+                goto type_declaration_id$no_emit;
+            }
+            if (word == words["static"]) {
+                // next after_static
+                goto after_static$no_emit;
+            }
             // -> no_declaration
             // -> error
             goto error$keyword_check;
@@ -2551,13 +2688,18 @@ function_declaration_id$no_emit:
             goto error$keyword_check;
         }
         nodeData = word.asUint();
+        // emitNode NodeKind::FunctionDecl
+        carriedEmitNodeKind = NodeKind::FunctionDecl;
         // next after_function_declaration_id
-        goto after_function_declaration_id$no_emit;
+        goto after_function_declaration_id$with_emit;
     }
     // then error
     goto error$as_then;
 
     // LinearState after_function_declaration_id
+after_function_declaration_id$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
 after_function_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -2594,14 +2736,156 @@ after_function_parameters$as_then:
     // then error
     goto error$as_then;
 
+    // LinearState type_declaration_id
+type_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::TypeDeclarationId;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        nodeData = word.asUint();
+        // emitNode nodeKind
+        carriedEmitNodeKind = nodeKind;
+        // next after_type_declaration_id
+        goto after_type_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_type_declaration_id
+after_type_declaration_id$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+after_type_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterTypeDeclarationId;
+    if (std::string_view(tokEnd, 1) == ":"sv) {
+        char next = tokEnd[1];
+        if (next != ':') {
+            tokEnd += 1;
+            // next type_declaration_body
+            goto type_declaration_body$no_emit;
+        }
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState type_declaration_body
+type_declaration_body$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::TypeDeclarationBody;
+    if (std::string_view(tokEnd, 1) == "{"sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::Type
+        scopePosition = pushScope(scopePosition, ScopeKind::Type);
+        // next member_declaration
+        goto member_declaration$no_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState member_declaration
+member_declaration$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::MemberDeclaration;
+member_declaration$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] member_declaration$keyword_check:
+            if (word == words["has"]) {
+                // pushScope ScopeKind::HasTypeExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
+                // emitNode NodeKind::HasMemberDecl
+                carriedEmitNodeKind = NodeKind::HasMemberDecl;
+                // next expression
+                goto expression$with_emit;
+            }
+            // -> templated_declaration
+            goto templated_declaration$keyword_check;
+        }
+        nodeData = word.asUint();
+        // emitNode NodeKind::MemberDecl
+        carriedEmitNodeKind = NodeKind::MemberDecl;
+        // next after_variable_declaration_id
+        goto after_variable_declaration_id$with_emit;
+    }
+    // then templated_declaration
+    goto templated_declaration$as_then;
+
+    // LinearState after_static
+after_static$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterStatic;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state.wordTable);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] after_static$keyword_check:
+            if (word == words["var"]) {
+                // nodeKind = NodeKind::StaticVarDecl
+                nodeKind = NodeKind::StaticVarDecl;
+                // next variable_declaration
+                goto variable_declaration$no_emit;
+            }
+            if (word == words["let"]) {
+                // nodeKind = NodeKind::StaticLetDecl
+                nodeKind = NodeKind::StaticLetDecl;
+                // next variable_declaration
+                goto variable_declaration$no_emit;
+            }
+            // -> error
+            goto error$keyword_check;
+        }
+        nodeData = word.asUint();
+        // emitNode NodeKind::StaticLetDecl
+        carriedEmitNodeKind = NodeKind::StaticLetDecl;
+        // next after_variable_declaration_id
+        goto after_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
     // LinearState after_declaration
+after_declaration$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
 after_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::AfterDeclaration;
 after_declaration$as_then:
-    // then namespace_declaration
-    goto namespace_declaration$as_then;
+    // ifScope ScopeKind::Type
+    if (scopePosition[0] == ScopeKind::Type) {
+        // then member_declaration
+        goto member_declaration$as_then;
+    }
+    // ifScope ScopeKind::Namespace
+    if (scopePosition[0] == ScopeKind::Namespace) {
+        // then namespace_declaration
+        goto namespace_declaration$as_then;
+    }
+    // then error
+    goto error$as_then;
 
     // SwitchState error
 error$as_then:
@@ -3116,6 +3400,11 @@ error$word_case:
         if (word == words["template"]) {
             // error
             errorToken = Token::Template;
+            goto handle_parse_error;
+        }
+        if (word == words["has"]) {
+            // error
+            errorToken = Token::Has;
             goto handle_parse_error;
         }
         if (word == words["var"]) {

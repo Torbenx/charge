@@ -150,6 +150,8 @@ std::string_view nameString(Token token) {
         return "Static";
     case Token::Template:
         return "Template";
+    case Token::Has:
+        return "Has";
     case Token::Var:
         return "Var";
     case Token::Let:
@@ -229,6 +231,16 @@ std::string_view nameString(State state) {
         return "AfterFunctionDeclarationId";
     case State::AfterFunctionParameters:
         return "AfterFunctionParameters";
+    case State::TypeDeclarationId:
+        return "TypeDeclarationId";
+    case State::AfterTypeDeclarationId:
+        return "AfterTypeDeclarationId";
+    case State::TypeDeclarationBody:
+        return "TypeDeclarationBody";
+    case State::MemberDeclaration:
+        return "MemberDeclaration";
+    case State::AfterStatic:
+        return "AfterStatic";
     case State::AfterDeclaration:
         return "AfterDeclaration";
     case State::Error:

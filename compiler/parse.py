@@ -15,7 +15,7 @@ keywords = [
     "return", "break", "continue", "loop", "guard", "try", "catch",
     "with", "analysis", "assert",
     "namespace", "struct", "trait", "object", "fn", "static",
-    "template",
+    "template", "has",
     "var", "let", "in", "inout", "out", "forward", "assign"
 ]
 

@@ -205,7 +205,15 @@ SwitchState after_expression() then error
         next comma_after_expression
 
     punctuation ;
-        popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
+        ifScope ScopeKind::HasTypeExpr
+            popScope ScopeKind::HasTypeExpr
+            emitNode NodeKind::EmptyNode
+            next after_declaration
+        ifScope ScopeKind::VariableType
+            popScope ScopeKind::VariableType
+            pushScope ScopeKind::RightExpr
+            emitNode NodeKind::AssignStmt
+        popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
         emitNode NodeKind::ExpressionStmt
         next after_statement
 
@@ -214,6 +222,9 @@ SwitchState after_expression() then error
         emitNode NodeKind::IfExpr
         next expression
     punctuation :
+        ifScope ScopeKind::HasTypeExpr
+            popScope ScopeKind::HasTypeExpr
+            next type_declaration_body
         ifScope ScopeKind::ReturnType
             popScope ScopeKind::ReturnType
             pushScope ScopeKind::FunctionBody
@@ -322,6 +333,10 @@ LinearState after_statement() then statement
         ifScope ScopeKind::FunctionBody
             popScope ScopeKind::FunctionBody
             then after_declaration
+        ifScope ScopeKind::Type
+            then member_declaration
+        ifScope ScopeKind::Namespace
+            then namespace_declaration
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         pushScope ScopeKind::PlainStatement
 
@@ -421,7 +436,7 @@ LinearState parameter() then variable_declaration
 
 LinearState no_declaration() then error
     punctuation }
-        popScope ScopeKind::Namespace
+        popScope ScopeKind::Namespace, ScopeKind::Type
         next after_declaration
     end
 
@@ -442,9 +457,18 @@ LinearState namespace_declaration_body() then error
 LinearState templated_declaration() then no_declaration
     keyword fn
         next function_declaration_id
+    keyword struct
+        nodeKind = NodeKind::StructTypeDecl
+        next type_declaration_id
+    keyword object
+        nodeKind = NodeKind::ObjectTypeDecl
+        next type_declaration_id
+    keyword static
+        next after_static
 
 LinearState function_declaration_id() then error
     identifier
+        emitNode NodeKind::FunctionDecl
         next after_function_declaration_id
 LinearState after_function_declaration_id() then error
     punctuation (
@@ -458,4 +482,40 @@ LinearState after_function_parameters() then error
         pushScope ScopeKind::ReturnType
         next expression
 
-LinearState after_declaration() then namespace_declaration
+LinearState type_declaration_id(nodeKind) then error
+    identifier
+        emitNode nodeKind
+        next after_type_declaration_id
+LinearState after_type_declaration_id() then error
+    punctuation :
+        next type_declaration_body
+LinearState type_declaration_body() then error
+    punctuation {
+        pushScope ScopeKind::Type
+        next member_declaration
+LinearState member_declaration() then templated_declaration
+    keyword has
+        pushScope ScopeKind::HasTypeExpr
+        emitNode NodeKind::HasMemberDecl
+        next expression
+    identifier
+        emitNode NodeKind::MemberDecl
+        next after_variable_declaration_id
+
+LinearState after_static() then error
+    keyword var
+        nodeKind = NodeKind::StaticVarDecl
+        next variable_declaration
+    keyword let
+        nodeKind = NodeKind::StaticLetDecl
+        next variable_declaration
+    identifier
+        emitNode NodeKind::StaticLetDecl
+        next after_variable_declaration_id
+
+LinearState after_declaration() then error
+    then
+        ifScope ScopeKind::Type
+            then member_declaration
+        ifScope ScopeKind::Namespace
+            then namespace_declaration

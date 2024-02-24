@@ -91,6 +91,16 @@ STMT(OutParameter, Parameter, Primary)
 STMT(LetParameter, Parameter, Primary)
 STMT(VarParameter, Parameter, Primary)
 
+// ------ declarations ------
+NODE(FunctionDecl, FunctionDecl, Decl)
+NODE(StructTypeDecl, TypeDecl, Decl)
+NODE(ObjectTypeDecl, TypeDecl, Decl)
+NODE(StaticLetDecl, Decl, Decl)
+NODE(StaticVarDecl, Decl, Decl)
+NODE(MemberDecl, MemberDecl, Decl)
+NODE(HasMemberDecl, HasMemberDecl, Decl)
+
+
 #undef EXPR
 #undef STMT
 #undef NODE

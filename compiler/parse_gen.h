@@ -29,6 +29,7 @@ inline constexpr ConstWordStringTable words {
     keyword("fn"),
     keyword("static"),
     keyword("template"),
+    keyword("has"),
     keyword("var"),
     keyword("let"),
     keyword("in"),
@@ -111,6 +112,7 @@ enum class Token : uint8_t {
     Fn, // fn
     Static, // static
     Template, // template
+    Has, // has
     Var, // var
     Let, // let
     In, // in
@@ -152,6 +154,11 @@ enum class State {
     FunctionDeclarationId,
     AfterFunctionDeclarationId,
     AfterFunctionParameters,
+    TypeDeclarationId,
+    AfterTypeDeclarationId,
+    TypeDeclarationBody,
+    MemberDeclaration,
+    AfterStatic,
     AfterDeclaration,
     Error,
 };

@@ -162,6 +162,7 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
 
     NodeKind nodeKind = (NodeKind)0;
 
+    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
     State parseState = State::NamespaceDeclaration;
     Token errorToken = (Token)0;
 
