@@ -35,6 +35,9 @@ SwitchState expression() then error
     identifier
         emitNode NodeKind::IdentifierExpr
         next after_expression
+    literal
+        emitNode NodeKind::LiteralExpr
+        next after_expression
 
 SwitchState after_expression() then error
     punctuation ++
@@ -350,6 +353,11 @@ LinearState statement() then expression
     keyword var
         nodeKind = NodeKind::VarStmt
         next variable_declaration
+    keyword return
+        pushScope ScopeKind::RightExpr
+        emitNode NodeKind::ReturnStmt
+        next after_return
+
     punctuation }
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         popScope ScopeKind::CompoundStmt
@@ -357,6 +365,12 @@ LinearState statement() then expression
         next after_statement
     then
         pushScope ScopeKind::LeftExpr
+
+LinearState after_return() then expression
+    punctuation ;
+        popScope ScopeKind::RightExpr
+        updateKind NodeKind::EmptyReturnStmt
+        next after_statement
 
 LinearState else_branch() then error
     punctuation :
@@ -406,6 +420,9 @@ LinearState after_parameters() then error
         ifScope ScopeKind::FunctionParameters
             popScope ScopeKind::FunctionParameters
             then after_function_parameters
+        ifScope ScopeKind::TemplateParameters
+            popScope ScopeKind::TemplateParameters
+            then after_template_parameters
 
 LinearState first_parameter() then parameter
     punctuation )
@@ -455,6 +472,8 @@ LinearState namespace_declaration_body() then error
         next namespace_declaration
 
 LinearState templated_declaration() then no_declaration
+    keyword template
+        next after_template
     keyword fn
         next function_declaration_id
     keyword struct
@@ -465,6 +484,12 @@ LinearState templated_declaration() then no_declaration
         next type_declaration_id
     keyword static
         next after_static
+
+LinearState after_template() then error
+    punctuation (
+        pushScope ScopeKind::TemplateParameters
+        next first_parameter
+LinearState after_template_parameters() then templated_declaration
 
 LinearState function_declaration_id() then error
     identifier
@@ -480,6 +505,14 @@ LinearState after_function_parameters() then error
         next single_or_compound_statement
     punctuation ->
         pushScope ScopeKind::ReturnType
+        next expression
+    punctuation =>
+        pushScope ScopeKind::FunctionBody
+        pushScope ScopeKind::RightExpr
+        next expression
+    punctuation <=>
+        pushScope ScopeKind::FunctionBody
+        pushScope ScopeKind::RightExpr
         next expression
 
 LinearState type_declaration_id(nodeKind) then error

@@ -42,6 +42,9 @@ def stateCppName(name):
 def identifierCppName():
     return "Identifier"
 
+def literalCppName():
+    return "Literal"
+
 indentationStep = ' ' * 4
 
 currentDir = pathlib.Path(__file__).parent.resolve()
@@ -75,6 +78,12 @@ class IdentifierCase(Case):
         super().__init__(instructions)
     def cppName(self):
         return identifierCppName()
+
+class LiteralCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+    def cppName(self):
+        return literalCppName()
 
 class ThenCase(Case):
     def __init__(self, instructions):
@@ -181,6 +190,12 @@ class State:
     def identifierCase(self) -> IdentifierCase | None:
         for c in self.cases:
             if type(c) is IdentifierCase:
+                return c
+        return None
+
+    def literalCase(self) -> LiteralCase | None:
+        for c in self.cases:
+            if type(c) is LiteralCase:
                 return c
         return None
 
@@ -296,6 +311,10 @@ class Parser:
                 self.advanceLine()
                 instructions = self.parseInstructions()
                 cases.append(IdentifierCase(instructions))
+            elif caseKind == "literal":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(LiteralCase(instructions))
             elif caseKind == "then":
                 self.advanceLine()
                 instructions = self.parseInstructions()
@@ -503,7 +522,7 @@ def generateWordCase(state):
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
 errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
-errorCases += [IdentifierCase([ErrorInstruction()])]
+errorCases += [IdentifierCase([ErrorInstruction()]), LiteralCase([ErrorInstruction()])]
 errorState = State("SwitchState", "error", "", [], errorCases)
 states += [errorState]
 
@@ -573,6 +592,34 @@ def generateSwitchState(state):
         with indent():
             linearIf(str(character), state)
         line("}")
+
+    # integer literal
+    line("case '0':")
+    line("case '1':")
+    line("case '2':")
+    line("case '3':")
+    line("case '4':")
+    line("case '5':")
+    line("case '6':")
+    line("case '7':")
+    line("case '8':")
+    line("case '9': {")
+    with indent():
+        line("do {")
+        with indent():
+            line("tokEnd += 1;")
+        line("} while (tokEnd[0] >= '0' && tokEnd[0] <= '9');")
+        recurse(state, lambda s: s.literalCase(), lambda case: generateCaseBody(case))
+    line("}")
+
+    # character literal
+    line("case '\\'': {")
+    with indent():
+        line("tokEnd = skipToEndOfCharacterLiteral(tokEnd);")
+        line("VERIFY(tokEnd[0] == '\\'');")
+        line("tokEnd += 1;")
+        recurse(state, lambda s: s.literalCase(), lambda case: generateCaseBody(case))
+    line("}")
 
     # word
     for character in string.ascii_lowercase + string.ascii_uppercase:
@@ -803,6 +850,7 @@ with indent():
     for keyword in keywords:
         line(keywordCppName(keyword) + ", // " + keyword)
     line(identifierCppName() + ",")
+    line(literalCppName() + ",")
 line("};")
 line("std::string_view nameString(Token);")
 lineNoIndent()
@@ -844,6 +892,9 @@ with indent():
     line("case Token::" + identifierCppName() + ":")
     with indent():
         line("return \"" + identifierCppName() + "\";")
+    line("case Token::" + literalCppName() + ":")
+    with indent():
+        line("return \"" + literalCppName() + "\";")
     line("}")
 line("}")
 lineNoIndent()

@@ -133,12 +133,12 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             if (comment.front() == ';')
                 break;
             std::string_view cmdStr = comment;
-            uint32_t hash = 0;
+            Word::HashState hashState;
             while (comment.length() > 0 && isBulkCommandChar(comment.front())) {
-                hash = Word::iterateHash(hash, comment.front());
+                Word::iterateHash(hashState, comment.front());
                 comment = comment.substr(1);
             }
-            hash = Word::finalizeHash(hash);
+            auto hash = Word::finalizeHash(hashState);
             cmdStr = cmdStr.substr(0, cmdStr.length() - comment.length());
             skipWhitespace();
 

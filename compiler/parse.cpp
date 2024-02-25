@@ -6,14 +6,14 @@ using namespace std::string_view_literals;
 
 namespace parse {
 
-static bool isWordBulkCharacter(uint8_t c) {
+static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
 static bool isWordFirstCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-        || c == '_' || c == '$';
+        || c == '_' || c == '$' || c == '#';
 }
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
@@ -50,10 +50,6 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static ScopeKind peekScope(ScopeKind* position) {
-    return position[0];
-}
-
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
     return { (uint32_t)(position - state.lines.back().begin), (uint32_t)state.lines.size() - 1 };
 }
@@ -72,12 +68,12 @@ struct WordAndPosition {
 };
 [[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, WordStringTable& wordTable) {
     const char* wordBegin = position;
-    uint32_t hash = 0;
+    Word::HashState hashState;
     do {
-        hash = Word::iterateHash(hash, position[0]);
+        Word::iterateHash(hashState, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    hash = Word::finalizeHash(hash);
+    auto hash = Word::finalizeHash(hashState);
     Word word = wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
@@ -105,7 +101,8 @@ struct WordAndPosition {
 };
 
 [[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
-    while (position[0] && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
+    position += 1;
+    while (position[0] != '\0' && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
         position += 1;
     }
     return position;
@@ -193,6 +190,8 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
         goto after_statement$no_emit;
     case State::Statement:
         goto statement$no_emit;
+    case State::AfterReturn:
+        goto after_return$no_emit;
     case State::ElseBranch:
         goto else_branch$no_emit;
     case State::CheckVarAfterLet:
@@ -218,6 +217,10 @@ void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorH
     case State::NamespaceDeclarationBody:
         goto namespace_declaration_body$no_emit;
     case State::TemplatedDeclaration:
+        VERIFY_NOT_REACHED();
+    case State::AfterTemplate:
+        goto after_template$no_emit;
+    case State::AfterTemplateParameters:
         VERIFY_NOT_REACHED();
     case State::FunctionDeclarationId:
         goto function_declaration_id$no_emit;
@@ -637,6 +640,33 @@ expression$as_then:
         carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
         // next expression
         goto expression$with_emit;
+    }
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9': {
+        do {
+            tokEnd += 1;
+        } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
+        // emitNode NodeKind::LiteralExpr
+        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    case '\'': {
+        tokEnd = skipToEndOfCharacterLiteral(tokEnd);
+        VERIFY(tokEnd[0] == '\'');
+        tokEnd += 1;
+        // emitNode NodeKind::LiteralExpr
+        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // next after_expression
+        goto after_expression$with_emit;
     }
     case 'a':
     case 'b':
@@ -1451,6 +1481,33 @@ after_expression$as_then:
         errorToken = Token::Tilde;
         goto handle_parse_error;
     }
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9': {
+        do {
+            tokEnd += 1;
+        } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
+        // -> error
+        // error
+        errorToken = Token::Literal;
+        goto handle_parse_error;
+    }
+    case '\'': {
+        tokEnd = skipToEndOfCharacterLiteral(tokEnd);
+        VERIFY(tokEnd[0] == '\'');
+        tokEnd += 1;
+        // -> error
+        // error
+        errorToken = Token::Literal;
+        goto handle_parse_error;
+    }
     case 'a':
     case 'b':
     case 'c':
@@ -1868,7 +1925,7 @@ maybe_designated_argument$no_emit:
     parseState = State::MaybeDesignatedArgument;
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
+        if (next != '=' && next != '>') {
             tokEnd += 1;
             // updateKind NodeKind::DesignateArgument
             state.nodes.back().setKind(NodeKind::DesignateArgument);
@@ -2231,6 +2288,14 @@ statement$as_then:
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
+            if (word == words["return"]) {
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitNode NodeKind::ReturnStmt
+                carriedEmitNodeKind = NodeKind::ReturnStmt;
+                // next after_return
+                goto after_return$with_emit;
+            }
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
@@ -2247,6 +2312,33 @@ statement$as_then:
     }
     // pushScope ScopeKind::LeftExpr
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
+    // then expression
+    goto expression$as_then;
+
+    // LinearState after_return
+after_return$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+after_return$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterReturn;
+    if (std::string_view(tokEnd, 1) == ";"sv) {
+        tokEnd += 1;
+        // popScope ScopeKind::RightExpr
+        {
+            auto result = popScope(scopePosition, ScopeKind::RightExpr);
+            if (result == nullptr) {
+                errorToken = Token::SemiColon;
+                goto handle_parse_error;
+            }
+            scopePosition = result;
+        }
+        // updateKind NodeKind::EmptyReturnStmt
+        state.nodes.back().setKind(NodeKind::EmptyReturnStmt);
+        // next after_statement
+        goto after_statement$no_emit;
+    }
     // then expression
     goto expression$as_then;
 
@@ -2352,7 +2444,7 @@ after_variable_declaration_id$no_emit:
     }
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
+        if (next != '=' && next != '>') {
             tokEnd += 1;
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -2435,6 +2527,19 @@ after_parameters$no_emit:
         }
         // then after_function_parameters
         goto after_function_parameters$as_then;
+    }
+    // ifScope ScopeKind::TemplateParameters
+    if (scopePosition[0] == ScopeKind::TemplateParameters) {
+        // popScope ScopeKind::TemplateParameters
+        {
+            auto result = popScope(scopePosition, ScopeKind::TemplateParameters);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // then after_template_parameters
+        goto after_template_parameters$as_then;
     }
     // then error
     goto error$as_then;
@@ -2638,6 +2743,10 @@ templated_declaration$as_then:
         }
         if (word.keyword()) {
         [[maybe_unused]] templated_declaration$keyword_check:
+            if (word == words["template"]) {
+                // next after_template
+                goto after_template$no_emit;
+            }
             if (word == words["fn"]) {
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
@@ -2671,6 +2780,26 @@ templated_declaration$as_then:
     }
     // then no_declaration
     goto no_declaration$as_then;
+
+    // LinearState after_template
+after_template$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterTemplate;
+    if (std::string_view(tokEnd, 1) == "("sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::TemplateParameters
+        scopePosition = pushScope(scopePosition, ScopeKind::TemplateParameters);
+        // next first_parameter
+        goto first_parameter$no_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_template_parameters
+after_template_parameters$as_then:
+    // then templated_declaration
+    goto templated_declaration$as_then;
 
     // LinearState function_declaration_id
 function_declaration_id$no_emit:
@@ -2730,6 +2859,24 @@ after_function_parameters$as_then:
         tokEnd += 2;
         // pushScope ScopeKind::ReturnType
         scopePosition = pushScope(scopePosition, ScopeKind::ReturnType);
+        // next expression
+        goto expression$no_emit;
+    }
+    if (std::string_view(tokEnd, 2) == "=>"sv) {
+        tokEnd += 2;
+        // pushScope ScopeKind::FunctionBody
+        scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
+        // pushScope ScopeKind::RightExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+        // next expression
+        goto expression$no_emit;
+    }
+    if (std::string_view(tokEnd, 3) == "<=>"sv) {
+        tokEnd += 3;
+        // pushScope ScopeKind::FunctionBody
+        scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
+        // pushScope ScopeKind::RightExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
         // next expression
         goto expression$no_emit;
     }
@@ -3211,6 +3358,31 @@ error$as_then:
         tokEnd += 1;
         // error
         errorToken = Token::Tilde;
+        goto handle_parse_error;
+    }
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9': {
+        do {
+            tokEnd += 1;
+        } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
+        // error
+        errorToken = Token::Literal;
+        goto handle_parse_error;
+    }
+    case '\'': {
+        tokEnd = skipToEndOfCharacterLiteral(tokEnd);
+        VERIFY(tokEnd[0] == '\'');
+        tokEnd += 1;
+        // error
+        errorToken = Token::Literal;
         goto handle_parse_error;
     }
     case 'a':

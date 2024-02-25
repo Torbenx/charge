@@ -6,14 +6,14 @@ using namespace std::string_view_literals;
 
 namespace parse {
 
-static bool isWordBulkCharacter(uint8_t c) {
+static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
 static bool isWordFirstCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-        || c == '_' || c == '$';
+        || c == '_' || c == '$' || c == '#';
 }
 
 static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
@@ -50,10 +50,6 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static ScopeKind peekScope(ScopeKind* position) {
-    return position[0];
-}
-
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
     return { (uint32_t)(position - state.lines.back().begin), (uint32_t)state.lines.size() - 1 };
 }
@@ -72,12 +68,12 @@ struct WordAndPosition {
 };
 [[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, WordStringTable& wordTable) {
     const char* wordBegin = position;
-    uint32_t hash = 0;
+    Word::HashState hashState;
     do {
-        hash = Word::iterateHash(hash, position[0]);
+        Word::iterateHash(hashState, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    hash = Word::finalizeHash(hash);
+    auto hash = Word::finalizeHash(hashState);
     Word word = wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
@@ -105,7 +101,8 @@ struct WordAndPosition {
 };
 
 [[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
-    while (position[0] && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
+    position += 1;
+    while (position[0] != '\0' && position[0] != '\'' && position[0] != '\n' && position[0] != '\r') {
         position += 1;
     }
     return position;

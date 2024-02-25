@@ -121,6 +121,7 @@ enum class Token : uint8_t {
     Forward, // forward
     Assign, // assign
     Identifier,
+    Literal,
 };
 std::string_view nameString(Token);
 
@@ -138,6 +139,7 @@ enum class State {
     SingleOrCompoundStatement,
     AfterStatement,
     Statement,
+    AfterReturn,
     ElseBranch,
     CheckVarAfterLet,
     VariableDeclaration,
@@ -151,6 +153,8 @@ enum class State {
     AfterNamespaceDeclarationId,
     NamespaceDeclarationBody,
     TemplatedDeclaration,
+    AfterTemplate,
+    AfterTemplateParameters,
     FunctionDeclarationId,
     AfterFunctionDeclarationId,
     AfterFunctionParameters,

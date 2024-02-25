@@ -11,16 +11,24 @@
 struct Word {
     static constexpr int ID_BITS = 3;
     static constexpr uint32_t MAX_ID = (1u << ID_BITS) - 1;
-    static constexpr uint32_t iterateHash(uint32_t hash, uint8_t c) {
-        return hash + (hash >> 5) + (hash << 7) + (c << 26) + c;
+    struct HashState {
+        uint32_t hash = 0;
+        uint32_t latent = 0;
+        HashState() = default;
+    };
+    static constexpr void iterateHash(HashState& state, uint8_t c) {
+        // state.hash = state.hash + (state.hash >> 5) + (state.hash << 7) + (c << 26) + c;
+        uint32_t newHash = state.latent + (state.hash >> 5) + (c << 26);
+        state.latent = state.hash + (state.hash << 7) + c;
+        state.hash = newHash;
     }
-    static constexpr uint32_t finalizeHash(uint32_t hash) {
-        return hash & ~((1u << Word::ID_BITS) - 1);
+    static constexpr uint32_t finalizeHash(HashState state) {
+        return (state.hash + state.latent) & ~((1u << Word::ID_BITS) - 1);
     }
     static constexpr uint32_t hash(std::string_view str) {
-        uint32_t hash = 0;
+        HashState hash;
         for (char c : str)
-            hash = iterateHash(hash, c);
+            iterateHash(hash, c);
         return finalizeHash(hash);
     }
 

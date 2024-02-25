@@ -35,7 +35,8 @@ std::string_view nameString(NodeKind);
     SCOPE(ReturnType)         \
     SCOPE(FunctionParameters) \
     SCOPE(Type)               \
-    SCOPE(HasTypeExpr)
+    SCOPE(HasTypeExpr)        \
+    SCOPE(TemplateParameters)
 
 enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,

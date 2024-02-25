@@ -34,6 +34,12 @@ fn f5(in x: type, in y): { }
 // expect-node FunctionDecl; expect-node IdentifierExpr; expect-node CompoundStmt; expect-node EmptyNode
 fn f6() -> type: { }
 
+// expect-node FunctionDecl; expect-node IdentifierExpr; expect-node ExpressionStmt;
+fn g1() => value;
+
+// expect-node FunctionDecl; expect-node IdentifierExpr; expect-node ExpressionStmt;
+fn g2() <=> value;
+
 // expect-node StructTypeDecl
 struct S1: { }
 
@@ -79,3 +85,15 @@ static w2 = init;
 
 // expect-node StaticLetDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 static w3: type = init;
+
+// expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T) struct T1: { }
+
+// expect-node LetParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T: type) struct T1: { }
+
+// expect-node LetParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T = init) struct T1: { }
+
+// expect-node LetParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T: type = init) struct T1: { }

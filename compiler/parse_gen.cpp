@@ -168,6 +168,8 @@ std::string_view nameString(Token token) {
         return "Assign";
     case Token::Identifier:
         return "Identifier";
+    case Token::Literal:
+        return "Literal";
     }
 }
 
@@ -199,6 +201,8 @@ std::string_view nameString(State state) {
         return "AfterStatement";
     case State::Statement:
         return "Statement";
+    case State::AfterReturn:
+        return "AfterReturn";
     case State::ElseBranch:
         return "ElseBranch";
     case State::CheckVarAfterLet:
@@ -225,6 +229,10 @@ std::string_view nameString(State state) {
         return "NamespaceDeclarationBody";
     case State::TemplatedDeclaration:
         return "TemplatedDeclaration";
+    case State::AfterTemplate:
+        return "AfterTemplate";
+    case State::AfterTemplateParameters:
+        return "AfterTemplateParameters";
     case State::FunctionDeclarationId:
         return "FunctionDeclarationId";
     case State::AfterFunctionDeclarationId:

@@ -45,8 +45,7 @@ EXPR(CompareLessEqualExpr, BinaryOperatorExpr, Relational)
 EXPR(CompareGreaterExpr, BinaryOperatorExpr, Relational)
 EXPR(CompareGreaterEqualExpr, BinaryOperatorExpr, Relational)
 
-EXPR(NumericLiteralExpr, NumericLiteralExpr, Primary)
-EXPR(CharacterLiteralExpr, CharacterLiteralExpr, Primary)
+EXPR(LiteralExpr, LiteralExpr, Primary)
 
 EXPR(CallExpr, CallExpr, Postfix)
 EXPR(IndexExpr, CallExpr, Postfix)
