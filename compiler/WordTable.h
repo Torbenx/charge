@@ -111,6 +111,7 @@ struct WordTable : WordTableView {
 
     constexpr void rehash();
     constexpr void maybeRehash();
+    constexpr bool insertWord(Word word, uint32_t payload);
 
     constexpr int_t entryCount() const { return usedBuckets; }
 };
@@ -137,6 +138,16 @@ constexpr WordTableView::FindResult WordTableView::continueFindWord(Word word, L
         if (entry.word == word)
             return { state, true };
     }
+}
+
+constexpr bool WordTable::insertWord(Word word, uint32_t payload) {
+    auto result = findWord(word);
+    if (!result.found) {
+        entries[result.bucket] = { word, payload };
+        usedBuckets += 1;
+        maybeRehash();
+    }
+    return result.found;
 }
 
 constexpr void WordTable::maybeRehash() {

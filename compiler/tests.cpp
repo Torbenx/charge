@@ -1,13 +1,12 @@
-#include "WordTable.h"
-#include "log.h"
-#include "parse.h"
+#include <WordTable.h>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <list>
+#include <log.h>
+#include <parse/parse_impl.h>
 #include <vector>
-
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -46,7 +45,6 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         }
         bool empty() const { return queue.empty(); }
     };
-    CommandQueue commandQueue;
 
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
@@ -55,7 +53,13 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "benchmark", "expect-expected-parameter-name", "expect-parameter-modifier-not-allowed",
         "expect-invalid-parameter-modifier", "expect-unexpected-after-parameter", "expect-expected-semicolon",
         "expect-expected-function-body", "expect-expected-if-body", "expect-expected-else-body");
+
     WordStringTable wordTable { words };
+    glue::Context context;
+    CommandQueue commandQueue;
+
+    TestInstrumenter(std::string_view source)
+        : context { source } { }
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
         VERIFY_NOT_REACHED();
@@ -74,18 +78,18 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         VERIFY_NOT_REACHED();
     }
 
-    void visitWhitespace(const parse::Output& output, parse::WhitespaceInfo info) {
+    void visitWhitespace(parse::WhitespaceInfo info) {
         if (info.tag() == parse::WhitespaceKind::LineComment) {
-            handleComment(output.whitespaceSpelling(info).substr(2));
+            handleComment(info, context.parseOutput.whitespaceSpelling(info).substr(2));
         }
         if (info.tag() == parse::WhitespaceKind::BlockComment) {
-            auto spelling = output.whitespaceSpelling(info);
-            handleComment(spelling.substr(2, spelling.length() - 4));
+            auto spelling = context.parseOutput.whitespaceSpelling(info);
+            handleComment(info, spelling.substr(2, spelling.length() - 4));
         }
     }
 
-    void visitNode(const parse::Output& output, parse::Node node) {
-        std::cout << nameString(node.kind()) << '\n';
+    void visitNode(parse::Node node) {
+        // std::cout << nameString(node.kind()) << '\n';
 
         if (commandQueue.empty())
             return;
@@ -94,8 +98,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
                     expect_eq(pair.value, nameString(node.kind()), "", &cmd, &pair);
-                //else if (pair.key == words["packed-range-begin-column"])
-                //    expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
+                // else if (pair.key == words["packed-range-begin-column"])
+                //     expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -104,25 +108,20 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             expect_eq(node.kind(), parse::NodeKind::IdentifierExpr);
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    expect_eq(pair.value, output.wordTable.view(Word::fromUint(node.data())), "", &cmd, &pair);
+                    expect_eq(pair.value, context.wordTable.view(Word::fromUint(node.data())), "", &cmd, &pair);
                 else
                     invalidKey(&cmd, &pair);
             }
         }
     }
 
-    void runTest(std::filesystem::path file, std::string_view source) {
-        parse::Output output(source);
-        parse::parseExpression(source.data(), output, this);
-        // TODO: Do this somewhere else
-        auto endLoc = parse::SourceLocation(0, output.lines.size());
-        output.nodes.push_back({ parse::NodeKind::EOS, endLoc });
-        output.whitespace.push_back({ { parse::WhitespaceKind::EOS, endLoc } });
+    void runTest() {
+        parse::parseImpl(context.parseOutput.source.data(), context, this);
 
-        visit(output);
+        visit(context.parseOutput);
     }
 
-    void handleComment(std::string_view comment) {
+    void handleComment(parse::WhitespaceInfo whitespace, std::string_view comment) {
         auto skipWhitespace = [&]() {
             while (comment.length() > 0 && (comment.front() == ' ' || comment.front() == '\t'))
                 comment = comment.substr(1);
@@ -179,18 +178,17 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
                 verify(commandQueue.empty(), "", &command);
                 break;
             }
-            /*case words["expect-source-position"].asUint(): {
-                SourcePosition pos = lex->sourcePosition(lex->tokRange().first());
+            case words["expect-source-position"].asUint(): {
                 for (const auto& pair : command.pairs) {
                     if (pair.key == words["line"])
-                        expect_eq<uint32_t>(pos.line, parseInteger(pair.value), "", &command, &pair);
+                        expect_eq<uint32_t>(whitespace.lineNumber(), parseInteger(pair.value), "", &command, &pair);
                     else if (pair.key == words["column"])
-                        expect_eq<uint32_t>(pos.column, parseInteger(pair.value), "", &command, &pair);
+                        expect_eq<uint32_t>(whitespace.column(), parseInteger(pair.value), "", &command, &pair);
                     else
                         invalidKey(&command, &pair);
                 }
                 break;
-            }*/
+            }
             default:
                 commandQueue.push(std::move(command));
                 break;
@@ -253,11 +251,11 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         return cmd;
     }
 
-    void invalidToken(parse::Token token, parse::State state, parse::ScopeKind* scopes, parse::Output& output) override {
+    void invalidToken(parse::Token token, parse::State state, parse::ScopeKind* scopes, glue::Context& context) override {
         fmt::println("");
         fmt::println(
             "Invalid token '{}' for state '{}' and scope '{}' on line {}",
-            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), output.lines.size());
+            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.parseOutput.lines.size());
         fmt::println("scopes:");
         for (;;) {
             fmt::println("  {}", parse::nameString(*scopes));

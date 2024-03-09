@@ -1,8 +1,9 @@
-#include "WordTable.h"
-#include "parse.h"
+#include <WordTable.h>
+#include <parse/parse_impl.h>
 #include <utility>
 
 using namespace std::string_view_literals;
+using DeclarationKind = glue::DeclarationNode::Kind;
 
 namespace parse {
 
@@ -51,22 +52,22 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
 }
 
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
-    return { (uint32_t)(position - state.lines.back().begin), (uint32_t)state.lines.size() - 1 };
+    return { (uint32_t)(position - state.parseOutput.lines.back().begin), (uint32_t)state.parseOutput.lines.size() - 1 };
 }
 
 [[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
+    state.parseOutput.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
 static void markLineBegin(const char* position, ParseState& state) {
-    state.lines.push_back({ position });
+    state.parseOutput.lines.push_back({ position });
 }
 
 struct WordAndPosition {
     const char* position;
     Word word;
 };
-[[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, WordStringTable& wordTable) {
+[[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, ParseState& state) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -74,7 +75,7 @@ struct WordAndPosition {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
-    Word word = wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    Word word = state.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
 
@@ -109,7 +110,7 @@ struct WordAndPosition {
 };
 
 [[gnu::noinline]] static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
-    state.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+    state.parseOutput.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
 }
 
 [[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
@@ -146,7 +147,25 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-void parseExpression(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
+[[gnu::noinline]] static void commitNamedDeclaration(DeclarationKind kind, Word name, ParseState& state) {
+    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
+    bool ret = state.pushNamedScope(kind, name);
+    if (ret)
+        VERIFY(kind == DeclarationKind::Namespace);
+}
+
+[[gnu::noinline]] static void commitUnnamedDeclaration(DeclarationKind kind, ParseState& state) {
+    // fmt::println("commitDeclaration");
+    state.pushUnnamedScope(kind);
+}
+
+static void endDeclaration(ParseState& state) {
+    // fmt::println("endDeclaration {}", state.wordTable.view(state.currentScope()->name()));
+    state.popScope();
+    VERIFY(state.currentScope() != nullptr);
+}
+
+void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "parse_gen.h"
+#include <parse/parse_gen.h>
 
 #include <utility>
 #include <vector>
@@ -129,9 +129,9 @@ struct Output {
     std::vector<Node> nodes;
     std::vector<LineInfo> lines;
     std::vector<WhitespaceInfo> whitespace;
-    WordStringTable wordTable { words };
     std::string_view source;
-    Output(std::string_view source) {
+    Output(std::string_view source)
+        : source(source) {
         lines.push_back({ source.data() });
     }
 
@@ -143,7 +143,6 @@ struct Output {
         return std::string_view(sourcePointer(info.location()), info.length);
     }
 };
-using ParseState = Output;
 
 template<typename Impl>
 struct OutputVisitor {
@@ -156,10 +155,10 @@ struct OutputVisitor {
         for (;;) {
             auto result = *nodeIt <=> *whitespaceIt;
             if (result < 0) {
-                impl()->visitNode(output, *nodeIt);
+                impl()->visitNode(*nodeIt);
                 nodeIt += 1;
             } else if (result > 0) {
-                impl()->visitWhitespace(output, *whitespaceIt);
+                impl()->visitWhitespace(*whitespaceIt);
                 whitespaceIt += 1;
             } else {
                 VERIFY(nodeIt + 1 == output.nodes.end() && whitespaceIt + 1 == output.whitespace.end());
@@ -168,13 +167,5 @@ struct OutputVisitor {
         }
     }
 };
-
-struct ErrorHandler {
-    virtual void invalidCharaceter() { }
-    virtual void invalidToken(Token, State, ScopeKind*, Output&) { }
-    virtual ~ErrorHandler() = default;
-};
-
-void parseExpression(const char* position, ParseState& state, ErrorHandler* errorHandler);
 
 }

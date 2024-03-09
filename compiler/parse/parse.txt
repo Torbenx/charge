@@ -336,14 +336,12 @@ LinearState after_statement() then statement
         ifScope ScopeKind::FunctionBody
             popScope ScopeKind::FunctionBody
             then after_declaration
-        ifScope ScopeKind::Type
-            then member_declaration
-        ifScope ScopeKind::Namespace
-            then namespace_declaration
+        ifScope ScopeKind::Type, ScopeKind::Namespace
+            then after_declaration
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         pushScope ScopeKind::PlainStatement
 
-LinearState statement() then expression
+SwitchState statement() then expression
     keyword if
         pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
         pushScope ScopeKind::IfExprOrStmt
@@ -447,7 +445,7 @@ LinearState parameter() then variable_declaration
         nodeKind = NodeKind::VarParameter
         next variable_declaration
     then
-        nodeKind = NodeKind::LetParameter
+        nodeKind = NodeKind::ImplicitKindParameter
 
 # --- Declarations
 
@@ -456,12 +454,15 @@ LinearState no_declaration() then error
         popScope ScopeKind::Namespace, ScopeKind::Type
         next after_declaration
     end
+        popScope ScopeKind::Namespace
+        popScope ScopeKind::Invalid
 
 LinearState namespace_declaration() then templated_declaration
     keyword namespace
         next namespace_declaration_id
 LinearState namespace_declaration_id() then error
     identifier
+        commitDeclaration DeclarationKind::Namespace
         next after_namespace_declaration_id
 LinearState after_namespace_declaration_id() then error
     punctuation :
@@ -493,6 +494,7 @@ LinearState after_template_parameters() then templated_declaration
 
 LinearState function_declaration_id() then error
     identifier
+        commitDeclaration DeclarationKind::Function
         emitNode NodeKind::FunctionDecl
         next after_function_declaration_id
 LinearState after_function_declaration_id() then error
@@ -517,6 +519,7 @@ LinearState after_function_parameters() then error
 
 LinearState type_declaration_id(nodeKind) then error
     identifier
+        commitDeclaration DeclarationKind::Type
         emitNode nodeKind
         next after_type_declaration_id
 LinearState after_type_declaration_id() then error
@@ -529,25 +532,34 @@ LinearState type_declaration_body() then error
 LinearState member_declaration() then templated_declaration
     keyword has
         pushScope ScopeKind::HasTypeExpr
+        commitDeclaration DeclarationKind::Type
         emitNode NodeKind::HasMemberDecl
         next expression
     identifier
+        commitDeclaration DeclarationKind::Variable
         emitNode NodeKind::MemberDecl
         next after_variable_declaration_id
 
 LinearState after_static() then error
     keyword var
         nodeKind = NodeKind::StaticVarDecl
-        next variable_declaration
+        next static_variable_declaration
     keyword let
         nodeKind = NodeKind::StaticLetDecl
-        next variable_declaration
+        next static_variable_declaration
     identifier
+        commitDeclaration DeclarationKind::Variable
         emitNode NodeKind::StaticLetDecl
+        next after_variable_declaration_id
+LinearState static_variable_declaration(nodeKind) then error
+    identifier
+        commitDeclaration DeclarationKind::Variable
+        emitNode nodeKind
         next after_variable_declaration_id
 
 LinearState after_declaration() then error
     then
+        endDeclaration
         ifScope ScopeKind::Type
             then member_declaration
         ifScope ScopeKind::Namespace

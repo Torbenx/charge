@@ -1,6 +1,6 @@
 #pragma once
 
-#include "WordTable.h"
+#include <WordTable.h>
 
 namespace parse {
 
@@ -27,9 +27,11 @@ inline constexpr ConstWordStringTable words {
     keyword("trait"),
     keyword("object"),
     keyword("fn"),
-    keyword("static"),
-    keyword("template"),
     keyword("has"),
+    keyword("static"),
+    keyword("incomplete"),
+    keyword("virtual"),
+    keyword("template"),
     keyword("var"),
     keyword("let"),
     keyword("in"),
@@ -37,6 +39,7 @@ inline constexpr ConstWordStringTable words {
     keyword("out"),
     keyword("forward"),
     keyword("assign"),
+    keyword("porperty"),
 };
 enum class Token : uint8_t {
     LeftParen, // (
@@ -110,9 +113,11 @@ enum class Token : uint8_t {
     Trait, // trait
     Object, // object
     Fn, // fn
-    Static, // static
-    Template, // template
     Has, // has
+    Static, // static
+    Incomplete, // incomplete
+    Virtual, // virtual
+    Template, // template
     Var, // var
     Let, // let
     In, // in
@@ -120,8 +125,10 @@ enum class Token : uint8_t {
     Out, // out
     Forward, // forward
     Assign, // assign
+    Porperty, // porperty
     Identifier,
     Literal,
+    EOS
 };
 std::string_view nameString(Token);
 
@@ -163,6 +170,7 @@ enum class State {
     TypeDeclarationBody,
     MemberDeclaration,
     AfterStatic,
+    StaticVariableDeclaration,
     AfterDeclaration,
     Error,
 };

@@ -5,7 +5,7 @@
 // expect-node OutParameter; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node VarParameter; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt
-// expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f1(in x, inout y, out z, var a, let b, c): { }
 
@@ -64,7 +64,7 @@ struct H1: {
     has m();
 
     has q: {
-        fn test(): { }
+        fn test2(): { }
     }
 }
 
@@ -86,14 +86,14 @@ static w2 = init;
 // expect-node StaticLetDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 static w3: type = init;
 
-// expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
 template(T) struct T1: { }
 
-// expect-node LetParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
-template(T: type) struct T1: { }
+// expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T: type) struct T2: { }
 
-// expect-node LetParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
-template(T = init) struct T1: { }
+// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T = init) struct T3: { }
 
-// expect-node LetParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
-template(T: type = init) struct T1: { }
+// expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+template(T: type = init) struct T4: { }

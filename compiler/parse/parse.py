@@ -14,9 +14,9 @@ keywords = [
     "if", "elif", "else", "match", "for", "while", "do",
     "return", "break", "continue", "loop", "guard", "try", "catch",
     "with", "analysis", "assert",
-    "namespace", "struct", "trait", "object", "fn", "static",
-    "template", "has",
-    "var", "let", "in", "inout", "out", "forward", "assign"
+    "namespace", "struct", "trait", "object", "fn", "has",
+    "static",  "incomplete", "virtual", "template",
+    "var", "let", "in", "inout", "out", "forward", "assign", "porperty"
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]
@@ -92,6 +92,8 @@ class ThenCase(Case):
 class EndCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
+    def cppName(self):
+        return "EOS"
 
 @dataclasses.dataclass
 class NextInstruction:
@@ -155,6 +157,18 @@ class IfScopeInstruction:
         for expr in self.scopeKindExprs[1:]:
             ret += ", " + expr
         return ret
+
+@dataclasses.dataclass
+class CommitDeclarationInstruction:
+    declKindExpr: str
+
+    def format(self):
+        return "commitDeclaration " + self.declKindExpr
+
+@dataclasses.dataclass
+class EndDeclarationInstruction:
+    def format(self):
+        return "endDeclaration"
 
 @dataclasses.dataclass
 class ErrorInstruction:
@@ -373,6 +387,12 @@ class Parser:
             elif first == "then":
                 instructions.append(ThenInstruction(self.parseWord()))
                 self.advanceLine()
+            elif first == "commitDeclaration":
+                instructions.append(CommitDeclarationInstruction(self.parseExpr()))
+                self.advanceLine()
+            elif first == "endDeclaration":
+                instructions.append(EndDeclarationInstruction())
+                self.advanceLine()
             else:
                 while self.line[0] == ' ':
                     self.line = self.line[1:]
@@ -418,11 +438,11 @@ def linearIf(commonPrefix: str, state):
     exactMatch: str | None = None
     for p in puncs:
         if len(p) == len(commonPrefix):
-            assert(exactMatch == None)
+            assert exactMatch == None
             exactMatch = p
         else:
             possibleContinuations.add(p[len(commonPrefix)])
-    assert(exactMatch != None)
+    assert exactMatch != None
 
     if possibleContinuations:
         line("char next = tokEnd[" + str(len(commonPrefix)) + "];")
@@ -453,11 +473,11 @@ def linearIf(commonPrefix: str, state):
 
 def checkForPunctuation(punc, handler):
     puncs = sorted(filter(lambda p: (p.startswith(punc)), punctuations))
-    assert(len(puncs) > 0)
+    assert len(puncs) > 0
     line("if (std::string_view(tokEnd, " + str(len(punc)) + ") == \"" + punc + "\"sv) {")
     with indent():
         if len(puncs) == 1:
-            assert(puncs[0] == punc)
+            assert puncs[0] == punc
             line("tokEnd += " + str(len(punc)) + ";")
             handler()
         else:
@@ -496,7 +516,7 @@ def rememberState(state):
 def readWord():
     line("{")
     with indent():
-        line("auto wordAndPos = readWord(tokEnd, state.wordTable);")
+        line("auto wordAndPos = readWord(tokEnd, state);")
         line("tokEnd = wordAndPos.position;")
         line("word = wordAndPos.word;")
     line("}")
@@ -553,7 +573,7 @@ def generateState(state):
     elif state.kind == "LinearState":
         generateLinearState(state)
     else:
-        assert(False)
+        assert False
 
 def generateSwitchState(state):
     line("switch (tokEnd[0]) {")
@@ -658,6 +678,8 @@ def generateLinearState(state):
         line("if (tokEnd[0] == '\\0') {")
         with indent():
             generateCaseBody(endCase)
+            emitNode("NodeKind::EOS", "tokBegin", "tokEnd")
+            line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);")
             line("return;")
         line("}")
 
@@ -686,20 +708,20 @@ def generateInstructions(case, instructions, thenHandler):
         line("// " + inst.format())
         if type(inst) is EmitNodeInstruction:
             if inst.delayed:
-                assert(inst.tokenExpr is None)
+                assert inst.tokenExpr is None
                 line("carriedEmitNodeKind = "+ inst.nodeKindExpr + ";")
             elif inst.tokenExpr is None:
                 emitNode(inst.nodeKindExpr, "tokBegin", "tokEnd")
             else:
                 emitNode(inst.nodeKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
         elif type(inst) is UpdateKindInstruction:
-            line("state.nodes.back().setKind(" + inst.nodeKindExpr + ");")
+            line("state.parseOutput.nodes.back().setKind(" + inst.nodeKindExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
                 line("// inlined " + newState.name)
-                assert(newState.origins == [inst])
-                assert(newState.kind == "LinearState")
+                assert newState.origins == [inst]
+                assert newState.kind == "LinearState"
                 if inst.carriesEmitNode:
                     emitCarriedNode()
                 inlineTokenAdvancer()
@@ -711,7 +733,7 @@ def generateInstructions(case, instructions, thenHandler):
             if inst.leftName == "nodeKind":
                 line("nodeKind = " + inst.rightExpr + ";")
             else:
-                assert(False)
+                assert False
         elif type(inst) is PushScopeInstruction:
             line("scopePosition = pushScope(scopePosition, " + inst.scopeKindExpr + ");")
         elif type(inst) is PopScopeInstruction:
@@ -738,6 +760,13 @@ def generateInstructions(case, instructions, thenHandler):
             line("}")
         elif type(inst) is ThenInstruction:
             thenHandler(inst.newState)
+        elif type(inst) is CommitDeclarationInstruction:
+            if type(case) is IdentifierCase:
+                line("commitNamedDeclaration(" + inst.declKindExpr + ", std::bit_cast<Word>(nodeData), state);")
+            else:
+                line("commitUnnamedDeclaration(" + inst.declKindExpr + ", state);")
+        elif type(inst) is EndDeclarationInstruction:
+            line("endDeclaration(state);")
         elif type(inst) is ErrorInstruction:
             generateError(case)
         else:
@@ -832,7 +861,7 @@ generatedLines = []
 outputIndentation = 0
 lineNoIndent("#pragma once")
 lineNoIndent()
-lineNoIndent("#include \"WordTable.h\"")
+lineNoIndent("#include <WordTable.h>")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
@@ -851,6 +880,7 @@ with indent():
         line(keywordCppName(keyword) + ", // " + keyword)
     line(identifierCppName() + ",")
     line(literalCppName() + ",")
+    line("EOS")
 line("};")
 line("std::string_view nameString(Token);")
 lineNoIndent()
@@ -873,7 +903,7 @@ with open(currentDir / "parse_gen.h", "w") as f:
 # generate .cpp
 generatedLines = []
 outputIndentation = 0
-lineNoIndent("#include \"parse.h\"")
+lineNoIndent("#include <parse/Output.h>")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
@@ -895,6 +925,9 @@ with indent():
     line("case Token::" + literalCppName() + ":")
     with indent():
         line("return \"" + literalCppName() + "\";")
+    line("case Token::EOS:")
+    with indent():
+        line("return \"EOS\";")
     line("}")
 line("}")
 lineNoIndent()

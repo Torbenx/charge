@@ -1,4 +1,4 @@
-#include "parse.h"
+#include <parse/Output.h>
 
 namespace parse {
 
@@ -146,12 +146,16 @@ std::string_view nameString(Token token) {
         return "Object";
     case Token::Fn:
         return "Fn";
-    case Token::Static:
-        return "Static";
-    case Token::Template:
-        return "Template";
     case Token::Has:
         return "Has";
+    case Token::Static:
+        return "Static";
+    case Token::Incomplete:
+        return "Incomplete";
+    case Token::Virtual:
+        return "Virtual";
+    case Token::Template:
+        return "Template";
     case Token::Var:
         return "Var";
     case Token::Let:
@@ -166,10 +170,14 @@ std::string_view nameString(Token token) {
         return "Forward";
     case Token::Assign:
         return "Assign";
+    case Token::Porperty:
+        return "Porperty";
     case Token::Identifier:
         return "Identifier";
     case Token::Literal:
         return "Literal";
+    case Token::EOS:
+        return "EOS";
     }
 }
 
@@ -249,6 +257,8 @@ std::string_view nameString(State state) {
         return "MemberDeclaration";
     case State::AfterStatic:
         return "AfterStatic";
+    case State::StaticVariableDeclaration:
+        return "StaticVariableDeclaration";
     case State::AfterDeclaration:
         return "AfterDeclaration";
     case State::Error:

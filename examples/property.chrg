@@ -1,0 +1,12 @@
+
+struct BoolArray: {
+    has std::index{(int) -> bool}: {
+        fn index(index: int) -> (property b: bool);
+        special_case fn index(i: int) -> (out b: bool): {
+            b = getBit(i);
+        }
+        special_case fn index(i: int) -> (let b: bool): {
+            setBit(i, b);
+        }
+    }
+}

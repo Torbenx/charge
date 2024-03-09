@@ -89,6 +89,7 @@ STMT(InOutParameter, Parameter, Primary)
 STMT(OutParameter, Parameter, Primary)
 STMT(LetParameter, Parameter, Primary)
 STMT(VarParameter, Parameter, Primary)
+STMT(ImplicitKindParameter, Parameter, Primary)
 
 // ------ declarations ------
 NODE(FunctionDecl, FunctionDecl, Decl)
