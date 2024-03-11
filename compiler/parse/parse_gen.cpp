@@ -237,6 +237,8 @@ std::string_view nameString(State state) {
         return "NamespaceDeclarationBody";
     case State::TemplatedDeclaration:
         return "TemplatedDeclaration";
+    case State::TemplatedDeclarationWithAttributes:
+        return "TemplatedDeclarationWithAttributes";
     case State::AfterTemplate:
         return "AfterTemplate";
     case State::AfterTemplateParameters:

@@ -59,7 +59,7 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
     state.parseOutput.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
-static void markLineBegin(const char* position, ParseState& state) {
+[[gnu::noinline]] static void markLineBegin(const char* position, ParseState& state) {
     state.parseOutput.lines.push_back({ position });
 }
 
@@ -147,16 +147,31 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitNamedDeclaration(DeclarationKind kind, Word name, ParseState& state) {
-    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    bool ret = state.pushNamedScope(kind, name);
+[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, NodeHandle parseLocation, ParseState& state) {
+    bool ret = state.pushStaticScope(kind, name, parseLocation);
     if (ret)
         VERIFY(kind == DeclarationKind::Namespace);
 }
 
-[[gnu::noinline]] static void commitUnnamedDeclaration(DeclarationKind kind, ParseState& state) {
-    // fmt::println("commitDeclaration");
-    state.pushUnnamedScope(kind);
+[[gnu::noinline]] static void commitHasMemberDeclaration(NodeHandle parseLocation, ParseState& state) {
+    state.pushHasScope(parseLocation);
+}
+
+[[gnu::noinline]] static void commitMemberDeclaration(Word name, NodeHandle parseLocation, ParseState& state) {
+    bool ret = state.pushMemberScope(name, parseLocation);
+    VERIFY(!ret);
+}
+
+template<DeclarationKind kind>
+static void commitDeclaration(Word name, NodeHandle declarationBegin, ParseState& state) {
+    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
+    if constexpr (kind == DeclarationKind::HasMember) {
+        commitHasMemberDeclaration(declarationBegin, state);
+    } else if constexpr (kind == DeclarationKind::Member) {
+        commitMemberDeclaration(name, declarationBegin, state);
+    } else {
+        commitStaticDeclaration(kind, name, declarationBegin, state);
+    }
 }
 
 static void endDeclaration(ParseState& state) {
@@ -175,6 +190,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     NodeKind carriedEmitNodeKind = (NodeKind)0;
     Word word;
     uint32_t nodeData = 0;
+    NodeHandle declarationBegin;
 
     NodeKind nodeKind = (NodeKind)0;
 

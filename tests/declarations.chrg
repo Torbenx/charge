@@ -86,14 +86,14 @@ static w2 = init;
 // expect-node StaticLetDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 static w3: type = init;
 
-// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
 template(T) struct T1: { }
 
-// expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
 template(T: type) struct T2: { }
 
-// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
 template(T = init) struct T3: { }
 
-// expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
 template(T: type = init) struct T4: { }

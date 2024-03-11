@@ -100,6 +100,10 @@ NODE(StaticVarDecl, Decl, Decl)
 NODE(MemberDecl, MemberDecl, Decl)
 NODE(HasMemberDecl, HasMemberDecl, Decl)
 
+NODE(TemplateAttribute, Attribute, Attribute)
+NODE(IncompleteAttribute, Attribute, Attribute)
+NODE(VirtualAttribute, Attribute, Attribute)
+
 
 #undef EXPR
 #undef STMT

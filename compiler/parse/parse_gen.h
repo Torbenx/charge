@@ -160,6 +160,7 @@ enum class State {
     AfterNamespaceDeclarationId,
     NamespaceDeclarationBody,
     TemplatedDeclaration,
+    TemplatedDeclarationWithAttributes,
     AfterTemplate,
     AfterTemplateParameters,
     FunctionDeclarationId,

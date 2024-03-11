@@ -7,6 +7,10 @@
 
 namespace parse {
 
+struct NodeHandle {
+    uint32_t offset;
+};
+
 enum class NodeKind : uint8_t {
 #define NODE(kind, type, prec) kind,
 
@@ -141,6 +145,10 @@ struct Output {
 
     std::string_view whitespaceSpelling(WhitespaceInfo info) const {
         return std::string_view(sourcePointer(info.location()), info.length);
+    }
+
+    NodeHandle currentNode() const {
+        return { (uint32_t)nodes.size() };
     }
 };
 

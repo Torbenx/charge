@@ -13,30 +13,41 @@ struct Context {
     Context(std::string_view source)
         : parseOutput(source) {
         m_currentNode = allocate<DeclarationNode>();
-        std::construct_at(m_currentNode, DeclarationNode::Kind::Namespace, Word(), nullptr);
+        std::construct_at(m_currentNode, DeclarationNode::Kind::Namespace, Word(), nullptr, parse::NodeHandle());
     }
 
     DeclarationNode* currentScope() { return m_currentNode; }
     void popScope() {
         m_currentNode = m_currentNode->declaringNode();
     }
-    bool pushNamedScope(DeclarationNode::Kind kind, Word name) {
+    bool pushStaticScope(DeclarationNode::Kind kind, Word name, parse::NodeHandle parseLocation) {
         auto node = m_currentNode->findChild(name);
         if (node.has_value()) {
             m_currentNode = node.value();
             return true;
         }
         DeclarationNode* newNode = allocate<DeclarationNode>();
-        std::construct_at(newNode, kind, name, m_currentNode);
-        m_currentNode->addNamedChild(name, newNode);
+        std::construct_at(newNode, kind, name, m_currentNode, parseLocation);
+        m_currentNode->addStaticChild(name, newNode);
         m_currentNode = newNode;
         return false;
     }
-    void pushUnnamedScope(DeclarationNode::Kind kind) {
+    void pushHasScope(parse::NodeHandle parseLocation) {
         DeclarationNode* newNode = allocate<DeclarationNode>();
-        std::construct_at(newNode, kind, Word(), m_currentNode);
-        m_currentNode->addUnnamedChild(newNode);
+        std::construct_at(newNode, DeclarationNode::Kind::HasMember, Word(), m_currentNode, parseLocation);
+        m_currentNode->addHasMember(newNode);
         m_currentNode = newNode;
+    }
+    bool pushMemberScope(Word name, parse::NodeHandle parseLocation) {
+        auto node = m_currentNode->findChild(name);
+        if (node.has_value()) {
+            return true;
+        }
+        DeclarationNode* newNode = allocate<DeclarationNode>();
+        std::construct_at(newNode, DeclarationNode::Kind::Member, Word(), m_currentNode, parseLocation);
+        m_currentNode->addMember(name, newNode);
+        m_currentNode = newNode;
+        return false;
     }
 
     template<typename T>

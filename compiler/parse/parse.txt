@@ -474,7 +474,39 @@ LinearState namespace_declaration_body() then error
 
 LinearState templated_declaration() then no_declaration
     keyword template
+        rememberDeclarationBegin
         next after_template
+    keyword incomplete
+        rememberDeclarationBegin
+        emitNode NodeKind::IncompleteAttribute
+        next templated_declaration_with_attributes
+    keyword virtual
+        rememberDeclarationBegin
+        emitNode NodeKind::VirtualAttribute
+        next templated_declaration_with_attributes
+    keyword fn
+        rememberDeclarationBegin
+        next function_declaration_id
+    keyword struct
+        rememberDeclarationBegin
+        nodeKind = NodeKind::StructTypeDecl
+        next type_declaration_id
+    keyword object
+        rememberDeclarationBegin
+        nodeKind = NodeKind::ObjectTypeDecl
+        next type_declaration_id
+    keyword static
+        rememberDeclarationBegin
+        next after_static
+LinearState templated_declaration_with_attributes() then error
+    keyword template
+        next after_template
+    keyword incomplete
+        emitNode NodeKind::IncompleteAttribute
+        next templated_declaration_with_attributes
+    keyword virtual
+        emitNode NodeKind::VirtualAttribute
+        next templated_declaration_with_attributes
     keyword fn
         next function_declaration_id
     keyword struct
@@ -489,8 +521,9 @@ LinearState templated_declaration() then no_declaration
 LinearState after_template() then error
     punctuation (
         pushScope ScopeKind::TemplateParameters
+        emitNode NodeKind::TemplateAttribute
         next first_parameter
-LinearState after_template_parameters() then templated_declaration
+LinearState after_template_parameters() then templated_declaration_with_attributes
 
 LinearState function_declaration_id() then error
     identifier
@@ -532,11 +565,11 @@ LinearState type_declaration_body() then error
 LinearState member_declaration() then templated_declaration
     keyword has
         pushScope ScopeKind::HasTypeExpr
-        commitDeclaration DeclarationKind::Type
+        commitDeclaration DeclarationKind::HasMember
         emitNode NodeKind::HasMemberDecl
         next expression
     identifier
-        commitDeclaration DeclarationKind::Variable
+        commitDeclaration DeclarationKind::Member
         emitNode NodeKind::MemberDecl
         next after_variable_declaration_id
 

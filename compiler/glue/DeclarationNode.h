@@ -1,20 +1,13 @@
 #pragma once
 
-#include "WordTable.h"
+#include <WordTable.h>
+#include <parse/Output.h>
 #include <ranges>
 #include <utility>
 
 namespace sema {
 
 struct Program;
-
-}
-
-namespace parse {
-
-struct NodeHandle {
-    uint32_t offset;
-};
 
 }
 
@@ -27,12 +20,15 @@ public:
         Type,
         Variable,
         Function,
+        Member,
+        HasMember,
     };
 
-    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring)
+    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, parse::NodeHandle parseLocation)
         : m_kind(std::to_underlying(kind))
         , m_name(name)
-        , m_declaringDecl(declaring) { }
+        , m_declaringDecl(declaring)
+        , m_parseLocation(parseLocation) { }
 
     Kind kind() const { return (Kind)m_kind; }
     Word name() const { return m_name; }
@@ -49,12 +45,17 @@ public:
             return getPtr(result);
         return std::nullopt;
     }
-    bool addNamedChild(Word name, DeclarationNode* child) {
+    bool addStaticChild(Word name, DeclarationNode* child) {
         return m_namedChildren.insertWord(name, std::bit_cast<uint32_t>(relative_t(this, child)));
     }
 
-    void addUnnamedChild(DeclarationNode* child) {
-        m_unnamedChildren.emplace_back(this, child);
+    bool addMember(Word name, DeclarationNode* child) {
+        m_members.emplace_back(this, child);
+        return addStaticChild(name, child);
+    }
+
+    void addHasMember(DeclarationNode* child) {
+        m_members.emplace_back(this, child);
     }
 
     using relative_t = relative_pointer<DeclarationNode, DeclarationNode>;
@@ -63,13 +64,13 @@ public:
         return std::bit_cast<relative_t>(m_namedChildren.entries[state.bucket].payload).get(this);
     }
 
-    uint32_t m_kind : 2;
+    uint32_t m_kind : 3;
     Word m_name;
     DeclarationNode* m_declaringDecl;
     parse::NodeHandle m_parseLocation;
     sema::Program* m_program;
     WordTable m_namedChildren;
-    std::vector<relative_t> m_unnamedChildren;
+    std::vector<relative_t> m_members;
 };
 
 }

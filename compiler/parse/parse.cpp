@@ -59,7 +59,7 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
     state.parseOutput.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
-static void markLineBegin(const char* position, ParseState& state) {
+[[gnu::noinline]] static void markLineBegin(const char* position, ParseState& state) {
     state.parseOutput.lines.push_back({ position });
 }
 
@@ -147,16 +147,31 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitNamedDeclaration(DeclarationKind kind, Word name, ParseState& state) {
-    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    bool ret = state.pushNamedScope(kind, name);
+[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, NodeHandle parseLocation, ParseState& state) {
+    bool ret = state.pushStaticScope(kind, name, parseLocation);
     if (ret)
         VERIFY(kind == DeclarationKind::Namespace);
 }
 
-[[gnu::noinline]] static void commitUnnamedDeclaration(DeclarationKind kind, ParseState& state) {
-    // fmt::println("commitDeclaration");
-    state.pushUnnamedScope(kind);
+[[gnu::noinline]] static void commitHasMemberDeclaration(NodeHandle parseLocation, ParseState& state) {
+    state.pushHasScope(parseLocation);
+}
+
+[[gnu::noinline]] static void commitMemberDeclaration(Word name, NodeHandle parseLocation, ParseState& state) {
+    bool ret = state.pushMemberScope(name, parseLocation);
+    VERIFY(!ret);
+}
+
+template<DeclarationKind kind>
+static void commitDeclaration(Word name, NodeHandle declarationBegin, ParseState& state) {
+    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
+    if constexpr (kind == DeclarationKind::HasMember) {
+        commitHasMemberDeclaration(declarationBegin, state);
+    } else if constexpr (kind == DeclarationKind::Member) {
+        commitMemberDeclaration(name, declarationBegin, state);
+    } else {
+        commitStaticDeclaration(kind, name, declarationBegin, state);
+    }
 }
 
 static void endDeclaration(ParseState& state) {
@@ -175,6 +190,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     NodeKind carriedEmitNodeKind = (NodeKind)0;
     Word word;
     uint32_t nodeData = 0;
+    NodeHandle declarationBegin;
 
     NodeKind nodeKind = (NodeKind)0;
 
@@ -237,6 +253,8 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto namespace_declaration_body$no_emit;
     case State::TemplatedDeclaration:
         VERIFY_NOT_REACHED();
+    case State::TemplatedDeclarationWithAttributes:
+        goto templated_declaration_with_attributes$no_emit;
     case State::AfterTemplate:
         goto after_template$no_emit;
     case State::AfterTemplateParameters:
@@ -2168,8 +2186,8 @@ after_statement$no_emit:
             // ifScope ScopeKind::Type
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
-                // commitDeclaration DeclarationKind::Variable
-                commitNamedDeclaration(DeclarationKind::Variable, std::bit_cast<Word>(nodeData), state);
+                // commitDeclaration DeclarationKind::Member
+                commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
                 // emitNode NodeKind::MemberDecl
                 carriedEmitNodeKind = NodeKind::MemberDecl;
                 // next after_variable_declaration_id
@@ -2198,8 +2216,8 @@ after_statement$no_emit:
             // ifScope ScopeKind::Type
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
-                // commitDeclaration DeclarationKind::Variable
-                commitNamedDeclaration(DeclarationKind::Variable, std::bit_cast<Word>(nodeData), state);
+                // commitDeclaration DeclarationKind::Member
+                commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
                 // emitNode NodeKind::MemberDecl
                 carriedEmitNodeKind = NodeKind::MemberDecl;
                 // next after_variable_declaration_id
@@ -3202,6 +3220,9 @@ after_parameters$no_emit:
     goto error$as_then;
 
     // LinearState first_parameter
+first_parameter$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
 first_parameter$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3375,7 +3396,7 @@ namespace_declaration_id$no_emit:
         }
         nodeData = word.asUint();
         // commitDeclaration DeclarationKind::Namespace
-        commitNamedDeclaration(DeclarationKind::Namespace, std::bit_cast<Word>(nodeData), state);
+        commitDeclaration<DeclarationKind::Namespace>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // next after_namespace_declaration_id
         goto after_namespace_declaration_id$no_emit;
     }
@@ -3424,8 +3445,101 @@ templated_declaration$as_then:
         if (word.keyword()) {
         [[maybe_unused]] templated_declaration$keyword_check:
             if (word == words["template"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
                 // next after_template
                 goto after_template$no_emit;
+            }
+            if (word == words["incomplete"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // emitNode NodeKind::IncompleteAttribute
+                carriedEmitNodeKind = NodeKind::IncompleteAttribute;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (word == words["virtual"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // emitNode NodeKind::VirtualAttribute
+                carriedEmitNodeKind = NodeKind::VirtualAttribute;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (word == words["fn"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // next function_declaration_id
+                goto function_declaration_id$no_emit;
+            }
+            if (word == words["struct"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // nodeKind = NodeKind::StructTypeDecl
+                nodeKind = NodeKind::StructTypeDecl;
+                // next type_declaration_id
+                goto type_declaration_id$no_emit;
+            }
+            if (word == words["object"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // nodeKind = NodeKind::ObjectTypeDecl
+                nodeKind = NodeKind::ObjectTypeDecl;
+                // next type_declaration_id
+                goto type_declaration_id$no_emit;
+            }
+            if (word == words["static"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentNode();
+                // next after_static
+                goto after_static$no_emit;
+            }
+            // -> no_declaration
+            // -> error
+            goto error$keyword_check;
+        }
+        nodeData = word.asUint();
+        // -> no_declaration
+        // -> error
+        // error
+        errorToken = Token::Identifier;
+        goto handle_parse_error;
+    }
+    // then no_declaration
+    goto no_declaration$as_then;
+
+    // LinearState templated_declaration_with_attributes
+templated_declaration_with_attributes$with_emit:
+    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
+    nodeData = 0;
+templated_declaration_with_attributes$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::TemplatedDeclarationWithAttributes;
+templated_declaration_with_attributes$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            word = wordAndPos.word;
+        }
+        if (word.keyword()) {
+        [[maybe_unused]] templated_declaration_with_attributes$keyword_check:
+            if (word == words["template"]) {
+                // next after_template
+                goto after_template$no_emit;
+            }
+            if (word == words["incomplete"]) {
+                // emitNode NodeKind::IncompleteAttribute
+                carriedEmitNodeKind = NodeKind::IncompleteAttribute;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (word == words["virtual"]) {
+                // emitNode NodeKind::VirtualAttribute
+                carriedEmitNodeKind = NodeKind::VirtualAttribute;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
             }
             if (word == words["fn"]) {
                 // next function_declaration_id
@@ -3447,19 +3561,17 @@ templated_declaration$as_then:
                 // next after_static
                 goto after_static$no_emit;
             }
-            // -> no_declaration
             // -> error
             goto error$keyword_check;
         }
         nodeData = word.asUint();
-        // -> no_declaration
         // -> error
         // error
         errorToken = Token::Identifier;
         goto handle_parse_error;
     }
-    // then no_declaration
-    goto no_declaration$as_then;
+    // then error
+    goto error$as_then;
 
     // LinearState after_template
 after_template$no_emit:
@@ -3470,16 +3582,18 @@ after_template$no_emit:
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
         scopePosition = pushScope(scopePosition, ScopeKind::TemplateParameters);
+        // emitNode NodeKind::TemplateAttribute
+        carriedEmitNodeKind = NodeKind::TemplateAttribute;
         // next first_parameter
-        goto first_parameter$no_emit;
+        goto first_parameter$with_emit;
     }
     // then error
     goto error$as_then;
 
     // LinearState after_template_parameters
 after_template_parameters$as_then:
-    // then templated_declaration
-    goto templated_declaration$as_then;
+    // then templated_declaration_with_attributes
+    goto templated_declaration_with_attributes$as_then;
 
     // LinearState function_declaration_id
 function_declaration_id$no_emit:
@@ -3498,7 +3612,7 @@ function_declaration_id$no_emit:
         }
         nodeData = word.asUint();
         // commitDeclaration DeclarationKind::Function
-        commitNamedDeclaration(DeclarationKind::Function, std::bit_cast<Word>(nodeData), state);
+        commitDeclaration<DeclarationKind::Function>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // emitNode NodeKind::FunctionDecl
         carriedEmitNodeKind = NodeKind::FunctionDecl;
         // next after_function_declaration_id
@@ -3582,7 +3696,7 @@ type_declaration_id$no_emit:
         }
         nodeData = word.asUint();
         // commitDeclaration DeclarationKind::Type
-        commitNamedDeclaration(DeclarationKind::Type, std::bit_cast<Word>(nodeData), state);
+        commitDeclaration<DeclarationKind::Type>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // emitNode nodeKind
         carriedEmitNodeKind = nodeKind;
         // next after_type_declaration_id
@@ -3642,8 +3756,8 @@ member_declaration$as_then:
             if (word == words["has"]) {
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
-                // commitDeclaration DeclarationKind::Type
-                commitUnnamedDeclaration(DeclarationKind::Type, state);
+                // commitDeclaration DeclarationKind::HasMember
+                commitDeclaration<DeclarationKind::HasMember>(Word(), declarationBegin, state);
                 // emitNode NodeKind::HasMemberDecl
                 carriedEmitNodeKind = NodeKind::HasMemberDecl;
                 // next expression
@@ -3653,8 +3767,8 @@ member_declaration$as_then:
             goto templated_declaration$keyword_check;
         }
         nodeData = word.asUint();
-        // commitDeclaration DeclarationKind::Variable
-        commitNamedDeclaration(DeclarationKind::Variable, std::bit_cast<Word>(nodeData), state);
+        // commitDeclaration DeclarationKind::Member
+        commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // emitNode NodeKind::MemberDecl
         carriedEmitNodeKind = NodeKind::MemberDecl;
         // next after_variable_declaration_id
@@ -3693,7 +3807,7 @@ after_static$no_emit:
         }
         nodeData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitNamedDeclaration(DeclarationKind::Variable, std::bit_cast<Word>(nodeData), state);
+        commitDeclaration<DeclarationKind::Variable>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // emitNode NodeKind::StaticLetDecl
         carriedEmitNodeKind = NodeKind::StaticLetDecl;
         // next after_variable_declaration_id
@@ -3719,7 +3833,7 @@ static_variable_declaration$no_emit:
         }
         nodeData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitNamedDeclaration(DeclarationKind::Variable, std::bit_cast<Word>(nodeData), state);
+        commitDeclaration<DeclarationKind::Variable>(std::bit_cast<Word>(nodeData), declarationBegin, state);
         // emitNode nodeKind
         carriedEmitNodeKind = nodeKind;
         // next after_variable_declaration_id

@@ -117,6 +117,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
     void runTest() {
         parse::parseImpl(context.parseOutput.source.data(), context, this);
+        VERIFY(context.currentScope()->declaringNode() == nullptr);
 
         visit(context.parseOutput);
     }

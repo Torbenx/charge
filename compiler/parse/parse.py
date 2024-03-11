@@ -166,6 +166,11 @@ class CommitDeclarationInstruction:
         return "commitDeclaration " + self.declKindExpr
 
 @dataclasses.dataclass
+class RememberDeclarationBeginInstruction:
+    def format(self):
+        return "rememberDeclarationBegin"
+
+@dataclasses.dataclass
 class EndDeclarationInstruction:
     def format(self):
         return "endDeclaration"
@@ -389,6 +394,9 @@ class Parser:
                 self.advanceLine()
             elif first == "commitDeclaration":
                 instructions.append(CommitDeclarationInstruction(self.parseExpr()))
+                self.advanceLine()
+            elif first == "rememberDeclarationBegin":
+                instructions.append(RememberDeclarationBeginInstruction())
                 self.advanceLine()
             elif first == "endDeclaration":
                 instructions.append(EndDeclarationInstruction())
@@ -761,10 +769,12 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is ThenInstruction:
             thenHandler(inst.newState)
         elif type(inst) is CommitDeclarationInstruction:
+            nameExpr = "Word()"
             if type(case) is IdentifierCase:
-                line("commitNamedDeclaration(" + inst.declKindExpr + ", std::bit_cast<Word>(nodeData), state);")
-            else:
-                line("commitUnnamedDeclaration(" + inst.declKindExpr + ", state);")
+                nameExpr = "std::bit_cast<Word>(nodeData)"
+            line("commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", declarationBegin, state);")
+        elif type(inst) is RememberDeclarationBeginInstruction:
+            line("declarationBegin = state.parseOutput.currentNode();")
         elif type(inst) is EndDeclarationInstruction:
             line("endDeclaration(state);")
         elif type(inst) is ErrorInstruction:
