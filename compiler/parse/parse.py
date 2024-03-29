@@ -98,7 +98,7 @@ class EndCase(Case):
 @dataclasses.dataclass
 class NextInstruction:
     newState: str
-    carriesEmitNode: bool = False
+    carriesEmitToken: bool = False
     def format(self):
         return "next " + self.newState
 
@@ -109,21 +109,21 @@ class ThenInstruction:
         return "then " + self.newState
 
 @dataclasses.dataclass
-class EmitNodeInstruction:
-    nodeKindExpr: str
+class EmitTokenInstruction:
+    tokenKindExpr: str
     tokenExpr: str | None = None
     delayed: bool = False
     def format(self):
-        ret = "emitNode " + self.nodeKindExpr
+        ret = "emitToken " + self.tokenKindExpr
         if not self.tokenExpr is None:
             ret += ", " + self.tokenExpr
         return ret
 
 @dataclasses.dataclass
 class UpdateKindInstruction:
-    nodeKindExpr: str
+    tokenKindExpr: str
     def format(self):
-        return "updateKind " + self.nodeKindExpr
+        return "updateKind " + self.tokenKindExpr
 
 @dataclasses.dataclass
 class PushScopeInstruction:
@@ -352,20 +352,20 @@ class Parser:
             first = self.parseWord()
             if first == "next":
                 delayed = False
-                if len(instructions) > 0 and type(instructions[-1]) == EmitNodeInstruction and instructions[-1].tokenExpr is None:
+                if len(instructions) > 0 and type(instructions[-1]) == EmitTokenInstruction and instructions[-1].tokenExpr is None:
                     instructions[-1].delayed = True
                     delayed = True
                 instructions.append(NextInstruction(self.parseWord(), delayed))
                 self.advanceLine()
-            elif first == "emitNode":
-                nodeKindExpr = self.parseExpr()
+            elif first == "emitToken":
+                tokenKindExpr = self.parseExpr()
                 while self.line[0] == ' ':
                     self.line = self.line[1:]
                 tokenExpr = None
                 if self.line[0] == ',':
                     self.line = self.line[1:]
                     tokenExpr = self.parseExpr()
-                instructions.append(EmitNodeInstruction(nodeKindExpr, tokenExpr))
+                instructions.append(EmitTokenInstruction(tokenKindExpr, tokenExpr))
                 self.advanceLine()
             elif first == "updateKind":
                 instructions.append(UpdateKindInstruction(self.parseExpr()))
@@ -509,12 +509,12 @@ def inlineTokenAdvancer():
     line("tokEnd = inlineAdvancer(tokEnd, state);")
     line("tokBegin = tokEnd;")
 
-def emitNode(nodeKindExpr, beginExpr, endExpr):
-    line("emitNode(" + nodeKindExpr + ", " + beginExpr +", nodeData, state);")
-    line("nodeData = 0;")
+def emitToken(tokenKindExpr, beginExpr, endExpr):
+    line("emitToken(" + tokenKindExpr + ", " + beginExpr +", tokenData, state);")
+    line("tokenData = 0;")
 
-def emitCarriedNode():
-    emitNode("carriedEmitNodeKind", "tokBegin", "tokEnd")
+def emitCarriedToken():
+    emitToken("carriedEmitTokenKind", "tokBegin", "tokEnd")
 
 def rememberState(state):
     if generateStateDebug:
@@ -545,7 +545,7 @@ def generateWordCase(state):
         else:
             recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
     line("}")
-    line("nodeData = word.asUint();")
+    line("tokenData = word.asUint();")
     recurse(state, lambda s: s.identifierCase(), lambda case: generateCaseBody(case))
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
@@ -686,7 +686,7 @@ def generateLinearState(state):
         line("if (tokEnd[0] == '\\0') {")
         with indent():
             generateCaseBody(endCase)
-            emitNode("NodeKind::EOS", "tokBegin", "tokEnd")
+            emitToken("TokenKind::EOS", "tokBegin", "tokEnd")
             line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);")
             line("return;")
         line("}")
@@ -705,7 +705,7 @@ def generateError(case):
     if type(case) is ThenCase:
         line("goto error$as_then;")
     else:
-        line("errorToken = Token::" + case.cppName() + ";")
+        line("errorToken = LexerToken::" + case.cppName() + ";")
         line("goto handle_parse_error;")
 
 def generateCaseBody(case, thenHandler = lambda target: line("xxxx")):
@@ -714,32 +714,32 @@ def generateCaseBody(case, thenHandler = lambda target: line("xxxx")):
 def generateInstructions(case, instructions, thenHandler):
     for inst in instructions:
         line("// " + inst.format())
-        if type(inst) is EmitNodeInstruction:
+        if type(inst) is EmitTokenInstruction:
             if inst.delayed:
                 assert inst.tokenExpr is None
-                line("carriedEmitNodeKind = "+ inst.nodeKindExpr + ";")
+                line("carriedEmitTokenKind = "+ inst.tokenKindExpr + ";")
             elif inst.tokenExpr is None:
-                emitNode(inst.nodeKindExpr, "tokBegin", "tokEnd")
+                emitToken(inst.tokenKindExpr, "tokBegin", "tokEnd")
             else:
-                emitNode(inst.nodeKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
+                emitToken(inst.tokenKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
         elif type(inst) is UpdateKindInstruction:
-            line("state.parseOutput.nodes.back().setKind(" + inst.nodeKindExpr + ");")
+            line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
                 line("// inlined " + newState.name)
                 assert newState.origins == [inst]
                 assert newState.kind == "LinearState"
-                if inst.carriesEmitNode:
-                    emitCarriedNode()
+                if inst.carriesEmitToken:
+                    emitCarriedToken()
                 inlineTokenAdvancer()
                 rememberState(newState)
                 generateState(newState)
             else:
-                line("goto " + newState.name + ("$with_emit" if inst.carriesEmitNode else "$no_emit") + ";")
+                line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
         elif type(inst) is AssignInstruction:
-            if inst.leftName == "nodeKind":
-                line("nodeKind = " + inst.rightExpr + ";")
+            if inst.leftName == "tokenKind":
+                line("tokenKind = " + inst.rightExpr + ";")
             else:
                 assert False
         elif type(inst) is PushScopeInstruction:
@@ -771,10 +771,10 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is CommitDeclarationInstruction:
             nameExpr = "Word()"
             if type(case) is IdentifierCase:
-                nameExpr = "std::bit_cast<Word>(nodeData)"
+                nameExpr = "Word::fromUint(tokenData)"
             line("commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", declarationBegin, state);")
         elif type(inst) is RememberDeclarationBeginInstruction:
-            line("declarationBegin = state.parseOutput.currentNode();")
+            line("declarationBegin = state.parseOutput.currentToken();")
         elif type(inst) is EndDeclarationInstruction:
             line("endDeclaration(state);")
         elif type(inst) is ErrorInstruction:
@@ -822,10 +822,10 @@ for state in states:
         raise Exception("unused state '" + state.name + "'")
     if not shouldBeInlined(state):
         line("// " + state.kind + " " + state.name)
-        withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitNode]
+        withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitToken]
         if withEmitLabelUsed:
             labelLine(state.name + "$with_emit:")
-            emitCarriedNode()
+            emitCarriedToken()
         noEmitLabelUsed = not onlyUsedAsThen(state)
         if noEmitLabelUsed:
             labelLine(state.name + "$no_emit:")
@@ -882,7 +882,7 @@ with indent():
         line("keyword(\"" + keyword + "\"),")
 line("};")
 
-line("enum class Token : uint8_t {")
+line("enum class LexerToken : uint8_t {")
 with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + ", // " + punc)
@@ -892,7 +892,7 @@ with indent():
     line(literalCppName() + ",")
     line("EOS")
 line("};")
-line("std::string_view nameString(Token);")
+line("std::string_view nameString(LexerToken);")
 lineNoIndent()
 
 line("enum class State {")
@@ -918,24 +918,24 @@ lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
 
-line("std::string_view nameString(Token token) {")
+line("std::string_view nameString(LexerToken token) {")
 with indent():
     line("switch (token) {")
     for punc in punctuationTokens:
-        line("case Token::" + punctuationCppName(punc) + ":")
+        line("case LexerToken::" + punctuationCppName(punc) + ":")
         with indent():
             line("return \"" + punctuationCppName(punc) + "\";")
     for keyword in keywords:
-        line("case Token::" + keywordCppName(keyword) + ":")
+        line("case LexerToken::" + keywordCppName(keyword) + ":")
         with indent():
             line("return \"" + keywordCppName(keyword) + "\";")
-    line("case Token::" + identifierCppName() + ":")
+    line("case LexerToken::" + identifierCppName() + ":")
     with indent():
         line("return \"" + identifierCppName() + "\";")
-    line("case Token::" + literalCppName() + ":")
+    line("case LexerToken::" + literalCppName() + ":")
     with indent():
         line("return \"" + literalCppName() + "\";")
-    line("case Token::EOS:")
+    line("case LexerToken::EOS:")
     with indent():
         line("return \"EOS\";")
     line("}")

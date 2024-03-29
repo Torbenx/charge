@@ -8,7 +8,7 @@ using ParseState = glue::Context;
 
 struct ErrorHandler {
     virtual void invalidCharaceter() { }
-    virtual void invalidToken(Token, State, ScopeKind*, ParseState&) { }
+    virtual void invalidToken(LexerToken, State, ScopeKind*, ParseState&) { }
     virtual ~ErrorHandler() = default;
 };
 

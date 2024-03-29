@@ -41,7 +41,7 @@ inline constexpr ConstWordStringTable words {
     keyword("assign"),
     keyword("porperty"),
 };
-enum class Token : uint8_t {
+enum class LexerToken : uint8_t {
     LeftParen, // (
     RightParen, // )
     LeftSqure, // [
@@ -130,7 +130,7 @@ enum class Token : uint8_t {
     Literal,
     EOS
 };
-std::string_view nameString(Token);
+std::string_view nameString(LexerToken);
 
 enum class State {
     Expression,

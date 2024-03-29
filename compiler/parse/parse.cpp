@@ -55,8 +55,8 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
     return { (uint32_t)(position - state.parseOutput.lines.back().begin), (uint32_t)state.parseOutput.lines.size() - 1 };
 }
 
-[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.parseOutput.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
+[[gnu::noinline]] static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
+    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
 [[gnu::noinline]] static void markLineBegin(const char* position, ParseState& state) {
@@ -147,23 +147,23 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, TokenHandle parseLocation, ParseState& state) {
     bool ret = state.pushStaticScope(kind, name, parseLocation);
     if (ret)
         VERIFY(kind == DeclarationKind::Namespace);
 }
 
-[[gnu::noinline]] static void commitHasMemberDeclaration(NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitHasMemberDeclaration(TokenHandle parseLocation, ParseState& state) {
     state.pushHasScope(parseLocation);
 }
 
-[[gnu::noinline]] static void commitMemberDeclaration(Word name, NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitMemberDeclaration(Word name, TokenHandle parseLocation, ParseState& state) {
     bool ret = state.pushMemberScope(name, parseLocation);
     VERIFY(!ret);
 }
 
 template<DeclarationKind kind>
-static void commitDeclaration(Word name, NodeHandle declarationBegin, ParseState& state) {
+static void commitDeclaration(Word name, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::HasMember) {
         commitHasMemberDeclaration(declarationBegin, state);
@@ -187,16 +187,16 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
 
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
-    NodeKind carriedEmitNodeKind = (NodeKind)0;
+    TokenKind carriedEmitTokenKind = (TokenKind)0;
     Word word;
-    uint32_t nodeData = 0;
-    NodeHandle declarationBegin;
+    uint32_t tokenData = 0;
+    TokenHandle declarationBegin;
 
-    NodeKind nodeKind = (NodeKind)0;
+    TokenKind tokenKind = (TokenKind)0;
 
     scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
     State parseState = State::NamespaceDeclaration;
-    Token errorToken = (Token)0;
+    LexerToken errorToken = (LexerToken)0;
 
     switch (parseState) {
     case State::Expression:
@@ -284,8 +284,8 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     }
     // SwitchState expression
 expression$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -312,12 +312,12 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::ExclaimEqual;
+            errorToken = LexerToken::ExclaimEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
-        // emitNode NodeKind::LogicalNotExpr
-        carriedEmitNodeKind = NodeKind::LogicalNotExpr;
+        // emitToken TokenKind::LogicalNotExpr
+        carriedEmitTokenKind = TokenKind::LogicalNotExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -327,13 +327,13 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::PercentEqual;
+            errorToken = LexerToken::PercentEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Percent;
+        errorToken = LexerToken::Percent;
         goto handle_parse_error;
     }
     case '&': {
@@ -344,32 +344,32 @@ expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::AmpAmpEqual;
+                errorToken = LexerToken::AmpAmpEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::AmpAmp;
+            errorToken = LexerToken::AmpAmp;
             goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::AmpEqual;
+            errorToken = LexerToken::AmpEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Amp;
+        errorToken = LexerToken::Amp;
         goto handle_parse_error;
     }
     case '(': {
         tokEnd += 1;
-        // emitNode NodeKind::ParenthesizedExpr
-        carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
+        // emitToken TokenKind::ParenthesizedExpr
+        carriedEmitTokenKind = TokenKind::ParenthesizedExpr;
         // next first_argument_paren
         goto first_argument_paren$with_emit;
     }
@@ -377,7 +377,7 @@ expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::RightParen;
+        errorToken = LexerToken::RightParen;
         goto handle_parse_error;
     }
     case '*': {
@@ -386,12 +386,12 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::StarEqual;
+            errorToken = LexerToken::StarEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
-        // emitNode NodeKind::DereferenceExpr
-        carriedEmitNodeKind = NodeKind::DereferenceExpr;
+        // emitToken TokenKind::DereferenceExpr
+        carriedEmitTokenKind = TokenKind::DereferenceExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -399,8 +399,8 @@ expression$as_then:
         char next = tokEnd[1];
         if (next == '+') {
             tokEnd += 2;
-            // emitNode NodeKind::PreIncrementExpr
-            carriedEmitNodeKind = NodeKind::PreIncrementExpr;
+            // emitToken TokenKind::PreIncrementExpr
+            carriedEmitTokenKind = TokenKind::PreIncrementExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -408,12 +408,12 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::PlusEqual;
+            errorToken = LexerToken::PlusEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
-        // emitNode NodeKind::PlusExpr
-        carriedEmitNodeKind = NodeKind::PlusExpr;
+        // emitToken TokenKind::PlusExpr
+        carriedEmitTokenKind = TokenKind::PlusExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -421,15 +421,15 @@ expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Comma;
+        errorToken = LexerToken::Comma;
         goto handle_parse_error;
     }
     case '-': {
         char next = tokEnd[1];
         if (next == '-') {
             tokEnd += 2;
-            // emitNode NodeKind::PreDecrementExpr
-            carriedEmitNodeKind = NodeKind::PreDecrementExpr;
+            // emitToken TokenKind::PreDecrementExpr
+            carriedEmitTokenKind = TokenKind::PreDecrementExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -437,19 +437,19 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::MinusEqual;
+            errorToken = LexerToken::MinusEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::MinusGreater;
+            errorToken = LexerToken::MinusGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
-        // emitNode NodeKind::NegateExpr
-        carriedEmitNodeKind = NodeKind::NegateExpr;
+        // emitToken TokenKind::NegateExpr
+        carriedEmitTokenKind = TokenKind::NegateExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -457,7 +457,7 @@ expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Point;
+        errorToken = LexerToken::Point;
         goto handle_parse_error;
     }
     case '/': {
@@ -479,13 +479,13 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::SlashEqual;
+            errorToken = LexerToken::SlashEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Slash;
+        errorToken = LexerToken::Slash;
         goto handle_parse_error;
     }
     case ':': {
@@ -494,20 +494,20 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::ColonColon;
+            errorToken = LexerToken::ColonColon;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Colon;
+        errorToken = LexerToken::Colon;
         goto handle_parse_error;
     }
     case ';': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::SemiColon;
+        errorToken = LexerToken::SemiColon;
         goto handle_parse_error;
     }
     case '<': {
@@ -518,13 +518,13 @@ expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::LessLessEqual;
+                errorToken = LexerToken::LessLessEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::LessLess;
+            errorToken = LexerToken::LessLess;
             goto handle_parse_error;
         }
         if (next == '=') {
@@ -533,19 +533,19 @@ expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::LessEqualGreater;
+                errorToken = LexerToken::LessEqualGreater;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::LessEqual;
+            errorToken = LexerToken::LessEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Less;
+        errorToken = LexerToken::Less;
         goto handle_parse_error;
     }
     case '=': {
@@ -554,20 +554,20 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::EqualEqual;
+            errorToken = LexerToken::EqualEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::EqualGreater;
+            errorToken = LexerToken::EqualGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Equal;
+        errorToken = LexerToken::Equal;
         goto handle_parse_error;
     }
     case '>': {
@@ -576,7 +576,7 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::GreaterEqual;
+            errorToken = LexerToken::GreaterEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
@@ -585,33 +585,33 @@ expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::GreaterGreaterEqual;
+                errorToken = LexerToken::GreaterGreaterEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::GreaterGreater;
+            errorToken = LexerToken::GreaterGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Greater;
+        errorToken = LexerToken::Greater;
         goto handle_parse_error;
     }
     case '[': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::LeftSqure;
+        errorToken = LexerToken::LeftSqure;
         goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::RightSqure;
+        errorToken = LexerToken::RightSqure;
         goto handle_parse_error;
     }
     case '^': {
@@ -620,20 +620,20 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::HatEqual;
+            errorToken = LexerToken::HatEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Hat;
+        errorToken = LexerToken::Hat;
         goto handle_parse_error;
     }
     case '{': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::LeftBrace;
+        errorToken = LexerToken::LeftBrace;
         goto handle_parse_error;
     }
     case '|': {
@@ -642,7 +642,7 @@ expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::VertEqual;
+            errorToken = LexerToken::VertEqual;
             goto handle_parse_error;
         }
         if (next == '|') {
@@ -651,32 +651,32 @@ expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::VertVertEqual;
+                errorToken = LexerToken::VertVertEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::VertVert;
+            errorToken = LexerToken::VertVert;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Vert;
+        errorToken = LexerToken::Vert;
         goto handle_parse_error;
     }
     case '}': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::RightBrace;
+        errorToken = LexerToken::RightBrace;
         goto handle_parse_error;
     }
     case '~': {
         tokEnd += 1;
-        // emitNode NodeKind::BitwiseNotExpr
-        carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
+        // emitToken TokenKind::BitwiseNotExpr
+        carriedEmitTokenKind = TokenKind::BitwiseNotExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -693,8 +693,8 @@ expression$as_then:
         do {
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
-        // emitNode NodeKind::LiteralExpr
-        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // emitToken TokenKind::LiteralExpr
+        carriedEmitTokenKind = TokenKind::LiteralExpr;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -702,8 +702,8 @@ expression$as_then:
         tokEnd = skipToEndOfCharacterLiteral(tokEnd);
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
-        // emitNode NodeKind::LiteralExpr
-        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // emitToken TokenKind::LiteralExpr
+        carriedEmitTokenKind = TokenKind::LiteralExpr;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -785,16 +785,16 @@ expression$word_case:
         // -> error
         goto error$keyword_check;
     }
-    nodeData = word.asUint();
-    // emitNode NodeKind::IdentifierExpr
-    carriedEmitNodeKind = NodeKind::IdentifierExpr;
+    tokenData = word.asUint();
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
     // next after_expression
     goto after_expression$with_emit;
 
     // SwitchState after_expression
 after_expression$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -819,15 +819,15 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
-            // emitNode NodeKind::CompareNotEqualExpr
-            carriedEmitNodeKind = NodeKind::CompareNotEqualExpr;
+            // emitToken TokenKind::CompareNotEqualExpr
+            carriedEmitTokenKind = TokenKind::CompareNotEqualExpr;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Exclaim;
+        errorToken = LexerToken::Exclaim;
         goto handle_parse_error;
     }
     case '%': {
@@ -838,21 +838,21 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::PercentEqual;
+                    errorToken = LexerToken::PercentEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::RemainderUpdateStmt
-            carriedEmitNodeKind = NodeKind::RemainderUpdateStmt;
+            // emitToken TokenKind::RemainderUpdateStmt
+            carriedEmitTokenKind = TokenKind::RemainderUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::RemainderExpr
-        carriedEmitNodeKind = NodeKind::RemainderExpr;
+        // emitToken TokenKind::RemainderExpr
+        carriedEmitTokenKind = TokenKind::RemainderExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -866,21 +866,21 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = Token::AmpAmpEqual;
+                        errorToken = LexerToken::AmpAmpEqual;
                         goto handle_parse_error;
                     }
                     scopePosition = result;
                 }
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-                // emitNode NodeKind::LogicalAndUpdateStmt
-                carriedEmitNodeKind = NodeKind::LogicalAndUpdateStmt;
+                // emitToken TokenKind::LogicalAndUpdateStmt
+                carriedEmitTokenKind = TokenKind::LogicalAndUpdateStmt;
                 // next expression
                 goto expression$with_emit;
             }
             tokEnd += 2;
-            // emitNode NodeKind::LogicalAndExpr
-            carriedEmitNodeKind = NodeKind::LogicalAndExpr;
+            // emitToken TokenKind::LogicalAndExpr
+            carriedEmitTokenKind = TokenKind::LogicalAndExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -890,28 +890,28 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::AmpEqual;
+                    errorToken = LexerToken::AmpEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::BitwiseAndUpdateStmt
-            carriedEmitNodeKind = NodeKind::BitwiseAndUpdateStmt;
+            // emitToken TokenKind::BitwiseAndUpdateStmt
+            carriedEmitTokenKind = TokenKind::BitwiseAndUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::BitwiseAndExpr
-        carriedEmitNodeKind = NodeKind::BitwiseAndExpr;
+        // emitToken TokenKind::BitwiseAndExpr
+        carriedEmitTokenKind = TokenKind::BitwiseAndExpr;
         // next expression
         goto expression$with_emit;
     }
     case '(': {
         tokEnd += 1;
-        // emitNode NodeKind::CallExpr
-        carriedEmitNodeKind = NodeKind::CallExpr;
+        // emitToken TokenKind::CallExpr
+        carriedEmitTokenKind = TokenKind::CallExpr;
         // next first_argument_paren
         goto first_argument_paren$with_emit;
     }
@@ -923,7 +923,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::RightExpr);
                 if (result == nullptr) {
-                    errorToken = Token::RightParen;
+                    errorToken = LexerToken::RightParen;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
@@ -932,13 +932,13 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    errorToken = Token::RightParen;
+                    errorToken = LexerToken::RightParen;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
-            // emitNode NodeKind::ExpressionStmt
-            carriedEmitNodeKind = NodeKind::ExpressionStmt;
+            // emitToken TokenKind::ExpressionStmt
+            carriedEmitTokenKind = TokenKind::ExpressionStmt;
             // next after_parameters
             goto after_parameters$with_emit;
         }
@@ -948,7 +948,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::VariableType);
                 if (result == nullptr) {
-                    errorToken = Token::RightParen;
+                    errorToken = LexerToken::RightParen;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
@@ -957,16 +957,16 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    errorToken = Token::RightParen;
+                    errorToken = LexerToken::RightParen;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
-            // emitNode NodeKind::AssignStmt
-            emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-            nodeData = 0;
-            // emitNode NodeKind::ExpressionStmt
-            carriedEmitNodeKind = NodeKind::ExpressionStmt;
+            // emitToken TokenKind::AssignStmt
+            emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+            tokenData = 0;
+            // emitToken TokenKind::ExpressionStmt
+            carriedEmitTokenKind = TokenKind::ExpressionStmt;
             // next after_parameters
             goto after_parameters$with_emit;
         }
@@ -974,13 +974,13 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Paren);
             if (result == nullptr) {
-                errorToken = Token::RightParen;
+                errorToken = LexerToken::RightParen;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -992,21 +992,21 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::StarEqual;
+                    errorToken = LexerToken::StarEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::MultiplyUpdateStmt
-            carriedEmitNodeKind = NodeKind::MultiplyUpdateStmt;
+            // emitToken TokenKind::MultiplyUpdateStmt
+            carriedEmitTokenKind = TokenKind::MultiplyUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::MultiplyExpr
-        carriedEmitNodeKind = NodeKind::MultiplyExpr;
+        // emitToken TokenKind::MultiplyExpr
+        carriedEmitTokenKind = TokenKind::MultiplyExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1014,8 +1014,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == '+') {
             tokEnd += 2;
-            // emitNode NodeKind::PostIncrementExpr
-            carriedEmitNodeKind = NodeKind::PostIncrementExpr;
+            // emitToken TokenKind::PostIncrementExpr
+            carriedEmitTokenKind = TokenKind::PostIncrementExpr;
             // next after_expression
             goto after_expression$with_emit;
         }
@@ -1025,21 +1025,21 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::PlusEqual;
+                    errorToken = LexerToken::PlusEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::AdditionUpdateStmt
-            carriedEmitNodeKind = NodeKind::AdditionUpdateStmt;
+            // emitToken TokenKind::AdditionUpdateStmt
+            carriedEmitTokenKind = TokenKind::AdditionUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::AdditionExpr
-        carriedEmitNodeKind = NodeKind::AdditionExpr;
+        // emitToken TokenKind::AdditionExpr
+        carriedEmitTokenKind = TokenKind::AdditionExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1052,8 +1052,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == '-') {
             tokEnd += 2;
-            // emitNode NodeKind::PostDecrementExpr
-            carriedEmitNodeKind = NodeKind::PostDecrementExpr;
+            // emitToken TokenKind::PostDecrementExpr
+            carriedEmitTokenKind = TokenKind::PostDecrementExpr;
             // next after_expression
             goto after_expression$with_emit;
         }
@@ -1063,15 +1063,15 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::MinusEqual;
+                    errorToken = LexerToken::MinusEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::SubtractionUpdateStmt
-            carriedEmitNodeKind = NodeKind::SubtractionUpdateStmt;
+            // emitToken TokenKind::SubtractionUpdateStmt
+            carriedEmitTokenKind = TokenKind::SubtractionUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
@@ -1079,19 +1079,19 @@ after_expression$as_then:
             tokEnd += 2;
             // -> error
             // error
-            errorToken = Token::MinusGreater;
+            errorToken = LexerToken::MinusGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
-        // emitNode NodeKind::SubtractionExpr
-        carriedEmitNodeKind = NodeKind::SubtractionExpr;
+        // emitToken TokenKind::SubtractionExpr
+        carriedEmitTokenKind = TokenKind::SubtractionExpr;
         // next expression
         goto expression$with_emit;
     }
     case '.': {
         tokEnd += 1;
-        // nodeKind = NodeKind::MemberAccessExpr
-        nodeKind = NodeKind::MemberAccessExpr;
+        // tokenKind = TokenKind::MemberAccessExpr
+        tokenKind = TokenKind::MemberAccessExpr;
         // next access_punctuation
         goto access_punctuation$no_emit;
     }
@@ -1116,21 +1116,21 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::SlashEqual;
+                    errorToken = LexerToken::SlashEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::DivideUpdateStmt
-            carriedEmitNodeKind = NodeKind::DivideUpdateStmt;
+            // emitToken TokenKind::DivideUpdateStmt
+            carriedEmitTokenKind = TokenKind::DivideUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::DivideExpr
-        carriedEmitNodeKind = NodeKind::DivideExpr;
+        // emitToken TokenKind::DivideExpr
+        carriedEmitTokenKind = TokenKind::DivideExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1138,8 +1138,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == ':') {
             tokEnd += 2;
-            // nodeKind = NodeKind::StaticAccessExpr
-            nodeKind = NodeKind::StaticAccessExpr;
+            // tokenKind = TokenKind::StaticAccessExpr
+            tokenKind = TokenKind::StaticAccessExpr;
             // next access_punctuation
             goto access_punctuation$no_emit;
         }
@@ -1150,7 +1150,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
                 if (result == nullptr) {
-                    errorToken = Token::Colon;
+                    errorToken = LexerToken::Colon;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
@@ -1164,7 +1164,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::ReturnType);
                 if (result == nullptr) {
-                    errorToken = Token::Colon;
+                    errorToken = LexerToken::Colon;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
@@ -1178,7 +1178,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::IfExprOrStmt);
             if (result == nullptr) {
-                errorToken = Token::Colon;
+                errorToken = LexerToken::Colon;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -1187,7 +1187,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::LeftExpr);
             if (result == nullptr) {
-                errorToken = Token::Colon;
+                errorToken = LexerToken::Colon;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -1196,15 +1196,15 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::PlainStatement);
             if (result == nullptr) {
-                errorToken = Token::Colon;
+                errorToken = LexerToken::Colon;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
         // pushScope ScopeKind::IfBranch
         scopePosition = pushScope(scopePosition, ScopeKind::IfBranch);
-        // emitNode NodeKind::IfStmt
-        carriedEmitNodeKind = NodeKind::IfStmt;
+        // emitToken TokenKind::IfStmt
+        carriedEmitTokenKind = TokenKind::IfStmt;
         // next single_or_compound_statement
         goto single_or_compound_statement$with_emit;
     }
@@ -1216,13 +1216,13 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
                 if (result == nullptr) {
-                    errorToken = Token::SemiColon;
+                    errorToken = LexerToken::SemiColon;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
-            // emitNode NodeKind::EmptyNode
-            carriedEmitNodeKind = NodeKind::EmptyNode;
+            // emitToken TokenKind::EmptyNode
+            carriedEmitTokenKind = TokenKind::EmptyNode;
             // next after_declaration
             goto after_declaration$with_emit;
         }
@@ -1232,28 +1232,28 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::VariableType);
                 if (result == nullptr) {
-                    errorToken = Token::SemiColon;
+                    errorToken = LexerToken::SemiColon;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::AssignStmt
-            emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-            nodeData = 0;
+            // emitToken TokenKind::AssignStmt
+            emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+            tokenData = 0;
         }
         // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
         {
             auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr);
             if (result == nullptr) {
-                errorToken = Token::SemiColon;
+                errorToken = LexerToken::SemiColon;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::ExpressionStmt
-        carriedEmitNodeKind = NodeKind::ExpressionStmt;
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
         // next after_statement
         goto after_statement$with_emit;
     }
@@ -1267,21 +1267,21 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = Token::LessLessEqual;
+                        errorToken = LexerToken::LessLessEqual;
                         goto handle_parse_error;
                     }
                     scopePosition = result;
                 }
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-                // emitNode NodeKind::ShiftLeftUpdateStmt
-                carriedEmitNodeKind = NodeKind::ShiftLeftUpdateStmt;
+                // emitToken TokenKind::ShiftLeftUpdateStmt
+                carriedEmitTokenKind = TokenKind::ShiftLeftUpdateStmt;
                 // next expression
                 goto expression$with_emit;
             }
             tokEnd += 2;
-            // emitNode NodeKind::ShiftLeftExpr
-            carriedEmitNodeKind = NodeKind::ShiftLeftExpr;
+            // emitToken TokenKind::ShiftLeftExpr
+            carriedEmitTokenKind = TokenKind::ShiftLeftExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -1291,18 +1291,18 @@ after_expression$as_then:
                 tokEnd += 3;
                 // -> error
                 // error
-                errorToken = Token::LessEqualGreater;
+                errorToken = LexerToken::LessEqualGreater;
                 goto handle_parse_error;
             }
             tokEnd += 2;
-            // emitNode NodeKind::CompareLessEqualExpr
-            carriedEmitNodeKind = NodeKind::CompareLessEqualExpr;
+            // emitToken TokenKind::CompareLessEqualExpr
+            carriedEmitTokenKind = TokenKind::CompareLessEqualExpr;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::CompareLessExpr
-        carriedEmitNodeKind = NodeKind::CompareLessExpr;
+        // emitToken TokenKind::CompareLessExpr
+        carriedEmitTokenKind = TokenKind::CompareLessExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1310,8 +1310,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
-            // emitNode NodeKind::CompareEqualExpr
-            carriedEmitNodeKind = NodeKind::CompareEqualExpr;
+            // emitToken TokenKind::CompareEqualExpr
+            carriedEmitTokenKind = TokenKind::CompareEqualExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -1321,13 +1321,13 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::IfExpr, ScopeKind::IfExprOrStmt);
                 if (result == nullptr) {
-                    errorToken = Token::EqualGreater;
+                    errorToken = LexerToken::EqualGreater;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
-            // emitNode NodeKind::IfExpr
-            carriedEmitNodeKind = NodeKind::IfExpr;
+            // emitToken TokenKind::IfExpr
+            carriedEmitTokenKind = TokenKind::IfExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -1336,15 +1336,15 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::VariableType, ScopeKind::LeftExpr);
             if (result == nullptr) {
-                errorToken = Token::Equal;
+                errorToken = LexerToken::Equal;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
         // pushScope ScopeKind::RightExpr
         scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-        // emitNode NodeKind::AssignStmt
-        carriedEmitNodeKind = NodeKind::AssignStmt;
+        // emitToken TokenKind::AssignStmt
+        carriedEmitTokenKind = TokenKind::AssignStmt;
         // next expression
         goto expression$with_emit;
     }
@@ -1352,8 +1352,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
-            // emitNode NodeKind::CompareGreaterEqualExpr
-            carriedEmitNodeKind = NodeKind::CompareGreaterEqualExpr;
+            // emitToken TokenKind::CompareGreaterEqualExpr
+            carriedEmitTokenKind = TokenKind::CompareGreaterEqualExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -1365,34 +1365,34 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = Token::GreaterGreaterEqual;
+                        errorToken = LexerToken::GreaterGreaterEqual;
                         goto handle_parse_error;
                     }
                     scopePosition = result;
                 }
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-                // emitNode NodeKind::ShiftRightUpdateStmt
-                carriedEmitNodeKind = NodeKind::ShiftRightUpdateStmt;
+                // emitToken TokenKind::ShiftRightUpdateStmt
+                carriedEmitTokenKind = TokenKind::ShiftRightUpdateStmt;
                 // next expression
                 goto expression$with_emit;
             }
             tokEnd += 2;
-            // emitNode NodeKind::ShiftRightExpr
-            carriedEmitNodeKind = NodeKind::ShiftRightExpr;
+            // emitToken TokenKind::ShiftRightExpr
+            carriedEmitTokenKind = TokenKind::ShiftRightExpr;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::CompareGreaterExpr
-        carriedEmitNodeKind = NodeKind::CompareGreaterExpr;
+        // emitToken TokenKind::CompareGreaterExpr
+        carriedEmitTokenKind = TokenKind::CompareGreaterExpr;
         // next expression
         goto expression$with_emit;
     }
     case '[': {
         tokEnd += 1;
-        // emitNode NodeKind::IndexExpr
-        carriedEmitNodeKind = NodeKind::IndexExpr;
+        // emitToken TokenKind::IndexExpr
+        carriedEmitTokenKind = TokenKind::IndexExpr;
         // next first_argument_square
         goto first_argument_square$with_emit;
     }
@@ -1402,13 +1402,13 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = Token::RightSqure;
+                errorToken = LexerToken::RightSqure;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1420,28 +1420,28 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::HatEqual;
+                    errorToken = LexerToken::HatEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::BitwiseXorUpdateStmt
-            carriedEmitNodeKind = NodeKind::BitwiseXorUpdateStmt;
+            // emitToken TokenKind::BitwiseXorUpdateStmt
+            carriedEmitTokenKind = TokenKind::BitwiseXorUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::BitwiseXorExpr
-        carriedEmitNodeKind = NodeKind::BitwiseXorExpr;
+        // emitToken TokenKind::BitwiseXorExpr
+        carriedEmitTokenKind = TokenKind::BitwiseXorExpr;
         // next expression
         goto expression$with_emit;
     }
     case '{': {
         tokEnd += 1;
-        // emitNode NodeKind::Parameterize
-        carriedEmitNodeKind = NodeKind::Parameterize;
+        // emitToken TokenKind::Parameterize
+        carriedEmitTokenKind = TokenKind::Parameterize;
         // next first_argument_brace
         goto first_argument_brace$with_emit;
     }
@@ -1453,15 +1453,15 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = Token::VertEqual;
+                    errorToken = LexerToken::VertEqual;
                     goto handle_parse_error;
                 }
                 scopePosition = result;
             }
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::BitwiseOrUpdateStmt
-            carriedEmitNodeKind = NodeKind::BitwiseOrUpdateStmt;
+            // emitToken TokenKind::BitwiseOrUpdateStmt
+            carriedEmitTokenKind = TokenKind::BitwiseOrUpdateStmt;
             // next expression
             goto expression$with_emit;
         }
@@ -1473,27 +1473,27 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = Token::VertVertEqual;
+                        errorToken = LexerToken::VertVertEqual;
                         goto handle_parse_error;
                     }
                     scopePosition = result;
                 }
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-                // emitNode NodeKind::LogicalOrUpdateStmt
-                carriedEmitNodeKind = NodeKind::LogicalOrUpdateStmt;
+                // emitToken TokenKind::LogicalOrUpdateStmt
+                carriedEmitTokenKind = TokenKind::LogicalOrUpdateStmt;
                 // next expression
                 goto expression$with_emit;
             }
             tokEnd += 2;
-            // emitNode NodeKind::LogicalOrExpr
-            carriedEmitNodeKind = NodeKind::LogicalOrExpr;
+            // emitToken TokenKind::LogicalOrExpr
+            carriedEmitTokenKind = TokenKind::LogicalOrExpr;
             // next expression
             goto expression$with_emit;
         }
         tokEnd += 1;
-        // emitNode NodeKind::BitwiseOrExpr
-        carriedEmitNodeKind = NodeKind::BitwiseOrExpr;
+        // emitToken TokenKind::BitwiseOrExpr
+        carriedEmitTokenKind = TokenKind::BitwiseOrExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1503,13 +1503,13 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
             if (result == nullptr) {
-                errorToken = Token::RightBrace;
+                errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1517,7 +1517,7 @@ after_expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Tilde;
+        errorToken = LexerToken::Tilde;
         goto handle_parse_error;
     }
     case '0':
@@ -1535,7 +1535,7 @@ after_expression$as_then:
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // -> error
         // error
-        errorToken = Token::Literal;
+        errorToken = LexerToken::Literal;
         goto handle_parse_error;
     }
     case '\'': {
@@ -1544,7 +1544,7 @@ after_expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = Token::Literal;
+        errorToken = LexerToken::Literal;
         goto handle_parse_error;
     }
     case 'a':
@@ -1618,10 +1618,10 @@ after_expression$word_case:
         // -> error
         goto error$keyword_check;
     }
-    nodeData = word.asUint();
+    tokenData = word.asUint();
     // -> error
     // error
-    errorToken = Token::Identifier;
+    errorToken = LexerToken::Identifier;
     goto handle_parse_error;
 
     // LinearState comma_after_expression
@@ -1635,13 +1635,13 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Paren);
             if (result == nullptr) {
-                errorToken = Token::RightParen;
+                errorToken = LexerToken::RightParen;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1651,13 +1651,13 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = Token::RightSqure;
+                errorToken = LexerToken::RightSqure;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1667,13 +1667,13 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
             if (result == nullptr) {
-                errorToken = Token::RightBrace;
+                errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1714,12 +1714,12 @@ comma_after_expression$no_emit:
                 }
                 // pushScope ScopeKind::Parameter
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-                // emitNode NodeKind::AssignStmt
-                emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-                nodeData = 0;
-                // emitNode NodeKind::ExpressionStmt
-                emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-                nodeData = 0;
+                // emitToken TokenKind::AssignStmt
+                emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+                tokenData = 0;
+                // emitToken TokenKind::ExpressionStmt
+                emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+                tokenData = 0;
                 // then parameter
                 goto parameter$keyword_check;
             }
@@ -1743,9 +1743,9 @@ comma_after_expression$no_emit:
                 }
                 // pushScope ScopeKind::Parameter
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-                // emitNode NodeKind::ExpressionStmt
-                emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-                nodeData = 0;
+                // emitToken TokenKind::ExpressionStmt
+                emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+                tokenData = 0;
                 // then parameter
                 goto parameter$keyword_check;
             }
@@ -1758,15 +1758,15 @@ comma_after_expression$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // ifScope ScopeKind::Parameter
         if (scopePosition[0] == ScopeKind::Parameter) {
             // then parameter
-            // nodeKind = NodeKind::ImplicitKindParameter
-            nodeKind = NodeKind::ImplicitKindParameter;
+            // tokenKind = TokenKind::ImplicitKindParameter
+            tokenKind = TokenKind::ImplicitKindParameter;
             // -> variable_declaration
-            // emitNode nodeKind
-            carriedEmitNodeKind = nodeKind;
+            // emitToken tokenKind
+            carriedEmitTokenKind = tokenKind;
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
         }
@@ -1790,18 +1790,18 @@ comma_after_expression$no_emit:
             }
             // pushScope ScopeKind::Parameter
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-            // emitNode NodeKind::AssignStmt
-            emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-            nodeData = 0;
-            // emitNode NodeKind::ExpressionStmt
-            emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-            nodeData = 0;
+            // emitToken TokenKind::AssignStmt
+            emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+            tokenData = 0;
+            // emitToken TokenKind::ExpressionStmt
+            emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+            tokenData = 0;
             // then parameter
-            // nodeKind = NodeKind::ImplicitKindParameter
-            nodeKind = NodeKind::ImplicitKindParameter;
+            // tokenKind = TokenKind::ImplicitKindParameter
+            tokenKind = TokenKind::ImplicitKindParameter;
             // -> variable_declaration
-            // emitNode nodeKind
-            carriedEmitNodeKind = nodeKind;
+            // emitToken tokenKind
+            carriedEmitTokenKind = tokenKind;
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
         }
@@ -1825,29 +1825,29 @@ comma_after_expression$no_emit:
             }
             // pushScope ScopeKind::Parameter
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-            // emitNode NodeKind::ExpressionStmt
-            emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-            nodeData = 0;
+            // emitToken TokenKind::ExpressionStmt
+            emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+            tokenData = 0;
             // then parameter
-            // nodeKind = NodeKind::ImplicitKindParameter
-            nodeKind = NodeKind::ImplicitKindParameter;
+            // tokenKind = TokenKind::ImplicitKindParameter
+            tokenKind = TokenKind::ImplicitKindParameter;
             // -> variable_declaration
-            // emitNode nodeKind
-            carriedEmitNodeKind = nodeKind;
+            // emitToken tokenKind
+            carriedEmitTokenKind = tokenKind;
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
         }
         // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
         if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace) {
             // then check_designated_argument
-            // emitNode NodeKind::IdentifierExpr
-            carriedEmitNodeKind = NodeKind::IdentifierExpr;
+            // emitToken TokenKind::IdentifierExpr
+            carriedEmitTokenKind = TokenKind::IdentifierExpr;
             // next maybe_designated_argument
             goto maybe_designated_argument$with_emit;
         }
         // -> error
         // error
-        errorToken = Token::Identifier;
+        errorToken = LexerToken::Identifier;
         goto handle_parse_error;
     }
     // ifScope ScopeKind::Parameter
@@ -1875,12 +1875,12 @@ comma_after_expression$no_emit:
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitNode NodeKind::AssignStmt
-        emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-        nodeData = 0;
-        // emitNode NodeKind::ExpressionStmt
-        emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-        nodeData = 0;
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+        tokenData = 0;
+        // emitToken TokenKind::ExpressionStmt
+        emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+        tokenData = 0;
         // then parameter
         goto parameter$as_then;
     }
@@ -1904,9 +1904,9 @@ comma_after_expression$no_emit:
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitNode NodeKind::ExpressionStmt
-        emitNode(NodeKind::ExpressionStmt, tokBegin, nodeData, state);
-        nodeData = 0;
+        // emitToken TokenKind::ExpressionStmt
+        emitToken(TokenKind::ExpressionStmt, tokBegin, tokenData, state);
+        tokenData = 0;
         // then parameter
         goto parameter$as_then;
     }
@@ -1925,8 +1925,8 @@ comma_else$no_emit:
     parseState = State::CommaElse;
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
-        // emitNode NodeKind::CommaElseExpr
-        carriedEmitNodeKind = NodeKind::CommaElseExpr;
+        // emitToken TokenKind::CommaElseExpr
+        carriedEmitTokenKind = TokenKind::CommaElseExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -1945,9 +1945,9 @@ check_designated_argument$as_then:
             // -> expression
             goto expression$keyword_check;
         }
-        nodeData = word.asUint();
-        // emitNode NodeKind::IdentifierExpr
-        carriedEmitNodeKind = NodeKind::IdentifierExpr;
+        tokenData = word.asUint();
+        // emitToken TokenKind::IdentifierExpr
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
         // next maybe_designated_argument
         goto maybe_designated_argument$with_emit;
     }
@@ -1956,8 +1956,8 @@ check_designated_argument$as_then:
 
     // LinearState maybe_designated_argument
 maybe_designated_argument$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 maybe_designated_argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -1966,8 +1966,8 @@ maybe_designated_argument$no_emit:
         char next = tokEnd[1];
         if (next != '>' && next != '=') {
             tokEnd += 1;
-            // updateKind NodeKind::DesignateArgument
-            state.parseOutput.nodes.back().setKind(NodeKind::DesignateArgument);
+            // updateKind TokenKind::DesignateArgument
+            state.parseOutput.tokens.back().setKind(TokenKind::DesignateArgument);
             // next expression
             goto expression$no_emit;
         }
@@ -1977,16 +1977,16 @@ maybe_designated_argument$no_emit:
 
     // LinearState first_argument_paren
 first_argument_paren$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 first_argument_paren$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentParen;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -1997,16 +1997,16 @@ first_argument_paren$no_emit:
 
     // LinearState first_argument_square
 first_argument_square$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 first_argument_square$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentSquare;
     if (std::string_view(tokEnd, 1) == "]"sv) {
         tokEnd += 1;
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2017,16 +2017,16 @@ first_argument_square$no_emit:
 
     // LinearState first_argument_brace
 first_argument_brace$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 first_argument_brace$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentBrace;
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2050,9 +2050,9 @@ access_punctuation$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        tokenData = word.asUint();
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2061,8 +2061,8 @@ access_punctuation$no_emit:
 
     // LinearState single_or_compound_statement
 single_or_compound_statement$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 single_or_compound_statement$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -2073,8 +2073,8 @@ single_or_compound_statement$no_emit:
         scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
         // pushScope ScopeKind::PlainStatement
         scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
-        // emitNode NodeKind::CompoundStmt
-        carriedEmitNodeKind = NodeKind::CompoundStmt;
+        // emitToken TokenKind::CompoundStmt
+        carriedEmitTokenKind = TokenKind::CompoundStmt;
         // next statement
         goto statement$with_emit;
     }
@@ -2083,8 +2083,8 @@ single_or_compound_statement$no_emit:
 
     // LinearState after_statement
 after_statement$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_statement$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -2102,7 +2102,7 @@ after_statement$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::IfBranch);
                     if (result == nullptr) {
-                        errorToken = Token::Else;
+                        errorToken = LexerToken::Else;
                         goto handle_parse_error;
                     }
                     scopePosition = result;
@@ -2169,7 +2169,7 @@ after_statement$no_emit:
             // -> statement
             goto statement$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // ifScope ScopeKind::FunctionBody
         if (scopePosition[0] == ScopeKind::FunctionBody) {
             // popScope ScopeKind::FunctionBody
@@ -2187,9 +2187,9 @@ after_statement$no_emit:
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
                 // commitDeclaration DeclarationKind::Member
-                commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-                // emitNode NodeKind::MemberDecl
-                carriedEmitNodeKind = NodeKind::MemberDecl;
+                commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+                // emitToken TokenKind::MemberDecl
+                carriedEmitTokenKind = TokenKind::MemberDecl;
                 // next after_variable_declaration_id
                 goto after_variable_declaration_id$with_emit;
             }
@@ -2200,12 +2200,12 @@ after_statement$no_emit:
                 // -> no_declaration
                 // -> error
                 // error
-                errorToken = Token::Identifier;
+                errorToken = LexerToken::Identifier;
                 goto handle_parse_error;
             }
             // -> error
             // error
-            errorToken = Token::Identifier;
+            errorToken = LexerToken::Identifier;
             goto handle_parse_error;
         }
         // ifScope ScopeKind::Type, ScopeKind::Namespace
@@ -2217,9 +2217,9 @@ after_statement$no_emit:
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
                 // commitDeclaration DeclarationKind::Member
-                commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-                // emitNode NodeKind::MemberDecl
-                carriedEmitNodeKind = NodeKind::MemberDecl;
+                commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+                // emitToken TokenKind::MemberDecl
+                carriedEmitTokenKind = TokenKind::MemberDecl;
                 // next after_variable_declaration_id
                 goto after_variable_declaration_id$with_emit;
             }
@@ -2230,12 +2230,12 @@ after_statement$no_emit:
                 // -> no_declaration
                 // -> error
                 // error
-                errorToken = Token::Identifier;
+                errorToken = LexerToken::Identifier;
                 goto handle_parse_error;
             }
             // -> error
             // error
-            errorToken = Token::Identifier;
+            errorToken = LexerToken::Identifier;
             goto handle_parse_error;
         }
         // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
@@ -2252,8 +2252,8 @@ after_statement$no_emit:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::IdentifierExpr
-        carriedEmitNodeKind = NodeKind::IdentifierExpr;
+        // emitToken TokenKind::IdentifierExpr
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2290,8 +2290,8 @@ after_statement$no_emit:
 
     // SwitchState statement
 statement$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 statement$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -2321,15 +2321,15 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::ExclaimEqual;
+            errorToken = LexerToken::ExclaimEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::LogicalNotExpr
-        carriedEmitNodeKind = NodeKind::LogicalNotExpr;
+        // emitToken TokenKind::LogicalNotExpr
+        carriedEmitTokenKind = TokenKind::LogicalNotExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -2342,7 +2342,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::PercentEqual;
+            errorToken = LexerToken::PercentEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2351,7 +2351,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Percent;
+        errorToken = LexerToken::Percent;
         goto handle_parse_error;
     }
     case '&': {
@@ -2365,7 +2365,7 @@ statement$as_then:
                 // -> expression
                 // -> error
                 // error
-                errorToken = Token::AmpAmpEqual;
+                errorToken = LexerToken::AmpAmpEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
@@ -2374,7 +2374,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::AmpAmp;
+            errorToken = LexerToken::AmpAmp;
             goto handle_parse_error;
         }
         if (next == '=') {
@@ -2384,7 +2384,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::AmpEqual;
+            errorToken = LexerToken::AmpEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2393,7 +2393,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Amp;
+        errorToken = LexerToken::Amp;
         goto handle_parse_error;
     }
     case '(': {
@@ -2401,8 +2401,8 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::ParenthesizedExpr
-        carriedEmitNodeKind = NodeKind::ParenthesizedExpr;
+        // emitToken TokenKind::ParenthesizedExpr
+        carriedEmitTokenKind = TokenKind::ParenthesizedExpr;
         // next first_argument_paren
         goto first_argument_paren$with_emit;
     }
@@ -2413,7 +2413,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::RightParen;
+        errorToken = LexerToken::RightParen;
         goto handle_parse_error;
     }
     case '*': {
@@ -2425,15 +2425,15 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::StarEqual;
+            errorToken = LexerToken::StarEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::DereferenceExpr
-        carriedEmitNodeKind = NodeKind::DereferenceExpr;
+        // emitToken TokenKind::DereferenceExpr
+        carriedEmitTokenKind = TokenKind::DereferenceExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -2444,8 +2444,8 @@ statement$as_then:
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
-            // emitNode NodeKind::PreIncrementExpr
-            carriedEmitNodeKind = NodeKind::PreIncrementExpr;
+            // emitToken TokenKind::PreIncrementExpr
+            carriedEmitTokenKind = TokenKind::PreIncrementExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -2456,15 +2456,15 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::PlusEqual;
+            errorToken = LexerToken::PlusEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::PlusExpr
-        carriedEmitNodeKind = NodeKind::PlusExpr;
+        // emitToken TokenKind::PlusExpr
+        carriedEmitTokenKind = TokenKind::PlusExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -2475,7 +2475,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Comma;
+        errorToken = LexerToken::Comma;
         goto handle_parse_error;
     }
     case '-': {
@@ -2485,8 +2485,8 @@ statement$as_then:
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
-            // emitNode NodeKind::PreDecrementExpr
-            carriedEmitNodeKind = NodeKind::PreDecrementExpr;
+            // emitToken TokenKind::PreDecrementExpr
+            carriedEmitTokenKind = TokenKind::PreDecrementExpr;
             // next expression
             goto expression$with_emit;
         }
@@ -2497,7 +2497,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::MinusEqual;
+            errorToken = LexerToken::MinusEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
@@ -2507,15 +2507,15 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::MinusGreater;
+            errorToken = LexerToken::MinusGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::NegateExpr
-        carriedEmitNodeKind = NodeKind::NegateExpr;
+        // emitToken TokenKind::NegateExpr
+        carriedEmitTokenKind = TokenKind::NegateExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -2526,7 +2526,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Point;
+        errorToken = LexerToken::Point;
         goto handle_parse_error;
     }
     case '/': {
@@ -2551,7 +2551,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::SlashEqual;
+            errorToken = LexerToken::SlashEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2560,7 +2560,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Slash;
+        errorToken = LexerToken::Slash;
         goto handle_parse_error;
     }
     case ':': {
@@ -2572,7 +2572,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::ColonColon;
+            errorToken = LexerToken::ColonColon;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2581,7 +2581,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Colon;
+        errorToken = LexerToken::Colon;
         goto handle_parse_error;
     }
     case ';': {
@@ -2591,7 +2591,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::SemiColon;
+        errorToken = LexerToken::SemiColon;
         goto handle_parse_error;
     }
     case '<': {
@@ -2605,7 +2605,7 @@ statement$as_then:
                 // -> expression
                 // -> error
                 // error
-                errorToken = Token::LessLessEqual;
+                errorToken = LexerToken::LessLessEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
@@ -2614,7 +2614,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::LessLess;
+            errorToken = LexerToken::LessLess;
             goto handle_parse_error;
         }
         if (next == '=') {
@@ -2626,7 +2626,7 @@ statement$as_then:
                 // -> expression
                 // -> error
                 // error
-                errorToken = Token::LessEqualGreater;
+                errorToken = LexerToken::LessEqualGreater;
                 goto handle_parse_error;
             }
             tokEnd += 2;
@@ -2635,7 +2635,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::LessEqual;
+            errorToken = LexerToken::LessEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2644,7 +2644,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Less;
+        errorToken = LexerToken::Less;
         goto handle_parse_error;
     }
     case '=': {
@@ -2656,7 +2656,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::EqualEqual;
+            errorToken = LexerToken::EqualEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
@@ -2666,7 +2666,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::EqualGreater;
+            errorToken = LexerToken::EqualGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2675,7 +2675,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Equal;
+        errorToken = LexerToken::Equal;
         goto handle_parse_error;
     }
     case '>': {
@@ -2687,7 +2687,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::GreaterEqual;
+            errorToken = LexerToken::GreaterEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
@@ -2699,7 +2699,7 @@ statement$as_then:
                 // -> expression
                 // -> error
                 // error
-                errorToken = Token::GreaterGreaterEqual;
+                errorToken = LexerToken::GreaterGreaterEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
@@ -2708,7 +2708,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::GreaterGreater;
+            errorToken = LexerToken::GreaterGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2717,7 +2717,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Greater;
+        errorToken = LexerToken::Greater;
         goto handle_parse_error;
     }
     case '[': {
@@ -2727,7 +2727,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::LeftSqure;
+        errorToken = LexerToken::LeftSqure;
         goto handle_parse_error;
     }
     case ']': {
@@ -2737,7 +2737,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::RightSqure;
+        errorToken = LexerToken::RightSqure;
         goto handle_parse_error;
     }
     case '^': {
@@ -2749,7 +2749,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::HatEqual;
+            errorToken = LexerToken::HatEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2758,7 +2758,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Hat;
+        errorToken = LexerToken::Hat;
         goto handle_parse_error;
     }
     case '{': {
@@ -2768,7 +2768,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::LeftBrace;
+        errorToken = LexerToken::LeftBrace;
         goto handle_parse_error;
     }
     case '|': {
@@ -2780,7 +2780,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::VertEqual;
+            errorToken = LexerToken::VertEqual;
             goto handle_parse_error;
         }
         if (next == '|') {
@@ -2792,7 +2792,7 @@ statement$as_then:
                 // -> expression
                 // -> error
                 // error
-                errorToken = Token::VertVertEqual;
+                errorToken = LexerToken::VertVertEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
@@ -2801,7 +2801,7 @@ statement$as_then:
             // -> expression
             // -> error
             // error
-            errorToken = Token::VertVert;
+            errorToken = LexerToken::VertVert;
             goto handle_parse_error;
         }
         tokEnd += 1;
@@ -2810,7 +2810,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = Token::Vert;
+        errorToken = LexerToken::Vert;
         goto handle_parse_error;
     }
     case '}': {
@@ -2819,7 +2819,7 @@ statement$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
             if (result == nullptr) {
-                errorToken = Token::RightBrace;
+                errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -2828,13 +2828,13 @@ statement$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::CompoundStmt);
             if (result == nullptr) {
-                errorToken = Token::RightBrace;
+                errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::EmptyNode
-        carriedEmitNodeKind = NodeKind::EmptyNode;
+        // emitToken TokenKind::EmptyNode
+        carriedEmitTokenKind = TokenKind::EmptyNode;
         // next after_statement
         goto after_statement$with_emit;
     }
@@ -2843,8 +2843,8 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::BitwiseNotExpr
-        carriedEmitNodeKind = NodeKind::BitwiseNotExpr;
+        // emitToken TokenKind::BitwiseNotExpr
+        carriedEmitTokenKind = TokenKind::BitwiseNotExpr;
         // next expression
         goto expression$with_emit;
     }
@@ -2864,8 +2864,8 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::LiteralExpr
-        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // emitToken TokenKind::LiteralExpr
+        carriedEmitTokenKind = TokenKind::LiteralExpr;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2876,8 +2876,8 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitNode NodeKind::LiteralExpr
-        carriedEmitNodeKind = NodeKind::LiteralExpr;
+        // emitToken TokenKind::LiteralExpr
+        carriedEmitTokenKind = TokenKind::LiteralExpr;
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2963,16 +2963,16 @@ statement$word_case:
             goto check_var_after_let$no_emit;
         }
         if (word == words["var"]) {
-            // nodeKind = NodeKind::VarStmt
-            nodeKind = NodeKind::VarStmt;
+            // tokenKind = TokenKind::VarStmt
+            tokenKind = TokenKind::VarStmt;
             // next variable_declaration
             goto variable_declaration$no_emit;
         }
         if (word == words["return"]) {
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::ReturnStmt
-            carriedEmitNodeKind = NodeKind::ReturnStmt;
+            // emitToken TokenKind::ReturnStmt
+            carriedEmitTokenKind = TokenKind::ReturnStmt;
             // next after_return
             goto after_return$with_emit;
         }
@@ -2981,19 +2981,19 @@ statement$word_case:
         // -> expression
         goto expression$keyword_check;
     }
-    nodeData = word.asUint();
+    tokenData = word.asUint();
     // pushScope ScopeKind::LeftExpr
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
     // -> expression
-    // emitNode NodeKind::IdentifierExpr
-    carriedEmitNodeKind = NodeKind::IdentifierExpr;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
     // next after_expression
     goto after_expression$with_emit;
 
     // LinearState after_return
 after_return$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_return$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3004,13 +3004,13 @@ after_return$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::RightExpr);
             if (result == nullptr) {
-                errorToken = Token::SemiColon;
+                errorToken = LexerToken::SemiColon;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // updateKind NodeKind::EmptyReturnStmt
-        state.parseOutput.nodes.back().setKind(NodeKind::EmptyReturnStmt);
+        // updateKind TokenKind::EmptyReturnStmt
+        state.parseOutput.tokens.back().setKind(TokenKind::EmptyReturnStmt);
         // next after_statement
         goto after_statement$no_emit;
     }
@@ -3026,8 +3026,8 @@ else_branch$no_emit:
         char next = tokEnd[1];
         if (next != ':') {
             tokEnd += 1;
-            // emitNode NodeKind::ElseStmt
-            carriedEmitNodeKind = NodeKind::ElseStmt;
+            // emitToken TokenKind::ElseStmt
+            carriedEmitTokenKind = TokenKind::ElseStmt;
             // next single_or_compound_statement
             goto single_or_compound_statement$with_emit;
         }
@@ -3049,28 +3049,28 @@ check_var_after_let$no_emit:
         if (word.keyword()) {
         [[maybe_unused]] check_var_after_let$keyword_check:
             if (word == words["var"]) {
-                // nodeKind = NodeKind::VarStmt
-                nodeKind = NodeKind::VarStmt;
+                // tokenKind = TokenKind::VarStmt
+                tokenKind = TokenKind::VarStmt;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
-            // nodeKind = NodeKind::LetStmt
-            nodeKind = NodeKind::LetStmt;
+            // tokenKind = TokenKind::LetStmt
+            tokenKind = TokenKind::LetStmt;
             // -> variable_declaration
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
-        // nodeKind = NodeKind::LetStmt
-        nodeKind = NodeKind::LetStmt;
+        tokenData = word.asUint();
+        // tokenKind = TokenKind::LetStmt
+        tokenKind = TokenKind::LetStmt;
         // -> variable_declaration
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
-    // nodeKind = NodeKind::LetStmt
-    nodeKind = NodeKind::LetStmt;
+    // tokenKind = TokenKind::LetStmt
+    tokenKind = TokenKind::LetStmt;
     // then variable_declaration
     goto variable_declaration$as_then;
 
@@ -3090,9 +3090,9 @@ variable_declaration$as_then:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        tokenData = word.asUint();
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3101,8 +3101,8 @@ variable_declaration$as_then:
 
     // LinearState after_variable_declaration_id
 after_variable_declaration_id$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_variable_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3123,19 +3123,19 @@ after_variable_declaration_id$no_emit:
             tokEnd += 1;
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitNode NodeKind::AssignStmt
-            carriedEmitNodeKind = NodeKind::AssignStmt;
+            // emitToken TokenKind::AssignStmt
+            carriedEmitTokenKind = TokenKind::AssignStmt;
             // next expression
             goto expression$with_emit;
         }
     }
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
-        // emitNode NodeKind::AssignStmt
-        emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-        nodeData = 0;
-        // emitNode NodeKind::ExpressionStmt
-        carriedEmitNodeKind = NodeKind::ExpressionStmt;
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+        tokenData = 0;
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
         // next after_statement
         goto after_statement$with_emit;
     }
@@ -3145,18 +3145,18 @@ after_variable_declaration_id$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = Token::Comma;
+                errorToken = LexerToken::Comma;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitNode NodeKind::AssignStmt
-        emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-        nodeData = 0;
-        // emitNode NodeKind::ExpressionStmt
-        carriedEmitNodeKind = NodeKind::ExpressionStmt;
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+        tokenData = 0;
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
         // next parameter
         goto parameter$with_emit;
     }
@@ -3166,16 +3166,16 @@ after_variable_declaration_id$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = Token::RightParen;
+                errorToken = LexerToken::RightParen;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        // emitNode NodeKind::AssignStmt
-        emitNode(NodeKind::AssignStmt, tokBegin, nodeData, state);
-        nodeData = 0;
-        // emitNode NodeKind::ExpressionStmt
-        carriedEmitNodeKind = NodeKind::ExpressionStmt;
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, tokenData, state);
+        tokenData = 0;
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
         // next after_parameters
         goto after_parameters$with_emit;
     }
@@ -3184,8 +3184,8 @@ after_variable_declaration_id$no_emit:
 
     // LinearState after_parameters
 after_parameters$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_parameters$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3221,8 +3221,8 @@ after_parameters$no_emit:
 
     // LinearState first_parameter
 first_parameter$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 first_parameter$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3239,8 +3239,8 @@ first_parameter$no_emit:
 
     // LinearState parameter
 parameter$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 parameter$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3255,52 +3255,52 @@ parameter$as_then:
         if (word.keyword()) {
         [[maybe_unused]] parameter$keyword_check:
             if (word == words["in"]) {
-                // nodeKind = NodeKind::InParameter
-                nodeKind = NodeKind::InParameter;
+                // tokenKind = TokenKind::InParameter
+                tokenKind = TokenKind::InParameter;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
             if (word == words["inout"]) {
-                // nodeKind = NodeKind::InOutParameter
-                nodeKind = NodeKind::InOutParameter;
+                // tokenKind = TokenKind::InOutParameter
+                tokenKind = TokenKind::InOutParameter;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
             if (word == words["out"]) {
-                // nodeKind = NodeKind::OutParameter
-                nodeKind = NodeKind::OutParameter;
+                // tokenKind = TokenKind::OutParameter
+                tokenKind = TokenKind::OutParameter;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
             if (word == words["let"]) {
-                // nodeKind = NodeKind::LetParameter
-                nodeKind = NodeKind::LetParameter;
+                // tokenKind = TokenKind::LetParameter
+                tokenKind = TokenKind::LetParameter;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
             if (word == words["var"]) {
-                // nodeKind = NodeKind::VarParameter
-                nodeKind = NodeKind::VarParameter;
+                // tokenKind = TokenKind::VarParameter
+                tokenKind = TokenKind::VarParameter;
                 // next variable_declaration
                 goto variable_declaration$no_emit;
             }
-            // nodeKind = NodeKind::ImplicitKindParameter
-            nodeKind = NodeKind::ImplicitKindParameter;
+            // tokenKind = TokenKind::ImplicitKindParameter
+            tokenKind = TokenKind::ImplicitKindParameter;
             // -> variable_declaration
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
-        // nodeKind = NodeKind::ImplicitKindParameter
-        nodeKind = NodeKind::ImplicitKindParameter;
+        tokenData = word.asUint();
+        // tokenKind = TokenKind::ImplicitKindParameter
+        tokenKind = TokenKind::ImplicitKindParameter;
         // -> variable_declaration
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
-    // nodeKind = NodeKind::ImplicitKindParameter
-    nodeKind = NodeKind::ImplicitKindParameter;
+    // tokenKind = TokenKind::ImplicitKindParameter
+    tokenKind = TokenKind::ImplicitKindParameter;
     // then variable_declaration
     goto variable_declaration$as_then;
 
@@ -3312,7 +3312,7 @@ no_declaration$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Namespace, ScopeKind::Type);
             if (result == nullptr) {
-                errorToken = Token::RightBrace;
+                errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -3325,7 +3325,7 @@ no_declaration$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Namespace);
             if (result == nullptr) {
-                errorToken = Token::EOS;
+                errorToken = LexerToken::EOS;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -3334,13 +3334,13 @@ no_declaration$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Invalid);
             if (result == nullptr) {
-                errorToken = Token::EOS;
+                errorToken = LexerToken::EOS;
                 goto handle_parse_error;
             }
             scopePosition = result;
         }
-        emitNode(NodeKind::EOS, tokBegin, nodeData, state);
-        nodeData = 0;
+        emitToken(TokenKind::EOS, tokBegin, tokenData, state);
+        tokenData = 0;
         emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);
         return;
     }
@@ -3368,12 +3368,12 @@ namespace_declaration$as_then:
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // -> templated_declaration
         // -> no_declaration
         // -> error
         // error
-        errorToken = Token::Identifier;
+        errorToken = LexerToken::Identifier;
         goto handle_parse_error;
     }
     // then templated_declaration
@@ -3394,9 +3394,9 @@ namespace_declaration_id$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Namespace
-        commitDeclaration<DeclarationKind::Namespace>(std::bit_cast<Word>(nodeData), declarationBegin, state);
+        commitDeclaration<DeclarationKind::Namespace>(Word::fromUint(tokenData), declarationBegin, state);
         // next after_namespace_declaration_id
         goto after_namespace_declaration_id$no_emit;
     }
@@ -3446,51 +3446,51 @@ templated_declaration$as_then:
         [[maybe_unused]] templated_declaration$keyword_check:
             if (word == words["template"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
+                declarationBegin = state.parseOutput.currentToken();
                 // next after_template
                 goto after_template$no_emit;
             }
             if (word == words["incomplete"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
-                // emitNode NodeKind::IncompleteAttribute
-                carriedEmitNodeKind = NodeKind::IncompleteAttribute;
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             }
             if (word == words["virtual"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
-                // emitNode NodeKind::VirtualAttribute
-                carriedEmitNodeKind = NodeKind::VirtualAttribute;
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             }
             if (word == words["fn"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
+                declarationBegin = state.parseOutput.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (word == words["struct"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
-                // nodeKind = NodeKind::StructTypeDecl
-                nodeKind = NodeKind::StructTypeDecl;
+                declarationBegin = state.parseOutput.currentToken();
+                // tokenKind = TokenKind::StructTypeDecl
+                tokenKind = TokenKind::StructTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
             if (word == words["object"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
-                // nodeKind = NodeKind::ObjectTypeDecl
-                nodeKind = NodeKind::ObjectTypeDecl;
+                declarationBegin = state.parseOutput.currentToken();
+                // tokenKind = TokenKind::ObjectTypeDecl
+                tokenKind = TokenKind::ObjectTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
             if (word == words["static"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentNode();
+                declarationBegin = state.parseOutput.currentToken();
                 // next after_static
                 goto after_static$no_emit;
             }
@@ -3498,11 +3498,11 @@ templated_declaration$as_then:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // -> no_declaration
         // -> error
         // error
-        errorToken = Token::Identifier;
+        errorToken = LexerToken::Identifier;
         goto handle_parse_error;
     }
     // then no_declaration
@@ -3510,8 +3510,8 @@ templated_declaration$as_then:
 
     // LinearState templated_declaration_with_attributes
 templated_declaration_with_attributes$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 templated_declaration_with_attributes$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3530,14 +3530,14 @@ templated_declaration_with_attributes$as_then:
                 goto after_template$no_emit;
             }
             if (word == words["incomplete"]) {
-                // emitNode NodeKind::IncompleteAttribute
-                carriedEmitNodeKind = NodeKind::IncompleteAttribute;
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             }
             if (word == words["virtual"]) {
-                // emitNode NodeKind::VirtualAttribute
-                carriedEmitNodeKind = NodeKind::VirtualAttribute;
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             }
@@ -3546,14 +3546,14 @@ templated_declaration_with_attributes$as_then:
                 goto function_declaration_id$no_emit;
             }
             if (word == words["struct"]) {
-                // nodeKind = NodeKind::StructTypeDecl
-                nodeKind = NodeKind::StructTypeDecl;
+                // tokenKind = TokenKind::StructTypeDecl
+                tokenKind = TokenKind::StructTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
             if (word == words["object"]) {
-                // nodeKind = NodeKind::ObjectTypeDecl
-                nodeKind = NodeKind::ObjectTypeDecl;
+                // tokenKind = TokenKind::ObjectTypeDecl
+                tokenKind = TokenKind::ObjectTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
@@ -3564,10 +3564,10 @@ templated_declaration_with_attributes$as_then:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // -> error
         // error
-        errorToken = Token::Identifier;
+        errorToken = LexerToken::Identifier;
         goto handle_parse_error;
     }
     // then error
@@ -3582,8 +3582,8 @@ after_template$no_emit:
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
         scopePosition = pushScope(scopePosition, ScopeKind::TemplateParameters);
-        // emitNode NodeKind::TemplateAttribute
-        carriedEmitNodeKind = NodeKind::TemplateAttribute;
+        // emitToken TokenKind::TemplateAttribute
+        carriedEmitTokenKind = TokenKind::TemplateAttribute;
         // next first_parameter
         goto first_parameter$with_emit;
     }
@@ -3610,11 +3610,11 @@ function_declaration_id$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Function
-        commitDeclaration<DeclarationKind::Function>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-        // emitNode NodeKind::FunctionDecl
-        carriedEmitNodeKind = NodeKind::FunctionDecl;
+        commitDeclaration<DeclarationKind::Function>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken TokenKind::FunctionDecl
+        carriedEmitTokenKind = TokenKind::FunctionDecl;
         // next after_function_declaration_id
         goto after_function_declaration_id$with_emit;
     }
@@ -3623,8 +3623,8 @@ function_declaration_id$no_emit:
 
     // LinearState after_function_declaration_id
 after_function_declaration_id$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_function_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3694,11 +3694,11 @@ type_declaration_id$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Type
-        commitDeclaration<DeclarationKind::Type>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        commitDeclaration<DeclarationKind::Type>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_type_declaration_id
         goto after_type_declaration_id$with_emit;
     }
@@ -3707,8 +3707,8 @@ type_declaration_id$no_emit:
 
     // LinearState after_type_declaration_id
 after_type_declaration_id$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_type_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3758,19 +3758,19 @@ member_declaration$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
                 // commitDeclaration DeclarationKind::HasMember
                 commitDeclaration<DeclarationKind::HasMember>(Word(), declarationBegin, state);
-                // emitNode NodeKind::HasMemberDecl
-                carriedEmitNodeKind = NodeKind::HasMemberDecl;
+                // emitToken TokenKind::HasMemberDecl
+                carriedEmitTokenKind = TokenKind::HasMemberDecl;
                 // next expression
                 goto expression$with_emit;
             }
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Member
-        commitDeclaration<DeclarationKind::Member>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-        // emitNode NodeKind::MemberDecl
-        carriedEmitNodeKind = NodeKind::MemberDecl;
+        commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken TokenKind::MemberDecl
+        carriedEmitTokenKind = TokenKind::MemberDecl;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3791,25 +3791,25 @@ after_static$no_emit:
         if (word.keyword()) {
         [[maybe_unused]] after_static$keyword_check:
             if (word == words["var"]) {
-                // nodeKind = NodeKind::StaticVarDecl
-                nodeKind = NodeKind::StaticVarDecl;
+                // tokenKind = TokenKind::StaticVarDecl
+                tokenKind = TokenKind::StaticVarDecl;
                 // next static_variable_declaration
                 goto static_variable_declaration$no_emit;
             }
             if (word == words["let"]) {
-                // nodeKind = NodeKind::StaticLetDecl
-                nodeKind = NodeKind::StaticLetDecl;
+                // tokenKind = TokenKind::StaticLetDecl
+                tokenKind = TokenKind::StaticLetDecl;
                 // next static_variable_declaration
                 goto static_variable_declaration$no_emit;
             }
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitDeclaration<DeclarationKind::Variable>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-        // emitNode NodeKind::StaticLetDecl
-        carriedEmitNodeKind = NodeKind::StaticLetDecl;
+        commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken TokenKind::StaticLetDecl
+        carriedEmitTokenKind = TokenKind::StaticLetDecl;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3831,11 +3831,11 @@ static_variable_declaration$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        nodeData = word.asUint();
+        tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitDeclaration<DeclarationKind::Variable>(std::bit_cast<Word>(nodeData), declarationBegin, state);
-        // emitNode nodeKind
-        carriedEmitNodeKind = nodeKind;
+        commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken tokenKind
+        carriedEmitTokenKind = tokenKind;
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3844,8 +3844,8 @@ static_variable_declaration$no_emit:
 
     // LinearState after_declaration
 after_declaration$with_emit:
-    emitNode(carriedEmitNodeKind, tokBegin, nodeData, state);
-    nodeData = 0;
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3877,12 +3877,12 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::ExclaimEqual;
+            errorToken = LexerToken::ExclaimEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Exclaim;
+        errorToken = LexerToken::Exclaim;
         goto handle_parse_error;
     }
     case '%': {
@@ -3890,12 +3890,12 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::PercentEqual;
+            errorToken = LexerToken::PercentEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Percent;
+        errorToken = LexerToken::Percent;
         goto handle_parse_error;
     }
     case '&': {
@@ -3905,35 +3905,35 @@ error$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                errorToken = Token::AmpAmpEqual;
+                errorToken = LexerToken::AmpAmpEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            errorToken = Token::AmpAmp;
+            errorToken = LexerToken::AmpAmp;
             goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::AmpEqual;
+            errorToken = LexerToken::AmpEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Amp;
+        errorToken = LexerToken::Amp;
         goto handle_parse_error;
     }
     case '(': {
         tokEnd += 1;
         // error
-        errorToken = Token::LeftParen;
+        errorToken = LexerToken::LeftParen;
         goto handle_parse_error;
     }
     case ')': {
         tokEnd += 1;
         // error
-        errorToken = Token::RightParen;
+        errorToken = LexerToken::RightParen;
         goto handle_parse_error;
     }
     case '*': {
@@ -3941,12 +3941,12 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::StarEqual;
+            errorToken = LexerToken::StarEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Star;
+        errorToken = LexerToken::Star;
         goto handle_parse_error;
     }
     case '+': {
@@ -3954,24 +3954,24 @@ error$as_then:
         if (next == '+') {
             tokEnd += 2;
             // error
-            errorToken = Token::PlusPlus;
+            errorToken = LexerToken::PlusPlus;
             goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::PlusEqual;
+            errorToken = LexerToken::PlusEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Plus;
+        errorToken = LexerToken::Plus;
         goto handle_parse_error;
     }
     case ',': {
         tokEnd += 1;
         // error
-        errorToken = Token::Comma;
+        errorToken = LexerToken::Comma;
         goto handle_parse_error;
     }
     case '-': {
@@ -3979,30 +3979,30 @@ error$as_then:
         if (next == '-') {
             tokEnd += 2;
             // error
-            errorToken = Token::MinusMinus;
+            errorToken = LexerToken::MinusMinus;
             goto handle_parse_error;
         }
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::MinusEqual;
+            errorToken = LexerToken::MinusEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            errorToken = Token::MinusGreater;
+            errorToken = LexerToken::MinusGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Minus;
+        errorToken = LexerToken::Minus;
         goto handle_parse_error;
     }
     case '.': {
         tokEnd += 1;
         // error
-        errorToken = Token::Point;
+        errorToken = LexerToken::Point;
         goto handle_parse_error;
     }
     case '/': {
@@ -4018,12 +4018,12 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::SlashEqual;
+            errorToken = LexerToken::SlashEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Slash;
+        errorToken = LexerToken::Slash;
         goto handle_parse_error;
     }
     case ':': {
@@ -4031,18 +4031,18 @@ error$as_then:
         if (next == ':') {
             tokEnd += 2;
             // error
-            errorToken = Token::ColonColon;
+            errorToken = LexerToken::ColonColon;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Colon;
+        errorToken = LexerToken::Colon;
         goto handle_parse_error;
     }
     case ';': {
         tokEnd += 1;
         // error
-        errorToken = Token::SemiColon;
+        errorToken = LexerToken::SemiColon;
         goto handle_parse_error;
     }
     case '<': {
@@ -4052,12 +4052,12 @@ error$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                errorToken = Token::LessLessEqual;
+                errorToken = LexerToken::LessLessEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            errorToken = Token::LessLess;
+            errorToken = LexerToken::LessLess;
             goto handle_parse_error;
         }
         if (next == '=') {
@@ -4065,17 +4065,17 @@ error$as_then:
             if (next == '>') {
                 tokEnd += 3;
                 // error
-                errorToken = Token::LessEqualGreater;
+                errorToken = LexerToken::LessEqualGreater;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            errorToken = Token::LessEqual;
+            errorToken = LexerToken::LessEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Less;
+        errorToken = LexerToken::Less;
         goto handle_parse_error;
     }
     case '=': {
@@ -4083,18 +4083,18 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::EqualEqual;
+            errorToken = LexerToken::EqualEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
             tokEnd += 2;
             // error
-            errorToken = Token::EqualGreater;
+            errorToken = LexerToken::EqualGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Equal;
+        errorToken = LexerToken::Equal;
         goto handle_parse_error;
     }
     case '>': {
@@ -4102,7 +4102,7 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::GreaterEqual;
+            errorToken = LexerToken::GreaterEqual;
             goto handle_parse_error;
         }
         if (next == '>') {
@@ -4110,29 +4110,29 @@ error$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                errorToken = Token::GreaterGreaterEqual;
+                errorToken = LexerToken::GreaterGreaterEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            errorToken = Token::GreaterGreater;
+            errorToken = LexerToken::GreaterGreater;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Greater;
+        errorToken = LexerToken::Greater;
         goto handle_parse_error;
     }
     case '[': {
         tokEnd += 1;
         // error
-        errorToken = Token::LeftSqure;
+        errorToken = LexerToken::LeftSqure;
         goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // error
-        errorToken = Token::RightSqure;
+        errorToken = LexerToken::RightSqure;
         goto handle_parse_error;
     }
     case '^': {
@@ -4140,18 +4140,18 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::HatEqual;
+            errorToken = LexerToken::HatEqual;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Hat;
+        errorToken = LexerToken::Hat;
         goto handle_parse_error;
     }
     case '{': {
         tokEnd += 1;
         // error
-        errorToken = Token::LeftBrace;
+        errorToken = LexerToken::LeftBrace;
         goto handle_parse_error;
     }
     case '|': {
@@ -4159,7 +4159,7 @@ error$as_then:
         if (next == '=') {
             tokEnd += 2;
             // error
-            errorToken = Token::VertEqual;
+            errorToken = LexerToken::VertEqual;
             goto handle_parse_error;
         }
         if (next == '|') {
@@ -4167,29 +4167,29 @@ error$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // error
-                errorToken = Token::VertVertEqual;
+                errorToken = LexerToken::VertVertEqual;
                 goto handle_parse_error;
             }
             tokEnd += 2;
             // error
-            errorToken = Token::VertVert;
+            errorToken = LexerToken::VertVert;
             goto handle_parse_error;
         }
         tokEnd += 1;
         // error
-        errorToken = Token::Vert;
+        errorToken = LexerToken::Vert;
         goto handle_parse_error;
     }
     case '}': {
         tokEnd += 1;
         // error
-        errorToken = Token::RightBrace;
+        errorToken = LexerToken::RightBrace;
         goto handle_parse_error;
     }
     case '~': {
         tokEnd += 1;
         // error
-        errorToken = Token::Tilde;
+        errorToken = LexerToken::Tilde;
         goto handle_parse_error;
     }
     case '0':
@@ -4206,7 +4206,7 @@ error$as_then:
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // error
-        errorToken = Token::Literal;
+        errorToken = LexerToken::Literal;
         goto handle_parse_error;
     }
     case '\'': {
@@ -4214,7 +4214,7 @@ error$as_then:
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
         // error
-        errorToken = Token::Literal;
+        errorToken = LexerToken::Literal;
         goto handle_parse_error;
     }
     case 'a':
@@ -4288,184 +4288,184 @@ error$word_case:
     [[maybe_unused]] error$keyword_check:
         if (word == words["if"]) {
             // error
-            errorToken = Token::If;
+            errorToken = LexerToken::If;
             goto handle_parse_error;
         }
         if (word == words["elif"]) {
             // error
-            errorToken = Token::Elif;
+            errorToken = LexerToken::Elif;
             goto handle_parse_error;
         }
         if (word == words["else"]) {
             // error
-            errorToken = Token::Else;
+            errorToken = LexerToken::Else;
             goto handle_parse_error;
         }
         if (word == words["match"]) {
             // error
-            errorToken = Token::Match;
+            errorToken = LexerToken::Match;
             goto handle_parse_error;
         }
         if (word == words["for"]) {
             // error
-            errorToken = Token::For;
+            errorToken = LexerToken::For;
             goto handle_parse_error;
         }
         if (word == words["while"]) {
             // error
-            errorToken = Token::While;
+            errorToken = LexerToken::While;
             goto handle_parse_error;
         }
         if (word == words["do"]) {
             // error
-            errorToken = Token::Do;
+            errorToken = LexerToken::Do;
             goto handle_parse_error;
         }
         if (word == words["return"]) {
             // error
-            errorToken = Token::Return;
+            errorToken = LexerToken::Return;
             goto handle_parse_error;
         }
         if (word == words["break"]) {
             // error
-            errorToken = Token::Break;
+            errorToken = LexerToken::Break;
             goto handle_parse_error;
         }
         if (word == words["continue"]) {
             // error
-            errorToken = Token::Continue;
+            errorToken = LexerToken::Continue;
             goto handle_parse_error;
         }
         if (word == words["loop"]) {
             // error
-            errorToken = Token::Loop;
+            errorToken = LexerToken::Loop;
             goto handle_parse_error;
         }
         if (word == words["guard"]) {
             // error
-            errorToken = Token::Guard;
+            errorToken = LexerToken::Guard;
             goto handle_parse_error;
         }
         if (word == words["try"]) {
             // error
-            errorToken = Token::Try;
+            errorToken = LexerToken::Try;
             goto handle_parse_error;
         }
         if (word == words["catch"]) {
             // error
-            errorToken = Token::Catch;
+            errorToken = LexerToken::Catch;
             goto handle_parse_error;
         }
         if (word == words["with"]) {
             // error
-            errorToken = Token::With;
+            errorToken = LexerToken::With;
             goto handle_parse_error;
         }
         if (word == words["analysis"]) {
             // error
-            errorToken = Token::Analysis;
+            errorToken = LexerToken::Analysis;
             goto handle_parse_error;
         }
         if (word == words["assert"]) {
             // error
-            errorToken = Token::Assert;
+            errorToken = LexerToken::Assert;
             goto handle_parse_error;
         }
         if (word == words["namespace"]) {
             // error
-            errorToken = Token::Namespace;
+            errorToken = LexerToken::Namespace;
             goto handle_parse_error;
         }
         if (word == words["struct"]) {
             // error
-            errorToken = Token::Struct;
+            errorToken = LexerToken::Struct;
             goto handle_parse_error;
         }
         if (word == words["trait"]) {
             // error
-            errorToken = Token::Trait;
+            errorToken = LexerToken::Trait;
             goto handle_parse_error;
         }
         if (word == words["object"]) {
             // error
-            errorToken = Token::Object;
+            errorToken = LexerToken::Object;
             goto handle_parse_error;
         }
         if (word == words["fn"]) {
             // error
-            errorToken = Token::Fn;
+            errorToken = LexerToken::Fn;
             goto handle_parse_error;
         }
         if (word == words["has"]) {
             // error
-            errorToken = Token::Has;
+            errorToken = LexerToken::Has;
             goto handle_parse_error;
         }
         if (word == words["static"]) {
             // error
-            errorToken = Token::Static;
+            errorToken = LexerToken::Static;
             goto handle_parse_error;
         }
         if (word == words["incomplete"]) {
             // error
-            errorToken = Token::Incomplete;
+            errorToken = LexerToken::Incomplete;
             goto handle_parse_error;
         }
         if (word == words["virtual"]) {
             // error
-            errorToken = Token::Virtual;
+            errorToken = LexerToken::Virtual;
             goto handle_parse_error;
         }
         if (word == words["template"]) {
             // error
-            errorToken = Token::Template;
+            errorToken = LexerToken::Template;
             goto handle_parse_error;
         }
         if (word == words["var"]) {
             // error
-            errorToken = Token::Var;
+            errorToken = LexerToken::Var;
             goto handle_parse_error;
         }
         if (word == words["let"]) {
             // error
-            errorToken = Token::Let;
+            errorToken = LexerToken::Let;
             goto handle_parse_error;
         }
         if (word == words["in"]) {
             // error
-            errorToken = Token::In;
+            errorToken = LexerToken::In;
             goto handle_parse_error;
         }
         if (word == words["inout"]) {
             // error
-            errorToken = Token::Inout;
+            errorToken = LexerToken::Inout;
             goto handle_parse_error;
         }
         if (word == words["out"]) {
             // error
-            errorToken = Token::Out;
+            errorToken = LexerToken::Out;
             goto handle_parse_error;
         }
         if (word == words["forward"]) {
             // error
-            errorToken = Token::Forward;
+            errorToken = LexerToken::Forward;
             goto handle_parse_error;
         }
         if (word == words["assign"]) {
             // error
-            errorToken = Token::Assign;
+            errorToken = LexerToken::Assign;
             goto handle_parse_error;
         }
         if (word == words["porperty"]) {
             // error
-            errorToken = Token::Porperty;
+            errorToken = LexerToken::Porperty;
             goto handle_parse_error;
         }
         VERIFY_NOT_REACHED();
     }
-    nodeData = word.asUint();
+    tokenData = word.asUint();
     // error
-    errorToken = Token::Identifier;
+    errorToken = LexerToken::Identifier;
     goto handle_parse_error;
 
 
@@ -4474,13 +4474,13 @@ handle_parse_error:
     return;
 }
 
-std::string_view nameString(NodeKind kind) {
+std::string_view nameString(TokenKind kind) {
     switch (kind) {
-#define NODE(kind, type, prec) \
-    case NodeKind::kind:       \
+#define TOKEN(kind, type, prec) \
+    case TokenKind::kind:       \
         return #kind;
 
-#include "nodes.inc"
+#include "tokens.inc"
     }
 }
 

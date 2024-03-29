@@ -7,6 +7,7 @@
 #include <log.h>
 #include <parse/parse_impl.h>
 #include <vector>
+#include <sema/Program.h>
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -88,8 +89,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         }
     }
 
-    void visitNode(parse::Node node) {
-        // std::cout << nameString(node.kind()) << '\n';
+    void visitToken(parse::TokenInfo tok) {
+        // std::cout << nameString(tok.kind()) << '\n';
 
         if (commandQueue.empty())
             return;
@@ -97,7 +98,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             auto cmd = commandQueue.pop();
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    expect_eq(pair.value, nameString(node.kind()), "", &cmd, &pair);
+                    expect_eq(pair.value, nameString(tok.kind()), "", &cmd, &pair);
                 // else if (pair.key == words["packed-range-begin-column"])
                 //     expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
                 else
@@ -105,10 +106,10 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             }
         } else if (commandQueue.top().command == words["expect-identifier"]) {
             auto cmd = commandQueue.pop();
-            expect_eq(node.kind(), parse::NodeKind::IdentifierExpr);
+            expect_eq(tok.kind(), parse::TokenKind::IdentifierExpr);
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    expect_eq(pair.value, context.wordTable.view(Word::fromUint(node.data())), "", &cmd, &pair);
+                    expect_eq(pair.value, context.wordTable.view(Word::fromUint(tok.data())), "", &cmd, &pair);
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -252,7 +253,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         return cmd;
     }
 
-    void invalidToken(parse::Token token, parse::State state, parse::ScopeKind* scopes, glue::Context& context) override {
+    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, glue::Context& context) override {
         fmt::println("");
         fmt::println(
             "Invalid token '{}' for state '{}' and scope '{}' on line {}",

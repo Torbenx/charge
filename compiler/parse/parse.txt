@@ -3,29 +3,29 @@
 
 SwitchState expression() then error
     punctuation !
-        emitNode NodeKind::LogicalNotExpr
+        emitToken TokenKind::LogicalNotExpr
         next expression
     punctuation ~
-        emitNode NodeKind::BitwiseNotExpr
+        emitToken TokenKind::BitwiseNotExpr
         next expression
     punctuation +
-        emitNode NodeKind::PlusExpr
+        emitToken TokenKind::PlusExpr
         next expression
     punctuation -
-        emitNode NodeKind::NegateExpr
+        emitToken TokenKind::NegateExpr
         next expression
     punctuation ++
-        emitNode NodeKind::PreIncrementExpr
+        emitToken TokenKind::PreIncrementExpr
         next expression
     punctuation --
-        emitNode NodeKind::PreDecrementExpr
+        emitToken TokenKind::PreDecrementExpr
         next expression
     punctuation *
-        emitNode NodeKind::DereferenceExpr
+        emitToken TokenKind::DereferenceExpr
         next expression
 
     punctuation (
-        emitNode NodeKind::ParenthesizedExpr
+        emitToken TokenKind::ParenthesizedExpr
         next first_argument_paren
 
     keyword if
@@ -33,175 +33,175 @@ SwitchState expression() then error
         next expression
 
     identifier
-        emitNode NodeKind::IdentifierExpr
+        emitToken TokenKind::IdentifierExpr
         next after_expression
     literal
-        emitNode NodeKind::LiteralExpr
+        emitToken TokenKind::LiteralExpr
         next after_expression
 
 SwitchState after_expression() then error
     punctuation ++
-        emitNode NodeKind::PostIncrementExpr
+        emitToken TokenKind::PostIncrementExpr
         next after_expression
     punctuation --
-        emitNode NodeKind::PostDecrementExpr
+        emitToken TokenKind::PostDecrementExpr
         next after_expression
 
     punctuation +
-        emitNode NodeKind::AdditionExpr
+        emitToken TokenKind::AdditionExpr
         next expression
     punctuation -
-        emitNode NodeKind::SubtractionExpr
+        emitToken TokenKind::SubtractionExpr
         next expression
     punctuation *
-        emitNode NodeKind::MultiplyExpr
+        emitToken TokenKind::MultiplyExpr
         next expression
     punctuation &
-        emitNode NodeKind::BitwiseAndExpr
+        emitToken TokenKind::BitwiseAndExpr
         next expression
     punctuation ^
-        emitNode NodeKind::BitwiseXorExpr
+        emitToken TokenKind::BitwiseXorExpr
         next expression
     punctuation |
-        emitNode NodeKind::BitwiseOrExpr
+        emitToken TokenKind::BitwiseOrExpr
         next expression
     punctuation /
-        emitNode NodeKind::DivideExpr
+        emitToken TokenKind::DivideExpr
         next expression
     punctuation %
-        emitNode NodeKind::RemainderExpr
+        emitToken TokenKind::RemainderExpr
         next expression
     punctuation <<
-        emitNode NodeKind::ShiftLeftExpr
+        emitToken TokenKind::ShiftLeftExpr
         next expression
     punctuation >>
-        emitNode NodeKind::ShiftRightExpr
+        emitToken TokenKind::ShiftRightExpr
         next expression
     punctuation &&
-        emitNode NodeKind::LogicalAndExpr
+        emitToken TokenKind::LogicalAndExpr
         next expression
     punctuation ||
-        emitNode NodeKind::LogicalOrExpr
+        emitToken TokenKind::LogicalOrExpr
         next expression
     punctuation !=
-        emitNode NodeKind::CompareNotEqualExpr
+        emitToken TokenKind::CompareNotEqualExpr
         next expression
     punctuation ==
-        emitNode NodeKind::CompareEqualExpr
+        emitToken TokenKind::CompareEqualExpr
         next expression
     punctuation <
-        emitNode NodeKind::CompareLessExpr
+        emitToken TokenKind::CompareLessExpr
         next expression
     punctuation <=
-        emitNode NodeKind::CompareLessEqualExpr
+        emitToken TokenKind::CompareLessEqualExpr
         next expression
     punctuation >
-        emitNode NodeKind::CompareGreaterExpr
+        emitToken TokenKind::CompareGreaterExpr
         next expression
     punctuation >=
-        emitNode NodeKind::CompareGreaterEqualExpr
+        emitToken TokenKind::CompareGreaterEqualExpr
         next expression
 
     punctuation +=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::AdditionUpdateStmt
+        emitToken TokenKind::AdditionUpdateStmt
         next expression
     punctuation -=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::SubtractionUpdateStmt
+        emitToken TokenKind::SubtractionUpdateStmt
         next expression
     punctuation *=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::MultiplyUpdateStmt
+        emitToken TokenKind::MultiplyUpdateStmt
         next expression
     punctuation &=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::BitwiseAndUpdateStmt
+        emitToken TokenKind::BitwiseAndUpdateStmt
         next expression
     punctuation ^=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::BitwiseXorUpdateStmt
+        emitToken TokenKind::BitwiseXorUpdateStmt
         next expression
     punctuation |=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::BitwiseOrUpdateStmt
+        emitToken TokenKind::BitwiseOrUpdateStmt
         next expression
     punctuation /=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::DivideUpdateStmt
+        emitToken TokenKind::DivideUpdateStmt
         next expression
     punctuation %=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::RemainderUpdateStmt
+        emitToken TokenKind::RemainderUpdateStmt
         next expression
     punctuation <<=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::ShiftLeftUpdateStmt
+        emitToken TokenKind::ShiftLeftUpdateStmt
         next expression
     punctuation >>=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::ShiftRightUpdateStmt
+        emitToken TokenKind::ShiftRightUpdateStmt
         next expression
     punctuation &&=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::LogicalAndUpdateStmt
+        emitToken TokenKind::LogicalAndUpdateStmt
         next expression
     punctuation ||=
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::LogicalOrUpdateStmt
+        emitToken TokenKind::LogicalOrUpdateStmt
         next expression
 
     punctuation .
-        nodeKind = NodeKind::MemberAccessExpr
+        tokenKind = TokenKind::MemberAccessExpr
         next access_punctuation
     punctuation ::
-        nodeKind = NodeKind::StaticAccessExpr
+        tokenKind = TokenKind::StaticAccessExpr
         next access_punctuation
 
     punctuation (
-        emitNode NodeKind::CallExpr
+        emitToken TokenKind::CallExpr
         next first_argument_paren
     punctuation [
-        emitNode NodeKind::IndexExpr
+        emitToken TokenKind::IndexExpr
         next first_argument_square
     punctuation {
-        emitNode NodeKind::Parameterize
+        emitToken TokenKind::Parameterize
         next first_argument_brace
 
     punctuation )
         ifScope ScopeKind::RightExpr
             popScope ScopeKind::RightExpr
             popScope ScopeKind::Parameter
-            emitNode NodeKind::ExpressionStmt
+            emitToken TokenKind::ExpressionStmt
             next after_parameters
         ifScope ScopeKind::VariableType
             popScope ScopeKind::VariableType
             popScope ScopeKind::Parameter
-            emitNode NodeKind::AssignStmt
-            emitNode NodeKind::ExpressionStmt
+            emitToken TokenKind::AssignStmt
+            emitToken TokenKind::ExpressionStmt
             next after_parameters
         popScope ScopeKind::Paren
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     punctuation ]
         popScope ScopeKind::Square
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
         popScope ScopeKind::Brace
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
 
     punctuation ,
@@ -210,19 +210,19 @@ SwitchState after_expression() then error
     punctuation ;
         ifScope ScopeKind::HasTypeExpr
             popScope ScopeKind::HasTypeExpr
-            emitNode NodeKind::EmptyNode
+            emitToken TokenKind::EmptyNode
             next after_declaration
         ifScope ScopeKind::VariableType
             popScope ScopeKind::VariableType
             pushScope ScopeKind::RightExpr
-            emitNode NodeKind::AssignStmt
+            emitToken TokenKind::AssignStmt
         popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
-        emitNode NodeKind::ExpressionStmt
+        emitToken TokenKind::ExpressionStmt
         next after_statement
 
     punctuation =>
         popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
-        emitNode NodeKind::IfExpr
+        emitToken TokenKind::IfExpr
         next expression
     punctuation :
         ifScope ScopeKind::HasTypeExpr
@@ -236,12 +236,12 @@ SwitchState after_expression() then error
         popScope ScopeKind::LeftExpr
         popScope ScopeKind::PlainStatement
         pushScope ScopeKind::IfBranch
-        emitNode NodeKind::IfStmt
+        emitToken TokenKind::IfStmt
         next single_or_compound_statement
     punctuation =
         popScope ScopeKind::VariableType, ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::AssignStmt
+        emitToken TokenKind::AssignStmt
         next expression
 
 LinearState comma_after_expression() then error
@@ -250,15 +250,15 @@ LinearState comma_after_expression() then error
 
     punctuation )
         popScope ScopeKind::Paren
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     punctuation ]
         popScope ScopeKind::Square
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
         popScope ScopeKind::Brace
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
 
     then
@@ -268,54 +268,54 @@ LinearState comma_after_expression() then error
             popScope ScopeKind::VariableType
             popScope ScopeKind::Parameter
             pushScope ScopeKind::Parameter
-            emitNode NodeKind::AssignStmt
-            emitNode NodeKind::ExpressionStmt
+            emitToken TokenKind::AssignStmt
+            emitToken TokenKind::ExpressionStmt
             then parameter
         ifScope ScopeKind::RightExpr
             popScope ScopeKind::RightExpr
             popScope ScopeKind::Parameter
             pushScope ScopeKind::Parameter
-            emitNode NodeKind::ExpressionStmt
+            emitToken TokenKind::ExpressionStmt
             then parameter
         ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
             then check_designated_argument
 
 LinearState comma_else() then error
     punctuation =>
-        emitNode NodeKind::CommaElseExpr
+        emitToken TokenKind::CommaElseExpr
         next expression
 
 LinearState check_designated_argument() then expression
     identifier
-        emitNode NodeKind::IdentifierExpr
+        emitToken TokenKind::IdentifierExpr
         next maybe_designated_argument
 LinearState maybe_designated_argument() then after_expression
     punctuation =
-        updateKind NodeKind::DesignateArgument
+        updateKind TokenKind::DesignateArgument
         next expression
 
 LinearState first_argument_paren() then check_designated_argument
     punctuation )
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Paren
 LinearState first_argument_square() then check_designated_argument
     punctuation ]
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
 LinearState first_argument_brace() then check_designated_argument
     punctuation }
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Brace
 
-LinearState access_punctuation(nodeKind) then error
+LinearState access_punctuation(tokenKind) then error
     identifier
-        emitNode nodeKind
+        emitToken tokenKind
         next after_expression
 
 # --- Statements
@@ -324,7 +324,7 @@ LinearState single_or_compound_statement() then statement
     punctuation {
         pushScope ScopeKind::CompoundStmt
         pushScope ScopeKind::PlainStatement
-        emitNode NodeKind::CompoundStmt
+        emitToken TokenKind::CompoundStmt
         next statement
 
 LinearState after_statement() then statement
@@ -349,17 +349,17 @@ SwitchState statement() then expression
     keyword let
         next check_var_after_let
     keyword var
-        nodeKind = NodeKind::VarStmt
+        tokenKind = TokenKind::VarStmt
         next variable_declaration
     keyword return
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::ReturnStmt
+        emitToken TokenKind::ReturnStmt
         next after_return
 
     punctuation }
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         popScope ScopeKind::CompoundStmt
-        emitNode NodeKind::EmptyNode
+        emitToken TokenKind::EmptyNode
         next after_statement
     then
         pushScope ScopeKind::LeftExpr
@@ -367,25 +367,25 @@ SwitchState statement() then expression
 LinearState after_return() then expression
     punctuation ;
         popScope ScopeKind::RightExpr
-        updateKind NodeKind::EmptyReturnStmt
+        updateKind TokenKind::EmptyReturnStmt
         next after_statement
 
 LinearState else_branch() then error
     punctuation :
-        emitNode NodeKind::ElseStmt
+        emitToken TokenKind::ElseStmt
         next single_or_compound_statement
 
 # --- Variable declaration
 
 LinearState check_var_after_let() then variable_declaration
     keyword var
-        nodeKind = NodeKind::VarStmt
+        tokenKind = TokenKind::VarStmt
         next variable_declaration
     then
-        nodeKind = NodeKind::LetStmt
-LinearState variable_declaration(nodeKind) then error
+        tokenKind = TokenKind::LetStmt
+LinearState variable_declaration(tokenKind) then error
     identifier
-        emitNode nodeKind
+        emitToken tokenKind
         next after_variable_declaration_id
 LinearState after_variable_declaration_id() then error
     punctuation :
@@ -393,22 +393,22 @@ LinearState after_variable_declaration_id() then error
         next expression
     punctuation =
         pushScope ScopeKind::RightExpr
-        emitNode NodeKind::AssignStmt
+        emitToken TokenKind::AssignStmt
         next expression
     punctuation ;
-        emitNode NodeKind::AssignStmt
-        emitNode NodeKind::ExpressionStmt
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
         next after_statement
     punctuation ,
         popScope ScopeKind::Parameter
         pushScope ScopeKind::Parameter
-        emitNode NodeKind::AssignStmt
-        emitNode NodeKind::ExpressionStmt
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
         next parameter
     punctuation )
         popScope ScopeKind::Parameter
-        emitNode NodeKind::AssignStmt
-        emitNode NodeKind::ExpressionStmt
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
         next after_parameters
 
 # --- Parameters
@@ -430,22 +430,22 @@ LinearState first_parameter() then parameter
 
 LinearState parameter() then variable_declaration
     keyword in
-        nodeKind = NodeKind::InParameter
+        tokenKind = TokenKind::InParameter
         next variable_declaration
     keyword inout
-        nodeKind = NodeKind::InOutParameter
+        tokenKind = TokenKind::InOutParameter
         next variable_declaration
     keyword out
-        nodeKind = NodeKind::OutParameter
+        tokenKind = TokenKind::OutParameter
         next variable_declaration
     keyword let
-        nodeKind = NodeKind::LetParameter
+        tokenKind = TokenKind::LetParameter
         next variable_declaration
     keyword var
-        nodeKind = NodeKind::VarParameter
+        tokenKind = TokenKind::VarParameter
         next variable_declaration
     then
-        nodeKind = NodeKind::ImplicitKindParameter
+        tokenKind = TokenKind::ImplicitKindParameter
 
 # --- Declarations
 
@@ -478,22 +478,22 @@ LinearState templated_declaration() then no_declaration
         next after_template
     keyword incomplete
         rememberDeclarationBegin
-        emitNode NodeKind::IncompleteAttribute
+        emitToken TokenKind::IncompleteAttribute
         next templated_declaration_with_attributes
     keyword virtual
         rememberDeclarationBegin
-        emitNode NodeKind::VirtualAttribute
+        emitToken TokenKind::VirtualAttribute
         next templated_declaration_with_attributes
     keyword fn
         rememberDeclarationBegin
         next function_declaration_id
     keyword struct
         rememberDeclarationBegin
-        nodeKind = NodeKind::StructTypeDecl
+        tokenKind = TokenKind::StructTypeDecl
         next type_declaration_id
     keyword object
         rememberDeclarationBegin
-        nodeKind = NodeKind::ObjectTypeDecl
+        tokenKind = TokenKind::ObjectTypeDecl
         next type_declaration_id
     keyword static
         rememberDeclarationBegin
@@ -502,18 +502,18 @@ LinearState templated_declaration_with_attributes() then error
     keyword template
         next after_template
     keyword incomplete
-        emitNode NodeKind::IncompleteAttribute
+        emitToken TokenKind::IncompleteAttribute
         next templated_declaration_with_attributes
     keyword virtual
-        emitNode NodeKind::VirtualAttribute
+        emitToken TokenKind::VirtualAttribute
         next templated_declaration_with_attributes
     keyword fn
         next function_declaration_id
     keyword struct
-        nodeKind = NodeKind::StructTypeDecl
+        tokenKind = TokenKind::StructTypeDecl
         next type_declaration_id
     keyword object
-        nodeKind = NodeKind::ObjectTypeDecl
+        tokenKind = TokenKind::ObjectTypeDecl
         next type_declaration_id
     keyword static
         next after_static
@@ -521,14 +521,14 @@ LinearState templated_declaration_with_attributes() then error
 LinearState after_template() then error
     punctuation (
         pushScope ScopeKind::TemplateParameters
-        emitNode NodeKind::TemplateAttribute
+        emitToken TokenKind::TemplateAttribute
         next first_parameter
 LinearState after_template_parameters() then templated_declaration_with_attributes
 
 LinearState function_declaration_id() then error
     identifier
         commitDeclaration DeclarationKind::Function
-        emitNode NodeKind::FunctionDecl
+        emitToken TokenKind::FunctionDecl
         next after_function_declaration_id
 LinearState after_function_declaration_id() then error
     punctuation (
@@ -550,10 +550,10 @@ LinearState after_function_parameters() then error
         pushScope ScopeKind::RightExpr
         next expression
 
-LinearState type_declaration_id(nodeKind) then error
+LinearState type_declaration_id(tokenKind) then error
     identifier
         commitDeclaration DeclarationKind::Type
-        emitNode nodeKind
+        emitToken tokenKind
         next after_type_declaration_id
 LinearState after_type_declaration_id() then error
     punctuation :
@@ -566,28 +566,28 @@ LinearState member_declaration() then templated_declaration
     keyword has
         pushScope ScopeKind::HasTypeExpr
         commitDeclaration DeclarationKind::HasMember
-        emitNode NodeKind::HasMemberDecl
+        emitToken TokenKind::HasMemberDecl
         next expression
     identifier
         commitDeclaration DeclarationKind::Member
-        emitNode NodeKind::MemberDecl
+        emitToken TokenKind::MemberDecl
         next after_variable_declaration_id
 
 LinearState after_static() then error
     keyword var
-        nodeKind = NodeKind::StaticVarDecl
+        tokenKind = TokenKind::StaticVarDecl
         next static_variable_declaration
     keyword let
-        nodeKind = NodeKind::StaticLetDecl
+        tokenKind = TokenKind::StaticLetDecl
         next static_variable_declaration
     identifier
         commitDeclaration DeclarationKind::Variable
-        emitNode NodeKind::StaticLetDecl
+        emitToken TokenKind::StaticLetDecl
         next after_variable_declaration_id
-LinearState static_variable_declaration(nodeKind) then error
+LinearState static_variable_declaration(tokenKind) then error
     identifier
         commitDeclaration DeclarationKind::Variable
-        emitNode nodeKind
+        emitToken tokenKind
         next after_variable_declaration_id
 
 LinearState after_declaration() then error

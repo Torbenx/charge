@@ -2,181 +2,181 @@
 
 namespace parse {
 
-std::string_view nameString(Token token) {
+std::string_view nameString(LexerToken token) {
     switch (token) {
-    case Token::LeftParen:
+    case LexerToken::LeftParen:
         return "LeftParen";
-    case Token::RightParen:
+    case LexerToken::RightParen:
         return "RightParen";
-    case Token::LeftSqure:
+    case LexerToken::LeftSqure:
         return "LeftSqure";
-    case Token::RightSqure:
+    case LexerToken::RightSqure:
         return "RightSqure";
-    case Token::LeftBrace:
+    case LexerToken::LeftBrace:
         return "LeftBrace";
-    case Token::RightBrace:
+    case LexerToken::RightBrace:
         return "RightBrace";
-    case Token::Exclaim:
+    case LexerToken::Exclaim:
         return "Exclaim";
-    case Token::Tilde:
+    case LexerToken::Tilde:
         return "Tilde";
-    case Token::PlusPlus:
+    case LexerToken::PlusPlus:
         return "PlusPlus";
-    case Token::MinusMinus:
+    case LexerToken::MinusMinus:
         return "MinusMinus";
-    case Token::Plus:
+    case LexerToken::Plus:
         return "Plus";
-    case Token::Minus:
+    case LexerToken::Minus:
         return "Minus";
-    case Token::Star:
+    case LexerToken::Star:
         return "Star";
-    case Token::Amp:
+    case LexerToken::Amp:
         return "Amp";
-    case Token::Hat:
+    case LexerToken::Hat:
         return "Hat";
-    case Token::Vert:
+    case LexerToken::Vert:
         return "Vert";
-    case Token::Slash:
+    case LexerToken::Slash:
         return "Slash";
-    case Token::Percent:
+    case LexerToken::Percent:
         return "Percent";
-    case Token::LessLess:
+    case LexerToken::LessLess:
         return "LessLess";
-    case Token::GreaterGreater:
+    case LexerToken::GreaterGreater:
         return "GreaterGreater";
-    case Token::AmpAmp:
+    case LexerToken::AmpAmp:
         return "AmpAmp";
-    case Token::VertVert:
+    case LexerToken::VertVert:
         return "VertVert";
-    case Token::ExclaimEqual:
+    case LexerToken::ExclaimEqual:
         return "ExclaimEqual";
-    case Token::EqualEqual:
+    case LexerToken::EqualEqual:
         return "EqualEqual";
-    case Token::Less:
+    case LexerToken::Less:
         return "Less";
-    case Token::LessEqual:
+    case LexerToken::LessEqual:
         return "LessEqual";
-    case Token::Greater:
+    case LexerToken::Greater:
         return "Greater";
-    case Token::GreaterEqual:
+    case LexerToken::GreaterEqual:
         return "GreaterEqual";
-    case Token::Equal:
+    case LexerToken::Equal:
         return "Equal";
-    case Token::PlusEqual:
+    case LexerToken::PlusEqual:
         return "PlusEqual";
-    case Token::MinusEqual:
+    case LexerToken::MinusEqual:
         return "MinusEqual";
-    case Token::StarEqual:
+    case LexerToken::StarEqual:
         return "StarEqual";
-    case Token::AmpEqual:
+    case LexerToken::AmpEqual:
         return "AmpEqual";
-    case Token::HatEqual:
+    case LexerToken::HatEqual:
         return "HatEqual";
-    case Token::VertEqual:
+    case LexerToken::VertEqual:
         return "VertEqual";
-    case Token::SlashEqual:
+    case LexerToken::SlashEqual:
         return "SlashEqual";
-    case Token::PercentEqual:
+    case LexerToken::PercentEqual:
         return "PercentEqual";
-    case Token::LessLessEqual:
+    case LexerToken::LessLessEqual:
         return "LessLessEqual";
-    case Token::GreaterGreaterEqual:
+    case LexerToken::GreaterGreaterEqual:
         return "GreaterGreaterEqual";
-    case Token::AmpAmpEqual:
+    case LexerToken::AmpAmpEqual:
         return "AmpAmpEqual";
-    case Token::VertVertEqual:
+    case LexerToken::VertVertEqual:
         return "VertVertEqual";
-    case Token::Comma:
+    case LexerToken::Comma:
         return "Comma";
-    case Token::Point:
+    case LexerToken::Point:
         return "Point";
-    case Token::Colon:
+    case LexerToken::Colon:
         return "Colon";
-    case Token::ColonColon:
+    case LexerToken::ColonColon:
         return "ColonColon";
-    case Token::SemiColon:
+    case LexerToken::SemiColon:
         return "SemiColon";
-    case Token::EqualGreater:
+    case LexerToken::EqualGreater:
         return "EqualGreater";
-    case Token::LessEqualGreater:
+    case LexerToken::LessEqualGreater:
         return "LessEqualGreater";
-    case Token::MinusGreater:
+    case LexerToken::MinusGreater:
         return "MinusGreater";
-    case Token::If:
+    case LexerToken::If:
         return "If";
-    case Token::Elif:
+    case LexerToken::Elif:
         return "Elif";
-    case Token::Else:
+    case LexerToken::Else:
         return "Else";
-    case Token::Match:
+    case LexerToken::Match:
         return "Match";
-    case Token::For:
+    case LexerToken::For:
         return "For";
-    case Token::While:
+    case LexerToken::While:
         return "While";
-    case Token::Do:
+    case LexerToken::Do:
         return "Do";
-    case Token::Return:
+    case LexerToken::Return:
         return "Return";
-    case Token::Break:
+    case LexerToken::Break:
         return "Break";
-    case Token::Continue:
+    case LexerToken::Continue:
         return "Continue";
-    case Token::Loop:
+    case LexerToken::Loop:
         return "Loop";
-    case Token::Guard:
+    case LexerToken::Guard:
         return "Guard";
-    case Token::Try:
+    case LexerToken::Try:
         return "Try";
-    case Token::Catch:
+    case LexerToken::Catch:
         return "Catch";
-    case Token::With:
+    case LexerToken::With:
         return "With";
-    case Token::Analysis:
+    case LexerToken::Analysis:
         return "Analysis";
-    case Token::Assert:
+    case LexerToken::Assert:
         return "Assert";
-    case Token::Namespace:
+    case LexerToken::Namespace:
         return "Namespace";
-    case Token::Struct:
+    case LexerToken::Struct:
         return "Struct";
-    case Token::Trait:
+    case LexerToken::Trait:
         return "Trait";
-    case Token::Object:
+    case LexerToken::Object:
         return "Object";
-    case Token::Fn:
+    case LexerToken::Fn:
         return "Fn";
-    case Token::Has:
+    case LexerToken::Has:
         return "Has";
-    case Token::Static:
+    case LexerToken::Static:
         return "Static";
-    case Token::Incomplete:
+    case LexerToken::Incomplete:
         return "Incomplete";
-    case Token::Virtual:
+    case LexerToken::Virtual:
         return "Virtual";
-    case Token::Template:
+    case LexerToken::Template:
         return "Template";
-    case Token::Var:
+    case LexerToken::Var:
         return "Var";
-    case Token::Let:
+    case LexerToken::Let:
         return "Let";
-    case Token::In:
+    case LexerToken::In:
         return "In";
-    case Token::Inout:
+    case LexerToken::Inout:
         return "Inout";
-    case Token::Out:
+    case LexerToken::Out:
         return "Out";
-    case Token::Forward:
+    case LexerToken::Forward:
         return "Forward";
-    case Token::Assign:
+    case LexerToken::Assign:
         return "Assign";
-    case Token::Porperty:
+    case LexerToken::Porperty:
         return "Porperty";
-    case Token::Identifier:
+    case LexerToken::Identifier:
         return "Identifier";
-    case Token::Literal:
+    case LexerToken::Literal:
         return "Literal";
-    case Token::EOS:
+    case LexerToken::EOS:
         return "EOS";
     }
 }

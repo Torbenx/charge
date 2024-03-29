@@ -55,8 +55,8 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
     return { (uint32_t)(position - state.parseOutput.lines.back().begin), (uint32_t)state.parseOutput.lines.size() - 1 };
 }
 
-[[gnu::noinline]] static void emitNode(NodeKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.parseOutput.nodes.push_back({ kind, locationInCurrentLine(begin, state), data });
+[[gnu::noinline]] static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
+    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
 [[gnu::noinline]] static void markLineBegin(const char* position, ParseState& state) {
@@ -147,23 +147,23 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, TokenHandle parseLocation, ParseState& state) {
     bool ret = state.pushStaticScope(kind, name, parseLocation);
     if (ret)
         VERIFY(kind == DeclarationKind::Namespace);
 }
 
-[[gnu::noinline]] static void commitHasMemberDeclaration(NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitHasMemberDeclaration(TokenHandle parseLocation, ParseState& state) {
     state.pushHasScope(parseLocation);
 }
 
-[[gnu::noinline]] static void commitMemberDeclaration(Word name, NodeHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitMemberDeclaration(Word name, TokenHandle parseLocation, ParseState& state) {
     bool ret = state.pushMemberScope(name, parseLocation);
     VERIFY(!ret);
 }
 
 template<DeclarationKind kind>
-static void commitDeclaration(Word name, NodeHandle declarationBegin, ParseState& state) {
+static void commitDeclaration(Word name, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::HasMember) {
         commitHasMemberDeclaration(declarationBegin, state);
@@ -187,16 +187,16 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
 
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
-    NodeKind carriedEmitNodeKind = (NodeKind)0;
+    TokenKind carriedEmitTokenKind = (TokenKind)0;
     Word word;
-    uint32_t nodeData = 0;
-    NodeHandle declarationBegin;
+    uint32_t tokenData = 0;
+    TokenHandle declarationBegin;
 
-    NodeKind nodeKind = (NodeKind)0;
+    TokenKind tokenKind = (TokenKind)0;
 
     scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
     State parseState = State::NamespaceDeclaration;
-    Token errorToken = (Token)0;
+    LexerToken errorToken = (LexerToken)0;
 
     // GENERATED CODE HERE
 
@@ -205,13 +205,13 @@ handle_parse_error:
     return;
 }
 
-std::string_view nameString(NodeKind kind) {
+std::string_view nameString(TokenKind kind) {
     switch (kind) {
-#define NODE(kind, type, prec) \
-    case NodeKind::kind:       \
+#define TOKEN(kind, type, prec) \
+    case TokenKind::kind:       \
         return #kind;
 
-#include "nodes.inc"
+#include "tokens.inc"
     }
 }
 
