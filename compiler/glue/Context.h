@@ -2,7 +2,6 @@
 
 #include <parse/Output.h>
 #include <glue/DeclarationNode.h>
-#include <sema/BuiltinTable.h>
 
 namespace glue {
 
@@ -10,7 +9,6 @@ struct Context {
     parse::Output parseOutput;
     WordStringTable wordTable { parse::words };
     DeclarationNode* m_currentNode = nullptr;
-    sema::BuiltinTable* builtinTable = nullptr;
 
     Context(std::string_view source)
         : parseOutput(source) {
@@ -50,14 +48,6 @@ struct Context {
         m_currentNode->addMember(name, newNode);
         m_currentNode = newNode;
         return false;
-    }
-
-    sema::BuiltinTable* builtins() {
-        if (builtinTable == nullptr) {
-            builtinTable = allocate<sema::BuiltinTable>();
-            std::construct_at(builtinTable, *this);
-        }
-        return builtinTable;
     }
 
     template<typename T>

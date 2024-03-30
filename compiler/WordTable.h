@@ -1,7 +1,8 @@
 #pragma once
 
-#include "log.h"
-#include "types.h"
+#include <log.h>
+#include <types.h>
+
 #include <algorithm>
 #include <array>
 #include <bit>

@@ -7,33 +7,36 @@
 namespace sema {
 
 enum class BuiltinId {
-    Type,
-    Namespace,
-    FunctionId,
+
+#define BUILTIN(name) name,
+#include <sema/builtins.inc>
+
+    COUNT,
 };
 
-enum class ValuePhase : uint8_t {
-    Value,
-    Constant,
+enum class ValueKind : uint8_t {
     Builtin,
+    Local,
+    Constant,
 };
 struct Value {
-    constexpr Value() = default;
-    constexpr Value(ValuePhase phase, uint32_t id)
-        : idBits(id), phaseBits(std::to_underlying(phase)) { }
+    constexpr Value()
+        : Value(BuiltinId::error_value) { }
+    constexpr Value(ValueKind kind, uint32_t id)
+        : idBits(id), kindBits(std::to_underlying(kind)) { }
     constexpr Value(BuiltinId id)
-        : Value(ValuePhase::Builtin, std::to_underlying(id)) { }
+        : Value(ValueKind::Builtin, std::to_underlying(id)) { }
 
     static Value fromUint(uint32_t x) { return std::bit_cast<Value>(x); }
     uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }
 
     constexpr uint32_t id() const { return idBits; }
-    constexpr ValuePhase phase() const { return (ValuePhase)phaseBits; }
+    constexpr ValueKind kind() const { return (ValueKind)kindBits; }
 
-    constexpr bool operator==(const Value& other) const = default;
+    constexpr bool operator==(const Value&) const = default;
 
-    uint32_t idBits : 30 = 0;
-    uint32_t phaseBits : 2 = 0;
+    uint32_t idBits : 30;
+    uint32_t kindBits : 2;
 };
 
 struct Type : Value {
@@ -43,10 +46,42 @@ struct Type : Value {
         : Value(value) { }
 };
 
+struct ExternValue {
+    constexpr ExternValue(Value value)
+        : value(value) { }
+
+    constexpr uint32_t id() const { return value.id(); }
+    constexpr ValueKind kind() const { return value.kind(); }
+
+    constexpr explicit operator Value() const { return value; }
+
+    bool operator==(const ExternValue&) const = default;
+
+private:
+    Value value;
+};
+}
+template<>
+struct optional_traits<sema::Value> {
+    static constexpr sema::Value empty_value = {};
+};
+template<>
+struct optional_traits<sema::Type> {
+    static constexpr sema::Type empty_value = {};
+};
+template<>
+struct optional_traits<sema::ExternValue> {
+    static constexpr sema::ExternValue empty_value = sema::Value();
+};
+
+namespace sema {
+
 namespace builtins {
-    constexpr inline Type type_type(BuiltinId::Type);
-    constexpr inline Type namespace_type(BuiltinId::Namespace);
-    constexpr inline Value function_id_template(BuiltinId::FunctionId);
+
+#define BUILTIN_TYPE(name) constexpr inline Type name { BuiltinId::name };
+#define BUILTIN(name) constexpr inline Value name { BuiltinId::name };
+#include <sema/builtins.inc>
+
 };
 
 struct NodeHandle {
@@ -72,12 +107,6 @@ struct Expression : NodeHandle {
     Type type() const { return Type::fromUint(node()->data1); }
 };
 
-struct BasicBlock {
-    std::vector<Node> nodes;
-
-    void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);
-};
-
 enum class ProgramStatus : uint8_t {
     Unchecked,
     SignatureCheckInProgress,
@@ -89,40 +118,96 @@ struct Program {
     Word m_name;
 
     enum class Opcode : uint8_t {
+        SignatureOf,
+        TypeOf,
         ProgramLiteral,
         DeclarationNodeLiteral,
         StaticAccess,
         Expression,
-        ImplicitTemplateParameter,
-        ExplicitTemplateParameter,
+        ImplicitParameter,
+        ExplicitParameter,
     };
     struct Constant {
         Opcode op;
         Type type;
-        uint64_t data;
+        union {
+            uint64_t data;
+            Program* program;
+            glue::DeclarationNode* declarationNode;
+            struct {
+                uint32_t index;
+                std::optional<Value> defaultValue;
+            } parameter;
+            uint32_t expressionIndex;
+            struct {
+                Value base;
+                uint32_t constantId;
+            } access;
+        } u;
+    };
+    static_assert(sizeof(Constant) == 16);
+
+    struct ExplicitParameter {
+        Word name;
+        ExternValue value;
     };
 
     std::vector<Constant> constants;
-    BasicBlock expressions;
+    std::vector<Node> expressions;
 
+    Value add(Constant);
     Value addLiteral(Type type, glue::DeclarationNode* decl);
-    Value addLiteral(Type type, Program* prog);
+    Value addProgramLiteral(Opcode op, Type type, Program* prog);
     Value addExpression(Node* expr);
     Value addImplicitParameter(Type type);
-    Value addParameter(Word name, Type type, std::optional<Value> value);
+    Value addExplicitParameter(Word name, Type type, std::optional<Value> value);
+    Value addStaticAccess(Type type, Value base, ExternValue value);
 
-    Type type;
-    Value value;
+    Program* GetProgramLiteral(ExternValue value);
 
-    uint32_t implicitParameterCount = 0;
-    uint32_t explicitParameterCount = 0;
+    ExternValue typeOf(ExternValue value) {
+        VERIFY(value.kind() == ValueKind::Constant);
+        return constants[value.id()].type;
+    }
+
+    // type after substituitng template arguments
+    ExternValue type() const { return m_type.value(); }
+
+    // value after substituitng template arguments
+    ExternValue value() const { return m_value.value(); }
+
+    void setType(Type type) {
+        m_type = type;
+    }
+    void setValue(Value value) {
+        m_value = value;
+    }
+
+    std::optional<ExternValue> m_type;
+    std::optional<ExternValue> m_value;
+
+    std::vector<ExplicitParameter> explicitParameters;
+    std::vector<ExternValue> implicitParameters;
+    struct DependentParent {
+        ExternValue parent;
+        ExternValue parentParameter;
+    };
+    std::optional<DependentParent> dependentParent;
 
     Word name() const { return m_name; }
     ProgramStatus status() const { return m_status; }
     void setStatus(ProgramStatus status) { m_status = status; }
     bool isTemplate() const {
-        return implicitParameterCount == 0 && explicitParameterCount == 0;
+        return !explicitParameters.empty() || !implicitParameters.empty();
+    }
+    bool hasDependentParent() const {
+        return dependentParent.has_value();
+    }
+    bool isDependent() const {
+        return isTemplate() || hasDependentParent();
     }
 };
+
+extern std::array<Program, std::to_underlying(BuiltinId::COUNT)> builtinPrograms;
 
 }

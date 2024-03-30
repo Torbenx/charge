@@ -1,34 +1,31 @@
-typeof(template(T: type) expr(T)) = cast{type}(template(T: type) typeof(expr(T)))
+typeof(template(T: type) => expr) = template(T: type) -> typeof(expr)
+template(T: type) -> type_expr = cast{type}(template(T: type) => type_expr)
+typeof(template(T: type) -> type_expr) = type
 
 
 template(T: type)
 struct foo: { }
 
-typeof(foo) = typeof(template(T: type) foo{T}) = cast{type}(template(T: type) typeof(foo{T})) = cast{type}(template(T: type) type)
+foo = template(T: type) => foo{T}
+typeof(foo) = typeof(template(T: type) => foo{T}) = template(T: type) -> typeof(foo{T}) = template(T: type) -> type
 
 
 template(T: type)
 fn bar(arg: x(T)) -> y(T): { }
 
-typeof(bar) = typeof(template(T: type) bar{T}) = cast{type}(template(T: type) typeof(bar{T})) = cast{type}(template(T: type) function_id{fn (arg: x(T)) -> y(T)})
+typeof(bar) = typeof(template(T: type) => bar{T}) = template(T: type) -> typeof(bar{T}) = template(T: type) -> function_id{fn (arg: x(T)) -> y(T)}
 
 
 template(T: type)
 static baz: x(T) = y(T);
 
-typeof(baz) = typeof(template(T: type) baz{T}) = cast{type}(template(T: type) typeof(baz{T})) = cast{type}(template(T: type) x(T))
-
-
-template(T: type)
-static fun = fn (arg: x(T)) -> y(T): { }
-
-typeof(fun) = typeof(template(T: type) fun{T}) = cast{type}(template(T: type) typeof(fun{T})) = cast{type}(template(T: type) typeof(fn (arg: x(T)) -> y(T)))
+typeof(baz) = typeof(template(T: type) => baz{T}) = template(T: type) -> typeof(baz{T}) = template(T: type) -> x(T)
 
 
 template(sig: function_signature)
 struct function_id: { }
 
-typeof(function_id) = typeof(template(sig: function_signature) function_id{sig}) = cast{type}(template(sig: function_signature) type)
+typeof(function_id) = typeof(template(sig: function_signature) => function_id{sig}) = template(sig: function_signature) -> type
 
 
 typeof((key = expr)) = cast{type}((key = typeof(expr)))

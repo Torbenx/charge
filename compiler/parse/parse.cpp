@@ -1964,7 +1964,7 @@ maybe_designated_argument$no_emit:
     parseState = State::MaybeDesignatedArgument;
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
+        if (next != '=' && next != '>') {
             tokEnd += 1;
             // updateKind TokenKind::DesignateArgument
             state.parseOutput.tokens.back().setKind(TokenKind::DesignateArgument);
@@ -3119,7 +3119,7 @@ after_variable_declaration_id$no_emit:
     }
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
-        if (next != '>' && next != '=') {
+        if (next != '=' && next != '>') {
             tokEnd += 1;
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -4480,7 +4480,7 @@ std::string_view nameString(TokenKind kind) {
     case TokenKind::kind:       \
         return #kind;
 
-#include "tokens.inc"
+#include <parse/tokens.inc>
     }
 }
 

@@ -495,7 +495,7 @@ def checkForPunctuation(punc, handler):
                     possibleContinuations.add(p[len(punc)])
             line("char next = tokEnd[" + str(len(punc)) + "];")
             condition = ""
-            for c in possibleContinuations:
+            for c in sorted(possibleContinuations):
                 condition += " && next != '" + c + "'"
             condition = condition[4:]
             line("if (" + condition + ") {")

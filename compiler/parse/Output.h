@@ -14,7 +14,7 @@ struct TokenHandle {
 enum class TokenKind : uint8_t {
 #define TOKEN(kind, type, prec) kind,
 
-#include "tokens.inc"
+#include <parse/tokens.inc>
 
 FirstUnaryExpr = LogicalNotExpr,
 LastUnaryExpr = DereferenceExpr,

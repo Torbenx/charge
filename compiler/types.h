@@ -1,6 +1,7 @@
 #pragma once
 
-#include "log.h"
+#include <log.h>
+
 #include <cstdint>
 #include <iostream>
 #include <optional>
@@ -37,8 +38,7 @@ public:
     constexpr optional() noexcept = default;
     constexpr optional(std::nullopt_t) noexcept
         : optional() { }
-    constexpr optional(const optional& other) noexcept
-        : storage(other.storage) { }
+    constexpr optional(const optional& other) noexcept = default;
     constexpr optional(const T& value) noexcept
         : storage(value) { }
 
@@ -46,10 +46,7 @@ public:
         storage = empty_value;
         return *this;
     }
-    constexpr optional& operator=(const optional& other) noexcept {
-        storage = other.storage;
-        return *this;
-    }
+    constexpr optional& operator=(const optional& other) noexcept = default;
     constexpr optional& operator=(const T& value) noexcept {
         storage = value;
         return *this;
@@ -174,6 +171,7 @@ struct optional_traits<relative_pointer<Source, Target>> {
 };
 
 struct SourceLocation {
+    SourceLocation() = default;
     SourceLocation(uint32_t offsetInLine, uint32_t lineIndex)
         : m_offsetInLine(offsetInLine), m_lineIndex(lineIndex) { }
 
@@ -193,6 +191,10 @@ struct TaggedSourceLocation {
         : tagBits(std::bit_cast<uint8_t>(tag))
         , m_offsetInLine(loc.offsetInLine())
         , m_lineIndex(loc.lineIndex()) { }
+
+    TaggedSourceLocation()
+        requires std::is_default_constructible_v<T>
+        : TaggedSourceLocation(T(), SourceLocation()) { }
 
     SourceLocation location() const {
         return std::bit_cast<SourceLocation>(*this);

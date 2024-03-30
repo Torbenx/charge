@@ -1,164 +1,44 @@
-#include <sema/Program.h>
+#include <sema/Generator.h>
 
 namespace sema {
 
-struct LookupCache {
-    WordTable table;
+Value Generator::makeExpressionValue() {
+    VERIFY(expressionStack.back().nodeIndex == scratchBlock.size() - 1);
+    Value value = program->addExpression(&scratchBlock.back());
+    int_t size = scratchBlock.back().subTreeSize();
+    scratchBlock.resize(scratchBlock.size() - size);
+    expressionStack.pop_back();
+    return value;
+}
 
-    std::optional<Value> get(Word name) {
-        auto result = table.findWord(name);
-        if (result.found)
-            return Value::fromUint(table.entries[result.bucket].payload);
-        return std::nullopt;
+Type Generator::makeProgramType(Program* targetProg) {
+    if (targetProg->isTemplate()) {
+        Value signature = program->addProgramLiteral(
+            Program::Opcode::SignatureOf, builtins::template_signature_type, targetProg);
+
+        emitValueExpr({ NodeKind::ConstantExpr, {} }, builtins::template_id_template);
+        emitValueExpr({ NodeKind::ConstantExpr, {} }, signature);
+        // generateParameterize(1);
+        return verifyType(makeExpressionValue());
+    } else {
+        return verifyType(program->addProgramLiteral(Program::Opcode::TypeOf, builtins::type_type, targetProg));
     }
+}
 
-    void insert(Word name, Value value) {
-        table.insertWord(name, value.toUint());
-    }
-};
+Value Generator::makeProgramLiteral(Program* targetProg) {
+    Type type = makeProgramType(targetProg);
+    return program->addProgramLiteral(Program::Opcode::ProgramLiteral, type, targetProg);
+}
 
-struct Generator {
-    struct LocalDeclarationEntry {
-        Word name;
-        Value value;
-    };
-
-    enum class WildcardMeaning {
-        Error,
-        ImplicitTemplate,
-    };
-
-    struct StackItem {
-        uint32_t nodeIndex;
-    };
-
-    using Token = parse::TokenKind;
-
-    glue::DeclarationNode* currentScope = nullptr;
-    parse::TokenInfo* tok = nullptr;
-    Program* program = nullptr;
-
-    LookupCache lookupCache;
-    std::vector<LocalDeclarationEntry> localDeclarations;
-    BasicBlock scratchBlock;
-    std::vector<StackItem> expressionStack;
-    WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
-
-    Generator(glue::DeclarationNode* scope) {
-        currentScope = scope;
-        tok = nullptr; // scope->parseLocation();
-        program = scope->program().value();
-    }
-
-    Node* takeExpression();
-
-    void advance() { tok += 1; }
-
-    void visitDeclaration() {
-        if (tok->kind() == Token::TemplateAttribute) {
-            visitTemplateParameters();
-        }
-    }
-
-    void visitTemplateParameters() {
-        while (tok->kind() != Token::EmptyNode) {
-            visitTemplateParameter();
-        }
-    }
-
-    void visitTemplateParameter() {
-        if (tok->kind() != Token::ImplicitKindParameter) {
-            // report error
-            VERIFY_NOT_REACHED();
-        }
-        Word name = Word::fromUint(tok->data());
-        advance();
-
-        Type type;
-        if (tok->kind() != Token::AssignStmt) {
-            // parse type
-            wildcardMeaning = WildcardMeaning::ImplicitTemplate;
-            visitExpression();
-            implicitToType();
-            type = verifyType(program->addExpression(takeExpression()));
-            wildcardMeaning = WildcardMeaning::Error;
-        } else {
-            type = verifyType(program->addImplicitParameter(builtins::type_type));
-        }
-        VERIFY(tok->kind() == Token::AssignStmt);
-        advance();
-
-        std::optional<Value> initializer;
-        if (tok->kind() != Token::ExpressionStmt) {
-            // parse initializer
-            visitExpression();
-            implicitCastTo(type);
-            initializer = program->addExpression(takeExpression());
-        }
-        VERIFY(tok->kind() == Token::ExpressionStmt);
-        advance();
-
-        program->addParameter(name, type, initializer);
-    }
-
-    void visitExpression() {
-        visitBinaryExpr();
-    }
-
-    void visitBinaryExpr() {
-        visitUnaryExpr();
-    }
-
-    void visitUnaryExpr() {
-        if (parse::isUnaryExpr(tok->kind())) {
-            // create placeholder node for the function
-            advance();
-            visitUnaryExpr();
-            // resolve and create call expression
-        } else {
-            visitPostfixExpr();
-        }
-    }
-
-    void visitPostfixExpr() {
-        visitPrimaryExpr();
-    }
-
-    void visitPrimaryExpr() {
-        if (tok->kind() == Token::IdentifierExpr) {
-            generateIdentifierExpr();
-            advance();
-        } else {
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    Program* signatureCheck(glue::DeclarationNode* scope) {
-        auto scopeProg = scope->program();
-        if (scopeProg.has_value() && scopeProg->status() >= ProgramStatus::SignatureChecked)
-            return scopeProg;
-
-        if (!scopeProg.has_value())
-            scope->setProgram(new Program());
-        Generator generator(scope);
-    }
-
-    Type typeOfValue(Value value);
-    Type typeOfProgram(Program*);
-
-    Type verifyType(Value value) {
-        VERIFY(typeOfValue(value) == builtins::type_type);
-        return (Type)value;
-    }
-
-    Value generateDeclarationLiteral(glue::DeclarationNode* target);
-    std::optional<Value> lookupInScope(glue::DeclarationNode* scope, Word name);
-
-    void generateIdentifierExpr();
-
-    void implicitToType() { implicitCastTo(builtins::type_type); }
-    void implicitCastTo(Type);
-};
+Value Generator::makeStaticAccess(Value base, Program* targetProg, ExternValue value) {
+    ExternValue externType = targetProg->typeOf(value);
+    Type type;
+    if (externType.kind() == ValueKind::Builtin)
+        type = verifyType((Value)externType);
+    else
+        type = verifyType(program->addStaticAccess(builtins::type_type, base, externType));
+    return program->addStaticAccess(type, base, value);
+}
 
 std::optional<Value> Generator::lookupInScope(glue::DeclarationNode* scope, Word name) {
     using Kind = glue::DeclarationNode::Kind;
@@ -180,23 +60,24 @@ Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
     case Kind::Function:
     case Kind::Variable: {
         Program* targetProg = signatureCheck(target);
-        return program->addLiteral(typeOfProgram(targetProg), targetProg);
+        return makeProgramLiteral(targetProg);
     }
+    default:
+        VERIFY_NOT_REACHED();
     }
-    VERIFY_NOT_REACHED();
 }
 
 void Generator::generateIdentifierExpr() {
     Word name = Word::fromUint(tok->data());
     for (const auto& entry : localDeclarations) {
         if (name == entry.name) {
-            scratchBlock.emitValueExpr({ NodeKind::ReferenceExpr, tok->location() }, entry.value);
+            emitValueExpr({ NodeKind::ReferenceExpr, tok->location() }, entry.value);
             return;
         }
     }
     auto result = lookupCache.get(name);
     if (result.has_value()) {
-        scratchBlock.emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, result.value());
+        emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, result.value());
         return;
     }
     glue::DeclarationNode* lookupScope = currentScope;
@@ -204,12 +85,123 @@ void Generator::generateIdentifierExpr() {
         auto lookup = lookupInScope(lookupScope, name);
         if (lookup.has_value()) {
             lookupCache.insert(name, lookup.value());
-            scratchBlock.emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, lookup.value());
+            emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, lookup.value());
             return;
         }
         lookupScope = lookupScope->declaringNode();
     }
     VERIFY_NOT_REACHED();
 }
+
+void Generator::implicitToType() {
+    implicitCastTo(builtins::type_type);
+}
+
+Program* Generator::signatureCheck(glue::DeclarationNode* scope) {
+    auto scopeProg = scope->program();
+    if (scopeProg.has_value() && scopeProg->status() >= ProgramStatus::SignatureChecked)
+        return scopeProg;
+
+    if (!scopeProg.has_value())
+        scope->setProgram(new Program());
+    Generator generator(scope);
+    VERIFY_NOT_REACHED();
+}
+
+Type Generator::typeOfValue(Value value) {
+    switch (value.kind()) {
+    case ValueKind::Local:
+        return localValues[value.id()].type;
+    case ValueKind::Constant:
+        return program->constants[value.id()].type;
+    case ValueKind::Builtin:
+        return makeProgramType(&builtinPrograms[value.id()]);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Type Generator::verifyType(Value value) {
+    switch (value.kind()) {
+    case ValueKind::Local:
+        VERIFY(localValues[value.id()].type == builtins::type_type);
+        return (Type)value;
+    case ValueKind::Constant:
+        VERIFY(program->constants[value.id()].type == builtins::type_type);
+        return (Type)value;
+    case ValueKind::Builtin: {
+        Program* valueProg = &builtinPrograms[value.id()];
+        VERIFY(!valueProg->isDependent());
+        VERIFY(valueProg->type() == builtins::type_type);
+        return (Type)value;
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+void Generator::buildDependentParents() {
+    if (!program->hasDependentParent() || !dependentParents.empty())
+        return;
+
+    dependentParents.push_back((Value)program->dependentParent->parentParameter);
+    Program* current = program;
+    for (;;) {
+        current = current->GetProgramLiteral(current->dependentParent->parent);
+        if (!current->isDependent())
+            return;
+        ExternValue externParameter = current->dependentParent->parentParameter;
+        dependentParents.push_back(makeStaticAccess(dependentParents.back(), current, externParameter));
+    }
+}
+
+std::array<Program, std::to_underlying(BuiltinId::COUNT)> builtinPrograms = [] {
+    std::array<Program, std::to_underlying(BuiltinId::COUNT)> programs;
+    auto prog = [&programs](BuiltinId id) { return &programs[std::to_underlying(id)]; };
+
+    {
+        Generator g { prog(BuiltinId::type_type) };
+        g.program->setType(builtins::type_type);
+    }
+    {
+        Generator g { prog(BuiltinId::namespace_type) };
+        g.program->setType(builtins::type_type);
+    }
+    {
+        Generator g { prog(BuiltinId::function_signature_type) };
+        g.program->setType(builtins::type_type);
+    }
+    {
+        Generator g { prog(BuiltinId::template_signature_type) };
+        g.program->setType(builtins::type_type);
+    }
+
+    // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
+    // cast{type}(template(T: type) -> type_expr) = template_id{template(T: type) -> type_expr}
+
+    // template(sig: template_signature) struct template_id: { }
+    // typof(template_id) = typeof(template(sig: template_signature) => template_id{sig})
+    //                    = template_id{template(sig: template_signature) -> typeof(template_id{sig})}
+    //                    = template_id{template(sig: template_signature) -> type}
+    {
+        Generator g { prog(BuiltinId::function_id_template) };
+        g.program->addExplicitParameter(Word(), builtins::template_signature_type, {});
+        g.program->setType(builtins::type_type);
+    }
+
+    // template(sig: function_signature) struct function_id: { }
+    // typeof(function_id) = typeof(template(sig: function_signature) => function_id{sig})
+    //                     = template_id{template(sig: function_signature) -> typeof(function_id{sig})}
+    //                     = template_id{template(sig: function_signature) -> type}
+    {
+        Generator g { prog(BuiltinId::function_id_template) };
+        g.program->addExplicitParameter(Word(), builtins::function_signature_type, {});
+        g.program->setType(builtins::type_type);
+    }
+
+    // typeof( (arg = expr) ) = cast{type}( (arg = typeof(expr)) ) = tuple{cast{tuple_signature}( (arg = typeof(expr)) )}
+
+    return programs;
+}();
 
 }

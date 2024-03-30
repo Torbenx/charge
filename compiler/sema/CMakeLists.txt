@@ -4,6 +4,9 @@ target_sources(compiler
     PRIVATE
     InsertOperation.h
     generate.cpp
+    Generator.h
     Node.h
+    parse.cpp
+    Program.cpp
     Program.h
 )

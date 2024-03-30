@@ -211,7 +211,7 @@ std::string_view nameString(TokenKind kind) {
     case TokenKind::kind:       \
         return #kind;
 
-#include "tokens.inc"
+#include <parse/tokens.inc>
     }
 }
 
