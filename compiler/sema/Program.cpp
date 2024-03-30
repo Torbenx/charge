@@ -66,4 +66,10 @@ Value Program::addStaticAccess(Type type, Value base, ExternValue value) {
     });
 }
 
+Program* Program::GetProgramLiteral(ExternValue value) {
+    VERIFY(value.kind() == ValueKind::Constant);
+    VERIFY(constants[value.id()].op == Opcode::ProgramLiteral);
+    return constants[value.id()].u.program;
+}
+
 }

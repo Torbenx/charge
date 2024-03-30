@@ -144,10 +144,4 @@ inline ChildrenRange Node::reverseChildren() {
     return ChildrenRange(this);
 }
 
-void Node::validateTreeProperty() {
-    auto it = reverseChildren().begin();
-    std::advance(it, childrenCount());
-    VERIFY(it == reverseChildren().end());
-}
-
 }

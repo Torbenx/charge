@@ -2,12 +2,37 @@
 
 namespace sema {
 
+void Generator::emitExpr(Node node) {
+    uint32_t nodeIndex = scratchBlock.size();
+    scratchBlock.push_back(node);
+    expressionStack.push_back({ nodeIndex });
+}
+
+void Generator::emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value) {
+    emitExpr({
+        location,
+        typeOfValue(value).toUint(),
+        { .data2 = value.toUint() },
+    });
+}
+
+void Generator::emitCompoundExpr(TaggedSourceLocation<NodeKind> location, Type type, int_t childCount) {
+    int_t subTreeSize = 1;
+    for (int_t i = 0; i < childCount; i++) {
+        subTreeSize += scratchBlock[expressionStack.back().nodeIndex].subTreeSize();
+        expressionStack.pop_back();
+    }
+    emitExpr({
+        location,
+        type.toUint(),
+        { .compound = { .childrenCount = (uint16_t)childCount, .subTreeSize = (uint16_t)subTreeSize } },
+    });
+}
+
 Value Generator::makeExpressionValue() {
-    VERIFY(expressionStack.back().nodeIndex == scratchBlock.size() - 1);
-    Value value = program->addExpression(&scratchBlock.back());
-    int_t size = scratchBlock.back().subTreeSize();
-    scratchBlock.resize(scratchBlock.size() - size);
-    expressionStack.pop_back();
+    Expression expr = topExpression();
+    Value value = program->addExpression(expr);
+    popExpression();
     return value;
 }
 
@@ -95,6 +120,15 @@ void Generator::generateIdentifierExpr() {
 
 void Generator::implicitToType() {
     implicitCastTo(builtins::type_type);
+}
+
+void Generator::implicitCastTo(Type type) {
+    auto expr = topExpression();
+    if (expr.type() == type) {
+        // nothing to do
+        return;
+    }
+    VERIFY_NOT_REACHED();
 }
 
 Program* Generator::signatureCheck(glue::DeclarationNode* scope) {

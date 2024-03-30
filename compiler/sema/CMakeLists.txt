@@ -5,6 +5,7 @@ target_sources(compiler
     InsertOperation.h
     generate.cpp
     Generator.h
+    Node.cpp
     Node.h
     parse.cpp
     Program.cpp

@@ -2,14 +2,40 @@
 
 namespace sema {
 
-void Generator::visitTemplateParameter() {
-    if (tok->kind() != Token::ImplicitKindParameter) {
-        // report error
+void Generator::advance() { tok += 1; }
+
+Expression Generator::topExpression(int_t n) {
+    return &scratchBlock[(expressionStack.end() - n - 1)->nodeIndex];
+}
+
+void Generator::popExpression() {
+    int_t size = scratchBlock.back().subTreeSize();
+    scratchBlock.resize(scratchBlock.size() - size);
+    expressionStack.pop_back();
+}
+
+void Generator::visitDeclaration() {
+    if (tok->kind() == Token::TemplateAttribute) {
+        visitTemplateParameters();
+    }
+    if (tok->kind() == Token::ObjectTypeDecl || tok->kind() == Token::StructTypeDecl) {
+        // VERIFY_NOT_REACHED();
+    } else if (tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl) {
+        visitStaticVariableDeclaration();
+    } else if (tok->kind() == Token::FunctionDecl) {
+        VERIFY_NOT_REACHED();
+    } else {
         VERIFY_NOT_REACHED();
     }
-    Word name = Word::fromUint(tok->data());
-    advance();
+}
 
+void Generator::visitTemplateParameters() {
+    while (tok->kind() != Token::EmptyNode) {
+        visitTemplateParameter();
+    }
+}
+
+Generator::VariableDeclaration Generator::visitVariableDeclaration() {
     Type type;
     if (tok->kind() != Token::AssignStmt) {
         // parse type
@@ -34,21 +60,30 @@ void Generator::visitTemplateParameter() {
     VERIFY(tok->kind() == Token::ExpressionStmt);
     advance();
 
-    program->addExplicitParameter(name, type, initializer);
+    return { type, initializer };
 }
 
-void Generator::advance() { tok += 1; }
-
-void Generator::visitDeclaration() {
-    if (tok->kind() == Token::TemplateAttribute) {
-        visitTemplateParameters();
+void Generator::visitTemplateParameter() {
+    if (tok->kind() != Token::ImplicitKindParameter) {
+        // report error
+        VERIFY_NOT_REACHED();
     }
+    Word name = Word::fromUint(tok->data());
+    advance();
+
+    auto info = visitVariableDeclaration();
+    program->addExplicitParameter(name, info.type, info.initializer);
 }
 
-void Generator::visitTemplateParameters() {
-    while (tok->kind() != Token::EmptyNode) {
-        visitTemplateParameter();
-    }
+void Generator::visitStaticVariableDeclaration() {
+    VERIFY(tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl);
+    bool isVar = tok->kind() == Token::StaticVarDecl;
+    advance();
+
+    auto info = visitVariableDeclaration();
+    VERIFY(info.initializer.has_value());
+    program->setType(info.type);
+    program->setValue(info.initializer.value());
 }
 
 void Generator::visitExpression() {

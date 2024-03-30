@@ -63,10 +63,18 @@ struct Generator {
     }
 
     void advance();
+    Expression topExpression(int_t n = 0);
+    void popExpression();
 
     void visitDeclaration();
     void visitTemplateParameters();
+    struct VariableDeclaration {
+        Type type;
+        std::optional<Value> initializer;
+    };
+    VariableDeclaration visitVariableDeclaration();
     void visitTemplateParameter();
+    void visitStaticVariableDeclaration();
 
     void visitExpression();
     void visitBinaryExpr();
@@ -94,8 +102,9 @@ struct Generator {
     void implicitToType();
     void implicitCastTo(Type);
 
-    void emitValueExpr(TaggedSourceLocation<NodeKind> location, Type type, Value value);
+    void emitExpr(Node node);
     void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);
+    void emitCompoundExpr(TaggedSourceLocation<NodeKind> location, Type type, int_t childCount);
 };
 
 }
