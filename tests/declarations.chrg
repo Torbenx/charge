@@ -5,39 +5,39 @@
 // expect-node OutParameter; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node VarParameter; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node LetParameter; expect-node AssignStmt; expect-node ExpressionStmt
-// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f1(in x, inout y, out z, var a, let b, c): { }
 
 // expect-node FunctionDecl
-// expect-node InParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
+// expect-node InParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f2(in x = init): { }
 
 // expect-node FunctionDecl
-// expect-node InParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node InParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f3(in x: type): { }
 
 // expect-node FunctionDecl
 // expect-node InParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
-// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f4(in x = init, in y): { }
 
 // expect-node FunctionDecl
 // expect-node InParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt
-// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt
+// expect-node InParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode
 // expect-node CompoundStmt; expect-node EmptyNode
 fn f5(in x: type, in y): { }
 
-// expect-node FunctionDecl; expect-node IdentifierExpr; expect-node CompoundStmt; expect-node EmptyNode
+// expect-node FunctionDecl; expect-node EmptyNode; expect-node IdentifierExpr; expect-node CompoundStmt; expect-node EmptyNode
 fn f6() -> type: { }
 
-// expect-node FunctionDecl; expect-node IdentifierExpr; expect-node ExpressionStmt;
+// expect-node FunctionDecl; expect-node EmptyNode; expect-node IdentifierExpr; expect-node ExpressionStmt;
 fn g1() => value;
 
-// expect-node FunctionDecl; expect-node IdentifierExpr; expect-node ExpressionStmt;
+// expect-node FunctionDecl; expect-node EmptyNode; expect-node IdentifierExpr; expect-node ExpressionStmt;
 fn g2() <=> value;
 
 // expect-node StructTypeDecl
@@ -48,7 +48,7 @@ struct S1: { }
 // expect-node MemberDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt
 // expect-node MemberDecl; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 // expect-node MemberDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
-// expect-node FunctionDecl; expect-node CompoundStmt; expect-node EmptyNode
+// expect-node FunctionDecl; expect-node EmptyNode; expect-node CompoundStmt; expect-node EmptyNode
 struct S2: {
     a;
     b: type;
@@ -59,7 +59,7 @@ struct S2: {
 
 // expect-node StructTypeDecl;
 // expect-node HasMemberDecl; expect-node IdentifierExpr; expect-node CallExpr; expect-node EmptyNode; expect-node EmptyNode
-// expect-node HasMemberDecl; expect-node IdentifierExpr; expect-node FunctionDecl; expect-node CompoundStmt; expect-node EmptyNode
+// expect-node HasMemberDecl; expect-node IdentifierExpr; expect-node FunctionDecl; expect-node EmptyNode; expect-node CompoundStmt; expect-node EmptyNode
 struct H1: {
     has m();
 
@@ -86,14 +86,14 @@ static w2 = init;
 // expect-node StaticLetDecl; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt
 static w3: type = init;
 
-//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode; expect-node StructTypeDecl
 template(T) struct T1: { }
 
-//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node ExpressionStmt; expect-node EmptyNode; expect-node StructTypeDecl
 template(T: type) struct T2: { }
 
-//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode; expect-node StructTypeDecl
 template(T = init) struct T3: { }
 
-//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node StructTypeDecl
+//expect-node TemplateAttribute; expect-node ImplicitKindParameter; expect-node IdentifierExpr; expect-node AssignStmt; expect-node IdentifierExpr; expect-node ExpressionStmt; expect-node EmptyNode; expect-node StructTypeDecl
 template(T: type = init) struct T4: { }

@@ -153,23 +153,23 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, TokenHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, const TokenInfo* parseLocation, ParseState& state) {
     bool ret = state.pushStaticScope(kind, name, parseLocation);
     if (ret)
         VERIFY(kind == DeclarationKind::Namespace);
 }
 
-[[gnu::noinline]] static void commitHasMemberDeclaration(TokenHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitHasMemberDeclaration(const TokenInfo* parseLocation, ParseState& state) {
     state.pushHasScope(parseLocation);
 }
 
-[[gnu::noinline]] static void commitMemberDeclaration(Word name, TokenHandle parseLocation, ParseState& state) {
+[[gnu::noinline]] static void commitMemberDeclaration(Word name, const TokenInfo* parseLocation, ParseState& state) {
     bool ret = state.pushMemberScope(name, parseLocation);
     VERIFY(!ret);
 }
 
 template<DeclarationKind kind>
-static void commitDeclaration(Word name, TokenHandle declarationBegin, ParseState& state) {
+static void commitDeclaration(Word name, const TokenInfo* declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::HasMember) {
         commitHasMemberDeclaration(declarationBegin, state);
@@ -196,7 +196,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     Word word;
     uint32_t tokenData = 0;
-    TokenHandle declarationBegin;
+    const TokenInfo* declarationBegin = nullptr;
 
     TokenKind tokenKind = (TokenKind)0;
 
@@ -218,6 +218,8 @@ std::string_view nameString(TokenKind kind) {
         return #kind;
 
 #include <parse/tokens.inc>
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 
@@ -228,6 +230,8 @@ std::string_view nameString(ScopeKind kind) {
         return #kind;
         ENUMERATE_SCOPE_KINDS
 #undef SCOPE
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 

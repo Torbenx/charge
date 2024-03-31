@@ -938,6 +938,9 @@ with indent():
     line("case LexerToken::EOS:")
     with indent():
         line("return \"EOS\";")
+    line("default:")
+    with indent():
+        line("VERIFY_NOT_REACHED();")
     line("}")
 line("}")
 lineNoIndent()
@@ -949,6 +952,9 @@ with indent():
         line("case State::" + stateCppName(state.name) + ":")
         with indent():
             line("return \"" + stateCppName(state.name) + "\";")
+    line("default:")
+    with indent():
+        line("VERIFY_NOT_REACHED();")
     line("}")
 line("}")
 lineNoIndent()

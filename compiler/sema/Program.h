@@ -113,19 +113,24 @@ enum class ProgramStatus : uint8_t {
     SignatureChecked, // (template) parameters have been checked, the type has been determined
 };
 
+#define ENUMERATE_PROGRAM_OPS          \
+    PROGRAM_OP(SignatureOf)            \
+    PROGRAM_OP(TypeOf)                 \
+    PROGRAM_OP(ProgramLiteral)         \
+    PROGRAM_OP(DeclarationNodeLiteral) \
+    PROGRAM_OP(StaticAccess)           \
+    PROGRAM_OP(Expression)             \
+    PROGRAM_OP(ImplicitParameter)      \
+    PROGRAM_OP(ExplicitParameter)
+
 struct Program {
     ProgramStatus m_status = ProgramStatus::Unchecked;
     Word m_name;
 
     enum class Opcode : uint8_t {
-        SignatureOf,
-        TypeOf,
-        ProgramLiteral,
-        DeclarationNodeLiteral,
-        StaticAccess,
-        Expression,
-        ImplicitParameter,
-        ExplicitParameter,
+#define PROGRAM_OP(kind) kind,
+        ENUMERATE_PROGRAM_OPS
+#undef PROGRAM_OP
     };
     struct Constant {
         Opcode op;
@@ -206,7 +211,11 @@ struct Program {
     bool isDependent() const {
         return isTemplate() || hasDependentParent();
     }
+
+    void dump();
 };
+
+std::string_view nameString(Program::Opcode op);
 
 extern std::array<Program, std::to_underlying(BuiltinId::COUNT)> builtinPrograms;
 

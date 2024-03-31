@@ -73,7 +73,7 @@ std::optional<Value> Generator::lookupInScope(glue::DeclarationNode* scope, Word
             return generateDeclarationLiteral(child);
         return std::nullopt;
     }
-    VERIFY_NOT_REACHED();
+    return std::nullopt;
 }
 
 Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
@@ -119,15 +119,10 @@ void Generator::generateIdentifierExpr() {
 }
 
 void Generator::implicitToType() {
-    implicitCastTo(builtins::type_type);
+    emitCompoundExpr({ NodeKind::CallExpr, {} }, builtins::type_type, 1);
 }
 
 void Generator::implicitCastTo(Type type) {
-    auto expr = topExpression();
-    if (expr.type() == type) {
-        // nothing to do
-        return;
-    }
     VERIFY_NOT_REACHED();
 }
 
@@ -138,8 +133,11 @@ Program* Generator::signatureCheck(glue::DeclarationNode* scope) {
 
     if (!scopeProg.has_value())
         scope->setProgram(new Program());
+    else
+        VERIFY(scopeProg->status() == ProgramStatus::Unchecked);
     Generator generator(scope);
-    VERIFY_NOT_REACHED();
+    generator.visitDeclaration();
+    return scope->program().value();
 }
 
 Type Generator::typeOfValue(Value value) {

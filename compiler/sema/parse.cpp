@@ -15,6 +15,7 @@ void Generator::popExpression() {
 }
 
 void Generator::visitDeclaration() {
+    program->setStatus(ProgramStatus::SignatureCheckInProgress);
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
     }
@@ -27,12 +28,16 @@ void Generator::visitDeclaration() {
     } else {
         VERIFY_NOT_REACHED();
     }
+    program->setStatus(ProgramStatus::SignatureChecked);
 }
 
 void Generator::visitTemplateParameters() {
+    advance();
     while (tok->kind() != Token::EmptyNode) {
         visitTemplateParameter();
     }
+    VERIFY(tok->kind() == Token::EmptyNode);
+    advance();
 }
 
 Generator::VariableDeclaration Generator::visitVariableDeclaration() {

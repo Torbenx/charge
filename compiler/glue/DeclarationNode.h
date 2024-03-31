@@ -24,7 +24,7 @@ public:
         HasMember,
     };
 
-    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, parse::TokenHandle parseLocation)
+    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, std::optional<const parse::TokenInfo*> parseLocation)
         : m_kind(std::to_underlying(kind))
         , m_name(name)
         , m_declaringDecl(this, declaring)
@@ -35,7 +35,7 @@ public:
     DeclarationNode* declaringNode() {
         return m_declaringDecl.get(this);
     }
-    std::optional<parse::TokenHandle> parseLocation() {
+    std::optional<const parse::TokenInfo*> parseLocation() {
         return m_parseLocation;
     }
     std::optional<sema::Program*> program() { return m_program; }
@@ -70,7 +70,7 @@ public:
     uint32_t m_kind : 3;
     Word m_name;
     relative_t m_declaringDecl;
-    parse::TokenHandle m_parseLocation;
+    std::optional<const parse::TokenInfo*> m_parseLocation;
     std::optional<sema::Program*> m_program;
     WordTable m_namedChildren;
     std::vector<relative_t> m_members;

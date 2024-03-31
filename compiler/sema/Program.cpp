@@ -72,4 +72,18 @@ Program* Program::GetProgramLiteral(ExternValue value) {
     return constants[value.id()].u.program;
 }
 
+std::string_view nameString(Program::Opcode op) {
+    switch (op) {
+#define PROGRAM_OP(kind)        \
+    case Program::Opcode::kind: \
+        return #kind;
+
+        ENUMERATE_PROGRAM_OPS
+
+#undef PROGRAM_OP
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 }

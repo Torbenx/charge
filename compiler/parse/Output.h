@@ -8,10 +8,6 @@
 
 namespace parse {
 
-struct TokenHandle {
-    uint32_t offset = -1;
-};
-
 enum class TokenKind : uint8_t {
 #define TOKEN(kind, type, prec) kind,
 
@@ -119,7 +115,6 @@ struct OutputVisitor {
     Impl* impl() { return static_cast<Impl*>(this); }
 
     void visit(const Output& output) {
-        auto endLoc = SourceLocation(0, output.lines.size());
         auto tokenIt = output.tokens.begin();
         auto whitespaceIt = output.whitespace.begin();
         for (;;) {

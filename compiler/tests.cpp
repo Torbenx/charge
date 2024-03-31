@@ -6,8 +6,8 @@
 #include <list>
 #include <log.h>
 #include <parse/parse_impl.h>
+#include <sema/Generator.h>
 #include <vector>
-#include <sema/Program.h>
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -271,6 +271,16 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 };
 
 int main() {
+    {
+        TestInstrumenter inst("struct X: { } template(x: X) struct Y: { }");
+        inst.runTest();
+        auto& ctx = inst.context;
+        auto node = ctx.currentScope()->findChild(ctx.wordTable.get("Y"));
+        VERIFY(node.has_value());
+        auto* prog = sema::Generator::signatureCheck(node.value());
+        prog->dump();
+    }
+
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
     for (const auto& entry : fs::directory_iterator(testDir)) {

@@ -415,6 +415,7 @@ LinearState after_variable_declaration_id() then error
 
 LinearState after_parameters() then error
     then
+        emitToken TokenKind::EmptyNode
         ifScope ScopeKind::FunctionParameters
             popScope ScopeKind::FunctionParameters
             then after_function_parameters

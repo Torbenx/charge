@@ -19,14 +19,14 @@ struct Context {
     void reset() {
         storage.clear();
         m_currentNode = allocateNode();
-        std::construct_at(m_currentNode, DeclarationNode::Kind::Namespace, Word(), nullptr, parse::TokenHandle());
+        std::construct_at(m_currentNode, DeclarationNode::Kind::Namespace, Word(), nullptr, std::nullopt);
     }
 
     DeclarationNode* currentScope() { return m_currentNode; }
     void popScope() {
         m_currentNode = m_currentNode->declaringNode();
     }
-    bool pushStaticScope(DeclarationNode::Kind kind, Word name, parse::TokenHandle parseLocation) {
+    bool pushStaticScope(DeclarationNode::Kind kind, Word name, const parse::TokenInfo* parseLocation) {
         auto node = m_currentNode->findChild(name);
         if (node.has_value()) {
             m_currentNode = node.value();
@@ -38,13 +38,13 @@ struct Context {
         m_currentNode = newNode;
         return false;
     }
-    void pushHasScope(parse::TokenHandle parseLocation) {
+    void pushHasScope(const parse::TokenInfo* parseLocation) {
         DeclarationNode* newNode = allocateNode();
         std::construct_at(newNode, DeclarationNode::Kind::HasMember, Word(), m_currentNode, parseLocation);
         m_currentNode->addHasMember(newNode);
         m_currentNode = newNode;
     }
-    bool pushMemberScope(Word name, parse::TokenHandle parseLocation) {
+    bool pushMemberScope(Word name, const parse::TokenInfo* parseLocation) {
         auto node = m_currentNode->findChild(name);
         if (node.has_value()) {
             return true;

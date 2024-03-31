@@ -41,7 +41,7 @@ struct Generator {
     using Token = parse::TokenKind;
 
     glue::DeclarationNode* currentScope = nullptr;
-    parse::TokenInfo* tok = nullptr;
+    const parse::TokenInfo* tok = nullptr;
     Program* program = nullptr;
 
     LookupCache lookupCache;
@@ -54,7 +54,8 @@ struct Generator {
 
     Generator(glue::DeclarationNode* scope) {
         currentScope = scope;
-        tok = nullptr; // scope->parseLocation();
+        VERIFY(scope->parseLocation().has_value());
+        tok = scope->parseLocation().value();
         program = scope->program().value();
     }
 
@@ -82,7 +83,7 @@ struct Generator {
     void visitPostfixExpr();
     void visitPrimaryExpr();
 
-    Program* signatureCheck(glue::DeclarationNode* scope);
+    static Program* signatureCheck(glue::DeclarationNode* scope);
 
     Type typeOfValue(Value value);
 

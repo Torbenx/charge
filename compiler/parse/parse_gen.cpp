@@ -178,6 +178,8 @@ std::string_view nameString(LexerToken token) {
         return "Literal";
     case LexerToken::EOS:
         return "EOS";
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 
@@ -265,6 +267,8 @@ std::string_view nameString(State state) {
         return "AfterDeclaration";
     case State::Error:
         return "Error";
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 

@@ -16,6 +16,7 @@ enum class NodeKind : uint8_t {
 
 #undef KIND
 };
+std::string_view nameString(NodeKind kind);
 
 inline bool isPrimary(NodeKind kind) {
     switch (kind) {
@@ -81,7 +82,7 @@ struct Node {
 
 // iterates children in reverse order
 struct ChildrenIterator {
-    using value_type = Node;
+    using value_type = Node*;
     using difference_type = int_t;
 
     ChildrenIterator() = default;
@@ -101,7 +102,7 @@ struct ChildrenIterator {
         advance();
         return copy;
     }
-    Node& operator*() const { return *m_node; }
+    Node* operator*() const { return m_node; }
     Node* operator->() const { return m_node; }
     operator Node*() const { return m_node; }
     Node* node() const { return m_node; }
