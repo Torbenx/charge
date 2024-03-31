@@ -534,7 +534,7 @@ def generateWordCase(state):
     line("if (word.keyword()) {")
     with indent():
         if state.keywordCases():
-            labelLine("[[maybe_unused]] " + state.name + "$keyword_check:")
+            labelLine("LABEL_MAYBE_UNUSED " + state.name + "$keyword_check:")
             for c in state.keywordCases():
                 line("if (word == words[\"" + c.keyword + "\"]) {")
                 with indent():

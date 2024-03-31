@@ -2,6 +2,12 @@
 #include <parse/parse_impl.h>
 #include <utility>
 
+#ifdef __GNUC__
+#define LABEL_MAYBE_UNUSED [[maybe_unused]]
+#else
+#define LABEL_MAYBE_UNUSED
+#endif
+
 using namespace std::string_view_literals;
 using DeclarationKind = glue::DeclarationNode::Kind;
 
@@ -775,7 +781,7 @@ expression$word_case:
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] expression$keyword_check:
+    LABEL_MAYBE_UNUSED expression$keyword_check:
         if (word == words["if"]) {
             // pushScope ScopeKind::IfExpr
             scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
@@ -1684,7 +1690,7 @@ comma_after_expression$no_emit:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] comma_after_expression$keyword_check:
+        LABEL_MAYBE_UNUSED comma_after_expression$keyword_check:
             if (word == words["else"]) {
                 // next comma_else
                 goto comma_else$no_emit;
@@ -2096,7 +2102,7 @@ after_statement$no_emit:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] after_statement$keyword_check:
+        LABEL_MAYBE_UNUSED after_statement$keyword_check:
             if (word == words["else"]) {
                 // popScope ScopeKind::IfBranch
                 {
@@ -2949,7 +2955,7 @@ statement$word_case:
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] statement$keyword_check:
+    LABEL_MAYBE_UNUSED statement$keyword_check:
         if (word == words["if"]) {
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3047,7 +3053,7 @@ check_var_after_let$no_emit:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] check_var_after_let$keyword_check:
+        LABEL_MAYBE_UNUSED check_var_after_let$keyword_check:
             if (word == words["var"]) {
                 // tokenKind = TokenKind::VarStmt
                 tokenKind = TokenKind::VarStmt;
@@ -3253,7 +3259,7 @@ parameter$as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] parameter$keyword_check:
+        LABEL_MAYBE_UNUSED parameter$keyword_check:
             if (word == words["in"]) {
                 // tokenKind = TokenKind::InParameter
                 tokenKind = TokenKind::InParameter;
@@ -3360,7 +3366,7 @@ namespace_declaration$as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] namespace_declaration$keyword_check:
+        LABEL_MAYBE_UNUSED namespace_declaration$keyword_check:
             if (word == words["namespace"]) {
                 // next namespace_declaration_id
                 goto namespace_declaration_id$no_emit;
@@ -3395,6 +3401,8 @@ namespace_declaration_id$no_emit:
             goto error$keyword_check;
         }
         tokenData = word.asUint();
+        // rememberDeclarationBegin
+        declarationBegin = state.parseOutput.currentToken();
         // commitDeclaration DeclarationKind::Namespace
         commitDeclaration<DeclarationKind::Namespace>(Word::fromUint(tokenData), declarationBegin, state);
         // next after_namespace_declaration_id
@@ -3443,7 +3451,7 @@ templated_declaration$as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] templated_declaration$keyword_check:
+        LABEL_MAYBE_UNUSED templated_declaration$keyword_check:
             if (word == words["template"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
@@ -3524,7 +3532,7 @@ templated_declaration_with_attributes$as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] templated_declaration_with_attributes$keyword_check:
+        LABEL_MAYBE_UNUSED templated_declaration_with_attributes$keyword_check:
             if (word == words["template"]) {
                 // next after_template
                 goto after_template$no_emit;
@@ -3752,7 +3760,7 @@ member_declaration$as_then:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] member_declaration$keyword_check:
+        LABEL_MAYBE_UNUSED member_declaration$keyword_check:
             if (word == words["has"]) {
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
@@ -3789,7 +3797,7 @@ after_static$no_emit:
             word = wordAndPos.word;
         }
         if (word.keyword()) {
-        [[maybe_unused]] after_static$keyword_check:
+        LABEL_MAYBE_UNUSED after_static$keyword_check:
             if (word == words["var"]) {
                 // tokenKind = TokenKind::StaticVarDecl
                 tokenKind = TokenKind::StaticVarDecl;
@@ -4285,7 +4293,7 @@ error$word_case:
         word = wordAndPos.word;
     }
     if (word.keyword()) {
-    [[maybe_unused]] error$keyword_check:
+    LABEL_MAYBE_UNUSED error$keyword_check:
         if (word == words["if"]) {
             // error
             errorToken = LexerToken::If;

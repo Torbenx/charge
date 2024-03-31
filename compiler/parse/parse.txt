@@ -462,6 +462,7 @@ LinearState namespace_declaration() then templated_declaration
         next namespace_declaration_id
 LinearState namespace_declaration_id() then error
     identifier
+        rememberDeclarationBegin
         commitDeclaration DeclarationKind::Namespace
         next after_namespace_declaration_id
 LinearState after_namespace_declaration_id() then error

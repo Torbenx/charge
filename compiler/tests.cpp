@@ -155,7 +155,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
                     keyStr = keyStr.substr(0, keyStr.length() - comment.length());
                     skipWhitespace();
 
-                    if (comment.front() == '=') {
+                    if (!comment.empty() && comment.front() == '=') {
                         comment = comment.substr(1);
                         key = wordTable.get(keyStr);
                         skipWhitespace();

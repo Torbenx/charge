@@ -8,7 +8,7 @@
 namespace parse {
 
 struct TokenHandle {
-    uint32_t offset;
+    uint32_t offset = -1;
 };
 
 enum class TokenKind : uint8_t {
@@ -90,6 +90,13 @@ struct Output {
     std::string_view source;
     Output(std::string_view source)
         : source(source) {
+        reset();
+    }
+
+    void reset() {
+        tokens.clear();
+        lines.clear();
+        whitespace.clear();
         lines.push_back({ source.data() });
     }
 

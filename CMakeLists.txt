@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.18)
 project(Charge_Language)
 
-set(CMAKE_BUILD_TYPE release)
-set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
+if (NOT MSVC)
+    set(CMAKE_BUILD_TYPE release)
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 
