@@ -79,7 +79,9 @@ struct WordTableView {
     constexpr uint32_t modSize(uint32_t in) const {
         return in & hashToBucket(-1);
     }
+    constexpr bool empty() const { return invLogSize == 0; }
     constexpr int_t bucketCount() const { return static_cast<uint32_t>((uint64_t)0x1'0000'0000 >> invLogSize); }
+    constexpr int_t entryCount() const { return usedBuckets; }
 
     struct LookupState {
         uint32_t bucket;
@@ -93,31 +95,22 @@ struct WordTableView {
     constexpr void advanceLookup(LookupState& state) const {
         state.bucket = modSize(state.bucket + 1);
     }
+    // TODO: This API is awkward, it can easily lead to misused when the table is empty
     constexpr FindResult findWord(Word) const;
     constexpr FindResult continueFindWord(Word, LookupState) const;
 
 private:
     constexpr WordTableView(Entry* entries, uint32_t size)
         : entries(entries), invLogSize(32 - std::countr_zero(size)) {
-        VERIFY(std::has_single_bit(size));
+        VERIFY(size == 0 || std::has_single_bit(size));
     }
     friend struct WordTable;
 };
-struct WordTable : WordTableView {
-    constexpr WordTable();
-    constexpr WordTable(std::span<Entry> entries, uint32_t numEntries)
-        : WordTableView(entries) { usedBuckets = numEntries; }
-    constexpr WordTable(const WordTable& other);
-    constexpr ~WordTable();
-
-    constexpr void rehash();
-    constexpr void maybeRehash();
-    constexpr bool insertWord(Word word, uint32_t payload);
-
-    constexpr int_t entryCount() const { return usedBuckets; }
-};
 
 constexpr WordTableView::FindResult WordTableView::findWord(Word word) const {
+    if (empty())
+        return { { 0 }, false };
+
     LookupState state = beginLookup(word.hash());
     for (;;) {
         const Entry& entry = entries[state.bucket];
@@ -141,7 +134,24 @@ constexpr WordTableView::FindResult WordTableView::continueFindWord(Word word, L
     }
 }
 
+struct WordTable : WordTableView {
+    constexpr WordTable();
+    constexpr WordTable(std::span<Entry> entries, uint32_t numEntries)
+        : WordTableView(entries) { usedBuckets = numEntries; }
+    constexpr WordTable(const WordTable& other);
+    constexpr ~WordTable();
+
+    constexpr void rehash();
+    constexpr void maybeRehash();
+    constexpr void initializeFromEmpty();
+
+    constexpr bool insertWord(Word word, uint32_t payload);
+};
+
 constexpr bool WordTable::insertWord(Word word, uint32_t payload) {
+    if (empty())
+        initializeFromEmpty();
+
     auto result = findWord(word);
     if (!result.found) {
         entries[result.bucket] = { word, payload };
@@ -181,19 +191,24 @@ constexpr void WordTable::rehash() {
     std::destroy_n(oldEntries, oldSize);
     allocator.deallocate(oldEntries, oldSize);
 }
-
-constexpr WordTable::WordTable()
-    : WordTableView(nullptr, 4) {
+constexpr void WordTable::initializeFromEmpty() {
+    VERIFY(empty());
+    invLogSize = 30;
     std::allocator<Entry> allocator;
     entries = allocator.allocate(bucketCount());
     std::uninitialized_fill_n(entries, bucketCount(), Entry());
 }
 
+constexpr WordTable::WordTable()
+    : WordTableView(nullptr, 0) { }
+
 constexpr WordTable::WordTable(const WordTable& other)
     : WordTableView(other) {
-    std::allocator<Entry> allocator;
-    entries = allocator.allocate(bucketCount());
-    std::uninitialized_copy_n(other.entries, bucketCount(), entries);
+    if (!other.empty()) {
+        std::allocator<Entry> allocator;
+        entries = allocator.allocate(bucketCount());
+        std::uninitialized_copy_n(other.entries, bucketCount(), entries);
+    }
 }
 
 constexpr WordTable::~WordTable() {
@@ -227,7 +242,7 @@ private:
 
 public:
     constexpr WordStringTable()
-        : WordTable() { }
+        : WordTable() { initializeFromEmpty(); }
     template<typename... Ts>
     constexpr WordStringTable(const ConstWordStringTable<Ts...>&);
     constexpr WordStringTable(const WordStringTable&);
