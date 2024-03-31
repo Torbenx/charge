@@ -12,8 +12,10 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.cpp"
 add_executable(compiler
     log.cpp
     log.h
+    PageBumpAllocator.h
     tests.cpp
     types.h
+    windows_allocdetail.cpp
     WordTable.h
 )
 

@@ -8,11 +8,17 @@ namespace glue {
 struct Context {
     parse::Output parseOutput;
     WordStringTable wordTable { parse::words };
+    PageBumpAllocator<DeclarationNode> storage;
     DeclarationNode* m_currentNode = nullptr;
 
     Context(std::string_view source)
         : parseOutput(source) {
-        m_currentNode = allocate<DeclarationNode>();
+        reset();
+    }
+
+    void reset() {
+        storage.clear();
+        m_currentNode = allocateNode();
         std::construct_at(m_currentNode, DeclarationNode::Kind::Namespace, Word(), nullptr, parse::TokenHandle());
     }
 
@@ -26,14 +32,14 @@ struct Context {
             m_currentNode = node.value();
             return true;
         }
-        DeclarationNode* newNode = allocate<DeclarationNode>();
+        DeclarationNode* newNode = allocateNode();
         std::construct_at(newNode, kind, name, m_currentNode, parseLocation);
         m_currentNode->addStaticChild(name, newNode);
         m_currentNode = newNode;
         return false;
     }
     void pushHasScope(parse::TokenHandle parseLocation) {
-        DeclarationNode* newNode = allocate<DeclarationNode>();
+        DeclarationNode* newNode = allocateNode();
         std::construct_at(newNode, DeclarationNode::Kind::HasMember, Word(), m_currentNode, parseLocation);
         m_currentNode->addHasMember(newNode);
         m_currentNode = newNode;
@@ -43,17 +49,15 @@ struct Context {
         if (node.has_value()) {
             return true;
         }
-        DeclarationNode* newNode = allocate<DeclarationNode>();
+        DeclarationNode* newNode = allocateNode();
         std::construct_at(newNode, DeclarationNode::Kind::Member, Word(), m_currentNode, parseLocation);
         m_currentNode->addMember(name, newNode);
         m_currentNode = newNode;
         return false;
     }
 
-    template<typename T>
-    T* allocate() {
-        std::allocator<T> allocator;
-        return allocator.allocate(1);
+    DeclarationNode* allocateNode() {
+        return storage.allocate();
     }
 };
 

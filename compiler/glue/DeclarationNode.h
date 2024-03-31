@@ -27,13 +27,13 @@ public:
     DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, parse::TokenHandle parseLocation)
         : m_kind(std::to_underlying(kind))
         , m_name(name)
-        , m_declaringDecl(declaring)
+        , m_declaringDecl(this, declaring)
         , m_parseLocation(parseLocation) { }
 
     Kind kind() const { return (Kind)m_kind; }
     Word name() const { return m_name; }
     DeclarationNode* declaringNode() {
-        return m_declaringDecl;
+        return m_declaringDecl.get(this);
     }
     std::optional<parse::TokenHandle> parseLocation() {
         return m_parseLocation;
@@ -69,7 +69,7 @@ public:
 
     uint32_t m_kind : 3;
     Word m_name;
-    DeclarationNode* m_declaringDecl;
+    relative_t m_declaringDecl;
     parse::TokenHandle m_parseLocation;
     std::optional<sema::Program*> m_program;
     WordTable m_namedChildren;

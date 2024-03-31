@@ -1,5 +1,6 @@
 #pragma once
 
+#include <PageBumpAllocator.h>
 #include <parse/parse_gen.h>
 
 #include <utility>
@@ -16,8 +17,8 @@ enum class TokenKind : uint8_t {
 
 #include <parse/tokens.inc>
 
-FirstUnaryExpr = LogicalNotExpr,
-LastUnaryExpr = DereferenceExpr,
+    FirstUnaryExpr = LogicalNotExpr,
+    LastUnaryExpr = DereferenceExpr,
 };
 std::string_view nameString(TokenKind);
 inline bool isUnaryExpr(TokenKind kind) {
@@ -84,9 +85,9 @@ struct WhitespaceInfo : TaggedSourceLocation<WhitespaceKind> {
 };
 
 struct Output {
-    std::vector<TokenInfo> tokens;
-    std::vector<LineInfo> lines;
-    std::vector<WhitespaceInfo> whitespace;
+    PageBumpAllocator<TokenInfo> tokens;
+    PageBumpAllocator<LineInfo> lines;
+    PageBumpAllocator<WhitespaceInfo> whitespace;
     std::string_view source;
     Output(std::string_view source)
         : source(source) {
@@ -108,8 +109,8 @@ struct Output {
         return std::string_view(sourcePointer(info.location()), info.length);
     }
 
-    TokenHandle currentToken() const {
-        return { (uint32_t)tokens.size() };
+    const TokenInfo* currentToken() const {
+        return tokens.end();
     }
 };
 
