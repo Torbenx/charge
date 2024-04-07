@@ -5,12 +5,12 @@ namespace sema {
 void Generator::advance() { tok += 1; }
 
 Expression Generator::topExpression(int_t n) {
-    return &scratchBlock[(expressionStack.end() - n - 1)->nodeIndex];
+    return &expressionScratch[(expressionStack.end() - n - 1)->nodeIndex];
 }
 
 void Generator::popExpression() {
-    int_t size = scratchBlock.back().subTreeSize();
-    scratchBlock.resize(scratchBlock.size() - size);
+    int_t size = expressionScratch.back().subTreeSize();
+    expressionScratch.resize(expressionScratch.size() - size);
     expressionStack.pop_back();
 }
 
@@ -21,6 +21,7 @@ void Generator::visitDeclaration() {
     }
     if (tok->kind() == Token::ObjectTypeDecl || tok->kind() == Token::StructTypeDecl) {
         // VERIFY_NOT_REACHED();
+        program->setType(builtins::type_type);
     } else if (tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
@@ -112,6 +113,9 @@ void Generator::visitUnaryExpr() {
 
 void Generator::visitPostfixExpr() {
     visitPrimaryExpr();
+    if (tok->kind() == Token::Parameterize) {
+        generateParameterizeExpr(visitExpressionList());
+    }
 }
 
 void Generator::visitPrimaryExpr() {
@@ -121,6 +125,17 @@ void Generator::visitPrimaryExpr() {
     } else {
         VERIFY_NOT_REACHED();
     }
+}
+
+int_t Generator::visitExpressionList() {
+    advance();
+    int_t argumentCount = 0;
+    while (tok->kind() != Token::EmptyNode) {
+        argumentCount += 1;
+        visitExpression();
+    }
+    advance();
+    return argumentCount;
 }
 
 }

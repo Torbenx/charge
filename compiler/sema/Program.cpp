@@ -8,68 +8,83 @@ Value Program::add(Constant constant) {
     return Value(ValueKind::Constant, id);
 }
 
-Value Program::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
-    uint32_t parameterIndex = explicitParameters.size();
+Value Program::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
+    VERIFY(parameterizeArguments.size() == parameters.size());
+    uint32_t parameterIndex = parameters.size();
     Value result = add({
-        Opcode::ExplicitParameter,
-        type,
-        { .parameter = { parameterIndex, defaultValue } },
+        .op = Opcode::Parameter,
+        .type = type,
+        .u = { .parameterIndex = parameterIndex },
     });
-    explicitParameters.push_back({ name, result });
+    parameters.push_back({ name, defaultValue });
+    parameterizeArguments.push_back(result);
     return result;
 }
 
+Value Program::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
+    return addParameter(name, type, defaultValue);
+}
+
 Value Program::addImplicitParameter(Type type) {
-    uint32_t parameterIndex = explicitParameters.size();
+    VERIFY(parameters.size() == inheritedParameterCount + implicitParameterCount);
+    implicitParameterCount += 1;
+    return addParameter(Word(), type, std::nullopt);
+}
+
+Value Program::addInheritedParameter(Type type, std::optional<Value> defaultValue) {
+    VERIFY(parameters.size() == inheritedParameterCount);
+    inheritedParameterCount += 1;
+    return addParameter(Word(), type, defaultValue);
+}
+
+std::pair<Value, Program::ParameterizeArgumentSetter> Program::addParameterize(Type type, Value base, int_t argumentCount) {
+    auto firstIndex = parameterizeArguments.size();
     Value result = add({
-        Opcode::ImplicitParameter,
-        type,
-        { .parameter = { parameterIndex, {} } },
+        .op = Opcode::Parameterize,
+        .type = type,
+        .u = { .parameterize = {
+                   .base = base,
+                   .firstArgumentIndex = (uint16_t)firstIndex,
+                   .argumentCount = (uint16_t)argumentCount,
+               } },
     });
-    implicitParameters.push_back(result);
-    return result;
+    parameterizeArguments.resize(parameterizeArguments.size() + argumentCount);
+    return { result, { this, (int_t)firstIndex } };
 }
 
 Value Program::addExpression(Node* expr) {
     int_t size = expr->subTreeSize();
     expressions.insert(expressions.end(), expr - size + 1, expr + 1);
     return add({
-        Opcode::Expression,
-        Expression(expr).type(),
-        { .expressionIndex = (uint32_t)(expressions.size() - 1) },
+        .op = Opcode::Expression,
+        .type = Expression(expr).type(),
+        .u = { .expressionIndex = (uint32_t)(expressions.size() - 1) },
     });
 }
 
-Value Program::addLiteral(Type type, glue::DeclarationNode* node) {
+Value Program::addNamespaceLiteral(glue::DeclarationNode* node) {
     return add({
-        Opcode::DeclarationNodeLiteral,
-        type,
-        { .declarationNode = node },
+        .op = Opcode::NamespaceLiteral,
+        .type = builtins::namespace_type,
+        .u = { .declarationNode = node },
     });
 }
 
 Value Program::addProgramLiteral(Opcode op, Type type, Program* program) {
-    VERIFY(op == Opcode::ProgramLiteral || op == Opcode::SignatureOf || op == Opcode::TypeOf);
+    VERIFY(op == Opcode::ProgramLiteral || op == Opcode::SignatureOf);
     return add({
-        op,
-        type,
-        { .program = program },
+        .op = Opcode::ProgramLiteral,
+        .type = type,
+        .u = { .program = program },
     });
 }
 
-Value Program::addStaticAccess(Type type, Value base, ExternValue value) {
-    VERIFY(value.kind() == ValueKind::Constant);
+Value Program::addRemoteExpression(Type type, Value base, uint32_t expressionIndex) {
     return add({
-        Opcode::StaticAccess,
-        type,
-        { .access = { base, value.id() } },
+        .op = Opcode::RemoteExpression,
+        .type = type,
+        .u = { .remoteExpression = { base, expressionIndex } },
     });
-}
-
-Program* Program::GetProgramLiteral(ExternValue value) {
-    VERIFY(value.kind() == ValueKind::Constant);
-    VERIFY(constants[value.id()].op == Opcode::ProgramLiteral);
-    return constants[value.id()].u.program;
 }
 
 std::string_view nameString(Program::Opcode op) {

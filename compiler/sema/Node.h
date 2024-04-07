@@ -7,7 +7,8 @@ namespace sema {
 #define ENUMERATE_NODE_KINDS             \
     KIND(ReferenceExpr, Reference, true) \
     KIND(ConstantExpr, Pure, true)       \
-    KIND(CallExpr, Owning, false)
+    KIND(ParameterizeExpr, Pure, false)  \
+    KIND(ImplicitConversion, Owning, false)
 
 enum class NodeKind : uint8_t {
 #define KIND(kind, cat, primary) kind,

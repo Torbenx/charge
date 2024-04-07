@@ -29,7 +29,7 @@ struct Generator {
         Type type;
     };
 
-    enum class WildcardMeaning {
+    enum class WildcardMeaning : uint8_t {
         Error,
         ImplicitTemplate,
     };
@@ -48,7 +48,7 @@ struct Generator {
     std::vector<Value> dependentParents;
     std::vector<LocalDeclarationEntry> localDeclarations;
     std::vector<LocalValue> localValues;
-    std::vector<Node> scratchBlock;
+    std::vector<Node> expressionScratch;
     std::vector<StackItem> expressionStack;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
@@ -82,23 +82,27 @@ struct Generator {
     void visitUnaryExpr();
     void visitPostfixExpr();
     void visitPrimaryExpr();
+    int_t visitExpressionList();
 
     static Program* signatureCheck(glue::DeclarationNode* scope);
+    Value fold(Value base, ExternValue v);
+    Value foldImpl(Value base, Program* baseProg, std::span<const Value> parameters, ExternValue v);
 
-    Type typeOfValue(Value value);
-
+    Type typeOf(Program* targetProg, ExternValue value);
+    Type typeOf(Value value);
     Type verifyType(Value value);
+    Program* getProgramLiteral(Value value);
+    std::span<const Value> parameterizeArguments(Value value);
+    static std::span<const ExternValue> parameterizeArguments(Program* targetProg, ExternValue base);
 
     Value generateDeclarationLiteral(glue::DeclarationNode* target);
     std::optional<Value> lookupInScope(glue::DeclarationNode* scope, Word name);
     void generateIdentifierExpr();
-
-    void buildDependentParents();
+    void generateParameterizeExpr(int_t argumentCount);
 
     Value makeExpressionValue();
-    Type makeProgramType(Program* program);
-    Value makeProgramLiteral(Program* program);
-    Value makeStaticAccess(Value base, Program* program, ExternValue value);
+    Type makeProgramType(Value programLiteral);
+    Value makeProgramLiteral(Program* targetProg);
 
     void implicitToType();
     void implicitCastTo(Type);

@@ -272,13 +272,34 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
 int main() {
     {
-        TestInstrumenter inst("struct X: { } template(x: X) struct Y: { }");
+        TestInstrumenter inst(R"str(
+            struct X: { }
+            static XX: type = X;
+            template(x: X) struct Container: {
+                template(x: XX) struct Y: { }
+            }
+            static Z = Container;
+        )str");
         inst.runTest();
         auto& ctx = inst.context;
-        auto node = ctx.currentScope()->findChild(ctx.wordTable.get("Y"));
-        VERIFY(node.has_value());
-        auto* prog = sema::Generator::signatureCheck(node.value());
-        prog->dump();
+        auto checkAndDump = [&ctx](std::string name) {
+            glue::DeclarationNode* node = ctx.currentScope();
+            for (;;) {
+                size_t offset = name.find("::");
+                if (offset == std::string::npos)
+                    offset = name.length();
+                node = node->findChild(ctx.wordTable.get(name.substr(0, offset))).value();
+                if (offset == name.length())
+                    break;
+                name = name.substr(offset + 2);
+            }
+            auto* prog = sema::Generator::signatureCheck(node);
+            fmt::println("------------------------------------");
+            prog->dump();
+        };
+        checkAndDump("XX");
+        checkAndDump("Container::Y");
+        checkAndDump("Z");
     }
 
     namespace fs = std::filesystem;

@@ -18,6 +18,9 @@ keywords = [
     "static",  "incomplete", "virtual", "template",
     "var", "let", "in", "inout", "out", "forward", "assign", "porperty"
 ]
+specialWords = [
+    "type"
+]
 
 punctuations = punctuationTokens + ["//", "/*"]
 punctuationAlphabet = "".join(sorted({p[0] for p in punctuations}))
@@ -880,6 +883,8 @@ line("inline constexpr ConstWordStringTable words {")
 with indent():
     for keyword in keywords:
         line("keyword(\"" + keyword + "\"),")
+    for word in specialWords:
+        line("\"" + word + "\",")
 line("};")
 
 line("enum class LexerToken : uint8_t {")
