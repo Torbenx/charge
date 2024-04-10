@@ -1,6 +1,6 @@
 #include <sema/Program.h>
 
-#include <ranges>
+#include <sstream>
 
 namespace sema {
 
@@ -35,6 +35,8 @@ struct Dumper {
     }
 
     std::string formatValue(Value v) {
+        if (v == INVALID_VALUE)
+            return "<invalid>";
         char c;
         switch (v.kind()) {
         case ValueKind::Builtin: {
@@ -94,21 +96,26 @@ void Dumper::dumpProgram(Program* prog) {
     for (int_t i = 0; i < (int_t)prog->constants.size(); i++) {
         const auto& c = prog->constants[i];
         std::string header = fmt::format("c{} = [{}]", i, formatValue(c.type));
-        std::string line = header + (std::string)nameString(c.op);
+        std::ostringstream line;
+        line << header << nameString(c.op);
         switch (c.op) {
         case Program::Opcode::Parameterize: {
-            line += " {";
             const auto& param = c.u.parameterize;
-            for (int_t i = 0; i < (int_t)param.argumentCount; i++)
-                line += fmt::format("{}, ", formatValue(prog->parameterizeArguments[param.firstArgumentIndex + i]));
-            line.resize(line.length() - 2);
-            line += "}";
+            line << " " << formatValue(param.base) << "{";
+            for (int_t i = 0; i < (int_t)param.argumentCount - 1; i++)
+                line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + i]) << ", ";
+            line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + param.argumentCount - 1]) << "}";
+            break;
+        }
+        case Program::Opcode::SignatureOf:
+        case Program::Opcode::ProgramLiteral: {
+            line << " " << (void*)c.u.program;
             break;
         }
         default:
             break;
         }
-        dumpLine(line);
+        dumpLine(line.view());
         switch (c.op) {
         case Program::Opcode::Expression:
             indentation.emplace_back(true, header.size());

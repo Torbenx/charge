@@ -9,15 +9,13 @@ Value Program::add(Constant constant) {
 }
 
 Value Program::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
-    VERIFY(parameterizeArguments.size() == parameters.size());
     uint32_t parameterIndex = parameters.size();
     Value result = add({
         .op = Opcode::Parameter,
         .type = type,
         .u = { .parameterIndex = parameterIndex },
     });
-    parameters.push_back({ name, defaultValue });
-    parameterizeArguments.push_back(result);
+    parameters.push_back({ name, result, defaultValue });
     return result;
 }
 
@@ -37,19 +35,22 @@ Value Program::addInheritedParameter(Type type, std::optional<Value> defaultValu
     return addParameter(Word(), type, defaultValue);
 }
 
-std::pair<Value, Program::ParameterizeArgumentSetter> Program::addParameterize(Type type, Value base, int_t argumentCount) {
-    auto firstIndex = parameterizeArguments.size();
-    Value result = add({
+Value Program::addParameterize(Type type, Value base, int_t firstArgumentIndex, int_t argumentCount) {
+    return add({
         .op = Opcode::Parameterize,
         .type = type,
         .u = { .parameterize = {
                    .base = base,
-                   .firstArgumentIndex = (uint16_t)firstIndex,
+                   .firstArgumentIndex = (uint16_t)firstArgumentIndex,
                    .argumentCount = (uint16_t)argumentCount,
                } },
     });
-    parameterizeArguments.resize(parameterizeArguments.size() + argumentCount);
-    return { result, { this, (int_t)firstIndex } };
+}
+
+std::pair<Value, Program::ParameterizeArgumentSetter> Program::addParameterize(Type type, Value base, int_t argumentCount) {
+    auto firstIndex = parameterizeArguments.size();
+    parameterizeArguments.resize(parameterizeArguments.size() + argumentCount, INVALID_VALUE);
+    return { addParameterize(type, base, firstIndex, argumentCount), { this, (int_t)firstIndex } };
 }
 
 Value Program::addExpression(Node* expr) {
@@ -73,7 +74,7 @@ Value Program::addNamespaceLiteral(glue::DeclarationNode* node) {
 Value Program::addProgramLiteral(Opcode op, Type type, Program* program) {
     VERIFY(op == Opcode::ProgramLiteral || op == Opcode::SignatureOf);
     return add({
-        .op = Opcode::ProgramLiteral,
+        .op = op,
         .type = type,
         .u = { .program = program },
     });

@@ -275,10 +275,23 @@ int main() {
         TestInstrumenter inst(R"str(
             struct X: { }
             static XX: type = X;
-            template(x: X) struct Container: {
-                template(x: XX) struct Y: { }
+            template(x: XX) struct Y: { }
+
+            template(T: type) struct Foo: { }
+            static U: type = Foo{X};
+
+            template(T) struct Bar: { }
+            static V: type = Bar{X};
+
+            template(T: type) struct Outer: {
+                struct A: { }
+
+                static AliasA: type = A;
+
+                template(T) struct B: { }
+
+                static BA: type = B{A};
             }
-            static Z = Container;
         )str");
         inst.runTest();
         auto& ctx = inst.context;
@@ -298,8 +311,13 @@ int main() {
             prog->dump();
         };
         checkAndDump("XX");
-        checkAndDump("Container::Y");
-        checkAndDump("Z");
+        checkAndDump("Y");
+        checkAndDump("U");
+        checkAndDump("V");
+        checkAndDump("Outer");
+        checkAndDump("Outer::AliasA");
+        checkAndDump("Outer::B");
+        checkAndDump("Outer::BA");
     }
 
     namespace fs = std::filesystem;

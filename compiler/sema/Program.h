@@ -16,8 +16,8 @@ enum class BuiltinId {
 
 enum class ValueKind : uint8_t {
     Builtin,
-    Local,
     Constant,
+    Local,
 };
 struct Value {
     constexpr Value()
@@ -35,9 +35,12 @@ struct Value {
 
     constexpr bool operator==(const Value&) const = default;
 
+    static constexpr uint32_t MAX_ID = (1 << 30) - 1;
+
     uint32_t idBits : 30;
     uint32_t kindBits : 2;
 };
+inline constexpr Value INVALID_VALUE = { (ValueKind)3, Value::MAX_ID };
 
 struct Type : Value {
     static Type fromUint(uint32_t x) { return Type(Value::fromUint(x)); }
@@ -63,15 +66,15 @@ private:
 }
 template<>
 struct optional_traits<sema::Value> {
-    static constexpr sema::Value empty_value = {};
+    static constexpr sema::Value empty_value = sema::INVALID_VALUE;
 };
 template<>
 struct optional_traits<sema::Type> {
-    static constexpr sema::Type empty_value = {};
+    static constexpr sema::Type empty_value = (sema::Type)sema::INVALID_VALUE;
 };
 template<>
 struct optional_traits<sema::ExternValue> {
-    static constexpr sema::ExternValue empty_value = sema::Value();
+    static constexpr sema::ExternValue empty_value = sema::INVALID_VALUE;
 };
 
 namespace sema {
@@ -155,6 +158,7 @@ struct Program {
 
     struct Parameter {
         Word name;
+        Value parameterValue;
         std::optional<Value> defaultValue;
     };
 
@@ -171,6 +175,11 @@ struct Program {
     std::vector<Node> expressions;
     std::vector<Value> parameterizeArguments;
 
+    ExternValue typeOf(ExternValue v) {
+        VERIFY(v.kind() == ValueKind::Constant);
+        return constants[v.id()].type;
+    }
+
     Value add(Constant);
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
@@ -180,6 +189,7 @@ struct Program {
     Value addImplicitParameter(Type type);
     Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
     Value addRemoteExpression(Type type, Value base, uint32_t expressionIndex);
+    Value addParameterize(Type type, Value base, int_t firstArgumentIndex, int_t argumentCount);
     std::pair<Value, ParameterizeArgumentSetter> addParameterize(Type type, Value base, int_t argumentCount);
 
     // type after substituitng template arguments
@@ -187,6 +197,8 @@ struct Program {
 
     // value after substituitng template arguments
     ExternValue value() const { return m_value.value(); }
+
+    Value parameterValue(int_t index) const { return parameters[index].parameterValue; }
 
     void setType(Type type) {
         m_type = type;

@@ -19,6 +19,27 @@ struct LookupCache {
     }
 };
 
+struct DeductionState {
+    struct ExpressionMatch {
+        ExternValue pValue;
+        Value aValue;
+    };
+    std::vector<bool> explicitArgumentsMap;
+    std::vector<ExpressionMatch> expressionMatches;
+
+    DeductionState(int_t parameters) { explicitArgumentsMap.resize(parameters); }
+
+    bool isExplicitArgument(int_t index) { return explicitArgumentsMap[index]; }
+};
+
+struct BaseProgram {
+    Program* program;
+    Value value;
+    std::span<Value> arguments;
+
+    Program* operator->() const { return program; }
+};
+
 struct Generator {
     struct LocalDeclarationEntry {
         Word name;
@@ -66,6 +87,7 @@ struct Generator {
     void advance();
     Expression topExpression(int_t n = 0);
     void popExpression();
+    void popExpressions(int_t n);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -85,14 +107,15 @@ struct Generator {
     int_t visitExpressionList();
 
     static Program* signatureCheck(glue::DeclarationNode* scope);
+    BaseProgram asProgram(Value value);
     Value fold(Value base, ExternValue v);
-    Value foldImpl(Value base, Program* baseProg, std::span<const Value> parameters, ExternValue v);
+    Value fold(BaseProgram base, ExternValue v);
+    bool staticMatch(DeductionState& state, ExternValue pValue, BaseProgram pBase, Value aValue);
 
-    Type typeOf(Program* targetProg, ExternValue value);
     Type typeOf(Value value);
     Type verifyType(Value value);
-    Program* getProgramLiteral(Value value);
-    std::span<const Value> parameterizeArguments(Value value);
+    std::optional<Program*> getProgramLiteral(Value value);
+    std::span<Value> parameterizeArguments(Value value);
     static std::span<const ExternValue> parameterizeArguments(Program* targetProg, ExternValue base);
 
     Value generateDeclarationLiteral(glue::DeclarationNode* target);
@@ -101,11 +124,13 @@ struct Generator {
     void generateParameterizeExpr(int_t argumentCount);
 
     Value makeExpressionValue();
-    Type makeProgramType(Value programLiteral);
+    Value makeExpressionValue(Expression expr);
     Value makeProgramLiteral(Program* targetProg);
+    void inheriteParameters(Program* parentProg);
 
     void implicitToType();
     void implicitCastTo(Type);
+    void implicitCastTo(DeductionState& state, ExternValue pType, BaseProgram pBase, Expression arg);
 
     void emitExpr(Node node);
     void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);

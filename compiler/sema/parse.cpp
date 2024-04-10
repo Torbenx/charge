@@ -14,6 +14,11 @@ void Generator::popExpression() {
     expressionStack.pop_back();
 }
 
+void Generator::popExpressions(int_t n) {
+    for (int_t i = 0; i < n; i++)
+        popExpression();
+}
+
 void Generator::visitDeclaration() {
     program->setStatus(ProgramStatus::SignatureCheckInProgress);
     if (tok->kind() == Token::TemplateAttribute) {
