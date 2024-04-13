@@ -80,6 +80,14 @@ struct WhitespaceInfo : TaggedSourceLocation<WhitespaceKind> {
     uint32_t length = 0;
 };
 
+struct TokenHandle {
+    uint32_t m_id = -1;
+
+    constexpr uint32_t id() const { return m_id; }
+
+    auto operator<=>(const TokenHandle&) const = default;
+};
+
 struct Output {
     PageBumpAllocator<TokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
@@ -105,8 +113,8 @@ struct Output {
         return std::string_view(sourcePointer(info.location()), info.length);
     }
 
-    const TokenInfo* currentToken() const {
-        return tokens.end();
+    TokenHandle currentToken() const {
+        return { (uint32_t)tokens.size() };
     }
 };
 
@@ -134,3 +142,8 @@ struct OutputVisitor {
 };
 
 }
+
+template<>
+struct optional_traits<parse::TokenHandle> {
+    static constexpr parse::TokenHandle empty_value = {};
+};

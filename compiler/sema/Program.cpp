@@ -35,7 +35,7 @@ Value Program::addInheritedParameter(Type type, std::optional<Value> defaultValu
     return addParameter(Word(), type, defaultValue);
 }
 
-Value Program::addParameterize(Type type, Value base, int_t firstArgumentIndex, int_t argumentCount) {
+Value Program::addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount) {
     return add({
         .op = Opcode::Parameterize,
         .type = type,
@@ -47,10 +47,10 @@ Value Program::addParameterize(Type type, Value base, int_t firstArgumentIndex, 
     });
 }
 
-std::pair<Value, Program::ParameterizeArgumentSetter> Program::addParameterize(Type type, Value base, int_t argumentCount) {
+Value Program::addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments) {
     auto firstIndex = parameterizeArguments.size();
-    parameterizeArguments.resize(parameterizeArguments.size() + argumentCount, INVALID_VALUE);
-    return { addParameterize(type, base, firstIndex, argumentCount), { this, (int_t)firstIndex } };
+    parameterizeArguments.insert(parameterizeArguments.end(), arguments.begin(), arguments.end());
+    return addParameterize(type, base, firstIndex, arguments.size());
 }
 
 Value Program::addExpression(Node* expr) {
@@ -71,12 +71,11 @@ Value Program::addNamespaceLiteral(glue::DeclarationNode* node) {
     });
 }
 
-Value Program::addProgramLiteral(Opcode op, Type type, Program* program) {
-    VERIFY(op == Opcode::ProgramLiteral || op == Opcode::SignatureOf);
+Value Program::addSignatureOf(Type type, ProgramHandle program) {
     return add({
-        .op = op,
+        .op = Opcode::SignatureOf,
         .type = type,
-        .u = { .program = program },
+        .u = { .signatureProgram = program },
     });
 }
 

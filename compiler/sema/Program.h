@@ -3,79 +3,7 @@
 #include <glue/DeclarationNode.h>
 #include <parse/Output.h>
 #include <sema/Node.h>
-
-namespace sema {
-
-enum class BuiltinId {
-
-#define BUILTIN(name, cppName) cppName,
-#include <sema/builtins.inc>
-
-    COUNT,
-};
-
-enum class ValueKind : uint8_t {
-    Builtin,
-    Constant,
-    Local,
-};
-struct Value {
-    constexpr Value()
-        : Value(BuiltinId::error_type) { }
-    constexpr Value(ValueKind kind, uint32_t id)
-        : idBits(id), kindBits(std::to_underlying(kind)) { }
-    constexpr Value(BuiltinId id)
-        : Value(ValueKind::Builtin, std::to_underlying(id)) { }
-
-    static Value fromUint(uint32_t x) { return std::bit_cast<Value>(x); }
-    uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }
-
-    constexpr uint32_t id() const { return idBits; }
-    constexpr ValueKind kind() const { return (ValueKind)kindBits; }
-
-    constexpr bool operator==(const Value&) const = default;
-
-    static constexpr uint32_t MAX_ID = (1 << 30) - 1;
-
-    uint32_t idBits : 30;
-    uint32_t kindBits : 2;
-};
-inline constexpr Value INVALID_VALUE = { (ValueKind)3, Value::MAX_ID };
-
-struct Type : Value {
-    static Type fromUint(uint32_t x) { return Type(Value::fromUint(x)); }
-    using Value::Value;
-    constexpr explicit Type(Value value)
-        : Value(value) { }
-};
-
-struct ExternValue {
-    constexpr ExternValue(Value value)
-        : value(value) { }
-
-    constexpr uint32_t id() const { return value.id(); }
-    constexpr ValueKind kind() const { return value.kind(); }
-
-    constexpr explicit operator Value() const { return value; }
-
-    bool operator==(const ExternValue&) const = default;
-
-private:
-    Value value;
-};
-}
-template<>
-struct optional_traits<sema::Value> {
-    static constexpr sema::Value empty_value = sema::INVALID_VALUE;
-};
-template<>
-struct optional_traits<sema::Type> {
-    static constexpr sema::Type empty_value = (sema::Type)sema::INVALID_VALUE;
-};
-template<>
-struct optional_traits<sema::ExternValue> {
-    static constexpr sema::ExternValue empty_value = sema::INVALID_VALUE;
-};
+#include <sema/Value.h>
 
 namespace sema {
 
@@ -117,7 +45,6 @@ enum class ProgramStatus : uint8_t {
 };
 
 #define ENUMERATE_PROGRAM_OPS    \
-    PROGRAM_OP(ProgramLiteral)   \
     PROGRAM_OP(SignatureOf)      \
     PROGRAM_OP(NamespaceLiteral) \
     PROGRAM_OP(RemoteExpression) \
@@ -139,16 +66,16 @@ struct Program {
         Type type;
         union {
             uint64_t data;
-            Program* program;
             glue::DeclarationNode* declarationNode;
             uint32_t parameterIndex;
             uint32_t expressionIndex; // offset into expressions
+            ProgramHandle signatureProgram;
             struct {
-                Value base; // either a non-dependent program literal or parameterize
+                Value base; // either a program or a parameterize constant
                 uint32_t expressionIndex; // offset into the target programs expressions
             } remoteExpression;
             struct {
-                Value base; // always a dependent program literal
+                ProgramHandle base; // always a dependent program literal
                 uint16_t firstArgumentIndex; // offset into parameterizeArguments
                 uint16_t argumentCount;
             } parameterize;
@@ -183,14 +110,14 @@ struct Program {
     Value add(Constant);
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
-    Value addProgramLiteral(Opcode op, Type type, Program* prog);
+    Value addSignatureOf(Type type, ProgramHandle prog);
     Value addExpression(Node* expr);
     Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addImplicitParameter(Type type);
     Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
     Value addRemoteExpression(Type type, Value base, uint32_t expressionIndex);
-    Value addParameterize(Type type, Value base, int_t firstArgumentIndex, int_t argumentCount);
-    std::pair<Value, ParameterizeArgumentSetter> addParameterize(Type type, Value base, int_t argumentCount);
+    Value addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
+    Value addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments);
 
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }
@@ -214,6 +141,8 @@ struct Program {
     uint32_t inheritedParameterCount = 0;
     uint32_t implicitParameterCount = 0;
 
+    const ProgramHandle* programTranslationBuffer = nullptr;
+
     Word name() const { return m_name; }
     ProgramStatus status() const { return m_status; }
     void setStatus(ProgramStatus status) { m_status = status; }
@@ -228,7 +157,5 @@ struct Program {
 };
 
 std::string_view nameString(Program::Opcode op);
-
-extern std::array<Program, std::to_underlying(BuiltinId::COUNT)> builtinPrograms;
 
 }

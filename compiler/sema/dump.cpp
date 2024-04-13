@@ -39,18 +39,9 @@ struct Dumper {
             return "<invalid>";
         char c;
         switch (v.kind()) {
-        case ValueKind::Builtin: {
-            switch ((BuiltinId)v.id()) {
-
-#define BUILTIN(name, cppName) \
-    case BuiltinId::cppName:   \
-        return #name;
-#include <sema/builtins.inc>
-
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }
+        case ValueKind::Program:
+            c = 'p';
+            break;
         case ValueKind::Constant:
             c = 'c';
             break;
@@ -101,17 +92,15 @@ void Dumper::dumpProgram(Program* prog) {
         switch (c.op) {
         case Program::Opcode::Parameterize: {
             const auto& param = c.u.parameterize;
-            line << " " << formatValue(param.base) << "{";
+            line << " p" << param.base.id() << "{";
             for (int_t i = 0; i < (int_t)param.argumentCount - 1; i++)
                 line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + i]) << ", ";
             line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + param.argumentCount - 1]) << "}";
             break;
         }
         case Program::Opcode::SignatureOf:
-        case Program::Opcode::ProgramLiteral: {
-            line << " " << (void*)c.u.program;
+            line << " p" << c.u.signatureProgram.id();
             break;
-        }
         default:
             break;
         }

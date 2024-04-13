@@ -1,6 +1,18 @@
+#include <glue/Context.h>
 #include <sema/Generator.h>
 
 namespace sema {
+
+Generator::Generator(glue::Context& context, Program* program)
+    : context(context), program(program) { }
+
+Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
+    : context(context) {
+    currentScope = scope;
+    VERIFY(scope->parseLocation().has_value());
+    tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
+    program = &context.programs[scope->program().value().id()];
+}
 
 void Generator::advance() { tok += 1; }
 

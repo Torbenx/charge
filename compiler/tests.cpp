@@ -295,6 +295,7 @@ int main() {
         )str");
         inst.runTest();
         auto& ctx = inst.context;
+        sema::Generator::generateBuiltins(ctx);
         auto checkAndDump = [&ctx](std::string name) {
             glue::DeclarationNode* node = ctx.currentScope();
             for (;;) {
@@ -306,9 +307,9 @@ int main() {
                     break;
                 name = name.substr(offset + 2);
             }
-            auto* prog = sema::Generator::signatureCheck(node);
+            auto progHandle = sema::Generator::signatureCheck(ctx, node);
             fmt::println("------------------------------------");
-            prog->dump();
+            ctx.programs[progHandle.id()].dump();
         };
         checkAndDump("XX");
         checkAndDump("Y");

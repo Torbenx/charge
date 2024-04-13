@@ -11,4 +11,5 @@ target_sources(compiler
     parse.cpp
     Program.cpp
     Program.h
+    Value.h
 )

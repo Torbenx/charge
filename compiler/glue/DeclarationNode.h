@@ -2,14 +2,10 @@
 
 #include <WordTable.h>
 #include <parse/Output.h>
+#include <sema/Value.h>
+
 #include <ranges>
 #include <utility>
-
-namespace sema {
-
-struct Program;
-
-}
 
 namespace glue {
 
@@ -24,7 +20,7 @@ public:
         HasMember,
     };
 
-    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, std::optional<const parse::TokenInfo*> parseLocation)
+    DeclarationNode(Kind kind, Word name, DeclarationNode* declaring, std::optional<parse::TokenHandle> parseLocation)
         : m_kind(std::to_underlying(kind))
         , m_name(name)
         , m_declaringDecl(this, declaring)
@@ -35,11 +31,11 @@ public:
     DeclarationNode* declaringNode() {
         return m_declaringDecl.get(this);
     }
-    std::optional<const parse::TokenInfo*> parseLocation() {
+    std::optional<parse::TokenHandle> parseLocation() {
         return m_parseLocation;
     }
-    std::optional<sema::Program*> program() { return m_program; }
-    void setProgram(std::optional<sema::Program*> program) {
+    std::optional<sema::ProgramHandle> program() { return m_program; }
+    void setProgram(std::optional<sema::ProgramHandle> program) {
         m_program = program;
     }
     std::optional<DeclarationNode*> findChild(Word name) {
@@ -70,8 +66,8 @@ public:
     uint32_t m_kind : 3;
     Word m_name;
     relative_t m_declaringDecl;
-    std::optional<const parse::TokenInfo*> m_parseLocation;
-    std::optional<sema::Program*> m_program;
+    std::optional<parse::TokenHandle> m_parseLocation;
+    std::optional<sema::ProgramHandle> m_program;
     WordTable m_namedChildren;
     std::vector<relative_t> m_members;
 };

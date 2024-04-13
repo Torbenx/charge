@@ -2,6 +2,10 @@
 
 #include <sema/Program.h>
 
+namespace glue {
+    struct Context;
+}
+
 namespace sema {
 
 struct LookupCache {
@@ -61,6 +65,7 @@ struct Generator {
 
     using Token = parse::TokenKind;
 
+    glue::Context& context;
     glue::DeclarationNode* currentScope = nullptr;
     const parse::TokenInfo* tok = nullptr;
     Program* program = nullptr;
@@ -73,16 +78,8 @@ struct Generator {
     std::vector<StackItem> expressionStack;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
-    Generator(glue::DeclarationNode* scope) {
-        currentScope = scope;
-        VERIFY(scope->parseLocation().has_value());
-        tok = scope->parseLocation().value();
-        program = scope->program().value();
-    }
-
-    Generator(Program* program) {
-        this->program = program;
-    }
+    Generator(glue::Context& context, Program* program);
+    Generator(glue::Context& context, glue::DeclarationNode* scope);
 
     void advance();
     Expression topExpression(int_t n = 0);
@@ -106,11 +103,12 @@ struct Generator {
     void visitPrimaryExpr();
     int_t visitExpressionList();
 
-    static Program* signatureCheck(glue::DeclarationNode* scope);
+    static ProgramHandle signatureCheck(glue::Context& context, glue::DeclarationNode* scope);
+    static void generateBuiltins(glue::Context& context);
     BaseProgram asProgram(Value value);
     Value fold(Value base, ExternValue v);
     Value fold(BaseProgram base, ExternValue v);
-    bool staticMatch(DeductionState& state, ExternValue pValue, BaseProgram pBase, Value aValue);
+    bool staticMatch(DeductionState& state, ExternValue pValue, Program* pBase, std::span<Value> arguments, Value aValue);
 
     Type typeOf(Value value);
     Type verifyType(Value value);
@@ -125,12 +123,13 @@ struct Generator {
 
     Value makeExpressionValue();
     Value makeExpressionValue(Expression expr);
-    Value makeProgramLiteral(Program* targetProg);
-    void inheriteParameters(Program* parentProg);
+    Value makeProgramValue(ProgramHandle targetHandle);
+    Type makeTemplateIdFor(ProgramHandle targetHandle);
+    void inheriteParameters(ProgramHandle parentHandle);
 
     void implicitToType();
     void implicitCastTo(Type);
-    void implicitCastTo(DeductionState& state, ExternValue pType, BaseProgram pBase, Expression arg);
+    void implicitCastTo(DeductionState& state, ExternValue pType, Program* pBase, std::span<Value> arguments, Expression arg);
 
     void emitExpr(Node node);
     void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);
