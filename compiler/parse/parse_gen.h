@@ -40,7 +40,12 @@ inline constexpr ConstWordStringTable words {
     keyword("forward"),
     keyword("assign"),
     keyword("porperty"),
+    "error",
     "type",
+    "template_signature",
+    "template_id",
+    "function_signature",
+    "function_id",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (

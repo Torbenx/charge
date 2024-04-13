@@ -19,7 +19,7 @@ keywords = [
     "var", "let", "in", "inout", "out", "forward", "assign", "porperty"
 ]
 specialWords = [
-    "type"
+    "error", "type", "template_signature", "template_id", "function_signature", "function_id"
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]

@@ -61,12 +61,27 @@ Value Generator::makeProgramValue(ProgramHandle targetHandle) {
     return Value(ValueKind::Program, targetHandle.id());
 }
 
-void Generator::inheriteParameters(ProgramHandle parentHandle) {
+void Generator::buildParent(glue::DeclarationNode* parentNode) {
+    if (!parentNode->program().has_value()) {
+        program->m_parent = program->addNamespaceLiteral(parentNode);
+        return;
+    }
+
+    ProgramHandle parentHandle = parentNode->program().value();
     Program* parentProg = &context.programs[parentHandle.id()];
+    if (!parentProg->isDependent()) {
+        program->m_parent = makeProgramValue(parentHandle);
+        return;
+    }
+
+    // inherite parameters
     int_t parameterCount = parentProg->parameters.size();
     VERIFY(parameterCount > 0);
-    program->parameterizeArguments.resize(parameterCount, INVALID_VALUE);
-    Value parentValue = program->addParameterize(Type(), parentHandle, 0, parameterCount);
+    std::vector<Value> arguments(parameterCount, INVALID_VALUE);
+    for (int_t i = 0; i < parameterCount; i++)
+        arguments[i] = program->addInheritedParameter(Type(), std::nullopt);
+
+    Value parentValue = program->addParameterize(Type(), parentHandle, arguments);
     BaseProgram base = asProgram(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
         ExternValue parentParameter = parentProg->parameterValue(i);
@@ -77,9 +92,10 @@ void Generator::inheriteParameters(ProgramHandle parentHandle) {
             VERIFY(parentParameterConst.u.parameterIndex == i);
         }
         Type type = verifyType(fold(base, base->typeOf(parentParameter)));
-        base.arguments[i] = program->addInheritedParameter(type, std::nullopt);
+        program->constants[base.arguments[i].id()].type = type;
     }
     program->constants[parentValue.id()].type = verifyType(fold(base, base->type()));
+    program->m_parent = parentValue;
 }
 
 std::optional<Value> Generator::lookupInScope(glue::DeclarationNode* scope, Word name) {
@@ -103,9 +119,14 @@ Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
     case Kind::Namespace:
         return program->addNamespaceLiteral(target);
     case Kind::Type:
-    case Kind::Function:
-    case Kind::Variable: {
+    case Kind::Function: {
         return makeProgramValue(signatureCheck(context, target));
+    }
+    case Kind::Variable: {
+        Value progValue = makeProgramValue(signatureCheck(context, target));
+        if (auto maybe = getProgramLiteral(progValue); maybe.has_value())
+            return fold(progValue, maybe->value());
+        return progValue;
     }
     default:
         VERIFY_NOT_REACHED();
@@ -325,15 +346,10 @@ ProgramHandle Generator::signatureCheck(glue::Context& context, glue::Declaratio
     } else {
         scope->setProgram(context.newProgram());
     }
+    context.programs[scope->program().value().id()].m_name = scope->name();
 
     Generator g(context, scope);
-    auto* parent = scope->declaringNode();
-    if (parent->program().has_value()) {
-        auto parentProg = &context.programs[parent->program()->id()];
-        if (parentProg->isDependent()) {
-            g.inheriteParameters(parent->program().value());
-        }
-    }
+    g.buildParent(scope->declaringNode());
 
     g.visitDeclaration();
     return scope->program().value();
@@ -406,14 +422,20 @@ void Generator::generateBuiltins(glue::Context& context) {
     {
         Generator g { context, prog(BuiltinId::error_type) };
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["error"];
+        g.buildParent(context.currentScope());
     }
     {
         Generator g { context, prog(BuiltinId::type_type) };
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["type"];
+        g.buildParent(context.currentScope());
     }
     {
         Generator g { context, prog(BuiltinId::namespace_type) };
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["namespace"];
+        g.buildParent(context.currentScope());
     }
 
     // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
@@ -426,11 +448,15 @@ void Generator::generateBuiltins(glue::Context& context) {
     {
         Generator g { context, prog(BuiltinId::template_signature_type) };
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["template_signature"];
+        g.buildParent(context.currentScope());
     }
     {
         Generator g { context, prog(BuiltinId::template_id_template) };
         g.program->addExplicitParameter(Word(), builtins::template_signature_type, {});
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["template_id"];
+        g.buildParent(context.currentScope());
     }
 
     // template(sig: function_signature) struct function_id: { }
@@ -440,11 +466,15 @@ void Generator::generateBuiltins(glue::Context& context) {
     {
         Generator g { context, prog(BuiltinId::function_signature_type) };
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["function_signature"];
+        g.buildParent(context.currentScope());
     }
     {
         Generator g { context, prog(BuiltinId::function_id_template) };
         g.program->addExplicitParameter(Word(), builtins::function_signature_type, {});
         g.program->setType(builtins::type_type);
+        g.program->m_name = parse::words["function_id"];
+        g.buildParent(context.currentScope());
     }
 
     // typeof( (arg = expr) ) = cast{type}( (arg = typeof(expr)) ) = tuple{cast{tuple_signature}( (arg = typeof(expr)) )}

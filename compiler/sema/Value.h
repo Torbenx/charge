@@ -69,6 +69,7 @@ struct ExternValue {
 
     constexpr uint32_t id() const { return value.id(); }
     constexpr ValueKind kind() const { return value.kind(); }
+    constexpr ProgramHandle program() const { return value.program(); }
 
     constexpr explicit operator Value() const { return value; }
 

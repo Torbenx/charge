@@ -5,6 +5,12 @@
 #include <sema/Node.h>
 #include <sema/Value.h>
 
+namespace glue {
+
+struct Context;
+
+}
+
 namespace sema {
 
 namespace builtins {
@@ -125,6 +131,8 @@ struct Program {
     // value after substituitng template arguments
     ExternValue value() const { return m_value.value(); }
 
+    ExternValue parent() const { return m_parent.value(); }
+
     Value parameterValue(int_t index) const { return parameters[index].parameterValue; }
 
     void setType(Type type) {
@@ -136,6 +144,7 @@ struct Program {
 
     std::optional<ExternValue> m_type;
     std::optional<ExternValue> m_value;
+    std::optional<ExternValue> m_parent;
 
     std::vector<Parameter> parameters;
     uint32_t inheritedParameterCount = 0;
@@ -153,7 +162,7 @@ struct Program {
         return parameters.size() > inheritedParameterCount;
     }
 
-    void dump();
+    void dump(glue::Context&);
 };
 
 std::string_view nameString(Program::Opcode op);

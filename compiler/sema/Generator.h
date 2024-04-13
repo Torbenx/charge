@@ -125,7 +125,7 @@ struct Generator {
     Value makeExpressionValue(Expression expr);
     Value makeProgramValue(ProgramHandle targetHandle);
     Type makeTemplateIdFor(ProgramHandle targetHandle);
-    void inheriteParameters(ProgramHandle parentHandle);
+    void buildParent(glue::DeclarationNode* parentDeclaration);
 
     void implicitToType();
     void implicitCastTo(Type);
