@@ -62,12 +62,12 @@ Value Generator::makeProgramValue(ProgramHandle targetHandle) {
 }
 
 void Generator::buildParent(glue::DeclarationNode* parentNode) {
-    if (!parentNode->program().has_value()) {
+    if (parentNode->kind() == glue::DeclarationNode::Kind::Namespace) {
         program->m_parent = program->addNamespaceLiteral(parentNode);
         return;
     }
 
-    ProgramHandle parentHandle = parentNode->program().value();
+    ProgramHandle parentHandle = signatureCheck(context, parentNode);
     Program* parentProg = &context.programs[parentHandle.id()];
     if (!parentProg->isDependent()) {
         program->m_parent = makeProgramValue(parentHandle);
@@ -155,10 +155,6 @@ void Generator::generateIdentifierExpr() {
             return;
         }
         lookupScope = lookupScope->declaringNode();
-    }
-    if (name == parse::words["type"]) {
-        emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, builtins::type_type);
-        return;
     }
     VERIFY_NOT_REACHED();
 }
@@ -412,30 +408,51 @@ Type Generator::verifyType(Value value) {
     }
 }
 
-void Generator::generateBuiltins(glue::Context& context) {
-    auto prog = [&context](BuiltinId id) {
+struct BuiltinGenerator : Generator {
+    static Word nameOf(BuiltinId id) {
+        switch (id) {
+#define BUILTIN(name, id) \
+    case BuiltinId::id:   \
+        return parse::words[#name];
+#include <sema/builtins.inc>
+
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    static glue::DeclarationNode* createScope(glue::Context& context, BuiltinId id) {
+        context.pushStaticScope(glue::DeclarationNode::Kind::Type, nameOf(id), {});
         auto handle = context.newProgram();
         VERIFY(handle.id() == std::to_underlying(id));
-        return &context.programs[handle.id()];
-    };
+        context.currentScope()->setProgram(handle);
+        return context.currentScope();
+    }
 
+    BuiltinGenerator(glue::Context& context, BuiltinId id)
+        : Generator(context, createScope(context, id)) {
+        program->m_name = nameOf(id);
+        buildParent(currentScope->declaringNode());
+    }
+
+    ~BuiltinGenerator() {
+        program->setStatus(ProgramStatus::SignatureChecked);
+        context.popScope();
+    }
+};
+
+void Generator::generateBuiltins(glue::Context& context) {
     {
-        Generator g { context, prog(BuiltinId::error_type) };
+        BuiltinGenerator g { context, BuiltinId::error_type };
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["error"];
-        g.buildParent(context.currentScope());
     }
     {
-        Generator g { context, prog(BuiltinId::type_type) };
+        BuiltinGenerator g { context, BuiltinId::type_type };
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["type"];
-        g.buildParent(context.currentScope());
     }
     {
-        Generator g { context, prog(BuiltinId::namespace_type) };
+        BuiltinGenerator g { context, BuiltinId::namespace_type };
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["namespace"];
-        g.buildParent(context.currentScope());
     }
 
     // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
@@ -446,17 +463,13 @@ void Generator::generateBuiltins(glue::Context& context) {
     //                    = template_id{template(sig: template_signature) -> typeof(template_id{sig})}
     //                    = template_id{template(sig: template_signature) -> type}
     {
-        Generator g { context, prog(BuiltinId::template_signature_type) };
+        BuiltinGenerator g { context, BuiltinId::template_signature_type };
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["template_signature"];
-        g.buildParent(context.currentScope());
     }
     {
-        Generator g { context, prog(BuiltinId::template_id_template) };
+        BuiltinGenerator g { context, BuiltinId::template_id_template };
         g.program->addExplicitParameter(Word(), builtins::template_signature_type, {});
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["template_id"];
-        g.buildParent(context.currentScope());
     }
 
     // template(sig: function_signature) struct function_id: { }
@@ -464,17 +477,13 @@ void Generator::generateBuiltins(glue::Context& context) {
     //                     = template_id{template(sig: function_signature) -> typeof(function_id{sig})}
     //                     = template_id{template(sig: function_signature) -> type}
     {
-        Generator g { context, prog(BuiltinId::function_signature_type) };
+        BuiltinGenerator g { context, BuiltinId::function_signature_type };
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["function_signature"];
-        g.buildParent(context.currentScope());
     }
     {
-        Generator g { context, prog(BuiltinId::function_id_template) };
+        BuiltinGenerator g { context, BuiltinId::function_id_template };
         g.program->addExplicitParameter(Word(), builtins::function_signature_type, {});
         g.program->setType(builtins::type_type);
-        g.program->m_name = parse::words["function_id"];
-        g.buildParent(context.currentScope());
     }
 
     // typeof( (arg = expr) ) = cast{type}( (arg = typeof(expr)) ) = tuple{cast{tuple_signature}( (arg = typeof(expr)) )}

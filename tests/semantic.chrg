@@ -1,0 +1,29 @@
+// expect-type type
+struct X: { }
+// expect-value X
+// expect-type type
+static XX: type = X;
+
+template(x: XX) struct Y: { }
+//; expect-type template_id{@sigof(Y)}
+static Z = Y;
+
+template(T: type) struct Foo: { }
+// expect-value Foo{X}
+static U: type = Foo{X};
+
+template(T) struct Bar: { }
+// expect-value Bar{type, X}
+static V: type = Bar{X};
+
+template(T: type) struct Outer: {
+    struct A: { }
+
+    // expect-value Outer::A{#0}
+    static AliasA: type = A;
+
+    template(T) struct B: { }
+
+    // expect-value Outer::B{#0, type, Outer::A{#0}}
+    static BA: type = B{A};
+}

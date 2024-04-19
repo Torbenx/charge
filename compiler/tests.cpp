@@ -19,6 +19,189 @@ static bool isFirstCommandChar(uint8_t c) {
 static bool isCommandEndChar(uint8_t c) {
     return c == '\r' || c == '\n' || c == ';';
 }
+static bool isBulkIdentifierChar(uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c == '_';
+}
+static uint64_t parseInteger(std::string_view str) {
+    auto characterValue = [](char c) -> std::optional<int> {
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        if (c >= '0' && c <= '9')
+            return c - '0';
+
+        if (c == '\'')
+            return {};
+
+        VERIFY_NOT_REACHED();
+    };
+
+    uint64_t base = 10;
+    if (str.front() == '0' && str.length() > 1) {
+        char baseChar = str[1];
+        if (baseChar == 'x' || baseChar == 'X') {
+            base = 16;
+            str = str.substr(2);
+        } else if (baseChar == 'b' || baseChar == 'B') {
+            base = 2;
+            str = str.substr(2);
+        }
+    }
+    uint64_t value = 0;
+    while (str.length() > 0) {
+        auto curDig = characterValue(str.front());
+        str = str.substr(1);
+        if (!curDig.has_value())
+            continue;
+        VERIFY((uint64_t)curDig.value() < base);
+        value = value * base + (uint64_t)curDig.value();
+    }
+    return value;
+}
+
+struct SemaExpr {
+    virtual ~SemaExpr() = default;
+
+    virtual void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const = 0;
+};
+struct ParameterizeExpr : SemaExpr {
+    glue::DeclarationNode* base;
+    std::vector<std::unique_ptr<SemaExpr>> arguments;
+
+    ParameterizeExpr(glue::DeclarationNode* base, std::vector<std::unique_ptr<SemaExpr>> args)
+        : base(base), arguments(std::move(args)) { }
+
+    void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Constant);
+        const auto& c = prog->constants[value.id()];
+        VERIFY(c.op == sema::Program::Opcode::Parameterize);
+
+        VERIFY(c.u.parameterize.base == base->program().value());
+
+        VERIFY(c.u.parameterize.argumentCount == arguments.size());
+        for (int_t i = 0; i < (int_t)arguments.size(); i++)
+            arguments[i]->check(ctx, prog, prog->parameterizeArguments[c.u.parameterize.firstArgumentIndex + i]);
+    }
+};
+struct LiteralExpr : SemaExpr {
+    glue::DeclarationNode* literal;
+
+    explicit LiteralExpr(glue::DeclarationNode* literal)
+        : literal(literal) { }
+
+    void check(glue::Context&, sema::Program*, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Program);
+        VERIFY(literal->program().value() == value.program());
+    }
+};
+struct ParameterExpr : SemaExpr {
+    int_t parameterIndex = 0;
+    explicit ParameterExpr(int_t index)
+        : parameterIndex(index) { }
+
+    void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Constant);
+        const auto& c = prog->constants[value.id()];
+        VERIFY(c.op == sema::Program::Opcode::Parameter);
+        VERIFY((int_t)c.u.parameterIndex == parameterIndex);
+    }
+};
+struct SignatureLiteralExpr : SemaExpr {
+    glue::DeclarationNode* literal;
+
+    explicit SignatureLiteralExpr(glue::DeclarationNode* literal)
+        : literal(literal) { }
+
+    void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Constant);
+        const auto& c = prog->constants[value.id()];
+        VERIFY(c.op == sema::Program::Opcode::SignatureOf);
+        VERIFY(c.u.signatureProgram == literal->program().value());
+    }
+};
+
+struct SemaExprParser {
+    glue::Context& context;
+    std::string_view& buffer;
+
+    void skipWhitespace() {
+        while (!buffer.empty() && buffer.front() == ' ')
+            buffer = buffer.substr(1);
+    }
+
+    void consume(std::string_view str) {
+        VERIFY(buffer.starts_with(str));
+        buffer = buffer.substr(str.length());
+        skipWhitespace();
+    }
+
+    std::string_view readId() {
+        std::string_view copy = buffer;
+        while (!buffer.empty() && isBulkIdentifierChar(buffer.front()))
+            buffer = buffer.substr(1);
+        auto result = copy.substr(0, copy.size() - buffer.size());
+        VERIFY(!result.empty());
+        skipWhitespace();
+        return result;
+    }
+
+    glue::DeclarationNode* readNestedName() {
+        glue::DeclarationNode* node = context.currentScope();
+
+        for (;;) {
+            auto id = readId();
+            node = node->findChild(context.wordTable.get(id));
+            VERIFY(node != nullptr);
+
+            if (!buffer.starts_with("::"))
+                break;
+            consume("::");
+        }
+
+        return node;
+    }
+
+    auto parseArguments() {
+        std::vector<std::unique_ptr<SemaExpr>> args;
+        for (;;) {
+            args.push_back(parse());
+            if (buffer.starts_with("}"))
+                break;
+            consume(",");
+        }
+        return args;
+    }
+
+    std::unique_ptr<SemaExpr> parse() {
+        if (buffer.starts_with("#")) {
+            buffer = buffer.substr(1);
+            auto id = readId();
+            return std::make_unique<ParameterExpr>(parseInteger(id));
+        }
+        if (buffer.starts_with("@")) {
+            buffer = buffer.substr(1);
+            auto id = readId();
+            if (id == "sigof") {
+                consume("(");
+                glue::DeclarationNode* base = readNestedName();
+                consume(")");
+                return std::make_unique<SignatureLiteralExpr>(base);
+            }
+        }
+
+        glue::DeclarationNode* node = readNestedName();
+
+        if (buffer.starts_with("{")) {
+            consume("{");
+            auto args = parseArguments();
+            consume("}");
+            return std::make_unique<ParameterizeExpr>(node, std::move(args));
+        }
+        return std::make_unique<LiteralExpr>(node);
+    }
+};
 
 struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHandler {
     struct Pair {
@@ -49,18 +232,16 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
     static constexpr auto words = ConstWordStringTable(
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
-        "expect-no-error", "expect-token", "expect-node", "parser-test", "lexer-test", "expect-source-position",
-        "line", "column", "packed-range-begin-column", "expect-decl", "expect-identifier", "name", "semantic-test",
-        "benchmark", "expect-expected-parameter-name", "expect-parameter-modifier-not-allowed",
-        "expect-invalid-parameter-modifier", "expect-unexpected-after-parameter", "expect-expected-semicolon",
-        "expect-expected-function-body", "expect-expected-if-body", "expect-expected-else-body");
+        "expect-no-error", "expect-token", "expect-source-position",
+        "line", "column", "packed-range-begin-column", "expect-identifier", "name",
+        "expect-type", "expect-value");
 
     WordStringTable wordTable { words };
     glue::Context context;
     CommandQueue commandQueue;
 
     TestInstrumenter(std::string_view source)
-        : context { source } { }
+        : context { source } { sema::Generator::generateBuiltins(context); }
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
         VERIFY_NOT_REACHED();
@@ -94,7 +275,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
         if (commandQueue.empty())
             return;
-        if (commandQueue.top().command == words["expect-node"]) {
+        if (commandQueue.top().command == words["expect-token"]) {
             auto cmd = commandQueue.pop();
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
@@ -134,16 +315,18 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             if (comment.front() == ';')
                 break;
             std::string_view cmdStr = comment;
-            Word::HashState hashState;
             while (comment.length() > 0 && isBulkCommandChar(comment.front())) {
-                Word::iterateHash(hashState, comment.front());
                 comment = comment.substr(1);
             }
-            auto hash = Word::finalizeHash(hashState);
             cmdStr = cmdStr.substr(0, cmdStr.length() - comment.length());
             skipWhitespace();
 
-            Command command { wordTable.getWithHash(cmdStr, hash) };
+            auto word = wordTable.get(cmdStr);
+            if (word == words["expect-type"] || word == words["expect-value"]) {
+                handleSemanticCommand(word, whitespace, comment);
+                return;
+            }
+            Command command { word };
             while (comment.length() > 0 && !isCommandEndChar(comment.front())) {
                 std::string_view savedComment = comment;
                 Word key = {};
@@ -202,42 +385,27 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             }
         }
     }
-    uint64_t parseInteger(std::string_view str) {
-        auto characterValue = [this](char c) -> std::optional<int> {
-            if (c >= 'a' && c <= 'f')
-                return c - 'a' + 10;
-            if (c >= 'A' && c <= 'F')
-                return c - 'A' + 10;
-            if (c >= '0' && c <= '9')
-                return c - '0';
-
-            if (c == '\'')
-                return {};
-
-            error();
-        };
-
-        uint64_t base = 10;
-        if (str.front() == '0' && str.length() > 1) {
-            char baseChar = str[1];
-            if (baseChar == 'x' || baseChar == 'X') {
-                base = 16;
-                str = str.substr(2);
-            } else if (baseChar == 'b' || baseChar == 'B') {
-                base = 2;
-                str = str.substr(2);
+    void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
+        SemaExprParser parser { context, comment };
+        auto expr = parser.parse();
+        sema::Program* program = nullptr;
+        for (auto& node : context.storage) {
+            if (!node.parseLocation().has_value())
+                continue;
+            auto tokenInfo = context.parseOutput.tokens[node.parseLocation()->id()];
+            if (tokenInfo > whitespace) {
+                auto progHandle = sema::Generator::signatureCheck(context, &node);
+                program = &context.programs[progHandle.id()];
+                break;
             }
         }
-        uint64_t value = 0;
-        while (str.length() > 0) {
-            auto curDig = characterValue(str.front());
-            str = str.substr(1);
-            if (!curDig.has_value())
-                continue;
-            verify((uint64_t)curDig.value() < base);
-            value = value * base + (uint64_t)curDig.value();
-        }
-        return value;
+        VERIFY(program != nullptr);
+        program->dump(context);
+
+        if (word == words["expect-type"])
+            expr->check(context, program, (sema::Value)program->type());
+        if (word == words["expect-value"])
+            expr->check(context, program, (sema::Value)program->value());
     }
 
     Command popCommand(Word cause) {
@@ -271,56 +439,6 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 };
 
 int main() {
-    {
-        TestInstrumenter inst(R"str(
-            struct X: { }
-            static XX: type = X;
-            template(x: XX) struct Y: { }
-
-            template(T: type) struct Foo: { }
-            static U: type = Foo{X};
-
-            template(T) struct Bar: { }
-            static V: type = Bar{X};
-
-            template(T: type) struct Outer: {
-                struct A: { }
-
-                static AliasA: type = A;
-
-                template(T) struct B: { }
-
-                static BA: type = B{A};
-            }
-        )str");
-        inst.runTest();
-        auto& ctx = inst.context;
-        sema::Generator::generateBuiltins(ctx);
-        auto checkAndDump = [&ctx](std::string name) {
-            glue::DeclarationNode* node = ctx.currentScope();
-            for (;;) {
-                size_t offset = name.find("::");
-                if (offset == std::string::npos)
-                    offset = name.length();
-                node = node->findChild(ctx.wordTable.get(name.substr(0, offset))).value();
-                if (offset == name.length())
-                    break;
-                name = name.substr(offset + 2);
-            }
-            auto progHandle = sema::Generator::signatureCheck(ctx, node);
-            fmt::println("------------------------------------");
-            ctx.programs[progHandle.id()].dump();
-        };
-        checkAndDump("XX");
-        checkAndDump("Y");
-        checkAndDump("U");
-        checkAndDump("V");
-        checkAndDump("Outer");
-        checkAndDump("Outer::AliasA");
-        checkAndDump("Outer::B");
-        checkAndDump("Outer::BA");
-    }
-
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
     for (const auto& entry : fs::directory_iterator(testDir)) {

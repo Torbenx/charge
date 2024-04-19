@@ -9,8 +9,8 @@ Generator::Generator(glue::Context& context, Program* program)
 Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
     : context(context) {
     currentScope = scope;
-    VERIFY(scope->parseLocation().has_value());
-    tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
+    if (scope->parseLocation().has_value())
+        tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
     program = &context.programs[scope->program().value().id()];
 }
 
