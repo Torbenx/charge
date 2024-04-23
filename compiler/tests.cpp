@@ -101,11 +101,9 @@ struct ParameterExpr : SemaExpr {
     explicit ParameterExpr(int_t index)
         : parameterIndex(index) { }
 
-    void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Constant);
-        const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::Parameter);
-        VERIFY((int_t)c.u.parameterIndex == parameterIndex);
+    void check(glue::Context&, sema::Program*, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Parameter);
+        VERIFY((int_t)value.id() == parameterIndex);
     }
 };
 struct SignatureLiteralExpr : SemaExpr {

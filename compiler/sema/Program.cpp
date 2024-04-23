@@ -8,33 +8,6 @@ Value Program::add(Constant constant) {
     return Value(ValueKind::Constant, id);
 }
 
-Value Program::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
-    uint32_t parameterIndex = parameters.size();
-    Value result = add({
-        .op = Opcode::Parameter,
-        .type = type,
-        .u = { .parameterIndex = parameterIndex },
-    });
-    parameters.push_back({ name, result, defaultValue });
-    return result;
-}
-
-Value Program::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
-    return addParameter(name, type, defaultValue);
-}
-
-Value Program::addImplicitParameter(Type type) {
-    VERIFY(parameters.size() == inheritedParameterCount + implicitParameterCount);
-    implicitParameterCount += 1;
-    return addParameter(Word(), type, std::nullopt);
-}
-
-Value Program::addInheritedParameter(Type type, std::optional<Value> defaultValue) {
-    VERIFY(parameters.size() == inheritedParameterCount);
-    inheritedParameterCount += 1;
-    return addParameter(Word(), type, defaultValue);
-}
-
 Value Program::addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount) {
     return add({
         .op = Opcode::Parameterize,

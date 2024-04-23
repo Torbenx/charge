@@ -76,6 +76,7 @@ struct Generator {
     std::vector<LocalValue> localValues;
     std::vector<Node> expressionScratch;
     std::vector<StackItem> expressionStack;
+    std::vector<Type> parameterTypes;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
     Generator(glue::Context& context, Program* program);
@@ -126,6 +127,11 @@ struct Generator {
     Value makeProgramValue(ProgramHandle targetHandle);
     Type makeTemplateIdFor(ProgramHandle targetHandle);
     void buildParent(glue::DeclarationNode* parentDeclaration);
+
+    Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
+    Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
+    Value addImplicitParameter(Type type);
+    Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
 
     void implicitToType();
     void implicitCastTo(Type);

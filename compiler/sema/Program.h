@@ -55,7 +55,6 @@ enum class ProgramStatus : uint8_t {
     PROGRAM_OP(NamespaceLiteral) \
     PROGRAM_OP(RemoteExpression) \
     PROGRAM_OP(Expression)       \
-    PROGRAM_OP(Parameter)        \
     PROGRAM_OP(Parameterize)
 
 struct Program {
@@ -73,7 +72,6 @@ struct Program {
         union {
             uint64_t data;
             glue::DeclarationNode* declarationNode;
-            uint32_t parameterIndex;
             uint32_t expressionIndex; // offset into expressions
             ProgramHandle signatureProgram;
             struct {
@@ -91,7 +89,7 @@ struct Program {
 
     struct Parameter {
         Word name;
-        Value parameterValue;
+        ExternValue type;
         std::optional<Value> defaultValue;
     };
 
@@ -109,18 +107,16 @@ struct Program {
     std::vector<Value> parameterizeArguments;
 
     ExternValue typeOf(ExternValue v) {
+        if (v.kind() == ValueKind::Parameter)
+            return parameters[v.id()].type;
         VERIFY(v.kind() == ValueKind::Constant);
         return constants[v.id()].type;
     }
 
     Value add(Constant);
-    Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
     Value addSignatureOf(Type type, ProgramHandle prog);
     Value addExpression(Node* expr);
-    Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
-    Value addImplicitParameter(Type type);
-    Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
     Value addRemoteExpression(Type type, Value base, uint32_t expressionIndex);
     Value addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
     Value addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments);
@@ -132,8 +128,6 @@ struct Program {
     ExternValue value() const { return m_value.value(); }
 
     ExternValue parent() const { return m_parent.value(); }
-
-    Value parameterValue(int_t index) const { return parameters[index].parameterValue; }
 
     void setType(Type type) {
         m_type = type;

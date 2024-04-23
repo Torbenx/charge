@@ -49,11 +49,12 @@ struct Dumper {
         char c;
         switch (v.kind()) {
         case ValueKind::Program:
-            //c = 'p';
-            //break;
             return formatProgram(v.program());
         case ValueKind::Constant:
             c = 'c';
+            break;
+        case ValueKind::Parameter:
+            c = '#';
             break;
         case ValueKind::Local:
             c = 'r';

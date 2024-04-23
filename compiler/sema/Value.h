@@ -26,6 +26,7 @@ struct ProgramHandle {
 enum class ValueKind : uint8_t {
     Program, // either not dependent or templated
     Constant,
+    Parameter,
     Local,
 };
 struct Value {

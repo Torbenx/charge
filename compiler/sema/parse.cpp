@@ -68,7 +68,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration() {
         type = verifyType(makeExpressionValue());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
-        type = verifyType(program->addImplicitParameter(builtins::type_type));
+        type = verifyType(addImplicitParameter(builtins::type_type));
     }
     VERIFY(tok->kind() == Token::AssignStmt);
     advance();
@@ -95,7 +95,7 @@ void Generator::visitTemplateParameter() {
     advance();
 
     auto info = visitVariableDeclaration();
-    program->addExplicitParameter(name, info.type, info.initializer);
+    addExplicitParameter(name, info.type, info.initializer);
 }
 
 void Generator::visitStaticVariableDeclaration() {

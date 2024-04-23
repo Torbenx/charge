@@ -79,19 +79,12 @@ void Generator::buildParent(glue::DeclarationNode* parentNode) {
     VERIFY(parameterCount > 0);
     std::vector<Value> arguments(parameterCount, INVALID_VALUE);
     for (int_t i = 0; i < parameterCount; i++)
-        arguments[i] = program->addInheritedParameter(Type(), std::nullopt);
+        arguments[i] = addInheritedParameter(Type(), std::nullopt);
 
     Value parentValue = program->addParameterize(Type(), parentHandle, arguments);
     BaseProgram base = asProgram(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
-        ExternValue parentParameter = parentProg->parameterValue(i);
-        {
-            VERIFY(parentParameter.kind() == ValueKind::Constant);
-            const auto& parentParameterConst = parentProg->constants[parentParameter.id()];
-            VERIFY(parentParameterConst.op == Program::Opcode::Parameter);
-            VERIFY(parentParameterConst.u.parameterIndex == i);
-        }
-        Type type = verifyType(fold(base, base->typeOf(parentParameter)));
+        Type type = verifyType(fold(base, base->parameters[i].type));
         program->constants[base.arguments[i].id()].type = type;
     }
     program->constants[parentValue.id()].type = verifyType(fold(base, base->type()));
@@ -171,14 +164,13 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             DeductionState state(parameterCount);
             for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++) {
                 state.explicitArgumentsMap[i] = true;
-                arguments[i] = program->parameterValue(i);
+                arguments[i] = Value(ValueKind::Parameter, i);
             }
 
             int_t pIndex = baseProg->inheritedParameterCount + baseProg->implicitParameterCount;
             int_t aIndex = 0;
             for (; aIndex < argumentCount; aIndex++, pIndex++) {
-                ExternValue pValue = baseProg->parameterValue(pIndex);
-                ExternValue pType = baseProg->typeOf(pValue);
+                ExternValue pType = baseProg->parameters[pIndex].type;
                 Expression argument = topExpression(argumentCount - 1 - aIndex);
                 implicitCastTo(state, pType, baseProg, arguments, argument);
                 if (argument.kind() == NodeKind::ConstantExpr) {
@@ -231,26 +223,26 @@ BaseProgram Generator::asProgram(Value base) {
 
 // pValue and aValue must be known to have the same type
 bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Program* pBase, std::span<Value> arguments, Value aValue) {
+    if (pValue.kind() == ValueKind::Parameter) {
+        int_t index = pValue.id();
+        if (state.isExplicitArgument(index))
+            return arguments[index] == aValue; // TODO: better comparison
+
+        if (arguments[index] == INVALID_VALUE) {
+            arguments[index] = aValue;
+            return true;
+        }
+        return false; // TODO: compare with existing deduction
+    }
+
     if (pValue.kind() == ValueKind::Constant) {
         const auto& pConst = pBase->constants[pValue.id()];
-        if (pConst.op == Program::Opcode::Parameter) {
-            int_t index = pConst.u.parameterIndex;
-            if (state.isExplicitArgument(index))
-                return arguments[index] == aValue; // TODO: better comparison
-
-            if (arguments[index] == INVALID_VALUE) {
-                arguments[index] = aValue;
-                return true;
-            }
-            return false; // TODO: compare with existing deduction
-        }
         if (pConst.op == Program::Opcode::Expression || pConst.op == Program::Opcode::RemoteExpression) {
             // TODO: check that the expression does not contain any deduced arguments
             state.expressionMatches.push_back({ pValue, aValue });
             return true;
         }
     }
-
     if (aValue.kind() == ValueKind::Constant) {
         const auto& aConst = program->constants[aValue.id()];
         if (aConst.op == Program::Opcode::Expression || aConst.op == Program::Opcode::RemoteExpression) {
@@ -300,6 +292,8 @@ Value Generator::fold(Value base, ExternValue v) {
 Value Generator::fold(BaseProgram base, ExternValue v) {
     if (v.kind() == ValueKind::Program)
         return makeProgramValue(base->programTranslationBuffer[v.id()]);
+    if (v.kind() == ValueKind::Parameter)
+        return base.arguments[v.id()];
     VERIFY(v.kind() == ValueKind::Constant);
 
     const auto& vConst = base->constants[v.id()];
@@ -319,8 +313,6 @@ Value Generator::fold(BaseProgram base, ExternValue v) {
     }
     case Program::Opcode::Expression:
         return program->addRemoteExpression(type(), base.value, vConst.u.expressionIndex);
-    case Program::Opcode::Parameter:
-        return base.arguments[vConst.u.parameterIndex];
     case Program::Opcode::Parameterize: {
         auto externArgs = parameterizeArguments(base.program, v);
         std::vector<Value> foldedArgs(externArgs.size(), INVALID_VALUE);
@@ -378,6 +370,8 @@ Type Generator::typeOf(Value value) {
         return localValues[value.id()].type;
     case ValueKind::Constant:
         return program->constants[value.id()].type;
+    case ValueKind::Parameter:
+        return parameterTypes[value.id()];
     case ValueKind::Program: {
         Program* valueProg = &context.programs[value.id()];
         if (!valueProg->isDependent())
@@ -397,6 +391,9 @@ Type Generator::verifyType(Value value) {
     case ValueKind::Constant:
         VERIFY(program->constants[value.id()].type == builtins::type_type);
         return (Type)value;
+    case ValueKind::Parameter:
+        VERIFY(parameterTypes[value.id()] == builtins::type_type);
+        return (Type)value;
     case ValueKind::Program: {
         Program* valueProg = &context.programs[value.id()];
         VERIFY(!valueProg->isTemplate());
@@ -406,6 +403,29 @@ Type Generator::verifyType(Value value) {
     default:
         VERIFY_NOT_REACHED();
     }
+}
+
+Value Generator::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
+    uint32_t parameterIndex = program->parameters.size();
+    parameterTypes.push_back(type);
+    program->parameters.push_back({ name, type, defaultValue });
+    return Value(ValueKind::Parameter, parameterIndex);
+}
+
+Value Generator::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
+    return addParameter(name, type, defaultValue);
+}
+
+Value Generator::addImplicitParameter(Type type) {
+    VERIFY(program->parameters.size() == program->inheritedParameterCount + program->implicitParameterCount);
+    program->implicitParameterCount += 1;
+    return addParameter(Word(), type, std::nullopt);
+}
+
+Value Generator::addInheritedParameter(Type type, std::optional<Value> defaultValue) {
+    VERIFY(program->parameters.size() == program->inheritedParameterCount);
+    program->inheritedParameterCount += 1;
+    return addParameter(Word(), type, defaultValue);
 }
 
 struct BuiltinGenerator : Generator {
@@ -468,7 +488,7 @@ void Generator::generateBuiltins(glue::Context& context) {
     }
     {
         BuiltinGenerator g { context, BuiltinId::template_id_template };
-        g.program->addExplicitParameter(Word(), builtins::template_signature_type, {});
+        g.addExplicitParameter(Word(), builtins::template_signature_type, {});
         g.program->setType(builtins::type_type);
     }
 
@@ -482,7 +502,7 @@ void Generator::generateBuiltins(glue::Context& context) {
     }
     {
         BuiltinGenerator g { context, BuiltinId::function_id_template };
-        g.program->addExplicitParameter(Word(), builtins::function_signature_type, {});
+        g.addExplicitParameter(Word(), builtins::function_signature_type, {});
         g.program->setType(builtins::type_type);
     }
 
