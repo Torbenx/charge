@@ -5,7 +5,7 @@ struct X: { }
 static XX: type = X;
 
 template(x: XX) struct Y: { }
-//; expect-type template_id{@sigof(Y)}
+// expect-type template_id{@sigof(Y)}
 static Z = Y;
 
 template(T: type) struct Foo: { }

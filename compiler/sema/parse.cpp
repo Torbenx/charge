@@ -51,11 +51,25 @@ void Generator::visitDeclaration() {
 
 void Generator::visitTemplateParameters() {
     advance();
+    std::vector<Program::Parameter> explicitParameters;
     while (tok->kind() != Token::EmptyNode) {
-        visitTemplateParameter();
+        explicitParameters.push_back(visitTemplateParameter());
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
+
+    // add implicit parameters to program
+    VERIFY(program->parameters.size() == program->inheritedParameterCount);
+    VERIFY(program->implicitParameterCount == 0);
+    program->implicitParameterCount = parameterTypes.size() - program->inheritedParameterCount;
+    for (int_t i = program->inheritedParameterCount; i < (int_t)parameterTypes.size(); i++)
+        program->parameters.push_back({ Word(), parameterTypes[i], std::nullopt });
+
+    // add explicit parameters
+    for (auto parameter : explicitParameters) {
+        program->parameters.push_back(parameter);
+        parameterTypes.push_back(verifyType((Value)parameter.type));
+    }
 }
 
 Generator::VariableDeclaration Generator::visitVariableDeclaration() {
@@ -68,7 +82,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration() {
         type = verifyType(makeExpressionValue());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
-        type = verifyType(addImplicitParameter(builtins::type_type));
+        type = verifyType(newImplicitParameter(builtins::type_type));
     }
     VERIFY(tok->kind() == Token::AssignStmt);
     advance();
@@ -77,7 +91,13 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration() {
     if (tok->kind() != Token::ExpressionStmt) {
         // parse initializer
         visitExpression();
-        implicitCastTo(type);
+
+        DeductionState state(program, parameterTypes.size());
+        state.identityMap(program->parameters.size());
+        implicitCastTo(state, type, topExpression());
+        VERIFY(state.isComplete());
+        type = verifyType(fold(FoldState { program, INVALID_VALUE, state.arguments }, type));
+
         initializer = makeExpressionValue();
     }
     VERIFY(tok->kind() == Token::ExpressionStmt);
@@ -86,7 +106,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration() {
     return { type, initializer };
 }
 
-void Generator::visitTemplateParameter() {
+Program::Parameter Generator::visitTemplateParameter() {
     if (tok->kind() != Token::ImplicitKindParameter) {
         // report error
         VERIFY_NOT_REACHED();
@@ -95,7 +115,7 @@ void Generator::visitTemplateParameter() {
     advance();
 
     auto info = visitVariableDeclaration();
-    addExplicitParameter(name, info.type, info.initializer);
+    return { name, info.type, info.initializer };
 }
 
 void Generator::visitStaticVariableDeclaration() {

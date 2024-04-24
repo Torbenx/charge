@@ -3,7 +3,7 @@
 #include <sema/Program.h>
 
 namespace glue {
-    struct Context;
+struct Context;
 }
 
 namespace sema {
@@ -28,20 +28,43 @@ struct DeductionState {
         ExternValue pValue;
         Value aValue;
     };
+    Program* program;
     std::vector<bool> explicitArgumentsMap;
+    std::vector<Value> arguments;
     std::vector<ExpressionMatch> expressionMatches;
 
-    DeductionState(int_t parameters) { explicitArgumentsMap.resize(parameters); }
+    DeductionState(Program* prog, int_t parameterCount)
+        : program(prog)
+        , explicitArgumentsMap(parameterCount, false)
+        , arguments(parameterCount, INVALID_VALUE) { }
 
-    bool isExplicitArgument(int_t index) { return explicitArgumentsMap[index]; }
+    void identityMap(int_t count) {
+        for (int_t i = 0; i < count; i++)
+            explicitArgument(i, Value(ValueKind::Parameter, i));
+    }
+
+    void explicitArgument(int_t i, Value value) {
+        VERIFY(arguments[i] == INVALID_VALUE);
+        VERIFY(!explicitArgumentsMap[i]);
+        arguments[i] = value;
+        explicitArgumentsMap[i] = true;
+    }
+
+    bool isExplicitArgument(int_t index) const { return explicitArgumentsMap[index]; }
+
+    bool isComplete() const {
+        for (auto arg : arguments) {
+            if (arg == INVALID_VALUE)
+                return false;
+        }
+        return true;
+    }
 };
 
-struct BaseProgram {
+struct FoldState {
     Program* program;
     Value value;
-    std::span<Value> arguments;
-
-    Program* operator->() const { return program; }
+    std::span<const Value> arguments;
 };
 
 struct Generator {
@@ -94,7 +117,7 @@ struct Generator {
         std::optional<Value> initializer;
     };
     VariableDeclaration visitVariableDeclaration();
-    void visitTemplateParameter();
+    Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
 
     void visitExpression();
@@ -106,10 +129,10 @@ struct Generator {
 
     static ProgramHandle signatureCheck(glue::Context& context, glue::DeclarationNode* scope);
     static void generateBuiltins(glue::Context& context);
-    BaseProgram asProgram(Value value);
+    FoldState asFoldBase(Value value);
     Value fold(Value base, ExternValue v);
-    Value fold(BaseProgram base, ExternValue v);
-    bool staticMatch(DeductionState& state, ExternValue pValue, Program* pBase, std::span<Value> arguments, Value aValue);
+    Value fold(FoldState base, ExternValue v);
+    bool staticMatch(DeductionState& state, ExternValue pValue, Value aValue);
 
     Type typeOf(Value value);
     Type verifyType(Value value);
@@ -130,12 +153,12 @@ struct Generator {
 
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
-    Value addImplicitParameter(Type type);
     Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
+    Value newImplicitParameter(Type type);
 
     void implicitToType();
     void implicitCastTo(Type);
-    void implicitCastTo(DeductionState& state, ExternValue pType, Program* pBase, std::span<Value> arguments, Expression arg);
+    void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
     void emitExpr(Node node);
     void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);
