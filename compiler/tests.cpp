@@ -115,7 +115,7 @@ struct SignatureLiteralExpr : SemaExpr {
     void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
         VERIFY(value.kind() == sema::ValueKind::Constant);
         const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::SignatureOf);
+        VERIFY(c.op == sema::Program::Opcode::TemplateSignatureOf);
         VERIFY(c.u.signatureProgram == literal->program().value());
     }
 };

@@ -10,7 +10,7 @@ void Node::validateTreeProperty() {
 
 std::string_view nameString(NodeKind kind) {
     switch (kind) {
-#define KIND(kind, cat, primary)       \
+#define KIND(kind, cat)       \
     case NodeKind::kind: \
         return #kind;
 

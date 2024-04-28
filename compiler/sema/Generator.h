@@ -97,8 +97,8 @@ struct Generator {
     std::vector<Value> dependentParents;
     std::vector<LocalDeclarationEntry> localDeclarations;
     std::vector<LocalValue> localValues;
-    std::vector<Node> expressionScratch;
-    std::vector<StackItem> expressionStack;
+    std::vector<Node> nodeScratch;
+    std::vector<StackItem> nodeStack;
     std::vector<Type> parameterTypes;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
@@ -114,11 +114,12 @@ struct Generator {
     void visitTemplateParameters();
     struct VariableDeclaration {
         Type type;
-        std::optional<Value> initializer;
+        bool hasInitializer;
     };
-    VariableDeclaration visitVariableDeclaration();
+    VariableDeclaration visitVariableDeclaration(bool deduceFromInitializer);
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
+    void visitFunctionDeclaration();
 
     void visitExpression();
     void visitBinaryExpr();
@@ -157,12 +158,12 @@ struct Generator {
     Value newImplicitParameter(Type type);
 
     void implicitToType();
-    void implicitCastTo(Type);
-    void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
+    void implicitCastTo(DeductionState& state, ExternValue);
+    Value implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
-    void emitExpr(Node node);
-    void emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value);
-    void emitCompoundExpr(TaggedSourceLocation<NodeKind> location, Type type, int_t childCount);
+    void emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data);
+    void emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data);
+    void emitConstantExpr(SourceLocation location, Value value);
 };
 
 }

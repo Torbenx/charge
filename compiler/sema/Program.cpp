@@ -44,11 +44,19 @@ Value Program::addNamespaceLiteral(glue::DeclarationNode* node) {
     });
 }
 
-Value Program::addSignatureOf(Type type, ProgramHandle program) {
+Value Program::addTemplateSignatureOf(Type type, ProgramHandle program) {
     return add({
-        .op = Opcode::SignatureOf,
+        .op = Opcode::TemplateSignatureOf,
         .type = type,
         .u = { .signatureProgram = program },
+    });
+}
+
+Value Program::addFunctionSignatureOf(Type type, Value value) {
+    return add({
+        .op = Opcode::FunctionSignatureOf,
+        .type = type,
+        .u = { .signatureValue = value },
     });
 }
 

@@ -1177,8 +1177,10 @@ after_expression$as_then:
             }
             // pushScope ScopeKind::FunctionBody
             scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
+            // emitToken TokenKind::FunctionBody
+            carriedEmitTokenKind = TokenKind::FunctionBody;
             // next single_or_compound_statement
-            goto single_or_compound_statement$no_emit;
+            goto single_or_compound_statement$with_emit;
         }
         // popScope ScopeKind::IfExprOrStmt
         {
@@ -3658,16 +3660,20 @@ after_function_parameters$as_then:
             tokEnd += 1;
             // pushScope ScopeKind::FunctionBody
             scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
+            // emitToken TokenKind::FunctionBody
+            carriedEmitTokenKind = TokenKind::FunctionBody;
             // next single_or_compound_statement
-            goto single_or_compound_statement$no_emit;
+            goto single_or_compound_statement$with_emit;
         }
     }
     if (std::string_view(tokEnd, 2) == "->"sv) {
         tokEnd += 2;
         // pushScope ScopeKind::ReturnType
         scopePosition = pushScope(scopePosition, ScopeKind::ReturnType);
+        // emitToken TokenKind::ReturnType
+        carriedEmitTokenKind = TokenKind::ReturnType;
         // next expression
-        goto expression$no_emit;
+        goto expression$with_emit;
     }
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
@@ -3675,8 +3681,10 @@ after_function_parameters$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
         // pushScope ScopeKind::RightExpr
         scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+        // emitToken TokenKind::BodyExpr
+        carriedEmitTokenKind = TokenKind::BodyExpr;
         // next expression
-        goto expression$no_emit;
+        goto expression$with_emit;
     }
     if (std::string_view(tokEnd, 3) == "<=>"sv) {
         tokEnd += 3;
@@ -3684,8 +3692,10 @@ after_function_parameters$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
         // pushScope ScopeKind::RightExpr
         scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+        // emitToken TokenKind::BodyExpr
+        carriedEmitTokenKind = TokenKind::BodyExpr;
         // next expression
-        goto expression$no_emit;
+        goto expression$with_emit;
     }
     // then error
     goto error$as_then;
@@ -4467,9 +4477,9 @@ error$word_case:
             errorToken = LexerToken::Assign;
             goto handle_parse_error;
         }
-        if (word == words["porperty"]) {
+        if (word == words["property"]) {
             // error
-            errorToken = LexerToken::Porperty;
+            errorToken = LexerToken::Property;
             goto handle_parse_error;
         }
         VERIFY_NOT_REACHED();

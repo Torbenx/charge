@@ -231,6 +231,7 @@ SwitchState after_expression() then error
         ifScope ScopeKind::ReturnType
             popScope ScopeKind::ReturnType
             pushScope ScopeKind::FunctionBody
+            emitToken TokenKind::FunctionBody
             next single_or_compound_statement
         popScope ScopeKind::IfExprOrStmt
         popScope ScopeKind::LeftExpr
@@ -539,17 +540,21 @@ LinearState after_function_declaration_id() then error
 LinearState after_function_parameters() then error
     punctuation :
         pushScope ScopeKind::FunctionBody
+        emitToken TokenKind::FunctionBody
         next single_or_compound_statement
     punctuation ->
         pushScope ScopeKind::ReturnType
+        emitToken TokenKind::ReturnType
         next expression
     punctuation =>
         pushScope ScopeKind::FunctionBody
         pushScope ScopeKind::RightExpr
+        emitToken TokenKind::BodyExpr
         next expression
     punctuation <=>
         pushScope ScopeKind::FunctionBody
         pushScope ScopeKind::RightExpr
+        emitToken TokenKind::BodyExpr
         next expression
 
 LinearState type_declaration_id(tokenKind) then error

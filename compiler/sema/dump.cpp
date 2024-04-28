@@ -56,9 +56,6 @@ struct Dumper {
         case ValueKind::Parameter:
             c = '#';
             break;
-        case ValueKind::Local:
-            c = 'r';
-            break;
         default:
             VERIFY_NOT_REACHED();
         }
@@ -99,9 +96,9 @@ void Dumper::dumpNode(Node* node) {
         beginLine();
         output += header;
         output += nameString(node->kind());
-        if (node->kind() == NodeKind::ReferenceExpr || node->kind() == NodeKind::ConstantExpr) {
+        if (node->kind() == NodeKind::ConstantExpr) {
             output += " ";
-            output += formatValue(Value::fromUint(node->u.data2));
+            output += formatValue(Expression(node).data().value);
         }
         endLine();
         return;
@@ -136,8 +133,11 @@ void Dumper::dumpProgram(Program* prog) {
             line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + param.argumentCount - 1]) << "}";
             break;
         }
-        case Program::Opcode::SignatureOf:
+        case Program::Opcode::TemplateSignatureOf:
             line << " " << formatProgram(c.u.signatureProgram);
+            break;
+        case Program::Opcode::FunctionSignatureOf:
+            line << " " << formatValue(c.u.signatureValue);
             break;
         default:
             break;

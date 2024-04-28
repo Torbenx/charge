@@ -1,37 +1,23 @@
 #pragma once
 
-#include <types.h>
+#include <sema/Value.h>
 
 namespace sema {
 
-#define ENUMERATE_NODE_KINDS             \
-    KIND(ReferenceExpr, Reference, true) \
-    KIND(ConstantExpr, Pure, true)       \
-    KIND(ParameterizeExpr, Pure, false)  \
-    KIND(ImplicitConversion, Owning, false)
+#define ENUMERATE_NODE_KINDS       \
+    KIND(ReferenceExpr, Reference) \
+    KIND(ConstantExpr, Pure)       \
+    KIND(LetDecl, Statement)       \
+    KIND(ExpressionStmt, Statement)
 
 enum class NodeKind : uint8_t {
-#define KIND(kind, cat, primary) kind,
+#define KIND(kind, cat) kind,
 
     ENUMERATE_NODE_KINDS
 
 #undef KIND
 };
 std::string_view nameString(NodeKind kind);
-
-inline bool isPrimary(NodeKind kind) {
-    switch (kind) {
-
-#define KIND(kind, cat, primary) \
-    case NodeKind::kind:         \
-        return primary;
-
-        ENUMERATE_NODE_KINDS
-
-#undef KIND
-    }
-    VERIFY_NOT_REACHED();
-}
 
 enum class NodeCategory {
     Pure,
@@ -42,8 +28,8 @@ enum class NodeCategory {
 inline NodeCategory nodeCategory(NodeKind kind) {
     switch (kind) {
 
-#define KIND(kind, cat, primary) \
-    case NodeKind::kind:         \
+#define KIND(kind, cat)  \
+    case NodeKind::kind: \
         return NodeCategory::cat;
 
         ENUMERATE_NODE_KINDS
@@ -58,11 +44,26 @@ inline bool isExpression(NodeKind kind) { return nodeCategory(kind) != NodeCateg
 struct ChildrenRange;
 struct ChildrenIterator;
 
+union ExprData {
+    Value value;
+};
+union NodeData {
+    struct {
+        Type type;
+        ExprData u;
+    } expr;
+    struct {
+        Type type;
+    } decl;
+    struct { } empty;
+};
+
 struct Node {
-    bool primary() const { return isPrimary(kind()); }
-    // Size of the sub-tree of this node including this node itself.
-    int_t subTreeSize() const { return isPrimary(kind()) ? 1 : u.compound.subTreeSize; }
-    int_t childrenCount() const { return isPrimary(kind()) ? 0 : u.compound.childrenCount; }
+    Node(NodeKind kind, SourceLocation location, int_t childrenCount, int_t subTreeSize, NodeData data)
+        : m_location(kind, location), m_childrenCount(childrenCount), m_subTreeSize(subTreeSize), u(data) { }
+
+    int_t subTreeSize() const { return m_subTreeSize; }
+    int_t childrenCount() const { return m_childrenCount; }
     ChildrenRange reverseChildren();
 
     void validateTreeProperty();
@@ -71,15 +72,11 @@ struct Node {
     SourceLocation location() const { return m_location.location(); }
 
     TaggedSourceLocation<NodeKind> m_location;
-    uint32_t data1;
-    union {
-        struct {
-            uint16_t childrenCount;
-            uint16_t subTreeSize;
-        } compound;
-        uint32_t data2;
-    } u;
+    uint32_t m_childrenCount;
+    uint32_t m_subTreeSize; // Size of the sub-tree of this node including this node itself.
+    NodeData u;
 };
+static_assert(sizeof(Node) == 24);
 
 // iterates children in reverse order
 struct ChildrenIterator {

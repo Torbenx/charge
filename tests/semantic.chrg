@@ -15,6 +15,8 @@ static U: type = Foo{X};
 template(T) struct Bar: { }
 // expect-value Bar{type, X}
 static V: type = Bar{X};
+// expect-value Bar{template_id{@sigof(Y)}, Y}
+static W: type = Bar{Y};
 
 template(T: type) struct Outer: {
     struct A: { }
@@ -27,3 +29,27 @@ template(T: type) struct Outer: {
     // expect-value Outer::B{#0, type, Outer::A{#0}}
     static BA: type = B{A};
 }
+
+struct A: { }
+template(a) struct B: { }
+template(b, a) struct C: { }
+template(c, b, a) struct D: { }
+template(d, c, b, a) struct E: { }
+// expect-value E{type, D{type, C{type, B{type, A}, type, A}, type, B{type, A}, type, A}, type, C{type, B{type, A}, type, A}, type, B{type, A}, type, A}
+static ABBCDE = E{D{C{B{A}, A}, B{A}, A}, C{B{A}, A}, B{A}, A};
+
+// expect-type type;
+fn f1() => X;
+// expect-type type;
+fn f2(t) => X;
+// expect-type type;
+fn f3(t: type) => X;
+// expect-type type;
+fn f4(t: type = X) => X;
+
+fn t1(x: X) => X;
+fn t2(x) => X;
+// expect-type type ;; This is wrong!
+static tt1 = t1;
+// expect-type template_id{@sigof(t2)}
+static tt2 = t2;

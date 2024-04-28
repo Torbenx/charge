@@ -3,31 +3,23 @@
 
 namespace sema {
 
-void Generator::emitExpr(Node node) {
-    uint32_t nodeIndex = expressionScratch.size();
-    expressionScratch.push_back(node);
-    expressionStack.push_back({ nodeIndex });
-}
-
-void Generator::emitValueExpr(TaggedSourceLocation<NodeKind> location, Value value) {
-    emitExpr({
-        location,
-        typeOf(value).toUint(),
-        { .data2 = value.toUint() },
-    });
-}
-
-void Generator::emitCompoundExpr(TaggedSourceLocation<NodeKind> location, Type type, int_t childCount) {
+void Generator::emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data) {
     int_t subTreeSize = 1;
     for (int_t i = 0; i < childCount; i++) {
-        subTreeSize += expressionScratch[expressionStack.back().nodeIndex].subTreeSize();
-        expressionStack.pop_back();
+        subTreeSize += nodeScratch[nodeStack.back().nodeIndex].subTreeSize();
+        nodeStack.pop_back();
     }
-    emitExpr({
-        location,
-        type.toUint(),
-        { .compound = { .childrenCount = (uint16_t)childCount, .subTreeSize = (uint16_t)subTreeSize } },
-    });
+    int_t index = nodeScratch.size();
+    nodeScratch.emplace_back(kind, location, childCount, subTreeSize, data);
+    nodeStack.push_back({ (uint32_t)index });
+}
+
+void Generator::emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data) {
+    emitNode(kind, location, childCount, NodeData { .expr = { type, data } });
+}
+
+void Generator::emitConstantExpr(SourceLocation location, Value value) {
+    emitExpr(NodeKind::ConstantExpr, location, 0, typeOf(value), ExprData { .value = value });
 }
 
 Value Generator::makeExpressionValue() {
@@ -38,7 +30,7 @@ Value Generator::makeExpressionValue() {
 
 Value Generator::makeExpressionValue(Expression expr) {
     if (expr.kind() == NodeKind::ConstantExpr)
-        return Value::fromUint(expr->u.data2);
+        return expr.data().value;
     else
         return program->addExpression(expr);
 }
@@ -46,7 +38,7 @@ Value Generator::makeExpressionValue(Expression expr) {
 Type Generator::makeTemplateIdFor(ProgramHandle targetHandle) {
     Program* targetProg = &context.programs[targetHandle.id()];
     VERIFY(targetProg->isTemplate());
-    std::array arguments { program->addSignatureOf(builtins::template_signature_type, targetHandle) };
+    std::array arguments { program->addTemplateSignatureOf(builtins::template_signature_type, targetHandle) };
     return verifyType(program->addParameterize(
         builtins::type_type, builtins::template_id_template.program(), arguments));
 }
@@ -128,15 +120,15 @@ Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
 
 void Generator::generateIdentifierExpr() {
     Word name = Word::fromUint(tok->data());
-    for (const auto& entry : localDeclarations) {
+    /*for (const auto& entry : localDeclarations) {
         if (name == entry.name) {
             emitValueExpr({ NodeKind::ReferenceExpr, tok->location() }, entry.value);
             return;
         }
-    }
+    }*/
     auto result = lookupCache.get(name);
     if (result.has_value()) {
-        emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, result.value());
+        emitConstantExpr(tok->location(), result.value());
         return;
     }
     glue::DeclarationNode* lookupScope = currentScope->declaringNode();
@@ -144,7 +136,7 @@ void Generator::generateIdentifierExpr() {
         auto lookup = lookupInScope(lookupScope, name);
         if (lookup.has_value()) {
             lookupCache.insert(name, lookup.value());
-            emitValueExpr({ NodeKind::ConstantExpr, tok->location() }, lookup.value());
+            emitConstantExpr(tok->location(), lookup.value());
             return;
         }
         lookupScope = lookupScope->declaringNode();
@@ -155,7 +147,7 @@ void Generator::generateIdentifierExpr() {
 void Generator::generateParameterizeExpr(int_t argumentCount) {
     Expression baseExpr = topExpression(argumentCount);
     if (baseExpr.kind() == NodeKind::ConstantExpr) {
-        Value baseValue = Value::fromUint(baseExpr->u.data2);
+        Value baseValue = baseExpr.data().value;
         if (baseValue.kind() == ValueKind::Program) {
             Program* baseProg = &context.programs[baseValue.id()];
             VERIFY(baseProg->isTemplate());
@@ -163,14 +155,19 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             DeductionState state(baseProg, parameterCount);
             state.identityMap(baseProg->inheritedParameterCount);
 
-            int_t pIndex = baseProg->inheritedParameterCount + baseProg->implicitParameterCount;
+            int_t pIndex = baseProg->inheritedParameterCount;
             int_t aIndex = 0;
             for (; aIndex < argumentCount; aIndex++, pIndex++) {
+                // Find next explicit parameter
+                while (pIndex < parameterCount && baseProg->parameters[pIndex].implicit())
+                    pIndex += 1;
+                VERIFY(pIndex < parameterCount);
+
                 ExternValue pType = baseProg->parameters[pIndex].type;
                 Expression argument = topExpression(argumentCount - 1 - aIndex);
                 implicitCastTo(state, pType, argument);
                 if (argument.kind() == NodeKind::ConstantExpr) {
-                    state.explicitArgument(pIndex, Value::fromUint(argument->u.data2));
+                    state.explicitArgument(pIndex, argument.data().value);
                 } else {
                     VERIFY_NOT_REACHED();
                 }
@@ -180,7 +177,7 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             Value result = program->addParameterize(Type(), baseValue.program(), state.arguments);
             Type type = verifyType(fold(result, baseProg->type()));
             program->constants[result.id()].type = type;
-            emitValueExpr({ NodeKind::ConstantExpr, {} }, result);
+            emitConstantExpr({}, result);
             return;
         }
     }
@@ -188,16 +185,18 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
 }
 
 void Generator::implicitToType() {
-    implicitCastTo(builtins::type_type);
+    Type type = verifyType(makeExpressionValue());
+    emitConstantExpr({}, type);
 }
 
-void Generator::implicitCastTo(Type type) {
-    if (topExpression().type() != type)
-        emitCompoundExpr({ NodeKind::ImplicitConversion, {} }, type, 1);
-}
-
-void Generator::implicitCastTo(DeductionState& state, ExternValue pType, Expression arg) {
+Value Generator::implicitCastTo(DeductionState& state, ExternValue pType, Expression arg) {
     bool sameType = staticMatch(state, pType, arg.type());
+    VERIFY(sameType);
+    return makeExpressionValue(arg);
+}
+
+void Generator::implicitCastTo(DeductionState& state, ExternValue pType) {
+    bool sameType = staticMatch(state, pType, topExpression().type());
     VERIFY(sameType);
 }
 
@@ -258,8 +257,10 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
     switch (pConst.op) {
     case Program::Opcode::NamespaceLiteral:
         return pConst.u.declarationNode == aConst.u.declarationNode;
-    case Program::Opcode::SignatureOf:
+    case Program::Opcode::TemplateFunctionSignatureOf:
         return pConst.u.signatureProgram == aConst.u.signatureProgram; // TODO: different programs can have the same signature
+    case Program::Opcode::FunctionSignatureOf:
+        return staticMatch(state, pConst.u.signatureValue, aConst.u.signatureValue); // TODO: different programs can have the same signature
     case Program::Opcode::Parameterize: {
         const auto& pPara = pConst.u.parameterize;
         const auto& aPara = aConst.u.parameterize;
@@ -299,8 +300,10 @@ Value Generator::fold(FoldState state, ExternValue v) {
     switch (vConst.op) {
     case Program::Opcode::NamespaceLiteral:
         return program->addNamespaceLiteral(vConst.u.declarationNode);
-    case Program::Opcode::SignatureOf:
-        return program->addSignatureOf(type(), vConst.u.signatureProgram);
+    case Program::Opcode::TemplateSignatureOf:
+        return program->addTemplateSignatureOf(type(), vConst.u.signatureProgram);
+    case Program::Opcode::FunctionSignatureOf:
+        return program->addFunctionSignatureOf(type(), fold(state, vConst.u.signatureValue));
     case Program::Opcode::RemoteExpression: {
         Value exprBase = fold(state, vConst.u.remoteExpression.base);
         return program->addRemoteExpression(type(), exprBase, vConst.u.remoteExpression.expressionIndex);
@@ -360,8 +363,6 @@ std::span<const ExternValue> Generator::parameterizeArguments(Program* targetPro
 
 Type Generator::typeOf(Value value) {
     switch (value.kind()) {
-    case ValueKind::Local:
-        return localValues[value.id()].type;
     case ValueKind::Constant:
         return program->constants[value.id()].type;
     case ValueKind::Parameter:
@@ -379,9 +380,6 @@ Type Generator::typeOf(Value value) {
 
 Type Generator::verifyType(Value value) {
     switch (value.kind()) {
-    case ValueKind::Local:
-        VERIFY(localValues[value.id()].type == builtins::type_type);
-        return (Type)value;
     case ValueKind::Constant:
         VERIFY(program->constants[value.id()].type == builtins::type_type);
         return (Type)value;
@@ -412,7 +410,6 @@ Value Generator::addExplicitParameter(Word name, Type type, std::optional<Value>
 }
 
 Value Generator::newImplicitParameter(Type type) {
-    VERIFY(program->parameters.size() == program->inheritedParameterCount + program->implicitParameterCount);
     uint32_t parameterIndex = parameterTypes.size();
     parameterTypes.push_back(type);
     return Value(ValueKind::Parameter, parameterIndex);
@@ -484,7 +481,7 @@ void Generator::generateBuiltins(glue::Context& context) {
     }
     {
         BuiltinGenerator g { context, BuiltinId::template_id_template };
-        g.addExplicitParameter(Word(), builtins::template_signature_type, {});
+        g.addExplicitParameter(parse::words["sig"], builtins::template_signature_type, {});
         g.program->setType(builtins::type_type);
     }
 
@@ -498,9 +495,14 @@ void Generator::generateBuiltins(glue::Context& context) {
     }
     {
         BuiltinGenerator g { context, BuiltinId::function_id_template };
-        g.addExplicitParameter(Word(), builtins::function_signature_type, {});
+        g.addExplicitParameter(parse::words["sig"], builtins::function_signature_type, {});
         g.program->setType(builtins::type_type);
     }
+
+    // cast{template_id}( template_function_id{template(T: type) fn(t: T) -> T)} )
+    //   = template_id{ template(T: type) -> function_id{fn(t: T) -> T} }
+
+    // template(T: type) fn(t: T) -> T = template(T: type) -> function_id{fn(t: T) -> T}
 
     // typeof( (arg = expr) ) = cast{type}( (arg = typeof(expr)) ) = tuple{cast{tuple_signature}( (arg = typeof(expr)) )}
 }

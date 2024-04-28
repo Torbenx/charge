@@ -170,8 +170,8 @@ std::string_view nameString(LexerToken token) {
         return "Forward";
     case LexerToken::Assign:
         return "Assign";
-    case LexerToken::Porperty:
-        return "Porperty";
+    case LexerToken::Property:
+        return "Property";
     case LexerToken::Identifier:
         return "Identifier";
     case LexerToken::Literal:

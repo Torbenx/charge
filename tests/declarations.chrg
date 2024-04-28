@@ -6,38 +6,39 @@
 // expect-token VarParameter; expect-token AssignStmt; expect-token ExpressionStmt
 // expect-token LetParameter; expect-token AssignStmt; expect-token ExpressionStmt
 // expect-token ImplicitKindParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
-// expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f1(in x, inout y, out z, var a, let b, c): { }
 
 // expect-token FunctionDecl
 // expect-token InParameter; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode
-// expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f2(in x = init): { }
 
 // expect-token FunctionDecl
 // expect-token InParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
-// expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f3(in x: type): { }
 
 // expect-token FunctionDecl
 // expect-token InParameter; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 // expect-token InParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
-// expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f4(in x = init, in y): { }
 
 // expect-token FunctionDecl
 // expect-token InParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
 // expect-token InParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
-// expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f5(in x: type, in y): { }
 
-// expect-token FunctionDecl; expect-token EmptyNode; expect-token IdentifierExpr; expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType; expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f6() -> type: { }
 
-// expect-token FunctionDecl; expect-token EmptyNode; expect-token IdentifierExpr; expect-token ExpressionStmt;
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token BodyExpr; expect-token IdentifierExpr; expect-token ExpressionStmt;
 fn g1() => value;
 
-// expect-token FunctionDecl; expect-token EmptyNode; expect-token IdentifierExpr; expect-token ExpressionStmt;
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token BodyExpr; expect-token IdentifierExpr; expect-token ExpressionStmt;
 fn g2() <=> value;
 
 // expect-token StructTypeDecl
@@ -48,7 +49,7 @@ struct S1: { }
 // expect-token MemberDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
 // expect-token MemberDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 // expect-token MemberDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
-// expect-token FunctionDecl; expect-token EmptyNode; expect-token CompoundStmt; expect-token EmptyNode
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 struct S2: {
     a;
     b: type;
@@ -59,7 +60,7 @@ struct S2: {
 
 // expect-token StructTypeDecl;
 // expect-token HasMemberDecl; expect-token IdentifierExpr; expect-token CallExpr; expect-token EmptyNode; expect-token EmptyNode
-// expect-token HasMemberDecl; expect-token IdentifierExpr; expect-token FunctionDecl; expect-token EmptyNode; expect-token CompoundStmt; expect-token EmptyNode
+// expect-token HasMemberDecl; expect-token IdentifierExpr; expect-token FunctionDecl; expect-token EmptyNode; expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 struct H1: {
     has m();
 

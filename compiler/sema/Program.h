@@ -30,7 +30,6 @@ struct NodeHandle {
     operator Node*() const { return node(); }
     NodeKind kind() const { return node()->kind(); }
     SourceLocation location() const { return node()->location(); }
-    bool primary() const { return node()->primary(); }
     int_t childrenCount() const { return node()->childrenCount(); }
     ChildrenRange reverseChildren() const { return node()->reverseChildren(); }
 
@@ -41,7 +40,8 @@ struct Expression : NodeHandle {
     Expression(Node* node)
         : NodeHandle(node) { VERIFY(isExpression(kind())); }
     NodeCategory category() const { return nodeCategory(kind()); }
-    Type type() const { return Type::fromUint(node()->data1); }
+    Type type() const { return node()->u.expr.type; }
+    ExprData data() const { return node()->u.expr.u; }
 };
 
 enum class ProgramStatus : uint8_t {
@@ -50,11 +50,13 @@ enum class ProgramStatus : uint8_t {
     SignatureChecked, // (template) parameters have been checked, the type has been determined
 };
 
-#define ENUMERATE_PROGRAM_OPS    \
-    PROGRAM_OP(SignatureOf)      \
-    PROGRAM_OP(NamespaceLiteral) \
-    PROGRAM_OP(RemoteExpression) \
-    PROGRAM_OP(Expression)       \
+#define ENUMERATE_PROGRAM_OPS               \
+    PROGRAM_OP(TemplateSignatureOf)         \
+    PROGRAM_OP(TemplateFunctionSignatureOf) \
+    PROGRAM_OP(FunctionSignatureOf)         \
+    PROGRAM_OP(NamespaceLiteral)            \
+    PROGRAM_OP(RemoteExpression)            \
+    PROGRAM_OP(Expression)                  \
     PROGRAM_OP(Parameterize)
 
 struct Program {
@@ -74,6 +76,7 @@ struct Program {
             glue::DeclarationNode* declarationNode;
             uint32_t expressionIndex; // offset into expressions
             ProgramHandle signatureProgram;
+            Value signatureValue; // either a program or a parameterize constant
             struct {
                 Value base; // either a program or a parameterize constant
                 uint32_t expressionIndex; // offset into the target programs expressions
@@ -91,6 +94,8 @@ struct Program {
         Word name;
         ExternValue type;
         std::optional<Value> defaultValue;
+
+        bool implicit() const { return name.empty(); }
     };
 
     struct ParameterizeArgumentSetter {
@@ -115,7 +120,8 @@ struct Program {
 
     Value add(Constant);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
-    Value addSignatureOf(Type type, ProgramHandle prog);
+    Value addTemplateSignatureOf(Type type, ProgramHandle prog);
+    Value addFunctionSignatureOf(Type type, Value base);
     Value addExpression(Node* expr);
     Value addRemoteExpression(Type type, Value base, uint32_t expressionIndex);
     Value addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
@@ -142,7 +148,6 @@ struct Program {
 
     std::vector<Parameter> parameters;
     uint32_t inheritedParameterCount = 0;
-    uint32_t implicitParameterCount = 0;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
 

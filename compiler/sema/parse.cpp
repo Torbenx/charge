@@ -17,13 +17,14 @@ Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
 void Generator::advance() { tok += 1; }
 
 Expression Generator::topExpression(int_t n) {
-    return &expressionScratch[(expressionStack.end() - n - 1)->nodeIndex];
+    return &nodeScratch[(nodeStack.end() - n - 1)->nodeIndex];
 }
 
 void Generator::popExpression() {
-    int_t size = expressionScratch.back().subTreeSize();
-    expressionScratch.resize(expressionScratch.size() - size);
-    expressionStack.pop_back();
+    int_t size = nodeScratch.back().subTreeSize();
+    for (int_t i = 0; i < size; i++)
+        nodeScratch.pop_back();
+    nodeStack.pop_back();
 }
 
 void Generator::popExpressions(int_t n) {
@@ -42,7 +43,7 @@ void Generator::visitDeclaration() {
     } else if (tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
-        VERIFY_NOT_REACHED();
+        visitFunctionDeclaration();
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -50,30 +51,24 @@ void Generator::visitDeclaration() {
 }
 
 void Generator::visitTemplateParameters() {
+    VERIFY(program->parameters.size() == program->inheritedParameterCount);
     advance();
-    std::vector<Program::Parameter> explicitParameters;
     while (tok->kind() != Token::EmptyNode) {
-        explicitParameters.push_back(visitTemplateParameter());
+        Program::Parameter explicitParameter = visitTemplateParameter();
+        VERIFY(!explicitParameter.name.empty());
+
+        program->parameters.push_back(explicitParameter);
+        parameterTypes.push_back(verifyType((Value)explicitParameter.type));
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
-
-    // add implicit parameters to program
-    VERIFY(program->parameters.size() == program->inheritedParameterCount);
-    VERIFY(program->implicitParameterCount == 0);
-    program->implicitParameterCount = parameterTypes.size() - program->inheritedParameterCount;
-    for (int_t i = program->inheritedParameterCount; i < (int_t)parameterTypes.size(); i++)
-        program->parameters.push_back({ Word(), parameterTypes[i], std::nullopt });
-
-    // add explicit parameters
-    for (auto parameter : explicitParameters) {
-        program->parameters.push_back(parameter);
-        parameterTypes.push_back(verifyType((Value)parameter.type));
-    }
 }
 
-Generator::VariableDeclaration Generator::visitVariableDeclaration() {
+Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
     Type type;
+    int_t oldParameterCount = parameterTypes.size();
+    if (programParameters)
+        VERIFY(oldParameterCount == (int_t)program->parameters.size());
     if (tok->kind() != Token::AssignStmt) {
         // parse type
         wildcardMeaning = WildcardMeaning::ImplicitTemplate;
@@ -87,23 +82,33 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration() {
     VERIFY(tok->kind() == Token::AssignStmt);
     advance();
 
-    std::optional<Value> initializer;
+    bool hasInitializer = false;
     if (tok->kind() != Token::ExpressionStmt) {
-        // parse initializer
+        if (oldParameterCount != (int_t)parameterTypes.size() && programParameters) {
+            // 'type' contains implicitly created parameters.
+            // Converting the initializer to 'type' can never happend without them.
+            VERIFY_NOT_REACHED();
+        }
         visitExpression();
 
         DeductionState state(program, parameterTypes.size());
-        state.identityMap(program->parameters.size());
-        implicitCastTo(state, type, topExpression());
+        state.identityMap(oldParameterCount);
+        implicitCastTo(state, type);
         VERIFY(state.isComplete());
         type = verifyType(fold(FoldState { program, INVALID_VALUE, state.arguments }, type));
 
-        initializer = makeExpressionValue();
+        hasInitializer = true;
     }
     VERIFY(tok->kind() == Token::ExpressionStmt);
     advance();
 
-    return { type, initializer };
+    if (programParameters) {
+        // add implicit parameters to program
+        while (program->parameters.size() < (int_t)parameterTypes.size())
+            program->parameters.push_back({ Word(), parameterTypes[program->parameters.size()], std::nullopt });
+    }
+
+    return { type, hasInitializer };
 }
 
 Program::Parameter Generator::visitTemplateParameter() {
@@ -114,8 +119,11 @@ Program::Parameter Generator::visitTemplateParameter() {
     Word name = Word::fromUint(tok->data());
     advance();
 
-    auto info = visitVariableDeclaration();
-    return { name, info.type, info.initializer };
+    auto info = visitVariableDeclaration(true);
+    std::optional<Value> initializer;
+    if (info.hasInitializer)
+        initializer = makeExpressionValue();
+    return { name, info.type, initializer };
 }
 
 void Generator::visitStaticVariableDeclaration() {
@@ -123,10 +131,46 @@ void Generator::visitStaticVariableDeclaration() {
     bool isVar = tok->kind() == Token::StaticVarDecl;
     advance();
 
-    auto info = visitVariableDeclaration();
-    VERIFY(info.initializer.has_value());
+    auto info = visitVariableDeclaration(false);
+    VERIFY(info.hasInitializer);
     program->setType(info.type);
-    program->setValue(info.initializer.value());
+    program->setValue(makeExpressionValue());
+}
+
+void Generator::visitFunctionDeclaration() {
+    VERIFY(tok->kind() == Token::FunctionDecl);
+    advance();
+
+    int_t firstStackEntry = nodeStack.size();
+
+    while (tok->kind() != Token::EmptyNode) {
+        VERIFY(tok->kind() == Token::ImplicitKindParameter);
+        Word name = Word::fromUint(tok->data());
+        auto nameLoc = tok->location();
+        advance();
+        auto info = visitVariableDeclaration(true);
+        emitNode(NodeKind::LetDecl, nameLoc, info.hasInitializer ? 1 : 0, NodeData { .decl { .type = info.type } });
+    }
+    VERIFY(tok->kind() == Token::EmptyNode);
+    advance();
+
+    if (tok->kind() == Token::BodyExpr) {
+        advance();
+        visitExpression();
+        program->m_type = topExpression().type();
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        emitNode(NodeKind::ExpressionStmt, tok->location(), 1, NodeData { .empty {} });
+    } else {
+        std::optional<Type> type;
+        if (tok->kind() == Token::ReturnType) {
+            advance();
+            visitExpression();
+            type = verifyType(makeExpressionValue());
+        }
+        VERIFY(tok->kind() == Token::FunctionBody);
+        // ... visit statement
+        VERIFY_NOT_REACHED();
+    }
 }
 
 void Generator::visitExpression() {

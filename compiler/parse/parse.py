@@ -16,10 +16,10 @@ keywords = [
     "with", "analysis", "assert",
     "namespace", "struct", "trait", "object", "fn", "has",
     "static",  "incomplete", "virtual", "template",
-    "var", "let", "in", "inout", "out", "forward", "assign", "porperty"
+    "var", "let", "in", "inout", "out", "forward", "assign", "property"
 ]
 specialWords = [
-    "error", "type", "template_signature", "template_id", "function_signature", "function_id"
+    "error", "type", "template_signature", "template_id", "function_signature", "function_id", "sig"
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]

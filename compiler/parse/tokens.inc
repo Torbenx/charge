@@ -15,6 +15,9 @@
 #define ATTRIBUTE(kind) TOKEN(kind, Attribute, Statement)
 #endif
 
+TOKEN(FunctionBody, FunctionBody, Statement)
+TOKEN(ReturnType, ReturnType, Statement)
+TOKEN(BodyExpr, BodyExpr, Statement)
 
 TOKEN(EmptyNode, EmptyNode, Statement)
 TOKEN(EOS, EOS, Statement)

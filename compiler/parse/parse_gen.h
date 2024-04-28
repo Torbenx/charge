@@ -39,13 +39,14 @@ inline constexpr ConstWordStringTable words {
     keyword("out"),
     keyword("forward"),
     keyword("assign"),
-    keyword("porperty"),
+    keyword("property"),
     "error",
     "type",
     "template_signature",
     "template_id",
     "function_signature",
     "function_id",
+    "sig",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -131,7 +132,7 @@ enum class LexerToken : uint8_t {
     Out, // out
     Forward, // forward
     Assign, // assign
-    Porperty, // porperty
+    Property, // property
     Identifier,
     Literal,
     EOS
