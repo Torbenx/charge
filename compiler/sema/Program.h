@@ -50,6 +50,12 @@ enum class ProgramStatus : uint8_t {
     SignatureChecked, // (template) parameters have been checked, the type has been determined
 };
 
+enum class ProgramKind : uint8_t {
+    Value,
+    Type,
+    Function,
+};
+
 #define ENUMERATE_PROGRAM_OPS               \
     PROGRAM_OP(TemplateSignatureOf)         \
     PROGRAM_OP(TemplateFunctionSignatureOf) \
@@ -61,6 +67,7 @@ enum class ProgramStatus : uint8_t {
 
 struct Program {
     ProgramStatus m_status = ProgramStatus::Unchecked;
+    ProgramKind m_kind;
     Word m_name;
 
     enum class Opcode : uint8_t {
@@ -135,17 +142,32 @@ struct Program {
 
     ExternValue parent() const { return m_parent.value(); }
 
+    ExternValue self() const { return m_self.value(); }
+
     void setType(Type type) {
+        VERIFY(!m_type.has_value());
         m_type = type;
     }
     void setValue(Value value) {
+        VERIFY(!m_value.has_value());
         m_value = value;
     }
+    void setParent(Value value) {
+        VERIFY(!m_parent.has_value());
+        m_parent = value;
+    }
+    void setSelf(Value value) {
+        VERIFY(!m_self.has_value());
+        m_self = value;
+    }
 
+private:
     std::optional<ExternValue> m_type;
     std::optional<ExternValue> m_value;
     std::optional<ExternValue> m_parent;
+    std::optional<ExternValue> m_self;
 
+public:
     std::vector<Parameter> parameters;
     uint32_t inheritedParameterCount = 0;
 

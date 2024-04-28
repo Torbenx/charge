@@ -92,6 +92,7 @@ struct Generator {
     glue::DeclarationNode* currentScope = nullptr;
     const parse::TokenInfo* tok = nullptr;
     Program* program = nullptr;
+    ProgramHandle programHandle;
 
     LookupCache lookupCache;
     std::vector<Value> dependentParents;
@@ -102,7 +103,7 @@ struct Generator {
     std::vector<Type> parameterTypes;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
-    Generator(glue::Context& context, Program* program);
+    Generator(glue::Context& context, ProgramHandle handle);
     Generator(glue::Context& context, glue::DeclarationNode* scope);
 
     void advance();
@@ -134,6 +135,8 @@ struct Generator {
     Value fold(Value base, ExternValue v);
     Value fold(FoldState base, ExternValue v);
     bool staticMatch(DeductionState& state, ExternValue pValue, Value aValue);
+    FoldState selfFold();
+    DeductionState selfDeduction();
 
     Type typeOf(Value value);
     Type verifyType(Value value);
@@ -151,6 +154,7 @@ struct Generator {
     Value makeProgramValue(ProgramHandle targetHandle);
     Type makeTemplateIdFor(ProgramHandle targetHandle);
     void buildParent(glue::DeclarationNode* parentDeclaration);
+    void buildSelf();
 
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);

@@ -3,15 +3,16 @@
 
 namespace sema {
 
-Generator::Generator(glue::Context& context, Program* program)
-    : context(context), program(program) { }
+Generator::Generator(glue::Context& context, ProgramHandle handle)
+    : context(context), program(&context.programs[handle.id()]), programHandle(handle) { }
 
 Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
     : context(context) {
     currentScope = scope;
     if (scope->parseLocation().has_value())
         tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
-    program = &context.programs[scope->program().value().id()];
+    programHandle = scope->program().value();
+    program = &context.programs[programHandle.id()];
 }
 
 void Generator::advance() { tok += 1; }
@@ -33,7 +34,6 @@ void Generator::popExpressions(int_t n) {
 }
 
 void Generator::visitDeclaration() {
-    program->setStatus(ProgramStatus::SignatureCheckInProgress);
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
     }
@@ -47,7 +47,6 @@ void Generator::visitDeclaration() {
     } else {
         VERIFY_NOT_REACHED();
     }
-    program->setStatus(ProgramStatus::SignatureChecked);
 }
 
 void Generator::visitTemplateParameters() {
@@ -104,7 +103,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
 
     if (programParameters) {
         // add implicit parameters to program
-        while (program->parameters.size() < (int_t)parameterTypes.size())
+        while (program->parameters.size() < parameterTypes.size())
             program->parameters.push_back({ Word(), parameterTypes[program->parameters.size()], std::nullopt });
     }
 
@@ -157,7 +156,7 @@ void Generator::visitFunctionDeclaration() {
     if (tok->kind() == Token::BodyExpr) {
         advance();
         visitExpression();
-        program->m_type = topExpression().type();
+        program->setType(topExpression().type());
         VERIFY(tok->kind() == Token::ExpressionStmt);
         emitNode(NodeKind::ExpressionStmt, tok->location(), 1, NodeData { .empty {} });
     } else {

@@ -55,14 +55,14 @@ Value Generator::makeProgramValue(ProgramHandle targetHandle) {
 
 void Generator::buildParent(glue::DeclarationNode* parentNode) {
     if (parentNode->kind() == glue::DeclarationNode::Kind::Namespace) {
-        program->m_parent = program->addNamespaceLiteral(parentNode);
+        program->setParent(program->addNamespaceLiteral(parentNode));
         return;
     }
 
     ProgramHandle parentHandle = signatureCheck(context, parentNode);
     Program* parentProg = &context.programs[parentHandle.id()];
     if (!parentProg->isDependent()) {
-        program->m_parent = makeProgramValue(parentHandle);
+        program->setParent(makeProgramValue(parentHandle));
         return;
     }
 
@@ -77,10 +77,25 @@ void Generator::buildParent(glue::DeclarationNode* parentNode) {
     FoldState base = asFoldBase(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
-        program->constants[base.arguments[i].id()].type = type;
+        program->parameters[i].type = type;
     }
+    VERIFY(parentValue.kind() == ValueKind::Constant);
     program->constants[parentValue.id()].type = verifyType(fold(base, base.program->type()));
-    program->m_parent = parentValue;
+    program->setParent(parentValue);
+}
+
+void Generator::buildSelf() {
+    if (!program->isDependent()) {
+        program->setSelf(makeProgramValue(programHandle));
+        return;
+    }
+
+    int_t parameterCount = program->parameters.size();
+    std::vector<Value> arguments(parameterCount, INVALID_VALUE);
+    for (int_t i = 0; i < parameterCount; i++)
+        arguments[i] = Value(ValueKind::Parameter, i);
+    Type type = verifyType((Value)program->type());
+    program->setSelf(program->addParameterize(type, programHandle, arguments));
 }
 
 std::optional<Value> Generator::lookupInScope(glue::DeclarationNode* scope, Word name) {
@@ -214,18 +229,29 @@ FoldState Generator::asFoldBase(Value base) {
     return { baseProg, base, parameterizeArguments(base) };
 }
 
+FoldState Generator::selfFold() {
+    return asFoldBase((Value)program->self());
+}
+
+DeductionState Generator::selfDeduction() {
+    DeductionState state(program, program->parameters.size());
+    state.identityMap(program->parameters.size());
+    return state;
+}
+
 // pValue and aValue must be known to have the same type
 bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aValue) {
     if (pValue.kind() == ValueKind::Parameter) {
         int_t index = pValue.id();
-        if (state.isExplicitArgument(index))
-            return state.arguments[index] == aValue; // TODO: better comparison
-
         if (state.arguments[index] == INVALID_VALUE) {
             state.arguments[index] = aValue;
+            VERIFY(!state.isExplicitArgument(index));
             return true;
         }
-        return false; // TODO: compare with existing deduction
+        auto selfState = selfDeduction();
+        bool result = staticMatch(selfState, state.arguments[index], aValue);
+        state.expressionMatches.insert(state.expressionMatches.end(), selfState.expressionMatches.begin(), selfState.expressionMatches.end());
+        return result;
     }
 
     if (pValue.kind() == ValueKind::Constant) {
@@ -334,10 +360,12 @@ ProgramHandle Generator::signatureCheck(glue::Context& context, glue::Declaratio
     context.programs[scope->program().value().id()].m_name = scope->name();
 
     Generator g(context, scope);
+    g.program->setStatus(ProgramStatus::SignatureCheckInProgress);
     g.buildParent(scope->declaringNode());
-
     g.visitDeclaration();
-    return scope->program().value();
+    g.buildSelf();
+    g.program->setStatus(ProgramStatus::SignatureChecked);
+    return g.programHandle;
 }
 
 std::optional<Program*> Generator::getProgramLiteral(Value value) {
@@ -449,6 +477,7 @@ struct BuiltinGenerator : Generator {
     }
 
     ~BuiltinGenerator() {
+        buildSelf();
         program->setStatus(ProgramStatus::SignatureChecked);
         context.popScope();
     }
@@ -456,11 +485,11 @@ struct BuiltinGenerator : Generator {
 
 void Generator::generateBuiltins(glue::Context& context) {
     {
-        BuiltinGenerator g { context, BuiltinId::error_type };
+        BuiltinGenerator g { context, BuiltinId::type_type };
         g.program->setType(builtins::type_type);
     }
     {
-        BuiltinGenerator g { context, BuiltinId::type_type };
+        BuiltinGenerator g { context, BuiltinId::error_type };
         g.program->setType(builtins::type_type);
     }
     {

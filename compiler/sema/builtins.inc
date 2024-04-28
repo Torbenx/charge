@@ -5,9 +5,10 @@
 #define BUILTIN_TEMPLATE(name) BUILTIN(name, name##_template)
 #endif
 
+BUILTIN_TYPE(type)
+
 BUILTIN_TYPE(error)
 
-BUILTIN_TYPE(type)
 BUILTIN_TYPE(namespace)
 
 BUILTIN_TYPE(template_signature)

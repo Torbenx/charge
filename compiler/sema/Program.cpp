@@ -21,6 +21,7 @@ Value Program::addParameterize(Type type, ProgramHandle base, int_t firstArgumen
 }
 
 Value Program::addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments) {
+    VERIFY(!arguments.empty());
     auto firstIndex = parameterizeArguments.size();
     parameterizeArguments.insert(parameterizeArguments.end(), arguments.begin(), arguments.end());
     return addParameterize(type, base, firstIndex, arguments.size());
