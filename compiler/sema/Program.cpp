@@ -27,13 +27,17 @@ Value Program::addParameterize(Type type, ProgramHandle base, std::span<const Va
     return addParameterize(type, base, firstIndex, arguments.size());
 }
 
+int_t Program::importNode(Node* node) {
+    int_t size = node->subTreeSize();
+    expressions.insert(expressions.end(), node - size + 1, node + 1);
+    return expressions.size() - 1;
+}
+
 Value Program::addExpression(Node* expr) {
-    int_t size = expr->subTreeSize();
-    expressions.insert(expressions.end(), expr - size + 1, expr + 1);
     return add({
         .op = Opcode::Expression,
         .type = Expression(expr).type(),
-        .u = { .expressionIndex = (uint32_t)(expressions.size() - 1) },
+        .u = { .expressionIndex = (uint32_t)importNode(expr) },
     });
 }
 

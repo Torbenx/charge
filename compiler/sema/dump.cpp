@@ -65,7 +65,7 @@ struct Dumper {
 
 std::string Dumper::formatProgram(Program* base, ProgramHandle externHandle) {
     ProgramHandle translatedHandle = base->programTranslationBuffer[externHandle.id()];
-    return formatProgram(&context.programs[translatedHandle.id()]);
+    return formatProgram(context.program(translatedHandle));
 }
 
 std::string Dumper::formatProgram(Program* targetProg) {
@@ -91,7 +91,9 @@ std::string Dumper::formatProgram(Program* targetProg) {
 void Dumper::dumpNode(Node* node) {
     std::vector<Node*> children(node->reverseChildren().begin(), node->reverseChildren().end());
     std::reverse(children.begin(), children.end());
-    auto header = fmt::format("[{}]", formatValue(Expression(node).type()));
+    std::string header = "";
+    if (isExpression(node->kind()))
+        header = fmt::format("[{}]", formatValue(Expression(node).type()));
     if (children.empty()) {
         beginLine();
         output += header;
@@ -119,6 +121,19 @@ void Dumper::dumpNode(Node* node) {
 void Dumper::dumpProgram(Program* prog) {
     this->program = prog;
     dumpLine(formatProgram(prog) + ":");
+    dumpLine("parent = " + formatValue((Value)prog->m_parent.value_or(INVALID_VALUE)));
+    dumpLine("self = " + formatValue((Value)prog->m_self.value_or(INVALID_VALUE)));
+    dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+    switch (prog->kind()) {
+    case ProgramKind::Value:
+        dumpLine("value = " + formatValue(Value::fromUint(prog->m_subClassData)));
+        break;
+    case ProgramKind::Function:
+        dumpNode(static_cast<FunctionProgram*>(prog)->body());
+        break;
+    default:
+        break;
+    }
     for (int_t i = 0; i < (int_t)prog->constants.size(); i++) {
         const auto& c = prog->constants[i];
         std::string header = fmt::format("c{} = [{}]", i, formatValue(c.type));

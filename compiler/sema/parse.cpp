@@ -4,7 +4,7 @@
 namespace sema {
 
 Generator::Generator(glue::Context& context, ProgramHandle handle)
-    : context(context), program(&context.programs[handle.id()]), programHandle(handle) { }
+    : context(context), program(context.program(handle)), programHandle(handle) { }
 
 Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
     : context(context) {
@@ -12,25 +12,29 @@ Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
     if (scope->parseLocation().has_value())
         tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
     programHandle = scope->program().value();
-    program = &context.programs[programHandle.id()];
+    program = context.program(programHandle);
 }
 
 void Generator::advance() { tok += 1; }
 
 Expression Generator::topExpression(int_t n) {
+    return topNode(n);
+}
+
+Node* Generator::topNode(int_t n) {
     return &nodeScratch[(nodeStack.end() - n - 1)->nodeIndex];
 }
 
-void Generator::popExpression() {
+void Generator::popNode() {
     int_t size = nodeScratch.back().subTreeSize();
     for (int_t i = 0; i < size; i++)
         nodeScratch.pop_back();
     nodeStack.pop_back();
 }
 
-void Generator::popExpressions(int_t n) {
+void Generator::popNodes(int_t n) {
     for (int_t i = 0; i < n; i++)
-        popExpression();
+        popNode();
 }
 
 void Generator::visitDeclaration() {
@@ -38,6 +42,7 @@ void Generator::visitDeclaration() {
         visitTemplateParameters();
     }
     if (tok->kind() == Token::ObjectTypeDecl || tok->kind() == Token::StructTypeDecl) {
+        VERIFY(program->kind() == ProgramKind::Type);
         // VERIFY_NOT_REACHED();
         program->setType(builtins::type_type);
     } else if (tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl) {
@@ -85,7 +90,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
     if (tok->kind() != Token::ExpressionStmt) {
         if (oldParameterCount != (int_t)parameterTypes.size() && programParameters) {
             // 'type' contains implicitly created parameters.
-            // Converting the initializer to 'type' can never happend without them.
+            // Converting the initializer to 'type' can never happend without deducing them.
             VERIFY_NOT_REACHED();
         }
         visitExpression();
@@ -126,6 +131,9 @@ Program::Parameter Generator::visitTemplateParameter() {
 }
 
 void Generator::visitStaticVariableDeclaration() {
+    VERIFY(program->kind() == ProgramKind::Value);
+    auto* valueProgram = static_cast<ValueProgram*>(program);
+
     VERIFY(tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl);
     bool isVar = tok->kind() == Token::StaticVarDecl;
     advance();
@@ -133,14 +141,17 @@ void Generator::visitStaticVariableDeclaration() {
     auto info = visitVariableDeclaration(false);
     VERIFY(info.hasInitializer);
     program->setType(info.type);
-    program->setValue(makeExpressionValue());
+    valueProgram->setValue(makeExpressionValue());
 }
 
 void Generator::visitFunctionDeclaration() {
+    VERIFY(program->kind() == ProgramKind::Function);
+    auto* fnProgram = static_cast<FunctionProgram*>(program);
+
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
 
-    int_t firstStackEntry = nodeStack.size();
+    int_t stackSizeAtBegin = nodeStack.size();
 
     while (tok->kind() != Token::EmptyNode) {
         VERIFY(tok->kind() == Token::ImplicitKindParameter);
@@ -149,6 +160,7 @@ void Generator::visitFunctionDeclaration() {
         advance();
         auto info = visitVariableDeclaration(true);
         emitNode(NodeKind::LetDecl, nameLoc, info.hasInitializer ? 1 : 0, NodeData { .decl { .type = info.type } });
+        fnProgram->functionParameters.push_back({ name, info.type });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -158,7 +170,10 @@ void Generator::visitFunctionDeclaration() {
         visitExpression();
         program->setType(topExpression().type());
         VERIFY(tok->kind() == Token::ExpressionStmt);
-        emitNode(NodeKind::ExpressionStmt, tok->location(), 1, NodeData { .empty {} });
+        emitNode(NodeKind::Function, {}, nodeStack.size() - stackSizeAtBegin, NodeData { .empty {} });
+        VERIFY(nodeStack.size() == stackSizeAtBegin + 1);
+        fnProgram->setBody(topNode());
+        popNode();
     } else {
         std::optional<Type> type;
         if (tok->kind() == Token::ReturnType) {

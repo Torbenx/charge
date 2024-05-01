@@ -30,7 +30,7 @@ enum class ValueKind : uint8_t {
 };
 struct Value {
     constexpr Value()
-        : Value(BuiltinId::error_type) { }
+        : idBits(MAX_ID), kindBits(3) { }
     constexpr Value(ValueKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
     constexpr Value(BuiltinId id)

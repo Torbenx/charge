@@ -119,6 +119,19 @@ struct SignatureLiteralExpr : SemaExpr {
         VERIFY(c.u.signatureProgram == literal->program().value());
     }
 };
+struct FunctionSignatureExpr : SemaExpr {
+    std::unique_ptr<SemaExpr> signatureValue;
+
+    explicit FunctionSignatureExpr(std::unique_ptr<SemaExpr> signatureValue)
+        : signatureValue(std::move(signatureValue)) { }
+
+    void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
+        VERIFY(value.kind() == sema::ValueKind::Constant);
+        const auto& c = prog->constants[value.id()];
+        VERIFY(c.op == sema::Program::Opcode::FunctionSignatureOf);
+        signatureValue->check(ctx, prog, c.u.signatureValue);
+    }
+};
 
 struct SemaExprParser {
     glue::Context& context;
@@ -186,6 +199,12 @@ struct SemaExprParser {
                 glue::DeclarationNode* base = readNestedName();
                 consume(")");
                 return std::make_unique<SignatureLiteralExpr>(base);
+            }
+            if (id == "fnsigof") {
+                consume("(");
+                auto sigExpr = parse();
+                consume(")");
+                return std::make_unique<FunctionSignatureExpr>(std::move(sigExpr));
             }
         }
 
@@ -393,7 +412,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             auto tokenInfo = context.parseOutput.tokens[node.parseLocation()->id()];
             if (tokenInfo > whitespace) {
                 auto progHandle = sema::Generator::signatureCheck(context, &node);
-                program = &context.programs[progHandle.id()];
+                program = context.program(progHandle);
                 break;
             }
         }
@@ -402,8 +421,10 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
         if (word == words["expect-type"])
             expr->check(context, program, (sema::Value)program->type());
-        if (word == words["expect-value"])
-            expr->check(context, program, (sema::Value)program->value());
+        if (word == words["expect-value"]) {
+            VERIFY(program->kind() == sema::ProgramKind::Value);
+            expr->check(context, program, (sema::Value)static_cast<sema::ValueProgram*>(program)->value());
+        }
     }
 
     Command popCommand(Word cause) {

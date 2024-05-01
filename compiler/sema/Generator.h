@@ -107,9 +107,10 @@ struct Generator {
     Generator(glue::Context& context, glue::DeclarationNode* scope);
 
     void advance();
+    Node* topNode(int_t n = 0);
     Expression topExpression(int_t n = 0);
-    void popExpression();
-    void popExpressions(int_t n);
+    void popNode();
+    void popNodes(int_t n);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -140,7 +141,7 @@ struct Generator {
 
     Type typeOf(Value value);
     Type verifyType(Value value);
-    std::optional<Program*> getProgramLiteral(Value value);
+    void setConstantType(Value constant, Type type);
     std::span<Value> parameterizeArguments(Value value);
     static std::span<const ExternValue> parameterizeArguments(Program* targetProg, ExternValue base);
 
@@ -153,6 +154,9 @@ struct Generator {
     Value makeExpressionValue(Expression expr);
     Value makeProgramValue(ProgramHandle targetHandle);
     Type makeTemplateIdFor(ProgramHandle targetHandle);
+    Type typeOfNonDependentProgram(Value value);
+    Type typeOfNonDependentProgram(FoldState state);
+    Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
     void buildParent(glue::DeclarationNode* parentDeclaration);
     void buildSelf();
 

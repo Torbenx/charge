@@ -4,11 +4,12 @@
 
 namespace sema {
 
-#define ENUMERATE_NODE_KINDS       \
-    KIND(ReferenceExpr, Reference) \
-    KIND(ConstantExpr, Pure)       \
-    KIND(LetDecl, Statement)       \
-    KIND(ExpressionStmt, Statement)
+#define ENUMERATE_NODE_KINDS        \
+    KIND(ReferenceExpr, Reference)  \
+    KIND(ConstantExpr, Pure)        \
+    KIND(LetDecl, Statement)        \
+    KIND(ExpressionStmt, Statement) \
+    KIND(Function, Statement)
 
 enum class NodeKind : uint8_t {
 #define KIND(kind, cat) kind,
@@ -55,7 +56,8 @@ union NodeData {
     struct {
         Type type;
     } decl;
-    struct { } empty;
+    struct {
+    } empty;
 };
 
 struct Node {

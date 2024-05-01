@@ -47,9 +47,12 @@ fn f3(t: type) => X;
 // expect-type type;
 fn f4(t: type = X) => X;
 
-fn t1(x: X) => X;
+fn t1() => X;
 fn t2(x) => X;
-// expect-type type ;; This is wrong!
+template(T: type) fn t3() => X;
+// expect-type @fnsigof(t1)
 static tt1 = t1;
 // expect-type template_id{@sigof(t2)}
 static tt2 = t2;
+// expect-type @fnsigof(t3{X})
+static tt3 = t3{X};

@@ -10,7 +10,7 @@ struct Context {
     parse::Output parseOutput;
     WordStringTable wordTable { parse::words };
     PageBumpAllocator<DeclarationNode> storage;
-    PageBumpAllocator<sema::Program> programs;
+    PageBumpAllocator<sema::ProgramUnion> programs;
     PageBumpAllocator<sema::ProgramHandle> identityTranslation;
     DeclarationNode* m_currentNode = nullptr;
 
@@ -63,13 +63,17 @@ struct Context {
         return storage.allocate();
     }
 
-    sema::ProgramHandle newProgram() {
+    sema::ProgramHandle newProgram(sema::ProgramKind kind) {
         sema::ProgramHandle result = { (uint32_t)programs.size() };
         auto* prog = programs.allocate();
         *identityTranslation.allocate() = result;
-        std::construct_at(prog);
-        prog->programTranslationBuffer = identityTranslation.data();
+        std::construct_at(prog, kind);
+        prog->get().programTranslationBuffer = identityTranslation.data();
         return result;
+    }
+
+    sema::Program* program(sema::ProgramHandle handle) {
+        return &programs[handle.id()].get();
     }
 };
 

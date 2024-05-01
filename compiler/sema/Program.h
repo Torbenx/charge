@@ -58,7 +58,6 @@ enum class ProgramKind : uint8_t {
 
 #define ENUMERATE_PROGRAM_OPS               \
     PROGRAM_OP(TemplateSignatureOf)         \
-    PROGRAM_OP(TemplateFunctionSignatureOf) \
     PROGRAM_OP(FunctionSignatureOf)         \
     PROGRAM_OP(NamespaceLiteral)            \
     PROGRAM_OP(RemoteExpression)            \
@@ -66,10 +65,6 @@ enum class ProgramKind : uint8_t {
     PROGRAM_OP(Parameterize)
 
 struct Program {
-    ProgramStatus m_status = ProgramStatus::Unchecked;
-    ProgramKind m_kind;
-    Word m_name;
-
     enum class Opcode : uint8_t {
 #define PROGRAM_OP(kind) kind,
         ENUMERATE_PROGRAM_OPS
@@ -114,10 +109,6 @@ struct Program {
         }
     };
 
-    std::vector<Constant> constants;
-    std::vector<Node> expressions;
-    std::vector<Value> parameterizeArguments;
-
     ExternValue typeOf(ExternValue v) {
         if (v.kind() == ValueKind::Parameter)
             return parameters[v.id()].type;
@@ -125,6 +116,7 @@ struct Program {
         return constants[v.id()].type;
     }
 
+    int_t importNode(Node* node);
     Value add(Constant);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
     Value addTemplateSignatureOf(Type type, ProgramHandle prog);
@@ -137,9 +129,6 @@ struct Program {
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }
 
-    // value after substituitng template arguments
-    ExternValue value() const { return m_value.value(); }
-
     ExternValue parent() const { return m_parent.value(); }
 
     ExternValue self() const { return m_self.value(); }
@@ -147,10 +136,6 @@ struct Program {
     void setType(Type type) {
         VERIFY(!m_type.has_value());
         m_type = type;
-    }
-    void setValue(Value value) {
-        VERIFY(!m_value.has_value());
-        m_value = value;
     }
     void setParent(Value value) {
         VERIFY(!m_parent.has_value());
@@ -161,21 +146,10 @@ struct Program {
         m_self = value;
     }
 
-private:
-    std::optional<ExternValue> m_type;
-    std::optional<ExternValue> m_value;
-    std::optional<ExternValue> m_parent;
-    std::optional<ExternValue> m_self;
-
-public:
-    std::vector<Parameter> parameters;
-    uint32_t inheritedParameterCount = 0;
-
-    const ProgramHandle* programTranslationBuffer = nullptr;
-
     Word name() const { return m_name; }
     ProgramStatus status() const { return m_status; }
     void setStatus(ProgramStatus status) { m_status = status; }
+    ProgramKind kind() const { return m_kind; }
     bool isDependent() const {
         return !parameters.empty();
     }
@@ -184,7 +158,110 @@ public:
     }
 
     void dump(glue::Context&);
+
+public:
+    ProgramStatus m_status = ProgramStatus::Unchecked;
+    ProgramKind m_kind = ProgramKind::Value;
+    uint16_t inheritedParameterCount = 0;
+    Word m_name;
+
+    std::vector<Parameter> parameters;
+    // Note: Typically references to constants should be avoided
+    //       because they become invalid when this vector grows in capacity.
+    std::vector<Constant> constants;
+    std::vector<Node> expressions;
+    std::vector<Value> parameterizeArguments;
+
+    const ProgramHandle* programTranslationBuffer = nullptr;
+
+protected:
+    static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
+
+    std::optional<ExternValue> m_type;
+    uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
+    std::optional<ExternValue> m_parent;
+    std::optional<ExternValue> m_self;
+
+    friend struct Dumper;
 };
+static_assert(sizeof(Program) == 128);
+
+struct ValueProgram : Program {
+    void setValue(Value value) {
+        VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
+        m_subClassData = value.toUint();
+    }
+
+    ExternValue value() const {
+        VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
+        return Value::fromUint(m_subClassData);
+    }
+};
+
+struct FunctionProgram : Program {
+    struct FunctionParameter {
+        Word name;
+        Type type;
+    };
+
+    void setBody(Node* node) {
+        VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
+        m_subClassData = importNode(node);
+    }
+    Node* body() {
+        VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
+        return &expressions[m_subClassData];
+    }
+
+    std::vector<FunctionParameter> functionParameters;
+};
+
+struct TypeProgram : Program {
+    struct Member { };
+    std::vector<Member> members;
+};
+
+union ProgramUnion {
+    ValueProgram value;
+    FunctionProgram function;
+    TypeProgram type;
+
+    ProgramUnion(ProgramKind kind) {
+        switch (kind) {
+        case ProgramKind::Value:
+            std::construct_at(&value);
+            break;
+        case ProgramKind::Function:
+            std::construct_at(&function);
+            break;
+        case ProgramKind::Type:
+            std::construct_at(&type);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        value.m_kind = kind;
+    }
+
+    Program& get() { return value; }
+
+    ~ProgramUnion() {
+        switch (value.kind()) {
+        case ProgramKind::Value:
+            std::destroy_at(&value);
+            break;
+        case ProgramKind::Function:
+            std::destroy_at(&function);
+            break;
+        case ProgramKind::Type:
+            std::destroy_at(&type);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+};
+static_assert(sizeof(ProgramUnion) == 152);
 
 std::string_view nameString(Program::Opcode op);
 
