@@ -4,6 +4,10 @@ struct X: { }
 // expect-type type
 static XX: type = X;
 
+namespace OuterNS: { }
+// expect-type namespace
+static ns = OuterNS;
+
 template(x: XX) struct Y: { }
 // expect-type template_id{@templsig(Y)}
 static Z = Y;
@@ -79,3 +83,6 @@ static func4ref = func4{X};
 static call4direct = func4{X}(X);
 // expect-type type
 static call4indirect = func4ref(X);
+
+// expect-type type
+static nested = func2(func1());

@@ -75,6 +75,16 @@ struct Context {
     sema::Program* program(sema::ProgramHandle handle) {
         return &programs[handle.id()].get();
     }
+
+    glue::DeclarationNode* getNamespace(sema::Value value) {
+        VERIFY(value.kind() == sema::ValueKind::Namespace);
+        return &storage[value.id()];
+    }
+
+    sema::Value namespaceValue(glue::DeclarationNode* node) {
+        int_t id = node - storage.data();
+        return sema::Value(sema::ValueKind::Namespace, id);
+    }
 };
 
 }

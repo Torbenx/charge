@@ -466,6 +466,7 @@ LinearState namespace_declaration_id() then error
     identifier
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::Namespace
+        emitToken TokenKind::NamespaceDecl
         next after_namespace_declaration_id
 LinearState after_namespace_declaration_id() then error
     punctuation :

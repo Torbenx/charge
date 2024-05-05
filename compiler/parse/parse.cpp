@@ -3410,13 +3410,18 @@ namespace_declaration_id$no_emit:
         declarationBegin = state.parseOutput.currentToken();
         // commitDeclaration DeclarationKind::Namespace
         commitDeclaration<DeclarationKind::Namespace>(Word::fromUint(tokenData), declarationBegin, state);
+        // emitToken TokenKind::NamespaceDecl
+        carriedEmitTokenKind = TokenKind::NamespaceDecl;
         // next after_namespace_declaration_id
-        goto after_namespace_declaration_id$no_emit;
+        goto after_namespace_declaration_id$with_emit;
     }
     // then error
     goto error$as_then;
 
     // LinearState after_namespace_declaration_id
+after_namespace_declaration_id$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, tokenData, state);
+    tokenData = 0;
 after_namespace_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;

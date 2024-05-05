@@ -44,6 +44,15 @@ struct Expression : NodeHandle {
     ExprData data() const { return node()->u.expr.u; }
 };
 
+struct Parameterize {
+    ProgramHandle base;
+    std::span<Value> arguments;
+};
+struct RemoteExpression {
+    Value base;
+    uint32_t expressionIndex;
+};
+
 enum class ProgramStatus : uint8_t {
     Unchecked,
     SignatureCheckInProgress,
@@ -56,41 +65,67 @@ enum class ProgramKind : uint8_t {
     Function,
 };
 
-#define ENUMERATE_PROGRAM_OPS               \
-    PROGRAM_OP(TemplateSignature)         \
-    PROGRAM_OP(FunctionSignature)         \
-    PROGRAM_OP(NamespaceLiteral)            \
-    PROGRAM_OP(RemoteExpression)            \
-    PROGRAM_OP(Expression)                  \
-    PROGRAM_OP(Parameterize)
+struct DataValueIterator {
+    using value_type = Value;
+    using difference_type = int_t;
+
+    DataValueIterator() = default;
+    DataValueIterator(Value* begin, Value* position)
+        : m_begin(begin), m_pos(position) { }
+    DataValueIterator(const DataValueIterator&) = default;
+    DataValueIterator(DataValueIterator&&) = default;
+    DataValueIterator& operator=(const DataValueIterator&) = default;
+    DataValueIterator& operator=(DataValueIterator&&) = default;
+
+    Value getValue() const {
+        return Value(m_pos->kind(), m_pos - m_begin);
+    }
+    DataValueIterator& operator++() {
+        advance();
+        return *this;
+    }
+    DataValueIterator operator++(int) {
+        DataValueIterator copy = *this;
+        advance();
+        return copy;
+    }
+    Value operator*() const { return getValue(); }
+
+    auto operator<=>(const DataValueIterator& other) const {
+        VERIFY(other.m_begin == m_begin);
+        return m_pos <=> other.m_pos;
+    }
+    bool operator==(const DataValueIterator&) const = default;
+
+private:
+    void advance() {
+        switch (m_pos->kind()) {
+        case ValueKind::Parameterize:
+            m_pos += 2 + m_pos->id();
+            break;
+        case ValueKind::RemoteExpression:
+            m_pos += 2;
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+    Value* m_begin = nullptr;
+    Value* m_pos = nullptr;
+};
+
+struct DataValueRange {
+    DataValueIterator begin() const {
+        return { values.data(), values.data() };
+    }
+    DataValueIterator end() const {
+        return { values.data(), values.data() + values.size() };
+    }
+
+    std::span<Value> values;
+};
 
 struct Program {
-    enum class Opcode : uint8_t {
-#define PROGRAM_OP(kind) kind,
-        ENUMERATE_PROGRAM_OPS
-#undef PROGRAM_OP
-    };
-    struct Constant {
-        Opcode op;
-        union {
-            uint64_t data;
-            glue::DeclarationNode* declarationNode;
-            uint32_t expressionIndex; // offset into expressions
-            ProgramHandle templateSignature;
-            Value functionSignature; // either a program or a parameterize constant
-            struct {
-                Value base; // either a program or a parameterize constant
-                uint32_t expressionIndex; // offset into the target programs expressions
-            } remoteExpression;
-            struct {
-                ProgramHandle base; // always a dependent program literal
-                uint16_t firstArgumentIndex; // offset into parameterizeArguments
-                uint16_t argumentCount;
-            } parameterize;
-        } u;
-    };
-    static_assert(sizeof(Constant) == 16);
-
     struct Parameter {
         Word name;
         ExternValue type;
@@ -99,24 +134,22 @@ struct Program {
         bool implicit() const { return name.empty(); }
     };
 
-    struct ParameterizeArgumentSetter {
-        Program* program = nullptr;
-        int_t firstIndex = 0;
-
-        void set(int_t index, Value value) {
-            program->parameterizeArguments[firstIndex + index] = value;
-        }
-    };
-
     int_t importNode(Node* node);
-    Value add(Constant);
-    Value addNamespaceLiteral(glue::DeclarationNode* decl);
-    Value addTemplateSignature(ProgramHandle prog);
-    Value addFunctionSignature(Value base);
     Value addExpression(Node* expr);
     Value addRemoteExpression(Value base, uint32_t expressionIndex);
-    Value addParameterize(ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
     Value addParameterize(ProgramHandle base, std::span<const Value> arguments);
+    RemoteExpression getRemoteExpression(ExternValue value) {
+        VERIFY(value.kind() == ValueKind::RemoteExpression);
+        Value* begin = &valueData[value.id()];
+        return RemoteExpression { begin[1], begin[0].id() };
+    }
+    Parameterize getParameterize(ExternValue value) {
+        // TODO: Returning a span referencing valueData maybe a bad idea
+        VERIFY(value.kind() == ValueKind::Parameterize);
+        Value* begin = &valueData[value.id()];
+        int_t argumentCount = begin[0].id();
+        return Parameterize { begin[1].program(), { begin + 2, (size_t)argumentCount } };
+    }
 
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }
@@ -150,6 +183,12 @@ struct Program {
     }
 
     void dump(glue::Context&);
+    ChildrenRange topLevelNodes() {
+        return ChildrenRange(expressions.data() + expressions.size(), expressions.size() + 1);
+    }
+    DataValueRange dataValues() {
+        return DataValueRange { valueData };
+    }
 
 public:
     ProgramStatus m_status = ProgramStatus::Unchecked;
@@ -158,11 +197,8 @@ public:
     Word m_name;
 
     std::vector<Parameter> parameters;
-    // Note: Typically references to constants should be avoided
-    //       because they become invalid when this vector grows in capacity.
-    std::vector<Constant> constants;
     std::vector<Node> expressions;
-    std::vector<Value> parameterizeArguments;
+    std::vector<Value> valueData;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
 
@@ -176,7 +212,7 @@ protected:
 
     friend struct Dumper;
 };
-static_assert(sizeof(Program) == 128);
+static_assert(sizeof(Program) == 104);
 
 struct ValueProgram : Program {
     void setValue(Value value) {
@@ -253,8 +289,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 152);
-
-std::string_view nameString(Program::Opcode op);
+static_assert(sizeof(ProgramUnion) == 128);
 
 }

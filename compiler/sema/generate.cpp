@@ -55,31 +55,46 @@ Value Generator::makeExpressionValue(Expression expr) {
         return program->addExpression(expr);
 }
 
+Value Generator::makeTemplateSignature(ProgramHandle progHandle) {
+    return Value(ValueKind::TemplateSignature, progHandle.id());
+}
+
+Value Generator::makeFunctionSignature(Value value) {
+    if (value.kind() == ValueKind::Program) {
+        VERIFY(!context.program(value.program())->isDependent());
+        return Value(ValueKind::FunctionSignature$Program, value.id());
+    }
+    if (value.kind() == ValueKind::Parameterize) {
+        return Value(ValueKind::FunctionSignature$Parameterize, value.id());
+    }
+    VERIFY_NOT_REACHED();
+}
+
 Type Generator::makeTemplateIdFor(ProgramHandle targetHandle) {
     Program* targetProg = context.program(targetHandle);
     VERIFY(targetProg->isTemplate());
-    std::array arguments { program->addTemplateSignature(targetHandle) };
+    std::array arguments { makeTemplateSignature(targetHandle) };
     return verifyType(program->addParameterize(builtins::template_id_template.program(), arguments));
 }
 
 Value Generator::makeProgramValue(ProgramHandle targetHandle) {
     Program* targetProg = context.program(targetHandle);
     if (targetProg->isDependent() && !targetProg->isTemplate()) {
-        Value result = program->addParameterize(targetHandle, 0, targetProg->inheritedParameterCount);
-        return result;
+        auto parent = program->getParameterize((Value)program->parent());
+        return program->addParameterize(targetHandle, parent.arguments.subspan(0, targetProg->inheritedParameterCount));
     }
-    return Value(ValueKind::Program, targetHandle.id());
+    return Value(targetHandle);
 }
 
 Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arguments) {
     if (arguments.empty())
-        return Value(ValueKind::Program, base.id());
+        return Value(base);
     return program->addParameterize(base, arguments);
 }
 
 void Generator::buildParent(glue::DeclarationNode* parentNode) {
     if (parentNode->kind() == glue::DeclarationNode::Kind::Namespace) {
-        program->setParent(program->addNamespaceLiteral(parentNode));
+        program->setParent(context.namespaceValue(parentNode));
         return;
     }
 
@@ -133,7 +148,7 @@ Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
     using Kind = glue::DeclarationNode::Kind;
     switch (target->kind()) {
     case Kind::Namespace:
-        return program->addNamespaceLiteral(target);
+        return context.namespaceValue(target);
     case Kind::Type:
     case Kind::Function: {
         return makeProgramValue(signatureCheck(context, target));
@@ -224,19 +239,15 @@ Generator::CallBase Generator::resolveCallBase() {
             state.identityMap(baseProg->inheritedParameterCount);
             popNode();
             return { std::move(state) };
-        } else if (baseValue.kind() == ValueKind::Constant) {
-            auto baseValueConst = program->constants[baseValue.id()];
-            if (baseValueConst.op == Program::Opcode::Parameterize) {
-                ProgramHandle baseProgHandle = baseValueConst.u.parameterize.base;
-                Program* baseProg = context.program(baseProgHandle);
-                auto arguments = parameterizeArguments(baseValue);
-                VERIFY(baseProg->parameters.size() == arguments.size());
-                DeductionState state(baseProg, baseProgHandle, arguments.size());
-                for (int_t i = 0; i < (int_t)arguments.size(); i++)
-                    state.explicitArgument(i, arguments[i]);
-                popNode();
-                return { std::move(state) };
-            }
+        } else if (baseValue.kind() == ValueKind::Parameterize) {
+            auto param = program->getParameterize(baseValue);
+            Program* baseProg = context.program(param.base);
+            VERIFY(baseProg->parameters.size() == param.arguments.size());
+            DeductionState state(baseProg, param.base, param.arguments.size());
+            for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
+                state.explicitArgument(i, param.arguments[i]);
+            popNode();
+            return { std::move(state) };
         }
     }
     VERIFY_NOT_REACHED();
@@ -288,12 +299,9 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Value base) {
         if (baseProg->isDependent())
             return std::nullopt;
         return FoldBase { baseProg, base.program(), base, {} };
-    } else if (base.kind() == ValueKind::Constant) {
-        auto baseConst = program->constants[base.id()];
-        if (baseConst.op == Program::Opcode::Parameterize) {
-            ProgramHandle baseProg = baseConst.u.parameterize.base;
-            return FoldBase { context.program(baseProg), baseProg, base, parameterizeArguments(base) };
-        }
+    } else if (base.kind() == ValueKind::Parameterize) {
+        auto param = program->getParameterize(base);
+        return FoldBase { context.program(param.base), param.base, base, param.arguments };
     }
     return std::nullopt;
 }
@@ -323,49 +331,44 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         return result;
     }
 
-    if (pValue.kind() == ValueKind::Constant) {
-        auto pConst = state.program->constants[pValue.id()];
-        if (pConst.op == Program::Opcode::Expression || pConst.op == Program::Opcode::RemoteExpression) {
-            // TODO: check that the expression does not contain any deduced arguments
-            state.expressionMatches.push_back({ pValue, aValue });
-            return true;
-        }
+    if (pValue.kind() == ValueKind::Expression || pValue.kind() == ValueKind::RemoteExpression) {
+        // TODO: check that the expression does not contain any deduced arguments
+        state.expressionMatches.push_back({ pValue, aValue });
+        return true;
     }
-    if (aValue.kind() == ValueKind::Constant) {
-        auto aConst = program->constants[aValue.id()];
-        if (aConst.op == Program::Opcode::Expression || aConst.op == Program::Opcode::RemoteExpression) {
-            state.expressionMatches.push_back({ pValue, aValue });
-            return true;
-        }
+    if (aValue.kind() == ValueKind::Expression || aValue.kind() == ValueKind::RemoteExpression) {
+        state.expressionMatches.push_back({ pValue, aValue });
+        return true;
     }
+
+    auto comparePrograms = [&state](ProgramHandle pProg, ProgramHandle aProg) {
+        return state.program->programTranslationBuffer[pProg.id()] == aProg;
+    };
 
     if (pValue.kind() != aValue.kind())
         return false;
-    if (pValue.kind() == ValueKind::Program)
-        return state.program->programTranslationBuffer[pValue.id()] == aValue.program();
-    VERIFY(pValue.kind() == ValueKind::Constant);
-    auto pConst = state.program->constants[pValue.id()];
-    auto aConst = program->constants[aValue.id()];
-
-    if (pConst.op != aConst.op)
-        return false;
-    switch (pConst.op) {
-    case Program::Opcode::NamespaceLiteral:
-        return pConst.u.declarationNode == aConst.u.declarationNode;
-    case Program::Opcode::TemplateSignature:
-        return pConst.u.templateSignature == aConst.u.templateSignature; // TODO: different programs can have the same signature
-    case Program::Opcode::FunctionSignature:
-        return staticMatch(state, pConst.u.functionSignature, aConst.u.functionSignature); // TODO: different programs can have the same signature
-    case Program::Opcode::Parameterize: {
-        const auto& pPara = pConst.u.parameterize;
-        const auto& aPara = aConst.u.parameterize;
-        if (pPara.base != aPara.base)
+    switch (pValue.kind()) {
+    case ValueKind::Program:
+        return comparePrograms(Value(pValue).program(), aValue.program());
+    case ValueKind::Namespace:
+        return context.getNamespace((Value)pValue) == context.getNamespace(aValue);
+    case ValueKind::TemplateSignature:
+        return comparePrograms(Value(pValue).templateSignatureProgram(), aValue.templateSignatureProgram()); // TODO: different programs can have the same signature
+    case ValueKind::FunctionSignature$Program:
+        return comparePrograms(Value(pValue).functionSignatureProgram(), aValue.functionSignatureProgram()); // TODO: different programs can have the same signature
+    case ValueKind::FunctionSignature$Parameterize:
+        // TODO: different programs can have the same signature
+        pValue = Value(pValue).functionSignatureBaseValue();
+        aValue = aValue.functionSignatureBaseValue();
+        [[fallthrough]];
+    case ValueKind::Parameterize: {
+        auto pPara = state.program->getParameterize(pValue);
+        auto aPara = program->getParameterize(aValue);
+        if (!comparePrograms(pPara.base, aPara.base))
             return false;
-        VERIFY(pPara.argumentCount == aPara.argumentCount);
-        for (int_t i = 0; i < (int_t)pPara.argumentCount; i++) {
-            ExternValue pArgument = state.program->parameterizeArguments[pPara.firstArgumentIndex + i];
-            Value aArgument = program->parameterizeArguments[aPara.firstArgumentIndex + i];
-            if (!staticMatch(state, pArgument, aArgument))
+        VERIFY(pPara.arguments.size() == aPara.arguments.size());
+        for (int_t i = 0; i < (int_t)pPara.arguments.size(); i++) {
+            if (!staticMatch(state, pPara.arguments[i], aPara.arguments[i]))
                 return false;
         }
         return true;
@@ -380,33 +383,33 @@ Value Generator::fold(Value base, ExternValue v) {
 }
 
 Value Generator::fold(FoldBase base, ExternValue v) {
-    if (v.kind() == ValueKind::Program)
-        return makeProgramValue(base.program->programTranslationBuffer[v.id()]);
-    if (v.kind() == ValueKind::Parameter)
+    auto foldProgram = [&base](ProgramHandle handle) {
+        return base.program->programTranslationBuffer[handle.id()];
+    };
+    switch (v.kind()) {
+    case ValueKind::Program:
+        return makeProgramValue(foldProgram(Value(v).program()));
+    case ValueKind::Parameter:
         return base.arguments[v.id()];
-    VERIFY(v.kind() == ValueKind::Constant);
-
-    auto vConst = base.program->constants[v.id()];
-
-    switch (vConst.op) {
-    case Program::Opcode::NamespaceLiteral:
-        return program->addNamespaceLiteral(vConst.u.declarationNode);
-    case Program::Opcode::TemplateSignature:
-        return program->addTemplateSignature(vConst.u.templateSignature);
-    case Program::Opcode::FunctionSignature:
-        return program->addFunctionSignature(fold(base, vConst.u.functionSignature));
-    case Program::Opcode::RemoteExpression: {
-        Value exprBase = fold(base, vConst.u.remoteExpression.base);
-        return program->addRemoteExpression(exprBase, vConst.u.remoteExpression.expressionIndex);
+    case ValueKind::Namespace:
+        return (Value)v; // TODO: translate?
+    case ValueKind::TemplateSignature:
+        return makeTemplateSignature(foldProgram(Value(v).templateSignatureProgram()));
+    case ValueKind::FunctionSignature$Program:
+    case ValueKind::FunctionSignature$Parameterize:
+        return makeFunctionSignature(fold(base, Value(v).functionSignatureBaseValue()));
+    case ValueKind::RemoteExpression: {
+        RemoteExpression expr = base.program->getRemoteExpression(v);
+        return program->addRemoteExpression(fold(base, expr.base), expr.expressionIndex);
     }
-    case Program::Opcode::Expression:
-        return program->addRemoteExpression(base.value, vConst.u.expressionIndex);
-    case Program::Opcode::Parameterize: {
-        auto externArgs = parameterizeArguments(base.program, v);
-        std::vector<Value> foldedArgs(externArgs.size(), INVALID_VALUE);
-        for (int_t argIndex = 0; argIndex < (int_t)externArgs.size(); argIndex++)
-            foldedArgs[argIndex] = fold(base, externArgs[argIndex]);
-        return program->addParameterize(vConst.u.parameterize.base, foldedArgs);
+    case ValueKind::Expression:
+        return program->addRemoteExpression(base.value, Value(v).expressionIndex());
+    case ValueKind::Parameterize: {
+        auto externPara = base.program->getParameterize(v);
+        std::vector<Value> foldedArgs;
+        for (auto arg : externPara.arguments)
+            foldedArgs.push_back(fold(base, arg));
+        return program->addParameterize(foldProgram(externPara.base), foldedArgs);
     }
     default:
         VERIFY_NOT_REACHED();
@@ -447,46 +450,24 @@ ProgramHandle Generator::signatureCheck(glue::Context& context, glue::Declaratio
     return g.programHandle;
 }
 
-std::span<Value> Generator::parameterizeArguments(Value value) {
-    VERIFY(value.kind() == ValueKind::Constant);
-    auto vConst = program->constants[value.id()];
-    VERIFY(vConst.op == Program::Opcode::Parameterize);
-    auto param = vConst.u.parameterize;
-    return std::span<Value>(&program->parameterizeArguments[param.firstArgumentIndex], param.argumentCount);
-}
-
-std::span<const ExternValue> Generator::parameterizeArguments(Program* targetProg, ExternValue value) {
-    VERIFY(value.kind() == ValueKind::Constant);
-    auto vConst = targetProg->constants[value.id()];
-    VERIFY(vConst.op == Program::Opcode::Parameterize);
-    const auto param = vConst.u.parameterize;
-    return std::span<const ExternValue>(reinterpret_cast<const ExternValue*>(&targetProg->parameterizeArguments[param.firstArgumentIndex]), param.argumentCount);
-}
-
 Type Generator::typeOf(Value value) {
     switch (value.kind()) {
-    case ValueKind::Constant: {
-        auto constant = program->constants[value.id()];
-        switch (constant.op) {
-        case Program::Opcode::TemplateSignature:
-            return builtins::template_signature_type;
-        case Program::Opcode::FunctionSignature:
-            return builtins::function_signature_type;
-        case Program::Opcode::NamespaceLiteral:
-            return builtins::namespace_type;
-        case Program::Opcode::Expression:
-            return Expression(&program->expressions[constant.u.expressionIndex]).type();
-        case Program::Opcode::RemoteExpression: {
-            auto rExpr = constant.u.remoteExpression;
-            auto base = asFoldBase(rExpr.base);
-            return verifyType(fold(base, Expression(&base.program->expressions[rExpr.expressionIndex]).type()));
-        }
-        case Program::Opcode::Parameterize:
-            return typeOfNonDependentProgram(value);
-        default:
-            VERIFY_NOT_REACHED();
-        }
+    case ValueKind::TemplateSignature:
+        return builtins::template_signature_type;
+    case ValueKind::FunctionSignature$Program:
+    case ValueKind::FunctionSignature$Parameterize:
+        return builtins::function_signature_type;
+    case ValueKind::Namespace:
+        return builtins::namespace_type;
+    case ValueKind::Expression:
+        return Expression(&program->expressions[value.expressionIndex()]).type();
+    case ValueKind::RemoteExpression: {
+        auto rExpr = program->getRemoteExpression(value);
+        auto base = asFoldBase(rExpr.base);
+        return verifyType(fold(base, Expression(&base.program->expressions[rExpr.expressionIndex]).type()));
     }
+    case ValueKind::Parameterize:
+        return typeOfNonDependentProgram(value);
     case ValueKind::Parameter:
         return parameterTypes[value.id()];
     case ValueKind::Program: {
@@ -506,7 +487,7 @@ Type Generator::typeOfNonDependentProgram(Value value) {
 
 Type Generator::typeOfNonDependentProgram(FoldBase base) {
     if (base.program->kind() == ProgramKind::Function) {
-        std::array arguments { program->addFunctionSignature(base.value) };
+        std::array arguments { makeFunctionSignature(base.value) };
         return verifyType(program->addParameterize(builtins::function_id_template.program(), arguments));
     }
     return verifyType(fold(base, base.program->type()));
@@ -514,13 +495,6 @@ Type Generator::typeOfNonDependentProgram(FoldBase base) {
 
 Type Generator::verifyType(Value value) {
     switch (value.kind()) {
-    case ValueKind::Constant: {
-        VERIFY(typeOf(value) == builtins::type_type);
-        return (Type)value;
-    }
-    case ValueKind::Parameter:
-        VERIFY(parameterTypes[value.id()] == builtins::type_type);
-        return (Type)value;
     case ValueKind::Program: {
         Program* valueProg = context.program(value.program());
         VERIFY(!valueProg->isTemplate());
@@ -529,7 +503,8 @@ Type Generator::verifyType(Value value) {
         return (Type)value;
     }
     default:
-        VERIFY_NOT_REACHED();
+        VERIFY(typeOf(value) == builtins::type_type);
+        return (Type)value;
     }
 }
 

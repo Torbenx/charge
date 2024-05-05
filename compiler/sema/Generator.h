@@ -153,8 +153,16 @@ struct Generator {
 
     Type typeOf(Value value);
     Type verifyType(Value value);
-    std::span<Value> parameterizeArguments(Value value);
-    static std::span<const ExternValue> parameterizeArguments(Program* targetProg, ExternValue base);
+
+    Value makeTemplateSignature(ProgramHandle handle);
+    Value makeFunctionSignature(Value value);
+    Value makeExpressionValue();
+    Value makeExpressionValue(Expression expr);
+    Value makeProgramValue(ProgramHandle targetHandle);
+    Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
+    Type makeTemplateIdFor(ProgramHandle targetHandle);
+    Type typeOfNonDependentProgram(Value value);
+    Type typeOfNonDependentProgram(FoldBase base);
 
     Value generateDeclarationLiteral(glue::DeclarationNode* target);
     std::optional<Value> lookupInScope(glue::DeclarationNode* scope, Word name);
@@ -163,13 +171,6 @@ struct Generator {
     CallBase resolveCallBase();
     void generateCallExpr(CallBase base, int_t argumentCount);
 
-    Value makeExpressionValue();
-    Value makeExpressionValue(Expression expr);
-    Value makeProgramValue(ProgramHandle targetHandle);
-    Type makeTemplateIdFor(ProgramHandle targetHandle);
-    Type typeOfNonDependentProgram(Value value);
-    Type typeOfNonDependentProgram(FoldBase base);
-    Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
     void buildParent(glue::DeclarationNode* parentDeclaration);
     void buildSelf();
 

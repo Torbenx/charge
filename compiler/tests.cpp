@@ -74,15 +74,14 @@ struct ParameterizeExpr : SemaExpr {
         : base(base), arguments(std::move(args)) { }
 
     void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Constant);
-        const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::Parameterize);
+        VERIFY(value.kind() == sema::ValueKind::Parameterize);
+        auto parameterize = prog->getParameterize(value);
 
-        VERIFY(c.u.parameterize.base == base->program().value());
+        VERIFY(parameterize.base == base->program().value());
 
-        VERIFY(c.u.parameterize.argumentCount == arguments.size());
+        VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
-            arguments[i]->check(ctx, prog, prog->parameterizeArguments[c.u.parameterize.firstArgumentIndex + i]);
+            arguments[i]->check(ctx, prog, parameterize.arguments[i]);
     }
 };
 struct LiteralExpr : SemaExpr {
@@ -113,10 +112,8 @@ struct SignatureLiteralExpr : SemaExpr {
         : literal(literal) { }
 
     void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Constant);
-        const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::TemplateSignature);
-        VERIFY(c.u.templateSignature == literal->program().value());
+        VERIFY(value.kind() == sema::ValueKind::TemplateSignature);
+        VERIFY(value.templateSignatureProgram() == literal->program().value());
     }
 };
 struct FunctionSignatureExpr : SemaExpr {
@@ -126,10 +123,9 @@ struct FunctionSignatureExpr : SemaExpr {
         : signatureValue(std::move(signatureValue)) { }
 
     void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Constant);
-        const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::FunctionSignature);
-        signatureValue->check(ctx, prog, c.u.functionSignature);
+        VERIFY(value.kind() == sema::ValueKind::FunctionSignature$Program
+            || value.kind() == sema::ValueKind::FunctionSignature$Parameterize);
+        signatureValue->check(ctx, prog, value.functionSignatureBaseValue());
     }
 };
 
@@ -423,7 +419,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             expr->check(context, program, (sema::Value)program->type());
         if (word == words["expect-value"]) {
             VERIFY(program->kind() == sema::ProgramKind::Value);
-            expr->check(context, program, (sema::Value)static_cast<sema::ValueProgram*>(program)->value());
+            expr->check(context, program, (sema::Value) static_cast<sema::ValueProgram*>(program)->value());
         }
     }
 

@@ -514,7 +514,7 @@ def inlineTokenAdvancer():
 
 def emitToken(tokenKindExpr, beginExpr, endExpr):
     line("emitToken(" + tokenKindExpr + ", " + beginExpr +", tokenData, state);")
-    line("tokenData = 0;")
+    line("tokenData = 0;") # TODO: This is not the right place to clear the token data
 
 def emitCarriedToken():
     emitToken("carriedEmitTokenKind", "tokBegin", "tokEnd")

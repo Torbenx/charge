@@ -101,6 +101,7 @@ STMT(VarParameter, Parameter)
 STMT(ImplicitKindParameter, Parameter)
 
 // ------ declarations ------
+DECL(NamespaceDecl, NamespaceDecl)
 DECL(FunctionDecl, FunctionDecl)
 DECL(StructTypeDecl, TypeDecl)
 DECL(ObjectTypeDecl, TypeDecl)

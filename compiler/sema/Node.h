@@ -109,7 +109,8 @@ struct ChildrenIterator {
     operator Node*() const { return m_node; }
     Node* node() const { return m_node; }
     auto operator<=>(const ChildrenIterator& other) const {
-        return m_node <=> other.m_node;
+        // Compare in revser order
+        return other.m_node <=> m_node;
     }
     bool operator==(const ChildrenIterator&) const = default;
 
@@ -125,7 +126,9 @@ static_assert(std::forward_iterator<ChildrenIterator>);
 struct ChildrenRange {
     ChildrenRange() = default;
     ChildrenRange(Node* node)
-        : node(node) { }
+        : ChildrenRange(node, node->subTreeSize()) { }
+    ChildrenRange(Node* node, int_t subTreeSize)
+        : node(node), subTreeSize(subTreeSize) { }
     ChildrenRange(const ChildrenRange&) = default;
     ChildrenRange(ChildrenRange&&) = default;
     ChildrenRange& operator=(const ChildrenRange&) = default;
@@ -135,12 +138,13 @@ struct ChildrenRange {
         return ChildrenIterator(node - 1);
     }
     ChildrenIterator end() const {
-        return std::next(ChildrenIterator(node));
+        return ChildrenIterator(node - subTreeSize);
     }
     Node* parent() const { return node; }
 
 private:
     Node* node = nullptr;
+    int_t subTreeSize;
 };
 
 inline ChildrenRange Node::reverseChildren() {

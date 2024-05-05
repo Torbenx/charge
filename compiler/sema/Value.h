@@ -24,17 +24,26 @@ struct ProgramHandle {
 };
 
 enum class ValueKind : uint8_t {
-    Program, // either not dependent or templated
-    Constant,
+    Program, // either not dependent or a template
+    Namespace,
     Parameter,
+    TemplateSignature,
+    FunctionSignature$Program,
+    FunctionSignature$Parameterize,
+    Parameterize,
+    Expression,
+    RemoteExpression,
+    Invalid = 15,
 };
 struct Value {
     constexpr Value()
-        : idBits(MAX_ID), kindBits(3) { }
+        : Value(ValueKind::Invalid, MAX_ID) { }
     constexpr Value(ValueKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
+    constexpr explicit Value(ProgramHandle prog)
+        : Value(ValueKind::Program, prog.id()) { }
     constexpr Value(BuiltinId id)
-        : Value(ValueKind::Program, std::to_underlying(id)) { }
+        : Value(ProgramHandle(std::to_underlying(id))) { }
 
     static Value fromUint(uint32_t x) { return std::bit_cast<Value>(x); }
     uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }
@@ -46,15 +55,46 @@ struct Value {
         VERIFY(kind() == ValueKind::Program);
         return { id() };
     }
+    constexpr ProgramHandle templateSignatureProgram() const {
+        VERIFY(kind() == ValueKind::TemplateSignature);
+        return { id() };
+    }
+    constexpr Value templateSignatureBaseValue() const {
+        VERIFY(kind() == ValueKind::TemplateSignature);
+        return Value(ValueKind::Program, id());
+    }
+    constexpr ProgramHandle functionSignatureProgram() const {
+        VERIFY(kind() == ValueKind::FunctionSignature$Program);
+        return { id() };
+    }
+    constexpr Value functionSignatureParameterize() const {
+        VERIFY(kind() == ValueKind::FunctionSignature$Parameterize);
+        return Value(ValueKind::Parameterize, id());
+    }
+    constexpr Value functionSignatureBaseValue() const {
+        if (kind() == ValueKind::FunctionSignature$Program)
+            return Value(ValueKind::Program, id());
+        if (kind() == ValueKind::FunctionSignature$Parameterize)
+            return functionSignatureParameterize();
+        VERIFY_NOT_REACHED();
+    }
+    constexpr int_t expressionIndex() const {
+        VERIFY(kind() == ValueKind::Expression);
+        return id();
+    }
+    constexpr int_t parameterIndex() const {
+        VERIFY(kind() == ValueKind::Parameter);
+        return id();
+    }
 
     constexpr bool operator==(const Value&) const = default;
 
-    static constexpr uint32_t MAX_ID = (1 << 30) - 1;
+    static constexpr uint32_t MAX_ID = (1u << 28) - 1u;
 
-    uint32_t idBits : 30;
-    uint32_t kindBits : 2;
+    uint32_t idBits : 28;
+    uint32_t kindBits : 4;
 };
-inline constexpr Value INVALID_VALUE = { (ValueKind)3, Value::MAX_ID };
+inline constexpr Value INVALID_VALUE = { ValueKind::Invalid, Value::MAX_ID };
 
 struct Type : Value {
     static Type fromUint(uint32_t x) { return Type(Value::fromUint(x)); }
