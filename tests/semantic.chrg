@@ -5,7 +5,7 @@ struct X: { }
 static XX: type = X;
 
 template(x: XX) struct Y: { }
-// expect-type template_id{@sigof(Y)}
+// expect-type template_id{@templsig(Y)}
 static Z = Y;
 
 template(T: type) struct Foo: { }
@@ -15,7 +15,7 @@ static U: type = Foo{X};
 template(T) struct Bar: { }
 // expect-value Bar{type, X}
 static V: type = Bar{X};
-// expect-value Bar{template_id{@sigof(Y)}, Y}
+// expect-value Bar{template_id{@templsig(Y)}, Y}
 static W: type = Bar{Y};
 
 template(T: type) struct Outer: {
@@ -48,11 +48,34 @@ fn f3(t: type) => X;
 fn f4(t: type = X) => X;
 
 fn t1() => X;
-fn t2(x) => X;
-template(T: type) fn t3() => X;
-// expect-type @fnsigof(t1)
+// expect-type function_id{@fnsig(t1)}
 static tt1 = t1;
-// expect-type template_id{@sigof(t2)}
+
+fn t2(x) => X;
+// expect-type template_id{@templsig(t2)}
 static tt2 = t2;
-// expect-type @fnsigof(t3{X})
+
+template(T: type) fn t3() => X;
+// expect-type function_id{@fnsig(t3{X})}
 static tt3 = t3{X};
+
+fn func1() => X;
+// expect-type type
+static call1 = func1();
+
+fn func2(x) => X;
+// expect-type type
+static call2 = func2(X);
+
+fn func3(a, b, c, d, e) => X;
+// expect-type type
+static call3 = func3(X, X, X, X, X);
+
+template(x: type) fn func4(y: type) => X;
+// expect-value func4{X}
+// expect-type function_id{@fnsig(func4{X})}
+static func4ref = func4{X};
+// expect-type type
+static call4direct = func4{X}(X);
+// expect-type type
+static call4indirect = func4ref(X);

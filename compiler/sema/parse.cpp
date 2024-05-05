@@ -17,26 +17,6 @@ Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
 
 void Generator::advance() { tok += 1; }
 
-Expression Generator::topExpression(int_t n) {
-    return topNode(n);
-}
-
-Node* Generator::topNode(int_t n) {
-    return &nodeScratch[(nodeStack.end() - n - 1)->nodeIndex];
-}
-
-void Generator::popNode() {
-    int_t size = nodeScratch.back().subTreeSize();
-    for (int_t i = 0; i < size; i++)
-        nodeScratch.pop_back();
-    nodeStack.pop_back();
-}
-
-void Generator::popNodes(int_t n) {
-    for (int_t i = 0; i < n; i++)
-        popNode();
-}
-
 void Generator::visitDeclaration() {
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
@@ -95,11 +75,11 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         }
         visitExpression();
 
-        DeductionState state(program, parameterTypes.size());
+        DeductionState state(program, programHandle, parameterTypes.size());
         state.identityMap(oldParameterCount);
         implicitCastTo(state, type);
         VERIFY(state.isComplete());
-        type = verifyType(fold(FoldState { program, INVALID_VALUE, state.arguments }, type));
+        type = verifyType(fold(state.toFoldBase(INVALID_VALUE), type));
 
         hasInitializer = true;
     }
@@ -171,7 +151,7 @@ void Generator::visitFunctionDeclaration() {
         program->setType(topExpression().type());
         VERIFY(tok->kind() == Token::ExpressionStmt);
         emitNode(NodeKind::Function, {}, nodeStack.size() - stackSizeAtBegin, NodeData { .empty {} });
-        VERIFY(nodeStack.size() == stackSizeAtBegin + 1);
+        VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
         fnProgram->setBody(topNode());
         popNode();
     } else {
@@ -208,8 +188,15 @@ void Generator::visitUnaryExpr() {
 
 void Generator::visitPostfixExpr() {
     visitPrimaryExpr();
-    if (tok->kind() == Token::Parameterize) {
-        generateParameterizeExpr(visitExpressionList());
+    for (;;) {
+        if (tok->kind() == Token::Parameterize) {
+            generateParameterizeExpr(visitExpressionList());
+        } else if (tok->kind() == Token::CallExpr) {
+            CallBase base = resolveCallBase();
+            generateCallExpr(std::move(base), visitExpressionList());
+        } else {
+            break;
+        }
     }
 }
 

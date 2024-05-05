@@ -3,6 +3,26 @@
 
 namespace sema {
 
+Expression Generator::topExpression(int_t n) {
+    return topNode(n);
+}
+
+Node* Generator::topNode(int_t n) {
+    return &nodeScratch[(nodeStack.end() - n - 1)->nodeIndex];
+}
+
+void Generator::popNode() {
+    int_t size = nodeScratch.back().subTreeSize();
+    for (int_t i = 0; i < size; i++)
+        nodeScratch.pop_back();
+    nodeStack.pop_back();
+}
+
+void Generator::popNodes(int_t n) {
+    for (int_t i = 0; i < n; i++)
+        popNode();
+}
+
 void Generator::emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data) {
     int_t subTreeSize = 1;
     for (int_t i = 0; i < childCount; i++) {
@@ -19,12 +39,7 @@ void Generator::emitExpr(NodeKind kind, SourceLocation location, int_t childCoun
 }
 
 void Generator::emitConstantExpr(SourceLocation location, Value value) {
-    emitExpr(NodeKind::ConstantExpr, location, 0, typeOf(value), ExprData { .value = value });
-}
-
-void Generator::setConstantType(Value constant, Type type) {
-    VERIFY(constant.kind() == ValueKind::Constant);
-    program->constants[constant.id()].type = type;
+    emitExpr(NodeKind::ConstantExpr, location, 0, typeOf(value), ExprData { .constant = value });
 }
 
 Value Generator::makeExpressionValue() {
@@ -35,7 +50,7 @@ Value Generator::makeExpressionValue() {
 
 Value Generator::makeExpressionValue(Expression expr) {
     if (expr.kind() == NodeKind::ConstantExpr)
-        return expr.data().value;
+        return expr.data().constant;
     else
         return program->addExpression(expr);
 }
@@ -43,25 +58,23 @@ Value Generator::makeExpressionValue(Expression expr) {
 Type Generator::makeTemplateIdFor(ProgramHandle targetHandle) {
     Program* targetProg = context.program(targetHandle);
     VERIFY(targetProg->isTemplate());
-    std::array arguments { program->addTemplateSignatureOf(builtins::template_signature_type, targetHandle) };
-    return verifyType(program->addParameterize(
-        builtins::type_type, builtins::template_id_template.program(), arguments));
+    std::array arguments { program->addTemplateSignature(targetHandle) };
+    return verifyType(program->addParameterize(builtins::template_id_template.program(), arguments));
 }
 
 Value Generator::makeProgramValue(ProgramHandle targetHandle) {
     Program* targetProg = context.program(targetHandle);
     if (targetProg->isDependent() && !targetProg->isTemplate()) {
-        Value result = program->addParameterize(Type(), targetHandle, 0, targetProg->inheritedParameterCount);
-        setConstantType(result, typeOfNonDependentProgram(result));
+        Value result = program->addParameterize(targetHandle, 0, targetProg->inheritedParameterCount);
         return result;
     }
     return Value(ValueKind::Program, targetHandle.id());
 }
 
 Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arguments) {
-    Value result = program->addParameterize(Type(), base, arguments);
-    setConstantType(result, typeOfNonDependentProgram(result));
-    return result;
+    if (arguments.empty())
+        return Value(ValueKind::Program, base.id());
+    return program->addParameterize(base, arguments);
 }
 
 void Generator::buildParent(glue::DeclarationNode* parentNode) {
@@ -84,22 +97,16 @@ void Generator::buildParent(glue::DeclarationNode* parentNode) {
     for (int_t i = 0; i < parameterCount; i++)
         arguments[i] = addInheritedParameter(Type(), std::nullopt);
 
-    Value parentValue = program->addParameterize(Type(), parentHandle, arguments);
-    FoldState base = asFoldBase(parentValue);
+    Value parentValue = program->addParameterize(parentHandle, arguments);
+    FoldBase base = asFoldBase(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
         program->parameters[i].type = type;
     }
-    setConstantType(parentValue, typeOfNonDependentProgram(base));
     program->setParent(parentValue);
 }
 
 void Generator::buildSelf() {
-    if (!program->isDependent()) {
-        program->setSelf(makeProgramValue(programHandle));
-        return;
-    }
-
     int_t parameterCount = program->parameters.size();
     std::vector<Value> arguments(parameterCount, INVALID_VALUE);
     for (int_t i = 0; i < parameterCount; i++)
@@ -174,12 +181,12 @@ void Generator::generateIdentifierExpr() {
 void Generator::generateParameterizeExpr(int_t argumentCount) {
     Expression baseExpr = topExpression(argumentCount);
     if (baseExpr.kind() == NodeKind::ConstantExpr) {
-        Value baseValue = baseExpr.data().value;
+        Value baseValue = baseExpr.data().constant;
         if (baseValue.kind() == ValueKind::Program) {
             Program* baseProg = context.program(baseValue.program());
             VERIFY(baseProg->isTemplate());
             int_t parameterCount = baseProg->parameters.size();
-            DeductionState state(baseProg, parameterCount);
+            DeductionState state(baseProg, baseValue.program(), parameterCount);
             state.identityMap(baseProg->inheritedParameterCount);
 
             int_t pIndex = baseProg->inheritedParameterCount;
@@ -193,18 +200,64 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
                 ExternValue pType = baseProg->parameters[pIndex].type;
                 Expression argument = topExpression(argumentCount - 1 - aIndex);
                 implicitCastTo(state, pType, argument);
-                if (argument.kind() == NodeKind::ConstantExpr) {
-                    state.explicitArgument(pIndex, argument.data().value);
-                } else {
-                    VERIFY_NOT_REACHED();
-                }
+                state.explicitArgument(pIndex, makeExpressionValue(argument));
             }
+            VERIFY(pIndex == parameterCount);
             VERIFY(state.isComplete());
             popNodes(argumentCount + 1);
             Value result = makeParameterize(baseValue.program(), state.arguments);
             emitConstantExpr({}, result);
             return;
         }
+    }
+    VERIFY_NOT_REACHED();
+}
+
+Generator::CallBase Generator::resolveCallBase() {
+    auto baseExpr = topExpression();
+    // TODO: Allow only function and type programs
+    if (baseExpr.kind() == NodeKind::ConstantExpr) {
+        auto baseValue = baseExpr.data().constant;
+        if (baseValue.kind() == ValueKind::Program) {
+            Program* baseProg = context.program(baseValue.program());
+            DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
+            state.identityMap(baseProg->inheritedParameterCount);
+            popNode();
+            return { std::move(state) };
+        } else if (baseValue.kind() == ValueKind::Constant) {
+            auto baseValueConst = program->constants[baseValue.id()];
+            if (baseValueConst.op == Program::Opcode::Parameterize) {
+                ProgramHandle baseProgHandle = baseValueConst.u.parameterize.base;
+                Program* baseProg = context.program(baseProgHandle);
+                auto arguments = parameterizeArguments(baseValue);
+                VERIFY(baseProg->parameters.size() == arguments.size());
+                DeductionState state(baseProg, baseProgHandle, arguments.size());
+                for (int_t i = 0; i < (int_t)arguments.size(); i++)
+                    state.explicitArgument(i, arguments[i]);
+                popNode();
+                return { std::move(state) };
+            }
+        }
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void Generator::generateCallExpr(CallBase base, int_t argumentCount) {
+    auto& state = base.state;
+    if (state.program->kind() == ProgramKind::Function) {
+        FunctionProgram* fnProg = static_cast<FunctionProgram*>(state.program);
+
+        VERIFY(argumentCount == (int_t)fnProg->functionParameters.size());
+        for (int_t index = 0; index < argumentCount; index++) {
+            const auto& parameter = fnProg->functionParameters[index];
+            Expression argument = topExpression(argumentCount - 1 - index);
+            implicitCastTo(state, parameter.type, argument);
+        }
+        VERIFY(base.state.isComplete());
+        Value callBase = makeParameterize(state.programHandle, state.arguments);
+        Type returnType = verifyType(fold(callBase, fnProg->type()));
+        emitExpr(NodeKind::CallExpr, SourceLocation(), argumentCount, returnType, ExprData { .callBase = callBase });
+        return;
     }
     VERIFY_NOT_REACHED();
 }
@@ -225,26 +278,32 @@ void Generator::implicitCastTo(DeductionState& state, ExternValue pType) {
     VERIFY(sameType);
 }
 
-FoldState Generator::asFoldBase(Value base) {
-    if (base.kind() == ValueKind::Program) {
-        Program* baseProg = context.program(base.program());
-        VERIFY(!baseProg->isDependent());
-        return { baseProg, base, {} };
-    }
-    VERIFY(base.kind() == ValueKind::Constant);
-
-    auto baseConst = program->constants[base.id()];
-    VERIFY(baseConst.op == Program::Opcode::Parameterize);
-    Program* baseProg = context.program(baseConst.u.parameterize.base);
-    return { baseProg, base, parameterizeArguments(base) };
+FoldBase Generator::asFoldBase(Value base) {
+    return tryAsFoldBase(base).value();
 }
 
-FoldState Generator::selfFold() {
+std::optional<FoldBase> Generator::tryAsFoldBase(Value base) {
+    if (base.kind() == ValueKind::Program) {
+        Program* baseProg = context.program(base.program());
+        if (baseProg->isDependent())
+            return std::nullopt;
+        return FoldBase { baseProg, base.program(), base, {} };
+    } else if (base.kind() == ValueKind::Constant) {
+        auto baseConst = program->constants[base.id()];
+        if (baseConst.op == Program::Opcode::Parameterize) {
+            ProgramHandle baseProg = baseConst.u.parameterize.base;
+            return FoldBase { context.program(baseProg), baseProg, base, parameterizeArguments(base) };
+        }
+    }
+    return std::nullopt;
+}
+
+FoldBase Generator::selfFold() {
     return asFoldBase((Value)program->self());
 }
 
 DeductionState Generator::selfDeduction() {
-    DeductionState state(program, program->parameters.size());
+    DeductionState state(program, programHandle, program->parameters.size());
     state.identityMap(program->parameters.size());
     return state;
 }
@@ -293,8 +352,10 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
     switch (pConst.op) {
     case Program::Opcode::NamespaceLiteral:
         return pConst.u.declarationNode == aConst.u.declarationNode;
-    case Program::Opcode::FunctionSignatureOf:
-        return staticMatch(state, pConst.u.signatureValue, aConst.u.signatureValue); // TODO: different programs can have the same signature
+    case Program::Opcode::TemplateSignature:
+        return pConst.u.templateSignature == aConst.u.templateSignature; // TODO: different programs can have the same signature
+    case Program::Opcode::FunctionSignature:
+        return staticMatch(state, pConst.u.functionSignature, aConst.u.functionSignature); // TODO: different programs can have the same signature
     case Program::Opcode::Parameterize: {
         const auto& pPara = pConst.u.parameterize;
         const auto& aPara = aConst.u.parameterize;
@@ -318,38 +379,34 @@ Value Generator::fold(Value base, ExternValue v) {
     return fold(asFoldBase(base), v);
 }
 
-Value Generator::fold(FoldState state, ExternValue v) {
+Value Generator::fold(FoldBase base, ExternValue v) {
     if (v.kind() == ValueKind::Program)
-        return makeProgramValue(state.program->programTranslationBuffer[v.id()]);
+        return makeProgramValue(base.program->programTranslationBuffer[v.id()]);
     if (v.kind() == ValueKind::Parameter)
-        return state.arguments[v.id()];
+        return base.arguments[v.id()];
     VERIFY(v.kind() == ValueKind::Constant);
 
-    auto vConst = state.program->constants[v.id()];
-
-    auto type = [&]() -> Type {
-        return verifyType(fold(state, vConst.type));
-    };
+    auto vConst = base.program->constants[v.id()];
 
     switch (vConst.op) {
     case Program::Opcode::NamespaceLiteral:
         return program->addNamespaceLiteral(vConst.u.declarationNode);
-    case Program::Opcode::TemplateSignatureOf:
-        return program->addTemplateSignatureOf(type(), vConst.u.signatureProgram);
-    case Program::Opcode::FunctionSignatureOf:
-        return program->addFunctionSignatureOf(type(), fold(state, vConst.u.signatureValue));
+    case Program::Opcode::TemplateSignature:
+        return program->addTemplateSignature(vConst.u.templateSignature);
+    case Program::Opcode::FunctionSignature:
+        return program->addFunctionSignature(fold(base, vConst.u.functionSignature));
     case Program::Opcode::RemoteExpression: {
-        Value exprBase = fold(state, vConst.u.remoteExpression.base);
-        return program->addRemoteExpression(type(), exprBase, vConst.u.remoteExpression.expressionIndex);
+        Value exprBase = fold(base, vConst.u.remoteExpression.base);
+        return program->addRemoteExpression(exprBase, vConst.u.remoteExpression.expressionIndex);
     }
     case Program::Opcode::Expression:
-        return program->addRemoteExpression(type(), state.value, vConst.u.expressionIndex);
+        return program->addRemoteExpression(base.value, vConst.u.expressionIndex);
     case Program::Opcode::Parameterize: {
-        auto externArgs = parameterizeArguments(state.program, v);
+        auto externArgs = parameterizeArguments(base.program, v);
         std::vector<Value> foldedArgs(externArgs.size(), INVALID_VALUE);
         for (int_t argIndex = 0; argIndex < (int_t)externArgs.size(); argIndex++)
-            foldedArgs[argIndex] = fold(state, externArgs[argIndex]);
-        return program->addParameterize(type(), vConst.u.parameterize.base, foldedArgs);
+            foldedArgs[argIndex] = fold(base, externArgs[argIndex]);
+        return program->addParameterize(vConst.u.parameterize.base, foldedArgs);
     }
     default:
         VERIFY_NOT_REACHED();
@@ -392,20 +449,44 @@ ProgramHandle Generator::signatureCheck(glue::Context& context, glue::Declaratio
 
 std::span<Value> Generator::parameterizeArguments(Value value) {
     VERIFY(value.kind() == ValueKind::Constant);
-    auto param = program->constants[value.id()].u.parameterize;
+    auto vConst = program->constants[value.id()];
+    VERIFY(vConst.op == Program::Opcode::Parameterize);
+    auto param = vConst.u.parameterize;
     return std::span<Value>(&program->parameterizeArguments[param.firstArgumentIndex], param.argumentCount);
 }
 
 std::span<const ExternValue> Generator::parameterizeArguments(Program* targetProg, ExternValue value) {
     VERIFY(value.kind() == ValueKind::Constant);
-    const auto& param = targetProg->constants[value.id()].u.parameterize;
+    auto vConst = targetProg->constants[value.id()];
+    VERIFY(vConst.op == Program::Opcode::Parameterize);
+    const auto param = vConst.u.parameterize;
     return std::span<const ExternValue>(reinterpret_cast<const ExternValue*>(&targetProg->parameterizeArguments[param.firstArgumentIndex]), param.argumentCount);
 }
 
 Type Generator::typeOf(Value value) {
     switch (value.kind()) {
-    case ValueKind::Constant:
-        return program->constants[value.id()].type;
+    case ValueKind::Constant: {
+        auto constant = program->constants[value.id()];
+        switch (constant.op) {
+        case Program::Opcode::TemplateSignature:
+            return builtins::template_signature_type;
+        case Program::Opcode::FunctionSignature:
+            return builtins::function_signature_type;
+        case Program::Opcode::NamespaceLiteral:
+            return builtins::namespace_type;
+        case Program::Opcode::Expression:
+            return Expression(&program->expressions[constant.u.expressionIndex]).type();
+        case Program::Opcode::RemoteExpression: {
+            auto rExpr = constant.u.remoteExpression;
+            auto base = asFoldBase(rExpr.base);
+            return verifyType(fold(base, Expression(&base.program->expressions[rExpr.expressionIndex]).type()));
+        }
+        case Program::Opcode::Parameterize:
+            return typeOfNonDependentProgram(value);
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
     case ValueKind::Parameter:
         return parameterTypes[value.id()];
     case ValueKind::Program: {
@@ -423,17 +504,20 @@ Type Generator::typeOfNonDependentProgram(Value value) {
     return typeOfNonDependentProgram(asFoldBase(value));
 }
 
-Type Generator::typeOfNonDependentProgram(FoldState state) {
-    if (state.program->kind() == ProgramKind::Function)
-        return verifyType(program->addFunctionSignatureOf(builtins::type_type, state.value));
-    return verifyType(fold(state, state.program->type()));
+Type Generator::typeOfNonDependentProgram(FoldBase base) {
+    if (base.program->kind() == ProgramKind::Function) {
+        std::array arguments { program->addFunctionSignature(base.value) };
+        return verifyType(program->addParameterize(builtins::function_id_template.program(), arguments));
+    }
+    return verifyType(fold(base, base.program->type()));
 }
 
 Type Generator::verifyType(Value value) {
     switch (value.kind()) {
-    case ValueKind::Constant:
-        VERIFY(program->constants[value.id()].type == builtins::type_type);
+    case ValueKind::Constant: {
+        VERIFY(typeOf(value) == builtins::type_type);
         return (Type)value;
+    }
     case ValueKind::Parameter:
         VERIFY(parameterTypes[value.id()] == builtins::type_type);
         return (Type)value;

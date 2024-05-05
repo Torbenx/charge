@@ -115,8 +115,8 @@ struct SignatureLiteralExpr : SemaExpr {
     void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
         VERIFY(value.kind() == sema::ValueKind::Constant);
         const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::TemplateSignatureOf);
-        VERIFY(c.u.signatureProgram == literal->program().value());
+        VERIFY(c.op == sema::Program::Opcode::TemplateSignature);
+        VERIFY(c.u.templateSignature == literal->program().value());
     }
 };
 struct FunctionSignatureExpr : SemaExpr {
@@ -128,8 +128,8 @@ struct FunctionSignatureExpr : SemaExpr {
     void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
         VERIFY(value.kind() == sema::ValueKind::Constant);
         const auto& c = prog->constants[value.id()];
-        VERIFY(c.op == sema::Program::Opcode::FunctionSignatureOf);
-        signatureValue->check(ctx, prog, c.u.signatureValue);
+        VERIFY(c.op == sema::Program::Opcode::FunctionSignature);
+        signatureValue->check(ctx, prog, c.u.functionSignature);
     }
 };
 
@@ -194,13 +194,13 @@ struct SemaExprParser {
         if (buffer.starts_with("@")) {
             buffer = buffer.substr(1);
             auto id = readId();
-            if (id == "sigof") {
+            if (id == "templsig") {
                 consume("(");
                 glue::DeclarationNode* base = readNestedName();
                 consume(")");
                 return std::make_unique<SignatureLiteralExpr>(base);
             }
-            if (id == "fnsigof") {
+            if (id == "fnsig") {
                 consume("(");
                 auto sigExpr = parse();
                 consume(")");

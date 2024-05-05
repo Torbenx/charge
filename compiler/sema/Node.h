@@ -7,6 +7,7 @@ namespace sema {
 #define ENUMERATE_NODE_KINDS        \
     KIND(ReferenceExpr, Reference)  \
     KIND(ConstantExpr, Pure)        \
+    KIND(CallExpr, Owning)          \
     KIND(LetDecl, Statement)        \
     KIND(ExpressionStmt, Statement) \
     KIND(Function, Statement)
@@ -46,7 +47,8 @@ struct ChildrenRange;
 struct ChildrenIterator;
 
 union ExprData {
-    Value value;
+    Value constant;
+    Value callBase; // either a program or a parameterize constant
 };
 union NodeData {
     struct {

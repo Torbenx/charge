@@ -23,18 +23,27 @@ struct LookupCache {
     }
 };
 
+struct FoldBase {
+    Program* program;
+    ProgramHandle programHandle;
+    Value value;
+    std::span<const Value> arguments;
+};
+
 struct DeductionState {
     struct ExpressionMatch {
         ExternValue pValue;
         Value aValue;
     };
     Program* program;
+    ProgramHandle programHandle;
     std::vector<bool> explicitArgumentsMap;
     std::vector<Value> arguments;
     std::vector<ExpressionMatch> expressionMatches;
 
-    DeductionState(Program* prog, int_t parameterCount)
+    DeductionState(Program* prog, ProgramHandle handle, int_t parameterCount)
         : program(prog)
+        , programHandle(handle)
         , explicitArgumentsMap(parameterCount, false)
         , arguments(parameterCount, INVALID_VALUE) { }
 
@@ -59,12 +68,10 @@ struct DeductionState {
         }
         return true;
     }
-};
 
-struct FoldState {
-    Program* program;
-    Value value;
-    std::span<const Value> arguments;
+    FoldBase toFoldBase(Value baseValue) {
+        return FoldBase { program, programHandle, baseValue, arguments };
+    }
 };
 
 struct Generator {
@@ -84,6 +91,10 @@ struct Generator {
 
     struct StackItem {
         uint32_t nodeIndex;
+    };
+
+    struct CallBase {
+        DeductionState state;
     };
 
     using Token = parse::TokenKind;
@@ -132,16 +143,16 @@ struct Generator {
 
     static ProgramHandle signatureCheck(glue::Context& context, glue::DeclarationNode* scope);
     static void generateBuiltins(glue::Context& context);
-    FoldState asFoldBase(Value value);
+    FoldBase asFoldBase(Value value);
+    std::optional<FoldBase> tryAsFoldBase(Value value);
     Value fold(Value base, ExternValue v);
-    Value fold(FoldState base, ExternValue v);
+    Value fold(FoldBase base, ExternValue v);
     bool staticMatch(DeductionState& state, ExternValue pValue, Value aValue);
-    FoldState selfFold();
+    FoldBase selfFold();
     DeductionState selfDeduction();
 
     Type typeOf(Value value);
     Type verifyType(Value value);
-    void setConstantType(Value constant, Type type);
     std::span<Value> parameterizeArguments(Value value);
     static std::span<const ExternValue> parameterizeArguments(Program* targetProg, ExternValue base);
 
@@ -149,13 +160,15 @@ struct Generator {
     std::optional<Value> lookupInScope(glue::DeclarationNode* scope, Word name);
     void generateIdentifierExpr();
     void generateParameterizeExpr(int_t argumentCount);
+    CallBase resolveCallBase();
+    void generateCallExpr(CallBase base, int_t argumentCount);
 
     Value makeExpressionValue();
     Value makeExpressionValue(Expression expr);
     Value makeProgramValue(ProgramHandle targetHandle);
     Type makeTemplateIdFor(ProgramHandle targetHandle);
     Type typeOfNonDependentProgram(Value value);
-    Type typeOfNonDependentProgram(FoldState state);
+    Type typeOfNonDependentProgram(FoldBase base);
     Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
     void buildParent(glue::DeclarationNode* parentDeclaration);
     void buildSelf();

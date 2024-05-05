@@ -57,8 +57,8 @@ enum class ProgramKind : uint8_t {
 };
 
 #define ENUMERATE_PROGRAM_OPS               \
-    PROGRAM_OP(TemplateSignatureOf)         \
-    PROGRAM_OP(FunctionSignatureOf)         \
+    PROGRAM_OP(TemplateSignature)         \
+    PROGRAM_OP(FunctionSignature)         \
     PROGRAM_OP(NamespaceLiteral)            \
     PROGRAM_OP(RemoteExpression)            \
     PROGRAM_OP(Expression)                  \
@@ -72,13 +72,12 @@ struct Program {
     };
     struct Constant {
         Opcode op;
-        Type type;
         union {
             uint64_t data;
             glue::DeclarationNode* declarationNode;
             uint32_t expressionIndex; // offset into expressions
-            ProgramHandle signatureProgram;
-            Value signatureValue; // either a program or a parameterize constant
+            ProgramHandle templateSignature;
+            Value functionSignature; // either a program or a parameterize constant
             struct {
                 Value base; // either a program or a parameterize constant
                 uint32_t expressionIndex; // offset into the target programs expressions
@@ -109,22 +108,15 @@ struct Program {
         }
     };
 
-    ExternValue typeOf(ExternValue v) {
-        if (v.kind() == ValueKind::Parameter)
-            return parameters[v.id()].type;
-        VERIFY(v.kind() == ValueKind::Constant);
-        return constants[v.id()].type;
-    }
-
     int_t importNode(Node* node);
     Value add(Constant);
     Value addNamespaceLiteral(glue::DeclarationNode* decl);
-    Value addTemplateSignatureOf(Type type, ProgramHandle prog);
-    Value addFunctionSignatureOf(Type type, Value base);
+    Value addTemplateSignature(ProgramHandle prog);
+    Value addFunctionSignature(Value base);
     Value addExpression(Node* expr);
-    Value addRemoteExpression(Type type, Value base, uint32_t expressionIndex);
-    Value addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
-    Value addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments);
+    Value addRemoteExpression(Value base, uint32_t expressionIndex);
+    Value addParameterize(ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount);
+    Value addParameterize(ProgramHandle base, std::span<const Value> arguments);
 
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }

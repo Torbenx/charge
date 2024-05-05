@@ -94,20 +94,23 @@ void Dumper::dumpNode(Node* node) {
     std::string header = "";
     if (isExpression(node->kind()))
         header = fmt::format("[{}]", formatValue(Expression(node).type()));
-    if (children.empty()) {
-        beginLine();
-        output += header;
-        output += nameString(node->kind());
-        if (node->kind() == NodeKind::ConstantExpr) {
-            output += " ";
-            output += formatValue(Expression(node).data().value);
-        }
-        endLine();
-        return;
+    std::string info;
+    switch (node->kind()) {
+    case NodeKind::ConstantExpr:
+        info += " ";
+        info += formatValue(Expression(node).data().constant);
+        break;
+    case NodeKind::CallExpr:
+        info += " ";
+        info += formatValue(Expression(node).data().callBase);
+        break;
+    default:
+        break;
     }
+    dumpLine(header + std::string(nameString(node->kind())) + info);
 
-    dumpLine(fmt::format("{}{}", header, nameString(node->kind())));
-
+    if (children.empty())
+        return;
     indentation.emplace_back(false, header.size());
     for (int_t i = 0; i < (int_t)children.size() - 1; i++) {
         dumpNode(children[i]);
@@ -136,7 +139,7 @@ void Dumper::dumpProgram(Program* prog) {
     }
     for (int_t i = 0; i < (int_t)prog->constants.size(); i++) {
         const auto& c = prog->constants[i];
-        std::string header = fmt::format("c{} = [{}]", i, formatValue(c.type));
+        std::string header = fmt::format("c{} = ", i);
         std::ostringstream line;
         line << header << nameString(c.op);
         switch (c.op) {
@@ -148,11 +151,11 @@ void Dumper::dumpProgram(Program* prog) {
             line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + param.argumentCount - 1]) << "}";
             break;
         }
-        case Program::Opcode::TemplateSignatureOf:
-            line << " " << formatProgram(c.u.signatureProgram);
+        case Program::Opcode::TemplateSignature:
+            line << " " << formatProgram(c.u.templateSignature);
             break;
-        case Program::Opcode::FunctionSignatureOf:
-            line << " " << formatValue(c.u.signatureValue);
+        case Program::Opcode::FunctionSignature:
+            line << " " << formatValue(c.u.functionSignature);
             break;
         default:
             break;

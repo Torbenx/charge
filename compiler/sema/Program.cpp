@@ -8,10 +8,9 @@ Value Program::add(Constant constant) {
     return Value(ValueKind::Constant, id);
 }
 
-Value Program::addParameterize(Type type, ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount) {
+Value Program::addParameterize(ProgramHandle base, int_t firstArgumentIndex, int_t argumentCount) {
     return add({
         .op = Opcode::Parameterize,
-        .type = type,
         .u = { .parameterize = {
                    .base = base,
                    .firstArgumentIndex = (uint16_t)firstArgumentIndex,
@@ -20,11 +19,11 @@ Value Program::addParameterize(Type type, ProgramHandle base, int_t firstArgumen
     });
 }
 
-Value Program::addParameterize(Type type, ProgramHandle base, std::span<const Value> arguments) {
+Value Program::addParameterize(ProgramHandle base, std::span<const Value> arguments) {
     VERIFY(!arguments.empty());
     auto firstIndex = parameterizeArguments.size();
     parameterizeArguments.insert(parameterizeArguments.end(), arguments.begin(), arguments.end());
-    return addParameterize(type, base, firstIndex, arguments.size());
+    return addParameterize(base, firstIndex, arguments.size());
 }
 
 int_t Program::importNode(Node* node) {
@@ -36,7 +35,6 @@ int_t Program::importNode(Node* node) {
 Value Program::addExpression(Node* expr) {
     return add({
         .op = Opcode::Expression,
-        .type = Expression(expr).type(),
         .u = { .expressionIndex = (uint32_t)importNode(expr) },
     });
 }
@@ -44,31 +42,27 @@ Value Program::addExpression(Node* expr) {
 Value Program::addNamespaceLiteral(glue::DeclarationNode* node) {
     return add({
         .op = Opcode::NamespaceLiteral,
-        .type = builtins::namespace_type,
         .u = { .declarationNode = node },
     });
 }
 
-Value Program::addTemplateSignatureOf(Type type, ProgramHandle program) {
+Value Program::addTemplateSignature(ProgramHandle program) {
     return add({
-        .op = Opcode::TemplateSignatureOf,
-        .type = type,
-        .u = { .signatureProgram = program },
+        .op = Opcode::TemplateSignature,
+        .u = { .templateSignature = program },
     });
 }
 
-Value Program::addFunctionSignatureOf(Type type, Value value) {
+Value Program::addFunctionSignature(Value value) {
     return add({
-        .op = Opcode::FunctionSignatureOf,
-        .type = type,
-        .u = { .signatureValue = value },
+        .op = Opcode::FunctionSignature,
+        .u = { .functionSignature = value },
     });
 }
 
-Value Program::addRemoteExpression(Type type, Value base, uint32_t expressionIndex) {
+Value Program::addRemoteExpression(Value base, uint32_t expressionIndex) {
     return add({
         .op = Opcode::RemoteExpression,
-        .type = type,
         .u = { .remoteExpression = { base, expressionIndex } },
     });
 }
