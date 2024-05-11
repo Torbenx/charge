@@ -1,17 +1,12 @@
 #pragma once
 
-#include <glue/DeclarationNode.h>
 #include <parse/Output.h>
 #include <sema/Node.h>
-#include <sema/Value.h>
-
-namespace glue {
-
-struct Context;
-
-}
+#include <sema/Scope.h>
 
 namespace sema {
+
+struct Context;
 
 namespace builtins {
 
@@ -134,6 +129,11 @@ struct Program {
         bool implicit() const { return name.empty(); }
     };
 
+    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+        : m_fields(Fields(kind), location)
+        , m_name(name)
+        , u { .unchecked = { .rawParent = rawParent, .parseLocation = parseLocation } } { }
+
     int_t importNode(Node* node);
     Value addExpression(Node* expr);
     Value addRemoteExpression(Value base, uint32_t expressionIndex);
@@ -151,30 +151,29 @@ struct Program {
         return Parameterize { begin[1].program(), { begin + 2, (size_t)argumentCount } };
     }
 
+    SourceLocation declarationLocation() const { return m_fields.location(); }
+
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }
 
-    ExternValue parent() const { return m_parent.value(); }
+    ExternValue parent() const {
+        VERIFY(status() >= ProgramStatus::SignatureCheckInProgress);
+        return u.checked.parent;
+    }
 
-    ExternValue self() const { return m_self.value(); }
+    ExternValue self() const {
+        VERIFY(status() >= ProgramStatus::SignatureChecked);
+        return u.checked.self.value();
+    }
 
     void setType(Type type) {
         VERIFY(!m_type.has_value());
         m_type = type;
     }
-    void setParent(Value value) {
-        VERIFY(!m_parent.has_value());
-        m_parent = value;
-    }
-    void setSelf(Value value) {
-        VERIFY(!m_self.has_value());
-        m_self = value;
-    }
 
     Word name() const { return m_name; }
-    ProgramStatus status() const { return m_status; }
-    void setStatus(ProgramStatus status) { m_status = status; }
-    ProgramKind kind() const { return m_kind; }
+    ProgramStatus status() const { return m_fields.tag().status(); }
+    ProgramKind kind() const { return m_fields.tag().kind(); }
     bool isDependent() const {
         return !parameters.empty();
     }
@@ -182,7 +181,7 @@ struct Program {
         return parameters.size() > inheritedParameterCount;
     }
 
-    void dump(glue::Context&);
+    void dump(Context&);
     ChildrenRange topLevelNodes() {
         return ChildrenRange(expressions.data() + expressions.size(), expressions.size() + 1);
     }
@@ -190,31 +189,94 @@ struct Program {
         return DataValueRange { valueData };
     }
 
+    sema::Value rawParent() const {
+        VERIFY(status() == ProgramStatus::Unchecked);
+        return u.unchecked.rawParent;
+    }
+
+    parse::TokenHandle beginSignatureCheck(sema::Value parent) {
+        VERIFY(status() == ProgramStatus::Unchecked);
+        if (parent.kind() == ValueKind::Program) {
+            VERIFY(parent == u.unchecked.rawParent);
+        } else if (parent.kind() == ValueKind::Namespace) {
+            VERIFY(parent == u.unchecked.rawParent);
+        } else if (parent.kind() == ValueKind::Parameterize) {
+            VERIFY((Value)getParameterize(parent).base == u.unchecked.rawParent);
+        } else {
+            VERIFY_NOT_REACHED();
+        }
+        auto result = u.unchecked.parseLocation;
+        u = { .checked = { .parent = parent, .self = std::nullopt } };
+        auto tag = m_fields.tag();
+        tag.setStatus(ProgramStatus::SignatureCheckInProgress);
+        m_fields.setTag(tag);
+        return result;
+    }
+
+    void completeSignatureCheck(sema::Value self) {
+        VERIFY(status() == ProgramStatus::SignatureCheckInProgress);
+        u.checked.self = self;
+        auto tag = m_fields.tag();
+        tag.setStatus(ProgramStatus::SignatureChecked);
+        m_fields.setTag(tag);
+    }
+
+    ProgramHandle translate(ProgramHandle handle) const {
+        return programTranslationBuffer[handle.id()];
+    }
+    NamespaceHandle translate(NamespaceHandle handle) const {
+        return namespaceTranslationBuffer[handle.id()];
+    }
+
 public:
-    ProgramStatus m_status = ProgramStatus::Unchecked;
-    ProgramKind m_kind = ProgramKind::Value;
-    uint16_t inheritedParameterCount = 0;
+    struct Fields {
+        uint8_t kindBits : 2;
+        uint8_t statusBits : 3;
+
+        Fields(ProgramKind kind)
+            : kindBits(std::to_underlying(kind))
+            , statusBits(std::to_underlying(ProgramStatus::Unchecked)) { }
+
+        void setStatus(ProgramStatus status) { statusBits = std::to_underlying(status); }
+        ProgramStatus status() const { return (ProgramStatus)statusBits; }
+        ProgramKind kind() const { return (ProgramKind)kindBits; }
+    };
+    TaggedSourceLocation<Fields> m_fields;
+    uint32_t inheritedParameterCount = 0;
     Word m_name;
 
     std::vector<Parameter> parameters;
     std::vector<Node> expressions;
     std::vector<Value> valueData;
 
-    const ProgramHandle* programTranslationBuffer = nullptr;
-
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
 
     std::optional<ExternValue> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
-    std::optional<ExternValue> m_parent;
-    std::optional<ExternValue> m_self;
+    union {
+        struct {
+            ExternValue parent;
+            std::optional<ExternValue> self;
+        } checked;
+        struct {
+            sema::Value rawParent;
+            parse::TokenHandle parseLocation;
+        } unchecked;
+    } u;
+
+    const ProgramHandle* programTranslationBuffer = nullptr;
+    const NamespaceHandle* namespaceTranslationBuffer = nullptr;
 
     friend struct Dumper;
+    friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 104);
+static_assert(sizeof(Program) == 120);
 
 struct ValueProgram : Program {
+    ValueProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+        : Program(ProgramKind::Value, name, parseLocation, rawParent, location) { }
+
     void setValue(Value value) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
         m_subClassData = value.toUint();
@@ -226,11 +288,55 @@ struct ValueProgram : Program {
     }
 };
 
-struct FunctionProgram : Program {
-    struct FunctionParameter {
-        Word name;
+enum class RuntimeParameterKind : uint8_t {
+    UncheckedMember,
+    Member,
+    HasMember,
+    LetParameter,
+    VarParameter,
+    InParameter,
+    InOutParameter,
+    OutParameter,
+};
+
+struct RuntimeParameter {
+    TaggedSourceLocation<RuntimeParameterKind> m_location;
+    Word name;
+    union {
+        parse::TokenHandle parseLocation; // active for unchecked kinds
         Type type;
-    };
+    } u;
+
+    RuntimeParameter(RuntimeParameterKind kind, Word name, Type type, SourceLocation location)
+        : m_location(kind, location), name(name), u { .type = type } { }
+
+    RuntimeParameter(Word name, parse::TokenHandle parseLocation, SourceLocation location)
+        : m_location(RuntimeParameterKind::UncheckedMember, location)
+        , name(name)
+        , u { .parseLocation = parseLocation } { }
+
+    void setKind(RuntimeParameterKind kind) {
+        m_location.setTag(kind);
+    }
+
+    RuntimeParameterKind kind() const { return m_location.tag(); }
+    SourceLocation location() const { return m_location.location(); }
+    Type type() const {
+        VERIFY(kind() != RuntimeParameterKind::UncheckedMember);
+        return u.type;
+    }
+};
+
+struct CallableProgram : Program {
+    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+        : Program(kind, name, parseLocation, rawParent, location) { }
+
+    std::vector<RuntimeParameter> runtimeParameters;
+};
+
+struct FunctionProgram : CallableProgram {
+    FunctionProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+        : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
     void setBody(Node* node) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
@@ -240,13 +346,11 @@ struct FunctionProgram : Program {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return &expressions[m_subClassData];
     }
-
-    std::vector<FunctionParameter> functionParameters;
 };
 
-struct TypeProgram : Program {
-    struct Member { };
-    std::vector<Member> members;
+struct TypeProgram : CallableProgram, Scope {
+    TypeProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+        : CallableProgram(ProgramKind::Type, name, parseLocation, rawParent, location) { }
 };
 
 union ProgramUnion {
@@ -254,21 +358,20 @@ union ProgramUnion {
     FunctionProgram function;
     TypeProgram type;
 
-    ProgramUnion(ProgramKind kind) {
+    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location) {
         switch (kind) {
         case ProgramKind::Value:
-            std::construct_at(&value);
+            std::construct_at(&value, name, parseLocation, rawParent, location);
             break;
         case ProgramKind::Function:
-            std::construct_at(&function);
+            std::construct_at(&function, name, parseLocation, rawParent, location);
             break;
         case ProgramKind::Type:
-            std::construct_at(&type);
+            std::construct_at(&type, name, parseLocation, rawParent, location);
             break;
         default:
             VERIFY_NOT_REACHED();
         }
-        value.m_kind = kind;
     }
 
     Program& get() { return value; }
@@ -289,6 +392,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 128);
+static_assert(sizeof(ProgramUnion) == 160);
 
 }

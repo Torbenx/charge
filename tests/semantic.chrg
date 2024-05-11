@@ -86,3 +86,5 @@ static call4indirect = func4ref(X);
 
 // expect-type type
 static nested = func2(func1());
+// expect-type type
+static nestedRef = nested;

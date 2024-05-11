@@ -6,6 +6,7 @@
 #include <list>
 #include <log.h>
 #include <parse/parse_impl.h>
+#include <ranges>
 #include <sema/Generator.h>
 #include <vector>
 
@@ -61,76 +62,108 @@ static uint64_t parseInteger(std::string_view str) {
     return value;
 }
 
-struct SemaExpr {
-    virtual ~SemaExpr() = default;
+namespace sema {
 
-    virtual void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const = 0;
+struct NestedName {
+    std::vector<Word> parts;
+
+    bool match(Context& ctx, Program* prog, Value value) const {
+        for (Word expectedName : std::views::reverse(parts)) {
+            if (value == INVALID_VALUE)
+                return false;
+
+            if (value.kind() == ValueKind::Program) {
+                auto* targetProg = ctx.program(prog->translate(value.program()));
+                if (targetProg->name() != expectedName)
+                    return false;
+                value = (Value)targetProg->parent();
+                prog = targetProg;
+                if (value.kind() == ValueKind::Parameterize)
+                    value = (Value)targetProg->getParameterize(value).base;
+            } else if (value.kind() == ValueKind::Namespace) {
+                auto* ns = ctx.getNamespace(value.nsHandle());
+                if (ns->name != expectedName)
+                    return false;
+                value = ns->parent.transform([](NamespaceHandle h) { return (Value)h; }).value_or(INVALID_VALUE);
+            } else {
+                VERIFY_NOT_REACHED();
+            }
+        }
+        if (value != ctx.m_scopeStack.back().value)
+            return false;
+        return true;
+    }
 };
-struct ParameterizeExpr : SemaExpr {
-    glue::DeclarationNode* base;
-    std::vector<std::unique_ptr<SemaExpr>> arguments;
 
-    ParameterizeExpr(glue::DeclarationNode* base, std::vector<std::unique_ptr<SemaExpr>> args)
-        : base(base), arguments(std::move(args)) { }
+struct CheckExpr {
+    virtual ~CheckExpr() = default;
 
-    void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Parameterize);
+    virtual void check(Context& ctx, Program* prog, Value value) const = 0;
+};
+struct ParameterizeExpr : CheckExpr {
+    NestedName base;
+    std::vector<std::unique_ptr<CheckExpr>> arguments;
+
+    ParameterizeExpr(NestedName base, std::vector<std::unique_ptr<CheckExpr>> args)
+        : base(std::move(base)), arguments(std::move(args)) { }
+
+    void check(Context& ctx, Program* prog, Value value) const override {
+        VERIFY(value.kind() == ValueKind::Parameterize);
         auto parameterize = prog->getParameterize(value);
 
-        VERIFY(parameterize.base == base->program().value());
+        VERIFY(base.match(ctx, prog, (Value)parameterize.base));
 
         VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
             arguments[i]->check(ctx, prog, parameterize.arguments[i]);
     }
 };
-struct LiteralExpr : SemaExpr {
-    glue::DeclarationNode* literal;
+struct LiteralExpr : CheckExpr {
+    NestedName literal;
 
-    explicit LiteralExpr(glue::DeclarationNode* literal)
-        : literal(literal) { }
+    explicit LiteralExpr(NestedName literal)
+        : literal(std::move(literal)) { }
 
-    void check(glue::Context&, sema::Program*, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Program);
-        VERIFY(literal->program().value() == value.program());
+    void check(Context& ctx, Program* prog, Value value) const override {
+        VERIFY(literal.match(ctx, prog, value));
     }
 };
-struct ParameterExpr : SemaExpr {
+struct ParameterExpr : CheckExpr {
     int_t parameterIndex = 0;
     explicit ParameterExpr(int_t index)
         : parameterIndex(index) { }
 
-    void check(glue::Context&, sema::Program*, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::Parameter);
+    void check(Context&, Program*, Value value) const override {
+        VERIFY(value.kind() == ValueKind::Parameter);
         VERIFY((int_t)value.id() == parameterIndex);
     }
 };
-struct SignatureLiteralExpr : SemaExpr {
-    glue::DeclarationNode* literal;
+struct TemplateSignatureExpr : CheckExpr {
+    NestedName literal;
 
-    explicit SignatureLiteralExpr(glue::DeclarationNode* literal)
-        : literal(literal) { }
+    explicit TemplateSignatureExpr(NestedName literal)
+        : literal(std::move(literal)) { }
 
-    void check(glue::Context&, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::TemplateSignature);
-        VERIFY(value.templateSignatureProgram() == literal->program().value());
+    void check(Context& ctx, Program* prog, Value value) const override {
+        VERIFY(value.kind() == ValueKind::TemplateSignature);
+        VERIFY(literal.match(ctx, prog, (Value)value.templateSignatureProgram()));
     }
 };
-struct FunctionSignatureExpr : SemaExpr {
-    std::unique_ptr<SemaExpr> signatureValue;
+struct FunctionSignatureExpr : CheckExpr {
+    std::unique_ptr<CheckExpr> signatureValue;
 
-    explicit FunctionSignatureExpr(std::unique_ptr<SemaExpr> signatureValue)
+    explicit FunctionSignatureExpr(std::unique_ptr<CheckExpr> signatureValue)
         : signatureValue(std::move(signatureValue)) { }
 
-    void check(glue::Context& ctx, sema::Program* prog, sema::Value value) const override {
-        VERIFY(value.kind() == sema::ValueKind::FunctionSignature$Program
-            || value.kind() == sema::ValueKind::FunctionSignature$Parameterize);
+    void check(Context& ctx, Program* prog, Value value) const override {
+        VERIFY(value.kind() == ValueKind::FunctionSignature$Program
+            || value.kind() == ValueKind::FunctionSignature$Parameterize);
         signatureValue->check(ctx, prog, value.functionSignatureBaseValue());
     }
 };
 
-struct SemaExprParser {
-    glue::Context& context;
+struct CheckExprParser {
+    Context& context;
     std::string_view& buffer;
 
     void skipWhitespace() {
@@ -154,24 +187,19 @@ struct SemaExprParser {
         return result;
     }
 
-    glue::DeclarationNode* readNestedName() {
-        glue::DeclarationNode* node = context.currentScope();
-
+    NestedName readNestedName() {
+        NestedName result;
         for (;;) {
-            auto id = readId();
-            node = node->findChild(context.wordTable.get(id));
-            VERIFY(node != nullptr);
-
+            result.parts.push_back(context.wordTable.get(readId()));
             if (!buffer.starts_with("::"))
                 break;
             consume("::");
         }
-
-        return node;
+        return result;
     }
 
     auto parseArguments() {
-        std::vector<std::unique_ptr<SemaExpr>> args;
+        std::vector<std::unique_ptr<CheckExpr>> args;
         for (;;) {
             args.push_back(parse());
             if (buffer.starts_with("}"))
@@ -181,7 +209,7 @@ struct SemaExprParser {
         return args;
     }
 
-    std::unique_ptr<SemaExpr> parse() {
+    std::unique_ptr<CheckExpr> parse() {
         if (buffer.starts_with("#")) {
             buffer = buffer.substr(1);
             auto id = readId();
@@ -192,9 +220,9 @@ struct SemaExprParser {
             auto id = readId();
             if (id == "templsig") {
                 consume("(");
-                glue::DeclarationNode* base = readNestedName();
+                auto base = readNestedName();
                 consume(")");
-                return std::make_unique<SignatureLiteralExpr>(base);
+                return std::make_unique<TemplateSignatureExpr>(std::move(base));
             }
             if (id == "fnsig") {
                 consume("(");
@@ -204,17 +232,19 @@ struct SemaExprParser {
             }
         }
 
-        glue::DeclarationNode* node = readNestedName();
+        auto base = readNestedName();
 
         if (buffer.starts_with("{")) {
             consume("{");
             auto args = parseArguments();
             consume("}");
-            return std::make_unique<ParameterizeExpr>(node, std::move(args));
+            return std::make_unique<ParameterizeExpr>(std::move(base), std::move(args));
         }
-        return std::make_unique<LiteralExpr>(node);
+        return std::make_unique<LiteralExpr>(std::move(base));
     }
 };
+
+}
 
 struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHandler {
     struct Pair {
@@ -250,7 +280,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "expect-type", "expect-value");
 
     WordStringTable wordTable { words };
-    glue::Context context;
+    sema::Context context;
     CommandQueue commandQueue;
 
     TestInstrumenter(std::string_view source)
@@ -312,7 +342,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
 
     void runTest() {
         parse::parseImpl(context.parseOutput.source.data(), context, this);
-        VERIFY(context.currentScope()->declaringNode() == nullptr);
+        VERIFY(context.m_scopeStack.size() == 1);
 
         visit(context.parseOutput);
     }
@@ -399,20 +429,17 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         }
     }
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
-        SemaExprParser parser { context, comment };
+        sema::CheckExprParser parser { context, comment };
         auto expr = parser.parse();
         sema::Program* program = nullptr;
-        for (auto& node : context.storage) {
-            if (!node.parseLocation().has_value())
-                continue;
-            auto tokenInfo = context.parseOutput.tokens[node.parseLocation()->id()];
-            if (tokenInfo > whitespace) {
-                auto progHandle = sema::Generator::signatureCheck(context, &node);
-                program = context.program(progHandle);
+        for (auto& prog : context.programs) {
+            if (prog.get().declarationLocation() > whitespace.location()) {
+                program = &prog.get();
                 break;
             }
         }
         VERIFY(program != nullptr);
+        sema::Generator::signatureCheck(context, context.programHandle(program));
         program->dump(context);
 
         if (word == words["expect-type"])
@@ -436,7 +463,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         return cmd;
     }
 
-    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, glue::Context& context) override {
+    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
         fmt::println("");
         fmt::println(
             "Invalid token '{}' for state '{}' and scope '{}' on line {}",

@@ -2,11 +2,9 @@
 
 #include <sema/Program.h>
 
-namespace glue {
-struct Context;
-}
-
 namespace sema {
+
+struct Context;
 
 struct LookupCache {
     WordTable table;
@@ -99,8 +97,7 @@ struct Generator {
 
     using Token = parse::TokenKind;
 
-    glue::Context& context;
-    glue::DeclarationNode* currentScope = nullptr;
+    Context& context;
     const parse::TokenInfo* tok = nullptr;
     Program* program = nullptr;
     ProgramHandle programHandle;
@@ -114,8 +111,7 @@ struct Generator {
     std::vector<Type> parameterTypes;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
-    Generator(glue::Context& context, ProgramHandle handle);
-    Generator(glue::Context& context, glue::DeclarationNode* scope);
+    Generator(Context& context, ProgramHandle handle);
 
     void advance();
     Node* topNode(int_t n = 0);
@@ -141,8 +137,8 @@ struct Generator {
     void visitPrimaryExpr();
     int_t visitExpressionList();
 
-    static ProgramHandle signatureCheck(glue::Context& context, glue::DeclarationNode* scope);
-    static void generateBuiltins(glue::Context& context);
+    static void signatureCheck(Context& context, ProgramHandle progHandle);
+    static void generateBuiltins(Context& context);
     FoldBase asFoldBase(Value value);
     std::optional<FoldBase> tryAsFoldBase(Value value);
     Value fold(Value base, ExternValue v);
@@ -164,15 +160,15 @@ struct Generator {
     Type typeOfNonDependentProgram(Value value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    Value generateDeclarationLiteral(glue::DeclarationNode* target);
-    std::optional<Value> lookupInScope(glue::DeclarationNode* scope, Word name);
+    Value generateDeclarationLiteral(Value rawValue);
+    std::optional<Value> lookupInside(Value scope, Word name);
     void generateIdentifierExpr();
     void generateParameterizeExpr(int_t argumentCount);
     CallBase resolveCallBase();
     void generateCallExpr(CallBase base, int_t argumentCount);
 
-    void buildParent(glue::DeclarationNode* parentDeclaration);
-    void buildSelf();
+    Value buildParent(Value rawParent);
+    Value buildSelf();
 
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);

@@ -9,7 +9,14 @@
 #endif
 
 using namespace std::string_view_literals;
-using DeclarationKind = glue::DeclarationNode::Kind;
+enum class DeclarationKind : uint8_t {
+        Namespace,
+        Type,
+        Variable,
+        Function,
+        Member,
+        HasMember,
+    };
 
 namespace parse {
 
@@ -153,37 +160,35 @@ struct WordAndPosition {
     return tokEnd;
 }
 
-[[gnu::noinline]] static void commitStaticDeclaration(DeclarationKind kind, Word name, TokenHandle parseLocation, ParseState& state) {
-    bool ret = state.pushStaticScope(kind, name, parseLocation);
-    if (ret)
-        VERIFY(kind == DeclarationKind::Namespace);
-}
-
-[[gnu::noinline]] static void commitHasMemberDeclaration(TokenHandle parseLocation, ParseState& state) {
-    state.pushHasScope(parseLocation);
-}
-
-[[gnu::noinline]] static void commitMemberDeclaration(Word name, TokenHandle parseLocation, ParseState& state) {
-    bool ret = state.pushMemberScope(name, parseLocation);
-    VERIFY(!ret);
-}
-
 template<DeclarationKind kind>
-static void commitDeclaration(Word name, TokenHandle declarationBegin, ParseState& state) {
+static sema::Value commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::HasMember) {
-        commitHasMemberDeclaration(declarationBegin, state);
-    } else if constexpr (kind == DeclarationKind::Member) {
-        commitMemberDeclaration(name, declarationBegin, state);
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
+        return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    } else if constexpr (kind == DeclarationKind::Namespace) {
+        return state.pushNamespaceScope(name);
     } else {
-        commitStaticDeclaration(kind, name, declarationBegin, state);
+        sema::ProgramKind progKind;
+        switch (kind) {
+        case DeclarationKind::Type:
+            progKind = sema::ProgramKind::Type;
+            break;
+        case DeclarationKind::Function:
+            progKind = sema::ProgramKind::Function;
+            break;
+        case DeclarationKind::Variable:
+            progKind = sema::ProgramKind::Value;
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        return state.pushStaticScope(progKind, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     }
 }
 
 static void endDeclaration(ParseState& state) {
     // fmt::println("endDeclaration {}", state.wordTable.view(state.currentScope()->name()));
     state.popScope();
-    VERIFY(state.currentScope() != nullptr);
 }
 
 void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
@@ -2195,7 +2200,7 @@ after_statement$no_emit:
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
                 // commitDeclaration DeclarationKind::Member
-                commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+                tokenData = commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
                 // emitToken TokenKind::MemberDecl
                 carriedEmitTokenKind = TokenKind::MemberDecl;
                 // next after_variable_declaration_id
@@ -2225,7 +2230,7 @@ after_statement$no_emit:
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
                 // commitDeclaration DeclarationKind::Member
-                commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+                tokenData = commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
                 // emitToken TokenKind::MemberDecl
                 carriedEmitTokenKind = TokenKind::MemberDecl;
                 // next after_variable_declaration_id
@@ -3409,7 +3414,7 @@ namespace_declaration_id$no_emit:
         // rememberDeclarationBegin
         declarationBegin = state.parseOutput.currentToken();
         // commitDeclaration DeclarationKind::Namespace
-        commitDeclaration<DeclarationKind::Namespace>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Namespace>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken TokenKind::NamespaceDecl
         carriedEmitTokenKind = TokenKind::NamespaceDecl;
         // next after_namespace_declaration_id
@@ -3630,7 +3635,7 @@ function_declaration_id$no_emit:
         }
         tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Function
-        commitDeclaration<DeclarationKind::Function>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Function>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken TokenKind::FunctionDecl
         carriedEmitTokenKind = TokenKind::FunctionDecl;
         // next after_function_declaration_id
@@ -3722,7 +3727,7 @@ type_declaration_id$no_emit:
         }
         tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Type
-        commitDeclaration<DeclarationKind::Type>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Type>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken tokenKind
         carriedEmitTokenKind = tokenKind;
         // next after_type_declaration_id
@@ -3783,7 +3788,7 @@ member_declaration$as_then:
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
                 // commitDeclaration DeclarationKind::HasMember
-                commitDeclaration<DeclarationKind::HasMember>(Word(), declarationBegin, state);
+                tokenData = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state).toUint();
                 // emitToken TokenKind::HasMemberDecl
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
                 // next expression
@@ -3794,7 +3799,7 @@ member_declaration$as_then:
         }
         tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Member
-        commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Member>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken TokenKind::MemberDecl
         carriedEmitTokenKind = TokenKind::MemberDecl;
         // next after_variable_declaration_id
@@ -3833,7 +3838,7 @@ after_static$no_emit:
         }
         tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken TokenKind::StaticLetDecl
         carriedEmitTokenKind = TokenKind::StaticLetDecl;
         // next after_variable_declaration_id
@@ -3859,7 +3864,7 @@ static_variable_declaration$no_emit:
         }
         tokenData = word.asUint();
         // commitDeclaration DeclarationKind::Variable
-        commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), declarationBegin, state);
+        tokenData = commitDeclaration<DeclarationKind::Variable>(Word::fromUint(tokenData), tokBegin, declarationBegin, state).toUint();
         // emitToken tokenKind
         carriedEmitTokenKind = tokenKind;
         // next after_variable_declaration_id

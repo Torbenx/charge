@@ -1,5 +1,4 @@
-#include <glue/Context.h>
-#include <sema/Program.h>
+#include <sema/Context.h>
 
 #include <sstream>
 
@@ -10,12 +9,12 @@ struct Dumper {
         bool atLast = false;
         uint8_t extraSpace = 0;
     };
-    glue::Context& context;
+    Context& context;
     std::vector<IndentItem> indentation;
     std::string output;
     Program* program = nullptr;
 
-    Dumper(glue::Context& context)
+    Dumper(Context& context)
         : context(context) { }
 
     void dumpProgram(Program*);
@@ -83,7 +82,7 @@ struct Dumper {
 };
 
 std::string Dumper::formatProgram(Program* base, ProgramHandle externHandle) {
-    ProgramHandle translatedHandle = base->programTranslationBuffer[externHandle.id()];
+    ProgramHandle translatedHandle = base->translate(externHandle);
     return formatProgram(context.program(translatedHandle));
 }
 
@@ -105,11 +104,11 @@ std::string Dumper::formatProgram(Program* targetProg) {
 }
 
 std::string Dumper::formatNamespaceInternal(ExternValue nsHandle) {
-    glue::DeclarationNode* scope = context.getNamespace((Value)nsHandle);
-    std::string name(context.wordTable.view(scope->name()));
-    while (scope->declaringNode() != nullptr) {
-        scope = scope->declaringNode();
-        name = std::string(context.wordTable.view(scope->name())) + "::" + name;
+    Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
+    std::string name(context.wordTable.view(ns->name));
+    while (ns->parent.has_value()) {
+        ns = context.getNamespace(ns->parent.value());
+        name = std::string(context.wordTable.view(ns->name)) + "::" + name;
     }
     return name;
 }
@@ -154,9 +153,11 @@ void Dumper::dumpNode(Node* node, std::string header) {
 void Dumper::dumpProgram(Program* prog) {
     this->program = prog;
     dumpLine(formatProgram(prog) + ":");
-    dumpLine("parent = " + formatValue((Value)prog->m_parent.value_or(INVALID_VALUE)));
-    dumpLine("self = " + formatValue((Value)prog->m_self.value_or(INVALID_VALUE)));
-    dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+    if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
+        dumpLine("parent = " + formatValue((Value)prog->u.checked.parent));
+        dumpLine("self = " + formatValue((Value)prog->u.checked.self.value_or(INVALID_VALUE)));
+        dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+    }
     switch (prog->kind()) {
     case ProgramKind::Value:
         dumpLine("value = " + formatValue(Value::fromUint(prog->m_subClassData)));
@@ -223,7 +224,7 @@ void Dumper::dumpProgram(Program* prog) {
     this->program = nullptr;
 }
 
-void Program::dump(glue::Context& context) {
+void Program::dump(Context& context) {
     Dumper dumper { context };
     dumper.dumpProgram(this);
     std::cout << dumper.output;

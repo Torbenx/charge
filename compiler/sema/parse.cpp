@@ -1,19 +1,10 @@
-#include <glue/Context.h>
+#include <sema/Context.h>
 #include <sema/Generator.h>
 
 namespace sema {
 
-Generator::Generator(glue::Context& context, ProgramHandle handle)
+Generator::Generator(Context& context, ProgramHandle handle)
     : context(context), program(context.program(handle)), programHandle(handle) { }
-
-Generator::Generator(glue::Context& context, glue::DeclarationNode* scope)
-    : context(context) {
-    currentScope = scope;
-    if (scope->parseLocation().has_value())
-        tok = &context.parseOutput.tokens[scope->parseLocation().value().id()];
-    programHandle = scope->program().value();
-    program = context.program(programHandle);
-}
 
 void Generator::advance() { tok += 1; }
 
@@ -140,7 +131,7 @@ void Generator::visitFunctionDeclaration() {
         advance();
         auto info = visitVariableDeclaration(true);
         emitNode(NodeKind::LetDecl, nameLoc, info.hasInitializer ? 1 : 0, NodeData { .decl { .type = info.type } });
-        fnProgram->functionParameters.push_back({ name, info.type });
+        fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();

@@ -23,6 +23,13 @@ struct ProgramHandle {
     bool operator==(const ProgramHandle&) const = default;
 };
 
+struct NamespaceHandle {
+    uint32_t m_id = -1;
+    constexpr uint32_t id() const { return m_id; }
+
+    bool operator==(const NamespaceHandle&) const = default;
+};
+
 enum class ValueKind : uint8_t {
     Program, // either not dependent or a template
     Namespace,
@@ -42,6 +49,8 @@ struct Value {
         : idBits(id), kindBits(std::to_underlying(kind)) { }
     constexpr explicit Value(ProgramHandle prog)
         : Value(ValueKind::Program, prog.id()) { }
+    constexpr explicit Value(NamespaceHandle ns)
+        : Value(ValueKind::Namespace, ns.id()) { }
     constexpr Value(BuiltinId id)
         : Value(ProgramHandle(std::to_underlying(id))) { }
 
@@ -53,6 +62,10 @@ struct Value {
 
     constexpr ProgramHandle program() const {
         VERIFY(kind() == ValueKind::Program);
+        return { id() };
+    }
+    constexpr NamespaceHandle nsHandle() const {
+        VERIFY(kind() == ValueKind::Namespace);
         return { id() };
     }
     constexpr ProgramHandle templateSignatureProgram() const {
@@ -122,6 +135,10 @@ private:
 template<>
 struct optional_traits<sema::ProgramHandle> {
     static constexpr sema::ProgramHandle empty_value = {};
+};
+template<>
+struct optional_traits<sema::NamespaceHandle> {
+    static constexpr sema::NamespaceHandle empty_value = {};
 };
 template<>
 struct optional_traits<sema::Value> {

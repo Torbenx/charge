@@ -19,7 +19,6 @@ add_executable(compiler
     WordTable.h
 )
 
-add_subdirectory(glue)
 add_subdirectory(parse)
 add_subdirectory(sema)
 

@@ -1,4 +1,4 @@
-#include <glue/Context.h>
+#include <sema/Context.h>
 #include <sema/Generator.h>
 
 namespace sema {
@@ -92,18 +92,17 @@ Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arg
     return program->addParameterize(base, arguments);
 }
 
-void Generator::buildParent(glue::DeclarationNode* parentNode) {
-    if (parentNode->kind() == glue::DeclarationNode::Kind::Namespace) {
-        program->setParent(context.namespaceValue(parentNode));
-        return;
-    }
+Value Generator::buildParent(Value rawParent) {
+    if (rawParent.kind() == ValueKind::Namespace)
+        return rawParent;
 
-    ProgramHandle parentHandle = signatureCheck(context, parentNode);
+    VERIFY(rawParent.kind() == ValueKind::Program);
+
+    ProgramHandle parentHandle = rawParent.program();
+    signatureCheck(context, parentHandle);
     Program* parentProg = context.program(parentHandle);
-    if (!parentProg->isDependent()) {
-        program->setParent(makeProgramValue(parentHandle));
-        return;
-    }
+    if (!parentProg->isDependent())
+        return makeProgramValue(parentHandle);
 
     // inherite parameters
     int_t parameterCount = parentProg->parameters.size();
@@ -118,48 +117,57 @@ void Generator::buildParent(glue::DeclarationNode* parentNode) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
         program->parameters[i].type = type;
     }
-    program->setParent(parentValue);
+    return parentValue;
 }
 
-void Generator::buildSelf() {
+Value Generator::buildSelf() {
     int_t parameterCount = program->parameters.size();
     std::vector<Value> arguments(parameterCount, INVALID_VALUE);
     for (int_t i = 0; i < parameterCount; i++)
         arguments[i] = Value(ValueKind::Parameter, i);
-    program->setSelf(makeParameterize(programHandle, arguments));
+    return makeParameterize(programHandle, arguments);
 }
 
-std::optional<Value> Generator::lookupInScope(glue::DeclarationNode* scope, Word name) {
-    using Kind = glue::DeclarationNode::Kind;
-    if (scope->kind() == Kind::Namespace || scope->kind() == Kind::Type) {
-        if (scope->kind() == Kind::Type) {
-            VERIFY(scope->program().has_value());
-            VERIFY(context.program(scope->program().value())->status() >= ProgramStatus::SignatureChecked);
-        }
-        auto child = scope->findChild(name);
-        if (child.has_value())
-            return generateDeclarationLiteral(child);
-        return std::nullopt;
+std::optional<Value> Generator::lookupInside(Value scope, Word name) {
+    auto rawToValue = [this](Value rawValue) { return generateDeclarationLiteral(rawValue); };
+    if (scope.kind() == ValueKind::Namespace) {
+        Namespace* ns = context.getNamespace(scope.nsHandle());
+        return ns->getDeclaration(name).transform(rawToValue);
     }
-    return std::nullopt;
+    if (scope.kind() == ValueKind::Program) {
+        Program* prog = context.program(scope.program());
+        VERIFY(prog->kind() == ProgramKind::Type);
+        return static_cast<TypeProgram*>(prog)->getDeclaration(name).transform(rawToValue);
+    }
+    if (scope.kind() == ValueKind::Parameterize) {
+        auto param = program->getParameterize(scope);
+        Program* baseProg = context.program(param.base);
+        auto lookup = static_cast<TypeProgram*>(baseProg)->getDeclaration(name);
+        if (!lookup.has_value())
+            return std::nullopt;
+        // 'baseProg' must be a parent of 'program'
+        VERIFY(program->parent().kind() == ValueKind::Parameterize);
+        VERIFY(program->inheritedParameterCount >= param.arguments.size());
+        return lookup.transform(rawToValue);
+    }
+    VERIFY_NOT_REACHED();
 }
 
-Value Generator::generateDeclarationLiteral(glue::DeclarationNode* target) {
-    using Kind = glue::DeclarationNode::Kind;
-    switch (target->kind()) {
-    case Kind::Namespace:
-        return context.namespaceValue(target);
-    case Kind::Type:
-    case Kind::Function: {
-        return makeProgramValue(signatureCheck(context, target));
-    }
-    case Kind::Variable: {
-        ProgramHandle progHandle = signatureCheck(context, target);
-        Program* prog = context.program(progHandle);
+Value Generator::generateDeclarationLiteral(Value rawValue) {
+    if (rawValue.kind() == ValueKind::Namespace)
+        return rawValue;
+    VERIFY(rawValue.kind() == ValueKind::Program);
+    ProgramHandle progHandle = rawValue.program();
+    Program* prog = context.program(progHandle);
+    signatureCheck(context, progHandle);
+    switch (prog->kind()) {
+    case ProgramKind::Type:
+    case ProgramKind::Function:
+        return makeProgramValue(progHandle);
+    case ProgramKind::Value: {
         Value progValue = makeProgramValue(progHandle);
         if (prog->isTemplate())
             return progValue;
-        VERIFY(prog->kind() == ProgramKind::Value);
         return fold(progValue, static_cast<ValueProgram*>(prog)->value());
     }
     default:
@@ -180,15 +188,27 @@ void Generator::generateIdentifierExpr() {
         emitConstantExpr(tok->location(), result.value());
         return;
     }
-    glue::DeclarationNode* lookupScope = currentScope->declaringNode();
-    while (lookupScope != nullptr) {
-        auto lookup = lookupInScope(lookupScope, name);
+    std::optional<Value> lookupScope = (Value)program->parent();
+    while (lookupScope.has_value()) {
+        auto lookup = lookupInside(lookupScope.value(), name);
         if (lookup.has_value()) {
             lookupCache.insert(name, lookup.value());
             emitConstantExpr(tok->location(), lookup.value());
             return;
         }
-        lookupScope = lookupScope->declaringNode();
+        switch (lookupScope.value().kind()) {
+        case ValueKind::Namespace:
+            lookupScope = context.getNamespace(lookupScope.value().nsHandle())->parent.transform([](NamespaceHandle h) { return (Value)h; });
+            break;
+        case ValueKind::Program:
+            lookupScope = (Value)context.program(lookupScope.value().program())->parent();
+            break;
+        case ValueKind::Parameterize:
+            lookupScope = (Value)context.program(program->getParameterize(lookupScope.value()).base)->parent();
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
     VERIFY_NOT_REACHED();
 }
@@ -258,11 +278,11 @@ void Generator::generateCallExpr(CallBase base, int_t argumentCount) {
     if (state.program->kind() == ProgramKind::Function) {
         FunctionProgram* fnProg = static_cast<FunctionProgram*>(state.program);
 
-        VERIFY(argumentCount == (int_t)fnProg->functionParameters.size());
+        VERIFY(argumentCount == (int_t)fnProg->runtimeParameters.size());
         for (int_t index = 0; index < argumentCount; index++) {
-            const auto& parameter = fnProg->functionParameters[index];
+            const auto& parameter = fnProg->runtimeParameters[index];
             Expression argument = topExpression(argumentCount - 1 - index);
-            implicitCastTo(state, parameter.type, argument);
+            implicitCastTo(state, parameter.type(), argument);
         }
         VERIFY(base.state.isComplete());
         Value callBase = makeParameterize(state.programHandle, state.arguments);
@@ -342,7 +362,7 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
     }
 
     auto comparePrograms = [&state](ProgramHandle pProg, ProgramHandle aProg) {
-        return state.program->programTranslationBuffer[pProg.id()] == aProg;
+        return state.program->translate(pProg) == aProg;
     };
 
     if (pValue.kind() != aValue.kind())
@@ -351,7 +371,7 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
     case ValueKind::Program:
         return comparePrograms(Value(pValue).program(), aValue.program());
     case ValueKind::Namespace:
-        return context.getNamespace((Value)pValue) == context.getNamespace(aValue);
+        return state.program->translate(Value(pValue).nsHandle()) == aValue.nsHandle();
     case ValueKind::TemplateSignature:
         return comparePrograms(Value(pValue).templateSignatureProgram(), aValue.templateSignatureProgram()); // TODO: different programs can have the same signature
     case ValueKind::FunctionSignature$Program:
@@ -384,7 +404,7 @@ Value Generator::fold(Value base, ExternValue v) {
 
 Value Generator::fold(FoldBase base, ExternValue v) {
     auto foldProgram = [&base](ProgramHandle handle) {
-        return base.program->programTranslationBuffer[handle.id()];
+        return base.program->translate(handle);
     };
     switch (v.kind()) {
     case ValueKind::Program:
@@ -392,7 +412,7 @@ Value Generator::fold(FoldBase base, ExternValue v) {
     case ValueKind::Parameter:
         return base.arguments[v.id()];
     case ValueKind::Namespace:
-        return (Value)v; // TODO: translate?
+        return (Value)base.program->translate(Value(v).nsHandle());
     case ValueKind::TemplateSignature:
         return makeTemplateSignature(foldProgram(Value(v).templateSignatureProgram()));
     case ValueKind::FunctionSignature$Program:
@@ -416,38 +436,21 @@ Value Generator::fold(FoldBase base, ExternValue v) {
     }
 }
 
-ProgramHandle Generator::signatureCheck(glue::Context& context, glue::DeclarationNode* scope) {
-    if (scope->program().has_value()) {
-        Program* prog = context.program(scope->program().value());
-        if (prog->status() >= ProgramStatus::SignatureChecked)
-            return scope->program().value();
-        VERIFY(prog->status() == ProgramStatus::Unchecked);
-    } else {
-        ProgramKind kind;
-        switch (scope->kind()) {
-        case glue::DeclarationNode::Kind::Variable:
-            kind = ProgramKind::Value;
-            break;
-        case glue::DeclarationNode::Kind::Function:
-            kind = ProgramKind::Function;
-            break;
-        case glue::DeclarationNode::Kind::Type:
-            kind = ProgramKind::Type;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-        scope->setProgram(context.newProgram(kind));
-    }
-    context.program(scope->program().value())->m_name = scope->name();
+void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
+    Program* program = context.program(progHandle);
+    if (program->status() >= ProgramStatus::SignatureChecked)
+        return;
+    VERIFY(program->status() == ProgramStatus::Unchecked);
 
-    Generator g(context, scope);
-    g.program->setStatus(ProgramStatus::SignatureCheckInProgress);
-    g.buildParent(scope->declaringNode());
+    Generator g(context, progHandle);
+    Value parent = g.buildParent(program->rawParent());
+    auto parseLocation = program->beginSignatureCheck(parent);
+
+    g.tok = &context.parseOutput.tokens[parseLocation.id()];
     g.visitDeclaration();
-    g.buildSelf();
-    g.program->setStatus(ProgramStatus::SignatureChecked);
-    return g.programHandle;
+    g.tok = nullptr;
+
+    program->completeSignatureCheck(g.buildSelf());
 }
 
 Type Generator::typeOf(Value value) {
@@ -545,28 +548,24 @@ struct BuiltinGenerator : Generator {
         }
     }
 
-    static glue::DeclarationNode* createScope(glue::Context& context, BuiltinId id) {
-        context.pushStaticScope(glue::DeclarationNode::Kind::Type, nameOf(id), {});
-        auto handle = context.newProgram(ProgramKind::Type);
-        VERIFY(handle.id() == std::to_underlying(id));
-        context.currentScope()->setProgram(handle);
-        return context.currentScope();
+    static ProgramHandle createScope(Context& context, BuiltinId id) {
+        auto value = context.pushStaticScope(ProgramKind::Type, nameOf(id), {}, {});
+        VERIFY(value == Value(id));
+        return value.program();
     }
 
-    BuiltinGenerator(glue::Context& context, BuiltinId id)
+    BuiltinGenerator(Context& context, BuiltinId id)
         : Generator(context, createScope(context, id)) {
-        program->m_name = nameOf(id);
-        buildParent(currentScope->declaringNode());
+        program->beginSignatureCheck(buildParent(program->rawParent()));
     }
 
     ~BuiltinGenerator() {
-        buildSelf();
-        program->setStatus(ProgramStatus::SignatureChecked);
+        program->completeSignatureCheck(buildSelf());
         context.popScope();
     }
 };
 
-void Generator::generateBuiltins(glue::Context& context) {
+void Generator::generateBuiltins(Context& context) {
     {
         BuiltinGenerator g { context, BuiltinId::type_type };
         g.program->setType(builtins::type_type);

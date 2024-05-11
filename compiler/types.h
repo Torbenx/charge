@@ -3,6 +3,7 @@
 #include <log.h>
 
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -119,6 +120,27 @@ public:
     {
         verify_has_value();
         return storage;
+    }
+
+    template<typename F>
+    constexpr auto and_then(F&& f) const {
+        if (*this)
+            return std::invoke(std::forward<F>(f), **this);
+        else
+            return std::remove_cvref_t<std::invoke_result_t<F, const T&>> {};
+    }
+    template<typename F>
+    constexpr auto transform(F&& f) const {
+        using U = std::remove_cv_t<std::invoke_result_t<F, const T&>>;
+        if (*this)
+            return std::optional<U>(std::invoke(std::forward<F>(f), **this));
+        else
+            return std::optional<U>();
+    }
+    template<typename F>
+    constexpr auto or_else(F&& f) const {
+        static_assert(std::is_same_v<std::remove_cvref_t<std::invoke_result_t<F>>, std::optional<T>>);
+        return *this ? *this : std::forward<F>(f)();
     }
 
     constexpr ~optional() = default;

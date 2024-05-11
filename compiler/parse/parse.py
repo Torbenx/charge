@@ -775,7 +775,7 @@ def generateInstructions(case, instructions, thenHandler):
             nameExpr = "Word()"
             if type(case) is IdentifierCase:
                 nameExpr = "Word::fromUint(tokenData)"
-            line("commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", declarationBegin, state);")
+            line("tokenData = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, state).toUint();")
         elif type(inst) is RememberDeclarationBeginInstruction:
             line("declarationBegin = state.parseOutput.currentToken();")
         elif type(inst) is EndDeclarationInstruction:

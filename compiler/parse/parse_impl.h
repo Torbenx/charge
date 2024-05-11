@@ -1,10 +1,10 @@
 #pragma once
 
-#include <glue/Context.h>
+#include <sema/Context.h>
 
 namespace parse {
 
-using ParseState = glue::Context;
+using ParseState = sema::Context;
 
 struct ErrorHandler {
     virtual void invalidCharaceter() { }
