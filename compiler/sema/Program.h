@@ -129,10 +129,11 @@ struct Program {
         bool implicit() const { return name.empty(); }
     };
 
-    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue parent, SourceLocation location)
         : m_fields(Fields(kind), location)
         , m_name(name)
-        , u { .unchecked = { .rawParent = rawParent, .parseLocation = parseLocation } } { }
+        , m_parent(parent)
+        , parseLocation(parseLocation) { }
 
     int_t importNode(Node* node);
     Value addExpression(Node* expr);
@@ -144,7 +145,7 @@ struct Program {
         return RemoteExpression { begin[1], begin[0].id() };
     }
     Parameterize getParameterize(ExternValue value) {
-        // TODO: Returning a span referencing valueData maybe a bad idea
+        // TODO: Returning a span referencing valueData may be a bad idea
         VERIFY(value.kind() == ValueKind::Parameterize);
         Value* begin = &valueData[value.id()];
         int_t argumentCount = begin[0].id();
@@ -155,20 +156,13 @@ struct Program {
 
     // type after substituitng template arguments
     ExternValue type() const { return m_type.value(); }
-
-    ExternValue parent() const {
-        VERIFY(status() >= ProgramStatus::SignatureCheckInProgress);
-        return u.checked.parent;
-    }
-
-    ExternValue self() const {
-        VERIFY(status() >= ProgramStatus::SignatureChecked);
-        return u.checked.self.value();
-    }
-
     void setType(Type type) {
         VERIFY(!m_type.has_value());
         m_type = type;
+    }
+
+    ScopeValue parent() const {
+        return m_parent;
     }
 
     Word name() const { return m_name; }
@@ -189,33 +183,16 @@ struct Program {
         return DataValueRange { valueData };
     }
 
-    sema::Value rawParent() const {
+    parse::TokenHandle beginSignatureCheck() {
         VERIFY(status() == ProgramStatus::Unchecked);
-        return u.unchecked.rawParent;
-    }
-
-    parse::TokenHandle beginSignatureCheck(sema::Value parent) {
-        VERIFY(status() == ProgramStatus::Unchecked);
-        if (parent.kind() == ValueKind::Program) {
-            VERIFY(parent == u.unchecked.rawParent);
-        } else if (parent.kind() == ValueKind::Namespace) {
-            VERIFY(parent == u.unchecked.rawParent);
-        } else if (parent.kind() == ValueKind::Parameterize) {
-            VERIFY((Value)getParameterize(parent).base == u.unchecked.rawParent);
-        } else {
-            VERIFY_NOT_REACHED();
-        }
-        auto result = u.unchecked.parseLocation;
-        u = { .checked = { .parent = parent, .self = std::nullopt } };
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureCheckInProgress);
         m_fields.setTag(tag);
-        return result;
+        return parseLocation;
     }
 
-    void completeSignatureCheck(sema::Value self) {
+    void completeSignatureCheck() {
         VERIFY(status() == ProgramStatus::SignatureCheckInProgress);
-        u.checked.self = self;
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureChecked);
         m_fields.setTag(tag);
@@ -226,6 +203,13 @@ struct Program {
     }
     NamespaceHandle translate(NamespaceHandle handle) const {
         return namespaceTranslationBuffer[handle.id()];
+    }
+    ScopeValue translate(ScopeValue value) const {
+        if (value.kind() == ValueKind::Program)
+            return translate(value.program());
+        if (value.kind() == ValueKind::Namespace)
+            return translate(value.nsHandle());
+        return value;
     }
 
 public:
@@ -254,16 +238,8 @@ protected:
 
     std::optional<ExternValue> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
-    union {
-        struct {
-            ExternValue parent;
-            std::optional<ExternValue> self;
-        } checked;
-        struct {
-            sema::Value rawParent;
-            parse::TokenHandle parseLocation;
-        } unchecked;
-    } u;
+    ScopeValue m_parent;
+    parse::TokenHandle parseLocation;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;
@@ -274,7 +250,7 @@ protected:
 static_assert(sizeof(Program) == 120);
 
 struct ValueProgram : Program {
-    ValueProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+    ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : Program(ProgramKind::Value, name, parseLocation, rawParent, location) { }
 
     void setValue(Value value) {
@@ -328,14 +304,14 @@ struct RuntimeParameter {
 };
 
 struct CallableProgram : Program {
-    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : Program(kind, name, parseLocation, rawParent, location) { }
 
     std::vector<RuntimeParameter> runtimeParameters;
 };
 
 struct FunctionProgram : CallableProgram {
-    FunctionProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+    FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
     void setBody(Node* node) {
@@ -349,7 +325,7 @@ struct FunctionProgram : CallableProgram {
 };
 
 struct TypeProgram : CallableProgram, Scope {
-    TypeProgram(Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location)
+    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Type, name, parseLocation, rawParent, location) { }
 };
 
@@ -358,7 +334,7 @@ union ProgramUnion {
     FunctionProgram function;
     TypeProgram type;
 
-    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location) {
+    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location) {
         switch (kind) {
         case ProgramKind::Value:
             std::construct_at(&value, name, parseLocation, rawParent, location);

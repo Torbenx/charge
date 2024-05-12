@@ -14,7 +14,7 @@ struct Context {
     PageBumpAllocator<ProgramHandle> identityProgramTranslation;
     PageBumpAllocator<NamespaceHandle> identityNamespaceTranslation;
     struct ScopeStackEntry {
-        Value value;
+        ScopeValue value;
         std::optional<Scope*> scope;
     };
     std::vector<ScopeStackEntry> m_scopeStack;
@@ -31,53 +31,53 @@ struct Context {
         identityNamespaceTranslation.clear();
         m_scopeStack.clear();
         auto globalNamespace = newNamespace(Word(), std::nullopt);
-        pushScope((Value)globalNamespace, getNamespace(globalNamespace));
+        pushScope((ScopeValue)globalNamespace, getNamespace(globalNamespace));
     }
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     void popScope() { m_scopeStack.pop_back(); }
-    void pushScope(Value value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
-    void pushEmptyScope(Value value) { m_scopeStack.push_back({ value, std::nullopt }); }
+    void pushScope(ScopeValue value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
+    void pushEmptyScope(ScopeValue value) { m_scopeStack.push_back({ value, std::nullopt }); }
 
-    Value pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+    ScopeValue pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
         ProgramHandle progHandle = newProgram(kind, name, parseLocation, m_scopeStack.back().value, location);
 
         std::optional<Scope*> scope = currentScope();
         if (scope.has_value())
-            scope->addDeclaration(name, (Value)progHandle);
+            scope->addDeclaration(name, (ScopeValue)progHandle);
 
         if (kind == ProgramKind::Type) {
-            pushScope((Value)progHandle, static_cast<TypeProgram*>(program(progHandle)));
+            pushScope((ScopeValue)progHandle, static_cast<TypeProgram*>(program(progHandle)));
         } else {
-            pushEmptyScope((Value)progHandle);
+            pushEmptyScope((ScopeValue)progHandle);
         }
-        return (Value)progHandle;
+        return (ScopeValue)progHandle;
     }
-    Value pushNamespaceScope(Word name) {
+    ScopeValue pushNamespaceScope(Word name) {
         std::optional<Scope*> scope = currentScope();
         VERIFY(scope.has_value());
-        std::optional<Value> maybeResult = scope->getDeclaration(name);
+        std::optional<ScopeValue> maybeResult = scope->getDeclaration(name);
         if (maybeResult.has_value()) {
             VERIFY(maybeResult->kind() == ValueKind::Namespace);
             return maybeResult.value();
         }
-        auto nsHandle = newNamespace(name, NamespaceHandle());
-        scope->addDeclaration(name, (Value)nsHandle);
-        pushScope((Value)nsHandle, getNamespace(nsHandle));
-        return (Value)nsHandle;
+        auto nsHandle = newNamespace(name, m_scopeStack.back().value.nsHandle());
+        scope->addDeclaration(name, (ScopeValue)nsHandle);
+        pushScope((ScopeValue)nsHandle, getNamespace(nsHandle));
+        return (ScopeValue)nsHandle;
     }
-    Value pushMemberScope(Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+    ScopeValue pushMemberScope(Word name, parse::TokenHandle parseLocation, SourceLocation location) {
         std::optional<Scope*> scope = currentScope();
         VERIFY(scope.has_value());
         TypeProgram* program = static_cast<TypeProgram*>(scope.value());
         VERIFY(program->kind() == ProgramKind::Type);
         int_t id = program->runtimeParameters.size();
         program->runtimeParameters.emplace_back(name, parseLocation, location);
-        pushEmptyScope(INVALID_VALUE);
-        return Value(ValueKind::Invalid, id);
+        pushEmptyScope(ScopeValue());
+        return ScopeValue(Value(ValueKind::Invalid, id));
     }
 
-    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, Value rawParent, SourceLocation location) {
+    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location) {
         ProgramHandle result = { (uint32_t)programs.size() };
         identityProgramTranslation.push_back(result);
         auto* prog = programs.allocate();

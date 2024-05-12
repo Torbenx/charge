@@ -39,11 +39,36 @@ struct Dumper {
         output += '\n';
     }
 
-    std::string formatProgram(ProgramHandle handle) { return formatProgram(program, handle); }
-    std::string formatProgram(Program* base, ProgramHandle);
-    std::string formatProgram(Program*);
-    std::string formatNamespaceInternal(ExternValue nsHandle);
-    std::string formatNamespace(ExternValue nsHandle) {
+    std::string formatScopeValue(ScopeValue value) {
+        if (value.kind() == ValueKind::Program)
+            return formatProgram(value.program());
+        if (value.kind() == ValueKind::Namespace)
+            return formatNamespace(value.nsHandle());
+        return "<invalid scope value>";
+    }
+    std::string formatProgram(ProgramHandle progHandle) {
+        Program* prog = context.program(progHandle);
+        std::string name(context.wordTable.view(prog->name()));
+        auto parentValue = prog->translate(prog->parent());
+        if (parentValue.kind() == ValueKind::Program)
+            return formatProgram(parentValue.program()) + "::" + name;
+
+        VERIFY(parentValue.kind() == ValueKind::Namespace);
+        auto path = formatNamespaceInternal(parentValue.nsHandle());
+        if (path.empty())
+            return name;
+        return path + "::" + name;
+    }
+    std::string formatNamespaceInternal(NamespaceHandle nsHandle)  {
+        Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
+        std::string name(context.wordTable.view(ns->name));
+        while (ns->parent.has_value()) {
+            ns = context.getNamespace(ns->parent.value());
+            name = std::string(context.wordTable.view(ns->name)) + "::" + name;
+        }
+        return name;
+    }
+    std::string formatNamespace(NamespaceHandle nsHandle) {
         std::string result = formatNamespaceInternal(nsHandle);
         if (result.empty())
             return "<global namespace>";
@@ -55,9 +80,9 @@ struct Dumper {
         std::string result;
         switch (v.kind()) {
         case ValueKind::Program:
-            return formatProgram(v.program());
+            return formatProgram(program->translate(v.program()));
         case ValueKind::Namespace:
-            return formatNamespace(v);
+            return formatNamespace(program->translate(v.nsHandle()));
         case ValueKind::TemplateSignature:
             return "templsig(" + formatValue(v.templateSignatureBaseValue()) + ")";
         case ValueKind::FunctionSignature$Program:
@@ -81,40 +106,8 @@ struct Dumper {
     }
 };
 
-std::string Dumper::formatProgram(Program* base, ProgramHandle externHandle) {
-    ProgramHandle translatedHandle = base->translate(externHandle);
-    return formatProgram(context.program(translatedHandle));
-}
-
-std::string Dumper::formatProgram(Program* targetProg) {
-    std::string name(context.wordTable.view(targetProg->name()));
-    auto parentValue = targetProg->parent();
-    if (parentValue.kind() == ValueKind::Program)
-        return formatProgram(targetProg, parentValue.program()) + "::" + name;
-
-    if (parentValue.kind() == ValueKind::Parameterize)
-        return formatProgram(targetProg, targetProg->getParameterize(parentValue).base) + "::" + name;
-
-    VERIFY(parentValue.kind() == ValueKind::Namespace);
-    auto path = formatNamespaceInternal(parentValue);
-    if (path.empty())
-        return name;
-    return path + "::" + name;
-
-}
-
-std::string Dumper::formatNamespaceInternal(ExternValue nsHandle) {
-    Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
-    std::string name(context.wordTable.view(ns->name));
-    while (ns->parent.has_value()) {
-        ns = context.getNamespace(ns->parent.value());
-        name = std::string(context.wordTable.view(ns->name)) + "::" + name;
-    }
-    return name;
-}
-
 static std::vector<Node*> allChildren(ChildrenRange range) {
-    std::vector<Node*> children(range.begin(), range.end());
+    auto children = asVector(range);
     std::reverse(children.begin(), children.end());
     return children;
 }
@@ -152,10 +145,9 @@ void Dumper::dumpNode(Node* node, std::string header) {
 
 void Dumper::dumpProgram(Program* prog) {
     this->program = prog;
-    dumpLine(formatProgram(prog) + ":");
+    dumpLine(formatProgram(context.programHandle(prog)) + ":");
     if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
-        dumpLine("parent = " + formatValue((Value)prog->u.checked.parent));
-        dumpLine("self = " + formatValue((Value)prog->u.checked.self.value_or(INVALID_VALUE)));
+        dumpLine("parent = " + formatScopeValue(prog->translate(prog->parent())));
         dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
     }
     switch (prog->kind()) {
@@ -190,36 +182,12 @@ void Dumper::dumpProgram(Program* prog) {
         }
         dumpLine(line.str());
     }
-    /*for (int_t i = 0; i < (int_t)prog->valueData.size(); i++) {
-        const auto& c = prog->constants[i];
-        std::string header = fmt::format("c{} = ", i);
-        std::ostringstream line;
-        line << header << nameString(c.op);
-        switch (c.op) {
-        case Program::Opcode::Parameterize: {
-            const auto& param = c.u.parameterize;
-            line << " " << formatProgram(param.base) << "{";
-            for (int_t i = 0; i < (int_t)param.argumentCount - 1; i++)
-                line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + i]) << ", ";
-            line << formatValue(prog->parameterizeArguments[param.firstArgumentIndex + param.argumentCount - 1]) << "}";
-            break;
-        }
-        }
-        dumpLine(line.view());
-        switch (c.op) {
-        case Program::Opcode::Expression:
-            indentation.emplace_back(true, header.size());
-            dumpNode(&prog->expressions[c.u.expressionIndex]);
-            indentation.pop_back();
-            break;
-        default:
-            break;
-        }
-    }*/
     auto nodes = allChildren(program->topLevelNodes());
     for (Node* node : nodes) {
-        int_t index = node - program->expressions.data();
-        dumpNode(node, fmt::format("e{} = ", index));
+        if (isExpression(node->kind())) {
+            int_t index = node - program->expressions.data();
+            dumpNode(node, fmt::format("e{} = ", index));
+        }
     }
     this->program = nullptr;
 }

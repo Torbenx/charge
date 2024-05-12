@@ -131,6 +131,31 @@ struct ExternValue {
 private:
     Value value;
 };
+
+struct ScopeValue {
+    static ScopeValue fromUint(uint32_t u) { return ScopeValue(Value::fromUint(u)); }
+
+    ScopeValue() = default;
+    constexpr explicit ScopeValue(Value value)
+        : value(value) {
+        VERIFY(value.kind() == ValueKind::Program || value.kind() == ValueKind::Namespace || value.kind() == ValueKind::Invalid);
+    }
+    constexpr ScopeValue(ProgramHandle prog)
+        : value(prog) { }
+    constexpr ScopeValue(NamespaceHandle ns)
+        : value(ns) { }
+
+    constexpr ValueKind kind() const { return value.kind(); }
+    constexpr ProgramHandle program() const { return value.program(); }
+    constexpr NamespaceHandle nsHandle() const { return value.nsHandle(); }
+
+    uint32_t toUint() const { return value.toUint(); }
+
+    bool operator==(const ScopeValue&) const = default;
+
+private:
+    Value value;
+};
 }
 template<>
 struct optional_traits<sema::ProgramHandle> {
@@ -151,4 +176,8 @@ struct optional_traits<sema::Type> {
 template<>
 struct optional_traits<sema::ExternValue> {
     static constexpr sema::ExternValue empty_value = sema::INVALID_VALUE;
+};
+template<>
+struct optional_traits<sema::ScopeValue> {
+    static constexpr sema::ScopeValue empty_value = {};
 };

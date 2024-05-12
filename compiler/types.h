@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 using int_t = std::ptrdiff_t;
 template<int_t... Is>
@@ -247,4 +248,9 @@ auto operator<=>(TaggedSourceLocation<T1> left, TaggedSourceLocation<T2> right) 
 
 inline auto operator<=>(SourceLocation left, SourceLocation right) {
     return (std::bit_cast<uint64_t>(left) >> 8) <=> (std::bit_cast<uint64_t>(right) >> 8);
+}
+
+template<typename T>
+constexpr auto asVector(T in) {
+    return std::vector<typename decltype(std::declval<T>().begin())::value_type>(in.begin(), in.end());
 }

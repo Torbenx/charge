@@ -80,8 +80,7 @@ Type Generator::makeTemplateIdFor(ProgramHandle targetHandle) {
 Value Generator::makeProgramValue(ProgramHandle targetHandle) {
     Program* targetProg = context.program(targetHandle);
     if (targetProg->isDependent() && !targetProg->isTemplate()) {
-        auto parent = program->getParameterize((Value)program->parent());
-        return program->addParameterize(targetHandle, parent.arguments.subspan(0, targetProg->inheritedParameterCount));
+        return program->addParameterize(targetHandle, identityParameterMap(targetProg));
     }
     return Value(targetHandle);
 }
@@ -92,17 +91,17 @@ Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arg
     return program->addParameterize(base, arguments);
 }
 
-Value Generator::buildParent(Value rawParent) {
-    if (rawParent.kind() == ValueKind::Namespace)
-        return rawParent;
+Value Generator::inheriteParameters(ScopeValue parent) {
+    if (parent.kind() == ValueKind::Namespace)
+        return (Value)parent.nsHandle();
 
-    VERIFY(rawParent.kind() == ValueKind::Program);
+    VERIFY(parent.kind() == ValueKind::Program);
 
-    ProgramHandle parentHandle = rawParent.program();
+    ProgramHandle parentHandle = parent.program();
     signatureCheck(context, parentHandle);
     Program* parentProg = context.program(parentHandle);
     if (!parentProg->isDependent())
-        return makeProgramValue(parentHandle);
+        return (Value)parentHandle;
 
     // inherite parameters
     int_t parameterCount = parentProg->parameters.size();
@@ -120,16 +119,8 @@ Value Generator::buildParent(Value rawParent) {
     return parentValue;
 }
 
-Value Generator::buildSelf() {
-    int_t parameterCount = program->parameters.size();
-    std::vector<Value> arguments(parameterCount, INVALID_VALUE);
-    for (int_t i = 0; i < parameterCount; i++)
-        arguments[i] = Value(ValueKind::Parameter, i);
-    return makeParameterize(programHandle, arguments);
-}
-
-std::optional<Value> Generator::lookupInside(Value scope, Word name) {
-    auto rawToValue = [this](Value rawValue) { return generateDeclarationLiteral(rawValue); };
+std::optional<Value> Generator::lookupInside(ScopeValue scope, Word name) {
+    auto rawToValue = [this](ScopeValue rawValue) { return generateDeclarationLiteral(rawValue); };
     if (scope.kind() == ValueKind::Namespace) {
         Namespace* ns = context.getNamespace(scope.nsHandle());
         return ns->getDeclaration(name).transform(rawToValue);
@@ -139,23 +130,12 @@ std::optional<Value> Generator::lookupInside(Value scope, Word name) {
         VERIFY(prog->kind() == ProgramKind::Type);
         return static_cast<TypeProgram*>(prog)->getDeclaration(name).transform(rawToValue);
     }
-    if (scope.kind() == ValueKind::Parameterize) {
-        auto param = program->getParameterize(scope);
-        Program* baseProg = context.program(param.base);
-        auto lookup = static_cast<TypeProgram*>(baseProg)->getDeclaration(name);
-        if (!lookup.has_value())
-            return std::nullopt;
-        // 'baseProg' must be a parent of 'program'
-        VERIFY(program->parent().kind() == ValueKind::Parameterize);
-        VERIFY(program->inheritedParameterCount >= param.arguments.size());
-        return lookup.transform(rawToValue);
-    }
     VERIFY_NOT_REACHED();
 }
 
-Value Generator::generateDeclarationLiteral(Value rawValue) {
+Value Generator::generateDeclarationLiteral(ScopeValue rawValue) {
     if (rawValue.kind() == ValueKind::Namespace)
-        return rawValue;
+        return (Value)rawValue.nsHandle();
     VERIFY(rawValue.kind() == ValueKind::Program);
     ProgramHandle progHandle = rawValue.program();
     Program* prog = context.program(progHandle);
@@ -188,7 +168,7 @@ void Generator::generateIdentifierExpr() {
         emitConstantExpr(tok->location(), result.value());
         return;
     }
-    std::optional<Value> lookupScope = (Value)program->parent();
+    std::optional<ScopeValue> lookupScope = program->parent();
     while (lookupScope.has_value()) {
         auto lookup = lookupInside(lookupScope.value(), name);
         if (lookup.has_value()) {
@@ -198,14 +178,13 @@ void Generator::generateIdentifierExpr() {
         }
         switch (lookupScope.value().kind()) {
         case ValueKind::Namespace:
-            lookupScope = context.getNamespace(lookupScope.value().nsHandle())->parent.transform([](NamespaceHandle h) { return (Value)h; });
+            lookupScope = context.getNamespace(lookupScope.value().nsHandle())->parent.transform([](NamespaceHandle h) { return (ScopeValue)h; });
             break;
-        case ValueKind::Program:
-            lookupScope = (Value)context.program(lookupScope.value().program())->parent();
+        case ValueKind::Program: {
+            auto* prog = context.program(lookupScope.value().program());
+            lookupScope = prog->translate(prog->parent());
             break;
-        case ValueKind::Parameterize:
-            lookupScope = (Value)context.program(program->getParameterize(lookupScope.value()).base)->parent();
-            break;
+        }
         default:
             VERIFY_NOT_REACHED();
         }
@@ -321,13 +300,19 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Value base) {
         return FoldBase { baseProg, base.program(), base, {} };
     } else if (base.kind() == ValueKind::Parameterize) {
         auto param = program->getParameterize(base);
-        return FoldBase { context.program(param.base), param.base, base, param.arguments };
+        return FoldBase { context.program(param.base), param.base, base, asVector(param.arguments) };
     }
     return std::nullopt;
 }
 
 FoldBase Generator::selfFold() {
-    return asFoldBase((Value)program->self());
+    FoldBase base {
+        program,
+        programHandle,
+        INVALID_VALUE,
+        identityParameterMap(program),
+    };
+    return base;
 }
 
 DeductionState Generator::selfDeduction() {
@@ -408,7 +393,7 @@ Value Generator::fold(FoldBase base, ExternValue v) {
     };
     switch (v.kind()) {
     case ValueKind::Program:
-        return makeProgramValue(foldProgram(Value(v).program()));
+        return (Value)foldProgram(Value(v).program());
     case ValueKind::Parameter:
         return base.arguments[v.id()];
     case ValueKind::Namespace:
@@ -443,14 +428,14 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     VERIFY(program->status() == ProgramStatus::Unchecked);
 
     Generator g(context, progHandle);
-    Value parent = g.buildParent(program->rawParent());
-    auto parseLocation = program->beginSignatureCheck(parent);
+    g.inheriteParameters(program->parent());
+    auto parseLocation = program->beginSignatureCheck();
 
     g.tok = &context.parseOutput.tokens[parseLocation.id()];
     g.visitDeclaration();
     g.tok = nullptr;
 
-    program->completeSignatureCheck(g.buildSelf());
+    program->completeSignatureCheck();
 }
 
 Type Generator::typeOf(Value value) {
@@ -550,17 +535,17 @@ struct BuiltinGenerator : Generator {
 
     static ProgramHandle createScope(Context& context, BuiltinId id) {
         auto value = context.pushStaticScope(ProgramKind::Type, nameOf(id), {}, {});
-        VERIFY(value == Value(id));
+        VERIFY(value == (ScopeValue)Value(id));
         return value.program();
     }
 
     BuiltinGenerator(Context& context, BuiltinId id)
         : Generator(context, createScope(context, id)) {
-        program->beginSignatureCheck(buildParent(program->rawParent()));
+        program->beginSignatureCheck();
     }
 
     ~BuiltinGenerator() {
-        program->completeSignatureCheck(buildSelf());
+        program->completeSignatureCheck();
         context.popScope();
     }
 };

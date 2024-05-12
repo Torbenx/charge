@@ -67,24 +67,21 @@ namespace sema {
 struct NestedName {
     std::vector<Word> parts;
 
-    bool match(Context& ctx, Program* prog, Value value) const {
+    bool match(Context& ctx, Program* prog, ScopeValue value) const {
         for (Word expectedName : std::views::reverse(parts)) {
-            if (value == INVALID_VALUE)
-                return false;
-
             if (value.kind() == ValueKind::Program) {
                 auto* targetProg = ctx.program(prog->translate(value.program()));
                 if (targetProg->name() != expectedName)
                     return false;
-                value = (Value)targetProg->parent();
+                value = targetProg->parent();
                 prog = targetProg;
-                if (value.kind() == ValueKind::Parameterize)
-                    value = (Value)targetProg->getParameterize(value).base;
             } else if (value.kind() == ValueKind::Namespace) {
                 auto* ns = ctx.getNamespace(value.nsHandle());
                 if (ns->name != expectedName)
                     return false;
-                value = ns->parent.transform([](NamespaceHandle h) { return (Value)h; }).value_or(INVALID_VALUE);
+                if (!ns->parent.has_value())
+                    return false;
+                value = (ScopeValue)ns->parent.value();
             } else {
                 VERIFY_NOT_REACHED();
             }
@@ -111,7 +108,7 @@ struct ParameterizeExpr : CheckExpr {
         VERIFY(value.kind() == ValueKind::Parameterize);
         auto parameterize = prog->getParameterize(value);
 
-        VERIFY(base.match(ctx, prog, (Value)parameterize.base));
+        VERIFY(base.match(ctx, prog, (ScopeValue)parameterize.base));
 
         VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
@@ -125,7 +122,8 @@ struct LiteralExpr : CheckExpr {
         : literal(std::move(literal)) { }
 
     void check(Context& ctx, Program* prog, Value value) const override {
-        VERIFY(literal.match(ctx, prog, value));
+        VERIFY(value.kind() == ValueKind::Program || value.kind() == ValueKind::Namespace);
+        VERIFY(literal.match(ctx, prog, (ScopeValue)value));
     }
 };
 struct ParameterExpr : CheckExpr {
@@ -146,7 +144,7 @@ struct TemplateSignatureExpr : CheckExpr {
 
     void check(Context& ctx, Program* prog, Value value) const override {
         VERIFY(value.kind() == ValueKind::TemplateSignature);
-        VERIFY(literal.match(ctx, prog, (Value)value.templateSignatureProgram()));
+        VERIFY(literal.match(ctx, prog, (ScopeValue)value.templateSignatureProgram()));
     }
 };
 struct FunctionSignatureExpr : CheckExpr {
@@ -440,6 +438,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         }
         VERIFY(program != nullptr);
         sema::Generator::signatureCheck(context, context.programHandle(program));
+        fmt::println("-------------------------------");
         program->dump(context);
 
         if (word == words["expect-type"])

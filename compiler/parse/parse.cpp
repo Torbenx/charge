@@ -161,7 +161,7 @@ struct WordAndPosition {
 }
 
 template<DeclarationKind kind>
-static sema::Value commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+static sema::ScopeValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));

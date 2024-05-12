@@ -25,7 +25,7 @@ struct FoldBase {
     Program* program;
     ProgramHandle programHandle;
     Value value;
-    std::span<const Value> arguments;
+    std::vector<Value> arguments;
 };
 
 struct DeductionState {
@@ -71,6 +71,17 @@ struct DeductionState {
         return FoldBase { program, programHandle, baseValue, arguments };
     }
 };
+
+constexpr std::vector<Value> identityParameterMap(int_t parameterCount) {
+    std::vector<Value> result;
+    result.reserve(parameterCount);
+    for (int_t i = 0; i < parameterCount; i++)
+        result.push_back(Value(ValueKind::Parameter, i));
+    return result;
+}
+constexpr std::vector<Value> identityParameterMap(Program* prog) {
+    return identityParameterMap(prog->parameters.size());
+}
 
 struct Generator {
     struct LocalDeclarationEntry {
@@ -160,15 +171,14 @@ struct Generator {
     Type typeOfNonDependentProgram(Value value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    Value generateDeclarationLiteral(Value rawValue);
-    std::optional<Value> lookupInside(Value scope, Word name);
+    Value generateDeclarationLiteral(ScopeValue rawValue);
+    std::optional<Value> lookupInside(ScopeValue scope, Word name);
     void generateIdentifierExpr();
     void generateParameterizeExpr(int_t argumentCount);
     CallBase resolveCallBase();
     void generateCallExpr(CallBase base, int_t argumentCount);
 
-    Value buildParent(Value rawParent);
-    Value buildSelf();
+    Value inheriteParameters(ScopeValue parent);
 
     Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
     Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
