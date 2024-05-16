@@ -33,7 +33,7 @@ SwitchState expression() then error
         next expression
 
     identifier
-        emitToken TokenKind::IdentifierExpr
+        emitToken TokenKind::IdentifierExpr, this_identifier
         next after_expression
     literal
         emitToken TokenKind::LiteralExpr
@@ -288,7 +288,7 @@ LinearState comma_else() then error
 
 LinearState check_designated_argument() then expression
     identifier
-        emitToken TokenKind::IdentifierExpr
+        emitToken TokenKind::IdentifierExpr, this_identifier
         next maybe_designated_argument
 LinearState maybe_designated_argument() then after_expression
     punctuation =
@@ -316,7 +316,7 @@ LinearState first_argument_brace() then check_designated_argument
 
 LinearState access_punctuation(tokenKind) then error
     identifier
-        emitToken tokenKind
+        emitToken tokenKind, this_identifier
         next after_expression
 
 # --- Statements
@@ -386,7 +386,7 @@ LinearState check_var_after_let() then variable_declaration
         tokenKind = TokenKind::LetStmt
 LinearState variable_declaration(tokenKind) then error
     identifier
-        emitToken tokenKind
+        emitToken tokenKind, this_identifier
         next after_variable_declaration_id
 LinearState after_variable_declaration_id() then error
     punctuation :
@@ -465,8 +465,8 @@ LinearState namespace_declaration() then templated_declaration
 LinearState namespace_declaration_id() then error
     identifier
         rememberDeclarationBegin
-        commitDeclaration DeclarationKind::Namespace
-        emitToken TokenKind::NamespaceDecl
+        commitDeclaration DeclarationKind::Namespace, this_identifier
+        emitToken TokenKind::NamespaceDecl, this_declaration
         next after_namespace_declaration_id
 LinearState after_namespace_declaration_id() then error
     punctuation :
@@ -531,8 +531,8 @@ LinearState after_template_parameters() then templated_declaration_with_attribut
 
 LinearState function_declaration_id() then error
     identifier
-        commitDeclaration DeclarationKind::Function
-        emitToken TokenKind::FunctionDecl
+        commitDeclaration DeclarationKind::Function, this_identifier
+        emitToken TokenKind::FunctionDecl, this_declaration
         next after_function_declaration_id
 LinearState after_function_declaration_id() then error
     punctuation (
@@ -560,8 +560,8 @@ LinearState after_function_parameters() then error
 
 LinearState type_declaration_id(tokenKind) then error
     identifier
-        commitDeclaration DeclarationKind::Type
-        emitToken tokenKind
+        commitDeclaration DeclarationKind::Type, this_identifier
+        emitToken tokenKind, this_declaration
         next after_type_declaration_id
 LinearState after_type_declaration_id() then error
     punctuation :
@@ -577,8 +577,8 @@ LinearState member_declaration() then templated_declaration
         emitToken TokenKind::HasMemberDecl
         next expression
     identifier
-        commitDeclaration DeclarationKind::Member
-        emitToken TokenKind::MemberDecl
+        commitDeclaration DeclarationKind::Member, this_identifier
+        emitToken TokenKind::MemberDecl, this_declaration
         next after_variable_declaration_id
 
 LinearState after_static() then error
@@ -589,13 +589,13 @@ LinearState after_static() then error
         tokenKind = TokenKind::StaticLetDecl
         next static_variable_declaration
     identifier
-        commitDeclaration DeclarationKind::Variable
-        emitToken TokenKind::StaticLetDecl
+        commitDeclaration DeclarationKind::Variable, this_identifier
+        emitToken TokenKind::StaticLetDecl, this_declaration
         next after_variable_declaration_id
 LinearState static_variable_declaration(tokenKind) then error
     identifier
-        commitDeclaration DeclarationKind::Variable
-        emitToken tokenKind
+        commitDeclaration DeclarationKind::Variable, this_identifier
+        emitToken tokenKind, this_declaration
         next after_variable_declaration_id
 
 LinearState after_declaration() then error

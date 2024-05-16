@@ -114,12 +114,12 @@ class ThenInstruction:
 @dataclasses.dataclass
 class EmitTokenInstruction:
     tokenKindExpr: str
-    tokenExpr: str | None = None
+    dataExpr: str | None = None
     delayed: bool = False
     def format(self):
         ret = "emitToken " + self.tokenKindExpr
-        if not self.tokenExpr is None:
-            ret += ", " + self.tokenExpr
+        if not self.dataExpr is None:
+            ret += ", " + self.dataExpr
         return ret
 
 @dataclasses.dataclass
@@ -164,9 +164,13 @@ class IfScopeInstruction:
 @dataclasses.dataclass
 class CommitDeclarationInstruction:
     declKindExpr: str
+    nameExpr: str | None
 
     def format(self):
-        return "commitDeclaration " + self.declKindExpr
+        ret = "commitDeclaration " + self.declKindExpr
+        if not self.nameExpr is None:
+            ret += ", " + self.nameExpr
+        return ret
 
 @dataclasses.dataclass
 class RememberDeclarationBeginInstruction:
@@ -355,7 +359,7 @@ class Parser:
             first = self.parseWord()
             if first == "next":
                 delayed = False
-                if len(instructions) > 0 and type(instructions[-1]) == EmitTokenInstruction and instructions[-1].tokenExpr is None:
+                if len(instructions) > 0 and type(instructions[-1]) == EmitTokenInstruction:
                     instructions[-1].delayed = True
                     delayed = True
                 instructions.append(NextInstruction(self.parseWord(), delayed))
@@ -364,11 +368,11 @@ class Parser:
                 tokenKindExpr = self.parseExpr()
                 while self.line[0] == ' ':
                     self.line = self.line[1:]
-                tokenExpr = None
+                dataExpr = None
                 if self.line[0] == ',':
                     self.line = self.line[1:]
-                    tokenExpr = self.parseExpr()
-                instructions.append(EmitTokenInstruction(tokenKindExpr, tokenExpr))
+                    dataExpr = self.parseExpr()
+                instructions.append(EmitTokenInstruction(tokenKindExpr, dataExpr))
                 self.advanceLine()
             elif first == "updateKind":
                 instructions.append(UpdateKindInstruction(self.parseExpr()))
@@ -396,7 +400,14 @@ class Parser:
                 instructions.append(ThenInstruction(self.parseWord()))
                 self.advanceLine()
             elif first == "commitDeclaration":
-                instructions.append(CommitDeclarationInstruction(self.parseExpr()))
+                declKindExpr = self.parseExpr()
+                while self.line[0] == ' ':
+                    self.line = self.line[1:]
+                nameExpr = None
+                if self.line[0] == ',':
+                    self.line = self.line[1:]
+                    nameExpr = self.parseExpr()
+                instructions.append(CommitDeclarationInstruction(declKindExpr, nameExpr))
                 self.advanceLine()
             elif first == "rememberDeclarationBegin":
                 instructions.append(RememberDeclarationBeginInstruction())
@@ -512,12 +523,11 @@ def inlineTokenAdvancer():
     line("tokEnd = inlineAdvancer(tokEnd, state);")
     line("tokBegin = tokEnd;")
 
-def emitToken(tokenKindExpr, beginExpr, endExpr):
-    line("emitToken(" + tokenKindExpr + ", " + beginExpr +", tokenData, state);")
-    line("tokenData = 0;") # TODO: This is not the right place to clear the token data
+def emitToken(tokenKindExpr, tokenData = "0"):
+    line("emitToken(" + tokenKindExpr + ", tokBegin, " + tokenData + ", state);")
 
 def emitCarriedToken():
-    emitToken("carriedEmitTokenKind", "tokBegin", "tokEnd")
+    emitToken("carriedEmitTokenKind", "carriedEmitTokenData")
 
 def rememberState(state):
     if generateStateDebug:
@@ -529,17 +539,17 @@ def readWord():
     with indent():
         line("auto wordAndPos = readWord(tokEnd, state);")
         line("tokEnd = wordAndPos.position;")
-        line("word = wordAndPos.word;")
+        line("this_identifier = wordAndPos.word;")
     line("}")
 
 def generateWordCase(state):
     readWord()
-    line("if (word.keyword()) {")
+    line("if (this_identifier.keyword()) {")
     with indent():
         if state.keywordCases():
             labelLine("LABEL_MAYBE_UNUSED " + state.name + "$keyword_check:")
             for c in state.keywordCases():
-                line("if (word == words[\"" + c.keyword + "\"]) {")
+                line("if (this_identifier == words[\"" + c.keyword + "\"]) {")
                 with indent():
                     generateCaseBody(c)
                 line("}")
@@ -548,7 +558,6 @@ def generateWordCase(state):
         else:
             recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
     line("}")
-    line("tokenData = word.asUint();")
     recurse(state, lambda s: s.identifierCase(), lambda case: generateCaseBody(case))
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
@@ -689,7 +698,7 @@ def generateLinearState(state):
         line("if (tokEnd[0] == '\\0') {")
         with indent():
             generateCaseBody(endCase)
-            emitToken("TokenKind::EOS", "tokBegin", "tokEnd")
+            emitToken("TokenKind::EOS")
             line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);")
             line("return;")
         line("}")
@@ -719,12 +728,15 @@ def generateInstructions(case, instructions, thenHandler):
         line("// " + inst.format())
         if type(inst) is EmitTokenInstruction:
             if inst.delayed:
-                assert inst.tokenExpr is None
-                line("carriedEmitTokenKind = "+ inst.tokenKindExpr + ";")
-            elif inst.tokenExpr is None:
-                emitToken(inst.tokenKindExpr, "tokBegin", "tokEnd")
+                line("carriedEmitTokenKind = " + inst.tokenKindExpr + ";")
+                dataExpr = "0"
+                if not inst.dataExpr is None:
+                    dataExpr = inst.dataExpr + ".toUint()"
+                line("carriedEmitTokenData = " + dataExpr + ";")
+            elif inst.dataExpr is None:
+                emitToken(inst.tokenKindExpr)
             else:
-                emitToken(inst.tokenKindExpr, inst.tokenExpr + "Begin", inst.tokenExpr + "End")
+                emitToken(inst.tokenKindExpr, inst.dataExpr + ".toUint()")
         elif type(inst) is UpdateKindInstruction:
             line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
         elif type(inst) is NextInstruction:
@@ -773,9 +785,9 @@ def generateInstructions(case, instructions, thenHandler):
             thenHandler(inst.newState)
         elif type(inst) is CommitDeclarationInstruction:
             nameExpr = "Word()"
-            if type(case) is IdentifierCase:
-                nameExpr = "Word::fromUint(tokenData)"
-            line("tokenData = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, state).toUint();")
+            if not inst.nameExpr is None:
+                nameExpr = inst.nameExpr
+            line("this_declaration = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, state);")
         elif type(inst) is RememberDeclarationBeginInstruction:
             line("declarationBegin = state.parseOutput.currentToken();")
         elif type(inst) is EndDeclarationInstruction:

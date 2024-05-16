@@ -25,6 +25,7 @@ struct Context {
     }
 
     void reset() {
+        parseOutput.reset();
         programs.clear();
         namespaces.clear();
         identityProgramTranslation.clear();
@@ -107,6 +108,25 @@ struct Context {
     NamespaceHandle namespaceHandle(Namespace* ns) {
         int_t id = ns - namespaces.data();
         return NamespaceHandle(id);
+    }
+
+    std::optional<Program*> firstDeclarationAfter(SourceLocation location) {
+        auto compare = [](ProgramUnion& prog, SourceLocation location) {
+            return prog.get().declarationLocation() < location;
+        };
+        auto it = std::lower_bound(programs.begin(), programs.end(), location, compare);
+        if (it == programs.end())
+            return std::nullopt;
+        return &it->get();
+    }
+    std::optional<Program*> lastDeclarationBefore(SourceLocation location) {
+        auto compare = [](ProgramUnion& prog, SourceLocation location) {
+            return prog.get().declarationLocation() < location;
+        };
+        auto it = std::lower_bound(programs.begin(), programs.end(), location, compare);
+        if (it == programs.begin())
+            return std::nullopt;
+        return &std::prev(it)->get();
     }
 };
 

@@ -69,6 +69,9 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
 }
 
 [[gnu::noinline]] static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
+    if (kind == TokenKind::ImplicitKindParameter) {
+        VERIFY(data != 0);
+    }
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
@@ -199,8 +202,9 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
-    Word word;
-    uint32_t tokenData = 0;
+    uint32_t carriedEmitTokenData = 0;
+    Word this_identifier;
+    sema::ScopeValue this_declaration;
     TokenHandle declarationBegin = {};
 
     TokenKind tokenKind = (TokenKind)0;

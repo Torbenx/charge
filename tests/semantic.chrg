@@ -1,4 +1,4 @@
-// expect-type type
+
 struct X: { }
 // expect-value X
 // expect-type type
@@ -42,13 +42,13 @@ template(d, c, b, a) struct E: { }
 // expect-value E{type, D{type, C{type, B{type, A}, type, A}, type, B{type, A}, type, A}, type, C{type, B{type, A}, type, A}, type, B{type, A}, type, A}
 static ABBCDE = E{D{C{B{A}, A}, B{A}, A}, C{B{A}, A}, B{A}, A};
 
-// expect-type type;
+// expect-return-type type;
 fn f1() => X;
-// expect-type type;
+// expect-return-type type;
 fn f2(t) => X;
-// expect-type type;
+// expect-return-type type;
 fn f3(t: type) => X;
-// expect-type type;
+// expect-return-type type;
 fn f4(t: type = X) => X;
 
 fn t1() => X;
@@ -88,3 +88,20 @@ static call4indirect = func4ref(X);
 static nested = func2(func1());
 // expect-type type
 static nestedRef = nested;
+
+// expect-type #0
+// expect-value #1
+template(arg) static identity = arg;
+// expect-value func2
+static func2id = identity{func2};
+
+// expect-return-type type
+template(T: type) fn refT(x: T) => T;
+// expect-type type
+static call_refT = refT(func4ref);
+
+// expect-return-type #0
+template(T: type) fn refArg(arg: T) => arg;
+
+// expect-return-type #0
+template(T: type) fn refArg2(arg0: T, arg1: T = arg0) => arg1;

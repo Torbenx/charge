@@ -275,7 +275,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-source-position",
         "line", "column", "packed-range-begin-column", "expect-identifier", "name",
-        "expect-type", "expect-value");
+        "expect-type", "expect-value", "expect-return-type");
 
     WordStringTable wordTable { words };
     sema::Context context;
@@ -363,7 +363,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             skipWhitespace();
 
             auto word = wordTable.get(cmdStr);
-            if (word == words["expect-type"] || word == words["expect-value"]) {
+            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"]) {
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
@@ -398,13 +398,13 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
                 skipWhitespace();
             }
 
-            switch (command.command.asUint()) {
-            case words["expect-no-error"].asUint(): {
+            switch (command.command.toUint()) {
+            case words["expect-no-error"].toUint(): {
                 verifyNoPairs(command);
                 verify(commandQueue.empty(), "", &command);
                 break;
             }
-            case words["expect-source-position"].asUint(): {
+            case words["expect-source-position"].toUint(): {
                 for (const auto& pair : command.pairs) {
                     if (pair.key == words["line"])
                         expect_eq<uint32_t>(whitespace.lineNumber(), parseInteger(pair.value), "", &command, &pair);
@@ -429,23 +429,22 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
         sema::CheckExprParser parser { context, comment };
         auto expr = parser.parse();
-        sema::Program* program = nullptr;
-        for (auto& prog : context.programs) {
-            if (prog.get().declarationLocation() > whitespace.location()) {
-                program = &prog.get();
-                break;
-            }
-        }
-        VERIFY(program != nullptr);
+        sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
         sema::Generator::signatureCheck(context, context.programHandle(program));
         fmt::println("-------------------------------");
         program->dump(context);
 
-        if (word == words["expect-type"])
-            expr->check(context, program, (sema::Value)program->type());
+        if (word == words["expect-type"]) {
+            VERIFY(program->kind() == sema::ProgramKind::Value);
+            expr->check(context, program, (sema::Value) static_cast<sema::ValueProgram*>(program)->type());
+        }
         if (word == words["expect-value"]) {
             VERIFY(program->kind() == sema::ProgramKind::Value);
             expr->check(context, program, (sema::Value) static_cast<sema::ValueProgram*>(program)->value());
+        }
+        if (word == words["expect-return-type"]) {
+            VERIFY(program->kind() == sema::ProgramKind::Function);
+            expr->check(context, program, (sema::Value) static_cast<sema::FunctionProgram*>(program)->returnType());
         }
     }
 

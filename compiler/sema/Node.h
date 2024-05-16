@@ -48,7 +48,8 @@ struct ChildrenIterator;
 
 union ExprData {
     Value constant;
-    Value callBase; // either a program or a parameterize constant
+    Value callTarget; // either a program or a parameterize constant
+    uint32_t localValueIndex;
 };
 union NodeData {
     struct {
@@ -57,6 +58,7 @@ union NodeData {
     } expr;
     struct {
         Type type;
+        uint32_t localValueIndex;
     } decl;
     struct {
     } empty;

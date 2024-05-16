@@ -1,6 +1,8 @@
 #include <sema/Context.h>
 #include <sema/Generator.h>
 
+#include <ranges>
+
 namespace sema {
 
 Expression Generator::topExpression(int_t n) {
@@ -40,6 +42,12 @@ void Generator::emitExpr(NodeKind kind, SourceLocation location, int_t childCoun
 
 void Generator::emitConstantExpr(SourceLocation location, Value value) {
     emitExpr(NodeKind::ConstantExpr, location, 0, typeOf(value), ExprData { .constant = value });
+}
+
+void Generator::emitReferenceExpr(SourceLocation location, int_t localValueIndex) {
+    return emitExpr(
+        NodeKind::ReferenceExpr, location, 0, localValues[localValueIndex].type,
+        ExprData { .localValueIndex = (uint32_t)localValueIndex });
 }
 
 Value Generator::makeExpressionValue() {
@@ -119,20 +127,6 @@ Value Generator::inheriteParameters(ScopeValue parent) {
     return parentValue;
 }
 
-std::optional<Value> Generator::lookupInside(ScopeValue scope, Word name) {
-    auto rawToValue = [this](ScopeValue rawValue) { return generateDeclarationLiteral(rawValue); };
-    if (scope.kind() == ValueKind::Namespace) {
-        Namespace* ns = context.getNamespace(scope.nsHandle());
-        return ns->getDeclaration(name).transform(rawToValue);
-    }
-    if (scope.kind() == ValueKind::Program) {
-        Program* prog = context.program(scope.program());
-        VERIFY(prog->kind() == ProgramKind::Type);
-        return static_cast<TypeProgram*>(prog)->getDeclaration(name).transform(rawToValue);
-    }
-    VERIFY_NOT_REACHED();
-}
-
 Value Generator::generateDeclarationLiteral(ScopeValue rawValue) {
     if (rawValue.kind() == ValueKind::Namespace)
         return (Value)rawValue.nsHandle();
@@ -157,33 +151,54 @@ Value Generator::generateDeclarationLiteral(ScopeValue rawValue) {
 
 void Generator::generateIdentifierExpr() {
     Word name = Word::fromUint(tok->data());
-    /*for (const auto& entry : localDeclarations) {
-        if (name == entry.name) {
-            emitValueExpr({ NodeKind::ReferenceExpr, tok->location() }, entry.value);
-            return;
+    for (auto lookupCtx : std::views::reverse(lookupStack)) {
+        switch (lookupCtx.kind()) {
+        case LookupContext::Kind::Namespace: {
+            auto result = lookupCtx.getNamespace()->getDeclaration(name);
+            if (result.has_value()) {
+                emitConstantExpr(tok->location(), generateDeclarationLiteral(result.value()));
+                return;
+            }
+            continue;
         }
-    }*/
-    auto result = lookupCache.get(name);
-    if (result.has_value()) {
-        emitConstantExpr(tok->location(), result.value());
-        return;
-    }
-    std::optional<ScopeValue> lookupScope = program->parent();
-    while (lookupScope.has_value()) {
-        auto lookup = lookupInside(lookupScope.value(), name);
-        if (lookup.has_value()) {
-            lookupCache.insert(name, lookup.value());
-            emitConstantExpr(tok->location(), lookup.value());
-            return;
+        case LookupContext::Kind::Type: {
+            TypeProgram* prog = lookupCtx.getType();
+            auto result = prog->getDeclaration(name);
+            if (result.has_value()) {
+                emitConstantExpr(tok->location(), generateDeclarationLiteral(result.value()));
+                return;
+            }
+            for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
+                if (prog->parameters[i].name == name) {
+                    emitConstantExpr(tok->location(), Value(ValueKind::Parameter, i));
+                    return;
+                }
+            }
+            continue;
+        };
+        case LookupContext::Kind::TemplateParameters: {
+            Program* prog = lookupCtx.getTemplateParameters();
+            for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
+                if (prog->parameters[i].name == name) {
+                    emitConstantExpr(tok->location(), Value(ValueKind::Parameter, i));
+                    return;
+                }
+            }
+            continue;
         }
-        switch (lookupScope.value().kind()) {
-        case ValueKind::Namespace:
-            lookupScope = context.getNamespace(lookupScope.value().nsHandle())->parent.transform([](NamespaceHandle h) { return (ScopeValue)h; });
-            break;
-        case ValueKind::Program: {
-            auto* prog = context.program(lookupScope.value().program());
-            lookupScope = prog->translate(prog->parent());
-            break;
+        case LookupContext::Kind::Local: {
+            Generator& g = *lookupCtx.getLocal();
+            for (auto entry : g.localLookupEntries) {
+                if (entry.name == name) {
+                    VERIFY(&g == this);
+                    if (entry.isLocalValue())
+                        emitReferenceExpr(tok->location(), entry.localValueIndex());
+                    else
+                        emitConstantExpr(tok->location(), entry.constant());
+                    return;
+                }
+            }
+            continue;
         }
         default:
             VERIFY_NOT_REACHED();
@@ -220,6 +235,9 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             VERIFY(state.isComplete());
             popNodes(argumentCount + 1);
             Value result = makeParameterize(baseValue.program(), state.arguments);
+            if (baseProg->kind() == ProgramKind::Value)
+                result = fold(result, static_cast<ValueProgram*>(baseProg)->value());
+
             emitConstantExpr({}, result);
             return;
         }
@@ -227,7 +245,7 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
     VERIFY_NOT_REACHED();
 }
 
-Generator::CallBase Generator::resolveCallBase() {
+Generator::CallTarget Generator::resolveCallTarget() {
     auto baseExpr = topExpression();
     // TODO: Allow only function and type programs
     if (baseExpr.kind() == NodeKind::ConstantExpr) {
@@ -252,8 +270,8 @@ Generator::CallBase Generator::resolveCallBase() {
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateCallExpr(CallBase base, int_t argumentCount) {
-    auto& state = base.state;
+void Generator::generateCallExpr(CallTarget target, int_t argumentCount) {
+    auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function) {
         FunctionProgram* fnProg = static_cast<FunctionProgram*>(state.program);
 
@@ -263,10 +281,10 @@ void Generator::generateCallExpr(CallBase base, int_t argumentCount) {
             Expression argument = topExpression(argumentCount - 1 - index);
             implicitCastTo(state, parameter.type(), argument);
         }
-        VERIFY(base.state.isComplete());
-        Value callBase = makeParameterize(state.programHandle, state.arguments);
-        Type returnType = verifyType(fold(callBase, fnProg->type()));
-        emitExpr(NodeKind::CallExpr, SourceLocation(), argumentCount, returnType, ExprData { .callBase = callBase });
+        VERIFY(state.isComplete());
+        Value callTarget = makeParameterize(state.programHandle, state.arguments);
+        Type returnType = verifyType(fold(callTarget, fnProg->returnType()));
+        emitExpr(NodeKind::CallExpr, SourceLocation(), argumentCount, returnType, ExprData { .callTarget = callTarget });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -328,6 +346,11 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         if (state.arguments[index] == INVALID_VALUE) {
             state.arguments[index] = aValue;
             VERIFY(!state.isExplicitArgument(index));
+            return true;
+        }
+        if (state.program == program && pValue == state.arguments[index]) {
+            // TODO: This needs to be here to break recursion. But is it correct?
+            state.expressionMatches.push_back({ pValue, aValue });
             return true;
         }
         auto selfState = selfDeduction();
@@ -429,6 +452,25 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 
     Generator g(context, progHandle);
     g.inheriteParameters(program->parent());
+    // built lookup stack
+    ScopeValue scope = program->parent();
+    for (;;) {
+        if (scope.kind() == ValueKind::Program) {
+            Program* scopeProg = context.program(scope.program());
+            VERIFY(scopeProg->kind() == ProgramKind::Type);
+            g.lookupStack.push_back(LookupContext::forType(static_cast<TypeProgram*>(scopeProg)));
+            scope = scopeProg->translate(scopeProg->parent());
+        } else if (scope.kind() == ValueKind::Namespace) {
+            Namespace* scopeNS = context.getNamespace(scope.nsHandle());
+            g.lookupStack.push_back(LookupContext::forNamespace(scopeNS));
+            if (!scopeNS->parent.has_value())
+                break;
+            scope = scopeNS->parent.value();
+        } else
+            VERIFY_NOT_REACHED();
+    }
+    std::reverse(g.lookupStack.begin(), g.lookupStack.end());
+
     auto parseLocation = program->beginSignatureCheck();
 
     g.tok = &context.parseOutput.tokens[parseLocation.id()];
@@ -474,11 +516,18 @@ Type Generator::typeOfNonDependentProgram(Value value) {
 }
 
 Type Generator::typeOfNonDependentProgram(FoldBase base) {
-    if (base.program->kind() == ProgramKind::Function) {
+    switch (base.program->kind()) {
+    case ProgramKind::Function: {
         std::array arguments { makeFunctionSignature(base.value) };
         return verifyType(program->addParameterize(builtins::function_id_template.program(), arguments));
     }
-    return verifyType(fold(base, base.program->type()));
+    case ProgramKind::Value:
+        return verifyType(fold(base, static_cast<ValueProgram*>(base.program)->type()));
+    case ProgramKind::Type:
+        return builtins::type_type;
+    default:
+        VERIFY_NOT_REACHED();
+    }
 }
 
 Type Generator::verifyType(Value value) {
@@ -486,9 +535,17 @@ Type Generator::verifyType(Value value) {
     case ValueKind::Program: {
         Program* valueProg = context.program(value.program());
         VERIFY(!valueProg->isTemplate());
-        VERIFY(valueProg->kind() != ProgramKind::Function);
-        VERIFY(valueProg->type() == builtins::type_type);
-        return (Type)value;
+        switch (valueProg->kind()) {
+        case ProgramKind::Function:
+            VERIFY_NOT_REACHED();
+        case ProgramKind::Type:
+            return (Type)value;
+        case ProgramKind::Value:
+            VERIFY(static_cast<ValueProgram*>(valueProg)->type() == builtins::type_type);
+            return (Type)value;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
     default:
         VERIFY(typeOf(value) == builtins::type_type);

@@ -59,7 +59,7 @@ struct Dumper {
             return name;
         return path + "::" + name;
     }
-    std::string formatNamespaceInternal(NamespaceHandle nsHandle)  {
+    std::string formatNamespaceInternal(NamespaceHandle nsHandle) {
         Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
         std::string name(context.wordTable.view(ns->name));
         while (ns->parent.has_value()) {
@@ -115,20 +115,29 @@ static std::vector<Node*> allChildren(ChildrenRange range) {
 void Dumper::dumpNode(Node* node, std::string header) {
     if (isExpression(node->kind()))
         header += fmt::format("[{}]", formatValue(Expression(node).type()));
-    std::string info;
+    std::stringstream info;
     switch (node->kind()) {
+    case NodeKind::LetDecl: {
+        auto decl = NodeHandle(node).data().decl;
+        info << "[" << formatValue(decl.type) << "]r" << decl.localValueIndex;
+        break;
+    }
+    case NodeKind::ReferenceExpr:
+        info << "r" << Expression(node).data().localValueIndex;
+        break;
     case NodeKind::ConstantExpr:
-        info += " ";
-        info += formatValue(Expression(node).data().constant);
+        info << formatValue(Expression(node).data().constant);
         break;
     case NodeKind::CallExpr:
-        info += " ";
-        info += formatValue(Expression(node).data().callBase);
+        info << formatValue(Expression(node).data().callTarget);
         break;
     default:
         break;
     }
-    dumpLine(header + std::string(nameString(node->kind())) + info);
+    auto infoStr = info.str();
+    if (!infoStr.empty())
+        infoStr.insert(infoStr.begin(), ' ');
+    dumpLine(header + std::string(nameString(node->kind())) + infoStr);
 
     auto children = allChildren(node);
     if (children.empty())
@@ -148,13 +157,14 @@ void Dumper::dumpProgram(Program* prog) {
     dumpLine(formatProgram(context.programHandle(prog)) + ":");
     if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
         dumpLine("parent = " + formatScopeValue(prog->translate(prog->parent())));
-        dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
     }
     switch (prog->kind()) {
     case ProgramKind::Value:
+        dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
         dumpLine("value = " + formatValue(Value::fromUint(prog->m_subClassData)));
         break;
     case ProgramKind::Function:
+        dumpLine("return-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
         dumpNode(static_cast<FunctionProgram*>(prog)->body(), "body = ");
         break;
     default:

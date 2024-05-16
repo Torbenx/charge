@@ -8,6 +8,15 @@ Generator::Generator(Context& context, ProgramHandle handle)
 
 void Generator::advance() { tok += 1; }
 
+void Generator::declareLocal(Word name, SourceLocation location, VariableDeclaration declaration) {
+    int_t index = localValues.size();
+    emitNode(
+        NodeKind::LetDecl, location, declaration.hasInitializer ? 1 : 0,
+        NodeData { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
+    localValues.push_back({ declaration.type });
+    localLookupEntries.push_back({ name, (uint32_t)index });
+}
+
 void Generator::visitDeclaration() {
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
@@ -27,6 +36,7 @@ void Generator::visitDeclaration() {
 
 void Generator::visitTemplateParameters() {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
+    lookupStack.push_back(LookupContext::forTemplateParameters(program));
     advance();
     while (tok->kind() != Token::EmptyNode) {
         Program::Parameter explicitParameter = visitTemplateParameter();
@@ -124,13 +134,15 @@ void Generator::visitFunctionDeclaration() {
 
     int_t stackSizeAtBegin = nodeStack.size();
 
+    lookupStack.push_back(LookupContext::forLocal(this));
+
     while (tok->kind() != Token::EmptyNode) {
         VERIFY(tok->kind() == Token::ImplicitKindParameter);
         Word name = Word::fromUint(tok->data());
         auto nameLoc = tok->location();
         advance();
         auto info = visitVariableDeclaration(true);
-        emitNode(NodeKind::LetDecl, nameLoc, info.hasInitializer ? 1 : 0, NodeData { .decl { .type = info.type } });
+        declareLocal(name, nameLoc, info);
         fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
@@ -168,7 +180,6 @@ void Generator::visitBinaryExpr() {
 
 void Generator::visitUnaryExpr() {
     if (parse::isUnaryExpr(tok->kind())) {
-        // create placeholder node for the function
         advance();
         visitUnaryExpr();
         // resolve and create call expression
@@ -183,8 +194,8 @@ void Generator::visitPostfixExpr() {
         if (tok->kind() == Token::Parameterize) {
             generateParameterizeExpr(visitExpressionList());
         } else if (tok->kind() == Token::CallExpr) {
-            CallBase base = resolveCallBase();
-            generateCallExpr(std::move(base), visitExpressionList());
+            CallTarget target = resolveCallTarget();
+            generateCallExpr(std::move(target), visitExpressionList());
         } else {
             break;
         }

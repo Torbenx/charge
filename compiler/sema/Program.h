@@ -27,6 +27,7 @@ struct NodeHandle {
     SourceLocation location() const { return node()->location(); }
     int_t childrenCount() const { return node()->childrenCount(); }
     ChildrenRange reverseChildren() const { return node()->reverseChildren(); }
+    NodeData data() const { return node()->u; }
 
     Node* m_node;
 };
@@ -35,8 +36,8 @@ struct Expression : NodeHandle {
     Expression(Node* node)
         : NodeHandle(node) { VERIFY(isExpression(kind())); }
     NodeCategory category() const { return nodeCategory(kind()); }
-    Type type() const { return node()->u.expr.type; }
-    ExprData data() const { return node()->u.expr.u; }
+    Type type() const { return NodeHandle::data().expr.type; }
+    ExprData data() const { return NodeHandle::data().expr.u; }
 };
 
 struct Parameterize {
@@ -154,8 +155,6 @@ struct Program {
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
 
-    // type after substituitng template arguments
-    ExternValue type() const { return m_type.value(); }
     void setType(Type type) {
         VERIFY(!m_type.has_value());
         m_type = type;
@@ -262,6 +261,7 @@ struct ValueProgram : Program {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return Value::fromUint(m_subClassData);
     }
+    ExternValue type() const { return m_type.value(); }
 };
 
 enum class RuntimeParameterKind : uint8_t {
@@ -308,6 +308,7 @@ struct CallableProgram : Program {
         : Program(kind, name, parseLocation, rawParent, location) { }
 
     std::vector<RuntimeParameter> runtimeParameters;
+    ExternValue returnType() const { return m_type.value(); }
 };
 
 struct FunctionProgram : CallableProgram {

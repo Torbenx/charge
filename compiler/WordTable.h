@@ -10,7 +10,7 @@
 #include <vector>
 
 struct Word {
-    static constexpr int ID_BITS = 3;
+    static constexpr int ID_BITS = 4;
     static constexpr uint32_t MAX_ID = (1u << ID_BITS) - 1;
     struct HashState {
         uint32_t hash = 0;
@@ -48,7 +48,7 @@ struct Word {
         return id == other.id && hashBits == other.hashBits;
     }
     constexpr bool empty() const { return *this == Word(); }
-    constexpr uint32_t asUint() const { return id | hash(); }
+    constexpr uint32_t toUint() const { return id | hash(); }
 };
 
 struct WordTable;

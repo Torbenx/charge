@@ -4,6 +4,7 @@
 
 namespace sema {
 
+struct Generator;
 struct Context;
 
 struct LookupCache {
@@ -83,10 +84,68 @@ constexpr std::vector<Value> identityParameterMap(Program* prog) {
     return identityParameterMap(prog->parameters.size());
 }
 
+#define ENUMERATE_LOOKUP_CONTEXT_KINDS \
+    KIND(Namespace, Namespace)         \
+    KIND(Type, TypeProgram)            \
+    KIND(Local, Generator)             \
+    KIND(TemplateParameters, Program)
+
+struct LookupContext {
+    enum class Kind : uint8_t {
+#define KIND(name, type) name,
+        ENUMERATE_LOOKUP_CONTEXT_KINDS
+#undef KIND
+    };
+
+    Kind kind() const { return (Kind)(bits & TAG_MASK); }
+
+#define KIND(name, type)                        \
+    static LookupContext for##name(type* arg) { \
+        return LookupContext(Kind::name, arg);  \
+    }                                           \
+    type* get##name() const {                   \
+        VERIFY(kind() == Kind::name);           \
+        return ptr<type>();                     \
+    }
+    ENUMERATE_LOOKUP_CONTEXT_KINDS
+#undef KIND
+
+private:
+    static constexpr uintptr_t TAG_MASK = 7;
+
+    LookupContext(Kind kind, void* ptr)
+        : bits(static_cast<uintptr_t>(kind) | reinterpret_cast<uintptr_t>(ptr)) {
+        VERIFY((static_cast<uintptr_t>(kind) & ~TAG_MASK) == 0u);
+        VERIFY((reinterpret_cast<uintptr_t>(ptr) & TAG_MASK) == 0u);
+    }
+
+    template<typename T>
+    T* ptr() const { return reinterpret_cast<T*>(bits & ~TAG_MASK); }
+
+    uintptr_t bits;
+};
+
 struct Generator {
-    struct LocalDeclarationEntry {
+    struct LocalLookupEntry {
         Word name;
         Value value;
+
+        LocalLookupEntry(Word name, int_t localValueIndex)
+            : name(name), value(ValueKind::Invalid, localValueIndex) { }
+        LocalLookupEntry(Word name, Value constant)
+            : name(name), value(constant) { VERIFY(constant.kind() == ValueKind::Invalid); }
+
+        bool isLocalValue() const {
+            return value.kind() == ValueKind::Invalid;
+        }
+        int_t localValueIndex() const {
+            VERIFY(isLocalValue());
+            return value.id();
+        }
+        Value constant() const {
+            VERIFY(!isLocalValue());
+            return value;
+        }
     };
 
     struct LocalValue {
@@ -102,7 +161,7 @@ struct Generator {
         uint32_t nodeIndex;
     };
 
-    struct CallBase {
+    struct CallTarget {
         DeductionState state;
     };
 
@@ -113,13 +172,12 @@ struct Generator {
     Program* program = nullptr;
     ProgramHandle programHandle;
 
-    LookupCache lookupCache;
-    std::vector<Value> dependentParents;
-    std::vector<LocalDeclarationEntry> localDeclarations;
-    std::vector<LocalValue> localValues;
     std::vector<Node> nodeScratch;
     std::vector<StackItem> nodeStack;
     std::vector<Type> parameterTypes;
+    std::vector<LookupContext> lookupStack;
+    std::vector<LocalLookupEntry> localLookupEntries;
+    std::vector<LocalValue> localValues;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
     Generator(Context& context, ProgramHandle handle);
@@ -172,11 +230,10 @@ struct Generator {
     Type typeOfNonDependentProgram(FoldBase base);
 
     Value generateDeclarationLiteral(ScopeValue rawValue);
-    std::optional<Value> lookupInside(ScopeValue scope, Word name);
     void generateIdentifierExpr();
     void generateParameterizeExpr(int_t argumentCount);
-    CallBase resolveCallBase();
-    void generateCallExpr(CallBase base, int_t argumentCount);
+    CallTarget resolveCallTarget();
+    void generateCallExpr(CallTarget base, int_t argumentCount);
 
     Value inheriteParameters(ScopeValue parent);
 
@@ -192,6 +249,8 @@ struct Generator {
     void emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data);
     void emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data);
     void emitConstantExpr(SourceLocation location, Value value);
+    void emitReferenceExpr(SourceLocation location, int_t localValueIndex);
+    void declareLocal(Word name, SourceLocation location, VariableDeclaration decl);
 };
 
 }
