@@ -52,7 +52,7 @@ struct RemoteExpression {
 enum class ProgramStatus : uint8_t {
     Unchecked,
     SignatureCheckInProgress,
-    SignatureChecked, // (template) parameters have been checked, the type has been determined
+    SignatureChecked,
 };
 
 enum class ProgramKind : uint8_t {
@@ -300,6 +300,10 @@ struct RuntimeParameter {
     Type type() const {
         VERIFY(kind() != RuntimeParameterKind::UncheckedMember);
         return u.type;
+    }
+    parse::TokenHandle parseLocation() const {
+        VERIFY(kind() == RuntimeParameterKind::UncheckedMember);
+        return u.parseLocation;
     }
 };
 

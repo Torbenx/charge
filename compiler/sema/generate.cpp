@@ -272,18 +272,18 @@ Generator::CallTarget Generator::resolveCallTarget() {
 
 void Generator::generateCallExpr(CallTarget target, int_t argumentCount) {
     auto& state = target.state;
-    if (state.program->kind() == ProgramKind::Function) {
-        FunctionProgram* fnProg = static_cast<FunctionProgram*>(state.program);
+    if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Type) {
+        CallableProgram* callableProg = static_cast<CallableProgram*>(state.program);
 
-        VERIFY(argumentCount == (int_t)fnProg->runtimeParameters.size());
+        VERIFY(argumentCount == (int_t)callableProg->runtimeParameters.size());
         for (int_t index = 0; index < argumentCount; index++) {
-            const auto& parameter = fnProg->runtimeParameters[index];
+            const auto& parameter = callableProg->runtimeParameters[index];
             Expression argument = topExpression(argumentCount - 1 - index);
             implicitCastTo(state, parameter.type(), argument);
         }
         VERIFY(state.isComplete());
         Value callTarget = makeParameterize(state.programHandle, state.arguments);
-        Type returnType = verifyType(fold(callTarget, fnProg->returnType()));
+        Type returnType = verifyType(fold(callTarget, callableProg->returnType()));
         emitExpr(NodeKind::CallExpr, SourceLocation(), argumentCount, returnType, ExprData { .callTarget = callTarget });
         return;
     }
@@ -473,9 +473,10 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 
     auto parseLocation = program->beginSignatureCheck();
 
-    g.tok = &context.parseOutput.tokens[parseLocation.id()];
-    g.visitDeclaration();
-    g.tok = nullptr;
+    {
+        ParseScope parseScope(&g, parseLocation);
+        g.visitDeclaration();
+    }
 
     program->completeSignatureCheck();
 }

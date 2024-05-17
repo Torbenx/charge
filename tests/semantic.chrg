@@ -105,3 +105,9 @@ template(T: type) fn refArg(arg: T) => arg;
 
 // expect-return-type #0
 template(T: type) fn refArg2(arg0: T, arg1: T = arg0) => arg1;
+
+struct CallMe: {
+    t: type;
+}
+// expect-type CallMe
+static callConstructor = CallMe(X);

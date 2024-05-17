@@ -573,10 +573,12 @@ LinearState type_declaration_body() then error
 LinearState member_declaration() then templated_declaration
     keyword has
         pushScope ScopeKind::HasTypeExpr
+        rememberDeclarationBegin
         commitDeclaration DeclarationKind::HasMember
         emitToken TokenKind::HasMemberDecl
         next expression
     identifier
+        rememberDeclarationBegin
         commitDeclaration DeclarationKind::Member, this_identifier
         emitToken TokenKind::MemberDecl, this_declaration
         next after_variable_declaration_id

@@ -22,9 +22,7 @@ void Generator::visitDeclaration() {
         visitTemplateParameters();
     }
     if (tok->kind() == Token::ObjectTypeDecl || tok->kind() == Token::StructTypeDecl) {
-        VERIFY(program->kind() == ProgramKind::Type);
-        // VERIFY_NOT_REACHED();
-        program->setType(builtins::type_type);
+        visitTypeDeclaration();
     } else if (tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
@@ -168,6 +166,33 @@ void Generator::visitFunctionDeclaration() {
         // ... visit statement
         VERIFY_NOT_REACHED();
     }
+}
+
+void Generator::visitTypeDeclaration() {
+    VERIFY(program->kind() == ProgramKind::Type);
+    auto* typeProgram = static_cast<TypeProgram*>(program);
+
+    VERIFY(tok->kind() == Token::StructTypeDecl || tok->kind() == Token::ObjectTypeDecl);
+    advance();
+
+    for (int_t i = 0; i < (int_t)typeProgram->runtimeParameters.size(); i++) {
+        auto& member = typeProgram->runtimeParameters[i];
+        VERIFY(member.kind() == RuntimeParameterKind::UncheckedMember);
+
+        ParseScope parseScope(this, member.parseLocation());
+        VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
+        VERIFY(tok->data() == Value(ValueKind::Invalid, i).toUint());
+        RuntimeParameterKind newKind = tok->kind() == Token::HasMemberDecl ? RuntimeParameterKind::HasMember : RuntimeParameterKind::Member;
+        advance();
+
+        visitExpression();
+        implicitToType();
+        Type type = verifyType(makeExpressionValue());
+
+        member = RuntimeParameter(newKind, member.name, type, member.location());
+    }
+
+    program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
 }
 
 void Generator::visitExpression() {

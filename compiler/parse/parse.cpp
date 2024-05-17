@@ -2249,6 +2249,8 @@ after_statement$no_emit:
             // ifScope ScopeKind::Type
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
                 // commitDeclaration DeclarationKind::Member, this_identifier
                 this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
                 // emitToken TokenKind::MemberDecl, this_declaration
@@ -2280,6 +2282,8 @@ after_statement$no_emit:
             // ifScope ScopeKind::Type
             if (scopePosition[0] == ScopeKind::Type) {
                 // then member_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
                 // commitDeclaration DeclarationKind::Member, this_identifier
                 this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
                 // emitToken TokenKind::MemberDecl, this_declaration
@@ -3848,6 +3852,8 @@ member_declaration$as_then:
             if (this_identifier == words["has"]) {
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
                 // commitDeclaration DeclarationKind::HasMember
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
                 // emitToken TokenKind::HasMemberDecl
@@ -3859,6 +3865,8 @@ member_declaration$as_then:
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
+        // rememberDeclarationBegin
+        declarationBegin = state.parseOutput.currentToken();
         // commitDeclaration DeclarationKind::Member, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::MemberDecl, this_declaration
