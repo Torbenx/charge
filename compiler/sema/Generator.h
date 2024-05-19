@@ -247,21 +247,21 @@ struct Generator {
     Type typeOf(Value value);
     Type verifyType(Value value);
 
-    Value makeTemplateSignature(ProgramHandle handle);
+    Value makeTemplateSignature(Value templateProg);
+    Type makeTemplateIdFor(Value templateProg);
     Value makeFunctionSignature(Value value);
     Value makeExpressionValue();
     Value makeExpressionValue(Expression expr);
-    Value makeProgramValue(ProgramHandle targetHandle);
     Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
-    Type makeTemplateIdFor(ProgramHandle targetHandle);
     Type typeOfNonDependentProgram(Value value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    Value generateDeclarationLiteral(ScopeValue rawValue);
+    Value generateDeclarationLiteral(ScopeValue rawValue, std::span<const Value> parentArgs);
     void generateIdentifierExpr();
     void generateParameterizeExpr(int_t argumentCount);
     CallTarget resolveCallTarget();
     void generateCallExpr(CallTarget base, int_t argumentCount);
+    void generateStaticAccessExpr();
 
     Value inheriteParameters(ScopeValue parent);
 

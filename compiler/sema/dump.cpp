@@ -61,10 +61,13 @@ struct Dumper {
     }
     std::string formatNamespaceInternal(NamespaceHandle nsHandle) {
         Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
+        if (ns->name.empty())
+            return {};
         std::string name(context.wordTable.view(ns->name));
-        while (ns->parent.has_value()) {
-            ns = context.getNamespace(ns->parent.value());
+        ns = context.getNamespace(ns->parent.value());
+        while (!ns->name.empty()) {
             name = std::string(context.wordTable.view(ns->name)) + "::" + name;
+            ns = context.getNamespace(ns->parent.value());
         }
         return name;
     }
@@ -83,7 +86,8 @@ struct Dumper {
             return formatProgram(program->translate(v.program()));
         case ValueKind::Namespace:
             return formatNamespace(program->translate(v.nsHandle()));
-        case ValueKind::TemplateSignature:
+        case ValueKind::TemplateSignature$Program:
+        case ValueKind::TemplateSignature$Parameterize:
             return "templsig(" + formatValue(v.templateSignatureBaseValue()) + ")";
         case ValueKind::FunctionSignature$Program:
         case ValueKind::FunctionSignature$Parameterize:

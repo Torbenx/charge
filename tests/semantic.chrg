@@ -4,9 +4,11 @@ struct X: { }
 // expect-type type
 static XX: type = X;
 
-namespace OuterNS: { }
+namespace OuterNS: { namespace InnerNS: { struct A: { } } }
 // expect-type namespace
-static ns = OuterNS;
+static ns = OuterNS::InnerNS;
+// expect-type type
+static nsa = OuterNS::InnerNS::A;
 
 template(x: XX) struct Y: { }
 // expect-type template_id{@templsig(Y)}
@@ -32,7 +34,13 @@ template(T: type) struct Outer: {
 
     // expect-value Outer::B{#0, type, Outer::A{#0}}
     static BA: type = B{A};
+
+    // expect-type template_id{@templsig(Outer::B{#0})}
+    static refB = B;
 }
+
+// expect-value Outer::B{X}
+static refAccess = Outer{X}::refB;
 
 struct A: { }
 template(a) struct B: { }

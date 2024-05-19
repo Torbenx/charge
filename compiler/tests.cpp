@@ -137,14 +137,15 @@ struct ParameterExpr : CheckExpr {
     }
 };
 struct TemplateSignatureExpr : CheckExpr {
-    NestedName literal;
+    std::unique_ptr<CheckExpr> signatureValue;
 
-    explicit TemplateSignatureExpr(NestedName literal)
-        : literal(std::move(literal)) { }
+    explicit TemplateSignatureExpr(std::unique_ptr<CheckExpr> signatureValue)
+        : signatureValue(std::move(signatureValue)) { }
 
     void check(Context& ctx, Program* prog, Value value) const override {
-        VERIFY(value.kind() == ValueKind::TemplateSignature);
-        VERIFY(literal.match(ctx, prog, (ScopeValue)value.templateSignatureProgram()));
+        VERIFY(value.kind() == ValueKind::TemplateSignature$Program
+            || value.kind() == ValueKind::TemplateSignature$Parameterize);
+        signatureValue->check(ctx, prog, value.templateSignatureBaseValue());
     }
 };
 struct FunctionSignatureExpr : CheckExpr {
@@ -218,9 +219,9 @@ struct CheckExprParser {
             auto id = readId();
             if (id == "templsig") {
                 consume("(");
-                auto base = readNestedName();
+                auto sigExpr = parse();
                 consume(")");
-                return std::make_unique<TemplateSignatureExpr>(std::move(base));
+                return std::make_unique<TemplateSignatureExpr>(std::move(sigExpr));
             }
             if (id == "fnsig") {
                 consume("(");

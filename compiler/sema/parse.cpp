@@ -221,6 +221,9 @@ void Generator::visitPostfixExpr() {
         } else if (tok->kind() == Token::CallExpr) {
             CallTarget target = resolveCallTarget();
             generateCallExpr(std::move(target), visitExpressionList());
+        } else if (tok->kind() == Token::StaticAccessExpr) {
+            generateStaticAccessExpr();
+            advance();
         } else {
             break;
         }

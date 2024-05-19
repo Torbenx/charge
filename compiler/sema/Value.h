@@ -34,10 +34,11 @@ enum class ValueKind : uint8_t {
     Program, // either not dependent or a template
     Namespace,
     Parameter,
-    TemplateSignature,
+    TemplateSignature$Program,
+    TemplateSignature$Parameterize,
     FunctionSignature$Program,
     FunctionSignature$Parameterize,
-    Parameterize,
+    Parameterize, // either all argument substituted or just the inherited ones
     Expression,
     RemoteExpression,
     Invalid = 15,
@@ -69,26 +70,25 @@ struct Value {
         return { id() };
     }
     constexpr ProgramHandle templateSignatureProgram() const {
-        VERIFY(kind() == ValueKind::TemplateSignature);
+        VERIFY(kind() == ValueKind::TemplateSignature$Program);
         return { id() };
     }
     constexpr Value templateSignatureBaseValue() const {
-        VERIFY(kind() == ValueKind::TemplateSignature);
-        return Value(ValueKind::Program, id());
+        if (kind() == ValueKind::TemplateSignature$Program)
+            return Value(ValueKind::Program, id());
+        if (kind() == ValueKind::TemplateSignature$Parameterize)
+            return Value(ValueKind::Parameterize, id());
+        VERIFY_NOT_REACHED();
     }
     constexpr ProgramHandle functionSignatureProgram() const {
         VERIFY(kind() == ValueKind::FunctionSignature$Program);
         return { id() };
     }
-    constexpr Value functionSignatureParameterize() const {
-        VERIFY(kind() == ValueKind::FunctionSignature$Parameterize);
-        return Value(ValueKind::Parameterize, id());
-    }
     constexpr Value functionSignatureBaseValue() const {
         if (kind() == ValueKind::FunctionSignature$Program)
             return Value(ValueKind::Program, id());
         if (kind() == ValueKind::FunctionSignature$Parameterize)
-            return functionSignatureParameterize();
+            return Value(ValueKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }
     constexpr int_t expressionIndex() const {
