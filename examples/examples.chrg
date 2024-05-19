@@ -64,10 +64,10 @@ struct IPv6Address: {
 }
 static IPAddress: Type = Union{IPAddressBase};
 fn printAddress(address: IPAddress): {
-    match *address: {
-        with(v4: IPv4Address) dyn_is(v4):
+    inspect *address: {
+        match(v4: IPv4Address) dyn_is(v4):
             // print v4 address
-        with(v6: IPv6Address) dyn_is(v6):
+        match(v6: IPv6Address) dyn_is(v6):
             // print v6 address
     }
 }
@@ -86,7 +86,7 @@ struct Rect: {
 
 //
 fn getImpl(t: Type) -> Type: {
-    return match t: {
+    return inspect t: {
         int => IntImpl;
         bool => BoolImpl;
         _ => DefaultImpl;
@@ -103,12 +103,12 @@ struct Dog: { has Mammal; has Legs; }
 struct Snake: { has Reptile; }
 struct Turtle: { has Reptile; has Legs; }
 fn test(a: Animal): {
-    match a: {
-        with(w: Whale) dyn_match(w): ... // matches 'Whale'
-        with(m: Mammal) dyn_match(m): ... // matches none
-        with(m: Mammal) dyn_is(m): ... // matches 'Dog' and 'Whale'
-        with(l: Legs) dyn_is(l): ... // matches none
-        with(l: Legs) dyn_has(l): ... // matches 'Dog' and 'Turtle'
+    inspect a: {
+        match(w: Whale) dyn_match(w): ... // matches 'Whale'
+        match(m: Mammal) dyn_match(m): ... // matches none
+        match(m: Mammal) dyn_is(m): ... // matches 'Dog' and 'Whale'
+        match(l: Legs) dyn_is(l): ... // matches none
+        match(l: Legs) dyn_has(l): ... // matches 'Dog' and 'Turtle'
     }
 }
 
@@ -116,15 +116,15 @@ fn test(a: Animal): {
 struct RGB: { r: int; g: int; b: int; }
 struct HSV: { h: int; s: int; v: int; }
 static Color: Type = Variant{RGB, HSV};
-fn toString(color: Option{Color}) => match color: {
-    with(r: int)
+fn toString(color: Option{Color}) => inspect color: {
+    match(r: int)
     Option(Color(RGB(r, 0, 0))) => format("[r={}]", r);
 
-    with(r: int, g: int, b: int)
+    match(r: int, g: int, b: int)
     Option(Color(RGB(r, g, b)))
         => format("[r={},g={},b={}]", r, g, b);
 
-    with(h: int, s: int, v: int)
+    match(h: int, s: int, v: int)
     Option(Color(HSV(h, s, v)))
         => format("[h={},s={},v={}]", h, s, v);
 

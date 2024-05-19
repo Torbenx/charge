@@ -1,6 +1,6 @@
 
 object Foo: {
-    std::vector<int> vec;
+    vec: std::vector{int};
 }
 fn test(): {
     mut foo: Foo = ();
@@ -21,9 +21,11 @@ fn test(): {
                                     //          Can this (falsely) suggest that we have to call the constructor of 'obj' again?
                                     //        - 'std::construtor_called_for(inout arg_with_storage) -> bool'?
 
-    foo.vec.move_from(getVector()); // 'move_from' would have a 'mut' parameter. This parameter would effectively be a temporary,
+    foo.vec.move_from(getVector()); // 'move_from' would have a 'var' parameter. This parameter would effectively be a temporary,
                                     // the exact thing we are trying to avoid. It might be better to just have temporaries as a
                                     // language feature instead.
+
+    foo.vec = getVector();          // Use relocating assignment operator=(inout self, var other), also effectively creates a temporary.
 
     foo.vec = getVector();          // Use 'out' parameters with initializers, see below.
 
@@ -75,6 +77,6 @@ object Bar: {
     collection: PointerCollection;
 }
 fn test(): {
-    mut bar: Bar = ( getCollection() );
+    var bar: Bar = ( getCollection() );
     bar.collection = getCollection();
 }

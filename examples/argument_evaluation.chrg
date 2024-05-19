@@ -9,9 +9,12 @@ fn update(inout x: T) -> int: {
 }
 
 template(T: Type)
-fn call(mut x: T): {
+fn call(var x: T): {
     // This does different things depending on whether 'T' is an object or value type.
     // If 'T' a object type the updated value will be passed to test,
     // and if 'T' a value type the non-update value gets passed.
     test(x, update(x));
+
+    // Resolution: 'let' exlusive for value types, seperate 'in' passing style for both
+    //             value and object types that is always a reference.
 }

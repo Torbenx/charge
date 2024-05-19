@@ -1,43 +1,8 @@
 
-fn test(x: int): {
-
-    let lambda = (x: int, y: int): {
-        guard (x > 0 && y > 0) || (x == 0 && y == 0) || (x < 0 && y < 0);
-
-        proof(x * y >= 0);
-    };
-    proof(catch(_): { lambda(x, x); }).valid());
-
-    proof(x * x >= 0);
+struct Node: {
+    next: optional{id{Node}};
 }
-
-fn test(x: int, y: int): {
-    guard x > 0 && y > 0;
-
-    proof(x * y > 0);
-}
-
-fn test(x: int, y: int, z: int): {
-    guard x > 0 && z > y; // x > 0 && z - y > 0
-
-    proof(x * z > x * y); // x * z - x * y > 0
-}
-
-fn test(x: int, y: int, a: int, b: int): {
-    guard x < y && x > 0 && a + b > 0;
-
-    proof(a * x < a * y); // b * y - b * x > 0
-
-    proof(a * x + b * y > 0);
-    // b * y - b * x > 0        b * y - b * x - 1 >= 0      b*y - b*x - 1 >= 0
-    // a + b > 0                a + b - 1         >= 0      a*x + b*x - x >= 0, a*y + b*y - y >= 0
-    // a * x + b * y <= 0       -a * x - b * y    >= 0      -a*x - b*y    >= 0
-}
-
-struct Node {
-    next: optional<id<Node>>;
-}
-fn proof_termination(first: id<Node>) {
+fn proof_termination(first: id{Node}): {
     var current = first;
     loop {
         if !current.next.has_value() {
@@ -47,19 +12,55 @@ fn proof_termination(first: id<Node>) {
 
         var check = first;
         loop {
-            guard check != next;
-            if check == current {
+            assert check != next;
+            if check == current:
                 break;
-            }
-            proof(check.next.has_value());
+
+            proof check.next.has_value();
             check = check.next.value();
         }
         current = next;
     }
 }
 
-trait sequence {
+struct sequence: {
     sub_sequence: type;
-    require sub_sequence == Self || (has(sequence)(sub_sequence) && sub_sequence::sub_sequence == sub_sequence);
-    proof has(sequence)(sub_sequence);
+    analysis in {
+        if sub_sequence != self_type: {
+            assert has(sequence)(sub_sequence);
+            assert sub_sequence::sub_sequence == sub_sequence;
+        }
+    }
+    analysis assert has(sequence)(sub_sequence);
 }
+
+/*
+
+proof > runtime check > no op > assume
+
+debug >= release
+debug >= runtime check
+
+
+statement       | debug         | release
+----------------|---------------|---------------
+check           | proof         | proof
+check_or_assert | proof         | runtime check
+debug check     | proof         | no op
+check_or_assume | proof         | assume
+assert          | runtime check | runtime check
+debug assert    | runtime check | no op
+assume          | runtime check | assume
+
+
+environment     | debug         | release
+----------------|---------------|---------------
+check           | proof         | proof
+check_or_assert | proof         | runtime check
+debug check     | proof         | no op
+check_or_assume | proof         | assume
+<default>       | runtime check | runtime check
+debug           | runtime check | no op
+assume          | runtime check | assume
+
+*/

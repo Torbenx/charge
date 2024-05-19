@@ -1,14 +1,12 @@
 
-MyType: object {
+object MyType {
 
-    constructor: (  out self, in      other: MyType); // copy constructor
-    constructor: (  out self, move    other: MyType); // move constructor
-    constructor: (  out self, destroy other: MyType); // relocate constructor
-    constructor: (inout self, in      other: MyType); // copy assignment
-    constructor: (inout self, move    other: MyType); // move assignment
-    constructor: (inout self, destroy other: MyType); // relocate assignment
+    fn constructor(  out self, in  other: MyType); // copy constructor
+    fn constructor(  out self, var other: MyType); // relocate constructor
+    fn constructor(inout self, in  other: MyType); // copy assignment
+    fn constructor(inout self, var other: MyType); // relocate assignment
 
-    constructor: (assign self, forward other: MyType);
+    fn constructor(assign self, forward other: MyType);
 
     // deduction rules:
 
@@ -18,35 +16,7 @@ MyType: object {
     // uninitialized l-value -> 'out'
 
     // forward
-    //               r-value -> 'move'
+    //               r-value -> 'var'
     //   initialized l-value -> 'in'
     // uninitialized l-value -> error!
-}
-
-MyType: object {
-    // let, var, inout, out
-    // forward, assign
-    constructor: (  out self, let other: MyType);
-    constructor: (  out self, var other: MyType);
-    constructor: (inout self, let other: MyType);
-    constructor: (inout self, var other: MyType);
-
-    constructor: (assign self, forward other: MyType);
-
-    // assign
-    //               r-value -> error!
-    //   initialized l-value -> 'inout'
-    // uninitialized l-value -> 'out'
-
-    // forward
-    //               r-value -> 'var'
-    //   initialized l-value -> 'let'
-    // uninitialized l-value -> error!
-
-    // var = destroy, i.e. it is acctually a reference?
-    // --> Parameter passing:
-    //       | struct type | object type
-    //  -----|-------------|--------------------
-    //   let | by value    | deleting-reference
-    //   var | by value    | const-reference
 }

@@ -47,7 +47,7 @@
 		"decl-keywords": {
 			"patterns": [
 				{
-					"match": "\\b(static|template|struct|fn|special_case|external|as|let|var|inout|out|forward|assign|property|with|has|compare|incomplete|final|module|virtual|override|const|enum|object|namespace|to|in|proof)\\b",
+					"match": "\\b(static|template|struct|fn|special_case|external|as|let|var|inout|out|forward|assign|property|with|has|compare|incomplete|final|module|virtual|override|const|enum|object|namespace|to|in|analysis|match)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.other.charge"
@@ -59,7 +59,7 @@
 		"controls": {
 			"patterns": [
 				{
-					"match": "\\b(if|elif|else|match|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is|guard|catch|try|require)\\b",
+					"match": "\\b(if|elif|else|return|break|continue|for|loop|while|dyn_match|dyn_has|dyn_is|catch|try|assert|inspect)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.control.charge"

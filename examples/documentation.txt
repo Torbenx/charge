@@ -4,29 +4,28 @@
     |- Static variable
     '- Parameter variable
 
--- Variable kinds: let, mut, inout, out, destroy.
+-- Variable kinds: let, mut, in, inout, out.
    Where the 'let' and 'mut' apply to all variables and the others only to parameters.
 -- 'let' is the default and can be omitted.
 -- Identity property: identity => storage => value
 
 -- Properties of identifier expression naming variable:
 
-           | let            | inout/out        | mut/destroy
-   --------|----------------|------------------|------------------
-    struct | value          | storage /mutable | identity/mutable
-    object | identity/const | identity/mutable | identity/muatble
+           | let            | in             | inout/out        | mut
+   --------|----------------|----------------|------------------|------------------
+    struct | value          | storage /const | storage /mutable | identity/mutable
+    object | identity/const | identity/const | identity/mutable | identity/muatble
 
 -- Initialized at begin/end:
 
-           | let        | inout   | out    | mut     | destroy
-   --------|------------|---------|--------|---------|---------
-    struct | yes*/undef | yes/yes | no/yes | yes*/no | yes/no
-    object | non-owning | yes/yes | no/yes | yes*/no | yes/no
+           | let        | inout   | out    | mut
+   --------|------------|---------|--------|---------
+    struct | yes*/undef | yes/yes | no/yes | yes*/no
+    object |            | yes/yes | no/yes | yes*/no
 
    *The initialization of block 'let' and 'mut' variables can be deferred.
 
--- Should there be non-parameter 'let' variables of object type?
-   What meaning does deferred initialization have for such variables?
+-- Should there be non-parameter 'let' variables of object type? => no!
 
 -- Variables supposed to be uninitialized at the end are automatically destroyed if there not.
    Also automatic relocating these on last use would be really useful for perfect forwarding.
@@ -54,7 +53,7 @@
 
 
 -- All types with an incomplete non-virtual function are 'traits'.
--- Non-template traits have an implicit 'Self' type template parameter, which must be explicit if template parameters are declared.
+-- Non-template traits have an implicit 'self_type' type template parameter, which must be explicit if template parameters are declared.
 
 
 -- Only parameter declarations and can have constraint on them. These are not constraints of the variable but only of its initial value.
@@ -71,10 +70,9 @@
     - guard : The condtiion is a dynamically checked and an exception is thrown if it isn't met.
     - assume: The condition is not checked and assumed to true.
 -- 'proof' preconditions must be part of the function signature.
--- 'guard' preconditions are ideally also checked at the call size, where they can be optimized away.
+-- 'guard' preconditions are ideally also checked at the call site, where they can be optimized away.
 
 
--- solve type equality by only allowing 'where assicated-type = direct-assicated-type'.
 -- trait "inheritance" is constraint 'Self' type.
 
 

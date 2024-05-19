@@ -7,7 +7,7 @@
     irregular bit type: any bit pattern is an irregular value (example: enum types)
     alive type        : can have destructors (example: slice/anonymous_memory_block/objects)
 
--- Bit types are allowed to alias arbitrary memory. Reading from such memory is safe, but writing 
+-- Bit types are allowed to alias arbitrary memory. Reading from such memory is safe, but writing
    is generally not. We implement such reads and writes with value semantics.
 
 -- Q: Since bit types are behave differently then alive types, does it make sense to have a
@@ -15,6 +15,8 @@
       Example: 'id{T}' for general types and 'pointer{T}', 'address{T}' or 'memory{T}' for bit types
 
 -- Q: How do these type categories interact with initialization state?
+   A: For alive types the initialization state must be known at each assignment.
+      Bit types can always be assigned to. They are in the initialized state afterwards.
 
 -- Q: What assumptions do we make about 'id{T}' and which things do we dynamically guard against?
        - allocated?   -- Is there memory allocated at the target address?
