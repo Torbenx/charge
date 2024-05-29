@@ -106,12 +106,8 @@ struct BoolTheory : Theory {
         return &infos[lit.literalId];
     }
 
-    void assignFalse(Literal lit, int_t level, std::optional<LiteralInstance> clause) override {
-        infos[lit.literalId].assignFalse(level, clause);
-    }
-
-    void markPropagated(Literal lit) override {
-        infos[lit.literalId].markPropagated();
+    void assignFalse(Literal lit, int_t tracePos, std::optional<LiteralInstance> clause) override {
+        infos[lit.literalId].assignFalse(tracePos, clause);
     }
 
     void reverseFalseAssignment(Literal lit) override {
@@ -173,11 +169,6 @@ void check(const Parser& parser) {
     }
 
     // solver
-    struct FutureAssignment {
-        uint32_t level;
-        Literal literal;
-    };
-    std::vector<FutureAssignment> nextAssignments;
     bool unsat = false;
     if (!solver.propagate())
         unsat = true;
