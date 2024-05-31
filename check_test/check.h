@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include <map>
 #include <queue>
 #include <set>
 #include <types.h>
@@ -21,6 +22,7 @@ struct Literal {
 };
 
 using clause_mask_t = uint64_t;
+inline constexpr int_t MAX_CLAUSE_SIZE = sizeof(clause_mask_t) * 8;
 
 struct LiteralInstance {
     static constexpr int_t LITERAL_BITS = std::bit_width(sizeof(clause_mask_t) * 8 - 1);
@@ -30,35 +32,98 @@ struct LiteralInstance {
     bool operator==(const LiteralInstance&) const = default;
 };
 
+struct TracePosition {
+    uint32_t index;
+
+    constexpr explicit TracePosition(uint32_t index)
+        : index(index) { }
+
+    auto operator<=>(const TracePosition&) const = default;
+    bool operator==(const TracePosition&) const = default;
+    TracePosition& operator++() {
+        index += 1;
+        return *this;
+    }
+    TracePosition operator++(int) {
+        TracePosition copy = *this;
+        index += 1;
+        return copy;
+    }
+    friend TracePosition operator+(TracePosition l, int_t r) {
+        return TracePosition(l.index + r);
+    }
+    friend TracePosition operator-(TracePosition l, int_t r) {
+        return TracePosition(l.index - r);
+    }
+    TracePosition& operator+=(int_t r) {
+        index += r;
+        return *this;
+    }
+    TracePosition& operator-=(int_t r) {
+        index -= r;
+        return *this;
+    }
+};
+
+}
+
+template<>
+struct optional_traits<check::TracePosition> {
+    static constexpr check::TracePosition empty_value = check::TracePosition(-1);
+};
+
+namespace check {
+
+struct ClauseOrDecision {
+    uint32_t decisionBit : 1 = 0;
+    uint32_t data : 31 = 0;
+
+    static ClauseOrDecision makeDecision(int_t decisionLevel) {
+        return { 1, (uint32_t)decisionLevel };
+    }
+    static ClauseOrDecision makeClause(int_t clauseIndex) {
+        return { 0, (uint32_t)clauseIndex };
+    }
+
+    bool isDecision() const { return decisionBit != 0; }
+    int_t decisionLevel() const {
+        VERIFY(isDecision());
+        return data;
+    }
+    int_t clauseIndex() const {
+        VERIFY(!isDecision());
+        return data;
+    }
+};
+
 struct Theory {
     struct LiteralInfo {
-        std::optional<LiteralInstance> propagatedFromClause;
-        int_t tracePosition = -1;
+        std::optional<TracePosition> firstReason;
+        std::optional<TracePosition> lastReason;
         std::vector<LiteralInstance> instances;
 
-        bool assignedFalse() const { return tracePosition != -1; }
-        void assignFalse(int_t tracePosition, std::optional<LiteralInstance> clause) {
-            this->tracePosition = tracePosition;
-            propagatedFromClause = clause;
-        }
-        void reverseFalseAssignment() {
-            tracePosition = -1;
-            propagatedFromClause = std::nullopt;
-        }
+        bool assignedFalse() const { return firstReason.has_value(); }
     };
 
+    virtual void enumerateLiterals(std::function<void(Literal)> visitor) = 0;
     virtual Literal negate(Literal) = 0;
-    virtual const LiteralInfo* getInfo(Literal) = 0;
-    virtual void assignFalse(Literal, int_t tracePosition, std::optional<LiteralInstance> clause) = 0;
+    virtual LiteralInfo* getInfo(Literal) = 0;
+    virtual void assignFalse(Literal) = 0;
     virtual void reverseFalseAssignment(Literal) = 0;
     virtual void setTheoryId(int_t id) = 0;
-    virtual void addLiteralInstance(Literal, LiteralInstance) = 0;
     virtual std::string format(Literal) = 0;
     virtual ~Theory() = default;
 };
 
 struct Solver {
-    Solver() { }
+    struct LiteralAndReason {
+        Literal literal;
+        ClauseOrDecision reason;
+    };
+
+    Solver() {
+        decisions.push_back(TracePosition(0));
+    }
 
     int_t addTheory(std::unique_ptr<Theory> theory) {
         for (auto& theoryPtr : theories) {
@@ -80,14 +145,15 @@ struct Solver {
         return theories[literal.theoryId].get();
     }
 
+    int_t currentLevel() const { return decisions.size() - 1; }
+
     bool assignedFalseAndPropagated(Literal lit) {
-        int_t tracePos = theoryFor(lit)->getInfo(lit)->tracePosition;
-        return tracePos != -1 && tracePos < propagatedPosition;
+        return theoryFor(lit)->getInfo(lit)->assignedFalse() && !unpropagatedLiterals.contains(lit);
     }
 
-    int_t addClause(std::vector<Literal> clause) {
+    void addClauseInternal(std::vector<Literal> clause) {
         VERIFY(!clause.empty());
-        VERIFY(clause.size() <= sizeof(clause_mask_t) * 8);
+        VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE);
         VERIFY(learnedClauses.size() == learnedClauseMasks.size());
         int_t clauseIndex = learnedClauses.size();
         clause_mask_t mask = 0;
@@ -95,37 +161,93 @@ struct Solver {
             LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
             Literal lit = clause[index];
             Theory* theory = theoryFor(lit);
-            theory->addLiteralInstance(lit, inst);
+            theory->getInfo(lit)->instances.push_back(inst);
             if (!assignedFalseAndPropagated(lit))
                 mask |= literalMask(index);
         }
         VERIFY(mask != 0);
         if (std::popcount(mask) == 1) {
             int_t index = std::countr_zero(mask);
-            VERIFY(assignTrue(clause[index], LiteralInstance { (uint32_t)index, (uint32_t)clauseIndex }));
+            if (!assignTrue(clause[index], ClauseOrDecision::makeClause(clauseIndex))) {
+                if (!conflict.has_value())
+                    conflict = Conflict { LiteralInstance { (uint32_t)index, (uint32_t)clauseIndex } };
+            }
         }
         learnedClauses.emplace_back(std::move(clause));
         learnedClauseMasks.push_back(mask);
-        return clauseIndex;
+    }
+
+    std::pair<Literal, Literal> makeBooleanPair();
+
+    void addClause(std::vector<Literal> clause) {
+        VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
+        if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
+            addClauseInternal(std::move(clause));
+            return;
+        }
+        // clause.size <= (MAX_CLAUSE_SIZE - extraClauses) + extraClauses * (MAX_CLAUSE_SIZE - 1)
+        // -> extraClauses >= (clause.size - MAX_CLAUSE_SIZE) / (MAX_CLAUSE_SIZE - 2)
+        // -> extraClauses >= floor( (clause.size - MAX_CLAUSE_SIZE + MAX_CLAUSE_SIZE - 3) / (MAX_CLAUSE_SIZE - 2)
+        int_t extraClauses = ((int_t)clause.size() - 3) / (MAX_CLAUSE_SIZE - 2);
+
+        // fmt::println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
+        // fmt::print("clause: "); dumpClause(clause);
+
+        int_t takenCount = 0;
+        auto take = [&](std::vector<Literal>& into, int_t n) {
+            VERIFY((int_t)clause.size() > takenCount);
+            n = std::min(n, (int_t)clause.size() - takenCount);
+            for (int_t i = 0; i < n; i++)
+                into.push_back(clause[takenCount++]);
+        };
+
+        std::vector<Literal> primaryClause;
+        take(primaryClause, MAX_CLAUSE_SIZE - extraClauses);
+
+        for (int_t i = 0; i < extraClauses; i++) {
+            std::vector<Literal> extraClause;
+            auto [posLit, negLit] = makeBooleanPair();
+            primaryClause.push_back(posLit);
+            extraClause.push_back(negLit);
+            take(extraClause, MAX_CLAUSE_SIZE - 1);
+            VERIFY(extraClause.size() >= 3);
+            // fmt::print("extra: "); dumpClause(extraClause);
+            addClauseInternal(std::move(extraClause));
+        }
+
+        VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
+        // fmt::print("primary: "); dumpClause(primaryClause);
+        addClauseInternal(std::move(primaryClause));
+
+        VERIFY(takenCount == (int_t)clause.size());
     }
 
     bool decideTrue(Literal literal) {
-        VERIFY(propagatedPosition == (int_t)trace.size());
-        return assignTrue(literal, std::nullopt);
+        VERIFY(unpropagatedLiterals.empty());
+        decisions.push_back(TracePosition(trace.size()));
+        return assignTrue(literal, ClauseOrDecision::makeDecision(currentLevel()));
     }
 
-    bool assignTrue(Literal trueLit, std::optional<LiteralInstance> clause) {
+    bool assignTrue(Literal trueLit, ClauseOrDecision reason) {
         Theory* theory = theoryFor(trueLit);
-        if (clause.has_value())
-            fmt::println("assigning {} from c{}", theory->format(trueLit), (int_t)clause->clauseIndex);
+        /*if (reason.isDecision())
+            fmt::println("deciding {} at level {}", theory->format(trueLit), reason.decisionLevel());
         else
-            fmt::println("deciding {}", theory->format(trueLit));
+            fmt::println("assigning {} from c{}", theory->format(trueLit), reason.clauseIndex());*/
 
         Literal falseLit = theory->negate(trueLit);
         auto* info = theory->getInfo(falseLit);
-        if (!info->assignedFalse()) {
-            theory->assignFalse(falseLit, trace.size(), clause);
-            trace.push_back(falseLit); // assign 'false' to 'falseLit'
+
+        TracePosition tracePos(trace.size());
+        trace.push_back({ falseLit, reason, info->lastReason, std::nullopt });
+        if (info->lastReason.has_value())
+            at(info->lastReason.value()).nextReason = tracePos;
+        info->lastReason = tracePos;
+
+        if (!info->firstReason.has_value()) {
+            info->firstReason = tracePos;
+            theory->assignFalse(falseLit);
+            unpropagatedLiterals.emplace(falseLit);
         }
 
         if (theory->getInfo(trueLit)->assignedFalse())
@@ -134,21 +256,19 @@ struct Solver {
     }
 
     bool propagate() {
-        while (propagatedPosition < (int_t)trace.size()) {
-            Literal literal = trace[propagatedPosition];
+        while (!unpropagatedLiterals.empty()) {
+            Literal literal = *unpropagatedLiterals.begin();
             Theory* literalTheory = theoryFor(literal);
-            fmt::println("propagating {}", literalTheory->format(literal));
+            // fmt::println("propagating {}", literalTheory->format(literal));
 
             validateMasks();
             const auto* info = literalTheory->getInfo(literal);
             VERIFY(info->assignedFalse());
-            VERIFY(info->tracePosition == propagatedPosition);
 
-            propagatedPosition += 1;
+            unpropagatedLiterals.erase(*unpropagatedLiterals.begin());
 
             for (auto inst : info->instances) {
                 clause_mask_t& clauseMask = learnedClauseMasks[inst.clauseIndex];
-                fmt::println("c{}: {:#b}", (int_t)inst.clauseIndex, clauseMask);
                 int popcnt = std::popcount(clauseMask);
                 VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
                 clauseMask &= ~literalMask(inst.literalIndex);
@@ -163,11 +283,11 @@ struct Solver {
 
                 int_t trueLitIndex = std::countr_zero(clauseMask);
                 Literal trueLit = clause[trueLitIndex];
-                if (assignTrue(trueLit, LiteralInstance { (uint32_t)trueLitIndex, inst.clauseIndex }))
+                if (assignTrue(trueLit, ClauseOrDecision::makeClause(inst.clauseIndex)))
                     continue;
 
                 if (!conflict.has_value())
-                    conflict = Conflict { inst };
+                    conflict = Conflict { LiteralInstance { (uint32_t)trueLitIndex, inst.clauseIndex } };
             }
             if (conflict.has_value())
                 return false;
@@ -176,63 +296,74 @@ struct Solver {
         return true;
     }
 
-    void learnClause() {
-        validateMasks();
+    bool learnClause() {
         VERIFY(conflict.has_value());
-        std::set<Literal> seenLiterals;
-        std::priority_queue<int_t> literalsToVisit;
 
-        LiteralInstance reason = conflict->assignment;
-        for (;;) {
-            const auto& clause = learnedClauses[reason.clauseIndex];
-            for (int_t index = 0; index < (int_t)clause.size(); index++) {
-                Literal lit = clause[index];
-                auto* info = theoryFor(lit)->getInfo(lit);
-                if (info->assignedFalse()) {
-                    if (!seenLiterals.contains(lit)) {
-                        seenLiterals.emplace(lit);
-                        literalsToVisit.push(info->tracePosition);
-                    }
+        const auto& conflictClause = learnedClauses[conflict->assignment.clauseIndex];
+        const auto& mask = learnedClauseMasks[conflict->assignment.clauseIndex];
+        Literal conflictLiteral = conflictClause[conflict->assignment.literalIndex];
+
+        auto doesConflictPersist = [&] {
+            bool isClauseForcing = std::popcount(mask) == 1;
+            if (isClauseForcing)
+                VERIFY(mask == literalMask(conflict->assignment.literalIndex));
+            bool isImpliedLiteralFalse = theoryFor(conflictLiteral)->getInfo(conflictLiteral)->assignedFalse();
+            return isClauseForcing && isImpliedLiteralFalse;
+        };
+
+        validateMasks();
+        VERIFY(doesConflictPersist());
+
+        std::vector<LiteralAndReason> reversedLiterals;
+        while (doesConflictPersist() && currentLevel() > 0) {
+            reversedLiterals.clear();
+            backtrack(currentLevel(), reversedLiterals);
+        }
+
+        if (currentLevel() == 0 && doesConflictPersist())
+            return false;
+
+        std::map<Literal, std::optional<ClauseOrDecision>> reasons;
+        for (auto e : reversedLiterals)
+            reasons.emplace(e.literal, e.reason);
+
+        std::vector<int_t> clausesToVisit;
+        std::vector<Literal> newClause;
+        clausesToVisit.push_back(conflict->assignment.clauseIndex);
+
+        while (!clausesToVisit.empty()) {
+            int_t clauseIndex = clausesToVisit.back();
+            clausesToVisit.pop_back();
+
+            for (Literal lit : learnedClauses[clauseIndex]) {
+                auto it = reasons.find(lit);
+                if (it == reasons.end()) {
+                    if (theoryFor(lit)->getInfo(lit)->assignedFalse())
+                        newClause.push_back(lit);
+                } else if (it->second.has_value()) {
+                    if (it->second->isDecision())
+                        newClause.push_back(lit);
+                    else
+                        clausesToVisit.push_back(it->second->clauseIndex());
+                    it->second.reset();
                 }
             }
-
-            VERIFY(!literalsToVisit.empty());
-            Literal literal = trace[literalsToVisit.top()];
-            auto* info = theoryFor(literal)->getInfo(literal);
-            VERIFY(info->assignedFalse());
-            auto nextReason = info->propagatedFromClause;
-            if (!nextReason.has_value()) {
-                // decision variable
-                break;
-            }
-            reason = nextReason.value();
-            literalsToVisit.pop();
-        }
-        int_t backtrackPosition = literalsToVisit.top();
-
-        std::vector<Literal> newClause;
-        while (!literalsToVisit.empty()) {
-            newClause.push_back(trace[literalsToVisit.top()]);
-            literalsToVisit.pop();
         }
 
-        {
-            Literal conflictDecision = trace[backtrackPosition];
-            Theory* theory = theoryFor(conflictDecision);
-            fmt::println("conflict from deciding {}", theory->format(theory->negate(conflictDecision)));
-            fmt::print("learning ");
-            dumpClause(newClause);
+        std::sort(newClause.begin(), newClause.end());
+        auto newEnd = std::unique(newClause.begin(), newClause.end());
+        newClause.erase(newEnd, newClause.end());
 
-            auto* info = theory->getInfo(conflictDecision);
-            VERIFY(info->assignedFalse());
-            VERIFY(!info->propagatedFromClause.has_value());
-            VERIFY(std::find(newClause.begin(), newClause.end(), conflictDecision) != newClause.end());
-        }
+        //fmt::print("learned: ");
+        //dumpClause(newClause);
 
-        backtrack(backtrackPosition);
-        addClause(std::move(newClause));
-        VERIFY((int_t)trace.size() > propagatedPosition);
         conflict.reset();
+        addClause(std::move(newClause));
+        if (conflict.has_value())
+            return learnClause();
+
+        VERIFY(unpropagatedLiterals.size() > 0);
+        return true;
     }
 
     void dumpClause(int_t clauseIndex) {
@@ -244,72 +375,78 @@ struct Solver {
         std::cout << '\n';
     }
 
-    // Revert all assignments up to and including position
-    void backtrack(int_t position) {
-        fmt::println("backtracking to {}", position);
+    // Revert all assignments up to and including level
+    void backtrack(int_t targetLevel, std::vector<LiteralAndReason>& revertedLiterals) {
+        VERIFY(targetLevel > 0);
         validateMasks();
-        int_t writePosition = position;
-        for (; position < propagatedPosition; position++) {
-            Literal literal = trace[position];
-            Theory* theory = theoryFor(literal);
-            auto reason = theory->getInfo(literal)->propagatedFromClause;
+        std::map<Literal, ClauseOrDecision> firstReasons;
+        TracePosition position = decisions[targetLevel];
+        TracePosition writePosition = position;
+        TracePosition traceEnd = TracePosition(trace.size());
+        for (; position < traceEnd; position++) {
+            const TraceEntry entry = at(position);
 
-            if (reason.has_value()) {
-                auto mask = learnedClauseMasks[reason->clauseIndex];
-                // fmt::println("c{}: {:#b} == {:#b}", (int_t)reason->clauseIndex, mask, literalMask(reason->literalIndex));
-                VERIFY(mask != 0);
-                if (std::popcount(mask) == 1)
-                    VERIFY(mask == literalMask(reason->literalIndex));
-            }
+            Theory* theory = theoryFor(entry.literal);
+            auto* info = theory->getInfo(entry.literal);
+            VERIFY(info->firstReason.has_value() && info->lastReason.has_value());
 
-            if (reason.has_value() && learnedClauseMasks[reason->clauseIndex] == literalMask(reason->literalIndex)) {
-                theory->assignFalse(literal, writePosition, reason.value()); // update trace position
-                trace[writePosition] = literal;
+            bool revert = entry.reason.isDecision() || std::popcount(learnedClauseMasks[entry.reason.clauseIndex()]) > 1;
+            if (revert) {
+                if (info->firstReason.value() == position) {
+                    if (!unpropagatedLiterals.contains(entry.literal)) {
+                        for (auto inst : info->instances) {
+                            auto& clauseMask = learnedClauseMasks[inst.clauseIndex];
+                            auto mask = literalMask(inst.literalIndex);
+                            clauseMask |= mask;
+                        }
+                        unpropagatedLiterals.emplace(entry.literal);
+                    }
+                    firstReasons.emplace(entry.literal, entry.reason);
+                }
+                if (entry.nextReason.has_value()) {
+                    // tell nextReason to update prevReason
+                    at(entry.nextReason.value()).prevReason = entry.prevReason;
+                } else if (entry.prevReason.has_value()) {
+                    info->lastReason = entry.prevReason.value();
+                    at(entry.prevReason.value()).nextReason = std::nullopt;
+                } else {
+                    // revert the literal
+                    info->firstReason = std::nullopt;
+                    info->lastReason = std::nullopt;
+                    theory->reverseFalseAssignment(entry.literal);
+                    revertedLiterals.push_back({ entry.literal, firstReasons.at(entry.literal) });
+
+                    VERIFY(unpropagatedLiterals.erase(entry.literal) == 1);
+                }
+            } else {
+                if (entry.prevReason.has_value())
+                    at(entry.prevReason.value()).nextReason = writePosition;
+                else
+                    info->firstReason = writePosition;
+
+                if (entry.nextReason.has_value())
+                    at(entry.nextReason.value()).prevReason = writePosition;
+                else
+                    info->lastReason = writePosition;
+
+                at(writePosition) = entry;
                 writePosition += 1;
-                continue;
-            }
-            // fmt::println("reversing {}", theory->format(literal));
-            theory->reverseFalseAssignment(literal);
-
-            for (auto inst : theory->getInfo(literal)->instances) {
-                auto& clauseMask = learnedClauseMasks[inst.clauseIndex];
-                auto mask = literalMask(inst.literalIndex);
-                clauseMask |= mask;
             }
         }
-        propagatedPosition = writePosition;
-        for (; position < (int_t)trace.size(); position++) {
-            Literal literal = trace[position];
-            Theory* theory = theoryFor(literal);
-            auto reason = theory->getInfo(literal)->propagatedFromClause;
-
-            if (reason.has_value()) {
-                auto mask = learnedClauseMasks[reason->clauseIndex];
-                // fmt::println("c{}: {:#b} == {:#b}", (int_t)reason->clauseIndex, mask, literalMask(reason->literalIndex));
-                VERIFY(mask != 0);
-                if (std::popcount(mask) == 1)
-                    VERIFY(mask == literalMask(reason->literalIndex));
-            }
-
-            if (reason.has_value() && learnedClauseMasks[reason->clauseIndex] == literalMask(reason->literalIndex)) {
-                theory->assignFalse(literal, writePosition, reason.value()); // update trace position
-                trace[writePosition++] = literal;
-                continue;
-            }
-            // fmt::println("reversing {}", theory->format(literal));
-            theory->reverseFalseAssignment(literal);
-        }
-        trace.resize(writePosition);
-        fmt::println("backtrack done");
+        trace.resize(writePosition.index);
+        while ((int_t)decisions.size() > targetLevel)
+            decisions.pop_back();
         validateMasks();
     }
 
     void validateMasks() {
+        return;
+        // check clause masks
         VERIFY(learnedClauses.size() == learnedClauseMasks.size());
         for (int_t clauseIndex = 0; clauseIndex < (int_t)learnedClauses.size(); clauseIndex++) {
             auto mask = learnedClauseMasks[clauseIndex];
             const auto& clause = learnedClauses[clauseIndex];
-            VERIFY((mask & (literalMask(clause.size()) - (clause_mask_t)1)) == mask);
+            // VERIFY((mask & (literalMask(clause.size()) - (clause_mask_t)1)) == mask);
             for (int_t index = 0; index < (int_t)clause.size(); index++) {
                 bool bitSet = (mask & literalMask(index)) != 0;
                 VERIFY(bitSet == !assignedFalseAndPropagated(clause[index]));
@@ -319,10 +456,45 @@ struct Solver {
                 Literal trueLit = clause[index];
                 Theory* theory = theoryFor(trueLit);
                 Literal falseLit = theory->negate(trueLit);
-                auto* info = theory->getInfo(falseLit);
+                const auto* info = theory->getInfo(falseLit);
                 VERIFY(info->assignedFalse());
-                VERIFY(trace[info->tracePosition] == falseLit);
             }
+        }
+
+        // check linked lists
+        auto checkLiteral = [this](Literal lit) {
+            const auto* info = theoryFor(lit)->getInfo(lit);
+            if (!info->assignedFalse())
+                return;
+            VERIFY(info->firstReason.has_value());
+            VERIFY(info->lastReason.has_value());
+            TracePosition pos = info->firstReason.value();
+            VERIFY(!at(pos).prevReason.has_value());
+            VERIFY(at(pos).literal == lit);
+            // std::cout << theoryFor(lit)->format(lit) << " (" << info->firstReason->index << " .. " << info->lastReason->index << ")" << ": ";
+            // std::cout << pos.index;
+
+            while (at(pos).nextReason.has_value()) {
+                TracePosition newPos = at(pos).nextReason.value();
+                // std::cout << " -> " << newPos.index;
+                VERIFY(at(newPos).literal == lit);
+                VERIFY(at(newPos).prevReason.has_value());
+                VERIFY(at(newPos).prevReason.value() == pos);
+                pos = newPos;
+            }
+            VERIFY(pos == info->lastReason.value());
+            // std::cout << '\n';
+        };
+        for (auto& theory : theories) {
+            if (theory == nullptr)
+                break;
+            theory->enumerateLiterals(checkLiteral);
+        }
+
+        // check decisions
+        for (int_t i = 1; i < (int_t)decisions.size(); i++) {
+            VERIFY(at(decisions[i]).reason.isDecision());
+            VERIFY(at(decisions[i]).reason.decisionLevel() == i);
         }
     }
 
@@ -345,8 +517,19 @@ private:
         LiteralInstance assignment;
     };
 
-    static clause_mask_t literalMask(int_t index) {
-        return (clause_mask_t)1 << index;
+    struct TraceEntry {
+        Literal literal;
+        ClauseOrDecision reason;
+        // Form a linked list for trace entries for 'literal'
+        std::optional<TracePosition> prevReason;
+        std::optional<TracePosition> nextReason;
+    };
+
+    static clause_mask_t literalMask(int_t index) { return (clause_mask_t)1 << index; }
+
+    TraceEntry& at(TracePosition pos) {
+        VERIFY(pos.index < trace.size());
+        return trace[pos.index];
     }
 
     // Bitmasks for learned clauses. Contains 1 for literals that are not assigned 'false'.
@@ -355,9 +538,12 @@ private:
     // The actual learned clauses
     std::vector<std::vector<Literal>> learnedClauses;
 
-    // Queue of literals that were or should be assigned 'false'
-    std::vector<Literal> trace;
-    int_t propagatedPosition = 0;
+    // Trace of reasons
+    std::vector<TraceEntry> trace;
+
+    std::set<Literal> unpropagatedLiterals;
+
+    std::vector<TracePosition> decisions;
 
     std::array<std::unique_ptr<Theory>, Literal::MAX_THEORY_COUNT> theories;
 

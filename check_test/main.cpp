@@ -102,31 +102,28 @@ struct BoolTheory : Theory {
         return { lit.theoryId, lit.literalId ^ 1u };
     }
 
-    const LiteralInfo* getInfo(Literal lit) override {
+    LiteralInfo* getInfo(Literal lit) override {
         return &infos[lit.literalId];
     }
 
-    void assignFalse(Literal lit, int_t tracePos, std::optional<LiteralInstance> clause) override {
-        infos[lit.literalId].assignFalse(tracePos, clause);
-    }
-
-    void reverseFalseAssignment(Literal lit) override {
-        VERIFY(infos[lit.literalId].assignedFalse());
-        infos[lit.literalId].reverseFalseAssignment();
-    }
+    void assignFalse(Literal) override { }
+    void reverseFalseAssignment(Literal) override { }
 
     void setTheoryId(int_t id) override {
         thisTheoryId = id;
-    }
-
-    void addLiteralInstance(Literal lit, LiteralInstance inst) override {
-        infos[lit.literalId].instances.push_back(inst);
     }
 
     int_t newVariable() {
         int_t id = infos.size() / 2;
         infos.resize(infos.size() + 2);
         return id;
+    }
+
+    void enumerateLiterals(std::function<void(Literal)> f) override {
+        for (int_t i = find; i < (int_t)infos.size() / 2; i++) {
+            f(positiveLiteral(i));
+            f(negativeLiteral(i));
+        }
     }
 
     std::optional<int_t> findUnassignedVariable() {
@@ -149,6 +146,12 @@ struct BoolTheory : Theory {
     Literal negativeLiteral(int_t varId) const { return { (uint32_t)thisTheoryId, (uint32_t)varId * 2u + 1u }; }
     Literal literalFromSign(int_t var) const { return var < 0 ? negativeLiteral(-var) : positiveLiteral(var); }
 };
+
+std::pair<Literal, Literal> Solver::makeBooleanPair() {
+    auto* theory = static_cast<BoolTheory*>(theories[0].get());
+    int_t varId = theory->newVariable();
+    return { theory->positiveLiteral(varId), theory->negativeLiteral(varId) };
+}
 
 void check(const Parser& parser) {
     // setup
@@ -180,8 +183,12 @@ void check(const Parser& parser) {
 
         int_t varId = var.value();
         VERIFY(solver.decideTrue(theory->positiveLiteral(varId)));
-        while (!solver.propagate())
-            solver.learnClause();
+        while (!solver.propagate()) {
+            if (!solver.learnClause()) {
+                unsat = true;
+                break;
+            }
+        }
     }
 
     if (unsat) {
