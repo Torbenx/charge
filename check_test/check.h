@@ -104,8 +104,7 @@ struct Theory {
         std::optional<Literal> nextPropagation;
         std::optional<Literal> prevPropagation;
 
-        std::optional<Reason> tmpFirstReason;
-        bool seenInLearn = false;
+        std::optional<int_t> subTraceIndex;
 
         std::vector<LiteralInstance> instances;
 
@@ -123,9 +122,10 @@ struct Theory {
 };
 
 struct Solver {
-    struct LiteralAndReason {
+    struct SubTraceEntry {
         Literal literal;
         Reason reason;
+        bool shouldBeVisited = false;
     };
 
     Solver() {
@@ -214,7 +214,7 @@ struct Solver {
     void dumpClause(const std::vector<Literal>& clause);
 
     // Revert all assignments up to and including level
-    void backtrack(int_t targetLevel, std::vector<Literal>& revertedLiterals);
+    void backtrack(int_t targetLevel, std::vector<SubTraceEntry>& subTrace);
 
     void validateMasks();
 
@@ -430,25 +430,24 @@ bool Solver::learnClause() {
         return false;
     };
 
-    std::vector<Literal> reversedFirstReasons;
+    std::vector<SubTraceEntry> subTrace;
     for (;;) {
         validateMasks();
         VERIFY(doesSomeConflictPersist());
         conflictIndex = 0;
 
         while (doesSomeConflictPersist() && currentLevel() > 0) {
-            reversedFirstReasons.clear();
-            backtrack(currentLevel(), reversedFirstReasons);
+            subTrace.clear();
+            backtrack(currentLevel(), subTrace);
         }
 
         if (currentLevel() == 0 && doesSomeConflictPersist())
             return false;
 
-        VERIFY(!reversedFirstReasons.empty());
-        Literal conflictDecision = reversedFirstReasons.front();
-        VERIFY(infoFor(conflictDecision)->tmpFirstReason.has_value());
-        VERIFY(infoFor(conflictDecision)->tmpFirstReason->isDecision());
-        if (infoFor(conflictDecision)->assignedFalse()) {
+        VERIFY(!subTrace.empty());
+        SubTraceEntry conflictDecision = subTrace.front();
+        VERIFY(conflictDecision.reason.isDecision());
+        if (infoFor(conflictDecision.literal)->assignedFalse()) {
             // if the decision was not reverted propagating it will to a conflict
             conflicts.clear();
             propagate();
@@ -456,28 +455,60 @@ bool Solver::learnClause() {
             continue;
         }
 
+        auto wasReversed = [&](Literal lit) {
+            return std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; }) != subTrace.end();
+        };
+        auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit)->assignedFalse(); };
+        auto wasTrue = [&](Literal lit) { return wasFalse(theoryFor(lit)->negate(lit)); };
+
         std::vector<Literal> newClause;
-        int_t position = reversedFirstReasons.size();
+        int_t position = subTrace.size();
         int_t openLiterals = 0;
         int_t seenDecisions = 0;
         LiteralInstance clauseReason = conflicts[conflictIndex].assignment;
+        Literal forcedConflictLiteral = learnedClauses[clauseReason.clauseIndex][clauseReason.literalIndex];
+        Literal alreadyFalseConflictLiteral = theoryFor(forcedConflictLiteral)->negate(forcedConflictLiteral);
+        // VERIFY(wasReversed(forcedConflictLiteral));
+        VERIFY(wasFalse(alreadyFalseConflictLiteral));
 
         do {
             const auto& clause = learnedClauses[clauseReason.clauseIndex];
+            // fmt::print("visiting ");
+            // dumpClause(clause);
             for (int_t index = 0; index < (int_t)clause.size(); index++) {
                 Literal lit = clause[index];
                 Theory* theory = theoryFor(lit);
                 auto* info = theory->getInfo(lit);
+
+                /*if (index != clauseReason.literalIndex) {
+                    VERIFY(wasFalse(lit));
+                } else {
+                    VERIFY(wasTrue(lit));
+                    bool isConflictLit = lit == forcedConflictLiteral || lit == alreadyFalseConflictLiteral;
+                    VERIFY(isConflictLit == wasFalse(lit));
+                }*/
+
                 if (info->assignedFalse()) {
                     newClause.push_back(lit);
                 } else {
-                    if (!info->seenInLearn) {
-                        // if (index != clauseReason.literalIndex)
-                        //     openLiterals += 1;
-                        auto it = std::find(reversedFirstReasons.begin(), reversedFirstReasons.end(), lit);
-                        if (it != reversedFirstReasons.end() && it - reversedFirstReasons.begin() < position) {
+                    if (index != clauseReason.literalIndex) {
+                        VERIFY(lit != forcedConflictLiteral && lit != alreadyFalseConflictLiteral);
+                        /*auto it = std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; });
+                        VERIFY(it != subTrace.end());
+                        VERIFY(it - subTrace.begin() < position);
+                        VERIFY(it - subTrace.begin() == info->subTraceIndex.value());*/
+                        SubTraceEntry& entry = subTrace[info->subTraceIndex.value()];
+                        if (!entry.shouldBeVisited) {
+                            entry.shouldBeVisited = true;
                             openLiterals += 1;
-                            info->seenInLearn = true;
+                        }
+                    } else if (lit == forcedConflictLiteral || lit == alreadyFalseConflictLiteral) {
+                        if (info->subTraceIndex.value() < position) {
+                            SubTraceEntry& entry = subTrace[info->subTraceIndex.value()];
+                            if (!entry.shouldBeVisited) {
+                                entry.shouldBeVisited = true;
+                                openLiterals += 1;
+                            }
                         }
                     }
                 }
@@ -485,19 +516,17 @@ bool Solver::learnClause() {
 
             position -= 1;
             for (; position >= 0; position--) {
-                Literal lit = reversedFirstReasons[position];
-                auto* info = infoFor(lit);
-                if (info->seenInLearn) {
+                SubTraceEntry entry = subTrace[position];
+                if (entry.shouldBeVisited) {
                     openLiterals -= 1;
-                    VERIFY(info->tmpFirstReason.has_value());
-                    if (info->tmpFirstReason->isDecision() || openLiterals == 0) {
+                    if (entry.reason.isDecision() || openLiterals == 0) {
                         VERIFY(openLiterals == 0);
                         seenDecisions += 1;
-                        newClause.push_back(lit);
+                        newClause.push_back(entry.literal);
                         position = -1;
                         break;
                     } else {
-                        clauseReason = info->tmpFirstReason->asLiteralInstance();
+                        clauseReason = entry.reason.asLiteralInstance();
                         break;
                     }
                 }
@@ -529,7 +558,7 @@ bool Solver::learnClause() {
     }
 }
 
-void Solver::backtrack(int_t targetLevel, std::vector<Literal>& reversedFirstReasons) {
+void Solver::backtrack(int_t targetLevel, std::vector<SubTraceEntry>& subTrace) {
     VERIFY(targetLevel > 0);
     validateMasks();
     TracePosition position = decisions[targetLevel];
@@ -553,9 +582,8 @@ void Solver::backtrack(int_t targetLevel, std::vector<Literal>& reversedFirstRea
                     }
                     queuePropagation(entry.literal);
                 }
-                info->tmpFirstReason = entry.reason;
-                info->seenInLearn = false;
-                reversedFirstReasons.push_back(entry.literal);
+                info->subTraceIndex = subTrace.size();
+                subTrace.push_back({ entry.literal, entry.reason });
             }
             if (entry.nextReason.has_value()) {
                 // tell nextReason to update prevReason

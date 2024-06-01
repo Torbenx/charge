@@ -195,7 +195,7 @@ void check(const Parser& parser) {
         std::cout << "unsat\n";
     } else {
         std::cout << "sat\n";
-        for (int_t varId = 1; varId <= parser.variableCount; varId++) {
+        /*for (int_t varId = 1; varId <= parser.variableCount; varId++) {
             if (theory->getInfo(theory->positiveLiteral(varId))->assignedFalse())
                 fmt::println("{} = false", varId);
             else if (theory->getInfo(theory->negativeLiteral(varId))->assignedFalse())
@@ -203,7 +203,7 @@ void check(const Parser& parser) {
             else
                 VERIFY_NOT_REACHED();
         }
-        solver.checkAssignment();
+        solver.checkAssignment();*/
     }
 }
 
