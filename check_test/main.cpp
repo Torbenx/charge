@@ -182,7 +182,7 @@ void check(const Parser& parser) {
             break;
 
         int_t varId = var.value();
-        VERIFY(solver.decideTrue(theory->positiveLiteral(varId)));
+        VERIFY(solver.decideTrue(theory->negativeLiteral(varId)));
         while (!solver.propagate()) {
             if (!solver.learnClause()) {
                 unsat = true;
@@ -202,8 +202,8 @@ void check(const Parser& parser) {
                 fmt::println("{} = true", varId);
             else
                 VERIFY_NOT_REACHED();
-        }
-        solver.checkAssignment();*/
+        }*/
+        solver.checkAssignment();
     }
 }
 

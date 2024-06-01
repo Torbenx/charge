@@ -4,6 +4,8 @@ project(Charge_Language)
 if (NOT MSVC)
     set(CMAKE_BUILD_TYPE release)
     set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
+
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbmi -mbmi2 -mpopcnt -mlzcnt")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
