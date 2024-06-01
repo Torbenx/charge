@@ -430,65 +430,103 @@ bool Solver::learnClause() {
         return false;
     };
 
-    validateMasks();
-    VERIFY(doesSomeConflictPersist());
-
     std::vector<Literal> reversedFirstReasons;
-    while (doesSomeConflictPersist() && currentLevel() > 0) {
-        reversedFirstReasons.clear();
-        backtrack(currentLevel(), reversedFirstReasons);
-    }
+    for (;;) {
+        validateMasks();
+        VERIFY(doesSomeConflictPersist());
+        conflictIndex = 0;
 
-    if (currentLevel() == 0 && doesSomeConflictPersist())
-        return false;
-
-    std::vector<Literal> newClause;
-    int_t position = reversedFirstReasons.size();
-    LiteralInstance clauseReason = conflicts[conflictIndex].assignment;
-
-    do {
-        const auto& clause = learnedClauses[clauseReason.clauseIndex];
-        for (int_t index = 0; index < (int_t)clause.size(); index++) {
-            Literal lit = clause[index];
-            Theory* theory = theoryFor(lit);
-            auto* info = theory->getInfo(lit);
-            if (info->assignedFalse()) {
-                newClause.push_back(lit);
-            } else {
-                if (!info->seenInLearn)
-                    info->seenInLearn = true;
-            }
+        while (doesSomeConflictPersist() && currentLevel() > 0) {
+            reversedFirstReasons.clear();
+            backtrack(currentLevel(), reversedFirstReasons);
         }
 
-        position -= 1;
-        for (; position >= 0; position--) {
-            Literal lit = reversedFirstReasons[position];
-            auto* info = infoFor(lit);
-            if (info->seenInLearn) {
-                VERIFY(info->tmpFirstReason.has_value());
-                if (info->tmpFirstReason->isDecision()) {
+        if (currentLevel() == 0 && doesSomeConflictPersist())
+            return false;
+
+        VERIFY(!reversedFirstReasons.empty());
+        Literal conflictDecision = reversedFirstReasons.front();
+        VERIFY(infoFor(conflictDecision)->tmpFirstReason.has_value());
+        VERIFY(infoFor(conflictDecision)->tmpFirstReason->isDecision());
+        if (infoFor(conflictDecision)->assignedFalse()) {
+            // if the decision was not reverted propagating it will to a conflict
+            conflicts.clear();
+            propagate();
+            VERIFY(!conflicts.empty());
+            continue;
+        }
+
+        std::vector<Literal> newClause;
+        int_t position = reversedFirstReasons.size();
+        int_t openLiterals = 0;
+        int_t seenDecisions = 0;
+        LiteralInstance clauseReason = conflicts[conflictIndex].assignment;
+
+        do {
+            const auto& clause = learnedClauses[clauseReason.clauseIndex];
+            for (int_t index = 0; index < (int_t)clause.size(); index++) {
+                Literal lit = clause[index];
+                Theory* theory = theoryFor(lit);
+                auto* info = theory->getInfo(lit);
+                if (info->assignedFalse()) {
                     newClause.push_back(lit);
                 } else {
-                    clauseReason = info->tmpFirstReason->asLiteralInstance();
-                    break;
+                    if (!info->seenInLearn) {
+                        // if (index != clauseReason.literalIndex)
+                        //     openLiterals += 1;
+                        auto it = std::find(reversedFirstReasons.begin(), reversedFirstReasons.end(), lit);
+                        if (it != reversedFirstReasons.end() && it - reversedFirstReasons.begin() < position) {
+                            openLiterals += 1;
+                            info->seenInLearn = true;
+                        }
+                    }
                 }
             }
+
+            position -= 1;
+            for (; position >= 0; position--) {
+                Literal lit = reversedFirstReasons[position];
+                auto* info = infoFor(lit);
+                if (info->seenInLearn) {
+                    openLiterals -= 1;
+                    VERIFY(info->tmpFirstReason.has_value());
+                    if (info->tmpFirstReason->isDecision() || openLiterals == 0) {
+                        VERIFY(openLiterals == 0);
+                        seenDecisions += 1;
+                        newClause.push_back(lit);
+                        position = -1;
+                        break;
+                    } else {
+                        clauseReason = info->tmpFirstReason->asLiteralInstance();
+                        break;
+                    }
+                }
+            }
+        } while (position >= 0);
+        if (seenDecisions == 0) {
+            conflicts.clear();
+            propagate();
+            VERIFY(!conflicts.empty());
+            continue;
         }
-    } while (position >= 0);
-    std::sort(newClause.begin(), newClause.end());
-    auto newEnd = std::unique(newClause.begin(), newClause.end());
-    newClause.erase(newEnd, newClause.end());
+        VERIFY(seenDecisions == 1);
+        VERIFY(openLiterals == 0);
 
-    // fmt::print("learned: ");
-    // dumpClause(newClause);
+        std::sort(newClause.begin(), newClause.end());
+        auto newEnd = std::unique(newClause.begin(), newClause.end());
+        newClause.erase(newEnd, newClause.end());
 
-    conflicts.clear();
-    addClause(std::move(newClause));
-    if (!conflicts.empty())
-        return learnClause();
+        // fmt::print("learned: ");
+        // dumpClause(newClause);
 
-    VERIFY(firstPropagation.has_value());
-    return true;
+        conflicts.clear();
+        addClause(std::move(newClause));
+        if (!conflicts.empty())
+            return learnClause();
+
+        VERIFY(firstPropagation.has_value());
+        return true;
+    }
 }
 
 void Solver::backtrack(int_t targetLevel, std::vector<Literal>& reversedFirstReasons) {
