@@ -184,7 +184,7 @@ void check(const Parser& parser) {
         int_t varId = var.value();
         VERIFY(solver.decideTrue(theory->negativeLiteral(varId)));
         while (!solver.propagate()) {
-            if (!solver.learnClause()) {
+            if (!solver.analyzeConflicts()) {
                 unsat = true;
                 break;
             }
@@ -203,13 +203,13 @@ void check(const Parser& parser) {
             else
                 VERIFY_NOT_REACHED();
         }*/
-        solver.checkAssignment();
+        VERIFY(solver.checkAssignment());
     }
 }
 
 }
 
-static auto readFile(std::filesystem::path file) {
+static std::string readFile(std::filesystem::path file) {
     std::ifstream stream;
     stream.open(file, std::ios::binary);
     VERIFY(stream.good());
