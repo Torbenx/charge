@@ -474,6 +474,8 @@ bool Solver::assignTrue(Literal trueLit, Reason reason) {
 }
 
 bool Solver::propagate() {
+    if (!conflicts.empty())
+        return false;
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
         Theory* literalTheory = theoryFor(literal);
@@ -547,65 +549,41 @@ bool Solver::tryLearn(Conflict conflict) {
     std::vector<Literal> newClause;
     int_t position = subTrace.size();
     int_t openLiterals = 0;
+    int_t uipCount = 0;
+    int_t seenClauses = 0;
     std::vector<bool> shouldBeVisited;
     shouldBeVisited.resize(subTrace.size());
 
-    Literal forcedConflictLiteral = conflict.impliedLiteralThatsFalse;
-    Literal alreadyFalseConflictLiteral = theoryFor(forcedConflictLiteral)->negate(forcedConflictLiteral);
-    // VERIFY(wasFalse(alreadyFalseConflictLiteral));
-
-    LiteralInstance clauseReason = conflict.assignment;
-    for (;;) {
-        const auto& clause = clauses[clauseReason.clauseIndex];
-        for (int_t index = 0; index < (int_t)clause.size(); index++) {
-            Literal lit = clause[index];
+    {
+        const auto& conflictClause = clauses[conflict.assignment.clauseIndex];
+        for (Literal lit : conflictClause) {
             Theory* theory = theoryFor(lit);
             auto* info = theory->getInfo(lit);
-
-            /*if (index != clauseReason.literalIndex) {
-                VERIFY(wasFalse(lit));
-            } else {
-                VERIFY(wasTrue(lit));
-                bool isConflictLit = lit == forcedConflictLiteral || lit == alreadyFalseConflictLiteral;
-                VERIFY(isConflictLit == wasFalse(lit));
-            }*/
-
             if (info->assignedFalse()) {
-                if (info->includedInNewClause != tryLearnIndex) {
-                    newClause.push_back(lit);
-                    info->includedInNewClause = tryLearnIndex;
-                }
-                continue;
-            }
-
-            if (index != clauseReason.literalIndex) {
-                // VERIFY(lit != forcedConflictLiteral && lit != alreadyFalseConflictLiteral);
-                /*auto it = std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; });
-                VERIFY(it != subTrace.end());
-                VERIFY(it - subTrace.begin() < position);
-                VERIFY(it - subTrace.begin() == info->subTraceIndex.value());*/
-                if (!shouldBeVisited[info->subTraceIndex]) {
-                    openLiterals += 1;
-                    shouldBeVisited[info->subTraceIndex] = true;
-                }
-            } else if (lit == forcedConflictLiteral || lit == alreadyFalseConflictLiteral) {
-                if ((int_t)info->subTraceIndex < position) {
-                    if (!shouldBeVisited[info->subTraceIndex]) {
-                        openLiterals += 1;
-                        shouldBeVisited[info->subTraceIndex] = true;
-                    }
-                }
+                VERIFY(info->includedInNewClause != tryLearnIndex);
+                newClause.push_back(lit);
+                info->includedInNewClause = tryLearnIndex;
+            } else {
+                VERIFY(!shouldBeVisited[info->subTraceIndex]);
+                openLiterals += 1;
+                shouldBeVisited[info->subTraceIndex] = true;
             }
         }
+        if (openLiterals == 0) {
+            // All literals in the clause were false, this is a conflict.
+            return false;
+        }
+        seenClauses += 1;
+    }
 
+    for (;;) {
         for (;;) {
             position -= 1;
             if (shouldBeVisited[position])
                 break;
             if (position == 0) {
-                // We iterated though the entire trace without seeing a UIP.
-                // Since the decision resposible for a conflict is a guaranteed UIP we cannot have
-                // reached this decision. The conflict must still persists.
+                // We iterated though the entire trace without seeing a decision.
+                // The conflict must still persists.
                 return false;
             }
         }
@@ -614,23 +592,58 @@ bool Solver::tryLearn(Conflict conflict) {
         openLiterals -= 1;
         if (openLiterals == 0) {
             // Found a UIP
-            newClause.push_back(entry.literal);
-            std::sort(newClause.begin(), newClause.end()); // This sort is not required but improves performence
-            break;
+            uipCount += 1;
+            VERIFY(!infoFor(entry.literal)->assignedFalse());
+
+            if (seenClauses > 1) {
+                newClause.push_back(entry.literal);
+                addClause(std::move(newClause));
+                VERIFY(conflicts.empty());
+            }
+
+            if (entry.reason.isDecision()) {
+                VERIFY(firstPropagation.has_value());
+                return true;
+            }
+
+            newClause.clear();
+            tryLearnIndex += 1;
+            Literal negatedUIP = theoryFor(entry.literal)->negate(entry.literal);
+            newClause.push_back(negatedUIP);
+            infoFor(negatedUIP)->includedInNewClause = tryLearnIndex;
+            seenClauses = 0;
         }
 
         VERIFY(!entry.reason.isDecision());
-        clauseReason = entry.reason.asLiteralInstance();
+
+        seenClauses += 1;
+        const auto& clause = clauses[entry.reason.clauseIndex()];
+        for (int_t index = 0; index < (int_t)clause.size(); index++) {
+            Literal lit = clause[index];
+            auto* info = infoFor(lit);
+
+            /*if (index != entry.reason.forcedLiteral())
+                VERIFY(wasFalse(lit));
+            else
+                VERIFY(wasTrue(lit));*/
+
+            if (info->assignedFalse()) {
+                if (info->includedInNewClause != tryLearnIndex) {
+                    newClause.push_back(lit);
+                    info->includedInNewClause = tryLearnIndex;
+                }
+            } else if (index != entry.reason.forcedLiteral()) {
+                /*auto it = std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; });
+                VERIFY(it != subTrace.end());
+                VERIFY(it - subTrace.begin() < position);
+                VERIFY(it - subTrace.begin() == (int_t)info->subTraceIndex);*/
+                if (!shouldBeVisited[info->subTraceIndex]) {
+                    openLiterals += 1;
+                    shouldBeVisited[info->subTraceIndex] = true;
+                }
+            }
+        }
     }
-
-    // fmt::print("learned: ");
-    // dumpClause(newClause);
-
-    addClause(std::move(newClause));
-    VERIFY(conflicts.empty());
-
-    VERIFY(firstPropagation.has_value());
-    return true;
 }
 
 bool Solver::analyzeConflicts() {
