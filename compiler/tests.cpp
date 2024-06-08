@@ -479,30 +479,45 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
     }
 };
 
+std::string readFile(std::filesystem::path file) {
+    std::ifstream stream;
+    stream.open(file, std::ios::binary);
+    VERIFY(stream.good());
+    stream.seekg(0, std::ios::end);
+    int_t length = stream.tellg();
+    VERIFY(length >= 0);
+    std::string sourceBuffer;
+    sourceBuffer.resize(length + 2);
+    stream.seekg(0, std::ios::beg);
+    stream.read(sourceBuffer.data(), length);
+    stream.close();
+    VERIFY(stream.good());
+
+    return sourceBuffer;
+}
+
+namespace check::sat {
+void runTests(std::filesystem::path testDir);
+}
+
 int main() {
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
+
+    check::sat::runTests(testDir / "sat");
+
+    int_t count = 0;
     for (const auto& entry : fs::directory_iterator(testDir)) {
         if (!entry.is_regular_file())
             continue;
         if (entry.path().extension().string() != ".chrg")
             continue;
 
-        std::ifstream stream;
-        stream.open(entry.path(), std::ios::binary);
-        VERIFY(stream.good());
-        stream.seekg(0, std::ios::end);
-        int_t length = stream.tellg();
-        VERIFY(length >= 0);
-        auto sourceBuffer = std::make_unique<char[]>(length + 2);
-        stream.seekg(0, std::ios::beg);
-        stream.read(sourceBuffer.get(), length);
-        stream.close();
-        VERIFY(stream.good());
-        sourceBuffer[length] = '\0';
-        sourceBuffer[length + 1] = '\0';
+        auto sourceBuffer = readFile(entry.path());
 
-        TestInstrumenter test;
-        test.runTest(fs::relative(fs::canonical(entry.path()), testDir), { sourceBuffer.get(), (size_t)length });
+        TestInstrumenter test(sourceBuffer);
+        test.runTest();
+        count += 1;
     }
+    fmt::println("Passed {} charge tests", count);
 }

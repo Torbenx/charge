@@ -21,6 +21,7 @@ add_executable(compiler
 
 add_subdirectory(parse)
 add_subdirectory(sema)
+add_subdirectory(check)
 
 target_include_directories(compiler PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 if(MSVC)
