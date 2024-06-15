@@ -1,7 +1,48 @@
-#include <check/SatSolver.h>
 #include <check/SatBoolTheory.h>
+#include <check/SatSolver.h>
 
 namespace check::sat {
+
+struct Solver::ExplicitReasonTheory : ReasonTheory {
+    static constexpr int_t THEORY_ID = 0;
+    Solver* solver;
+
+    ExplicitReasonTheory(Solver* solver)
+        : solver(solver) { }
+
+    Reason make(int_t clauseIndex, int_t literalIndex) {
+        return { .reasonTheory = THEORY_ID, .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
+    }
+
+    bool test(const Reason& reason) override {
+        int_t clauseIndex = reason.data1;
+        return std::popcount(solver->clauseMasks[clauseIndex]) == 1;
+    }
+
+    ClauseAndIndex clause(const Reason& reason) override {
+        int_t clauseIndex = reason.data1;
+        int_t literalIndex = reason.data0;
+        return { solver->clauses[clauseIndex], literalIndex };
+    }
+
+    LiteralInstance asInstance(const Reason& reason) {
+        int_t clauseIndex = reason.data1;
+        int_t literalIndex = reason.data0;
+        return { (uint32_t)literalIndex, (uint32_t)clauseIndex };
+    }
+};
+
+Solver::Solver() {
+    reasonTheories.push_back(std::make_unique<ExplicitReasonTheory>(this));
+}
+
+Solver::ExplicitReasonTheory* Solver::explicitReasonTheory() {
+    return static_cast<ExplicitReasonTheory*>(reasonTheories[ExplicitReasonTheory::THEORY_ID].get());
+}
+
+Reason Solver::makeClauseReason(int_t clauseIndex, int_t literalIndex) {
+    return explicitReasonTheory()->make(clauseIndex, literalIndex);
+}
 
 std::pair<Literal, Literal> Solver::makeBooleanPair() {
     auto* theory = static_cast<BoolTheory*>(theories[0].get());
@@ -25,9 +66,7 @@ void Solver::addClauseInternal(std::vector<Literal> clause) {
     VERIFY(mask != 0);
     if (std::popcount(mask) == 1) {
         int_t index = std::countr_zero(mask);
-        if (!assignTrue(clause[index], Reason::makeClause({ (uint32_t)index, (uint32_t)clauseIndex }))) {
-            conflicts.push_back({ LiteralInstance { (uint32_t)index, (uint32_t)clauseIndex }, clause[index] });
-        }
+        assignTrue(clause[index], makeClauseReason(clauseIndex, index));
     }
     clauses.emplace_back(std::move(clause));
     clauseMasks.push_back(mask);
@@ -100,8 +139,10 @@ bool Solver::assignTrue(Literal trueLit, Reason reason) {
         queuePropagation(falseLit);
     }
 
-    if (theory->getInfo(trueLit)->assignedFalse())
+    if (theory->getInfo(trueLit)->assignedFalse()) {
+        conflicts.push_back({ trueLit, reason });
         return false;
+    }
     return true;
 }
 
@@ -140,8 +181,7 @@ bool Solver::propagate() {
 
             int_t trueLitIndex = std::countr_zero(clauseMask);
             Literal trueLit = clause[trueLitIndex];
-            if (!assignTrue(trueLit, Reason::makeClause({ (uint32_t)trueLitIndex, inst.clauseIndex })))
-                conflicts.push_back({ LiteralInstance { (uint32_t)trueLitIndex, inst.clauseIndex }, trueLit });
+            assignTrue(trueLit, makeClauseReason(inst.clauseIndex, trueLitIndex));
         }
         if (!conflicts.empty())
             return false;
@@ -170,22 +210,21 @@ bool Solver::tryLearn(Conflict conflict) {
     }
     tryLearnIndex += 1;
 
-    auto wasReversed = [&](Literal lit) {
+    [[maybe_unused]] auto wasReversed = [&](Literal lit) {
         return std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; }) != subTrace.end();
     };
-    auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit)->assignedFalse(); };
-    auto wasTrue = [&](Literal lit) { return wasFalse(theoryFor(lit)->negate(lit)); };
+    [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit)->assignedFalse(); };
+    [[maybe_unused]] auto wasTrue = [&](Literal lit) { return wasFalse(theoryFor(lit)->negate(lit)); };
 
     std::vector<Literal> newClause;
     int_t position = subTrace.size();
     int_t openLiterals = 0;
-    int_t uipCount = 0;
     int_t seenClauses = 0;
     std::vector<bool> shouldBeVisited;
     shouldBeVisited.resize(subTrace.size());
 
     {
-        const auto& conflictClause = clauses[conflict.assignment.clauseIndex];
+        auto [conflictClause, conflictLiteralIndex] = theoryFor(conflict.reason)->clause(conflict.reason);
         for (Literal lit : conflictClause) {
             Theory* theory = theoryFor(lit);
             auto* info = theory->getInfo(lit);
@@ -212,8 +251,10 @@ bool Solver::tryLearn(Conflict conflict) {
             if (shouldBeVisited[position])
                 break;
             if (position == 0) {
-                // We iterated though the entire trace without seeing a decision.
-                // The conflict must still persists.
+                // Entry 0 of the subTrace is always the decision of the reversed level. When we
+                // get here we iterated though the entire trace without marking the decision to be
+                // visited and thus it is not part of the implication graph that lead to the
+                // conflict.
                 return false;
             }
         }
@@ -222,7 +263,6 @@ bool Solver::tryLearn(Conflict conflict) {
         openLiterals -= 1;
         if (openLiterals == 0) {
             // Found a UIP
-            uipCount += 1;
             VERIFY(!infoFor(entry.literal)->assignedFalse());
 
             if (seenClauses > 1) {
@@ -247,12 +287,12 @@ bool Solver::tryLearn(Conflict conflict) {
         VERIFY(!entry.reason.isDecision());
 
         seenClauses += 1;
-        const auto& clause = clauses[entry.reason.clauseIndex()];
+        auto [clause, forceLiteralIndex] = theoryFor(entry.reason)->clause(entry.reason);
         for (int_t index = 0; index < (int_t)clause.size(); index++) {
             Literal lit = clause[index];
             auto* info = infoFor(lit);
 
-            /*if (index != entry.reason.forcedLiteral())
+            /*if (index != forceLiteralIndex)
                 VERIFY(wasFalse(lit));
             else
                 VERIFY(wasTrue(lit));*/
@@ -262,7 +302,7 @@ bool Solver::tryLearn(Conflict conflict) {
                     newClause.push_back(lit);
                     info->includedInNewClause = tryLearnIndex;
                 }
-            } else if (index != entry.reason.forcedLiteral()) {
+            } else if (index != forceLiteralIndex) {
                 /*auto it = std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; });
                 VERIFY(it != subTrace.end());
                 VERIFY(it - subTrace.begin() < position);
@@ -280,10 +320,9 @@ bool Solver::analyzeConflicts() {
     VERIFY(!conflicts.empty());
 
     auto doesConflictPersist = [this](Conflict conflict) {
-        const auto& mask = clauseMasks[conflict.assignment.clauseIndex];
-        bool isClauseForcing = std::popcount(mask) == 1;
-        bool isImpliedLiteralFalse = infoFor(conflict.impliedLiteralThatsFalse)->assignedFalse();
-        return isClauseForcing && isImpliedLiteralFalse;
+        bool isReasonValid = theoryFor(conflict.reason)->test(conflict.reason);
+        bool isImpliedLiteralFalse = infoFor(conflict.literal)->assignedFalse();
+        return isReasonValid && isImpliedLiteralFalse;
     };
 
     for (;;) {
@@ -335,7 +374,7 @@ void Solver::backtrack(int_t targetLevel) {
         auto* info = theory->getInfo(entry.literal);
         // VERIFY(info->firstReason.has_value() && info->lastReason.has_value());
 
-        bool revert = entry.reason.isDecision() || std::popcount(clauseMasks[entry.reason.clauseIndex()]) > 1;
+        bool revert = entry.reason.isDecision() || !theoryFor(entry.reason)->test(entry.reason);
         if (revert) {
             if (info->firstReason.value() == position) {
                 // When the first reason is reverted we requeue the propagation.
@@ -454,12 +493,17 @@ void Solver::checkInvariances() {
             VERIFY(info->lastReason.has_value());
             TracePosition pos = info->firstReason.value();
             for (;;) {
-                if (!at(pos).reason.isDecision() && at(pos).reason.clauseIndex() == clauseIndex)
-                    break;
+                if (at(pos).reason.reasonTheory == ExplicitReasonTheory::THEORY_ID) {
+                    auto inst = explicitReasonTheory()->asInstance(at(pos).reason);
+                    if ((int_t)inst.clauseIndex == clauseIndex) {
+                        VERIFY(mask == literalMask(inst.literalIndex));
+                        break;
+                    }
+                }
                 VERIFY(at(pos).nextReason.has_value());
                 pos = at(pos).nextReason.value();
             }
-            VERIFY(mask == literalMask(at(pos).reason.forcedLiteral()));
+
             for (Literal lit : clause) {
                 if (lit != trueLit) {
                     VERIFY(infoFor(lit)->assignedFalse());

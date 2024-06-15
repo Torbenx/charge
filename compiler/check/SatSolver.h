@@ -13,12 +13,8 @@ complementary literal NOT X. These will always belong to the same theory.
 \see Theory::negate()
 */
 struct Literal {
-    static constexpr int_t THEORY_BITS = 4;
-    static constexpr int_t MAX_THEORY_COUNT = (int_t)1 << THEORY_BITS;
-    static constexpr int_t MAX_LITERAL_ID = ((int_t)1 << (32 - THEORY_BITS)) - 1;
-
-    uint32_t theoryId : THEORY_BITS = MAX_THEORY_COUNT - 1;
-    uint32_t literalId : 32 - THEORY_BITS = MAX_LITERAL_ID;
+    uint32_t theoryId : 8 = -1;
+    uint32_t literalId : 24 = -1;
 
     auto operator<=>(const Literal& other) const {
         return std::pair<uint32_t, uint32_t>(theoryId, literalId)
@@ -96,24 +92,39 @@ namespace check::sat {
 
 //! Encapsulates the reason for a literal assignment
 /*!
-The reason may be either an (external) decision or a clause that forced the assignment. Information
-which particular decision lead to the assignment is not of use and is not tacked. For clauses both
-the implying clause and the position of the implied variable are stored.
+The reason may be either an (external) decision or a clause that forced the assignment. A clause
+may be either an explicit clause of the boolean formula or lazily generated only when needed.
 */
 struct Reason {
-    std::optional<LiteralInstance> inst;
+    static constexpr int_t INVALID_THEORY_ID = 255;
+    uint32_t reasonTheory : 8 = 0;
+    uint32_t data0 : 24 = 0;
+    uint32_t data1 = 0;
+    uint32_t data2 = 0;
 
     static Reason makeDecision() {
-        return { std::nullopt };
-    }
-    static Reason makeClause(LiteralInstance inst) {
-        return { inst };
+        return { .reasonTheory = INVALID_THEORY_ID };
     }
 
-    bool isDecision() const { return !inst.has_value(); }
-    int_t clauseIndex() const { return inst.value().clauseIndex; }
-    int_t forcedLiteral() const { return inst.value().literalIndex; }
-    LiteralInstance asLiteralInstance() const { return inst.value(); }
+    bool isDecision() const { return reasonTheory == INVALID_THEORY_ID; }
+};
+
+struct ReasonTheory {
+    struct ClauseAndIndex {
+        std::span<const Literal> clause;
+        int_t forceLiteralIndex = 0;
+    };
+
+    //! Test if the reason is still valid
+    /*!
+    Returns whether the clause this reason is modeling is still forcing.
+    */
+    virtual bool test(const Reason&) = 0;
+
+    //! Return the clause modeled by this reason
+    virtual ClauseAndIndex clause(const Reason&) = 0;
+
+    virtual ~ReasonTheory() = default;
 };
 
 struct Theory {
@@ -147,22 +158,15 @@ struct Solver {
         Literal literal;
         Reason reason;
     };
+    using Conflict = SubTraceEntry;
 
-    struct Conflict {
-        LiteralInstance assignment;
-        Literal impliedLiteralThatsFalse;
-    };
+    Solver();
 
     int_t addTheory(std::unique_ptr<Theory> theory) {
-        for (auto& theoryPtr : theories) {
-            if (theoryPtr == nullptr) {
-                theoryPtr = std::move(theory);
-                int_t id = &theoryPtr - theories.data();
-                theoryPtr->setTheoryId(id);
-                return id;
-            }
-        }
-        VERIFY_NOT_REACHED();
+        int_t id = theories.size();
+        theory->setTheoryId(id);
+        theories.emplace_back(std::move(theory));
+        return id;
     }
 
     Theory* getTheoryById(int_t id) {
@@ -174,6 +178,10 @@ struct Solver {
     }
     Theory::LiteralInfo* infoFor(Literal literal) {
         return theoryFor(literal)->getInfo(literal);
+    }
+
+    ReasonTheory* theoryFor(const Reason& reason) {
+        return reasonTheories[reason.reasonTheory].get();
     }
 
     //! Returns the current decision level of the solver
@@ -288,9 +296,9 @@ struct Solver {
     //! Try to learn a new clause from \p conflict
     /*!
     The function will the current subTrace that should be from the backtrack() operation that
-    resolved \p conflict. When successful the function will identify the 1st UIP, generate a new
-    clause and clear the conflicts. The function will fail if it detects that the solver is still
-    in a conflict state. In this case calling propagate() will produce \p conflict again.
+    resolved \p conflict. When successful the function will identify the UIPs, generate new clauses
+    and clear the conflicts. The function will fail if it detects that the solver is still in a
+    conflict state. In this case calling propagate() will produce \p conflict again.
     \returns true if successful
     */
     bool tryLearn(Conflict conflict);
@@ -315,6 +323,8 @@ struct Solver {
     bool hasConflicts() const { return !conflicts.empty(); }
 
 private:
+    struct ExplicitReasonTheory;
+
     //! An entry in the trace
     /*!
     Each entry represent a reason for a literal to false. The different reasons for a given literal
@@ -333,6 +343,8 @@ private:
         VERIFY(pos.index < trace.size());
         return trace[pos.index];
     }
+
+    Reason makeClauseReason(int_t clauseIndex, int_t literalIndex);
 
     //! Bitmasks for the clauses
     /*!
@@ -373,8 +385,10 @@ private:
     //! Positions of the decisions in the trace
     std::vector<TracePosition> decisions;
 
-    //! Array for the theories
-    std::array<std::unique_ptr<Theory>, Literal::MAX_THEORY_COUNT> theories;
+    std::vector<std::unique_ptr<Theory>> theories;
+    std::vector<std::unique_ptr<ReasonTheory>> reasonTheories;
+
+    ExplicitReasonTheory* explicitReasonTheory();
 };
 
 }
