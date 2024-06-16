@@ -1,6 +1,11 @@
-#include <check/SatBoolTheory.h>
+#include <check/BooleanVariables.h>
 #include <check/SatSolver.h>
 #include <types.h>
+
+#include <check/BasicBlock.h>
+#include <check/StandardEquality.h>
+#include <check/TopologicalOrder.h>
+#include <check/BooleanEquality.h>
 
 #include <filesystem>
 #include <fstream>
@@ -94,18 +99,16 @@ namespace {
     bool check(const Parser& parser) {
         // setup
         Solver solver;
-        int_t boolId = solver.addTheory(std::make_unique<BoolTheory>());
-        VERIFY(boolId == 0);
-        BoolTheory* theory = static_cast<BoolTheory*>(solver.getTheoryById(0));
+        BooleanVariables theory(solver);
 
         // generate
-        VERIFY(theory->newVariable() == 0);
+        VERIFY(theory.newVariable() == 0);
         for (int_t varId = 1; varId <= parser.variableCount; varId++)
-            VERIFY(theory->newVariable() == varId);
+            VERIFY(theory.newVariable() == varId);
         for (const auto& clause : parser.cnf) {
-            std::vector<Literal> outClause;
+            std::vector<BooleanValue> outClause;
             for (int_t i = 0; i < (int_t)clause.size(); i++)
-                outClause.push_back(theory->literalFromSign(clause[i]));
+                outClause.push_back(theory.literalFromSign(clause[i]));
             solver.addClause(std::move(outClause));
         }
 
@@ -114,12 +117,12 @@ namespace {
 
         // solver
         for (;;) {
-            auto var = theory->findUnassignedVariable();
+            auto var = theory.findUnassignedVariable();
             if (!var.has_value())
                 break;
 
             int_t varId = var.value();
-            solver.decideTrue(theory->negativeLiteral(varId));
+            solver.decideTrue(theory.negativeLiteral(varId));
             VERIFY(!solver.hasConflicts());
             while (!solver.propagate()) {
                 if (!solver.analyzeConflicts())
@@ -129,9 +132,9 @@ namespace {
 
         // sat
         /*for (int_t varId = 1; varId <= parser.variableCount; varId++) {
-            if (theory->getInfo(theory->positiveLiteral(varId))->assignedFalse())
+            if (theory.getInfo(theory.positiveLiteral(varId))->assignedFalse())
                 fmt::println("{} = false", varId);
-            else if (theory->getInfo(theory->negativeLiteral(varId))->assignedFalse())
+            else if (theory.getInfo(theory.negativeLiteral(varId))->assignedFalse())
                 fmt::println("{} = true", varId);
             else
                 VERIFY_NOT_REACHED();
@@ -259,6 +262,125 @@ void runTests(std::filesystem::path testDir) {
     }
     VERIFY(count == (int_t)expectedResults.size());
     fmt::println("Passed {} sat tests", count);
+
+    // Equality test
+    using Link = StandardEquality::Link;
+    Solver dummySolver;
+    struct TestEquality : StandardEquality {
+        using StandardEquality::StandardEquality;
+
+        EqualityInfo& equalityInfo(Value v) override {
+            return infos[v.valueId];
+        }
+
+        Value newValue() {
+            Value v { .theoryId = 0, .valueId = (uint32_t)infos.size() };
+            infos.emplace_back(v);
+            return v;
+        }
+
+        std::vector<EqualityInfo> infos;
+    };
+    {
+        TestEquality tree(dummySolver);
+        Value v1 = tree.newValue();
+        Value v2 = tree.newValue();
+
+        VERIFY(!tree.connected(v1, v2));
+        tree.link(v1, v2);
+        VERIFY(tree.connected(v1, v2));
+
+        auto path = tree.path(v1, v2);
+        VERIFY(path.size() == 1);
+        VERIFY(path[0].source == v1);
+        VERIFY(path[0].target == v2);
+    }
+    {
+        TestEquality tree(dummySolver);
+        Value v1 = tree.newValue();
+        Value v2 = tree.newValue();
+        Value v3 = tree.newValue();
+
+        tree.link(v2, v1);
+        tree.link(v2, v3);
+        VERIFY(tree.connected(v1, v3));
+
+        auto path = tree.path(v1, v3);
+        VERIFY(path.size() == 2);
+        VERIFY(std::find(path.begin(), path.end(), Link { v2, v1 }) != path.end());
+        VERIFY(std::find(path.begin(), path.end(), Link { v2, v3 }) != path.end());
+    }
+    {
+        TestEquality tree(dummySolver);
+        Value v1 = tree.newValue();
+        Value v2 = tree.newValue();
+        Value v3 = tree.newValue();
+
+        tree.link(v1, v2);
+        tree.link(v3, v2);
+        VERIFY(tree.connected(v1, v3));
+
+        auto path = tree.path(v1, v3);
+        VERIFY(path.size() == 2);
+        VERIFY(std::find(path.begin(), path.end(), Link { v1, v2 }) != path.end());
+        VERIFY(std::find(path.begin(), path.end(), Link { v3, v2 }) != path.end());
+    }
+    {
+        TestEquality tree(dummySolver);
+        Value values[4][4];
+        for (int_t i = 0; i < 4; i++) {
+            for (int_t j = 0; j < 4; j++)
+                values[i][j] = tree.newValue();
+        }
+
+        tree.link(values[0][0], values[0][1]);
+        tree.link(values[0][1], values[0][2]);
+        tree.link(values[0][2], values[0][3]);
+        VERIFY(tree.connected(values[0][0], values[0][3]));
+        {
+            auto path = tree.path(values[0][0], values[0][3]);
+            VERIFY(path.size() == 3);
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[0][1] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][1], values[0][2] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+        }
+
+        for (int_t i = 0; i < 4; i++) {
+            tree.link(values[2][i], values[3][i]);
+            tree.link(values[1][i], values[2][i]);
+            tree.link(values[0][i], values[1][i]);
+        }
+        VERIFY(tree.connected(values[3][0], values[3][3]));
+        {
+            auto path = tree.path(values[3][0], values[3][3]);
+            VERIFY(path.size() == 9);
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[1][0] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[1][0], values[2][0] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[2][0], values[3][0] }) != path.end());
+
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[0][1] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][1], values[0][2] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][3], values[1][3] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[1][3], values[2][3] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[2][3], values[3][3] }) != path.end());
+        }
+        VERIFY(tree.connected(values[3][2], values[3][3]));
+        {
+            auto path = tree.path(values[3][2], values[3][3]);
+            VERIFY(path.size() == 7);
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[1][2] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[1][2], values[2][2] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[2][2], values[3][2] }) != path.end());
+
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+
+            VERIFY(std::find(path.begin(), path.end(), Link { values[0][3], values[1][3] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[1][3], values[2][3] }) != path.end());
+            VERIFY(std::find(path.begin(), path.end(), Link { values[2][3], values[3][3] }) != path.end());
+        }
+    }
 }
 
 }

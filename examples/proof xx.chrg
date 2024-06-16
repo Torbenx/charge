@@ -5,7 +5,7 @@ struct Node: {
 fn proof_termination(first: id{Node}): {
     var current = first;
     loop {
-        if !current.next.has_value() {
+        if !current.next.has_value(): {
             break;
         }
         let next = current.next.value();
@@ -64,3 +64,32 @@ debug           | runtime check | no op
 assume          | runtime check | assume
 
 */
+
+fn test(control: vector{bool}, data: vector{int}): {
+    var theData: ptr{int};
+    for i in range(10): {
+        if control[i]:
+            theData = ptrto(data[i]);
+    }
+
+    data[11] = 123;
+    *theData = 456;
+    analysis assert data[11] == 123;
+}
+
+fn test(data: vector{pair{int, int}}, int increment, int special_index): {
+    data[special_index].second = 0;
+    for i in data.index_range():
+        data[i].first += increment;
+    analysis assert data[special_index].second == 0;
+}
+
+struct A: {
+    i: int;
+    j: int;
+}
+fn test(inout a: A): {
+    a.i = 5;
+    a.j = 6;
+    analysis assert a.i == 5;
+}

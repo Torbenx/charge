@@ -1,159 +1,15 @@
 #pragma once
 
-#include <types.h>
+#include <check/Reason.h>
+#include <check/BooleanVariables.h>
 
 #include <bit>
 
-namespace check::sat {
-
-//! A boolean literal
-/*!
-These are identified by their theory and their id within that theory. For literal X there exist the
-complementary literal NOT X. These will always belong to the same theory.
-\see Theory::negate()
-*/
-struct Literal {
-    uint32_t theoryId : 8 = -1;
-    uint32_t literalId : 24 = -1;
-
-    auto operator<=>(const Literal& other) const {
-        return std::pair<uint32_t, uint32_t>(theoryId, literalId)
-            <=> std::pair<uint32_t, uint32_t>(other.theoryId, other.literalId);
-    }
-    bool operator==(const Literal& other) const = default;
-};
-
-//! Bitmask type for a clause. Contains 1 bit for each literal in the clause.
-using clause_mask_t = uint64_t;
-inline constexpr int_t MAX_CLAUSE_SIZE = sizeof(clause_mask_t) * 8;
-
-struct LiteralInstance {
-    static constexpr int_t LITERAL_BITS = std::bit_width(sizeof(clause_mask_t) * 8 - 1);
-    static constexpr int_t MAX_CLAUSE_INDEX = ((int_t)1 << (32 - LITERAL_BITS)) - 1;
-
-    uint32_t literalIndex : LITERAL_BITS = MAX_CLAUSE_SIZE - 1;
-    uint32_t clauseIndex : 32 - LITERAL_BITS = MAX_CLAUSE_INDEX;
-
-    bool operator==(const LiteralInstance&) const = default;
-};
-
-//!
-struct TracePosition {
-    uint32_t index;
-
-    constexpr explicit TracePosition(uint32_t index)
-        : index(index) { }
-
-    auto operator<=>(const TracePosition&) const = default;
-    bool operator==(const TracePosition&) const = default;
-    TracePosition& operator++() {
-        index += 1;
-        return *this;
-    }
-    TracePosition operator++(int) {
-        TracePosition copy = *this;
-        index += 1;
-        return copy;
-    }
-    friend TracePosition operator+(TracePosition l, int_t r) {
-        return TracePosition(l.index + r);
-    }
-    friend TracePosition operator-(TracePosition l, int_t r) {
-        return TracePosition(l.index - r);
-    }
-    TracePosition& operator+=(int_t r) {
-        index += r;
-        return *this;
-    }
-    TracePosition& operator-=(int_t r) {
-        index -= r;
-        return *this;
-    }
-};
-
-}
-
-template<>
-struct optional_traits<check::sat::Literal> {
-    static constexpr check::sat::Literal empty_value = check::sat::Literal();
-};
-
-template<>
-struct optional_traits<check::sat::LiteralInstance> {
-    static constexpr check::sat::LiteralInstance empty_value = check::sat::LiteralInstance();
-};
-
-template<>
-struct optional_traits<check::sat::TracePosition> {
-    static constexpr check::sat::TracePosition empty_value = check::sat::TracePosition(-1);
-};
-
-namespace check::sat {
-
-//! Encapsulates the reason for a literal assignment
-/*!
-The reason may be either an (external) decision or a clause that forced the assignment. A clause
-may be either an explicit clause of the boolean formula or lazily generated only when needed.
-*/
-struct Reason {
-    static constexpr int_t INVALID_THEORY_ID = 255;
-    uint32_t reasonTheory : 8 = 0;
-    uint32_t data0 : 24 = 0;
-    uint32_t data1 = 0;
-    uint32_t data2 = 0;
-
-    static Reason makeDecision() {
-        return { .reasonTheory = INVALID_THEORY_ID };
-    }
-
-    bool isDecision() const { return reasonTheory == INVALID_THEORY_ID; }
-};
-
-struct ReasonTheory {
-    struct ClauseAndIndex {
-        std::span<const Literal> clause;
-        int_t forceLiteralIndex = 0;
-    };
-
-    //! Test if the reason is still valid
-    /*!
-    Returns whether the clause this reason is modeling is still forcing.
-    */
-    virtual bool test(const Reason&) = 0;
-
-    //! Return the clause modeled by this reason
-    virtual ClauseAndIndex clause(const Reason&) = 0;
-
-    virtual ~ReasonTheory() = default;
-};
-
-struct Theory {
-    struct LiteralInfo {
-        std::optional<TracePosition> firstReason;
-        std::optional<TracePosition> lastReason;
-
-        std::optional<Literal> nextPropagation;
-        std::optional<Literal> prevPropagation;
-
-        uint32_t subTraceIndex = -1;
-        uint32_t includedInNewClause = -1;
-
-        std::vector<LiteralInstance> instances;
-
-        bool assignedFalse() const { return firstReason.has_value(); }
-    };
-
-    virtual void enumerateLiterals(std::function<void(Literal)> visitor) = 0;
-    virtual Literal negate(Literal) = 0;
-    virtual LiteralInfo* getInfo(Literal) = 0;
-    virtual void assignFalse(Literal) = 0;
-    virtual void reverseFalseAssignment(Literal) = 0;
-    virtual void setTheoryId(int_t id) = 0;
-    virtual std::string format(Literal) = 0;
-    virtual ~Theory() = default;
-};
+namespace check {
 
 struct Solver {
+    using Literal = BooleanValue;
+
     struct SubTraceEntry {
         Literal literal;
         Reason reason;
@@ -162,26 +18,30 @@ struct Solver {
 
     Solver();
 
-    int_t addTheory(std::unique_ptr<Theory> theory) {
-        int_t id = theories.size();
-        theory->setTheoryId(id);
-        theories.emplace_back(std::move(theory));
-        return id;
+    ValueTheory& getTheoryById(int_t id) {
+        return *valueTheories[id];
     }
 
-    Theory* getTheoryById(int_t id) {
-        return theories[id].get();
+    ValueTheory& theoryFor(Value value) {
+        return *valueTheories[value.theoryId];
+    }
+    BooleanTheory& theoryFor(BooleanValue value) {
+        return static_cast<BooleanTheory&>(*valueTheories[value.theoryId]);
+    }
+    BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
+        return theoryFor(literal).literalInfo(*this, literal);
     }
 
-    Theory* theoryFor(Literal literal) {
-        return theories[literal.theoryId].get();
-    }
-    Theory::LiteralInfo* infoFor(Literal literal) {
-        return theoryFor(literal)->getInfo(literal);
+    ReasonTheory& theoryFor(const Reason& reason) {
+        return *reasonTheories[reason.reasonTheory];
     }
 
-    ReasonTheory* theoryFor(const Reason& reason) {
-        return reasonTheories[reason.reasonTheory].get();
+    std::string formatValue(Value value) {
+        return theoryFor(value).formatValue(*this, value);
+    }
+
+    Literal negate(Literal lit) {
+        return theoryFor(lit).negate(*this, lit);
     }
 
     //! Returns the current decision level of the solver
@@ -192,10 +52,10 @@ struct Solver {
 
     //! Returns true if \p lit is assigned false and this assignment was propagated to the clause masks
     bool assignedFalseAndPropagated(Literal lit) {
-        const auto* info = infoFor(lit);
-        if (!info->assignedFalse())
+        const auto& info = infoFor(lit);
+        if (!info.assignedFalse())
             return false;
-        return lit != firstPropagation && !info->prevPropagation.has_value();
+        return lit != firstPropagation && !info.prevPropagation.has_value();
     }
 
     //! Append \p lit the end of the propagation queue
@@ -204,14 +64,14 @@ struct Solver {
     The queue will be processed by propagate() to propagate this assignment to the clause masks.
     */
     void queuePropagation(Literal lit) {
-        auto* info = infoFor(lit);
+        auto& info = infoFor(lit);
         if (!firstPropagation.has_value()) {
             firstPropagation = lit;
             lastPropagation = lit;
             return;
         }
-        info->prevPropagation = lastPropagation.value();
-        infoFor(lastPropagation.value())->nextPropagation = lit;
+        info.prevPropagation = lastPropagation.value();
+        infoFor(lastPropagation.value()).nextPropagation = lit;
         lastPropagation = lit;
     }
 
@@ -219,32 +79,32 @@ struct Solver {
     void removeFirstPropagation() {
         VERIFY(firstPropagation.has_value());
         Literal lit = firstPropagation.value();
-        auto* info = infoFor(lit);
-        firstPropagation = info->nextPropagation;
+        auto& info = infoFor(lit);
+        firstPropagation = info.nextPropagation;
 
-        if (info->nextPropagation.has_value())
-            infoFor(info->nextPropagation.value())->prevPropagation = std::nullopt;
+        if (info.nextPropagation.has_value())
+            infoFor(info.nextPropagation.value()).prevPropagation = std::nullopt;
         else
             lastPropagation = std::nullopt;
 
-        info->nextPropagation = std::nullopt;
+        info.nextPropagation = std::nullopt;
     }
 
     //! Removes \p lit from the propagation queue
     void removePropagation(Literal lit) {
-        auto* info = infoFor(lit);
-        if (info->prevPropagation.has_value())
-            infoFor(info->prevPropagation.value())->nextPropagation = info->nextPropagation;
+        auto& info = infoFor(lit);
+        if (info.prevPropagation.has_value())
+            infoFor(info.prevPropagation.value()).nextPropagation = info.nextPropagation;
         else
-            firstPropagation = info->nextPropagation;
+            firstPropagation = info.nextPropagation;
 
-        if (info->nextPropagation.has_value())
-            infoFor(info->nextPropagation.value())->prevPropagation = info->prevPropagation;
+        if (info.nextPropagation.has_value())
+            infoFor(info.nextPropagation.value()).prevPropagation = info.prevPropagation;
         else
-            lastPropagation = info->prevPropagation;
+            lastPropagation = info.prevPropagation;
 
-        info->prevPropagation = std::nullopt;
-        info->nextPropagation = std::nullopt;
+        info.prevPropagation = std::nullopt;
+        info.nextPropagation = std::nullopt;
     }
 
     //! Helper for adding clauses
@@ -323,7 +183,12 @@ struct Solver {
     bool hasConflicts() const { return !conflicts.empty(); }
 
 private:
-    struct ExplicitReasonTheory;
+    struct ExplicitReasons : ReasonTheory {
+        ExplicitReasons(Solver& solver);
+        bool test(Solver&, const Reason& reason) override;
+        ClauseAndIndex clause(Solver&, const Reason& reason) override;
+        LiteralInstance asInstance(const Reason& reason);
+    };
 
     //! An entry in the trace
     /*!
@@ -345,6 +210,22 @@ private:
     }
 
     Reason makeClauseReason(int_t clauseIndex, int_t literalIndex);
+
+    friend ValueTheory;
+    //! Attch a new theory to the solver
+    /*!
+    Called by the ValueTheory constructor.
+    \returns the theory id for \p theory
+    */
+    int_t attachTheory(ValueTheory& theory);
+
+    friend ReasonTheory;
+    //! Attch a new theory to the solver
+    /*!
+    Called by the ReasonTheory constructor.
+    \returns the theory id for \p theory
+    */
+    int_t attachTheory(ReasonTheory& theory);
 
     //! Bitmasks for the clauses
     /*!
@@ -385,10 +266,13 @@ private:
     //! Positions of the decisions in the trace
     std::vector<TracePosition> decisions;
 
-    std::vector<std::unique_ptr<Theory>> theories;
-    std::vector<std::unique_ptr<ReasonTheory>> reasonTheories;
+    std::vector<ValueTheory*> valueTheories;
+    std::vector<ReasonTheory*> reasonTheories;
 
-    ExplicitReasonTheory* explicitReasonTheory();
+    // --- These variables must be initialized last since their constructors modify the theory arrays ---
+
+    BooleanVariables internalVariables;
+    ExplicitReasons explicitReasons;
 };
 
 }
