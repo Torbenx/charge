@@ -15,6 +15,7 @@ struct ValueTheory {
     ValueTheory& operator=(ValueTheory&&) = delete;
 
     virtual Type typeOf(Solver&, Value) = 0;
+    virtual uint64_t labelOf(Solver&, Value) = 0;
 
     virtual std::string formatValue(Solver&, Value) = 0;
 
@@ -35,8 +36,7 @@ struct BooleanTheory : ValueTheory {
 
     virtual BooleanValue negate(Solver&, BooleanValue) = 0;
     virtual LiteralInfo& literalInfo(Solver&, BooleanValue) = 0;
-    virtual void assignFalse(Solver&, BooleanValue) = 0;
-    virtual void revertFalseAssignment(Solver&, BooleanValue) = 0;
+    virtual void propagateFalseAssignment(Solver&, BooleanValue) = 0;
 };
 
 struct TypeTheory : ValueTheory {
@@ -62,29 +62,30 @@ struct SimpleBooleanTheory : BooleanTheory {
 
     virtual std::string formatPositiveLiteral(Solver&, int_t varId) = 0;
     virtual std::string formatNegativeLiteral(Solver&, int_t varId) = 0;
-    std::string formatValue(Solver& solver, Value lit) override {
-        int_t varId = lit.valueId >> 1;
-        if ((lit.valueId & 1u) == 0u)
+    std::string formatValue(Solver& solver, Value v) override {
+        auto lit = BooleanValue { v };
+        int_t varId = variableId(lit);
+        if (isPositive(lit))
             return formatPositiveLiteral(solver, varId);
         else
             return formatNegativeLiteral(solver, varId);
     }
 
     void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = find; i < (int_t)infos.size() / 2; i++) {
+        for (int_t i = find; i < variableCount(); i++) {
             f(positiveLiteral(i));
             f(negativeLiteral(i));
         }
     }
 
     int_t newVariable() {
-        int_t id = infos.size() / 2;
+        int_t id = variableCount();
         infos.resize(infos.size() + 2);
         return id;
     }
 
     std::optional<int_t> findUnassignedVariable() {
-        for (int_t i = find; i < (int_t)infos.size() / 2; i++) {
+        for (int_t i = find; i < variableCount(); i++) {
             if (literalInfo(positiveLiteral(i)).assignedFalse() || literalInfo(negativeLiteral(i)).assignedFalse())
                 continue;
             find = i;
@@ -99,8 +100,15 @@ struct SimpleBooleanTheory : BooleanTheory {
         return std::nullopt;
     }
 
+    int_t variableId(BooleanValue v) const { return v.valueId >> 1; }
+    bool isPositive(BooleanValue v) const { return (v.valueId & 1u) == 0u; }
+
+    int_t variableCount() const { return infos.size() >> 1; }
+
     BooleanValue positiveLiteral(int_t varId) const { return { (uint32_t)theoryId(), (uint32_t)varId * 2u }; }
     BooleanValue negativeLiteral(int_t varId) const { return { (uint32_t)theoryId(), (uint32_t)varId * 2u + 1u }; }
+
+    uint64_t labelOf(Solver&, Value) override { VERIFY_NOT_REACHED(); }
 
 private:
     std::vector<T> infos;

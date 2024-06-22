@@ -33,7 +33,13 @@ struct ReasonTheory {
         int_t forceLiteralIndex = 0;
     };
 
-    ReasonTheory(Solver&);
+    //! Constructor
+    /*!
+    \param solver the solver this reason theory will belong to
+    \param propagating indication to the solver whether this propagating theory. This should be set
+            to true if any reason that is theory could ever produce will automatically propagate.
+    */
+    ReasonTheory(Solver& solver, bool propagating);
     virtual ~ReasonTheory() = default;
     ReasonTheory(const ReasonTheory&) = delete;
     ReasonTheory(ReasonTheory&&) = delete;
@@ -44,15 +50,17 @@ struct ReasonTheory {
     /*!
     Returns whether the clause this reason is modeling is still forcing.
     */
-    virtual bool test(Solver&, const Reason&) = 0;
+    virtual bool testReason(Solver&, const Reason&) = 0;
 
     //! Return the clause modeled by this reason
-    virtual ClauseAndIndex clause(Solver&, const Reason&) = 0;
+    virtual ClauseAndIndex reasonToClause(Solver&, const Reason&) = 0;
 
     int_t theoryId() const { return m_theoryId; }
+    bool isPropagating() const { return m_propagating; }
 
 private:
-    int_t m_theoryId;
+    uint8_t m_theoryId;
+    bool m_propagating;
 };
 
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <check/ValueTheory.h>
+#include <check/EqualityTheory.h>
 
 namespace check {
 
@@ -12,37 +12,30 @@ Equalities are eagerly encoded as clauses. For each equality there will be 4 cla
     a == b ||  a ||  b
     a == b || !a || !b
 */
-struct BooleanEquality : SimpleBooleanTheory<> {
-    void link(Solver& solver, BooleanValue a, BooleanValue b) {
+struct BooleanEquality : EqualityTheory {
+    void onNewVariable(Solver& solver, int_t varId) override {
+        Link l = equalities.at(varId);
         int_t var = newVariable();
         BooleanValue eq = positiveLiteral(var);
         BooleanValue neq = negativeLiteral(var);
+        BooleanValue a { l.source };
+        BooleanValue b { l.target };
         BooleanValue na = solver.negate(a);
         BooleanValue nb = solver.negate(b);
 
-        solver.addClause({ neq, na, b });
-        solver.addClause({ neq, a, nb });
-        solver.addClause({ eq, a, b });
-        solver.addClause({ eq, na, nb });
+        if (a == b) {
+            solver.addClause({ eq });
+        } else if (a == nb) {
+            solver.addClause({ neq });
+        } else {
+            solver.addClause({ neq, na, b });
+            solver.addClause({ neq, a, nb });
+            solver.addClause({ eq, a, b });
+            solver.addClause({ eq, na, nb });
+        }
     }
 
-    void assignFalse(Solver&, BooleanValue) override { }
-    void revertFalseAssignment(Solver&, BooleanValue) override { }
-
-    std::string formatPositiveLiteral(Solver& solver, int_t eqId) override {
-        auto eq = equalities[eqId];
-        return fmt::format("({} == {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
-    }
-    std::string formatNegativeLiteral(Solver& solver, int_t eqId) override {
-        auto eq = equalities[eqId];
-        return fmt::format("({} != {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
-    }
-
-    struct Link {
-        BooleanValue source;
-        BooleanValue target;
-    };
-    std::vector<Link> equalities;
+    void propagateFalseAssignment(Solver&, BooleanValue) override { }
 };
 
 }

@@ -40,9 +40,24 @@ struct Solver {
         return theoryFor(value).formatValue(*this, value);
     }
 
+    uint64_t labelOf(Value value) {
+        return theoryFor(value).labelOf(*this, value);
+    }
+
     Literal negate(Literal lit) {
         return theoryFor(lit).negate(*this, lit);
     }
+
+    bool assignedFalse(Literal lit) {
+        return theoryFor(lit).literalInfo(*this, lit).assignedFalse();
+    }
+
+    bool assignedTrue(Literal lit) {
+        auto& theory = theoryFor(lit);
+        return theory.literalInfo(*this, theory.negate(*this, lit)).assignedFalse();
+    }
+
+    std::strong_ordering compare(Value a, Value b) { return labelOf(a) <=> labelOf(b); }
 
     //! Returns the current decision level of the solver
     /*!
@@ -180,13 +195,19 @@ struct Solver {
     //! Check if all clauses are satisfied by the current assignment
     bool checkAssignment();
 
+    //! Return whether the solver has any conflicts
     bool hasConflicts() const { return !conflicts.empty(); }
+
+    std::vector<BooleanValue>& scratchClause() {
+        m_scratchClause.clear();
+        return m_scratchClause;
+    }
 
 private:
     struct ExplicitReasons : ReasonTheory {
         ExplicitReasons(Solver& solver);
-        bool test(Solver&, const Reason& reason) override;
-        ClauseAndIndex clause(Solver&, const Reason& reason) override;
+        bool testReason(Solver&, const Reason& reason) override;
+        ClauseAndIndex reasonToClause(Solver&, const Reason& reason) override;
         LiteralInstance asInstance(const Reason& reason);
     };
 
@@ -227,6 +248,12 @@ private:
     */
     int_t attachTheory(ReasonTheory& theory);
 
+    //! Scratch space to hold a temporary clause
+    /*!
+    This is useful for reason theories that lazily generate clauses.
+    */
+    std::vector<BooleanValue> m_scratchClause;
+
     //! Bitmasks for the clauses
     /*!
     The mask will contain a 1 for literals that are not false. That is for all literals that are
@@ -234,7 +261,7 @@ private:
     has exactly one bit set, the remaining literal must be true for the clause to be true.
     Detecting this case is the primary purpose of these masks.
 
-    The updating of the masks is done in propagate() and backtrack(). propagate() will propagate()
+    The updating of the masks is done in propagate() and backtrack(). propagate() will propagate
     already made false assignments to the masks by clearing the appropiate bits. While backtrack()
     will set the bits for the literals that are detected to be no longer assigned.
     */
@@ -248,7 +275,7 @@ private:
 
     //! First element in the propagation queue
     /*!
-    The propagation queue is stored as a linked list intrusively inside the Theory::LiteralInfo
+    The propagation queue is stored as a linked list intrusively inside the BooleanTheory::LiteralInfo
     (members nextPropagation and prevPropagation). It conatins the pending false assignments to be
     processed by propagate().
     */

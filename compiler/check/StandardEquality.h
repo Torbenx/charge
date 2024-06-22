@@ -1,16 +1,12 @@
 #pragma once
 
-#include <check/SatSolver.h>
+#include <check/EqualityTheory.h>
+#include <check/Reason.h>
 
 namespace check {
 
-struct StandardEquality : SimpleBooleanTheory<> {
-    struct Link {
-        Value source;
-        Value target;
-
-        bool operator==(const Link&) const = default;
-    };
+struct StandardEquality : EqualityTheory, ReasonTheory {
+    using Link = EqualityTheory::Link;
 
     struct TreeNode {
         Value value;
@@ -25,22 +21,36 @@ struct StandardEquality : SimpleBooleanTheory<> {
         Always lies with in this subtree (linkTarget < subTreeSize). Stored is the offset from this node.
         */
         uint32_t linkTarget = 0;
+
+        bool operator==(const TreeNode&) const = default;
+    };
+
+    //! Used to detect when two values become equal
+    /*!
+    The is one (active) watch per equality literal defined by this theory.
+    When \p otherValue belongs to the same tree as the watch then the equality given by \p eqId is implied.
+    */
+    struct Watch {
+        Value otherValue;
+        uint32_t eqId;
+
+        bool operator==(const Watch&) const = default;
     };
 
     struct EqualityInfo {
         EqualityInfo(Value v)
-            : root(v), index(-1) { }
+            : root(v) { }
 
         Value root;
-        int32_t index;
+        int32_t treeOffset = -1; //!< Offset in root's tree
+        uint32_t watchOffset = 0; //!< Offset of this values watches in root's watches
         std::vector<TreeNode> tree;
+        std::vector<Watch> watches;
     };
 
-    using SimpleBooleanTheory<>::SimpleBooleanTheory;
+    StandardEquality(Solver&);
 
-    std::vector<Link> path(Value a, Value b);
-
-    void link(Value source, Value target);
+    void link(Solver& solver, Value source, Value target);
 
     bool connected(Value a, Value b) {
         return equalityInfo(a).root == equalityInfo(b).root;
@@ -48,25 +58,17 @@ struct StandardEquality : SimpleBooleanTheory<> {
 
     virtual EqualityInfo& equalityInfo(Value value) = 0;
 
-    void assignFalse(Solver&, BooleanValue) override {
-        /* TODO */
-    }
-    void revertFalseAssignment(Solver&, BooleanValue) override {
-        /* TODO */
-    }
+    void propagateFalseAssignment(Solver&, BooleanValue) override;
 
-    std::string formatPositiveLiteral(Solver& solver, int_t eqId) override {
-        auto eq = equalities[eqId];
-        return fmt::format("({} == {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
-    }
-    std::string formatNegativeLiteral(Solver& solver, int_t eqId) override {
-        auto eq = equalities[eqId];
-        return fmt::format("({} != {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
-    }
+    void checkInvariances();
+
+    bool testReason(Solver&, const Reason&) override;
+    static Link linkFromReason(const Reason&);
+    Reason linkToReason(Link l) const;
+    ClauseAndIndex reasonToClause(Solver&, const Reason&) override;
 
 private:
-    std::vector<Link> equalities;
-    std::vector<Link> trace;
+    void onNewVariable(Solver&, int_t eqId) override;
 };
 
 }

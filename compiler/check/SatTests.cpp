@@ -3,9 +3,11 @@
 #include <types.h>
 
 #include <check/BasicBlock.h>
+#include <check/BooleanEquality.h>
+#include <check/EqualityTheory.h>
 #include <check/StandardEquality.h>
 #include <check/TopologicalOrder.h>
-#include <check/BooleanEquality.h>
+
 
 #include <filesystem>
 #include <fstream>
@@ -264,122 +266,199 @@ void runTests(std::filesystem::path testDir) {
     fmt::println("Passed {} sat tests", count);
 
     // Equality test
-    using Link = StandardEquality::Link;
-    Solver dummySolver;
-    struct TestEquality : StandardEquality {
-        using StandardEquality::StandardEquality;
+    Solver solver;
+    solver.propagate();
+    struct TestValueTheory : ValueTheory {
+        struct Equality : StandardEquality {
+            using StandardEquality::StandardEquality;
+            EqualityInfo& equalityInfo(Value v) override {
+                return infos[v.valueId];
+            }
 
-        EqualityInfo& equalityInfo(Value v) override {
-            return infos[v.valueId];
-        }
+            std::vector<EqualityInfo> infos;
+        };
+
+        TestValueTheory(Solver& solver)
+            : ValueTheory(solver), equality(solver) { }
+
+        uint64_t labelOf(Solver&, Value v) override { return baseLabel + v.valueId; }
+        std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
+        Type typeOf(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+        void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
 
         Value newValue() {
-            Value v { .theoryId = 0, .valueId = (uint32_t)infos.size() };
-            infos.emplace_back(v);
-            return v;
-        }
+                Value v { .theoryId = (uint32_t)theoryId(), .valueId = (uint32_t)equality.infos.size() };
+                equality.infos.emplace_back(v);
+                return v;
+            }
 
-        std::vector<EqualityInfo> infos;
+        uint64_t baseLabel = 0;
+        Equality equality;
     };
     {
-        TestEquality tree(dummySolver);
-        Value v1 = tree.newValue();
-        Value v2 = tree.newValue();
+        TestValueTheory values(solver);
+        Value v1 = values.newValue();
+        Value v2 = values.newValue();
 
-        VERIFY(!tree.connected(v1, v2));
-        tree.link(v1, v2);
-        VERIFY(tree.connected(v1, v2));
+        Reason r12 = values.equality.linkToReason({ v1, v2 });
+        VERIFY(!values.equality.testReason(solver, r12));
 
-        auto path = tree.path(v1, v2);
-        VERIFY(path.size() == 1);
-        VERIFY(path[0].source == v1);
-        VERIFY(path[0].target == v2);
+        BooleanValue e12 = values.equality.equality(solver, v1, v2);
+        VERIFY(!values.equality.testReason(solver, r12));
+
+        solver.decideTrue(e12);
+        VERIFY(!values.equality.testReason(solver, r12));
+
+        solver.propagate();
+        VERIFY(values.equality.testReason(solver, r12));
+
+        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+        VERIFY(clause.size() == 2);
+        VERIFY(forcedIndex == 0);
+        VERIFY(clause[0] == e12);
+        VERIFY(clause[1] == values.equality.negate(e12));
     }
     {
-        TestEquality tree(dummySolver);
-        Value v1 = tree.newValue();
-        Value v2 = tree.newValue();
-        Value v3 = tree.newValue();
+        TestValueTheory values(solver);
+        Value v1 = values.newValue();
+        Value v2 = values.newValue();
+        Value v3 = values.newValue();
 
-        tree.link(v2, v1);
-        tree.link(v2, v3);
-        VERIFY(tree.connected(v1, v3));
+        BooleanValue e12 = values.equality.equality(solver, v1, v2);
+        BooleanValue e13 = values.equality.equality(solver, v1, v3);
+        BooleanValue e23 = values.equality.equality(solver, v2, v3);
+        solver.decideTrue(e12);
+        solver.propagate();
+        solver.decideTrue(e13);
+        solver.propagate();
 
-        auto path = tree.path(v1, v3);
-        VERIFY(path.size() == 2);
-        VERIFY(std::find(path.begin(), path.end(), Link { v2, v1 }) != path.end());
-        VERIFY(std::find(path.begin(), path.end(), Link { v2, v3 }) != path.end());
+        VERIFY(solver.assignedTrue(e23));
+        Reason r23 = values.equality.linkToReason({ v2, v3 });
+        VERIFY(values.equality.testReason(solver, r23));
+
+        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r23);
+        VERIFY(clause.size() == 3);
+        VERIFY(clause[forcedIndex] == e23);
+        VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e12)) != clause.end());
+        VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e13)) != clause.end());
     }
     {
-        TestEquality tree(dummySolver);
-        Value v1 = tree.newValue();
-        Value v2 = tree.newValue();
-        Value v3 = tree.newValue();
+        TestValueTheory values(solver);
+        Value v1 = values.newValue();
+        Value v2 = values.newValue();
+        Value v3 = values.newValue();
 
-        tree.link(v1, v2);
-        tree.link(v3, v2);
-        VERIFY(tree.connected(v1, v3));
+        BooleanValue e13 = values.equality.equality(solver, v1, v3);
+        BooleanValue e23 = values.equality.equality(solver, v2, v3);
+        BooleanValue e12 = values.equality.equality(solver, v1, v2);
+        solver.decideTrue(e13);
+        solver.propagate();
+        solver.decideTrue(e23);
+        solver.propagate();
 
-        auto path = tree.path(v1, v3);
-        VERIFY(path.size() == 2);
-        VERIFY(std::find(path.begin(), path.end(), Link { v1, v2 }) != path.end());
-        VERIFY(std::find(path.begin(), path.end(), Link { v3, v2 }) != path.end());
+        VERIFY(solver.assignedTrue(e12));
+        Reason r12 = values.equality.linkToReason({ v1, v2 });
+        VERIFY(values.equality.testReason(solver, r12));
+
+        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+        VERIFY(clause.size() == 3);
+        VERIFY(clause[forcedIndex] == e12);
+        VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e13)) != clause.end());
+        VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e23)) != clause.end());
     }
     {
-        TestEquality tree(dummySolver);
-        Value values[4][4];
+        TestValueTheory values(solver);
+        Value vals[4][4];
         for (int_t i = 0; i < 4; i++) {
             for (int_t j = 0; j < 4; j++)
-                values[i][j] = tree.newValue();
+                vals[i][j] = values.newValue();
         }
 
-        tree.link(values[0][0], values[0][1]);
-        tree.link(values[0][1], values[0][2]);
-        tree.link(values[0][2], values[0][3]);
-        VERIFY(tree.connected(values[0][0], values[0][3]));
+        solver.decideTrue(values.equality.equality(solver, vals[0][0], vals[0][1]));
+        solver.propagate();
+        solver.decideTrue(values.equality.equality(solver, vals[0][1], vals[0][2]));
+        solver.propagate();
+        solver.decideTrue(values.equality.equality(solver, vals[0][2], vals[0][3]));
+        solver.propagate();
+        Reason r00_03 = values.equality.linkToReason({ vals[0][0], vals[0][3] });
+        VERIFY(values.equality.testReason(solver, r00_03));
         {
-            auto path = tree.path(values[0][0], values[0][3]);
-            VERIFY(path.size() == 3);
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[0][1] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][1], values[0][2] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r00_03);
+            VERIFY(clause.size() == 4);
+            VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[0][0], vals[0][3]));
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[0][1])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][1], vals[0][2])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
         }
 
         for (int_t i = 0; i < 4; i++) {
-            tree.link(values[2][i], values[3][i]);
-            tree.link(values[1][i], values[2][i]);
-            tree.link(values[0][i], values[1][i]);
+            solver.decideTrue(values.equality.equality(solver, vals[2][i], vals[3][i]));
+            solver.propagate();
+            solver.decideTrue(values.equality.equality(solver, vals[1][i], vals[2][i]));
+            solver.propagate();
+            solver.decideTrue(values.equality.equality(solver, vals[0][i], vals[1][i]));
+            solver.propagate();
         }
-        VERIFY(tree.connected(values[3][0], values[3][3]));
+        Reason r30_33 = values.equality.linkToReason({ vals[3][0], vals[3][3] });
+        VERIFY(values.equality.testReason(solver, r30_33));
         {
-            auto path = tree.path(values[3][0], values[3][3]);
-            VERIFY(path.size() == 9);
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[1][0] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[1][0], values[2][0] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[2][0], values[3][0] }) != path.end());
+            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r30_33);
+            VERIFY(clause.size() == 10);
+            VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][0], vals[3][3]));
 
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][0], values[0][1] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][1], values[0][2] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[1][0])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][0], vals[2][0])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][0], vals[3][0])) != clause.end());
 
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][3], values[1][3] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[1][3], values[2][3] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[2][3], values[3][3] }) != path.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[0][1])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][1], vals[0][2])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
+
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
         }
-        VERIFY(tree.connected(values[3][2], values[3][3]));
+
+        Reason r32_33 = values.equality.linkToReason({ vals[3][2], vals[3][3] });
         {
-            auto path = tree.path(values[3][2], values[3][3]);
-            VERIFY(path.size() == 7);
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[1][2] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[1][2], values[2][2] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[2][2], values[3][2] }) != path.end());
+            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r32_33);
+            VERIFY(clause.size() == 8);
+            VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][2], vals[3][3]));
 
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][2], values[0][3] }) != path.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[1][2])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][2], vals[2][2])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][2], vals[3][2])) != clause.end());
 
-            VERIFY(std::find(path.begin(), path.end(), Link { values[0][3], values[1][3] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[1][3], values[2][3] }) != path.end());
-            VERIFY(std::find(path.begin(), path.end(), Link { values[2][3], values[3][3] }) != path.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
+
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
+            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
         }
+    }
+
+    // TreeLabel
+    {
+        TreeLabel root = TreeLabel::rootLabel();
+        VERIFY(root.label() == 0b0111'1111'1111'1111'1111'1111'1111'1111u);
+
+        VERIFY(root.extend(false).label() == 0b0011'1111'1111'1111'1111'1111'1111'1111u);
+        VERIFY(root.extend(false).extend(false).label() == 0b0001'1111'1111'1111'1111'1111'1111'1111u);
+        VERIFY(root.extend(false).extend(true).label() == 0b0101'1111'1111'1111'1111'1111'1111'1111u);
+
+        VERIFY(root.extend(true).label() == 0b1011'1111'1111'1111'1111'1111'1111'1111u);
+        VERIFY(root.extend(true).extend(false).label() == 0b1001'1111'1111'1111'1111'1111'1111'1111u);
+        VERIFY(root.extend(true).extend(true).label() == 0b1101'1111'1111'1111'1111'1111'1111'1111u);
+
+        VERIFY(root.depth() == 0);
+
+        VERIFY(root.extend(false).depth() == 1);
+        VERIFY(root.extend(false).extend(false).depth() == 2);
+        VERIFY(root.extend(false).extend(true).depth() == 2);
+
+        VERIFY(root.extend(true).depth() == 1);
+        VERIFY(root.extend(true).extend(false).depth() == 2);
+        VERIFY(root.extend(true).extend(true).depth() == 2);
     }
 }
 
