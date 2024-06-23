@@ -37,6 +37,18 @@ struct BooleanTheory : ValueTheory {
     virtual BooleanValue negate(Solver&, BooleanValue) = 0;
     virtual LiteralInfo& literalInfo(Solver&, BooleanValue) = 0;
     virtual void propagateFalseAssignment(Solver&, BooleanValue) = 0;
+
+    //! Reapply an assignment that was reverted during ReasonTheory::backtrack()
+    /*!
+    Should only be used when a reason theory also uses backtrack.
+    */
+    virtual void reapplyFalseAssignment(Solver&, BooleanValue) = 0;
+
+    //! Revert an assignment that was not reverted during ReasonTheory::backtrack()
+    /*!
+    Should not be used when a reason theory also reverts assignments in backtrack.
+    */
+    virtual void unapplyFalseAssignment(Solver&, BooleanValue) = 0;
 };
 
 struct TypeTheory : ValueTheory {

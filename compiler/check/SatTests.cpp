@@ -8,7 +8,6 @@
 #include <check/StandardEquality.h>
 #include <check/TopologicalOrder.h>
 
-
 #include <filesystem>
 #include <fstream>
 
@@ -208,8 +207,6 @@ void runTests(std::filesystem::path testDir) {
     fmt::println("Passed {} sat tests", count);
 
     // Equality test
-    Solver solver;
-    solver.propagate();
     struct TestValueTheory : ValueTheory {
         struct Equality : StandardEquality {
             using StandardEquality::StandardEquality;
@@ -229,15 +226,17 @@ void runTests(std::filesystem::path testDir) {
         void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
 
         Value newValue() {
-                Value v { .theoryId = (uint32_t)theoryId(), .valueId = (uint32_t)equality.infos.size() };
-                equality.infos.emplace_back(v);
-                return v;
-            }
+            Value v { .theoryId = (uint32_t)theoryId(), .valueId = (uint32_t)equality.infos.size() };
+            equality.infos.emplace_back(v);
+            return v;
+        }
 
         uint64_t baseLabel = 0;
         Equality equality;
     };
     {
+        Solver solver;
+        solver.propagate();
         TestValueTheory values(solver);
         Value v1 = values.newValue();
         Value v2 = values.newValue();
@@ -261,6 +260,8 @@ void runTests(std::filesystem::path testDir) {
         VERIFY(clause[1] == values.equality.negate(e12));
     }
     {
+        Solver solver;
+        solver.propagate();
         TestValueTheory values(solver);
         Value v1 = values.newValue();
         Value v2 = values.newValue();
@@ -285,6 +286,8 @@ void runTests(std::filesystem::path testDir) {
         VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e13)) != clause.end());
     }
     {
+        Solver solver;
+        solver.propagate();
         TestValueTheory values(solver);
         Value v1 = values.newValue();
         Value v2 = values.newValue();
@@ -309,6 +312,8 @@ void runTests(std::filesystem::path testDir) {
         VERIFY(std::find(clause.begin(), clause.end(), values.equality.negate(e23)) != clause.end());
     }
     {
+        Solver solver;
+        solver.propagate();
         TestValueTheory values(solver);
         Value vals[4][4];
         for (int_t i = 0; i < 4; i++) {

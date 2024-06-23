@@ -50,7 +50,7 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
 
     StandardEquality(Solver&);
 
-    void link(Solver& solver, Value source, Value target);
+    void link(Solver& solver, Value source, Value target, bool propagate);
 
     bool connected(Value a, Value b) {
         return equalityInfo(a).root == equalityInfo(b).root;
@@ -59,6 +59,8 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
     virtual EqualityInfo& equalityInfo(Value value) = 0;
 
     void propagateFalseAssignment(Solver&, BooleanValue) override;
+    void reapplyFalseAssignment(Solver&, BooleanValue) override;
+    void unapplyFalseAssignment(Solver&, BooleanValue) override;
 
     void checkInvariances();
 
@@ -66,9 +68,18 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
     static Link linkFromReason(const Reason&);
     Reason linkToReason(Link l) const;
     ClauseAndIndex reasonToClause(Solver&, const Reason&) override;
+    void newDecisionLevel(Solver&) override;
+    void backtrack(Solver&) override;
 
 private:
     void onNewVariable(Solver&, int_t eqId) override;
+
+    struct TraceEntry {
+        Value oldRoot; //!< The value that seized to be a root as the result of the link
+    };
+
+    std::vector<TraceEntry> trace;
+    std::vector<uint32_t> decisionPoints; //!< Trace sizes at the respective decision levels
 };
 
 }

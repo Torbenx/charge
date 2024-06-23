@@ -36,6 +36,8 @@ struct BooleanEquality : EqualityTheory {
     }
 
     void propagateFalseAssignment(Solver&, BooleanValue) override { }
+    void reapplyFalseAssignment(Solver&, BooleanValue) override { }
+    void unapplyFalseAssignment(Solver&, BooleanValue) override { }
 };
 
 }

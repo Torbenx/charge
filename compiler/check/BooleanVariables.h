@@ -17,6 +17,8 @@ struct BooleanVariables : SimpleBooleanTheory<> {
     }
 
     void propagateFalseAssignment(Solver&, BooleanValue) override { }
+    void reapplyFalseAssignment(Solver&, BooleanValue) override { }
+    void unapplyFalseAssignment(Solver&, BooleanValue) override { }
 
     BooleanValue literalFromSign(int_t var) const { return var < 0 ? negativeLiteral(-var) : positiveLiteral(var); }
 };

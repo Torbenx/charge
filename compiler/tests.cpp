@@ -432,8 +432,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         auto expr = parser.parse();
         sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
         sema::Generator::signatureCheck(context, context.programHandle(program));
-        fmt::println("-------------------------------");
-        program->dump(context);
+        // fmt::println("-------------------------------");
+        // program->dump(context);
 
         if (word == words["expect-type"]) {
             VERIFY(program->kind() == sema::ProgramKind::Value);

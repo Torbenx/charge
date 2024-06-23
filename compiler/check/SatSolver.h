@@ -61,9 +61,12 @@ struct Solver {
 
     //! Returns the current decision level of the solver
     /*!
-    The decision level is equal to the number of decisions that were made.
+    The decision level is equal to the number of decisions that were made minus 1.
+
+    A level of -1 implies that no decision were made. If a conflict is found at this level the
+    problem is unsatisfiable.
     */
-    int_t currentLevel() const { return decisions.size(); }
+    int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
 
     //! Returns true if \p lit is assigned false and this assignment was propagated to the clause masks
     bool assignedFalseAndPropagated(Literal lit) {
@@ -139,14 +142,7 @@ struct Solver {
     std::pair<Literal, Literal> makeBooleanPair();
 
     //! Decide that the given \p literal is true
-    /*!
-    \returns false if \p literal is already known to be false.
-    */
-    bool decideTrue(Literal literal) {
-        VERIFY(!firstPropagation.has_value());
-        decisions.push_back(TracePosition(trace.size()));
-        return assignTrue(literal, Reason::makeDecision());
-    }
+    void decideTrue(Literal literal);
 
     //! Assign true to \p trueLit
     /*!
@@ -170,10 +166,10 @@ struct Solver {
 
     //! Try to learn a new clause from \p conflict
     /*!
-    The function will the current subTrace that should be from the backtrack() operation that
+    The function uses the current subTrace that should be from the backtrack() operation that
     resolved \p conflict. When successful the function will identify the UIPs, generate new clauses
     and clear the conflicts. The function will fail if it detects that the solver is still in a
-    conflict state. In this case calling propagate() will produce \p conflict again.
+    conflict state. In this case calling propagate() will produce a conflict again.
     \returns true if successful
     */
     bool tryLearn(Conflict conflict);
@@ -181,13 +177,13 @@ struct Solver {
     void dumpClause(int_t clauseIndex);
     void dumpClause(const std::vector<Literal>& clause);
 
-    //! Revert all assignments up to and including level
+    //! Revert all assignments up to and including \p level
     /*!
     This updates the subTrace member to contain a list of all 1st reasons that are no longer
     forcing in the order they appeared in the original trace. Note this doesn't always mean that
-    the literal assignment was also reverted since an other reason may still be forcing.
+    the literal assignment was also reverted since another reason may still be forcing.
     */
-    void backtrack(int_t targetLevel);
+    void backtrack(int_t level);
 
     //! Explicitly check that the invariances of the solver hold
     void checkInvariances();
@@ -208,6 +204,12 @@ private:
         ExplicitReasons(Solver& solver);
         bool testReason(Solver&, const Reason& reason) override;
         ClauseAndIndex reasonToClause(Solver&, const Reason& reason) override;
+        void newDecisionLevel(Solver&) override;
+        void backtrack(Solver&) override;
+
+        void propagateFalseAssignment(Solver&, BooleanValue);
+        void reapplyFalseAssignment(Solver&, BooleanValue);
+        void unapplyFalseAssignment(Solver&, BooleanValue);
         LiteralInstance asInstance(const Reason& reason);
     };
 
