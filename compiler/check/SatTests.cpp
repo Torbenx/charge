@@ -98,7 +98,7 @@ namespace {
         }
     };
 
-    bool check(const Parser& parser) {
+    std::optional<std::vector<bool>> check(const Parser& parser) {
         // setup
         Solver solver;
         BooleanVariables theory(solver);
@@ -115,7 +115,7 @@ namespace {
         }
 
         if (solver.hasConflicts() || !solver.propagate())
-            return false; // unsat
+            return std::nullopt; // unsat
 
         // solver
         for (;;) {
@@ -128,21 +128,22 @@ namespace {
             VERIFY(!solver.hasConflicts());
             while (!solver.propagate()) {
                 if (!solver.analyzeConflicts())
-                    return false; // unsat
+                    return std::nullopt; // unsat
             }
         }
 
         // sat
-        /*for (int_t varId = 1; varId <= parser.variableCount; varId++) {
-            if (theory.getInfo(theory.positiveLiteral(varId))->assignedFalse())
-                fmt::println("{} = false", varId);
-            else if (theory.getInfo(theory.negativeLiteral(varId))->assignedFalse())
-                fmt::println("{} = true", varId);
+        VERIFY(solver.checkAssignment());
+        std::vector<bool> assignment;
+        for (int_t varId = 1; varId <= parser.variableCount; varId++) {
+            if (theory.literalInfo(theory.positiveLiteral(varId)).assignedFalse())
+                assignment.push_back(false);
+            else if (theory.literalInfo(theory.negativeLiteral(varId)).assignedFalse())
+                assignment.push_back(true);
             else
                 VERIFY_NOT_REACHED();
-        }*/
-        VERIFY(solver.checkAssignment());
-        return true;
+        }
+        return assignment;
     }
 
     std::string readFile(std::filesystem::path file) {
@@ -153,7 +154,7 @@ namespace {
         int_t length = stream.tellg();
         VERIFY(length >= 0);
         std::string sourceBuffer;
-        sourceBuffer.resize(length + 2);
+        sourceBuffer.resize(length);
         stream.seekg(0, std::ios::beg);
         stream.read(sourceBuffer.data(), length);
         stream.close();
@@ -161,108 +162,49 @@ namespace {
 
         return sourceBuffer;
     }
+
+    void writeFile(std::filesystem::path file, std::string content) {
+        std::ofstream stream;
+        stream.open(file, std::ios::binary);
+        VERIFY(stream.good());
+        stream.write(content.data(), content.length());
+        stream.close();
+        VERIFY(stream.good());
+    }
 }
 
 void runTests(std::filesystem::path testDir) {
-
-    static const std::unordered_map<std::string, bool> expectedResults = {
-        { "add4.cnf", false },
-        { "add8.cnf", false },
-        { "add16.cnf", false },
-        { "add32.cnf", false },
-        { "add64.cnf", false },
-        { "aim-100-1_6-no-1.cnf", false },
-        { "aim-50-1_6-yes1-4.cnf", true },
-        { "block0.cnf", true },
-        { "dubois20.cnf", false },
-        { "dubois21.cnf", false },
-        { "dubois22.cnf", false },
-        { "elimclash.cnf", false },
-        { "elimredundant.cnf", true },
-        { "empty.cnf", true },
-        { "factor1234321.cnf", true },
-        { "factor2708413neg.cnf", true },
-        { "full1.cnf", false },
-        { "full2.cnf", false },
-        { "full3.cnf", false },
-        { "full4.cnf", false },
-        { "full5.cnf", false },
-        { "full6.cnf", false },
-        { "full7.cnf", false },
-        { "hole6.cnf", false },
-        { "learn.cnf", true },
-        { "par8-1-c.cnf", true },
-        { "ph2.cnf", false },
-        { "ph3.cnf", false },
-        { "ph4.cnf", false },
-        { "ph5.cnf", false },
-        { "ph6.cnf", false },
-        { "prime4.cnf", true },
-        { "prime9.cnf", true },
-        { "prime25.cnf", true },
-        { "prime49.cnf", true },
-        { "prime121.cnf", true },
-        { "prime169.cnf", true },
-        { "prime289.cnf", true },
-        { "prime361.cnf", true },
-        { "prime529.cnf", true },
-        { "prime841.cnf", true },
-        { "prime961.cnf", true },
-        { "prime1369.cnf", true },
-        { "prime1681.cnf", true },
-        { "prime1849.cnf", true },
-        { "prime2209.cnf", true },
-        { "prime65537.cnf", false },
-        { "quinn.cnf", true },
-        { "regr000.cnf", true },
-        { "simple_v3_c2.cnf", true },
-        { "sqrt2809.cnf", true },
-        { "sqrt3481.cnf", true },
-        { "sqrt3721.cnf", true },
-        { "sqrt4489.cnf", true },
-        { "sqrt5041.cnf", true },
-        { "sqrt5329.cnf", true },
-        { "sqrt6241.cnf", true },
-        { "sqrt6889.cnf", true },
-        { "sqrt7921.cnf", true },
-        { "sqrt9409.cnf", true },
-        { "sqrt10201.cnf", true },
-        { "sqrt10609.cnf", true },
-        { "sqrt11449.cnf", true },
-        { "sqrt11881.cnf", true },
-        { "sqrt12769.cnf", true },
-        { "sqrt16129.cnf", true },
-        { "sqrt63001.cnf", true },
-        { "sqrt259081.cnf", true },
-        { "sqrt1042441.cnf", true },
-        { "sub0.cnf", true },
-        { "unit0.cnf", true },
-        { "unit1.cnf", true },
-        { "unit2.cnf", true },
-        { "unit3.cnf", true },
-        { "unit4.cnf", false },
-        { "unit5.cnf", false },
-        { "unit6.cnf", false },
-        { "unit7.cnf", false },
-        { "unsat.cnf", false },
-        { "zebra_v155_c1135.cnf", true },
-    };
+    bool overwriteSolutionFiles = false;
 
     namespace fs = std::filesystem;
     int_t count = 0;
     for (const auto& entry : fs::directory_iterator(testDir)) {
-        if (!entry.is_regular_file())
+        if (!entry.is_regular_file() || entry.path().extension() != ".cnf")
             continue;
 
         auto sourceBuffer = readFile(entry.path());
         Parser parser;
         parser.buffer = sourceBuffer;
         parser.parse();
-        bool result = check(parser);
-        VERIFY(expectedResults.at(entry.path().filename().string()) == result);
+        auto result = check(parser);
+        std::string resultString;
+        if (result.has_value()) {
+            for (bool v : result.value())
+                resultString += v ? "true " : "false ";
+        }
+
+
+        auto solutionPath = entry.path();
+        solutionPath += ".sol";
+        if (overwriteSolutionFiles)
+            writeFile(solutionPath, resultString);
+
+        auto expectedResultString = readFile(solutionPath);
+        VERIFY(resultString == expectedResultString);
+
         count += 1;
     }
-    VERIFY(count == (int_t)expectedResults.size());
+    VERIFY(count == 80);
     fmt::println("Passed {} sat tests", count);
 
     // Equality test
