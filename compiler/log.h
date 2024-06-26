@@ -20,5 +20,4 @@ constexpr void expect_eq(const L& lhs, const R& rhs, const char* lhsStr, const c
 }
 
 #define VERIFY(cond) ::verify(cond, #cond, __FILE__, __func__, __LINE__)
-#define EXPECT_EQ(lhs, rhs) ::expect_eq(lhs, rhs, #lhs, #rhs, __FILE__, __func__, __LINE__)
 #define VERIFY_NOT_REACHED() ::verify_not_reached(__FILE__, __func__, __LINE__);

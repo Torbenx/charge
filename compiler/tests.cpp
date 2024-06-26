@@ -9,6 +9,7 @@
 #include <ranges>
 #include <sema/Generator.h>
 #include <vector>
+#include <gtest/gtest.h>
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -496,17 +497,10 @@ std::string readFile(std::filesystem::path file) {
     return sourceBuffer;
 }
 
-namespace check::sat {
-void runTests(std::filesystem::path testDir);
-}
-
-int main() {
+TEST(Charge, Files) {
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
 
-    check::sat::runTests(testDir / "sat");
-
-    int_t count = 0;
     for (const auto& entry : fs::directory_iterator(testDir)) {
         if (!entry.is_regular_file())
             continue;
@@ -517,7 +511,5 @@ int main() {
 
         TestInstrumenter test(sourceBuffer);
         test.runTest();
-        count += 1;
     }
-    fmt::println("Passed {} charge tests", count);
 }
