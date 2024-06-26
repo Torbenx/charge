@@ -44,13 +44,14 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
         Value root;
         int32_t treeOffset = -1; //!< Offset in root's tree
         uint32_t watchOffset = 0; //!< Offset of this values watches in root's watches
+        uint32_t tracePosition = -1; //! Position of the trace entry where this value ceased to be a root or -1 if it is a root
         std::vector<TreeNode> tree;
         std::vector<Watch> watches;
     };
 
     StandardEquality(Solver&);
 
-    void link(Solver& solver, Value source, Value target, bool propagate);
+    void link(Solver& solver, int_t eqId, bool propagate);
 
     bool connected(Value a, Value b) {
         return equalityInfo(a).root == equalityInfo(b).root;
@@ -74,12 +75,19 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
 private:
     void onNewVariable(Solver&, int_t eqId) override;
 
+    void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
+    void pathInTree(Solver&, Value a, Value b, std::vector<BooleanValue>&);
+
     struct TraceEntry {
-        Value oldRoot; //!< The value that seized to be a root as the result of the link
+        Link link;
+        Link roots; //!< The root of the source and target respectively
     };
 
     std::vector<TraceEntry> trace;
     std::vector<uint32_t> decisionPoints; //!< Trace sizes at the respective decision levels
+
+    //! Copy of the trace at the time of backtracking. Used to reconstruct paths after backtracking
+    std::vector<TraceEntry> backtrackTrace;
 };
 
 }

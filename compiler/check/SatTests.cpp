@@ -192,7 +192,6 @@ void runTests(std::filesystem::path testDir) {
                 resultString += v ? "true " : "false ";
         }
 
-
         auto solutionPath = entry.path();
         solutionPath += ".sol";
         if (overwriteSolutionFiles)
@@ -203,8 +202,8 @@ void runTests(std::filesystem::path testDir) {
 
         count += 1;
     }
-    VERIFY(count == 80);
     fmt::println("Passed {} sat tests", count);
+    VERIFY(count == 80);
 
     // Equality test
     struct TestValueTheory : ValueTheory {
@@ -253,11 +252,22 @@ void runTests(std::filesystem::path testDir) {
         solver.propagate();
         VERIFY(values.equality.testReason(solver, r12));
 
-        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
-        VERIFY(clause.size() == 2);
-        VERIFY(forcedIndex == 0);
-        VERIFY(clause[0] == e12);
-        VERIFY(clause[1] == values.equality.negate(e12));
+        {
+            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+            VERIFY(clause.size() == 2);
+            VERIFY(forcedIndex == 0);
+            VERIFY(clause[0] == e12);
+            VERIFY(clause[1] == values.equality.negate(e12));
+        }
+
+        solver.backtrack(0);
+        {
+            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+            VERIFY(clause.size() == 2);
+            VERIFY(forcedIndex == 0);
+            VERIFY(clause[0] == e12);
+            VERIFY(clause[1] == values.equality.negate(e12));
+        }
     }
     {
         Solver solver;
@@ -346,42 +356,103 @@ void runTests(std::filesystem::path testDir) {
             solver.decideTrue(values.equality.equality(solver, vals[0][i], vals[1][i]));
             solver.propagate();
         }
+
         Reason r30_33 = values.equality.linkToReason({ vals[3][0], vals[3][3] });
         VERIFY(values.equality.testReason(solver, r30_33));
-        {
-            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r30_33);
-            VERIFY(clause.size() == 10);
-            VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][0], vals[3][3]));
-
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[1][0])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][0], vals[2][0])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][0], vals[3][0])) != clause.end());
-
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[0][1])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][1], vals[0][2])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
-
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
-        }
-
         Reason r32_33 = values.equality.linkToReason({ vals[3][2], vals[3][3] });
-        {
-            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r32_33);
-            VERIFY(clause.size() == 8);
-            VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][2], vals[3][3]));
+        VERIFY(values.equality.testReason(solver, r32_33));
 
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[1][2])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][2], vals[2][2])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][2], vals[3][2])) != clause.end());
+        auto testConnections = [&] {
+            {
+                auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r30_33);
+                VERIFY(clause.size() == 10);
+                VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][0], vals[3][3]));
 
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[1][0])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][0], vals[2][0])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][0], vals[3][0])) != clause.end());
 
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
-            VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
-        }
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[0][1])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][1], vals[0][2])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
+
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
+            }
+
+            {
+                auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r32_33);
+                VERIFY(clause.size() == 8);
+                VERIFY(clause[forcedIndex] == values.equality.equality(solver, vals[3][2], vals[3][3]));
+
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[1][2])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][2], vals[2][2])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][2], vals[3][2])) != clause.end());
+
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
+
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][3], vals[1][3])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[1][3], vals[2][3])) != clause.end());
+                VERIFY(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[2][3], vals[3][3])) != clause.end());
+            }
+        };
+        testConnections();
+
+        solver.backtrack(0);
+        VERIFY(!values.equality.testReason(solver, r30_33));
+        VERIFY(!values.equality.testReason(solver, r32_33));
+
+        testConnections();
+    }
+    {
+        Solver solver;
+        TestValueTheory values(solver);
+        Value v1 = values.newValue();
+        Value v2 = values.newValue();
+        Value v3 = values.newValue();
+        solver.addClause({ values.equality.equality(solver, v1, v2) });
+        solver.addClause({ values.equality.equality(solver, v2, v3) });
+        solver.addClause({ values.equality.disequality(solver, v1, v3) });
+        solver.propagate();
+        VERIFY(solver.hasConflicts());
+    }
+    {
+        Solver solver;
+        TestValueTheory values(solver);
+        BooleanVariables bools(solver);
+        BooleanValue c = bools.positiveLiteral(bools.newVariable());
+        Value s = values.newValue();
+        Value t1 = values.newValue();
+        Value t2 = values.newValue();
+        solver.addClause({ c, values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2) });
+        solver.addClause({ solver.negate(c) });
+        solver.addClause({ values.equality.equality(solver, t1, t2) });
+        solver.addClause({ values.equality.disequality(solver, s, t1) });
+        solver.propagate();
+        VERIFY(solver.hasConflicts());
+    }
+    {
+        Solver solver;
+        TestValueTheory values(solver);
+        BooleanVariables bools(solver);
+        BooleanValue c = bools.positiveLiteral(bools.newVariable());
+        Value s = values.newValue();
+        Value t1 = values.newValue();
+        Value t2 = values.newValue();
+        solver.addClause({ c, values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2) });
+        solver.addClause({ values.equality.equality(solver, t1, t2) });
+        solver.addClause({ values.equality.disequality(solver, s, t1) });
+        solver.propagate();
+        VERIFY(!solver.hasConflicts());
+
+        solver.decideTrue(solver.negate(c));
+        solver.propagate();
+        VERIFY(solver.hasConflicts());
+        solver.analyzeConflicts();
+        solver.propagate();
+        VERIFY(!solver.hasConflicts());
+        VERIFY(solver.assignedTrue(c));
     }
 
     // TreeLabel
