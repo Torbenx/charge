@@ -68,6 +68,9 @@ void Solver::ExplicitReasons::propagateFalseAssignment(Solver& solver, BooleanVa
         // Perform the popcount before we clear the bit so the operations can be executed in parallel
         int popcnt = std::popcount(clauseMask);
 
+        // solver.dumpClause(solver.clauses[inst.clauseIndex]);
+        // fmt::println("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
+
         // VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
         clauseMask &= ~literalMask(inst.literalIndex);
 
@@ -216,10 +219,12 @@ bool Solver::assignTrue(Literal trueLit, Reason reason) {
 }
 
 bool Solver::propagate() {
+    VERIFY(conflicts.empty());
+
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
         auto& literalTheory = theoryFor(literal);
-        // fmt::println("propagating {}", literalTheory.formatValue(*this, literal));
+        // fmt::println("propagating {}", literalTheory.formatValue(*this, negate(literal)));
         removeFirstPropagation();
 
         literalTheory.propagateFalseAssignment(*this, literal);
@@ -234,7 +239,7 @@ bool Solver::propagate() {
 void Solver::dumpClause(int_t clauseIndex) {
     dumpClause(clauses[clauseIndex]);
 }
-void Solver::dumpClause(const std::vector<Literal>& clause) {
+void Solver::dumpClause(std::span<const Literal> clause) {
     for (auto lit : clause)
         std::cout << formatValue(lit) << " ";
     std::cout << '\n';
@@ -269,6 +274,9 @@ bool Solver::tryLearn(Conflict conflict) {
         for (Literal lit : conflictClause) {
             auto& theory = theoryFor(lit);
             auto& info = theory.literalInfo(*this, lit);
+
+            // VERIFY(wasFalse(lit));
+
             if (info.assignedFalse()) {
                 VERIFY(info.includedInNewClause != tryLearnIndex);
                 newClause.push_back(lit);

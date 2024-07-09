@@ -15,10 +15,6 @@ struct Value {
     uint32_t theoryId : 8 = -1;
     uint32_t valueId : 24 = -1;
 
-    auto operator<=>(const Value& other) const {
-        return std::pair<uint32_t, uint32_t>(theoryId, valueId)
-            <=> std::pair<uint32_t, uint32_t>(other.theoryId, other.valueId);
-    }
     bool operator==(const Value& other) const = default;
 };
 
@@ -32,6 +28,9 @@ struct BooleanValue : Value { };
 
 //! A type value
 struct Type : Value { };
+
+//! A memory location value
+struct MemoryLocation : Value { };
 
 namespace builtins {
     inline constexpr BooleanValue true_literal = { SOLVER_INTERNAL_VARS_THEORY_ID, 0 };
@@ -56,4 +55,9 @@ struct optional_traits<check::BooleanValue> {
 template<>
 struct optional_traits<check::Type> {
     static constexpr check::Type empty_value = check::Type();
+};
+
+template<>
+struct optional_traits<check::MemoryLocation> {
+    static constexpr check::MemoryLocation empty_value = check::MemoryLocation();
 };

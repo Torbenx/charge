@@ -66,14 +66,18 @@ struct FlatTreeSet {
             }
 
             nextIndex = nodes.size();
+            int_t result = nodes.size();
             nodes.emplace_back(data, node.label.extend(c > 0));
-            return nextIndex;
+            return result;
         }
     }
 
     T& at(int_t index) { return nodes[index].data; }
+    const T& at(int_t index) const { return nodes[index].data; }
 
     uint32_t label(int_t index) const { return nodes[index].label.label(); }
+
+    int_t nodeCount() const { return nodes.size(); }
 
     std::vector<Node> nodes;
     uint32_t rootNodeIndex = NIL_INDEX;

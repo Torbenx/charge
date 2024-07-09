@@ -18,6 +18,7 @@ std::strong_ordering EqualityTheory::compare(Solver& solver, Link a, Link b) {
 }
 
 int_t EqualityTheory::equalityVariable(Solver& solver, Value a, Value b) {
+    VERIFY(a != b);
     Link l = orient(solver, a, b);
     auto cmp = [&solver](Link a, Link b) { return compare(solver, a, b); };
     int_t varId = equalities.get(l, cmp);

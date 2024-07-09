@@ -5,6 +5,7 @@ target_sources(compiler
     BasicBlock.h
     BooleanEquality.h
     BooleanVariables.h
+    EqualityInfo.h
     EqualityTheory.h
     EqualityTheory.cpp
     LiteralInfo.h

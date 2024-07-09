@@ -28,6 +28,9 @@ struct Solver {
     BooleanTheory& theoryFor(BooleanValue value) {
         return static_cast<BooleanTheory&>(*valueTheories[value.theoryId]);
     }
+    MemoryLocationTheory& theoryFor(MemoryLocation value) {
+        return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
+    }
     BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
         return theoryFor(literal).literalInfo(*this, literal);
     }
@@ -63,7 +66,7 @@ struct Solver {
     /*!
     The decision level is equal to the number of decisions that were made minus 1.
 
-    A level of -1 implies that no decision were made. If a conflict is found at this level the
+    A level of -1 implies that no decisions were made. If a conflict is found at this level the
     problem is unsatisfiable.
     */
     int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
@@ -175,7 +178,7 @@ struct Solver {
     bool tryLearn(Conflict conflict);
 
     void dumpClause(int_t clauseIndex);
-    void dumpClause(const std::vector<Literal>& clause);
+    void dumpClause(std::span<const Literal> clause);
 
     //! Revert all assignments up to and including \p level
     /*!

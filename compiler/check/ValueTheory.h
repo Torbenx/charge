@@ -24,7 +24,16 @@ struct ValueTheory {
     int_t theoryId() const { return m_theoryId; }
 
 private:
-    int_t m_theoryId;
+    uint8_t m_theoryId;
+};
+
+struct EquatableValueTheory : ValueTheory {
+    struct EqualityInfo;
+
+    using ValueTheory::ValueTheory;
+
+    virtual EqualityInfo& equalityInfo(Solver&, Value) = 0;
+    virtual void propagateEquality(Solver&, Value source, Value target) = 0;
 };
 
 struct BooleanTheory : ValueTheory {
@@ -125,6 +134,11 @@ struct SimpleBooleanTheory : BooleanTheory {
 private:
     std::vector<T> infos;
     int_t find = 0;
+};
+
+struct MemoryLocationTheory : ValueTheory {
+    //! Type of a load from the location
+    virtual Type loadedType(Solver&, MemoryLocation) = 0;
 };
 
 }

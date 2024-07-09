@@ -2,7 +2,7 @@
 struct Node: {
     next: optional{id{Node}};
 }
-fn proof_termination(first: id{Node}): {
+fn prove_termination(first: id{Node}): {
     var current = first;
     loop {
         if !current.next.has_value(): {
@@ -16,7 +16,7 @@ fn proof_termination(first: id{Node}): {
             if check == current:
                 break;
 
-            proof check.next.has_value();
+            prove check.next.has_value();
             check = check.next.value();
         }
         current = next;
@@ -36,7 +36,7 @@ struct sequence: {
 
 /*
 
-proof > runtime check > no op > assume
+prove > runtime check > no op > assume
 
 debug >= release
 debug >= runtime check
@@ -44,10 +44,10 @@ debug >= runtime check
 
 statement       | debug         | release
 ----------------|---------------|---------------
-check           | proof         | proof
-check_or_assert | proof         | runtime check
-debug check     | proof         | no op
-check_or_assume | proof         | assume
+check           | prove         | prove
+check_or_assert | prove         | runtime check
+debug check     | prove         | no op
+check_or_assume | prove         | assume
 assert          | runtime check | runtime check
 debug assert    | runtime check | no op
 assume          | runtime check | assume
@@ -55,10 +55,10 @@ assume          | runtime check | assume
 
 environment     | debug         | release
 ----------------|---------------|---------------
-check           | proof         | proof
-check_or_assert | proof         | runtime check
-debug check     | proof         | no op
-check_or_assume | proof         | assume
+check           | prove         | prove
+check_or_assert | prove         | runtime check
+debug check     | prove         | no op
+check_or_assume | prove         | assume
 <default>       | runtime check | runtime check
 debug           | runtime check | no op
 assume          | runtime check | assume

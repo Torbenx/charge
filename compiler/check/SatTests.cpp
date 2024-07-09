@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 #include <types.h>
 
-#include <check/BasicBlock.h>
+// #include <check/BasicBlock.h>
 #include <check/BooleanEquality.h>
 #include <check/EqualityTheory.h>
 #include <check/StandardEquality.h>
@@ -207,18 +207,9 @@ TEST(Check, SatProblems) {
     EXPECT_EQ(count, 80);
 }
 
-struct TestValueTheory : ValueTheory {
-    struct Equality : StandardEquality {
-        using StandardEquality::StandardEquality;
-        EqualityInfo& equalityInfo(Value v) override {
-            return infos[v.valueId];
-        }
-
-        std::vector<EqualityInfo> infos;
-    };
-
+struct TestValueTheory : EquatableValueTheory {
     TestValueTheory(Solver& solver)
-        : ValueTheory(solver), equality(solver) { }
+        : EquatableValueTheory(solver), equality(solver) { }
 
     uint64_t labelOf(Solver&, Value v) override { return baseLabel + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
@@ -226,13 +217,21 @@ struct TestValueTheory : ValueTheory {
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
 
     Value newValue() {
-        Value v { .theoryId = (uint32_t)theoryId(), .valueId = (uint32_t)equality.infos.size() };
-        equality.infos.emplace_back(v);
+        Value v { .theoryId = (uint32_t)theoryId(), .valueId = (uint32_t)infos.size() };
+        infos.emplace_back(v);
         return v;
     }
 
+    EqualityInfo& equalityInfo(Solver&, Value v) override { return infos[v.valueId]; }
+    void propagateEquality(Solver&, Value, Value) override { }
+
+    Reason equalityReason(Solver& solver, Value v1, Value v2) {
+        return equality.equalityReason(equality.variableId(equality.equality(solver, v1, v2)));
+    }
+
     uint64_t baseLabel = 0;
-    Equality equality;
+    StandardEquality equality;
+    std::vector<EqualityInfo> infos;
 };
 
 TEST(Check, EqualityTreePath1) {
@@ -242,7 +241,7 @@ TEST(Check, EqualityTreePath1) {
     Value v1 = values.newValue();
     Value v2 = values.newValue();
 
-    Reason r12 = values.equality.linkToReason({ v1, v2 });
+    Reason r12 = values.equalityReason(solver, v1, v2);
     EXPECT_FALSE(values.equality.testReason(solver, r12));
 
     BooleanValue e12 = values.equality.equality(solver, v1, v2);
@@ -289,7 +288,7 @@ TEST(Check, EqualityTreePath2) {
     solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(e23));
-    Reason r23 = values.equality.linkToReason({ v2, v3 });
+    Reason r23 = values.equalityReason(solver, v2, v3);
     EXPECT_TRUE(values.equality.testReason(solver, r23));
 
     auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r23);
@@ -316,7 +315,7 @@ TEST(Check, EqualityTreePath3) {
     solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(e12));
-    Reason r12 = values.equality.linkToReason({ v1, v2 });
+    Reason r12 = values.equalityReason(solver, v1, v2);
     EXPECT_TRUE(values.equality.testReason(solver, r12));
 
     auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
@@ -342,7 +341,7 @@ TEST(Check, EqualityTreePath4) {
     solver.propagate();
     solver.decideTrue(values.equality.equality(solver, vals[0][2], vals[0][3]));
     solver.propagate();
-    Reason r00_03 = values.equality.linkToReason({ vals[0][0], vals[0][3] });
+    Reason r00_03 = values.equalityReason(solver, vals[0][0], vals[0][3]);
     EXPECT_TRUE(values.equality.testReason(solver, r00_03));
     {
         auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r00_03);
@@ -352,6 +351,7 @@ TEST(Check, EqualityTreePath4) {
         EXPECT_TRUE(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][1], vals[0][2])) != clause.end());
         EXPECT_TRUE(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][2], vals[0][3])) != clause.end());
     }
+    solver.propagate();
 
     for (int_t i = 0; i < 4; i++) {
         solver.decideTrue(values.equality.equality(solver, vals[2][i], vals[3][i]));
@@ -362,9 +362,9 @@ TEST(Check, EqualityTreePath4) {
         solver.propagate();
     }
 
-    Reason r30_33 = values.equality.linkToReason({ vals[3][0], vals[3][3] });
+    Reason r30_33 = values.equalityReason(solver, vals[3][0], vals[3][3]);
     EXPECT_TRUE(values.equality.testReason(solver, r30_33));
-    Reason r32_33 = values.equality.linkToReason({ vals[3][2], vals[3][3] });
+    Reason r32_33 = values.equalityReason(solver, vals[3][2], vals[3][3]);
     EXPECT_TRUE(values.equality.testReason(solver, r32_33));
 
     auto testConnections = [&] {
@@ -440,7 +440,22 @@ TEST(Check, EqualityPropagation2) {
     EXPECT_TRUE(solver.hasConflicts());
 }
 
-TEST(Check, BacktrackWithEquality) {
+TEST(Check, DisequalityPropagation1) {
+    Solver solver;
+    TestValueTheory values(solver);
+    BooleanVariables bools(solver);
+    BooleanValue c = bools.positiveLiteral(bools.newVariable());
+    Value s = values.newValue();
+    Value t1 = values.newValue();
+    Value t2 = values.newValue();
+    solver.addClause({ c, values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2) });
+    solver.addClause({ values.equality.disequality(solver, s, t1) });
+    solver.addClause({ values.equality.equality(solver, t1, t2) });
+    solver.propagate();
+    VERIFY(solver.assignedTrue(c));
+}
+
+TEST(Check, DisequalityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
     BooleanVariables bools(solver);
@@ -452,15 +467,64 @@ TEST(Check, BacktrackWithEquality) {
     solver.addClause({ values.equality.equality(solver, t1, t2) });
     solver.addClause({ values.equality.disequality(solver, s, t1) });
     solver.propagate();
+    VERIFY(solver.assignedTrue(c));
+}
+
+TEST(Check, EqualityProblem) {
+    Solver solver;
+    TestValueTheory values(solver);
+    Value s = values.newValue();
+    Value t1 = values.newValue();
+    Value t2 = values.newValue();
+    Value t3 = values.newValue();
+
+    solver.addClause({ values.equality.disequality(solver, s, t1), values.equality.disequality(solver, s, t2), values.equality.equality(solver, s, t3) });
+    solver.addClause({ values.equality.disequality(solver, s, t1), values.equality.equality(solver, s, t2), values.equality.disequality(solver, s, t3) });
+    solver.addClause({ values.equality.equality(solver, s, t1), values.equality.disequality(solver, s, t2), values.equality.disequality(solver, s, t3) });
+
+    solver.addClause({ values.equality.disequality(solver, t1, t2), values.equality.disequality(solver, t1, t3) });
+    solver.addClause({ values.equality.equality(solver, t1, t2), values.equality.equality(solver, t1, t3), values.equality.equality(solver, t2, t3) });
+
+    solver.addClause({ values.equality.disequality(solver, t1, t2), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2)  });
+    solver.addClause({ values.equality.disequality(solver, t1, t3), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t3)  });
+    solver.addClause({ values.equality.disequality(solver, t2, t3), values.equality.equality(solver, s, t2), values.equality.equality(solver, s, t3)  });
+
+    solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
 
-    solver.decideTrue(solver.negate(c));
-    solver.propagate();
-    EXPECT_TRUE(solver.hasConflicts());
-    solver.analyzeConflicts();
+    solver.decideTrue(values.equality.equality(solver, s, t1));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
-    EXPECT_TRUE(solver.assignedTrue(c));
+
+    solver.decideTrue(values.equality.equality(solver, s, t2));
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+
+    EXPECT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+
+    EXPECT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    solver.decideTrue(values.equality.equality(solver, s, t2));
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+
+    EXPECT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    solver.decideTrue(values.equality.equality(solver, s, t3));
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+
+    EXPECT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+
+    EXPECT_FALSE(solver.analyzeConflicts());
 }
 
 TEST(Check, TreeLabel) {
@@ -485,5 +549,20 @@ TEST(Check, TreeLabel) {
     EXPECT_EQ(root.extend(true).extend(false).depth(), 2);
     EXPECT_EQ(root.extend(true).extend(true).depth(), 2);
 }
+
+/*TEST(Check, BasicBlocks) {
+    Solver solver;
+    BlockManager manager(solver);
+    TestValueTheory values(solver);
+    Loads loads(solver);
+
+    MemoryLocation x = {}; // TODO
+    Value v1 = values.newValue();
+    Value v2 = values.newValue();
+    solver.addClause({ values.equality.disequality(solver, v1, v2) });
+    manager.store(x, v1);
+    manager.branch(values.equality.disequality(solver, loads.load(x), v1), [&]() { manager.proveUnreachable(); });
+    manager.branch(values.equality.equality(solver, loads.load(x), v2), [&]() { manager.proveUnreachable(); });
+}*/
 
 }
