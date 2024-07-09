@@ -1,7 +1,7 @@
 #pragma once
 
-#include <check/Reason.h>
 #include <check/BooleanVariables.h>
+#include <check/Reason.h>
 
 #include <bit>
 
@@ -203,8 +203,8 @@ struct Solver {
     }
 
 private:
-    struct ExplicitReasons : ReasonTheory {
-        ExplicitReasons(Solver& solver);
+    struct Clauses : ReasonTheory {
+        Clauses(Solver& solver);
         bool testReason(Solver&, const Reason& reason) override;
         ClauseAndIndex reasonToClause(Solver&, const Reason& reason) override;
         void newDecisionLevel(Solver&) override;
@@ -214,6 +214,27 @@ private:
         void reapplyFalseAssignment(Solver&, BooleanValue);
         void unapplyFalseAssignment(Solver&, BooleanValue);
         LiteralInstance asInstance(const Reason& reason);
+        Reason makeReason(int_t clauseIndex, int_t literalIndex);
+
+        void addClause(Solver&, std::vector<Literal> clause);
+
+        void checkInvariances(Solver&);
+
+        //! Bitmasks for the clauses
+        /*!
+        The mask will contain a 1 for literals that are not false. That is for all literals that are
+        either true or unassigned. If all literals in a clause except one are false, i.e. if this mask
+        has exactly one bit set, the remaining literal must be true for the clause to be true.
+        Detecting this case is the primary purpose of these masks.
+
+        The updating of the masks is done in propagate() and backtrack(). propagate() will propagate
+        already made false assignments to the masks by clearing the appropiate bits. While backtrack()
+        will set the bits for the literals that are detected to be no longer assigned.
+        */
+        std::vector<clause_mask_t> clauseMasks;
+
+        //! The actual clauses, just arrays of literals
+        std::vector<std::vector<Literal>> clauses;
     };
 
     //! An entry in the trace
@@ -235,7 +256,8 @@ private:
         return trace[pos.index];
     }
 
-    Reason makeClauseReason(int_t clauseIndex, int_t literalIndex);
+    //! Collect all reason for \p trueLit to be true
+    std::vector<Reason> collectReasons(Literal trueLit);
 
     friend ValueTheory;
     //! Attch a new theory to the solver
@@ -258,22 +280,6 @@ private:
     This is useful for reason theories that lazily generate clauses.
     */
     std::vector<BooleanValue> m_scratchClause;
-
-    //! Bitmasks for the clauses
-    /*!
-    The mask will contain a 1 for literals that are not false. That is for all literals that are
-    either true or unassigned. If all literals in a clause except one are false, i.e. if this mask
-    has exactly one bit set, the remaining literal must be true for the clause to be true.
-    Detecting this case is the primary purpose of these masks.
-
-    The updating of the masks is done in propagate() and backtrack(). propagate() will propagate
-    already made false assignments to the masks by clearing the appropiate bits. While backtrack()
-    will set the bits for the literals that are detected to be no longer assigned.
-    */
-    std::vector<clause_mask_t> clauseMasks;
-
-    //! The actual clauses, just arrays of literals
-    std::vector<std::vector<Literal>> clauses;
 
     //! Trace of reasons
     std::vector<TraceEntry> trace;
@@ -304,7 +310,7 @@ private:
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 
     BooleanVariables internalVariables;
-    ExplicitReasons explicitReasons;
+    Clauses clauses;
 };
 
 }

@@ -128,6 +128,7 @@ TEST(Check, MergeLists) {
     mergeUnmerge({ 0, 2, 4, 6 }, {});
     mergeUnmerge({}, { 0, 2, 4, 6 });
     mergeUnmerge({ 0, 2, 4, 6 }, { 1, 3, 5, 7 });
+    mergeUnmerge({ 1, 3, 5, 7 }, { 0, 2, 4, 6 });
     mergeUnmerge({ 1, 2, 3, 7, 8, 9 }, { 4, 5, 6 });
 }
 

@@ -27,44 +27,44 @@ namespace {
     static constexpr int_t EXPLICIT_REASONS_THEORY_ID = 0;
 }
 
-Solver::ExplicitReasons::ExplicitReasons(Solver& solver)
+Solver::Clauses::Clauses(Solver& solver)
     : ReasonTheory(solver, true) { }
 
-Reason Solver::makeClauseReason(int_t clauseIndex, int_t literalIndex) {
+Reason Solver::Clauses::makeReason(int_t clauseIndex, int_t literalIndex) {
     return { .reasonTheory = EXPLICIT_REASONS_THEORY_ID, .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
 }
 
-bool Solver::ExplicitReasons::testReason(Solver& solver, const Reason& reason) {
+bool Solver::Clauses::testReason(Solver&, const Reason& reason) {
     int_t clauseIndex = reason.data1;
-    return std::popcount(solver.clauseMasks[clauseIndex]) == 1;
+    return std::popcount(clauseMasks[clauseIndex]) == 1;
 }
 
-ReasonTheory::ClauseAndIndex Solver::ExplicitReasons::reasonToClause(Solver& solver, const Reason& reason) {
+ReasonTheory::ClauseAndIndex Solver::Clauses::reasonToClause(Solver&, const Reason& reason) {
     int_t clauseIndex = reason.data1;
     int_t literalIndex = reason.data0;
-    return { solver.clauses[clauseIndex], literalIndex };
+    return { clauses[clauseIndex], literalIndex };
 }
 
-LiteralInstance Solver::ExplicitReasons::asInstance(const Reason& reason) {
+LiteralInstance Solver::Clauses::asInstance(const Reason& reason) {
     int_t clauseIndex = reason.data1;
     int_t literalIndex = reason.data0;
     return { (uint32_t)literalIndex, (uint32_t)clauseIndex };
 }
 
-void Solver::ExplicitReasons::newDecisionLevel(Solver&) { }
+void Solver::Clauses::newDecisionLevel(Solver&) { }
 
-void Solver::ExplicitReasons::backtrack(Solver&) { }
+void Solver::Clauses::backtrack(Solver&) { }
 
-void Solver::ExplicitReasons::reapplyFalseAssignment(Solver&, BooleanValue) { }
+void Solver::Clauses::reapplyFalseAssignment(Solver&, BooleanValue) { }
 
-void Solver::ExplicitReasons::propagateFalseAssignment(Solver& solver, BooleanValue literal) {
+void Solver::Clauses::propagateFalseAssignment(Solver& solver, BooleanValue literal) {
     auto& literalTheory = solver.theoryFor(literal);
     const auto& info = literalTheory.literalInfo(solver, literal);
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
     for (auto inst : info.instances) {
-        clause_mask_t& clauseMask = solver.clauseMasks[inst.clauseIndex];
+        clause_mask_t& clauseMask = clauseMasks[inst.clauseIndex];
         // Perform the popcount before we clear the bit so the operations can be executed in parallel
         int popcnt = std::popcount(clauseMask);
 
@@ -83,24 +83,46 @@ void Solver::ExplicitReasons::propagateFalseAssignment(Solver& solver, BooleanVa
 
         // Unit clause propagation:
         // All other literals in this clause are false thus the last one must be true.
-        const auto& clause = solver.clauses[inst.clauseIndex];
+        const auto& clause = clauses[inst.clauseIndex];
 
         int_t trueLitIndex = std::countr_zero(clauseMask);
         Literal trueLit = clause[trueLitIndex];
-        solver.assignTrue(trueLit, solver.makeClauseReason(inst.clauseIndex, trueLitIndex));
+        solver.assignTrue(trueLit, makeReason(inst.clauseIndex, trueLitIndex));
     }
 }
 
-void Solver::ExplicitReasons::unapplyFalseAssignment(Solver& solver, BooleanValue literal) {
+void Solver::Clauses::unapplyFalseAssignment(Solver& solver, BooleanValue literal) {
     for (auto inst : solver.infoFor(literal).instances) {
-        auto& clauseMask = solver.clauseMasks[inst.clauseIndex];
+        auto& clauseMask = clauseMasks[inst.clauseIndex];
         auto mask = literalMask(inst.literalIndex);
         clauseMask |= mask;
     }
 }
 
+void Solver::Clauses::addClause(Solver& solver, std::vector<Literal> clause) {
+    VERIFY(!clause.empty());
+    VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE);
+    VERIFY(clauses.size() == clauseMasks.size());
+    int_t clauseIndex = clauses.size();
+    clause_mask_t mask = 0;
+    for (int_t index = 0; index < (int_t)clause.size(); index++) {
+        LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
+        Literal lit = clause[index];
+        solver.infoFor(lit).instances.push_back(inst);
+        if (!solver.assignedFalseAndPropagated(lit))
+            mask |= literalMask(index);
+    }
+    VERIFY(mask != 0);
+    if (std::popcount(mask) == 1) {
+        int_t index = std::countr_zero(mask);
+        solver.assignTrue(clause[index], makeReason(clauseIndex, index));
+    }
+    clauses.emplace_back(std::move(clause));
+    clauseMasks.push_back(mask);
+}
+
 Solver::Solver()
-    : internalVariables(*this), explicitReasons(*this) {
+    : internalVariables(*this), clauses(*this) {
     {
         int_t id = internalVariables.newVariable();
         VERIFY(internalVariables.positiveLiteral(id) == builtins::true_literal);
@@ -114,32 +136,10 @@ std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
     return { internalVariables.positiveLiteral(varId), internalVariables.negativeLiteral(varId) };
 }
 
-void Solver::addClauseInternal(std::vector<Literal> clause) {
-    VERIFY(!clause.empty());
-    VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE);
-    VERIFY(clauses.size() == clauseMasks.size());
-    int_t clauseIndex = clauses.size();
-    clause_mask_t mask = 0;
-    for (int_t index = 0; index < (int_t)clause.size(); index++) {
-        LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
-        Literal lit = clause[index];
-        infoFor(lit).instances.push_back(inst);
-        if (!assignedFalseAndPropagated(lit))
-            mask |= literalMask(index);
-    }
-    VERIFY(mask != 0);
-    if (std::popcount(mask) == 1) {
-        int_t index = std::countr_zero(mask);
-        assignTrue(clause[index], makeClauseReason(clauseIndex, index));
-    }
-    clauses.emplace_back(std::move(clause));
-    clauseMasks.push_back(mask);
-}
-
 void Solver::addClause(std::vector<Literal> clause) {
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
     if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
-        addClauseInternal(std::move(clause));
+        clauses.addClause(*this, std::move(clause));
         return;
     }
     // clause.size <= (MAX_CLAUSE_SIZE - extraClauses) + extraClauses * (MAX_CLAUSE_SIZE - 1)
@@ -171,12 +171,12 @@ void Solver::addClause(std::vector<Literal> clause) {
         take(extraClause, MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
         // fmt::print("extra: "); dumpClause(extraClause);
-        addClauseInternal(std::move(extraClause));
+        clauses.addClause(*this, std::move(extraClause));
     }
 
     VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
     // fmt::print("primary: "); dumpClause(primaryClause);
-    addClauseInternal(std::move(primaryClause));
+    clauses.addClause(*this, std::move(primaryClause));
 
     VERIFY(takenCount == (int_t)clause.size());
 }
@@ -228,7 +228,7 @@ bool Solver::propagate() {
         removeFirstPropagation();
 
         literalTheory.propagateFalseAssignment(*this, literal);
-        explicitReasons.propagateFalseAssignment(*this, literal);
+        clauses.propagateFalseAssignment(*this, literal);
 
         if (!conflicts.empty())
             return false;
@@ -237,7 +237,7 @@ bool Solver::propagate() {
 }
 
 void Solver::dumpClause(int_t clauseIndex) {
-    dumpClause(clauses[clauseIndex]);
+    dumpClause(clauses.clauses[clauseIndex]);
 }
 void Solver::dumpClause(std::span<const Literal> clause) {
     for (auto lit : clause)
@@ -440,7 +440,7 @@ void Solver::backtrack(int_t targetLevel) {
                 subTrace.push_back({ entry.literal, entry.reason });
                 if (assignedFalseAndPropagated(entry.literal)) {
                     theory.unapplyFalseAssignment(*this, entry.literal);
-                    explicitReasons.unapplyFalseAssignment(*this, entry.literal);
+                    clauses.unapplyFalseAssignment(*this, entry.literal);
                     queuePropagation(entry.literal);
                 }
             }
@@ -461,7 +461,7 @@ void Solver::backtrack(int_t targetLevel) {
             if (info.firstReason.value() == position) {
                 if (assignedFalseAndPropagated(entry.literal)) {
                     theory.reapplyFalseAssignment(*this, entry.literal);
-                    explicitReasons.reapplyFalseAssignment(*this, entry.literal);
+                    clauses.reapplyFalseAssignment(*this, entry.literal);
                 }
             }
             *(entry.prevReason.has_value() ? &at(*entry.prevReason).nextReason : &info.firstReason) = writePosition;
@@ -474,6 +474,25 @@ void Solver::backtrack(int_t targetLevel) {
     trace.resize(writePosition.index);
 
     // checkInvariances();
+}
+
+std::vector<Reason> Solver::collectReasons(Literal trueLit) {
+    auto& theory = theoryFor(trueLit);
+    Literal falseLit = theory.negate(*this, trueLit);
+    const auto& info = theory.literalInfo(*this, falseLit);
+    VERIFY(info.assignedFalse());
+
+    VERIFY(info.firstReason.has_value());
+    VERIFY(info.lastReason.has_value());
+    std::vector<Reason> result;
+    TracePosition pos = info.firstReason.value();
+    for (;;) {
+        result.push_back(at(pos).reason);
+        if (!at(pos).nextReason.has_value())
+            break;
+        pos = at(pos).nextReason.value();
+    }
+    return result;
 }
 
 void Solver::checkInvariances() {
@@ -509,48 +528,6 @@ void Solver::checkInvariances() {
             bTheory->enumerateValues(*this, checkLiteral);
     }
 
-    // check clause masks
-    VERIFY(clauses.size() == clauseMasks.size());
-    for (int_t clauseIndex = 0; clauseIndex < (int_t)clauses.size(); clauseIndex++) {
-        auto mask = clauseMasks[clauseIndex];
-        const auto& clause = clauses[clauseIndex];
-        // VERIFY((mask & (literalMask(clause.size()) - (clause_mask_t)1)) == mask);
-        for (int_t index = 0; index < (int_t)clause.size(); index++) {
-            bool bitSet = (mask & literalMask(index)) != 0;
-            VERIFY(bitSet == !assignedFalseAndPropagated(clause[index]));
-        }
-        if (std::popcount(mask) == 1) {
-            int_t index = std::countr_zero(mask);
-            Literal trueLit = clause[index];
-            auto& theory = theoryFor(trueLit);
-            Literal falseLit = theory.negate(*this, trueLit);
-            const auto& info = theory.literalInfo(*this, falseLit);
-            VERIFY(info.assignedFalse());
-
-            VERIFY(info.firstReason.has_value());
-            VERIFY(info.lastReason.has_value());
-            TracePosition pos = info.firstReason.value();
-            for (;;) {
-                if (at(pos).reason.reasonTheory == EXPLICIT_REASONS_THEORY_ID) {
-                    auto inst = explicitReasons.asInstance(at(pos).reason);
-                    if ((int_t)inst.clauseIndex == clauseIndex) {
-                        VERIFY(mask == literalMask(inst.literalIndex));
-                        break;
-                    }
-                }
-                VERIFY(at(pos).nextReason.has_value());
-                pos = at(pos).nextReason.value();
-            }
-
-            for (Literal lit : clause) {
-                if (lit != trueLit) {
-                    VERIFY(infoFor(lit).assignedFalse());
-                    VERIFY(infoFor(lit).firstReason.value() < pos);
-                }
-            }
-        }
-    }
-
     // check decisions
     for (int_t level = 0; level < (int_t)decisions.size(); level++) {
         VERIFY(at(decisions[level]).reason.isDecision());
@@ -569,10 +546,48 @@ void Solver::checkInvariances() {
         }
         VERIFY(current == lastPropagation.value());
     }
+
+    clauses.checkInvariances(*this);
+}
+
+void Solver::Clauses::checkInvariances(Solver& solver) {
+    // check clause masks
+    VERIFY(clauses.size() == clauseMasks.size());
+    for (int_t clauseIndex = 0; clauseIndex < (int_t)clauses.size(); clauseIndex++) {
+        auto mask = clauseMasks[clauseIndex];
+        const auto& clause = clauses[clauseIndex];
+        // VERIFY((mask & (literalMask(clause.size()) - (clause_mask_t)1)) == mask);
+        for (int_t index = 0; index < (int_t)clause.size(); index++) {
+            bool bitSet = (mask & literalMask(index)) != 0;
+            VERIFY(bitSet == !solver.assignedFalseAndPropagated(clause[index]));
+        }
+        if (std::popcount(mask) == 1) {
+            int_t index = std::countr_zero(mask);
+            Literal trueLit = clause[index];
+            auto reasons = solver.collectReasons(trueLit);
+            VERIFY(std::any_of(reasons.begin(), reasons.end(), [&](Reason reason) {
+                if (reason.reasonTheory == EXPLICIT_REASONS_THEORY_ID) {
+                    auto inst = asInstance(reason);
+                    if ((int_t)inst.clauseIndex == clauseIndex) {
+                        VERIFY(mask == literalMask(inst.literalIndex));
+                        return true;
+                    }
+                }
+                return false;
+            }));
+
+            for (Literal lit : clause) {
+                if (lit != trueLit) {
+                    VERIFY(solver.infoFor(lit).assignedFalse());
+                    // VERIFY(solver.infoFor(lit).firstReason.value() < pos);
+                }
+            }
+        }
+    }
 }
 
 bool Solver::checkAssignment() {
-    for (const auto& clause : clauses) {
+    for (const auto& clause : clauses.clauses) {
         bool foundTrue = false;
         std::optional<Literal> unassignedInternal;
         for (Literal lit : clause) {
