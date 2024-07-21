@@ -118,6 +118,21 @@ struct CallMe: { t: type; }
 // expect-type CallMe
 static callConstructor = CallMe(X);
 
+struct CallMe2: { has type; }
+// expect-type CallMe2
+static callConstructor2 = CallMe2(X);
+
 template(T: type) struct CallMeT: { t: T; }
 // expect-type CallMeT{X}
 static callConstructorT = CallMeT(X());
+
+struct Base: { static MyX: type = X; }
+struct Derived: {
+    has Base;
+    // expect-value X
+    static MyXinDerived = MyX;
+}
+// expect-value X
+static BaseMyX = Base::MyX;
+// expect-value X
+static DerivedMyX = Derived::MyX;

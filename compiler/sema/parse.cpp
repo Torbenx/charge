@@ -224,6 +224,9 @@ void Generator::visitPostfixExpr() {
         } else if (tok->kind() == Token::StaticAccessExpr) {
             generateStaticAccessExpr();
             advance();
+        } else if (tok->kind() == Token::MemberAccessExpr) {
+            generateMemberAccessExpr();
+            advance();
         } else {
             break;
         }

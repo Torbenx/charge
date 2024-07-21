@@ -3856,9 +3856,9 @@ member_declaration$as_then:
                 declarationBegin = state.parseOutput.currentToken();
                 // commitDeclaration DeclarationKind::HasMember
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
-                // emitToken TokenKind::HasMemberDecl
+                // emitToken TokenKind::HasMemberDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
-                carriedEmitTokenData = 0;
+                carriedEmitTokenData = this_declaration.toUint();
                 // next expression
                 goto expression$with_emit;
             }

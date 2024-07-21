@@ -4,12 +4,14 @@
 
 namespace sema {
 
-#define ENUMERATE_NODE_KINDS        \
-    KIND(ReferenceExpr, Reference)  \
-    KIND(ConstantExpr, Pure)        \
-    KIND(CallExpr, Owning)          \
-    KIND(LetDecl, Statement)        \
-    KIND(ExpressionStmt, Statement) \
+#define ENUMERATE_NODE_KINDS             \
+    KIND(ReferenceExpr, Reference)       \
+    KIND(ReferenceMemberExpr, Reference) \
+    KIND(ConstantExpr, Pure)             \
+    KIND(CallExpr, Owning)               \
+    KIND(OwningMemberExpr, Owning)       \
+    KIND(LetDecl, Statement)             \
+    KIND(ExpressionStmt, Statement)      \
     KIND(Function, Statement)
 
 enum class NodeKind : uint8_t {

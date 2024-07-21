@@ -168,9 +168,9 @@ void Generator::generateIdentifierExpr() {
         }
         case LookupContext::Kind::Type: {
             TypeProgram* prog = lookupCtx.getType();
-            auto result = prog->getDeclaration(name);
+            auto result = lookupInType(prog, identityParameterMap(prog), name);
             if (result.has_value()) {
-                emitConstantExpr(tok->location(), generateDeclarationLiteral(result.value(), identityParameterMap(prog)));
+                emitConstantExpr(tok->location(), result.value());
                 return;
             }
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
@@ -310,6 +310,29 @@ void Generator::generateCallExpr(CallTarget target, int_t argumentCount) {
     VERIFY_NOT_REACHED();
 }
 
+std::optional<Value> Generator::lookupInType(TypeProgram* typeProg, std::span<const Value> arguments, Word name) {
+    auto maybeDecl = typeProg->getDeclaration(name);
+    if (maybeDecl.has_value())
+        return generateDeclarationLiteral(maybeDecl.value(), arguments);
+
+    std::optional<Value> result;
+    for (const auto& member : typeProg->runtimeParameters) {
+        if (member.kind() != RuntimeParameterKind::HasMember)
+            continue;
+        Type baseType = member.type();
+        if (baseType.kind() == ValueKind::Program || baseType.kind() == ValueKind::Parameterize) {
+            FoldBase base = asFoldBase(baseType);
+            VERIFY(base.program->kind() == ProgramKind::Type);
+            auto maybeValue = lookupInType(static_cast<TypeProgram*>(base.program), base.arguments, name);
+            if (maybeValue.has_value()) {
+                VERIFY(!result.has_value());
+                result = maybeValue;
+            }
+        }
+    }
+    return result;
+}
+
 void Generator::generateStaticAccessExpr() {
     Word name = Word::fromUint(tok->data());
     Value baseValue = makeExpressionValue();
@@ -321,14 +344,16 @@ void Generator::generateStaticAccessExpr() {
     if (baseValue.kind() == ValueKind::Program || baseValue.kind() == ValueKind::Parameterize) {
         FoldBase base = asFoldBase(baseValue);
         VERIFY(base.program->kind() == ProgramKind::Type);
-        auto* typeProg = static_cast<TypeProgram*>(base.program);
-        auto maybeDecl = typeProg->getDeclaration(name);
-        if (maybeDecl.has_value()) {
-            emitConstantExpr(tok->location(), generateDeclarationLiteral(maybeDecl.value(), base.arguments));
-            return;
-        }
-        VERIFY_NOT_REACHED(); // TODO: Members
+        auto maybeValue = lookupInType(static_cast<TypeProgram*>(base.program), base.arguments, name);
+        VERIFY(maybeValue.has_value());
+        return emitConstantExpr(tok->location(), maybeValue.value());
     }
+    VERIFY_NOT_REACHED();
+}
+
+void Generator::generateMemberAccessExpr() {
+    Word name = Word::fromUint(tok->data());
+    Type baseType = topExpression().type();
 }
 
 void Generator::implicitToType() {

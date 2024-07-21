@@ -261,7 +261,9 @@ struct Generator {
     void generateParameterizeExpr(int_t argumentCount);
     CallTarget resolveCallTarget();
     void generateCallExpr(CallTarget base, int_t argumentCount);
+    std::optional<Value> lookupInType(TypeProgram* typeProg, std::span<const Value> arguments, Word name);
     void generateStaticAccessExpr();
+    void generateMemberAccessExpr();
 
     Value inheriteParameters(ScopeValue parent);
 

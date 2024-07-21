@@ -575,7 +575,7 @@ LinearState member_declaration() then templated_declaration
         pushScope ScopeKind::HasTypeExpr
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::HasMember
-        emitToken TokenKind::HasMemberDecl
+        emitToken TokenKind::HasMemberDecl, this_declaration
         next expression
     identifier
         rememberDeclarationBegin
