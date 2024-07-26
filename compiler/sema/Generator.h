@@ -236,6 +236,7 @@ struct Generator {
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
     static void generateBuiltins(Context& context);
+
     FoldBase asFoldBase(Value value);
     std::optional<FoldBase> tryAsFoldBase(Value value);
     Value fold(Value base, ExternValue v);
@@ -244,6 +245,8 @@ struct Generator {
     FoldBase selfFold();
     DeductionState selfDeduction();
 
+    RuntimeParameter member(MemberPointer pointer);
+    Type memberType(MemberPointer pointer);
     Type typeOf(Value value);
     Type verifyType(Value value);
 
@@ -263,6 +266,9 @@ struct Generator {
     void generateCallExpr(CallTarget base, int_t argumentCount);
     std::optional<Value> lookupInType(TypeProgram* typeProg, std::span<const Value> arguments, Word name);
     void generateStaticAccessExpr();
+    struct MemberAccessState;
+    void emitMemberAccessExpr(MemberAccessState& state);
+    void generateMemberAccessExprInside(MemberAccessState& state, Type type, Word name);
     void generateMemberAccessExpr();
 
     Value inheriteParameters(ScopeValue parent);
@@ -274,7 +280,7 @@ struct Generator {
 
     void implicitToType();
     void implicitCastTo(DeductionState& state, ExternValue);
-    Value implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
+    void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
     void emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data);
     void emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data);

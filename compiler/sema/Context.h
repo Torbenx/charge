@@ -48,7 +48,7 @@ struct Context {
             scope->addDeclaration(name, (ScopeValue)progHandle);
 
         if (kind == ProgramKind::Type) {
-            pushScope((ScopeValue)progHandle, static_cast<TypeProgram*>(program(progHandle)));
+            pushScope((ScopeValue)progHandle, cast<TypeProgram>(program(progHandle)));
         } else {
             pushEmptyScope((ScopeValue)progHandle);
         }

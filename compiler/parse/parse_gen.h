@@ -47,6 +47,9 @@ inline constexpr ConstWordStringTable words {
     "function_signature",
     "function_id",
     "sig",
+    "parent_type",
+    "member_type",
+    "member_ptr",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (

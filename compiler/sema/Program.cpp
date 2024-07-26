@@ -28,4 +28,11 @@ Value Program::addRemoteExpression(Value base, uint32_t expressionIndex) {
     return Value(ValueKind::RemoteExpression, id);
 }
 
+Value Program::addMemberPointer(Type parent, uint32_t memberIndex) {
+    auto id = valueData.size();
+    valueData.push_back(Value(ValueKind::MemberPointer, memberIndex));
+    valueData.push_back(parent);
+    return Value(ValueKind::MemberPointer, id);
+}
+
 }

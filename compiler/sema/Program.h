@@ -7,6 +7,7 @@
 namespace sema {
 
 struct Context;
+struct RuntimeParameter;
 
 namespace builtins {
 
@@ -47,6 +48,10 @@ struct Parameterize {
 struct RemoteExpression {
     Value base;
     uint32_t expressionIndex;
+};
+struct MemberPointer {
+    Type parentType; // always non-dependent
+    uint32_t memberIndex;
 };
 
 enum class ProgramStatus : uint8_t {
@@ -102,6 +107,9 @@ private:
         case ValueKind::RemoteExpression:
             m_pos += 2;
             break;
+        case ValueKind::MemberPointer:
+            m_pos += 2;
+            break;
         default:
             VERIFY_NOT_REACHED();
         }
@@ -109,6 +117,7 @@ private:
     Value* m_begin = nullptr;
     Value* m_pos = nullptr;
 };
+static_assert(std::forward_iterator<DataValueIterator>);
 
 struct DataValueRange {
     DataValueIterator begin() const {
@@ -138,8 +147,19 @@ struct Program {
 
     int_t importNode(Node* node);
     Value addExpression(Node* expr);
+
     Value addRemoteExpression(Value base, uint32_t expressionIndex);
+    Value addRemoteExpression(RemoteExpression expr) {
+        return addRemoteExpression(expr.base, expr.expressionIndex);
+    }
+
     Value addParameterize(ProgramHandle base, std::span<const Value> arguments);
+
+    Value addMemberPointer(Type parent, uint32_t memberIndex);
+    Value addMemberPointer(MemberPointer pointer) {
+        return addMemberPointer(pointer.parentType, pointer.memberIndex);
+    }
+
     RemoteExpression getRemoteExpression(ExternValue value) {
         VERIFY(value.kind() == ValueKind::RemoteExpression);
         Value* begin = &valueData[value.id()];
@@ -151,6 +171,11 @@ struct Program {
         Value* begin = &valueData[value.id()];
         int_t argumentCount = begin[0].id();
         return Parameterize { begin[1].program(), { begin + 2, (size_t)argumentCount } };
+    }
+    MemberPointer getMemberPointer(ExternValue value) {
+        VERIFY(value.kind() == ValueKind::MemberPointer);
+        Value* begin = &valueData[value.id()];
+        return { (Type)begin[1], begin[0].id() };
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -209,6 +234,14 @@ struct Program {
         if (value.kind() == ValueKind::Namespace)
             return translate(value.nsHandle());
         return value;
+    }
+
+    ProgramHandle baseProgram(ExternValue value) {
+        if (value.kind() == ValueKind::Program)
+            return value.program();
+        if (value.kind() == ValueKind::Parameterize)
+            return getParameterize(value).base;
+        VERIFY_NOT_REACHED();
     }
 
 public:
@@ -333,6 +366,32 @@ struct TypeProgram : CallableProgram, Scope {
     TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Type, name, parseLocation, rawParent, location) { }
 };
+
+template<typename T>
+constexpr std::optional<T*> try_cast(Program* prog) {
+    switch (prog->kind()) {
+    case ProgramKind::Value:
+        if constexpr (std::derived_from<ValueProgram, T>)
+            return static_cast<T*>(prog);
+        else
+            return std::nullopt;
+    case ProgramKind::Type:
+        if constexpr (std::derived_from<TypeProgram, T>)
+            return static_cast<T*>(prog);
+        else
+            return std::nullopt;
+    case ProgramKind::Function:
+        if constexpr (std::derived_from<FunctionProgram, T>)
+            return static_cast<T*>(prog);
+        else
+            return std::nullopt;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+template<typename T>
+constexpr T* cast(Program* prog) { return try_cast<T>(prog).value(); }
 
 union ProgramUnion {
     ValueProgram value;

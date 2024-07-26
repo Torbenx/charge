@@ -111,7 +111,7 @@ Program::Parameter Generator::visitTemplateParameter() {
 
 void Generator::visitStaticVariableDeclaration() {
     VERIFY(program->kind() == ProgramKind::Value);
-    auto* valueProgram = static_cast<ValueProgram*>(program);
+    auto* valueProgram = cast<ValueProgram>(program);
 
     VERIFY(tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl);
     bool isVar = tok->kind() == Token::StaticVarDecl;
@@ -125,7 +125,7 @@ void Generator::visitStaticVariableDeclaration() {
 
 void Generator::visitFunctionDeclaration() {
     VERIFY(program->kind() == ProgramKind::Function);
-    auto* fnProgram = static_cast<FunctionProgram*>(program);
+    auto* fnProgram = cast<FunctionProgram>(program);
 
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
@@ -170,7 +170,7 @@ void Generator::visitFunctionDeclaration() {
 
 void Generator::visitTypeDeclaration() {
     VERIFY(program->kind() == ProgramKind::Type);
-    auto* typeProgram = static_cast<TypeProgram*>(program);
+    auto* typeProgram = cast<TypeProgram>(program);
 
     VERIFY(tok->kind() == Token::StructTypeDecl || tok->kind() == Token::ObjectTypeDecl);
     advance();

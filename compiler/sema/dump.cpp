@@ -78,25 +78,29 @@ struct Dumper {
         return result;
     }
     std::string formatValue(Value v) {
+        return formatValue(program, v);
+    }
+    std::string formatValue(Program* prog, Value v) {
         if (v == INVALID_VALUE)
             return "<invalid>";
         std::string result;
         switch (v.kind()) {
         case ValueKind::Program:
-            return formatProgram(program->translate(v.program()));
+            return formatProgram(prog->translate(v.program()));
         case ValueKind::Namespace:
-            return formatNamespace(program->translate(v.nsHandle()));
+            return formatNamespace(prog->translate(v.nsHandle()));
         case ValueKind::TemplateSignature$Program:
         case ValueKind::TemplateSignature$Parameterize:
-            return "templsig(" + formatValue(v.templateSignatureBaseValue()) + ")";
+            return "templsig(" + formatValue(prog, v.templateSignatureBaseValue()) + ")";
         case ValueKind::FunctionSignature$Program:
         case ValueKind::FunctionSignature$Parameterize:
-            return "fnsig(" + formatValue(v.functionSignatureBaseValue()) + ")";
+            return "fnsig(" + formatValue(prog, v.functionSignatureBaseValue()) + ")";
         case ValueKind::Expression:
             result += "e";
             break;
         case ValueKind::Parameterize:
         case ValueKind::RemoteExpression:
+        case ValueKind::MemberPointer:
             result += "d";
             break;
         case ValueKind::Parameter:
@@ -135,6 +139,10 @@ void Dumper::dumpNode(Node* node, std::string header) {
     case NodeKind::CallExpr:
         info << formatValue(Expression(node).data().callTarget);
         break;
+    case NodeKind::ReferenceMemberExpr:
+    case NodeKind::OwningMemberExpr:
+        info << formatValue(Expression(node).data().memberPointer);
+        break;
     default:
         break;
     }
@@ -169,7 +177,7 @@ void Dumper::dumpProgram(Program* prog) {
         break;
     case ProgramKind::Function:
         dumpLine("return-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
-        dumpNode(static_cast<FunctionProgram*>(prog)->body(), "body = ");
+        dumpNode(cast<FunctionProgram>(prog)->body(), "body = ");
         break;
     default:
         break;
@@ -189,6 +197,19 @@ void Dumper::dumpProgram(Program* prog) {
         case ValueKind::RemoteExpression: {
             auto rExpr = program->getRemoteExpression(value);
             line << formatValue(rExpr.base) << "/e" << rExpr.expressionIndex;
+            break;
+        }
+        case ValueKind::MemberPointer: {
+            auto pointer = program->getMemberPointer(value);
+            line << formatValue(pointer.parentType) << ".";
+            auto* parentProg = cast<TypeProgram>(context.program(program->baseProgram(pointer.parentType)));
+            const auto& member = parentProg->runtimeParameters[pointer.memberIndex];
+            if (member.name.empty()) {
+                VERIFY(member.kind() == RuntimeParameterKind::HasMember);
+                line << "has " << formatValue(parentProg, member.type());
+            } else {
+                line << context.wordTable.view(member.name);
+            }
             break;
         }
         default:

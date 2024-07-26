@@ -17,6 +17,8 @@ BUILTIN_TEMPLATE(template_id)
 BUILTIN_TYPE(function_signature)
 BUILTIN_TEMPLATE(function_id)
 
+BUILTIN_TEMPLATE(member_ptr)
+
 #undef BUILTIN_TYPE
 #undef BUILTIN_TEMPLATE
 #undef BUILTIN

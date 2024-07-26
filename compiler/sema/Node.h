@@ -52,6 +52,7 @@ union ExprData {
     Value constant;
     Value callTarget; // either a program or a parameterize constant
     uint32_t localValueIndex;
+    Value memberPointer;
 };
 union NodeData {
     struct {

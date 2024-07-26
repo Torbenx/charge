@@ -433,21 +433,15 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         auto expr = parser.parse();
         sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
         sema::Generator::signatureCheck(context, context.programHandle(program));
-        // fmt::println("-------------------------------");
-        // program->dump(context);
+        fmt::println("-------------------------------");
+        program->dump(context);
 
-        if (word == words["expect-type"]) {
-            VERIFY(program->kind() == sema::ProgramKind::Value);
-            expr->check(context, program, (sema::Value) static_cast<sema::ValueProgram*>(program)->type());
-        }
-        if (word == words["expect-value"]) {
-            VERIFY(program->kind() == sema::ProgramKind::Value);
-            expr->check(context, program, (sema::Value) static_cast<sema::ValueProgram*>(program)->value());
-        }
-        if (word == words["expect-return-type"]) {
-            VERIFY(program->kind() == sema::ProgramKind::Function);
-            expr->check(context, program, (sema::Value) static_cast<sema::FunctionProgram*>(program)->returnType());
-        }
+        if (word == words["expect-type"])
+            expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->type());
+        if (word == words["expect-value"])
+            expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->value());
+        if (word == words["expect-return-type"])
+            expr->check(context, program, (sema::Value) cast<sema::FunctionProgram>(program)->returnType());
     }
 
     Command popCommand(Word cause) {

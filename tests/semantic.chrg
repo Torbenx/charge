@@ -136,3 +136,11 @@ struct Derived: {
 static BaseMyX = Base::MyX;
 // expect-value X
 static DerivedMyX = Derived::MyX;
+
+struct WithMember: { member: X; }
+// expect-type X
+static AccessMember = WithMember(X()).member;
+
+struct DerivedWithMember: { has WithMember; }
+// expect-type X
+static AccessDerivedMember = DerivedWithMember(WithMember(X())).member;

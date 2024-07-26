@@ -41,6 +41,7 @@ enum class ValueKind : uint8_t {
     Parameterize, // either all argument substituted or just the inherited ones
     Expression,
     RemoteExpression,
+    MemberPointer,
     Invalid = 15,
 };
 struct Value {
