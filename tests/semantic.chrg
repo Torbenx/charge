@@ -143,4 +143,14 @@ static AccessMember = WithMember(X()).member;
 
 struct DerivedWithMember: { has WithMember; }
 // expect-type X
-static AccessDerivedMember = DerivedWithMember(WithMember(X())).member;
+static accessDerivedMember = DerivedWithMember(WithMember(X())).member;
+
+// expect-return-type X
+fn accessDerivedMember2(w: DerivedWithMember) => w.member;
+
+// expect-return-type X
+fn withBody1() -> X: { }
+// expect-return-type X
+fn withBody2() -> X: { withBody1(); }
+// expect-return-type X
+fn withBody3() -> X: withBody1();

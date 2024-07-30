@@ -227,6 +227,7 @@ struct Generator {
     void visitFunctionDeclaration();
     void visitTypeDeclaration();
 
+    void visitStatement();
     void visitExpression();
     void visitBinaryExpr();
     void visitUnaryExpr();

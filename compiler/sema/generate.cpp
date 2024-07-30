@@ -359,11 +359,13 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
     state.emitted = true;
     auto origExpr = topExpression();
     Type parentType = origExpr.type();
-    if (origExpr.category() == NodeCategory::Pure) {
-        // TODO: Implement (requires P- to R-Value conversion)
+    if (origExpr.category() == NodeCategory::PValue) {
+        emitExpr(NodeKind::PureInstantiationExpr, tok->location(), 1, parentType, {});
+        emitMemberAccessExpr(state);
+        emitExpr(NodeKind::PurifyExpr, tok->location(), 1, topExpression().type(), {});
         VERIFY_NOT_REACHED();
     }
-    NodeKind nodeKind = origExpr.category() == NodeCategory::Reference ? NodeKind::ReferenceMemberExpr : NodeKind::OwningMemberExpr;
+    NodeKind nodeKind = origExpr.category() == NodeCategory::LValue ? NodeKind::LMemberAccessExpr : NodeKind::RMemberAccessExpr;
     for (uint32_t memberIndex : state.memberIndicies) {
         MemberPointer memberPointer { parentType, memberIndex };
         Type mType = memberType(memberPointer);

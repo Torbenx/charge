@@ -149,23 +149,27 @@ void Generator::visitFunctionDeclaration() {
     if (tok->kind() == Token::BodyExpr) {
         advance();
         visitExpression();
-        program->setType(topExpression().type());
         VERIFY(tok->kind() == Token::ExpressionStmt);
-        emitNode(NodeKind::Function, {}, nodeStack.size() - stackSizeAtBegin, NodeData { .empty {} });
-        VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
-        fnProgram->setBody(topNode());
-        popNode();
+        advance();
+
+        program->setType(topExpression().type());
     } else {
-        std::optional<Type> type;
         if (tok->kind() == Token::ReturnType) {
             advance();
             visitExpression();
-            type = verifyType(makeExpressionValue());
+            program->setType(verifyType(makeExpressionValue()));
+        } else {
+            // TODO: Implement return type deduction
+            VERIFY_NOT_REACHED();
         }
         VERIFY(tok->kind() == Token::FunctionBody);
-        // ... visit statement
-        VERIFY_NOT_REACHED();
+        advance();
+        visitStatement();
     }
+    emitNode(NodeKind::Function, {}, nodeStack.size() - stackSizeAtBegin, NodeData { .empty {} });
+    VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
+    fnProgram->setBody(topNode());
+    popNode();
 }
 
 void Generator::visitTypeDeclaration() {
@@ -193,6 +197,26 @@ void Generator::visitTypeDeclaration() {
     }
 
     program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
+}
+
+void Generator::visitStatement() {
+    if (tok->kind() == Token::CompoundStmt) {
+        SourceLocation openBraceLoc = tok->location();
+        advance();
+        int_t stackSizeAtBegin = nodeStack.size();
+        while (tok->kind() != Token::EmptyNode) {
+            visitStatement();
+        }
+        VERIFY(tok->kind() == Token::EmptyNode);
+        advance();
+        emitNode(NodeKind::CompoundStmt, openBraceLoc, nodeStack.size() - stackSizeAtBegin, { .empty {} });
+        VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
+    } else {
+        visitExpression();
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        emitNode(NodeKind::ExpressionStmt, tok->location(), 1, { .empty {} });
+        advance();
+    }
 }
 
 void Generator::visitExpression() {

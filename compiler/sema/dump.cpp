@@ -139,8 +139,8 @@ void Dumper::dumpNode(Node* node, std::string header) {
     case NodeKind::CallExpr:
         info << formatValue(Expression(node).data().callTarget);
         break;
-    case NodeKind::ReferenceMemberExpr:
-    case NodeKind::OwningMemberExpr:
+    case NodeKind::LMemberAccessExpr:
+    case NodeKind::RMemberAccessExpr:
         info << formatValue(Expression(node).data().memberPointer);
         break;
     default:

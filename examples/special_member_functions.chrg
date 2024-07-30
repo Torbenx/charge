@@ -1,22 +1,49 @@
 
 object MyType {
 
-    fn constructor(  out self, in  other: MyType); // copy constructor
-    fn constructor(  out self, var other: MyType); // relocate constructor
-    fn constructor(inout self, in  other: MyType); // copy assignment
-    fn constructor(inout self, var other: MyType); // relocate assignment
+    fn constructor(  out self, in  other: self_type); // copy constructor
+    fn constructor(  out self, let other: self_type);
+    fn constructor(  out self, var other: self_type); // relocate constructor
+    fn constructor(inout self, in  other: self_type); // copy assignment
+    fn constructor(inout self, let other: self_type);
+    fn constructor(inout self, var other: self_type); // relocate assignment
 
-    fn constructor(assign self, forward other: MyType);
+    fn constructor(assign self, forward other: self_type);
 
     // deduction rules:
 
     // assign
     //               r-value -> error!
+    //               p-value -> error!
     //   initialized l-value -> 'inout'
     // uninitialized l-value -> 'out'
 
     // forward
     //               r-value -> 'var'
+    //               p-value -> 'let'
     //   initialized l-value -> 'in'
     // uninitialized l-value -> error!
+
+
+
+    fn prop(in self) -> (out val);
+    fn prop(inout self) -> (in val);
+    fn prop(inout self) -> (var val);
+    fn prop(inout self) -> (let val);
+
+    fn prop(in self) -> (out val);
+    fn prop(inout self) -> (forward val);
+
+    template(pkind: parameter_kind)
+    fn prop([invert(pkind)] self) -> (property[pkind] val);
+
+    // property
+    // normal use              -> 'out'
+    // =               r-value -> 'var'
+    // =               p-value -> 'let'
+    // =   initialized l-value -> 'in'
+    // = uninitialized l-value -> error!
+
+    // invert(out) -> in
+    // invert(var), invert(let), invert(in) -> inout
 }

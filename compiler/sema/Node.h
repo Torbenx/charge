@@ -4,14 +4,18 @@
 
 namespace sema {
 
-#define ENUMERATE_NODE_KINDS             \
-    KIND(ReferenceExpr, Reference)       \
-    KIND(ReferenceMemberExpr, Reference) \
-    KIND(ConstantExpr, Pure)             \
-    KIND(CallExpr, Owning)               \
-    KIND(OwningMemberExpr, Owning)       \
-    KIND(LetDecl, Statement)             \
-    KIND(ExpressionStmt, Statement)      \
+#define ENUMERATE_NODE_KINDS                                   \
+    KIND(ReferenceExpr, LValue)                                \
+    KIND(LMemberAccessExpr, LValue)                            \
+    KIND(ConstantExpr, PValue)                                 \
+    KIND(PurifyExpr, PValue) /* RValue -> PValue */            \
+    KIND(CallExpr, RValue)                                     \
+    KIND(RMemberAccessExpr, RValue)                            \
+    KIND(ImplicitCopyExpr, RValue) /* LValue -> RValue */      \
+    KIND(PureInstantiationExpr, RValue) /* PValue -> RValue */ \
+    KIND(LetDecl, Statement)                                   \
+    KIND(ExpressionStmt, Statement)                            \
+    KIND(CompoundStmt, Statement)                              \
     KIND(Function, Statement)
 
 enum class NodeKind : uint8_t {
@@ -24,9 +28,9 @@ enum class NodeKind : uint8_t {
 std::string_view nameString(NodeKind kind);
 
 enum class NodeCategory {
-    Pure,
-    Reference,
-    Owning,
+    PValue,
+    LValue,
+    RValue,
     Statement,
 };
 inline NodeCategory nodeCategory(NodeKind kind) {
