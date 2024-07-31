@@ -42,6 +42,7 @@ enum class ValueKind : uint8_t {
     Expression,
     RemoteExpression,
     MemberPointer,
+    BooleanLiteral,
     Invalid = 15,
 };
 struct Value {
@@ -99,6 +100,10 @@ struct Value {
     constexpr int_t parameterIndex() const {
         VERIFY(kind() == ValueKind::Parameter);
         return id();
+    }
+    constexpr bool booleanValue() const {
+        VERIFY(kind() == ValueKind::BooleanLiteral);
+        return idBits != 0;
     }
 
     constexpr bool operator==(const Value&) const = default;

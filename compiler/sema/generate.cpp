@@ -156,6 +156,14 @@ Value Generator::generateDeclarationLiteral(ScopeValue rawValue, std::span<const
 
 void Generator::generateIdentifierExpr() {
     Word name = Word::fromUint(tok->data());
+    if (name == parse::words["false"]) {
+        emitConstantExpr(tok->location(), Value(ValueKind::BooleanLiteral, 0));
+        return;
+    }
+    if (name == parse::words["true"]) {
+        emitConstantExpr(tok->location(), Value(ValueKind::BooleanLiteral, 1));
+        return;
+    }
     for (auto lookupCtx : std::views::reverse(lookupStack)) {
         switch (lookupCtx.kind()) {
         case LookupContext::Kind::Namespace: {
@@ -406,9 +414,14 @@ void Generator::generateMemberAccessExpr() {
     VERIFY(state.emitted);
 }
 
-void Generator::implicitToType() {
-    Type type = verifyType(makeExpressionValue());
-    emitConstantExpr({}, type);
+void Generator::contextualType() {
+    auto state = selfDeduction();
+    implicitCastTo(state, builtins::type_type);
+}
+
+void Generator::contextualBool() {
+    auto state = selfDeduction();
+    implicitCastTo(state, builtins::bool_type);
 }
 
 void Generator::implicitCastTo(DeductionState& state, ExternValue pType, Expression arg) {
@@ -521,6 +534,15 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         return compareParameterize(Value(pValue).functionSignatureBaseValue(), aValue.functionSignatureBaseValue());
     case ValueKind::Parameterize:
         return compareParameterize(pValue, aValue);
+    case ValueKind::MemberPointer: {
+        auto pMember = state.program->getMemberPointer(pValue);
+        auto aMember = program->getMemberPointer(aValue);
+        if (!staticMatch(state, pMember.parentType, aMember.parentType))
+            return false;
+        return pMember.memberIndex == aMember.memberIndex;
+    }
+    case ValueKind::BooleanLiteral:
+        return Value(pValue).booleanValue() == aValue.booleanValue();
     default:
         VERIFY_NOT_REACHED();
     }
@@ -560,6 +582,12 @@ Value Generator::fold(FoldBase base, ExternValue v) {
             foldedArgs.push_back(fold(base, arg));
         return program->addParameterize(foldProgram(externPara.base), foldedArgs);
     }
+    case ValueKind::MemberPointer: {
+        auto externMember = base.program->getMemberPointer(v);
+        return program->addMemberPointer(verifyType((base, externMember.parentType)), externMember.memberIndex);
+    }
+    case ValueKind::BooleanLiteral:
+        return (Value)v;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -621,6 +649,8 @@ Type Generator::typeOf(Value value) {
         return builtins::function_signature_type;
     case ValueKind::Namespace:
         return builtins::namespace_type;
+    case ValueKind::BooleanLiteral:
+        return builtins::bool_type;
     case ValueKind::Expression:
         return Expression(&program->expressions[value.expressionIndex()]).type();
     case ValueKind::RemoteExpression: {
@@ -744,6 +774,7 @@ struct BuiltinGenerator : Generator {
     }
 
     ~BuiltinGenerator() {
+        program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
         program->completeSignatureCheck();
         context.popScope();
     }
@@ -752,15 +783,15 @@ struct BuiltinGenerator : Generator {
 void Generator::generateBuiltins(Context& context) {
     {
         BuiltinGenerator g { context, BuiltinId::type_type };
-        g.program->setType(builtins::type_type);
+    }
+    {
+        BuiltinGenerator g { context, BuiltinId::bool_type };
     }
     {
         BuiltinGenerator g { context, BuiltinId::error_type };
-        g.program->setType(builtins::type_type);
     }
     {
         BuiltinGenerator g { context, BuiltinId::namespace_type };
-        g.program->setType(builtins::type_type);
     }
 
     // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
@@ -772,12 +803,10 @@ void Generator::generateBuiltins(Context& context) {
     //                    = template_id{template(sig: template_signature) -> type}
     {
         BuiltinGenerator g { context, BuiltinId::template_signature_type };
-        g.program->setType(builtins::type_type);
     }
     {
         BuiltinGenerator g { context, BuiltinId::template_id_template };
         g.addExplicitParameter(parse::words["sig"], builtins::template_signature_type, {});
-        g.program->setType(builtins::type_type);
     }
 
     // template(sig: function_signature) struct function_id: { }
@@ -786,12 +815,10 @@ void Generator::generateBuiltins(Context& context) {
     //                     = template_id{template(sig: function_signature) -> type}
     {
         BuiltinGenerator g { context, BuiltinId::function_signature_type };
-        g.program->setType(builtins::type_type);
     }
     {
         BuiltinGenerator g { context, BuiltinId::function_id_template };
         g.addExplicitParameter(parse::words["sig"], builtins::function_signature_type, {});
-        g.program->setType(builtins::type_type);
     }
 
     // template(parent_type: type, member_type: type) struct member_ptr: { }
@@ -799,7 +826,6 @@ void Generator::generateBuiltins(Context& context) {
         BuiltinGenerator g { context, BuiltinId::member_ptr_template };
         g.addExplicitParameter(parse::words["parent_type"], builtins::type_type, {});
         g.addExplicitParameter(parse::words["member_type"], builtins::type_type, {});
-        g.program->setType(builtins::type_type);
     }
 
     // cast{template_id}( template_function_id{template(T: type) fn(t: T) -> T)} )

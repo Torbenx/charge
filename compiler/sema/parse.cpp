@@ -49,14 +49,12 @@ void Generator::visitTemplateParameters() {
 
 Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
     Type type;
-    int_t oldParameterCount = parameterTypes.size();
-    if (programParameters)
-        VERIFY(oldParameterCount == (int_t)program->parameters.size());
+    VERIFY(parameterTypes.size() == program->parameters.size());
     if (tok->kind() != Token::AssignStmt) {
         // parse type
         wildcardMeaning = WildcardMeaning::ImplicitTemplate;
         visitExpression();
-        implicitToType();
+        contextualType();
         type = verifyType(makeExpressionValue());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
@@ -67,7 +65,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
 
     bool hasInitializer = false;
     if (tok->kind() != Token::ExpressionStmt) {
-        if (oldParameterCount != (int_t)parameterTypes.size() && programParameters) {
+        if (parameterTypes.size() != program->parameters.size() && programParameters) {
             // 'type' contains implicitly created parameters.
             // Converting the initializer to 'type' can never happend without deducing them.
             VERIFY_NOT_REACHED();
@@ -75,7 +73,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         visitExpression();
 
         DeductionState state(program, programHandle, parameterTypes.size());
-        state.identityMap(oldParameterCount);
+        state.identityMap(program->parameters.size());
         implicitCastTo(state, type);
         VERIFY(state.isComplete());
         type = verifyType(fold(state.toFoldBase(INVALID_VALUE), type));
@@ -89,6 +87,9 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         // add implicit parameters to program
         while (program->parameters.size() < parameterTypes.size())
             program->parameters.push_back({ Word(), parameterTypes[program->parameters.size()], std::nullopt });
+    } else {
+        // remove introduced parameters
+        parameterTypes.resize(program->parameters.size());
     }
 
     return { type, hasInitializer };
@@ -190,7 +191,7 @@ void Generator::visitTypeDeclaration() {
         advance();
 
         visitExpression();
-        implicitToType();
+        contextualType();
         Type type = verifyType(makeExpressionValue());
 
         member = RuntimeParameter(newKind, member.name, type, member.location());
@@ -211,11 +212,25 @@ void Generator::visitStatement() {
         advance();
         emitNode(NodeKind::CompoundStmt, openBraceLoc, nodeStack.size() - stackSizeAtBegin, { .empty {} });
         VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
+    } else if (tok->kind() == Token::LetStmt || tok->kind() == Token::VarStmt) {
+        Word name = Word::fromUint(tok->data());
+        SourceLocation nameLoc = tok->location();
+        advance();
+        auto info = visitVariableDeclaration(false);
+        declareLocal(name, nameLoc, info);
     } else {
         visitExpression();
-        VERIFY(tok->kind() == Token::ExpressionStmt);
-        emitNode(NodeKind::ExpressionStmt, tok->location(), 1, { .empty {} });
-        advance();
+        if (tok->kind() == Token::IfStmt) {
+            SourceLocation ifLoc = tok->location();
+            advance();
+            contextualBool();
+            visitStatement();
+            emitNode(NodeKind::IfStmt, ifLoc, 2, { .empty {} });
+        } else {
+            VERIFY(tok->kind() == Token::ExpressionStmt);
+            emitNode(NodeKind::ExpressionStmt, tok->location(), 1, { .empty {} });
+            advance();
+        }
     }
 }
 

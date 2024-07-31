@@ -42,6 +42,7 @@ inline constexpr ConstWordStringTable words {
     keyword("property"),
     "error",
     "type",
+    "bool",
     "template_signature",
     "template_id",
     "function_signature",
@@ -50,6 +51,8 @@ inline constexpr ConstWordStringTable words {
     "parent_type",
     "member_type",
     "member_ptr",
+    "true",
+    "false",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (

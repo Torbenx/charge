@@ -279,7 +279,8 @@ struct Generator {
     Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
     Value newImplicitParameter(Type type);
 
-    void implicitToType();
+    void contextualType();
+    void contextualBool();
     void implicitCastTo(DeductionState& state, ExternValue);
     void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 

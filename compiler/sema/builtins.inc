@@ -7,6 +7,8 @@
 
 BUILTIN_TYPE(type)
 
+BUILTIN_TYPE(bool)
+
 BUILTIN_TYPE(error)
 
 BUILTIN_TYPE(namespace)

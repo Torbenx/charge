@@ -16,7 +16,8 @@ namespace sema {
     KIND(LetDecl, Statement)                                   \
     KIND(ExpressionStmt, Statement)                            \
     KIND(CompoundStmt, Statement)                              \
-    KIND(Function, Statement)
+    KIND(Function, Statement)                                  \
+    KIND(IfStmt, Statement)
 
 enum class NodeKind : uint8_t {
 #define KIND(kind, cat) kind,

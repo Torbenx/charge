@@ -95,6 +95,8 @@ struct Dumper {
         case ValueKind::FunctionSignature$Program:
         case ValueKind::FunctionSignature$Parameterize:
             return "fnsig(" + formatValue(prog, v.functionSignatureBaseValue()) + ")";
+        case ValueKind::BooleanLiteral:
+            return v.booleanValue() ? "true" : "false";
         case ValueKind::Expression:
             result += "e";
             break;
