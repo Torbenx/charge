@@ -5,54 +5,56 @@
 namespace parse {
 
 inline constexpr ConstWordStringTable words {
-    keyword("if"),
-    keyword("elif"),
-    keyword("else"),
-    keyword("match"),
-    keyword("for"),
-    keyword("while"),
-    keyword("do"),
-    keyword("return"),
-    keyword("break"),
-    keyword("continue"),
-    keyword("loop"),
-    keyword("guard"),
-    keyword("try"),
-    keyword("catch"),
-    keyword("with"),
     keyword("analysis"),
     keyword("assert"),
-    keyword("namespace"),
-    keyword("struct"),
-    keyword("trait"),
-    keyword("object"),
-    keyword("fn"),
-    keyword("has"),
-    keyword("static"),
-    keyword("incomplete"),
-    keyword("virtual"),
-    keyword("template"),
-    keyword("var"),
-    keyword("let"),
-    keyword("in"),
-    keyword("inout"),
-    keyword("out"),
-    keyword("forward"),
     keyword("assign"),
+    keyword("break"),
+    keyword("catch"),
+    keyword("continue"),
+    keyword("do"),
+    keyword("elif"),
+    keyword("else"),
+    keyword("fn"),
+    keyword("for"),
+    keyword("forward"),
+    keyword("guard"),
+    keyword("has"),
+    keyword("if"),
+    keyword("in"),
+    keyword("incomplete"),
+    keyword("inout"),
+    keyword("let"),
+    keyword("loop"),
+    keyword("match"),
+    keyword("namespace"),
+    keyword("object"),
+    keyword("out"),
     keyword("property"),
-    "error",
-    "type",
+    keyword("return"),
+    keyword("static"),
+    keyword("struct"),
+    keyword("template"),
+    keyword("trait"),
+    keyword("try"),
+    keyword("var"),
+    keyword("virtual"),
+    keyword("while"),
+    keyword("with"),
     "bool",
-    "template_signature",
-    "template_id",
-    "function_signature",
-    "function_id",
-    "sig",
-    "parent_type",
-    "member_type",
-    "member_ptr",
-    "true",
+    "error",
     "false",
+    "function_id",
+    "function_signature",
+    "member_ptr",
+    "member_type",
+    "parent_type",
+    "pointee_type",
+    "ptr",
+    "sig",
+    "template_id",
+    "template_signature",
+    "true",
+    "type",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -104,41 +106,41 @@ enum class LexerToken : uint8_t {
     EqualGreater, // =>
     LessEqualGreater, // <=>
     MinusGreater, // ->
-    If, // if
-    Elif, // elif
-    Else, // else
-    Match, // match
-    For, // for
-    While, // while
-    Do, // do
-    Return, // return
-    Break, // break
-    Continue, // continue
-    Loop, // loop
-    Guard, // guard
-    Try, // try
-    Catch, // catch
-    With, // with
     Analysis, // analysis
     Assert, // assert
-    Namespace, // namespace
-    Struct, // struct
-    Trait, // trait
-    Object, // object
-    Fn, // fn
-    Has, // has
-    Static, // static
-    Incomplete, // incomplete
-    Virtual, // virtual
-    Template, // template
-    Var, // var
-    Let, // let
-    In, // in
-    Inout, // inout
-    Out, // out
-    Forward, // forward
     Assign, // assign
+    Break, // break
+    Catch, // catch
+    Continue, // continue
+    Do, // do
+    Elif, // elif
+    Else, // else
+    Fn, // fn
+    For, // for
+    Forward, // forward
+    Guard, // guard
+    Has, // has
+    If, // if
+    In, // in
+    Incomplete, // incomplete
+    Inout, // inout
+    Let, // let
+    Loop, // loop
+    Match, // match
+    Namespace, // namespace
+    Object, // object
+    Out, // out
     Property, // property
+    Return, // return
+    Static, // static
+    Struct, // struct
+    Template, // template
+    Trait, // trait
+    Try, // try
+    Var, // var
+    Virtual, // virtual
+    While, // while
+    With, // with
     Identifier,
     Literal,
     EOS
@@ -184,7 +186,8 @@ enum class State {
     TypeDeclarationBody,
     MemberDeclaration,
     AfterStatic,
-    StaticVariableDeclaration,
+    StaticLetVariableDeclaration,
+    StaticVarVariableDeclaration,
     AfterDeclaration,
     Error,
 };

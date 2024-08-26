@@ -161,3 +161,26 @@ fn withBody4() -> X: { let x: X = X(); let y = x; }
 static boolTest = false;
 // expect-return-type X
 fn ifTest() -> X: { if true: {} }
+
+// expect-object-type X
+static var staticObj: X = X();
+// expect-type ptr{X} ;; TODO: This is wrong!
+static accessObj = staticObj;
+
+namespace parameter_expr_match: {
+
+template(T1: type, T2: type)
+struct blub: { }
+
+template(T: type)
+fn target(b: blub{T, T}) -> T: { }
+
+// expect-type #0
+template(T: type)
+static test1 = target(blub{T, X}());
+
+// expect-type X
+template(T: type)
+static test2 = target(blub{X, T}());
+
+}

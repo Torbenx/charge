@@ -102,76 +102,76 @@ std::string_view nameString(LexerToken token) {
         return "LessEqualGreater";
     case LexerToken::MinusGreater:
         return "MinusGreater";
-    case LexerToken::If:
-        return "If";
-    case LexerToken::Elif:
-        return "Elif";
-    case LexerToken::Else:
-        return "Else";
-    case LexerToken::Match:
-        return "Match";
-    case LexerToken::For:
-        return "For";
-    case LexerToken::While:
-        return "While";
-    case LexerToken::Do:
-        return "Do";
-    case LexerToken::Return:
-        return "Return";
-    case LexerToken::Break:
-        return "Break";
-    case LexerToken::Continue:
-        return "Continue";
-    case LexerToken::Loop:
-        return "Loop";
-    case LexerToken::Guard:
-        return "Guard";
-    case LexerToken::Try:
-        return "Try";
-    case LexerToken::Catch:
-        return "Catch";
-    case LexerToken::With:
-        return "With";
     case LexerToken::Analysis:
         return "Analysis";
     case LexerToken::Assert:
         return "Assert";
-    case LexerToken::Namespace:
-        return "Namespace";
-    case LexerToken::Struct:
-        return "Struct";
-    case LexerToken::Trait:
-        return "Trait";
-    case LexerToken::Object:
-        return "Object";
-    case LexerToken::Fn:
-        return "Fn";
-    case LexerToken::Has:
-        return "Has";
-    case LexerToken::Static:
-        return "Static";
-    case LexerToken::Incomplete:
-        return "Incomplete";
-    case LexerToken::Virtual:
-        return "Virtual";
-    case LexerToken::Template:
-        return "Template";
-    case LexerToken::Var:
-        return "Var";
-    case LexerToken::Let:
-        return "Let";
-    case LexerToken::In:
-        return "In";
-    case LexerToken::Inout:
-        return "Inout";
-    case LexerToken::Out:
-        return "Out";
-    case LexerToken::Forward:
-        return "Forward";
     case LexerToken::Assign:
         return "Assign";
+    case LexerToken::Break:
+        return "Break";
+    case LexerToken::Catch:
+        return "Catch";
+    case LexerToken::Continue:
+        return "Continue";
+    case LexerToken::Do:
+        return "Do";
+    case LexerToken::Elif:
+        return "Elif";
+    case LexerToken::Else:
+        return "Else";
+    case LexerToken::Fn:
+        return "Fn";
+    case LexerToken::For:
+        return "For";
+    case LexerToken::Forward:
+        return "Forward";
+    case LexerToken::Guard:
+        return "Guard";
+    case LexerToken::Has:
+        return "Has";
+    case LexerToken::If:
+        return "If";
+    case LexerToken::In:
+        return "In";
+    case LexerToken::Incomplete:
+        return "Incomplete";
+    case LexerToken::Inout:
+        return "Inout";
+    case LexerToken::Let:
+        return "Let";
+    case LexerToken::Loop:
+        return "Loop";
+    case LexerToken::Match:
+        return "Match";
+    case LexerToken::Namespace:
+        return "Namespace";
+    case LexerToken::Object:
+        return "Object";
+    case LexerToken::Out:
+        return "Out";
     case LexerToken::Property:
         return "Property";
+    case LexerToken::Return:
+        return "Return";
+    case LexerToken::Static:
+        return "Static";
+    case LexerToken::Struct:
+        return "Struct";
+    case LexerToken::Template:
+        return "Template";
+    case LexerToken::Trait:
+        return "Trait";
+    case LexerToken::Try:
+        return "Try";
+    case LexerToken::Var:
+        return "Var";
+    case LexerToken::Virtual:
+        return "Virtual";
+    case LexerToken::While:
+        return "While";
+    case LexerToken::With:
+        return "With";
     case LexerToken::Identifier:
         return "Identifier";
     case LexerToken::Literal:
@@ -261,8 +261,10 @@ std::string_view nameString(State state) {
         return "MemberDeclaration";
     case State::AfterStatic:
         return "AfterStatic";
-    case State::StaticVariableDeclaration:
-        return "StaticVariableDeclaration";
+    case State::StaticLetVariableDeclaration:
+        return "StaticLetVariableDeclaration";
+    case State::StaticVarVariableDeclaration:
+        return "StaticVarVariableDeclaration";
     case State::AfterDeclaration:
         return "AfterDeclaration";
     case State::Error:

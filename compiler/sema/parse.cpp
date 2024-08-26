@@ -111,17 +111,16 @@ Program::Parameter Generator::visitTemplateParameter() {
 }
 
 void Generator::visitStaticVariableDeclaration() {
-    VERIFY(program->kind() == ProgramKind::Value);
-    auto* valueProgram = cast<ValueProgram>(program);
-
     VERIFY(tok->kind() == Token::StaticLetDecl || tok->kind() == Token::StaticVarDecl);
-    bool isVar = tok->kind() == Token::StaticVarDecl;
     advance();
 
     auto info = visitVariableDeclaration(false);
     VERIFY(info.hasInitializer);
     program->setType(info.type);
-    valueProgram->setValue(makeExpressionValue());
+    if (program->kind() == ProgramKind::Value) {
+        auto* valueProgram = cast<ValueProgram>(program);
+        valueProgram->setValue(makeExpressionValue());
+    }
 }
 
 void Generator::visitFunctionDeclaration() {

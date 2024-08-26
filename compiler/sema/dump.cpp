@@ -177,6 +177,9 @@ void Dumper::dumpProgram(Program* prog) {
         dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
         dumpLine("value = " + formatValue(Value::fromUint(prog->m_subClassData)));
         break;
+    case ProgramKind::Object:
+        dumpLine("object-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+        break;
     case ProgramKind::Function:
         dumpLine("return-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
         dumpNode(cast<FunctionProgram>(prog)->body(), "body = ");

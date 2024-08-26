@@ -140,6 +140,7 @@ Value Generator::generateDeclarationLiteral(ScopeValue rawValue, std::span<const
     Program* prog = context.program(progHandle);
     signatureCheck(context, progHandle);
     switch (prog->kind()) {
+    case ProgramKind::Object:
     case ProgramKind::Type:
     case ProgramKind::Function:
         return makeProgramValue(progHandle);
@@ -490,12 +491,10 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         return result;
     }
 
-    if (pValue.kind() == ValueKind::Expression || pValue.kind() == ValueKind::RemoteExpression) {
-        // TODO: check that the expression does not contain any deduced arguments
-        state.expressionMatches.push_back({ pValue, aValue });
-        return true;
-    }
-    if (aValue.kind() == ValueKind::Expression || aValue.kind() == ValueKind::RemoteExpression) {
+    if (pValue.kind() == ValueKind::Expression || pValue.kind() == ValueKind::RemoteExpression
+        || aValue.kind() == ValueKind::Expression || aValue.kind() == ValueKind::RemoteExpression
+        || aValue.kind() == ValueKind::Parameter) {
+        // TODO: check that the parameter-side value does not contain any non-explicit arguments
         state.expressionMatches.push_back({ pValue, aValue });
         return true;
     }
@@ -693,6 +692,10 @@ Type Generator::typeOfNonDependentProgram(FoldBase base) {
         std::array arguments { makeFunctionSignature(base.value) };
         return verifyType(program->addParameterize(builtins::function_id_template.program(), arguments));
     }
+    case ProgramKind::Object: {
+        std::array arguments { (Value)cast<ObjectProgram>(base.program)->objectType() };
+        return verifyType(program->addParameterize(builtins::ptr_template.program(), arguments));
+    }
     case ProgramKind::Value:
         return verifyType(fold(base, cast<ValueProgram>(base.program)->type()));
     case ProgramKind::Type:
@@ -708,6 +711,7 @@ Type Generator::verifyType(Value value) {
         Program* valueProg = context.program(value.program());
         VERIFY(!valueProg->isTemplate());
         switch (valueProg->kind()) {
+        case ProgramKind::Object:
         case ProgramKind::Function:
             VERIFY_NOT_REACHED();
         case ProgramKind::Type:
@@ -819,6 +823,12 @@ void Generator::generateBuiltins(Context& context) {
     {
         BuiltinGenerator g { context, BuiltinId::function_id_template };
         g.addExplicitParameter(parse::words["sig"], builtins::function_signature_type, {});
+    }
+
+    // template(pointee_type: type) struct ptr: { }
+    {
+        BuiltinGenerator g { context, BuiltinId::ptr_template };
+        g.addExplicitParameter(parse::words["pointee_type"], builtins::type_type, {});
     }
 
     // template(parent_type: type, member_type: type) struct member_ptr: { }

@@ -277,7 +277,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-source-position",
         "line", "column", "packed-range-begin-column", "expect-identifier", "name",
-        "expect-type", "expect-value", "expect-return-type");
+        "expect-type", "expect-value", "expect-object-type", "expect-return-type");
 
     WordStringTable wordTable { words };
     sema::Context context;
@@ -365,7 +365,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             skipWhitespace();
 
             auto word = wordTable.get(cmdStr);
-            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"]) {
+            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-object-type"] || word == words["expect-return-type"]) {
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
@@ -440,6 +440,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->type());
         if (word == words["expect-value"])
             expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->value());
+        if (word == words["expect-object-type"])
+            expr->check(context, program, (sema::Value) cast<sema::ObjectProgram>(program)->objectType());
         if (word == words["expect-return-type"])
             expr->check(context, program, (sema::Value) cast<sema::FunctionProgram>(program)->returnType());
     }

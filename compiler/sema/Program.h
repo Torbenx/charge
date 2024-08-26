@@ -62,6 +62,7 @@ enum class ProgramStatus : uint8_t {
 
 enum class ProgramKind : uint8_t {
     Value,
+    Object,
     Type,
     Function,
 };
@@ -297,6 +298,13 @@ struct ValueProgram : Program {
     ExternValue type() const { return m_type.value(); }
 };
 
+struct ObjectProgram : Program {
+    ObjectProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+        : Program(ProgramKind::Object, name, parseLocation, rawParent, location) { }
+
+    ExternValue objectType() const { return m_type.value(); }
+};
+
 enum class RuntimeParameterKind : uint8_t {
     UncheckedMember,
     Member,
@@ -375,6 +383,11 @@ constexpr std::optional<T*> try_cast(Program* prog) {
             return static_cast<T*>(prog);
         else
             return std::nullopt;
+    case ProgramKind::Object:
+        if constexpr (std::derived_from<ObjectProgram, T>)
+            return static_cast<T*>(prog);
+        else
+            return std::nullopt;
     case ProgramKind::Type:
         if constexpr (std::derived_from<TypeProgram, T>)
             return static_cast<T*>(prog);
@@ -395,6 +408,7 @@ constexpr T* cast(Program* prog) { return try_cast<T>(prog).value(); }
 
 union ProgramUnion {
     ValueProgram value;
+    ObjectProgram object;
     FunctionProgram function;
     TypeProgram type;
 
@@ -402,6 +416,9 @@ union ProgramUnion {
         switch (kind) {
         case ProgramKind::Value:
             std::construct_at(&value, name, parseLocation, rawParent, location);
+            break;
+        case ProgramKind::Object:
+            std::construct_at(&object, name, parseLocation, rawParent, location);
             break;
         case ProgramKind::Function:
             std::construct_at(&function, name, parseLocation, rawParent, location);
@@ -420,6 +437,9 @@ union ProgramUnion {
         switch (value.kind()) {
         case ProgramKind::Value:
             std::destroy_at(&value);
+            break;
+        case ProgramKind::Object:
+            std::destroy_at(&object);
             break;
         case ProgramKind::Function:
             std::destroy_at(&function);

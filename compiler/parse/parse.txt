@@ -584,20 +584,23 @@ LinearState member_declaration() then templated_declaration
         next after_variable_declaration_id
 
 LinearState after_static() then error
-    keyword var
-        tokenKind = TokenKind::StaticVarDecl
-        next static_variable_declaration
     keyword let
-        tokenKind = TokenKind::StaticLetDecl
-        next static_variable_declaration
+        next static_let_variable_declaration
+    keyword var
+        next static_var_variable_declaration
     identifier
-        commitDeclaration DeclarationKind::Variable, this_identifier
+        commitDeclaration DeclarationKind::StaticValue, this_identifier
         emitToken TokenKind::StaticLetDecl, this_declaration
         next after_variable_declaration_id
-LinearState static_variable_declaration(tokenKind) then error
+LinearState static_let_variable_declaration() then error
     identifier
-        commitDeclaration DeclarationKind::Variable, this_identifier
-        emitToken tokenKind, this_declaration
+        commitDeclaration DeclarationKind::StaticValue, this_identifier
+        emitToken TokenKind::StaticLetDecl, this_declaration
+        next after_variable_declaration_id
+LinearState static_var_variable_declaration() then error
+    identifier
+        commitDeclaration DeclarationKind::StaticObject, this_identifier
+        emitToken TokenKind::StaticVarDecl, this_declaration
         next after_variable_declaration_id
 
 LinearState after_declaration() then error

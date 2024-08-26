@@ -12,7 +12,8 @@ using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
         Namespace,
         Type,
-        Variable,
+        StaticValue,
+        StaticObject,
         Function,
         Member,
         HasMember,
@@ -179,8 +180,11 @@ static sema::ScopeValue commitDeclaration(Word name, const char* currentPosition
         case DeclarationKind::Function:
             progKind = sema::ProgramKind::Function;
             break;
-        case DeclarationKind::Variable:
+        case DeclarationKind::StaticValue:
             progKind = sema::ProgramKind::Value;
+            break;
+        case DeclarationKind::StaticObject:
+            progKind = sema::ProgramKind::Object;
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -290,8 +294,10 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto member_declaration$no_emit;
     case State::AfterStatic:
         goto after_static$no_emit;
-    case State::StaticVariableDeclaration:
-        goto static_variable_declaration$no_emit;
+    case State::StaticLetVariableDeclaration:
+        goto static_let_variable_declaration$no_emit;
+    case State::StaticVarVariableDeclaration:
+        goto static_var_variable_declaration$no_emit;
     case State::AfterDeclaration:
         goto after_declaration$no_emit;
     case State::Error:
@@ -3891,23 +3897,19 @@ after_static$no_emit:
         }
         if (this_identifier.keyword()) {
         LABEL_MAYBE_UNUSED after_static$keyword_check:
-            if (this_identifier == words["var"]) {
-                // tokenKind = TokenKind::StaticVarDecl
-                tokenKind = TokenKind::StaticVarDecl;
-                // next static_variable_declaration
-                goto static_variable_declaration$no_emit;
-            }
             if (this_identifier == words["let"]) {
-                // tokenKind = TokenKind::StaticLetDecl
-                tokenKind = TokenKind::StaticLetDecl;
-                // next static_variable_declaration
-                goto static_variable_declaration$no_emit;
+                // next static_let_variable_declaration
+                goto static_let_variable_declaration$no_emit;
+            }
+            if (this_identifier == words["var"]) {
+                // next static_var_variable_declaration
+                goto static_var_variable_declaration$no_emit;
             }
             // -> error
             goto error$keyword_check;
         }
-        // commitDeclaration DeclarationKind::Variable, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Variable>(this_identifier, tokBegin, declarationBegin, state);
+        // commitDeclaration DeclarationKind::StaticValue, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticValue>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::StaticLetDecl, this_declaration
         carriedEmitTokenKind = TokenKind::StaticLetDecl;
         carriedEmitTokenData = this_declaration.toUint();
@@ -3917,11 +3919,11 @@ after_static$no_emit:
     // then error
     goto error$as_then;
 
-    // LinearState static_variable_declaration
-static_variable_declaration$no_emit:
+    // LinearState static_let_variable_declaration
+static_let_variable_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::StaticVariableDeclaration;
+    parseState = State::StaticLetVariableDeclaration;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, state);
@@ -3932,10 +3934,36 @@ static_variable_declaration$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        // commitDeclaration DeclarationKind::Variable, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Variable>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken tokenKind, this_declaration
-        carriedEmitTokenKind = tokenKind;
+        // commitDeclaration DeclarationKind::StaticValue, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticValue>(this_identifier, tokBegin, declarationBegin, state);
+        // emitToken TokenKind::StaticLetDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::StaticLetDecl;
+        carriedEmitTokenData = this_declaration.toUint();
+        // next after_variable_declaration_id
+        goto after_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState static_var_variable_declaration
+static_var_variable_declaration$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::StaticVarVariableDeclaration;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // commitDeclaration DeclarationKind::StaticObject, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticObject>(this_identifier, tokBegin, declarationBegin, state);
+        // emitToken TokenKind::StaticVarDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::StaticVarDecl;
         carriedEmitTokenData = this_declaration.toUint();
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
@@ -4386,9 +4414,39 @@ error$word_case:
     }
     if (this_identifier.keyword()) {
     LABEL_MAYBE_UNUSED error$keyword_check:
-        if (this_identifier == words["if"]) {
+        if (this_identifier == words["analysis"]) {
             // error
-            errorToken = LexerToken::If;
+            errorToken = LexerToken::Analysis;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["assert"]) {
+            // error
+            errorToken = LexerToken::Assert;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["assign"]) {
+            // error
+            errorToken = LexerToken::Assign;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["break"]) {
+            // error
+            errorToken = LexerToken::Break;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["catch"]) {
+            // error
+            errorToken = LexerToken::Catch;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["continue"]) {
+            // error
+            errorToken = LexerToken::Continue;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["do"]) {
+            // error
+            errorToken = LexerToken::Do;
             goto handle_parse_error;
         }
         if (this_identifier == words["elif"]) {
@@ -4401,9 +4459,9 @@ error$word_case:
             errorToken = LexerToken::Else;
             goto handle_parse_error;
         }
-        if (this_identifier == words["match"]) {
+        if (this_identifier == words["fn"]) {
             // error
-            errorToken = LexerToken::Match;
+            errorToken = LexerToken::Fn;
             goto handle_parse_error;
         }
         if (this_identifier == words["for"]) {
@@ -4411,34 +4469,9 @@ error$word_case:
             errorToken = LexerToken::For;
             goto handle_parse_error;
         }
-        if (this_identifier == words["while"]) {
+        if (this_identifier == words["forward"]) {
             // error
-            errorToken = LexerToken::While;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["do"]) {
-            // error
-            errorToken = LexerToken::Do;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["return"]) {
-            // error
-            errorToken = LexerToken::Return;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["break"]) {
-            // error
-            errorToken = LexerToken::Break;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["continue"]) {
-            // error
-            errorToken = LexerToken::Continue;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["loop"]) {
-            // error
-            errorToken = LexerToken::Loop;
+            errorToken = LexerToken::Forward;
             goto handle_parse_error;
         }
         if (this_identifier == words["guard"]) {
@@ -4446,89 +4479,14 @@ error$word_case:
             errorToken = LexerToken::Guard;
             goto handle_parse_error;
         }
-        if (this_identifier == words["try"]) {
-            // error
-            errorToken = LexerToken::Try;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["catch"]) {
-            // error
-            errorToken = LexerToken::Catch;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["with"]) {
-            // error
-            errorToken = LexerToken::With;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["analysis"]) {
-            // error
-            errorToken = LexerToken::Analysis;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["assert"]) {
-            // error
-            errorToken = LexerToken::Assert;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["namespace"]) {
-            // error
-            errorToken = LexerToken::Namespace;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["struct"]) {
-            // error
-            errorToken = LexerToken::Struct;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["trait"]) {
-            // error
-            errorToken = LexerToken::Trait;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["object"]) {
-            // error
-            errorToken = LexerToken::Object;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["fn"]) {
-            // error
-            errorToken = LexerToken::Fn;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["has"]) {
             // error
             errorToken = LexerToken::Has;
             goto handle_parse_error;
         }
-        if (this_identifier == words["static"]) {
+        if (this_identifier == words["if"]) {
             // error
-            errorToken = LexerToken::Static;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["incomplete"]) {
-            // error
-            errorToken = LexerToken::Incomplete;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["virtual"]) {
-            // error
-            errorToken = LexerToken::Virtual;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["template"]) {
-            // error
-            errorToken = LexerToken::Template;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["var"]) {
-            // error
-            errorToken = LexerToken::Var;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["let"]) {
-            // error
-            errorToken = LexerToken::Let;
+            errorToken = LexerToken::If;
             goto handle_parse_error;
         }
         if (this_identifier == words["in"]) {
@@ -4536,9 +4494,39 @@ error$word_case:
             errorToken = LexerToken::In;
             goto handle_parse_error;
         }
+        if (this_identifier == words["incomplete"]) {
+            // error
+            errorToken = LexerToken::Incomplete;
+            goto handle_parse_error;
+        }
         if (this_identifier == words["inout"]) {
             // error
             errorToken = LexerToken::Inout;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["let"]) {
+            // error
+            errorToken = LexerToken::Let;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["loop"]) {
+            // error
+            errorToken = LexerToken::Loop;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["match"]) {
+            // error
+            errorToken = LexerToken::Match;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["namespace"]) {
+            // error
+            errorToken = LexerToken::Namespace;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["object"]) {
+            // error
+            errorToken = LexerToken::Object;
             goto handle_parse_error;
         }
         if (this_identifier == words["out"]) {
@@ -4546,19 +4534,59 @@ error$word_case:
             errorToken = LexerToken::Out;
             goto handle_parse_error;
         }
-        if (this_identifier == words["forward"]) {
-            // error
-            errorToken = LexerToken::Forward;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["assign"]) {
-            // error
-            errorToken = LexerToken::Assign;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["property"]) {
             // error
             errorToken = LexerToken::Property;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["return"]) {
+            // error
+            errorToken = LexerToken::Return;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["static"]) {
+            // error
+            errorToken = LexerToken::Static;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["struct"]) {
+            // error
+            errorToken = LexerToken::Struct;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["template"]) {
+            // error
+            errorToken = LexerToken::Template;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["trait"]) {
+            // error
+            errorToken = LexerToken::Trait;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["try"]) {
+            // error
+            errorToken = LexerToken::Try;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["var"]) {
+            // error
+            errorToken = LexerToken::Var;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["virtual"]) {
+            // error
+            errorToken = LexerToken::Virtual;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["while"]) {
+            // error
+            errorToken = LexerToken::While;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["with"]) {
+            // error
+            errorToken = LexerToken::With;
             goto handle_parse_error;
         }
         VERIFY_NOT_REACHED();
