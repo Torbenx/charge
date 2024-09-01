@@ -11,19 +11,17 @@ Value Program::addParameterize(ProgramHandle base, std::span<const Value> argume
     return Value(ValueKind::Parameterize, id);
 }
 
-int_t Program::importNode(Node* node) {
-    int_t size = node->subTreeSize();
-    expressions.insert(expressions.end(), node - size + 1, node + 1);
-    return expressions.size() - 1;
+Value Program::addExpression(Expression expr) {
+    auto id = instructions.size();
+    instructions.push_back({ Opcode::ExpressionHeader, {}, { .expressionSize = (uint32_t)expr.size } });
+    instructions.insert(instructions.end(), expr.begin(), expr.end());
+    return Value(ValueKind::Expression, id);
 }
 
-Value Program::addExpression(Node* expr) {
-    return Value(ValueKind::Expression, importNode(expr));
-}
-
-Value Program::addRemoteExpression(Value base, uint32_t expressionIndex) {
+Value Program::addRemoteExpression(Value base, ExternValue expression) {
+    VERIFY(expression.kind() == ValueKind::Expression);
     auto id = valueData.size();
-    valueData.push_back(Value(ValueKind::RemoteExpression, expressionIndex));
+    valueData.push_back(Value(ValueKind::RemoteExpression, expression.id()));
     valueData.push_back(base);
     return Value(ValueKind::RemoteExpression, id);
 }

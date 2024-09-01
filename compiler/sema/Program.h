@@ -1,7 +1,7 @@
 #pragma once
 
 #include <parse/Output.h>
-#include <sema/Node.h>
+#include <sema/Instruction.h>
 #include <sema/Scope.h>
 
 namespace sema {
@@ -17,28 +17,24 @@ namespace builtins {
 
 };
 
-struct NodeHandle {
-    NodeHandle(Node* node)
-        : m_node(node) { VERIFY(node != nullptr); }
+struct Expression {
+    Instruction* inst;
+    int_t size;
 
-    Node* node() const { return m_node; }
-    Node* operator->() const { return node(); }
-    operator Node*() const { return node(); }
-    NodeKind kind() const { return node()->kind(); }
-    SourceLocation location() const { return node()->location(); }
-    int_t childrenCount() const { return node()->childrenCount(); }
-    ChildrenRange reverseChildren() const { return node()->reverseChildren(); }
-    NodeData data() const { return node()->u; }
+    Expression(Instruction* inst, int_t size)
+        : inst(inst), size(size) {
+        VERIFY(isExpression(inst->opcode()));
+    }
 
-    Node* m_node;
-};
+    Opcode opcode() const { return inst->opcode(); }
+    InstructionCategory category() const { return categoryOf(opcode()); }
+    ExpressionData data() const { return inst->u.expr.u; }
+    Type type() const { return inst->u.expr.type; }
 
-struct Expression : NodeHandle {
-    Expression(Node* node)
-        : NodeHandle(node) { VERIFY(isExpression(kind())); }
-    NodeCategory category() const { return nodeCategory(kind()); }
-    Type type() const { return NodeHandle::data().expr.type; }
-    ExprData data() const { return NodeHandle::data().expr.u; }
+    std::span<Instruction> span() const { return { inst - (size - 1), (size_t)size }; }
+
+    Instruction* begin() const { return inst - (size - 1); }
+    Instruction* end() const { return inst + 1; }
 };
 
 struct Parameterize {
@@ -47,7 +43,7 @@ struct Parameterize {
 };
 struct RemoteExpression {
     Value base;
-    uint32_t expressionIndex;
+    ExternValue expression;
 };
 struct MemberPointer {
     Type parentType; // always non-dependent
@@ -146,12 +142,11 @@ struct Program {
         , m_parent(parent)
         , parseLocation(parseLocation) { }
 
-    int_t importNode(Node* node);
-    Value addExpression(Node* expr);
+    Value addExpression(Expression);
 
-    Value addRemoteExpression(Value base, uint32_t expressionIndex);
+    Value addRemoteExpression(Value base, ExternValue expression);
     Value addRemoteExpression(RemoteExpression expr) {
-        return addRemoteExpression(expr.base, expr.expressionIndex);
+        return addRemoteExpression(expr.base, expr.expression);
     }
 
     Value addParameterize(ProgramHandle base, std::span<const Value> arguments);
@@ -161,10 +156,17 @@ struct Program {
         return addMemberPointer(pointer.parentType, pointer.memberIndex);
     }
 
+    Expression getExpression(ExternValue value) {
+        VERIFY(value.kind() == ValueKind::Expression);
+        Instruction* header = &instructions[value.id()];
+        VERIFY(header->opcode() == Opcode::ExpressionHeader);
+        int_t size = header->u.expressionSize;
+        return Expression(header + size, size);
+    }
     RemoteExpression getRemoteExpression(ExternValue value) {
         VERIFY(value.kind() == ValueKind::RemoteExpression);
         Value* begin = &valueData[value.id()];
-        return RemoteExpression { begin[1], begin[0].id() };
+        return RemoteExpression { begin[1], Value(ValueKind::Expression, begin[0].id()) };
     }
     Parameterize getParameterize(ExternValue value) {
         // TODO: Returning a span referencing valueData may be a bad idea
@@ -201,9 +203,6 @@ struct Program {
     }
 
     void dump(Context&);
-    ChildrenRange topLevelNodes() {
-        return ChildrenRange(expressions.data() + expressions.size(), expressions.size() + 1);
-    }
     DataValueRange dataValues() {
         return DataValueRange { valueData };
     }
@@ -263,7 +262,7 @@ public:
     Word m_name;
 
     std::vector<Parameter> parameters;
-    std::vector<Node> expressions;
+    std::vector<Instruction> instructions;
     std::vector<Value> valueData;
 
 protected:
@@ -360,14 +359,14 @@ struct FunctionProgram : CallableProgram {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
-    void setBody(Node* node) {
+    /*void setBody(Node* node) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
         m_subClassData = importNode(node);
     }
     Node* body() {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return &expressions[m_subClassData];
-    }
+    }*/
 };
 
 struct TypeProgram : CallableProgram, Scope {

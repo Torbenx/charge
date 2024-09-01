@@ -18,7 +18,7 @@ struct Dumper {
         : context(context) { }
 
     void dumpProgram(Program*);
-    void dumpNode(Node*, std::string header = "");
+    void dumpInstruction(Instruction inst);
     void beginLine() {
         if (!indentation.empty()) {
             for (int_t i = 0; i < (int_t)indentation.size() - 1; i++) {
@@ -116,54 +116,37 @@ struct Dumper {
     }
 };
 
-static std::vector<Node*> allChildren(ChildrenRange range) {
-    auto children = asVector(range);
-    std::reverse(children.begin(), children.end());
-    return children;
-}
+void Dumper::dumpInstruction(Instruction inst) {
+    std::stringstream line, info;
+    if (isExpression(inst.opcode()))
+        line << "[" << formatValue(inst.u.expr.type) << "]";
 
-void Dumper::dumpNode(Node* node, std::string header) {
-    if (isExpression(node->kind()))
-        header += fmt::format("[{}]", formatValue(Expression(node).type()));
-    std::stringstream info;
-    switch (node->kind()) {
-    case NodeKind::LetDecl: {
-        auto decl = NodeHandle(node).data().decl;
+    line << nameString(inst.opcode());
+    switch (inst.opcode()) {
+    case Opcode::LetDecl: {
+        auto decl = inst.u.decl;
         info << "[" << formatValue(decl.type) << "]r" << decl.localValueIndex;
         break;
     }
-    case NodeKind::ReferenceExpr:
-        info << "r" << Expression(node).data().localValueIndex;
+    case Opcode::Reference:
+        info << "r" << inst.u.expr.u.referencedLocalIndex;
         break;
-    case NodeKind::ConstantExpr:
-        info << formatValue(Expression(node).data().constant);
+    case Opcode::Constant:
+        info << formatValue(inst.u.expr.u.constant);
         break;
-    case NodeKind::CallExpr:
-        info << formatValue(Expression(node).data().callTarget);
+    case Opcode::Call:
+        info << formatValue(inst.u.expr.u.callTarget);
         break;
-    case NodeKind::LMemberAccessExpr:
-    case NodeKind::RMemberAccessExpr:
-        info << formatValue(Expression(node).data().memberPointer);
+    case Opcode::LMemberAccess:
+    case Opcode::RMemberAccess:
+        info << formatValue(inst.u.expr.u.memberPointer);
         break;
     default:
         break;
     }
-    auto infoStr = info.str();
-    if (!infoStr.empty())
-        infoStr.insert(infoStr.begin(), ' ');
-    dumpLine(header + std::string(nameString(node->kind())) + infoStr);
-
-    auto children = allChildren(node);
-    if (children.empty())
-        return;
-    indentation.emplace_back(false, header.size());
-    for (int_t i = 0; i < (int_t)children.size() - 1; i++) {
-        dumpNode(children[i]);
-    }
-    indentation.pop_back();
-    indentation.emplace_back(true, header.size());
-    dumpNode(children.back());
-    indentation.pop_back();
+    if (auto instStr = info.str(); !instStr.empty())
+        line << " " << instStr;
+    dumpLine(line.str());
 }
 
 void Dumper::dumpProgram(Program* prog) {
@@ -182,7 +165,7 @@ void Dumper::dumpProgram(Program* prog) {
         break;
     case ProgramKind::Function:
         dumpLine("return-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
-        dumpNode(cast<FunctionProgram>(prog)->body(), "body = ");
+        // dumpNode(cast<FunctionProgram>(prog)->body(), "body = ");
         break;
     default:
         break;
@@ -201,7 +184,8 @@ void Dumper::dumpProgram(Program* prog) {
         }
         case ValueKind::RemoteExpression: {
             auto rExpr = program->getRemoteExpression(value);
-            line << formatValue(rExpr.base) << "/e" << rExpr.expressionIndex;
+            VERIFY(rExpr.expression.kind() == ValueKind::Expression);
+            line << formatValue(rExpr.base) << "/e" << rExpr.expression.id();
             break;
         }
         case ValueKind::MemberPointer: {
@@ -222,12 +206,8 @@ void Dumper::dumpProgram(Program* prog) {
         }
         dumpLine(line.str());
     }
-    auto nodes = allChildren(program->topLevelNodes());
-    for (Node* node : nodes) {
-        if (isExpression(node->kind())) {
-            int_t index = node - program->expressions.data();
-            dumpNode(node, fmt::format("e{} = ", index));
-        }
+    for (auto inst : program->instructions) {
+        dumpInstruction(inst); // TODO: Do this better
     }
     this->program = nullptr;
 }

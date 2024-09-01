@@ -5,59 +5,58 @@
 
 namespace sema {
 
+Instruction& Generator::topInstruction(int_t n) {
+    auto entry = *(instructionStack.end() - n - 1);
+    return instructionScratch[entry.endOffset - 1];
+}
+
 Expression Generator::topExpression(int_t n) {
-    return topNode(n);
+    auto entry = *(instructionStack.end() - n - 1);
+    auto prevEntry = *(instructionStack.end() - n - 2);
+    return Expression(&instructionScratch[entry.endOffset - 1], entry.endOffset - prevEntry.endOffset);
 }
 
-Node* Generator::topNode(int_t n) {
-    return &nodeScratch[(nodeStack.end() - n - 1)->nodeIndex];
+void Generator::popInstruction() {
+    popInstructions(1);
 }
 
-void Generator::popNode() {
-    int_t size = nodeScratch.back().subTreeSize();
-    for (int_t i = 0; i < size; i++)
-        nodeScratch.pop_back();
-    nodeStack.pop_back();
+void Generator::popInstructions(int_t n) {
+    VERIFY(n < (int_t)instructionStack.size());
+    int_t newSize = (instructionStack.end() - n - 1)->endOffset;
+    VERIFY(newSize < (int_t)instructionScratch.size());
+    instructionScratch.resize(newSize, Instruction((Opcode)0, {}, { .empty {} }));
+    instructionStack.resize(instructionStack.size() - n);
 }
 
-void Generator::popNodes(int_t n) {
-    for (int_t i = 0; i < n; i++)
-        popNode();
+void Generator::emitInstruction(Opcode op, SourceLocation location, int_t childCount, InstructionData data) {
+    VERIFY(instructionStack.back().endOffset == instructionScratch.size());
+    instructionStack.resize(instructionStack.size() - childCount);
+    instructionScratch.emplace_back(op, location, data);
+    instructionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data) {
-    int_t subTreeSize = 1;
-    for (int_t i = 0; i < childCount; i++) {
-        subTreeSize += nodeScratch[nodeStack.back().nodeIndex].subTreeSize();
-        nodeStack.pop_back();
-    }
-    int_t index = nodeScratch.size();
-    nodeScratch.emplace_back(kind, location, childCount, subTreeSize, data);
-    nodeStack.push_back({ (uint32_t)index });
-}
-
-void Generator::emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data) {
-    emitNode(kind, location, childCount, NodeData { .expr = { type, data } });
+void Generator::emitExpression(Opcode op, SourceLocation location, int_t childCount, Type type, ExpressionData data) {
+    emitInstruction(op, location, childCount, { .expr { type, data } });
 }
 
 void Generator::emitConstantExpr(SourceLocation location, Value value) {
-    emitExpr(NodeKind::ConstantExpr, location, 0, typeOf(value), ExprData { .constant = value });
+    emitExpression(Opcode::Constant, location, 0, typeOf(value), { .constant = value });
 }
 
 void Generator::emitReferenceExpr(SourceLocation location, int_t localValueIndex) {
-    return emitExpr(
-        NodeKind::ReferenceExpr, location, 0, localValues[localValueIndex].type,
-        ExprData { .localValueIndex = (uint32_t)localValueIndex });
+    return emitExpression(
+        Opcode::Reference, location, 0, localValues[localValueIndex].type,
+        { .referencedLocalIndex = (uint32_t)localValueIndex });
 }
 
 Value Generator::makeExpressionValue() {
     Value value = makeExpressionValue(topExpression());
-    popNode();
+    popInstruction();
     return value;
 }
 
 Value Generator::makeExpressionValue(Expression expr) {
-    if (expr.kind() == NodeKind::ConstantExpr)
+    if (expr.opcode() == Opcode::Constant)
         return expr.data().constant;
     else
         return program->addExpression(expr);
@@ -223,7 +222,7 @@ void Generator::generateIdentifierExpr() {
 
 void Generator::generateParameterizeExpr(int_t argumentCount) {
     Expression baseExpr = topExpression(argumentCount);
-    if (baseExpr.kind() == NodeKind::ConstantExpr) {
+    if (baseExpr.opcode() == Opcode::Constant) {
         Value baseValue = baseExpr.data().constant;
 
         auto generate = [this, argumentCount](DeductionState state) {
@@ -243,7 +242,7 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             }
             VERIFY(pIndex == parameterCount);
             VERIFY(state.isComplete());
-            popNodes(argumentCount + 1);
+            popInstructions(argumentCount + 1);
             Value result = makeParameterize(state.programHandle, state.arguments);
             if (state.program->kind() == ProgramKind::Value)
                 result = fold(result, cast<ValueProgram>(state.program)->value());
@@ -277,13 +276,13 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
 Generator::CallTarget Generator::resolveCallTarget() {
     auto baseExpr = topExpression();
     // TODO: Allow only function and type programs
-    if (baseExpr.kind() == NodeKind::ConstantExpr) {
+    if (baseExpr.opcode() == Opcode::Constant) {
         auto baseValue = baseExpr.data().constant;
         if (baseValue.kind() == ValueKind::Program) {
             Program* baseProg = context.program(baseValue.program());
             DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
             state.identityMap(baseProg->inheritedParameterCount);
-            popNode();
+            popInstruction();
             return { std::move(state) };
         } else if (baseValue.kind() == ValueKind::Parameterize) {
             auto param = program->getParameterize(baseValue);
@@ -292,7 +291,7 @@ Generator::CallTarget Generator::resolveCallTarget() {
             DeductionState state(baseProg, param.base, param.arguments.size());
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
                 state.explicitArgument(i, param.arguments[i]);
-            popNode();
+            popInstruction();
             return { std::move(state) };
         }
     }
@@ -313,7 +312,7 @@ void Generator::generateCallExpr(CallTarget target, int_t argumentCount) {
         VERIFY(state.isComplete());
         Value callTarget = makeParameterize(state.programHandle, state.arguments);
         Type returnType = verifyType(fold(callTarget, callableProg->returnType()));
-        emitExpr(NodeKind::CallExpr, SourceLocation(), argumentCount, returnType, ExprData { .callTarget = callTarget });
+        emitExpression(Opcode::Call, SourceLocation(), argumentCount, returnType, { .callTarget = callTarget });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -368,17 +367,17 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
     state.emitted = true;
     auto origExpr = topExpression();
     Type parentType = origExpr.type();
-    if (origExpr.category() == NodeCategory::PValue) {
-        emitExpr(NodeKind::PureInstantiationExpr, tok->location(), 1, parentType, {});
+    if (origExpr.category() == InstructionCategory::PValue) {
+        emitExpression(Opcode::PureInstantiation, tok->location(), 1, parentType, { .empty {} });
         emitMemberAccessExpr(state);
-        emitExpr(NodeKind::PurifyExpr, tok->location(), 1, topExpression().type(), {});
+        emitExpression(Opcode::Purify, tok->location(), 1, topExpression().type(), {});
         VERIFY_NOT_REACHED();
     }
-    NodeKind nodeKind = origExpr.category() == NodeCategory::LValue ? NodeKind::LMemberAccessExpr : NodeKind::RMemberAccessExpr;
+    Opcode opcode = origExpr.category() == InstructionCategory::LValue ? Opcode::LMemberAccess : Opcode::RMemberAccess;
     for (uint32_t memberIndex : state.memberIndicies) {
         MemberPointer memberPointer { parentType, memberIndex };
         Type mType = memberType(memberPointer);
-        emitExpr(nodeKind, tok->location(), 1, mType, ExprData { .memberPointer = program->addMemberPointer(memberPointer) });
+        emitExpression(opcode, tok->location(), 1, mType, { .memberPointer = program->addMemberPointer(memberPointer) });
         parentType = mType;
     }
 }
@@ -570,10 +569,10 @@ Value Generator::fold(FoldBase base, ExternValue v) {
         return makeFunctionSignature(fold(base, Value(v).functionSignatureBaseValue()));
     case ValueKind::RemoteExpression: {
         RemoteExpression expr = base.program->getRemoteExpression(v);
-        return program->addRemoteExpression(fold(base, expr.base), expr.expressionIndex);
+        return program->addRemoteExpression(fold(base, expr.base), expr.expression);
     }
     case ValueKind::Expression:
-        return program->addRemoteExpression(base.value, Value(v).expressionIndex());
+        return program->addRemoteExpression(base.value, v);
     case ValueKind::Parameterize: {
         auto externPara = base.program->getParameterize(v);
         std::vector<Value> foldedArgs;
@@ -583,7 +582,7 @@ Value Generator::fold(FoldBase base, ExternValue v) {
     }
     case ValueKind::MemberPointer: {
         auto externMember = base.program->getMemberPointer(v);
-        return program->addMemberPointer(verifyType((base, externMember.parentType)), externMember.memberIndex);
+        return program->addMemberPointer(verifyType(fold(base, externMember.parentType)), externMember.memberIndex);
     }
     case ValueKind::BooleanLiteral:
         return (Value)v;
@@ -651,11 +650,11 @@ Type Generator::typeOf(Value value) {
     case ValueKind::BooleanLiteral:
         return builtins::bool_type;
     case ValueKind::Expression:
-        return Expression(&program->expressions[value.expressionIndex()]).type();
+        return program->getExpression(value).type();
     case ValueKind::RemoteExpression: {
         auto rExpr = program->getRemoteExpression(value);
         auto base = asFoldBase(rExpr.base);
-        return verifyType(fold(base, Expression(&base.program->expressions[rExpr.expressionIndex]).type()));
+        return verifyType(fold(base, base.program->getExpression(rExpr.expression).type()));
     }
     case ValueKind::Parameter:
         return parameterTypes[value.id()];

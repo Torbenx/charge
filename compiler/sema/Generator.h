@@ -157,8 +157,8 @@ struct Generator {
         ImplicitTemplate,
     };
 
-    struct StackItem {
-        uint32_t nodeIndex;
+    struct InstructionStackItem {
+        uint32_t endOffset;
     };
 
     struct CallTarget {
@@ -192,6 +192,13 @@ struct Generator {
         }
     };
 
+    struct JumpReference {
+        uint32_t offset;
+    };
+    struct JumpLabel {
+        uint32_t offset;
+    };
+
     using Token = parse::TokenKind;
 
     Context& context;
@@ -199,8 +206,8 @@ struct Generator {
     Program* program = nullptr;
     ProgramHandle programHandle;
 
-    std::vector<Node> nodeScratch;
-    std::vector<StackItem> nodeStack;
+    std::vector<Instruction> instructionScratch;
+    std::vector<InstructionStackItem> instructionStack = { InstructionStackItem { .endOffset = 0 } };
     std::vector<Type> parameterTypes;
     std::vector<LookupContext> lookupStack;
     std::vector<LocalLookupEntry> localLookupEntries;
@@ -210,10 +217,10 @@ struct Generator {
     Generator(Context& context, ProgramHandle handle);
 
     void advance();
-    Node* topNode(int_t n = 0);
+    Instruction& topInstruction(int_t n = 0);
     Expression topExpression(int_t n = 0);
-    void popNode();
-    void popNodes(int_t n);
+    void popInstruction();
+    void popInstructions(int_t n);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -248,14 +255,14 @@ struct Generator {
 
     RuntimeParameter member(MemberPointer pointer);
     Type memberType(MemberPointer pointer);
-    Type typeOf(Value value);
+    Type typeOf(Value);
     Type verifyType(Value value);
 
     Value makeTemplateSignature(Value templateProg);
     Type makeTemplateIdFor(Value templateProg);
     Value makeFunctionSignature(Value value);
     Value makeExpressionValue();
-    Value makeExpressionValue(Expression expr);
+    Value makeExpressionValue(Expression);
     Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
     Type typeOfNonDependentProgram(Value value);
     Type typeOfNonDependentProgram(FoldBase base);
@@ -284,11 +291,20 @@ struct Generator {
     void implicitCastTo(DeductionState& state, ExternValue);
     void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
-    void emitNode(NodeKind kind, SourceLocation location, int_t childCount, NodeData data);
-    void emitExpr(NodeKind kind, SourceLocation location, int_t childCount, Type type, ExprData data);
-    void emitConstantExpr(SourceLocation location, Value value);
-    void emitReferenceExpr(SourceLocation location, int_t localValueIndex);
-    void declareLocal(Word name, SourceLocation location, VariableDeclaration decl);
+    void emitInstruction(Opcode, SourceLocation, int_t childCount, InstructionData data);
+    void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
+    void emitConstantExpr(SourceLocation, Value value);
+    void emitReferenceExpr(SourceLocation, int_t localValueIndex);
+    void declareLocal(Word name, SourceLocation, VariableDeclaration decl);
+
+    /*JumpLabel here();
+    void emitJumpTo(Opcode, SourceLocation, int_t childCount, JumpLabel);
+    JumpReference emitJump(Opcode, SourceLocation, int_t childCount);
+    void link(JumpReference, JumpLabel);
+    void emitJumpTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::Jump, location, 0, label); }
+    JumpReference emitJump(SourceLocation location) { return emitJump(Opcode::Jump, location, 0); }
+    void emitJumpIfTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }
+    JumpReference emitJumpIf(SourceLocation location) { return emitJump(Opcode::JumpIf, location, 1); }*/
 };
 
 }

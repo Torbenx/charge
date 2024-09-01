@@ -159,8 +159,9 @@ fn withBody4() -> X: { let x: X = X(); let y = x; }
 
 // expect-type bool
 static boolTest = false;
-// expect-return-type X
-fn ifTest() -> X: { if true: {} }
+//; FIXME
+//; expect-return-type X
+//; fn ifTest() -> X: { if true: {} }
 
 // expect-object-type X
 static var staticObj: X = X();

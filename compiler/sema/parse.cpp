@@ -10,9 +10,9 @@ void Generator::advance() { tok += 1; }
 
 void Generator::declareLocal(Word name, SourceLocation location, VariableDeclaration declaration) {
     int_t index = localValues.size();
-    emitNode(
-        NodeKind::LetDecl, location, declaration.hasInitializer ? 1 : 0,
-        NodeData { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
+    emitInstruction(
+        Opcode::LetDecl, location, declaration.hasInitializer ? 1 : 0,
+        { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
     localValues.push_back({ declaration.type });
     localLookupEntries.push_back({ name, (uint32_t)index });
 }
@@ -130,7 +130,7 @@ void Generator::visitFunctionDeclaration() {
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
 
-    int_t stackSizeAtBegin = nodeStack.size();
+    int_t stackSizeAtBegin = instructionStack.size();
 
     lookupStack.push_back(LookupContext::forLocal(this));
 
@@ -166,10 +166,10 @@ void Generator::visitFunctionDeclaration() {
         advance();
         visitStatement();
     }
-    emitNode(NodeKind::Function, {}, nodeStack.size() - stackSizeAtBegin, NodeData { .empty {} });
-    VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
-    fnProgram->setBody(topNode());
-    popNode();
+    emitInstruction(Opcode::Function, {}, instructionStack.size() - stackSizeAtBegin, { .empty {} });
+    VERIFY((int_t)instructionStack.size() == stackSizeAtBegin + 1);
+    //fnProgram->setBody(topNode());
+    popInstruction();
 }
 
 void Generator::visitTypeDeclaration() {
@@ -203,14 +203,14 @@ void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {
         SourceLocation openBraceLoc = tok->location();
         advance();
-        int_t stackSizeAtBegin = nodeStack.size();
+        int_t stackSizeAtBegin = instructionStack.size();
         while (tok->kind() != Token::EmptyNode) {
             visitStatement();
         }
         VERIFY(tok->kind() == Token::EmptyNode);
         advance();
-        emitNode(NodeKind::CompoundStmt, openBraceLoc, nodeStack.size() - stackSizeAtBegin, { .empty {} });
-        VERIFY((int_t)nodeStack.size() == stackSizeAtBegin + 1);
+        emitInstruction(Opcode::EndScope, openBraceLoc, instructionStack.size() - stackSizeAtBegin, { .empty {} });
+        VERIFY((int_t)instructionStack.size() == stackSizeAtBegin + 1);
     } else if (tok->kind() == Token::LetStmt || tok->kind() == Token::VarStmt) {
         Word name = Word::fromUint(tok->data());
         SourceLocation nameLoc = tok->location();
@@ -220,14 +220,16 @@ void Generator::visitStatement() {
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
-            SourceLocation ifLoc = tok->location();
+            VERIFY_NOT_REACHED();
+            /*SourceLocation ifLoc = tok->location();
             advance();
             contextualBool();
+            auto jump = emitJumpIf(ifLoc);
             visitStatement();
-            emitNode(NodeKind::IfStmt, ifLoc, 2, { .empty {} });
+            link(jump, here());*/
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);
-            emitNode(NodeKind::ExpressionStmt, tok->location(), 1, { .empty {} });
+            emitInstruction(Opcode::Discard, tok->location(), 1, { .empty {} });
             advance();
         }
     }
