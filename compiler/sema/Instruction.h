@@ -18,9 +18,10 @@ namespace sema {
     OP(Function, Control)                                \
     OP(JumpIf, Control)                                  \
     OP(Jump, Control)                                    \
-    OP(ExpressionHeader, Control)                        \
     OP(EndScope, Control)                                \
-    OP(Discard, Control)
+    OP(Discard, Control)                                 \
+    OP(ExpressionHeader, Header)                         \
+    OP(FunctionHeader, Header)
 
 enum class Opcode : uint8_t {
 #define OP(opcode, cat) opcode,
@@ -34,6 +35,7 @@ enum class InstructionCategory : uint8_t {
     RValue,
     PValue,
     Control,
+    Header,
 };
 
 inline InstructionCategory categoryOf(Opcode opcode) {
@@ -51,7 +53,7 @@ inline InstructionCategory categoryOf(Opcode opcode) {
 }
 
 inline bool isExpression(Opcode opcode) {
-    return categoryOf(opcode) != InstructionCategory::Control;
+    return categoryOf(opcode) <= InstructionCategory::PValue;
 }
 
 union ExpressionData {
@@ -65,7 +67,7 @@ union ExpressionData {
 };
 
 union InstructionData {
-    uint32_t expressionSize;
+    uint32_t blockSize;
     uint32_t jumpDistance;
 
     struct {

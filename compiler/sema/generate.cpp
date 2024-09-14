@@ -6,37 +6,39 @@
 namespace sema {
 
 Instruction& Generator::topInstruction(int_t n) {
-    auto entry = *(instructionStack.end() - n - 1);
+    auto entry = *(expressionStack.end() - n - 1);
     return instructionScratch[entry.endOffset - 1];
 }
 
 Expression Generator::topExpression(int_t n) {
-    auto entry = *(instructionStack.end() - n - 1);
-    auto prevEntry = *(instructionStack.end() - n - 2);
+    auto entry = *(expressionStack.end() - n - 1);
+    auto prevEntry = *(expressionStack.end() - n - 2);
     return Expression(&instructionScratch[entry.endOffset - 1], entry.endOffset - prevEntry.endOffset);
 }
 
-void Generator::popInstruction() {
-    popInstructions(1);
+void Generator::popExpression() {
+    popExpressions(1);
 }
 
-void Generator::popInstructions(int_t n) {
-    VERIFY(n < (int_t)instructionStack.size());
-    int_t newSize = (instructionStack.end() - n - 1)->endOffset;
-    VERIFY(newSize < (int_t)instructionScratch.size());
-    instructionScratch.resize(newSize, Instruction((Opcode)0, {}, { .empty {} }));
-    instructionStack.resize(instructionStack.size() - n);
+void Generator::popExpressions(int_t n) {
+    VERIFY(n < (int_t)expressionStack.size());
+    int_t newSize = (expressionStack.end() - n - 1)->endOffset;
+    instructionScratch.erase(instructionScratch.begin() + newSize, instructionScratch.end());
+    expressionStack.erase(expressionStack.end() - n, expressionStack.end());
 }
 
-void Generator::emitInstruction(Opcode op, SourceLocation location, int_t childCount, InstructionData data) {
-    VERIFY(instructionStack.back().endOffset == instructionScratch.size());
-    instructionStack.resize(instructionStack.size() - childCount);
+void Generator::emitControl(Opcode op, SourceLocation location, int_t childCount, InstructionData data) {
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
+    expressionStack.resize(expressionStack.size() - childCount);
     instructionScratch.emplace_back(op, location, data);
-    instructionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
+    expressionStack.back().endOffset = (uint32_t)instructionScratch.size();
 }
 
 void Generator::emitExpression(Opcode op, SourceLocation location, int_t childCount, Type type, ExpressionData data) {
-    emitInstruction(op, location, childCount, { .expr { type, data } });
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
+    expressionStack.resize(expressionStack.size() - childCount);
+    instructionScratch.emplace_back(op, location, InstructionData { .expr { type, data } });
+    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
 void Generator::emitConstantExpr(SourceLocation location, Value value) {
@@ -51,7 +53,7 @@ void Generator::emitReferenceExpr(SourceLocation location, int_t localValueIndex
 
 Value Generator::makeExpressionValue() {
     Value value = makeExpressionValue(topExpression());
-    popInstruction();
+    popExpression();
     return value;
 }
 
@@ -242,7 +244,7 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
             }
             VERIFY(pIndex == parameterCount);
             VERIFY(state.isComplete());
-            popInstructions(argumentCount + 1);
+            popExpressions(argumentCount + 1);
             Value result = makeParameterize(state.programHandle, state.arguments);
             if (state.program->kind() == ProgramKind::Value)
                 result = fold(result, cast<ValueProgram>(state.program)->value());
@@ -282,7 +284,7 @@ Generator::CallTarget Generator::resolveCallTarget() {
             Program* baseProg = context.program(baseValue.program());
             DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
             state.identityMap(baseProg->inheritedParameterCount);
-            popInstruction();
+            popExpression();
             return { std::move(state) };
         } else if (baseValue.kind() == ValueKind::Parameterize) {
             auto param = program->getParameterize(baseValue);
@@ -291,7 +293,7 @@ Generator::CallTarget Generator::resolveCallTarget() {
             DeductionState state(baseProg, param.base, param.arguments.size());
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
                 state.explicitArgument(i, param.arguments[i]);
-            popInstruction();
+            popExpression();
             return { std::move(state) };
         }
     }

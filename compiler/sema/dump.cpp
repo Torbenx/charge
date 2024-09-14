@@ -5,12 +5,8 @@
 namespace sema {
 
 struct Dumper {
-    struct IndentItem {
-        bool atLast = false;
-        uint8_t extraSpace = 0;
-    };
     Context& context;
-    std::vector<IndentItem> indentation;
+    std::vector<std::string> indentation;
     std::string output;
     Program* program = nullptr;
 
@@ -20,15 +16,8 @@ struct Dumper {
     void dumpProgram(Program*);
     void dumpInstruction(Instruction inst);
     void beginLine() {
-        if (!indentation.empty()) {
-            for (int_t i = 0; i < (int_t)indentation.size() - 1; i++) {
-                auto item = indentation[i];
-                output += std::string(item.extraSpace, ' ');
-                output += item.atLast ? "  " : "| ";
-            }
-            output += std::string(indentation.back().extraSpace, ' ');
-            output += indentation.back().atLast ? "'-" : "|-";
-        }
+        for (const auto& entry : indentation)
+            output += entry;
     }
     void dumpLine(std::string_view line) {
         beginLine();
@@ -206,8 +195,19 @@ void Dumper::dumpProgram(Program* prog) {
         }
         dumpLine(line.str());
     }
-    for (auto inst : program->instructions) {
-        dumpInstruction(inst); // TODO: Do this better
+    for (auto block : program->instructionBlocks()) {
+        beginLine();
+        if (block.headerCode() == Opcode::ExpressionHeader) {
+            output += "e" + std::to_string(program->instructions.data() - block.header()) + ":";
+        } else {
+            output += nameString(block.headerCode());
+        }
+        endLine();
+
+        indentation.emplace_back("  ");
+        for (const auto& inst : block)
+            dumpInstruction(inst);
+        indentation.pop_back();
     }
     this->program = nullptr;
 }

@@ -75,7 +75,7 @@ struct DataValueIterator {
     DataValueIterator& operator=(const DataValueIterator&) = default;
     DataValueIterator& operator=(DataValueIterator&&) = default;
 
-    Value getValue() const {
+    Value value() const {
         return Value(m_pos->kind(), m_pos - m_begin);
     }
     DataValueIterator& operator++() {
@@ -87,7 +87,7 @@ struct DataValueIterator {
         advance();
         return copy;
     }
-    Value operator*() const { return getValue(); }
+    Value operator*() const { return value(); }
 
     auto operator<=>(const DataValueIterator& other) const {
         VERIFY(other.m_begin == m_begin);
@@ -127,6 +127,66 @@ struct DataValueRange {
     std::span<Value> values;
 };
 
+struct InstructionBlock {
+    explicit InstructionBlock(Instruction* header)
+        : m_header(header) { VERIFY(categoryOf(header->opcode()) == InstructionCategory::Header); }
+
+    std::span<Instruction> instructions() const {
+        return { m_header + 1, m_header->u.blockSize };
+    }
+    Instruction* header() const { return m_header; }
+    Opcode headerCode() const { return m_header->opcode(); }
+
+    Instruction* begin() const { return m_header + 1; }
+    Instruction* end() const { return m_header + 1 + m_header->u.blockSize; }
+
+private:
+    Instruction* m_header = nullptr;
+};
+
+struct InstructionBlockIterator {
+    using value_type = InstructionBlock;
+    using difference_type = int_t;
+
+    InstructionBlockIterator() = default;
+    explicit InstructionBlockIterator(Instruction* header)
+        : header(header) { }
+
+    InstructionBlock block() const { return InstructionBlock { header }; }
+    InstructionBlockIterator& operator++() {
+        advance();
+        return *this;
+    }
+    InstructionBlockIterator operator++(int) {
+        InstructionBlockIterator copy = *this;
+        advance();
+        return copy;
+    }
+    InstructionBlock operator*() const { return block(); }
+
+    auto operator<=>(const InstructionBlockIterator& other) const {
+        return header <=> other.header;
+    }
+    bool operator==(const InstructionBlockIterator&) const = default;
+
+private:
+    void advance() {  header = block().end(); }
+
+    Instruction* header = nullptr;
+};
+static_assert(std::forward_iterator<InstructionBlockIterator>);
+
+struct InstructionBlockRange {
+    InstructionBlockIterator begin() const {
+        return InstructionBlockIterator { instructions.data() };
+    }
+    InstructionBlockIterator end() const {
+        return InstructionBlockIterator { instructions.data() + instructions.size() };
+    }
+
+    std::span<Instruction> instructions;
+};
+
 struct Program {
     struct Parameter {
         Word name;
@@ -157,11 +217,8 @@ struct Program {
     }
 
     Expression getExpression(ExternValue value) {
-        VERIFY(value.kind() == ValueKind::Expression);
-        Instruction* header = &instructions[value.id()];
-        VERIFY(header->opcode() == Opcode::ExpressionHeader);
-        int_t size = header->u.expressionSize;
-        return Expression(header + size, size);
+        auto instructions = getInstructions(value.id(), Opcode::ExpressionHeader);
+        return Expression(&instructions.back(), instructions.size());
     }
     RemoteExpression getRemoteExpression(ExternValue value) {
         VERIFY(value.kind() == ValueKind::RemoteExpression);
@@ -205,6 +262,9 @@ struct Program {
     void dump(Context&);
     DataValueRange dataValues() {
         return DataValueRange { valueData };
+    }
+    InstructionBlockRange instructionBlocks() {
+        return InstructionBlockRange { instructions };
     }
 
     parse::TokenHandle beginSignatureCheck() {
@@ -275,6 +335,14 @@ protected:
 
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;
+
+    int_t importInstructions(Opcode headerCode, std::span<const Instruction> instructions);
+
+    std::span<Instruction> getInstructions(int_t offset, Opcode headerCode) {
+        VERIFY(categoryOf(headerCode) == InstructionCategory::Header);
+        VERIFY(instructions[offset].opcode() == headerCode);
+        return { instructions.data() + offset + 1, instructions[offset].u.blockSize };
+    }
 
     friend struct Dumper;
     friend Context; // set translation buffers
@@ -359,14 +427,14 @@ struct FunctionProgram : CallableProgram {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
-    /*void setBody(Node* node) {
+    void setBody(std::span<const Instruction> body) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
-        m_subClassData = importNode(node);
+        m_subClassData = importInstructions(Opcode::FunctionHeader, body);
     }
-    Node* body() {
+    std::span<Instruction> body() {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
-        return &expressions[m_subClassData];
-    }*/
+        return getInstructions(m_subClassData, Opcode::FunctionHeader);
+    }
 };
 
 struct TypeProgram : CallableProgram, Scope {

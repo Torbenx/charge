@@ -10,7 +10,7 @@ void Generator::advance() { tok += 1; }
 
 void Generator::declareLocal(Word name, SourceLocation location, VariableDeclaration declaration) {
     int_t index = localValues.size();
-    emitInstruction(
+    emitControl(
         Opcode::LetDecl, location, declaration.hasInitializer ? 1 : 0,
         { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
     localValues.push_back({ declaration.type });
@@ -130,7 +130,7 @@ void Generator::visitFunctionDeclaration() {
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
 
-    int_t stackSizeAtBegin = instructionStack.size();
+    int_t scratchSizeAtBegin = instructionScratch.size();
 
     lookupStack.push_back(LookupContext::forLocal(this));
 
@@ -166,10 +166,8 @@ void Generator::visitFunctionDeclaration() {
         advance();
         visitStatement();
     }
-    emitInstruction(Opcode::Function, {}, instructionStack.size() - stackSizeAtBegin, { .empty {} });
-    VERIFY((int_t)instructionStack.size() == stackSizeAtBegin + 1);
-    //fnProgram->setBody(topNode());
-    popInstruction();
+    fnProgram->setBody({ instructionScratch.begin() + scratchSizeAtBegin, instructionScratch.end() });
+    instructionScratch.erase(instructionScratch.begin() + scratchSizeAtBegin, instructionScratch.end());
 }
 
 void Generator::visitTypeDeclaration() {
@@ -203,14 +201,12 @@ void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {
         SourceLocation openBraceLoc = tok->location();
         advance();
-        int_t stackSizeAtBegin = instructionStack.size();
         while (tok->kind() != Token::EmptyNode) {
             visitStatement();
         }
         VERIFY(tok->kind() == Token::EmptyNode);
         advance();
-        emitInstruction(Opcode::EndScope, openBraceLoc, instructionStack.size() - stackSizeAtBegin, { .empty {} });
-        VERIFY((int_t)instructionStack.size() == stackSizeAtBegin + 1);
+        emitControl(Opcode::EndScope, openBraceLoc, 0, { .empty {} });
     } else if (tok->kind() == Token::LetStmt || tok->kind() == Token::VarStmt) {
         Word name = Word::fromUint(tok->data());
         SourceLocation nameLoc = tok->location();
@@ -229,7 +225,7 @@ void Generator::visitStatement() {
             link(jump, here());*/
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);
-            emitInstruction(Opcode::Discard, tok->location(), 1, { .empty {} });
+            emitControl(Opcode::Discard, tok->location(), 1, { .empty {} });
             advance();
         }
     }

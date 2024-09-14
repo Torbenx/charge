@@ -156,6 +156,8 @@ fn withBody2() -> X: { withBody1(); }
 fn withBody3() -> X: withBody1();
 // expect-return-type X
 fn withBody4() -> X: { let x: X = X(); let y = x; }
+// expect-return-type X
+fn withBody5() -> X: { let x = identity{X()}; }
 
 // expect-type bool
 static boolTest = false;

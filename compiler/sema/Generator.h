@@ -157,7 +157,7 @@ struct Generator {
         ImplicitTemplate,
     };
 
-    struct InstructionStackItem {
+    struct ExpressionStackItem {
         uint32_t endOffset;
     };
 
@@ -207,7 +207,7 @@ struct Generator {
     ProgramHandle programHandle;
 
     std::vector<Instruction> instructionScratch;
-    std::vector<InstructionStackItem> instructionStack = { InstructionStackItem { .endOffset = 0 } };
+    std::vector<ExpressionStackItem> expressionStack = { ExpressionStackItem { .endOffset = 0 } };
     std::vector<Type> parameterTypes;
     std::vector<LookupContext> lookupStack;
     std::vector<LocalLookupEntry> localLookupEntries;
@@ -219,8 +219,8 @@ struct Generator {
     void advance();
     Instruction& topInstruction(int_t n = 0);
     Expression topExpression(int_t n = 0);
-    void popInstruction();
-    void popInstructions(int_t n);
+    void popExpression();
+    void popExpressions(int_t n);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -291,20 +291,20 @@ struct Generator {
     void implicitCastTo(DeductionState& state, ExternValue);
     void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
-    void emitInstruction(Opcode, SourceLocation, int_t childCount, InstructionData data);
+    void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
     void emitConstantExpr(SourceLocation, Value value);
     void emitReferenceExpr(SourceLocation, int_t localValueIndex);
     void declareLocal(Word name, SourceLocation, VariableDeclaration decl);
 
-    /*JumpLabel here();
+    JumpLabel here();
     void emitJumpTo(Opcode, SourceLocation, int_t childCount, JumpLabel);
     JumpReference emitJump(Opcode, SourceLocation, int_t childCount);
     void link(JumpReference, JumpLabel);
     void emitJumpTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::Jump, location, 0, label); }
     JumpReference emitJump(SourceLocation location) { return emitJump(Opcode::Jump, location, 0); }
     void emitJumpIfTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }
-    JumpReference emitJumpIf(SourceLocation location) { return emitJump(Opcode::JumpIf, location, 1); }*/
+    JumpReference emitJumpIf(SourceLocation location) { return emitJump(Opcode::JumpIf, location, 1); }
 };
 
 }
