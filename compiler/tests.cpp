@@ -509,3 +509,18 @@ TEST(Charge, Files) {
         test.runTest();
     }
 }
+
+TEST(Charge, DISABLED_Benchmark) {
+    namespace fs = std::filesystem;
+    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = readFile(file);
+
+    sema::Context context(sourceBuffer);
+    for (int i = 0; i < 10; i++) {
+        context.reset();
+        parse::parseImpl(context.parseOutput.source.data(), context, nullptr);
+        VERIFY(context.m_scopeStack.size() == 1);
+    }
+}
