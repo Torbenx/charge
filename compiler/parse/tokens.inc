@@ -66,7 +66,6 @@ EXPR(CompareGreaterEqualExpr, BinaryOperatorExpr, Relational)
 
 EXPR(IfExpr, IfExpr, ConditionalIf)
 EXPR(CommaElseExpr, CommaElseExpr, ConditionalElse)
-EXPR(DesignateArgument, DesignateArgument, DesignateArgument)
 
 
 // ------ statements ------

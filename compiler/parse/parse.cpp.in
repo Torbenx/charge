@@ -4,20 +4,22 @@
 
 #ifdef __GNUC__
 #define LABEL_MAYBE_UNUSED [[maybe_unused]]
+#define NO_INLINE [[gnu::noinline]]
 #else
 #define LABEL_MAYBE_UNUSED
+#define NO_INLINE
 #endif
 
 using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
-        Namespace,
-        Type,
-        StaticValue,
-        StaticObject,
-        Function,
-        Member,
-        HasMember,
-    };
+    Namespace,
+    Type,
+    StaticValue,
+    StaticObject,
+    Function,
+    Member,
+    HasMember,
+};
 
 namespace parse {
 
@@ -65,18 +67,66 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
+static constexpr int_t ARGUMENT_BUFFER_SIZE = 1024;
+static constexpr int_t ARGUMENT_BUFFER_SIZE_IN_BYTES = ARGUMENT_BUFFER_SIZE * sizeof(Word);
+
+struct ArgumentBuffer {
+    static size_t toIndex(Word* position) {
+        return ((uintptr_t)position & (ARGUMENT_BUFFER_SIZE_IN_BYTES - 1)) / sizeof(Word);
+    }
+    Word* buffer;
+    ArgumentBuffer()
+        : buffer((Word*)::operator new(ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES))) { }
+    ~ArgumentBuffer() {
+        ::operator delete(buffer, ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES));
+    }
+};
+
+static Word* addCallArgument(Word* position, Word name) {
+    auto index = ArgumentBuffer::toIndex(position);
+    VERIFY(index + 1 < (size_t)ARGUMENT_BUFFER_SIZE);
+    uint32_t newCount = position[0].toUint() + 1;
+    position[0] = name;
+    position += 1;
+    position[0] = Word::fromUint(newCount);
+    return position;
+}
+
+NO_INLINE static Word* endCall(Word* position, ParseState& state) {
+    uint32_t count = position[0].toUint();
+    auto& outputArgs = state.parseOutput.callArguments;
+    uint32_t outputPos = outputArgs.size();
+    outputArgs.push_back(position[0]);
+    outputArgs.insert(outputArgs.end(), position - count, position);
+    position -= count + 2;
+    state.parseOutput.tokens[position[1].toUint()].dataBits = outputPos;
+    return position;
+}
+
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
     return { (uint32_t)(position - state.parseOutput.lines.back().begin), (uint32_t)state.parseOutput.lines.size() - 1 };
 }
 
-[[gnu::noinline]] static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
+NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
     if (kind == TokenKind::ImplicitKindParameter) {
         VERIFY(data != 0);
     }
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
-[[gnu::noinline]] static void markLineBegin(const char* position, ParseState& state) {
+NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
+    uint32_t tokenIndex = state.parseOutput.tokens.size();
+    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
+
+    auto index = ArgumentBuffer::toIndex(argPos);
+    VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
+    argPos[1] = Word::fromUint(tokenIndex);
+    argPos[2] = Word::fromUint(0);
+    argPos += 2;
+    return argPos;
+}
+
+NO_INLINE static void markLineBegin(const char* position, ParseState& state) {
     state.parseOutput.lines.push_back({ position });
 }
 
@@ -84,7 +134,7 @@ struct WordAndPosition {
     const char* position;
     Word word;
 };
-[[nodiscard]] [[gnu::noinline]] static WordAndPosition readWord(const char* position, ParseState& state) {
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseState& state) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -126,11 +176,11 @@ struct WordAndPosition {
     return position;
 };
 
-[[gnu::noinline]] static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
+NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
     state.parseOutput.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
 }
 
-[[nodiscard]] [[gnu::noinline]] static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
+[[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         const char* tokBegin = tokEnd;
@@ -202,6 +252,8 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
     scopePosition[0] = ScopeKind::Invalid;
+    ArgumentBuffer argumentBuffer;
+    Word* argumentPosition = argumentBuffer.buffer;
 
     const char* tokBegin = sourceBufferPosition;
     const char* tokEnd = sourceBufferPosition;
@@ -210,6 +262,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     Word this_identifier;
     sema::ScopeValue this_declaration;
     TokenHandle declarationBegin = {};
+    Word argumentName;
 
     TokenKind tokenKind = (TokenKind)0;
 
@@ -218,6 +271,13 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     LexerToken errorToken = (LexerToken)0;
 
     // GENERATED CODE HERE
+
+exit:
+    VERIFY(scopePosition == scopeBuffer.buffer + 1);
+    VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
+    VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
+    VERIFY(argumentPosition == argumentBuffer.buffer);
+    return;
 
 handle_parse_error:
     errorHandler->invalidToken(errorToken, parseState, scopePosition, state);

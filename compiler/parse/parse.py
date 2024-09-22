@@ -226,6 +226,26 @@ class EndDeclarationInstruction:
         return "endDeclaration"
 
 @dataclasses.dataclass
+class CallArgumentInstruction:
+    nameExpr: str | None
+    def format(self):
+        ret = "callArgument"
+        if not self.nameExpr is None:
+            ret += " " + self.nameExpr
+        return ret
+
+@dataclasses.dataclass
+class EmitCallTokenInstruction:
+    tokenKindExpr: str
+    def format(self):
+        return "emitCallToken " + self.tokenKindExpr
+
+@dataclasses.dataclass
+class EndCallInstruction:
+    def format(self):
+        return "endCall"
+
+@dataclasses.dataclass
 class ErrorInstruction:
     def format(self):
         return "error"
@@ -457,6 +477,18 @@ class Parser:
                 self.advanceLine()
             elif first == "endDeclaration":
                 instructions.append(EndDeclarationInstruction())
+                self.advanceLine()
+            elif first == "callArgument":
+                nameExpr = None
+                if not self.lineEmpty():
+                    nameExpr = self.parseExpr()
+                instructions.append(CallArgumentInstruction(nameExpr))
+                self.advanceLine()
+            elif first == "emitCallToken":
+                instructions.append(EmitCallTokenInstruction(self.parseExpr()))
+                self.advanceLine()
+            elif first == "endCall":
+                instructions.append(EndCallInstruction())
                 self.advanceLine()
             else:
                 while self.line[0] == ' ':
@@ -743,7 +775,7 @@ def generateLinearState(state):
             generateCaseBody(endCase)
             emitToken("TokenKind::EOS")
             line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);")
-            line("return;")
+            line("goto exit;")
         line("}")
 
     thenCase = state.thenCase()
@@ -796,10 +828,7 @@ def generateInstructions(case, instructions, thenHandler):
             else:
                 line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
         elif type(inst) is AssignInstruction:
-            if inst.leftName == "tokenKind":
-                line("tokenKind = " + inst.rightExpr + ";")
-            else:
-                assert False
+            line(inst.leftName + " = " + inst.rightExpr + ";")
         elif type(inst) is PushScopeInstruction:
             line("scopePosition = pushScope(scopePosition, " + inst.scopeKindExpr + ");")
         elif type(inst) is PopScopeInstruction:
@@ -835,6 +864,15 @@ def generateInstructions(case, instructions, thenHandler):
             line("declarationBegin = state.parseOutput.currentToken();")
         elif type(inst) is EndDeclarationInstruction:
             line("endDeclaration(state);")
+        elif type(inst) is EmitCallTokenInstruction:
+            line("argumentPosition = emitCallToken(argumentPosition, " + inst.tokenKindExpr + ", tokBegin, state);")
+        elif type(inst) is CallArgumentInstruction:
+            nameExpr = "Word()"
+            if not inst.nameExpr is None:
+                nameExpr = inst.nameExpr
+            line("argumentPosition = addCallArgument(argumentPosition, " + nameExpr + ");")
+        elif type(inst) is EndCallInstruction:
+            line("argumentPosition = endCall(argumentPosition, state);")
         elif type(inst) is ErrorInstruction:
             generateError(case)
         else:

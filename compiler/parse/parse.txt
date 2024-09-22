@@ -25,7 +25,7 @@ SwitchState expression() then error
         next expression
 
     punctuation (
-        emitToken TokenKind::ParenthesizedExpr
+        emitCallToken TokenKind::ParenthesizedExpr
         next first_argument_paren
 
     keyword if
@@ -171,13 +171,13 @@ SwitchState after_expression() then error
         next access_punctuation
 
     punctuation (
-        emitToken TokenKind::CallExpr
+        emitCallToken TokenKind::CallExpr
         next first_argument_paren
     punctuation [
-        emitToken TokenKind::IndexExpr
+        emitCallToken TokenKind::IndexExpr
         next first_argument_square
     punctuation {
-        emitToken TokenKind::Parameterize
+        emitCallToken TokenKind::Parameterize
         next first_argument_brace
 
     punctuation )
@@ -193,14 +193,17 @@ SwitchState after_expression() then error
             emitToken TokenKind::ExpressionStmt
             next after_parameters
         popScope ScopeKind::Paren
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation ]
         popScope ScopeKind::Square
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
         popScope ScopeKind::Brace
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
 
@@ -251,14 +254,17 @@ LinearState comma_after_expression() then error
 
     punctuation )
         popScope ScopeKind::Paren
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation ]
         popScope ScopeKind::Square
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
         popScope ScopeKind::Brace
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
 
@@ -288,27 +294,34 @@ LinearState comma_else() then error
 
 LinearState check_designated_argument() then expression
     identifier
-        emitToken TokenKind::IdentifierExpr, this_identifier
+        argumentName = this_identifier
         next maybe_designated_argument
-LinearState maybe_designated_argument() then after_expression
+    then
+        callArgument
+LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation =
-        updateKind TokenKind::DesignateArgument
+        callArgument argumentName
         next expression
+    then
+        emitToken TokenKind::IdentifierExpr, argumentName
 
 LinearState first_argument_paren() then check_designated_argument
     punctuation )
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Paren
 LinearState first_argument_square() then check_designated_argument
     punctuation ]
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
 LinearState first_argument_brace() then check_designated_argument
     punctuation }
+        endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
@@ -456,8 +469,6 @@ LinearState no_declaration() then error
         popScope ScopeKind::Namespace, ScopeKind::Type
         next after_declaration
     end
-        popScope ScopeKind::Namespace
-        popScope ScopeKind::Invalid
 
 LinearState namespace_declaration() then templated_declaration
     keyword namespace

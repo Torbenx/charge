@@ -92,6 +92,7 @@ struct Output {
     PageBumpAllocator<TokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
+    std::vector<Word> callArguments;
     std::string_view source;
     Output(std::string_view source)
         : source(source) {
