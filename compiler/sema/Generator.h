@@ -240,7 +240,6 @@ struct Generator {
     void visitUnaryExpr();
     void visitPostfixExpr();
     void visitPrimaryExpr();
-    int_t visitExpressionList();
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
     static void generateBuiltins(Context& context);
@@ -269,9 +268,9 @@ struct Generator {
 
     Value generateDeclarationLiteral(ScopeValue rawValue, std::span<const Value> parentArgs);
     void generateIdentifierExpr();
-    void generateParameterizeExpr(int_t argumentCount);
-    CallTarget resolveCallTarget();
-    void generateCallExpr(CallTarget base, int_t argumentCount);
+    void generateParameterizeExpr(std::span<const Word> argumentNames);
+    CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
+    void generateCallExpr(CallTarget base);
     std::optional<Value> lookupInType(TypeProgram* typeProg, std::span<const Value> arguments, Word name);
     void generateStaticAccessExpr();
     struct MemberAccessState;
@@ -289,7 +288,6 @@ struct Generator {
     void contextualType();
     void contextualBool();
     void implicitCastTo(DeductionState& state, ExternValue);
-    void implicitCastTo(DeductionState& state, ExternValue pType, Expression arg);
 
     void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);

@@ -222,29 +222,35 @@ void Generator::generateIdentifierExpr() {
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateParameterizeExpr(int_t argumentCount) {
-    Expression baseExpr = topExpression(argumentCount);
+void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
+    Expression baseExpr = topExpression();
     if (baseExpr.opcode() == Opcode::Constant) {
         Value baseValue = baseExpr.data().constant;
+        popExpression();
 
-        auto generate = [this, argumentCount](DeductionState state) {
+        auto generate = [this, argumentCount = (int_t)argumentNames.size()](DeductionState state) {
             int_t parameterCount = state.arguments.size();
             int_t pIndex = state.program->inheritedParameterCount;
             int_t aIndex = 0;
-            for (; aIndex < argumentCount; aIndex++, pIndex++) {
+            for (; tok->kind() == Token::CallArgument; aIndex++, pIndex++) {
+                advance();
+
                 // Find next explicit parameter
                 while (pIndex < parameterCount && state.program->parameters[pIndex].implicit())
                     pIndex += 1;
                 VERIFY(pIndex < parameterCount);
 
                 ExternValue pType = state.program->parameters[pIndex].type;
-                Expression argument = topExpression(argumentCount - 1 - aIndex);
-                implicitCastTo(state, pType, argument);
-                state.explicitArgument(pIndex, makeExpressionValue(argument));
+                visitExpression();
+                implicitCastTo(state, pType);
+                state.explicitArgument(pIndex, makeExpressionValue());
             }
+            VERIFY(tok->kind() == Token::EmptyNode);
+            advance();
+
+            VERIFY(aIndex == argumentCount);
             VERIFY(pIndex == parameterCount);
             VERIFY(state.isComplete());
-            popExpressions(argumentCount + 1);
             Value result = makeParameterize(state.programHandle, state.arguments);
             if (state.program->kind() == ProgramKind::Value)
                 result = fold(result, cast<ValueProgram>(state.program)->value());
@@ -275,13 +281,13 @@ void Generator::generateParameterizeExpr(int_t argumentCount) {
     VERIFY_NOT_REACHED();
 }
 
-Generator::CallTarget Generator::resolveCallTarget() {
+Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {
     auto baseExpr = topExpression();
-    // TODO: Allow only function and type programs
     if (baseExpr.opcode() == Opcode::Constant) {
         auto baseValue = baseExpr.data().constant;
         if (baseValue.kind() == ValueKind::Program) {
             Program* baseProg = context.program(baseValue.program());
+            VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
             state.identityMap(baseProg->inheritedParameterCount);
             popExpression();
@@ -289,6 +295,7 @@ Generator::CallTarget Generator::resolveCallTarget() {
         } else if (baseValue.kind() == ValueKind::Parameterize) {
             auto param = program->getParameterize(baseValue);
             Program* baseProg = context.program(param.base);
+            VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             VERIFY(param.arguments.size() <= baseProg->parameters.size());
             DeductionState state(baseProg, param.base, param.arguments.size());
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
@@ -300,21 +307,26 @@ Generator::CallTarget Generator::resolveCallTarget() {
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateCallExpr(CallTarget target, int_t argumentCount) {
+void Generator::generateCallExpr(CallTarget target) {
     auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Type) {
         CallableProgram* callableProg = cast<CallableProgram>(state.program);
 
-        VERIFY(argumentCount == (int_t)callableProg->runtimeParameters.size());
-        for (int_t index = 0; index < argumentCount; index++) {
-            const auto& parameter = callableProg->runtimeParameters[index];
-            Expression argument = topExpression(argumentCount - 1 - index);
-            implicitCastTo(state, parameter.type(), argument);
+        int_t argumentIndex = 0;
+        const auto& parameters = callableProg->runtimeParameters;
+        while (tok->kind() == Token::CallArgument) {
+            advance();
+            visitExpression();
+            implicitCastTo(state, parameters[argumentIndex].type());
+            argumentIndex += 1;
         }
+        VERIFY(tok->kind() == Token::EmptyNode);
+        advance();
+
         VERIFY(state.isComplete());
         Value callTarget = makeParameterize(state.programHandle, state.arguments);
         Type returnType = verifyType(fold(callTarget, callableProg->returnType()));
-        emitExpression(Opcode::Call, SourceLocation(), argumentCount, returnType, { .callTarget = callTarget });
+        emitExpression(Opcode::Call, SourceLocation(), parameters.size(), returnType, { .callTarget = callTarget });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -424,11 +436,6 @@ void Generator::contextualType() {
 void Generator::contextualBool() {
     auto state = selfDeduction();
     implicitCastTo(state, builtins::bool_type);
-}
-
-void Generator::implicitCastTo(DeductionState& state, ExternValue pType, Expression arg) {
-    bool sameType = staticMatch(state, pType, arg.type());
-    VERIFY(sameType);
 }
 
 void Generator::implicitCastTo(DeductionState& state, ExternValue pType) {

@@ -2,6 +2,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <list>
 #include <log.h>
@@ -9,7 +10,7 @@
 #include <ranges>
 #include <sema/Generator.h>
 #include <vector>
-#include <gtest/gtest.h>
+
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -314,7 +315,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
     }
 
     void visitToken(parse::TokenInfo tok) {
-        // std::cout << nameString(tok.kind()) << '\n';
+        // fmt::println("L{}: {}", tok.lineNumber(), nameString(tok.kind()));
 
         if (commandQueue.empty())
             return;
@@ -437,13 +438,13 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         program->dump(context);
 
         if (word == words["expect-type"])
-            expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->type());
+            expr->check(context, program, (sema::Value)cast<sema::ValueProgram>(program)->type());
         if (word == words["expect-value"])
-            expr->check(context, program, (sema::Value) cast<sema::ValueProgram>(program)->value());
+            expr->check(context, program, (sema::Value)cast<sema::ValueProgram>(program)->value());
         if (word == words["expect-object-type"])
-            expr->check(context, program, (sema::Value) cast<sema::ObjectProgram>(program)->objectType());
+            expr->check(context, program, (sema::Value)cast<sema::ObjectProgram>(program)->objectType());
         if (word == words["expect-return-type"])
-            expr->check(context, program, (sema::Value) cast<sema::FunctionProgram>(program)->returnType());
+            expr->check(context, program, (sema::Value)cast<sema::FunctionProgram>(program)->returnType());
     }
 
     Command popCommand(Word cause) {

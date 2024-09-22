@@ -253,10 +253,13 @@ void Generator::visitPostfixExpr() {
     visitPrimaryExpr();
     for (;;) {
         if (tok->kind() == Token::Parameterize) {
-            generateParameterizeExpr(visitExpressionList());
+            auto argumentNames = context.parseOutput.argumentNames(tok->data());
+            advance();
+            generateParameterizeExpr(argumentNames);
         } else if (tok->kind() == Token::CallExpr) {
-            CallTarget target = resolveCallTarget();
-            generateCallExpr(std::move(target), visitExpressionList());
+            CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data()));
+            advance();
+            generateCallExpr(std::move(target));
         } else if (tok->kind() == Token::StaticAccessExpr) {
             generateStaticAccessExpr();
             advance();
@@ -276,17 +279,6 @@ void Generator::visitPrimaryExpr() {
     } else {
         VERIFY_NOT_REACHED();
     }
-}
-
-int_t Generator::visitExpressionList() {
-    advance();
-    int_t argumentCount = 0;
-    while (tok->kind() != Token::EmptyNode) {
-        argumentCount += 1;
-        visitExpression();
-    }
-    advance();
-    return argumentCount;
 }
 
 }

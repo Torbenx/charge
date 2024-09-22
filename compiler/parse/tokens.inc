@@ -66,6 +66,7 @@ EXPR(CompareGreaterEqualExpr, BinaryOperatorExpr, Relational)
 
 EXPR(IfExpr, IfExpr, ConditionalIf)
 EXPR(CommaElseExpr, CommaElseExpr, ConditionalElse)
+EXPR(CallArgument, CallArgument, CallArgument)
 
 
 // ------ statements ------

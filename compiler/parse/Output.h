@@ -106,6 +106,11 @@ struct Output {
         lines.push_back({ source.data() });
     }
 
+    std::span<const Word> argumentNames(uint32_t callTokenData) {
+        int_t count = std::bit_cast<uint32_t>(callArguments[callTokenData]);
+        return std::span<const Word>(callArguments.data() + callTokenData + 1, count);
+    }
+
     const char* sourcePointer(SourceLocation loc) const {
         return lines[loc.lineIndex()].begin + loc.offsetInLine();
     }

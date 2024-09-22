@@ -6,7 +6,6 @@ target_sources(compiler
     dump.cpp
     generate.cpp
     Generator.h
-    InsertOperation.h
     Instruction.cpp
     Instruction.h
     Node.cpp

@@ -8,21 +8,21 @@ fn test(): {
 //; primary expressions
 /* expect-token IdentifierExpr */ a;
 /* expect-token LiteralExpr */ 1;
-/* exect-node LiteralExpr */ 'a';
+/* expect-token LiteralExpr */ 'a';
 
 /* expect-token ParenthesizedExpr; expect-token EmptyNode */ ();
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a);
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a,);
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a, /**/);
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a, b);
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a, b,);
-/* expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token IdentifierExpr; expect-token EmptyNode */ (a, /**/ b, /**/);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a,);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p /**/ = a, /**/);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a, q = b);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a, q = b,);
-/* expect-token ParenthesizedExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token DesignateArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p /**/ = a, /**/ q = /**/ b, /**/);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a,);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a, /**/);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a, b);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a, b,);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a, /**/ b, /**/);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a,);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p /**/ = a, /**/);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a, q = b);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p = a, q = b,);
+/* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (p /**/ = a, /**/ q = /**/ b, /**/);
 
 //; postfix expressions
 /* expect-token IdentifierExpr; expect-token Parameterize; expect-token EmptyNode */ a{};
@@ -30,13 +30,13 @@ fn test(): {
 /* expect-token IdentifierExpr; expect-token Parameterize; expect-token EmptyNode */
 a{
 };
-/* expect-token IdentifierExpr; expect-token Parameterize; expect-token IdentifierExpr; expect-token EmptyNode */ a{b};
+/* expect-token IdentifierExpr; expect-token Parameterize; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ a{b};
 /* expect-token IdentifierExpr; expect-token CallExpr; expect-token EmptyNode */ a();
 /* expect-token IdentifierExpr; expect-token CallExpr; expect-token EmptyNode */ a(/**/);
-/* expect-token IdentifierExpr; expect-token CallExpr; expect-token IdentifierExpr; expect-token EmptyNode */ a(b);
+/* expect-token IdentifierExpr; expect-token CallExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ a(b);
 /* expect-token IdentifierExpr; expect-token IndexExpr; expect-token EmptyNode */ a[];
 /* expect-token IdentifierExpr; expect-token IndexExpr; expect-token EmptyNode */ a[/**/];
-/* expect-token IdentifierExpr; expect-token IndexExpr; expect-token IdentifierExpr; expect-token EmptyNode */ a[b];
+/* expect-token IdentifierExpr; expect-token IndexExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ a[b];
 /* expect-token IdentifierExpr; expect-token MemberAccessExpr */ a.b;
 /* expect-token IdentifierExpr; expect-token MemberAccessExpr */ a./**/b;
 /* expect-token IdentifierExpr; expect-token StaticAccessExpr */ a::b;
@@ -96,8 +96,8 @@ a{
 
 //; test comma-else in arguments
 // expect-token ParenthesizedExpr;
-// expect-token IdentifierExpr; expect-token CommaElseExpr; expect-token IdentifierExpr
-// expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token CallArgument; expect-token IdentifierExpr; expect-token CommaElseExpr; expect-token IdentifierExpr
+// expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode
 (a, else => b, c);
 
 /* expect-token IdentifierExpr; expect-token IfStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ if a: b;
@@ -127,11 +127,11 @@ if a: { b; } else: { c; }
 // expect-token ElseStmt; expect-token LetStmt; expect-token AssignStmt; expect-token ExpressionStmt
 if a: let b; else: let c;
 
-// expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode
 // expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 (a, b) = c;
 
-// expect-token ParenthesizedExpr; expect-token IdentifierExpr; expect-token IfExpr; expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token IfExpr; expect-token IdentifierExpr; expect-token EmptyNode
 // expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 (if a => b) = c;
 

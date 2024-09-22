@@ -298,11 +298,15 @@ LinearState check_designated_argument() then expression
         next maybe_designated_argument
     then
         callArgument
+        emitToken TokenKind::CallArgument
 LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation =
         callArgument argumentName
+        emitToken TokenKind::CallArgument, argumentName
         next expression
     then
+        callArgument
+        emitToken TokenKind::CallArgument
         emitToken TokenKind::IdentifierExpr, argumentName
 
 LinearState first_argument_paren() then check_designated_argument

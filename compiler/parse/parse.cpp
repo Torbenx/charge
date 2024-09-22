@@ -1889,6 +1889,8 @@ comma_after_expression$no_emit:
                 // then check_designated_argument
                 // callArgument
                 argumentPosition = addCallArgument(argumentPosition, Word());
+                // emitToken TokenKind::CallArgument
+                emitToken(TokenKind::CallArgument, tokBegin, 0, state);
                 // -> expression
                 goto expression$keyword_check;
             }
@@ -2078,6 +2080,8 @@ check_designated_argument$as_then:
         if (this_identifier.keyword()) {
             // callArgument
             argumentPosition = addCallArgument(argumentPosition, Word());
+            // emitToken TokenKind::CallArgument
+            emitToken(TokenKind::CallArgument, tokBegin, 0, state);
             // -> expression
             goto expression$keyword_check;
         }
@@ -2088,6 +2092,8 @@ check_designated_argument$as_then:
     }
     // callArgument
     argumentPosition = addCallArgument(argumentPosition, Word());
+    // emitToken TokenKind::CallArgument
+    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
     // then expression
     goto expression$as_then;
 
@@ -2102,10 +2108,17 @@ maybe_designated_argument$no_emit:
             tokEnd += 1;
             // callArgument argumentName
             argumentPosition = addCallArgument(argumentPosition, argumentName);
+            // emitToken TokenKind::CallArgument, argumentName
+            carriedEmitTokenKind = TokenKind::CallArgument;
+            carriedEmitTokenData = argumentName.toUint();
             // next expression
-            goto expression$no_emit;
+            goto expression$with_emit;
         }
     }
+    // callArgument
+    argumentPosition = addCallArgument(argumentPosition, Word());
+    // emitToken TokenKind::CallArgument
+    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
     // emitToken TokenKind::IdentifierExpr, argumentName
     emitToken(TokenKind::IdentifierExpr, tokBegin, argumentName.toUint(), state);
     // then after_expression
