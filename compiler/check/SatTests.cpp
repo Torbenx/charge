@@ -527,29 +527,6 @@ TEST(Check, EqualityProblem) {
     EXPECT_FALSE(solver.analyzeConflicts());
 }
 
-TEST(Check, TreeLabel) {
-    TreeLabel root = TreeLabel::rootLabel();
-    EXPECT_EQ(root.label(), 0b0111'1111'1111'1111'1111'1111'1111'1111u);
-
-    EXPECT_EQ(root.extend(false).label(), 0b0011'1111'1111'1111'1111'1111'1111'1111u);
-    EXPECT_EQ(root.extend(false).extend(false).label(), 0b0001'1111'1111'1111'1111'1111'1111'1111u);
-    EXPECT_EQ(root.extend(false).extend(true).label(), 0b0101'1111'1111'1111'1111'1111'1111'1111u);
-
-    EXPECT_EQ(root.extend(true).label(), 0b1011'1111'1111'1111'1111'1111'1111'1111u);
-    EXPECT_EQ(root.extend(true).extend(false).label(), 0b1001'1111'1111'1111'1111'1111'1111'1111u);
-    EXPECT_EQ(root.extend(true).extend(true).label(), 0b1101'1111'1111'1111'1111'1111'1111'1111u);
-
-    EXPECT_EQ(root.depth(), 0);
-
-    EXPECT_EQ(root.extend(false).depth(), 1);
-    EXPECT_EQ(root.extend(false).extend(false).depth(), 2);
-    EXPECT_EQ(root.extend(false).extend(true).depth(), 2);
-
-    EXPECT_EQ(root.extend(true).depth(), 1);
-    EXPECT_EQ(root.extend(true).extend(false).depth(), 2);
-    EXPECT_EQ(root.extend(true).extend(true).depth(), 2);
-}
-
 /*TEST(Check, BasicBlocks) {
     Solver solver;
     BlockManager manager(solver);

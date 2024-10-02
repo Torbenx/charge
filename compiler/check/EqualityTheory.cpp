@@ -4,24 +4,26 @@
 
 namespace check {
 
-EqualityTheory::Link EqualityTheory::orient(Solver& solver, Value a, Value b) {
-    if (solver.compare(a, b) > 0)
-        std::swap(a, b);
-    return Link { a, b };
+uint32_t EqualityTheory::LinkSet::makeNode(Solver&, const Link& link, TreeLabel label) {
+    return Base::makeNode(label, link);
 }
-
-std::strong_ordering EqualityTheory::compare(Solver& solver, Link a, Link b) {
+std::strong_ordering EqualityTheory::LinkSet::compare(Solver& solver, const Link& a, const Link& b) {
     auto targetCmp = solver.compare(a.target, b.target);
     if (targetCmp != 0)
         return targetCmp;
     return solver.compare(a.source, b.source);
 }
 
+EqualityTheory::Link EqualityTheory::orient(Solver& solver, Value a, Value b) {
+    if (solver.compare(a, b) > 0)
+        std::swap(a, b);
+    return Link { a, b };
+}
+
 int_t EqualityTheory::equalityVariable(Solver& solver, Value a, Value b) {
     VERIFY(a != b);
     Link l = orient(solver, a, b);
-    auto cmp = [&solver](Link a, Link b) { return compare(solver, a, b); };
-    int_t varId = equalities.get(l, cmp);
+    int_t varId = equalities.get(solver, l);
     if (varId == variableCount()) {
         newVariable();
         onNewVariable(solver, varId);

@@ -17,6 +17,10 @@ add_executable(compiler
     types.h
     windows_allocdetail.cpp
     WordTable.h
+    FlatSet.cpp
+    FlatSet.h
+    FlatTreeSet.cpp
+    FlatTreeSet.h
 )
 
 add_subdirectory(parse)
