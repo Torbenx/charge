@@ -90,9 +90,13 @@ struct Dumper {
             result += "e";
             break;
         case ValueKind::Parameterize:
+            result += "p";
+            break;
         case ValueKind::RemoteExpression:
+            result += "re";
+            break;
         case ValueKind::MemberPointer:
-            result += "d";
+            result += "m";
             break;
         case ValueKind::Parameter:
             result += '#';
@@ -159,7 +163,7 @@ void Dumper::dumpProgram(Program* prog) {
     default:
         break;
     }
-    for (Value value : program->dataValues()) {
+    for (Value value : std::views::join(std::array { program->parameterizeValues(), program->memberPointerValues(), program->remoteExpressionValues() })) {
         std::ostringstream line;
         line << formatValue(value) << " = ";
         switch (value.kind()) {

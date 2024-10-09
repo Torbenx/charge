@@ -85,7 +85,7 @@ Value Generator::makeFunctionSignature(Value value) {
 
 Type Generator::makeTemplateIdFor(Value templateProg) {
     std::array arguments { makeTemplateSignature(templateProg) };
-    return verifyType(program->addParameterize(builtins::template_id_template.program(), arguments));
+    return verifyType(program->addParameterize(context, { builtins::template_id_template.program(), arguments }));
 }
 
 Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arguments) {
@@ -93,7 +93,7 @@ Value Generator::makeParameterize(ProgramHandle base, std::span<const Value> arg
     VERIFY(arguments.size() == baseProg->inheritedParameterCount || arguments.size() == baseProg->parameters.size());
     if (arguments.empty())
         return Value(base);
-    return program->addParameterize(base, arguments);
+    return program->addParameterize(context, { base, arguments });
 }
 
 Value Generator::inheriteParameters(ScopeValue parent) {
@@ -115,7 +115,7 @@ Value Generator::inheriteParameters(ScopeValue parent) {
     for (int_t i = 0; i < parameterCount; i++)
         arguments[i] = addInheritedParameter(Type(), std::nullopt);
 
-    Value parentValue = program->addParameterize(parentHandle, arguments);
+    Value parentValue = program->addParameterize(context, { parentHandle, arguments });
     FoldBase base = asFoldBase(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
@@ -129,7 +129,7 @@ Value Generator::generateDeclarationLiteral(ScopeValue rawValue, std::span<const
         Program* targetProg = context.program(targetHandle);
         VERIFY(targetProg->inheritedParameterCount <= baseArgs.size());
         if (targetProg->inheritedParameterCount > 0)
-            return program->addParameterize(targetHandle, baseArgs);
+            return program->addParameterize(context, { targetHandle, baseArgs });
         return Value(targetHandle);
     };
 
@@ -391,7 +391,7 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
     for (uint32_t memberIndex : state.memberIndicies) {
         MemberPointer memberPointer { parentType, memberIndex };
         Type mType = memberType(memberPointer);
-        emitExpression(opcode, tok->location(), 1, mType, { .memberPointer = program->addMemberPointer(memberPointer) });
+        emitExpression(opcode, tok->location(), 1, mType, { .memberPointer = program->addMemberPointer(context, memberPointer) });
         parentType = mType;
     }
 }
@@ -578,20 +578,20 @@ Value Generator::fold(FoldBase base, ExternValue v) {
         return makeFunctionSignature(fold(base, Value(v).functionSignatureBaseValue()));
     case ValueKind::RemoteExpression: {
         RemoteExpression expr = base.program->getRemoteExpression(v);
-        return program->addRemoteExpression(fold(base, expr.base), expr.expression);
+        return program->addRemoteExpression(context, { fold(base, expr.base), expr.expression });
     }
     case ValueKind::Expression:
-        return program->addRemoteExpression(base.value, v);
+        return program->addRemoteExpression(context, { base.value, v });
     case ValueKind::Parameterize: {
         auto externPara = base.program->getParameterize(v);
         std::vector<Value> foldedArgs;
         for (auto arg : externPara.arguments)
             foldedArgs.push_back(fold(base, arg));
-        return program->addParameterize(foldProgram(externPara.base), foldedArgs);
+        return program->addParameterize(context, { foldProgram(externPara.base), foldedArgs });
     }
     case ValueKind::MemberPointer: {
         auto externMember = base.program->getMemberPointer(v);
-        return program->addMemberPointer(verifyType(fold(base, externMember.parentType)), externMember.memberIndex);
+        return program->addMemberPointer(context, { verifyType(fold(base, externMember.parentType)), externMember.memberIndex });
     }
     case ValueKind::BooleanLiteral:
         return (Value)v;
@@ -698,11 +698,11 @@ Type Generator::typeOfNonDependentProgram(FoldBase base) {
     switch (base.program->kind()) {
     case ProgramKind::Function: {
         std::array arguments { makeFunctionSignature(base.value) };
-        return verifyType(program->addParameterize(builtins::function_id_template.program(), arguments));
+        return verifyType(program->addParameterize(context, { builtins::function_id_template.program(), arguments }));
     }
     case ProgramKind::Object: {
         std::array arguments { (Value)cast<ObjectProgram>(base.program)->objectType() };
-        return verifyType(program->addParameterize(builtins::ptr_template.program(), arguments));
+        return verifyType(program->addParameterize(context, { builtins::ptr_template.program(), arguments }));
     }
     case ProgramKind::Value:
         return verifyType(fold(base, cast<ValueProgram>(base.program)->type()));

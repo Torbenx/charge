@@ -1,8 +1,10 @@
 #pragma once
 
+#include <FlatTreeSet.h>
 #include <parse/Output.h>
 #include <sema/Instruction.h>
 #include <sema/Scope.h>
+
 
 namespace sema {
 
@@ -37,17 +39,51 @@ struct Expression {
     Instruction* end() const { return inst + 1; }
 };
 
+struct ParameterizeData {
+    ProgramHandle base;
+    std::vector<Value> arguments;
+};
 struct Parameterize {
     ProgramHandle base;
-    std::span<Value> arguments;
+    std::span<const Value> arguments;
+
+    static Parameterize fromData(const ParameterizeData& data) {
+        return { data.base, { data.arguments.data(), data.arguments.size() } };
+    }
 };
+struct ParameterizeSet : FlatTreeSetDetail::Base<ParameterizeSet, ParameterizeData> {
+    uint32_t get(Context& context, ProgramHandle prog, Parameterize);
+
+private:
+    friend Base;
+    uint32_t makeNode(Context&, ProgramHandle, Parameterize, TreeLabel);
+    std::strong_ordering compare(Context&, ProgramHandle, Parameterize, ParameterizeData&);
+};
+
 struct RemoteExpression {
     Value base;
     ExternValue expression;
 };
+struct RemoteExpressionSet : FlatTreeSetDetail::Base<RemoteExpressionSet, RemoteExpression> {
+    uint32_t get(Context& context, ProgramHandle prog, RemoteExpression);
+
+private:
+    friend Base;
+    uint32_t makeNode(Context&, ProgramHandle, RemoteExpression, TreeLabel);
+    std::strong_ordering compare(Context&, ProgramHandle, RemoteExpression, RemoteExpression);
+};
+
 struct MemberPointer {
     Type parentType; // always non-dependent
     uint32_t memberIndex;
+};
+struct MemberPointerSet : FlatTreeSetDetail::Base<MemberPointerSet, MemberPointer> {
+    uint32_t get(Context& context, ProgramHandle prog, MemberPointer);
+
+private:
+    friend Base;
+    uint32_t makeNode(Context&, ProgramHandle, MemberPointer, TreeLabel);
+    std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
 };
 
 enum class ProgramStatus : uint8_t {
@@ -63,68 +99,58 @@ enum class ProgramKind : uint8_t {
     Function,
 };
 
-struct DataValueIterator {
+struct ValueIdIterator {
     using value_type = Value;
     using difference_type = int_t;
 
-    DataValueIterator() = default;
-    DataValueIterator(Value* begin, Value* position)
-        : m_begin(begin), m_pos(position) { }
-    DataValueIterator(const DataValueIterator&) = default;
-    DataValueIterator(DataValueIterator&&) = default;
-    DataValueIterator& operator=(const DataValueIterator&) = default;
-    DataValueIterator& operator=(DataValueIterator&&) = default;
+    ValueIdIterator() = default;
+    explicit ValueIdIterator(Value value)
+        : m_value(value) { }
+    ValueIdIterator(const ValueIdIterator&) = default;
+    ValueIdIterator(ValueIdIterator&&) = default;
+    ValueIdIterator& operator=(const ValueIdIterator&) = default;
+    ValueIdIterator& operator=(ValueIdIterator&&) = default;
 
     Value value() const {
-        return Value(m_pos->kind(), m_pos - m_begin);
+        return m_value;
     }
-    DataValueIterator& operator++() {
+    ValueIdIterator& operator++() {
         advance();
         return *this;
     }
-    DataValueIterator operator++(int) {
-        DataValueIterator copy = *this;
+    ValueIdIterator operator++(int) {
+        ValueIdIterator copy = *this;
         advance();
         return copy;
     }
     Value operator*() const { return value(); }
 
-    auto operator<=>(const DataValueIterator& other) const {
-        VERIFY(other.m_begin == m_begin);
-        return m_pos <=> other.m_pos;
+    auto operator<=>(const ValueIdIterator& other) const {
+        VERIFY(m_value.kind() == other.m_value.kind());
+        return m_value.id() <=> other.m_value.id();
     }
-    bool operator==(const DataValueIterator&) const = default;
+    bool operator==(const ValueIdIterator&) const = default;
 
 private:
     void advance() {
-        switch (m_pos->kind()) {
-        case ValueKind::Parameterize:
-            m_pos += 2 + m_pos->id();
-            break;
-        case ValueKind::RemoteExpression:
-            m_pos += 2;
-            break;
-        case ValueKind::MemberPointer:
-            m_pos += 2;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        m_value = Value(m_value.kind(), m_value.id() + 1);
     }
-    Value* m_begin = nullptr;
-    Value* m_pos = nullptr;
+    Value m_value;
 };
-static_assert(std::forward_iterator<DataValueIterator>);
+static_assert(std::forward_iterator<ValueIdIterator>);
 
-struct DataValueRange {
-    DataValueIterator begin() const {
-        return { values.data(), values.data() };
+struct ValueIdRange {
+    ValueIdIterator begin() const {
+        return ValueIdIterator(Value(endValue.kind(), 0));
     }
-    DataValueIterator end() const {
-        return { values.data(), values.data() + values.size() };
+    ValueIdIterator end() const {
+        return ValueIdIterator(endValue);
     }
 
-    std::span<Value> values;
+    ValueIdRange(ValueKind kind, uint32_t endId)
+        : endValue(kind, endId) { }
+
+    Value endValue;
 };
 
 struct InstructionBlock {
@@ -170,7 +196,7 @@ struct InstructionBlockIterator {
     bool operator==(const InstructionBlockIterator&) const = default;
 
 private:
-    void advance() {  header = block().end(); }
+    void advance() { header = block().end(); }
 
     Instruction* header = nullptr;
 };
@@ -204,38 +230,30 @@ struct Program {
 
     Value addExpression(Expression);
 
-    Value addRemoteExpression(Value base, ExternValue expression);
-    Value addRemoteExpression(RemoteExpression expr) {
-        return addRemoteExpression(expr.base, expr.expression);
-    }
-
-    Value addParameterize(ProgramHandle base, std::span<const Value> arguments);
-
-    Value addMemberPointer(Type parent, uint32_t memberIndex);
-    Value addMemberPointer(MemberPointer pointer) {
-        return addMemberPointer(pointer.parentType, pointer.memberIndex);
-    }
+    Value addParameterize(Context& context, Parameterize parameterize);
+    Value addRemoteExpression(Context& context, RemoteExpression expr);
+    Value addMemberPointer(Context& context, MemberPointer pointer);
 
     Expression getExpression(ExternValue value) {
         auto instructions = getInstructions(value.id(), Opcode::ExpressionHeader);
         return Expression(&instructions.back(), instructions.size());
     }
+    Parameterize getParameterize(ExternValue value) {
+        VERIFY(value.kind() == ValueKind::Parameterize);
+        return Parameterize::fromData(parameterizes.at(value.id()));
+    }
     RemoteExpression getRemoteExpression(ExternValue value) {
         VERIFY(value.kind() == ValueKind::RemoteExpression);
-        Value* begin = &valueData[value.id()];
-        return RemoteExpression { begin[1], Value(ValueKind::Expression, begin[0].id()) };
-    }
-    Parameterize getParameterize(ExternValue value) {
-        // TODO: Returning a span referencing valueData may be a bad idea
-        VERIFY(value.kind() == ValueKind::Parameterize);
-        Value* begin = &valueData[value.id()];
-        int_t argumentCount = begin[0].id();
-        return Parameterize { begin[1].program(), { begin + 2, (size_t)argumentCount } };
+        return remoteExpressions.at(value.id());
     }
     MemberPointer getMemberPointer(ExternValue value) {
         VERIFY(value.kind() == ValueKind::MemberPointer);
-        Value* begin = &valueData[value.id()];
-        return { (Type)begin[1], begin[0].id() };
+        return memberPointers.at(value.id());
+    }
+    std::strong_ordering compareParameterizes(Value a, Value b) {
+        VERIFY(a.kind() == ValueKind::Parameterize);
+        VERIFY(b.kind() == ValueKind::Parameterize);
+        return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -260,9 +278,6 @@ struct Program {
     }
 
     void dump(Context&);
-    DataValueRange dataValues() {
-        return DataValueRange { valueData };
-    }
     InstructionBlockRange instructionBlocks() {
         return InstructionBlockRange { instructions };
     }
@@ -304,6 +319,16 @@ struct Program {
         VERIFY_NOT_REACHED();
     }
 
+    ValueIdRange parameterizeValues() const {
+        return ValueIdRange(ValueKind::Parameterize, parameterizes.size());
+    }
+    ValueIdRange memberPointerValues() const {
+        return ValueIdRange(ValueKind::MemberPointer, memberPointers.size());
+    }
+    ValueIdRange remoteExpressionValues() const {
+        return ValueIdRange(ValueKind::RemoteExpression, remoteExpressions.size());
+    }
+
 public:
     struct Fields {
         uint8_t kindBits : 2;
@@ -323,7 +348,9 @@ public:
 
     std::vector<Parameter> parameters;
     std::vector<Instruction> instructions;
-    std::vector<Value> valueData;
+    ParameterizeSet parameterizes;
+    RemoteExpressionSet remoteExpressions;
+    MemberPointerSet memberPointers;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
@@ -347,7 +374,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 120);
+static_assert(sizeof(Program) == 192);
 
 struct ValueProgram : Program {
     ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
@@ -519,6 +546,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 160);
+static_assert(sizeof(ProgramUnion) == 232);
 
 }

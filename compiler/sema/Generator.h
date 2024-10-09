@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sema/Program.h>
+#include <sema/Util.h>
 
 namespace sema {
 
@@ -26,7 +26,7 @@ struct FoldBase {
     Program* program;
     ProgramHandle programHandle;
     Value value;
-    std::vector<Value> arguments;
+    std::span<const Value> arguments;
 };
 
 struct DeductionState {
@@ -125,7 +125,7 @@ private:
     uintptr_t bits;
 };
 
-struct Generator {
+struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
         Value value;
@@ -201,10 +201,7 @@ struct Generator {
 
     using Token = parse::TokenKind;
 
-    Context& context;
     const parse::TokenInfo* tok = nullptr;
-    Program* program = nullptr;
-    ProgramHandle programHandle;
 
     std::vector<Instruction> instructionScratch;
     std::vector<ExpressionStackItem> expressionStack = { ExpressionStackItem { .endOffset = 0 } };

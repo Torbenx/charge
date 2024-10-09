@@ -4,7 +4,7 @@
 namespace sema {
 
 Generator::Generator(Context& context, ProgramHandle handle)
-    : context(context), program(context.program(handle)), programHandle(handle) { }
+    : Util(context, handle) { }
 
 void Generator::advance() { tok += 1; }
 

@@ -14,5 +14,7 @@ target_sources(compiler
     Program.cpp
     Program.h
     Scope.h
+    Util.cpp
+    Util.h
     Value.h
 )

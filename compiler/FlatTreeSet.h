@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ranges>
 #include <types.h>
 
 struct TreeLabel {
@@ -85,7 +86,7 @@ protected:
                 continue;
             }
 
-            uint32_t result =  nodes.size();
+            uint32_t result = nodes.size();
             nextHandle = result;
             VERIFY(result == impl()->makeNode(args..., node.label.extend(c > 0)));
             return result;
@@ -148,6 +149,18 @@ public:
     }
 
     uint32_t label(uint32_t handle) const { return node_at(handle).label.label(); }
+
+    auto entries() const
+        requires std::is_void_v<array_type>
+    {
+        auto view = std::views::transform(nodes, [](const node_type& node) -> const data_type& { return node.data; });
+        static_assert(std::random_access_iterator<decltype(view.begin())>);
+        return view;
+    }
+
+    int_t size() const
+        requires std::is_void_v<array_type>
+    { return nodes.size(); }
 };
 
 }

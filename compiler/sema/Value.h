@@ -31,18 +31,25 @@ struct NamespaceHandle {
 };
 
 enum class ValueKind : uint8_t {
+    // The ordering in this enum determines the ordering of values
+    // This ordering needs to be defined between aritatry values to make some data strutures work,
+    // but it is most important between values of the same type where it used to orient equalities.
+
     Program, // either not dependent or a template
     Namespace,
-    Parameter,
     TemplateSignature$Program,
     TemplateSignature$Parameterize,
     FunctionSignature$Program,
     FunctionSignature$Parameterize,
+    BooleanLiteral,
+    MemberPointer,
+
     Parameterize, // either all argument substituted or just the inherited ones
     Expression,
     RemoteExpression,
-    MemberPointer,
-    BooleanLiteral,
+
+    Parameter,
+
     Invalid = 15,
 };
 struct Value {
