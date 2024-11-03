@@ -4,49 +4,35 @@
     |- Static variable
     '- Parameter variable
 
--- Variable kinds: let, mut, in, inout, out.
-   Where the 'let' and 'mut' apply to all variables and the others only to parameters.
+-- Variable kinds: let, var, in, inout, out.
+   Where the 'let' and 'var' apply to all variables and the others only to parameters.
 -- 'let' is the default and can be omitted.
--- Identity property: identity => storage => value
 
--- Properties of identifier expression naming variable:
+-- A
 
-           | let            | in             | inout/out        | mut
-   --------|----------------|----------------|------------------|------------------
-    struct | value          | storage /const | storage /mutable | identity/mutable
-    object | identity/const | identity/const | identity/mutable | identity/muatble
+           | in    | inout | out   | var
+   --------|-------|-------|-------|-------
+    unique | no    | yes   | yes   | yes
+    shared | yes   | yes   | no    | no
 
 -- Initialized at begin/end:
 
-           | let        | inout   | out    | mut
-   --------|------------|---------|--------|---------
-    struct | yes*/undef | yes/yes | no/yes | yes*/no
-    object |            | yes/yes | no/yes | yes*/no
+    let        | in/inout | out    | var
+   ------------|----------|--------|---------
+    yes*/undef | yes/yes  | no/yes | yes*/no
 
-   *The initialization of block 'let' and 'mut' variables can be deferred.
-
--- Should there be non-parameter 'let' variables of object type? => no!
+   *The initialization of block 'let' and 'var' variables can be deferred.
 
 -- Variables supposed to be uninitialized at the end are automatically destroyed if there not.
    Also automatic relocating these on last use would be really useful for perfect forwarding.
--- If a function throws the initialization status of the parameters should be the same it was initially.
-
--- Dereference and index expressions can have an identity. They do this by having '<=> expr with identity' as body.
-   The const property is inherited from that expressions.
--- There are some builtin types with dereference implementations that (magically) have the properties:
-
-    type     | deref expr
-   ----------|------------------
-    const_id | identity/const
-    id       | identity/mutable
+-- If a function throws the initialization status of the parameters should be the same it was initially
+   unless explicitly specified otherwise.
 
 -- Member access expressions inherit their identity and const properties from the base expresssion.
 
--- Notice that any expression of object type has an identity.
-
 
 -- Types of assignment: initialize, replace, value
-    mut rect: Rect = ...;
+    var rect: Rect = ...;
     rect.left() = ...;           // ok
     rect.bottomLeft().x = ...;   // ok
     rect.bottomLeft().x() = ...; // impossible because the result of 'bottomLeft()' cannot be bound to the 'inout self' parameter of 'x() = '
@@ -66,14 +52,14 @@
     fn test(irregular e ?out(std::regular): Enum)
 
 -- It should be possible to globally change how precondition are erforeced. Possible variants are:
-    - proof : The condition must be proven to be true at the call site.
+    - prove : The condition must be proven to be true at the call site.
     - guard : The condtiion is a dynamically checked and an exception is thrown if it isn't met.
     - assume: The condition is not checked and assumed to true.
--- 'proof' preconditions must be part of the function signature.
+-- 'prove' preconditions must be part of the function signature.
 -- 'guard' preconditions are ideally also checked at the call site, where they can be optimized away.
 
 
--- trait "inheritance" is constraint 'Self' type.
+-- trait "inheritance" is constraint 'self_type' type.
 
 
 SSA:

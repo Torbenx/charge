@@ -1,0 +1,73 @@
+
+template(T: type)
+struct refcell: {
+    struct unique_ref: {
+        invariant(self, cell) {
+            prove cell.shared_refcount == INVALID_REFCOUNT;
+
+            if !std::uniquely_referenced(&self):
+                prove !std::referenced(cell.target);
+        }
+
+        fn get(unique inout self) -> (ref<shared self, unique *cell.target> r: T): { r = *cell.target; }
+
+        has destroy_behavior: {
+            fn destruct(unique var self, shared inout cell): {
+                cell.shared_refcount = 0;
+            }
+        }
+
+        relationship cell: refcell{T};
+    }
+
+    struct shared_ref: {
+        invariant {
+            prove cell.shared_refcount > 0 && cell.shared_refcount < INVALID_REFCOUNT;
+
+            prove !std::uniquely_referenced(target);
+            if !std::referenced(&self):
+                prove std::shared_reference_count(cell.target) < cell.shared_refcount;
+        }
+
+        fn get(shared inout self, shared inout cell) -> (ref<shared self, shared *cell.target> r: T): { r = *cell.target; }
+
+        has destroy_behavior: {
+            fn destruct(unique self, shared inout cell): {
+                cell.shared_refcount -= 1;
+                if cell.shared_refcount == 0: {
+                    prove std::shared_reference_count(cell.target) == 0;
+                    prove !std::referenced(cell.target);
+                }
+            }
+        }
+
+        relationship cell: refcell{T};
+    }
+
+    invariant {
+        if shared_refcount == 0: {
+            prove !std::referenced(target);
+        } elif shared_refcount < INVALID_REFCOUNT: {
+            prove !std::uniqueley_referenced(target);
+            prove std::shared_reference_count(target) <= shared_refcount;
+        }
+    }
+
+    fn unique_borrow(shared inout self) -> unique_ref: {
+        assert shared_refcount == 0;
+        shared_refcount = INVALID_REFCOUNT;
+        return unique_ref(self);
+    }
+
+    fn shared_borrow(shared inout self) -> shared_ref: {
+        assert shared_refcount < INVALID_REFCOUNT;
+        shared_refcount += 1;
+        assert shared_refcount < INVALID_REFCOUNT;
+        return shared_ref(self);
+    }
+
+    private let INVALID_REFCOUNT: bits = numeric_limits<bits>::max();
+
+    internal target: ptr{T};
+    internal shared_refcount: bits = 0;
+}

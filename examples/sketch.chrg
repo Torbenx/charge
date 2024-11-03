@@ -337,3 +337,36 @@ object Obj: {
 fn deref(firstArg: id{int}, secondArg: id{Obj}): {
     return *firstArg + *secondArg.get();
 }
+
+
+struct Trait: {
+    static MyType: type where(t) has(Add)(t);
+
+    relationship myT: MyType;
+}
+struct Impl: {
+    static var myInt: int = 0;
+    has Trait where MyType == int && myT is myInt;
+}
+
+template(T: type)
+struct iterator: {
+    relationship container: vector{T};
+    index: int;
+}
+struct Bar: {
+    storage: vector{int};
+
+    splits_inline: vector{iterator{int} where container is storage};
+
+    splits_invariant: vector{iterator{int}};
+    invariant { for it in splits_invariant: prove it.container is storage; }
+
+    end_inline: iterator{int} where container is storage;
+
+    end_invariant: interator{int};
+    invariant { prove end_invariant.container is storage; }
+}
+
+template(T: type where has(Add) && has(Sub))
+fn foo(x: T)
