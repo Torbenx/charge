@@ -490,12 +490,12 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         }
         if (state.program == program && pValue == state.arguments[index]) {
             // TODO: This needs to be here to break recursion. But is it correct?
-            state.expressionMatches.push_back({ pValue, aValue });
+            state.equalities.add(context, program, state.program, { pValue, aValue });
             return true;
         }
         auto selfState = selfDeduction();
         bool result = staticMatch(selfState, state.arguments[index], aValue);
-        state.expressionMatches.insert(state.expressionMatches.end(), selfState.expressionMatches.begin(), selfState.expressionMatches.end());
+        state.equalities.unionWith(context, program, state.program, selfState.equalities);
         return result;
     }
 
@@ -503,7 +503,7 @@ bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aVa
         || aValue.kind() == ValueKind::Expression || aValue.kind() == ValueKind::RemoteExpression
         || aValue.kind() == ValueKind::Parameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
-        state.expressionMatches.push_back({ pValue, aValue });
+        state.equalities.add(context, program, state.program, { pValue, aValue });
         return true;
     }
 

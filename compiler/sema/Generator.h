@@ -2,6 +2,8 @@
 
 #include <sema/Util.h>
 
+#include <FlatSet.h>
+
 namespace sema {
 
 struct Generator;
@@ -29,16 +31,26 @@ struct FoldBase {
     std::span<const Value> arguments;
 };
 
+struct ValuePair {
+    ExternValue pValue;
+    Value aValue;
+};
+struct ValuePairCompare {
+    std::strong_ordering operator()(Context& context, Program* argProg, Program* paramProg, ValuePair left, ValuePair right) const {
+        auto paramOdering = Util(context, context.programHandle(argProg)).compare(left.aValue, right.aValue);
+        if (paramOdering != 0)
+            return paramOdering;
+        return Util(context, context.programHandle(paramProg)).compare(Value(left.pValue), Value(right.pValue));
+    }
+};
+using ValuePairSet = FlatSet<ValuePair, ValuePairCompare, Context&, Program*, Program*>;
+
 struct DeductionState {
-    struct ExpressionMatch {
-        ExternValue pValue;
-        Value aValue;
-    };
     Program* program;
     ProgramHandle programHandle;
     std::vector<bool> explicitArgumentsMap;
     std::vector<Value> arguments;
-    std::vector<ExpressionMatch> expressionMatches;
+    ValuePairSet equalities;
 
     DeductionState(Program* prog, ProgramHandle handle, int_t parameterCount)
         : program(prog)

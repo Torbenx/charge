@@ -63,6 +63,31 @@ struct FlatSet {
             return s.capacity - s.begin;
     }
 
+    void add(Args... args, const T& newEntry) {
+        T* it = std::lower_bound(s.begin, s.end, newEntry, [&... args = args](const T& a, const T& b) {
+            Compare comp;
+            return comp(args..., a, b) < 0;
+        });
+        Compare comp;
+        if (it != s.end && comp(args..., *it, newEntry) == 0)
+            return;
+        if (capacity() == size()) {
+            Storage newStorage = Storage(size() + 1);
+            T* pos = std::copy(s.begin, it, newStorage.begin);
+            *(pos++) = newEntry;
+            newStorage.end = std::copy(it, s.end, pos);
+            s = std::move(newStorage);
+        } else if (s.capacity < s.begin) {
+            std::copy(s.begin, it, s.begin - 1);
+            s.begin -= 1;
+            *it = newEntry;
+        } else {
+            std::copy_backward(it, s.end, s.end + 1);
+            s.end += 1;
+            *it = newEntry;
+        }
+    }
+
     int_t size() const { return s.end - s.begin; }
 
     const T* begin() const { return s.begin; }

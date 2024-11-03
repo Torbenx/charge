@@ -86,4 +86,17 @@ TEST(FlatSet, Basic) {
     EXPECT_EQ(set, set246);
     set.unionWith(set135);
     EXPECT_EQ(set, set123456);
+
+    set = {};
+    EXPECT_EQ(set, empty);
+    set.add(1);
+    set.add(5);
+    set.add(3);
+    EXPECT_EQ(set, set135);
+    set.add(1);
+    EXPECT_EQ(set, set135);
+    set.add(6);
+    set.add(2);
+    set.add(4);
+    EXPECT_EQ(set, set123456);
 }
