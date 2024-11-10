@@ -74,7 +74,7 @@ struct Context {
         VERIFY(program->kind() == ProgramKind::Type);
         int_t id = program->runtimeParameters.size();
         program->runtimeParameters.emplace_back(name, parseLocation, location);
-        pushEmptyScope(ScopeValue());
+        pushEmptyScope(INVALID_SCOPE_VALUE); // TODO: Avoid this
         return ScopeValue(Value(ValueKind::Invalid, id));
     }
 

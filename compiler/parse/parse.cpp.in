@@ -260,7 +260,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
-    sema::ScopeValue this_declaration;
+    sema::ScopeValue this_declaration = sema::INVALID_SCOPE_VALUE;
     TokenHandle declarationBegin = {};
     Word argumentName;
 

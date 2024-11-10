@@ -6,14 +6,13 @@ namespace sema {
 
 #define ENUMERATE_SEMA_INSTRUCTION_OPCODES               \
     OP(Reference, LValue)                                \
-    OP(LMemberAccess, LValue)                            \
     OP(Constant, PValue)                                 \
     OP(Purify, PValue) /* RValue -> PValue */            \
     OP(Call, RValue)                                     \
     OP(RMemberAccess, RValue)                            \
     OP(ImplicitCopy, RValue) /* LValue -> RValue */      \
     OP(PureInstantiation, RValue) /* PValue -> RValue */ \
-    OP(LetDecl, Control)                                 \
+    OP(VarDecl, Control)                                 \
     OP(CompoundStmt, Control)                            \
     OP(Function, Control)                                \
     OP(JumpIf, Control)                                  \
@@ -60,7 +59,7 @@ union ExpressionData {
     Value constant;
     Value callTarget;
     Value memberPointer;
-    uint32_t referencedLocalIndex;
+    ReferenceExpression referenceExpr;
 
     struct {
     } empty;
@@ -68,7 +67,7 @@ union ExpressionData {
 
 union InstructionData {
     uint32_t blockSize;
-    uint32_t jumpDistance;
+    int32_t jumpDistance;
 
     struct {
         Type type;

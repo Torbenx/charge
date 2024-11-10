@@ -161,9 +161,12 @@ fn withBody5() -> X: { let x = identity{X()}; }
 
 // expect-type bool
 static boolTest = false;
-//; FIXME
+// expect-return-type X
+fn ifTest() -> X: { if true: {} }
+// expect-return-type X
+fn ifTest2() -> X: { if true: { withBody1(); } }
 //; expect-return-type X
-//; fn ifTest() -> X: { if true: {} }
+//; fn ifTest3() -> X: { if true: { let x: X = X(); } } TODO
 
 // expect-object-type X
 static var staticObj: X = X();

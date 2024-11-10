@@ -8,13 +8,14 @@ Generator::Generator(Context& context, ProgramHandle handle)
 
 void Generator::advance() { tok += 1; }
 
-void Generator::declareLocal(Word name, SourceLocation location, VariableDeclaration declaration) {
-    int_t index = localValues.size();
+void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
+    int_t index = localVariables.size();
     emitControl(
-        Opcode::LetDecl, location, declaration.hasInitializer ? 1 : 0,
+        Opcode::VarDecl, location, declaration.hasInitializer ? 1 : 0,
         { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
-    localValues.push_back({ declaration.type });
-    localLookupEntries.push_back({ name, (uint32_t)index });
+    localVariables.push_back({ declaration.type });
+    currentScope.variableInitStates.push_back(declaration.hasInitializer);
+    localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::LocalVariable, index) });
 }
 
 void Generator::visitDeclaration() {
@@ -48,18 +49,19 @@ void Generator::visitTemplateParameters() {
 }
 
 Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
-    Type type;
+    std::optional<Type> variableType;
     VERIFY(parameterTypes.size() == program->parameters.size());
     if (tok->kind() != Token::AssignStmt) {
         // parse type
         wildcardMeaning = WildcardMeaning::ImplicitTemplate;
         visitExpression();
-        contextualType();
-        type = verifyType(makeExpressionValue());
+        contextualToType();
+        variableType = verifyType(makeExpressionValue());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
-        type = verifyType(newImplicitParameter(builtins::type_type));
+        variableType = verifyType(newImplicitParameter(builtins::type_type));
     }
+    Type type = variableType.value();
     VERIFY(tok->kind() == Token::AssignStmt);
     advance();
 
@@ -89,7 +91,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
             program->parameters.push_back({ Word(), parameterTypes[program->parameters.size()], std::nullopt });
     } else {
         // remove introduced parameters
-        parameterTypes.resize(program->parameters.size());
+        parameterTypes.erase(parameterTypes.begin() + program->parameters.size(), parameterTypes.end());
     }
 
     return { type, hasInitializer };
@@ -140,7 +142,11 @@ void Generator::visitFunctionDeclaration() {
         auto nameLoc = tok->location();
         advance();
         auto info = visitVariableDeclaration(true);
-        declareLocal(name, nameLoc, info);
+
+        VERIFY(fnProgram->runtimeParameters.size() == currentScope.parameterInitStates.size());
+        int_t parameterIndex = fnProgram->runtimeParameters.size();
+        currentScope.parameterInitStates.push_back(true);
+        localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::Parameter, parameterIndex) });
         fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
@@ -188,7 +194,7 @@ void Generator::visitTypeDeclaration() {
         advance();
 
         visitExpression();
-        contextualType();
+        contextualToType();
         Type type = verifyType(makeExpressionValue());
 
         member = RuntimeParameter(newKind, member.name, type, member.location());
@@ -212,17 +218,28 @@ void Generator::visitStatement() {
         SourceLocation nameLoc = tok->location();
         advance();
         auto info = visitVariableDeclaration(false);
-        declareLocal(name, nameLoc, info);
+        declareLocalVariable(name, nameLoc, info);
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
-            VERIFY_NOT_REACHED();
-            /*SourceLocation ifLoc = tok->location();
+            SourceLocation ifLoc = tok->location();
             advance();
-            contextualBool();
-            auto jump = emitJumpIf(ifLoc);
+            contextualToBool();
+
+            auto notTrueJump = emitJumpIf(ifLoc);
             visitStatement();
-            link(jump, here());*/
+
+            if (tok->kind() == Token::ElseStmt) {
+                auto skipElseJump = emitJump(tok->location());
+                advance();
+
+                linkToNextInstruction(notTrueJump);
+                visitStatement();
+
+                linkToNextInstruction(skipElseJump);
+            } else {
+                linkToNextInstruction(notTrueJump);
+            }
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);
             emitControl(Opcode::Discard, tok->location(), 1, { .empty {} });

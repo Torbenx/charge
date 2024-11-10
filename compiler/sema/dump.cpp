@@ -107,6 +107,43 @@ struct Dumper {
         result += std::to_string(v.id());
         return result;
     }
+
+    std::string formatReferenceExpression(ReferenceExpression e) {
+        if (e == INVALID_REFERENCE_EXPRESSION)
+            return "<invalid>";
+        std::string result;
+        switch (e.kind()) {
+        case ReferenceExpressionKind::Parameter:
+            result += "arg";
+            break;
+        case ReferenceExpressionKind::LocalVariable:
+            result += "var";
+            break;
+        case ReferenceExpressionKind::LocalReference:
+            result += "ref";
+            break;
+        case ReferenceExpressionKind::MemberExpression: {
+            auto memberExpr = program->getMemberReferenceExpression(e);
+            return formatReferenceExpression(memberExpr.base)
+                + "." + formatMember(program, program->getMemberPointer(memberExpr.memberPointer));
+        }
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        result += std::to_string(e.id());
+        return result;
+    }
+
+    std::string formatMember(Program* prog, MemberPointer pointer) {
+        auto* parentProg = cast<TypeProgram>(context.program(prog->baseProgram(pointer.parentType)));
+        const auto& member = parentProg->runtimeParameters[pointer.memberIndex];
+        if (member.name.empty()) {
+            VERIFY(member.kind() == RuntimeParameterKind::HasMember);
+            return "(has " + formatValue(parentProg, member.type()) + ")";
+        } else {
+            return (std::string)context.wordTable.view(member.name);
+        }
+    }
 };
 
 void Dumper::dumpInstruction(Instruction inst) {
@@ -116,13 +153,13 @@ void Dumper::dumpInstruction(Instruction inst) {
 
     line << nameString(inst.opcode());
     switch (inst.opcode()) {
-    case Opcode::LetDecl: {
+    case Opcode::VarDecl: {
         auto decl = inst.u.decl;
         info << "[" << formatValue(decl.type) << "]r" << decl.localValueIndex;
         break;
     }
     case Opcode::Reference:
-        info << "r" << inst.u.expr.u.referencedLocalIndex;
+        info << formatReferenceExpression(inst.u.expr.u.referenceExpr);
         break;
     case Opcode::Constant:
         info << formatValue(inst.u.expr.u.constant);
@@ -130,9 +167,12 @@ void Dumper::dumpInstruction(Instruction inst) {
     case Opcode::Call:
         info << formatValue(inst.u.expr.u.callTarget);
         break;
-    case Opcode::LMemberAccess:
     case Opcode::RMemberAccess:
         info << formatValue(inst.u.expr.u.memberPointer);
+        break;
+    case Opcode::Jump:
+    case Opcode::JumpIf:
+        info << fmt::format("{:+}", inst.u.jumpDistance);
         break;
     default:
         break;
@@ -183,15 +223,7 @@ void Dumper::dumpProgram(Program* prog) {
         }
         case ValueKind::MemberPointer: {
             auto pointer = program->getMemberPointer(value);
-            line << formatValue(pointer.parentType) << ".";
-            auto* parentProg = cast<TypeProgram>(context.program(program->baseProgram(pointer.parentType)));
-            const auto& member = parentProg->runtimeParameters[pointer.memberIndex];
-            if (member.name.empty()) {
-                VERIFY(member.kind() == RuntimeParameterKind::HasMember);
-                line << "has " << formatValue(parentProg, member.type());
-            } else {
-                line << context.wordTable.view(member.name);
-            }
+            line << formatValue(pointer.parentType) << "." << formatMember(prog, pointer);
             break;
         }
         default:

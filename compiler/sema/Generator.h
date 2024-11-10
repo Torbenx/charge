@@ -140,27 +140,23 @@ private:
 struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
-        Value value;
-
-        LocalLookupEntry(Word name, int_t localValueIndex)
-            : name(name), value(ValueKind::Invalid, localValueIndex) { }
-        LocalLookupEntry(Word name, Value constant)
-            : name(name), value(constant) { VERIFY(constant.kind() == ValueKind::Invalid); }
-
-        bool isLocalValue() const {
-            return value.kind() == ValueKind::Invalid;
-        }
-        int_t localValueIndex() const {
-            VERIFY(isLocalValue());
-            return value.id();
-        }
-        Value constant() const {
-            VERIFY(!isLocalValue());
-            return value;
-        }
+        ValueOrReferenceExpression data;
     };
 
-    struct LocalValue {
+    struct ReferenceUnitLock {
+        uint32_t exprBits : 31;
+        uint32_t sharedBit : 1;
+
+        bool shared() const { return sharedBit != 0; }
+        ReferenceExpression expr() const { return std::bit_cast<ReferenceExpression>(exprBits); }
+    };
+
+    struct LocalReference {
+        Type type;
+        std::vector<ReferenceUnitLock> locks;
+    };
+
+    struct LocalVariable {
         Type type;
     };
 
@@ -204,11 +200,22 @@ struct Generator : Util {
         }
     };
 
+    struct LocalScope {
+        std::vector<bool> parameterInitStates;
+        std::vector<bool> variableInitStates;
+        std::vector<bool> referenceInitStates;
+        // FlatSet<> trueHas;
+
+        bool operator==(const LocalScope&) const = default;
+    };
+
     struct JumpReference {
         uint32_t offset;
+        LocalScope originScope;
     };
     struct JumpLabel {
         uint32_t offset;
+        LocalScope targetScope;
     };
 
     using Token = parse::TokenKind;
@@ -220,7 +227,9 @@ struct Generator : Util {
     std::vector<Type> parameterTypes;
     std::vector<LookupContext> lookupStack;
     std::vector<LocalLookupEntry> localLookupEntries;
-    std::vector<LocalValue> localValues;
+    std::vector<LocalVariable> localVariables;
+    std::vector<LocalReference> localReferences;
+    LocalScope currentScope;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
 
     Generator(Context& context, ProgramHandle handle);
@@ -263,8 +272,10 @@ struct Generator : Util {
 
     RuntimeParameter member(MemberPointer pointer);
     Type memberType(MemberPointer pointer);
+    Type memberType(Value memberPointerValue);
     Type typeOf(Value);
     Type verifyType(Value value);
+    Type referencedType(ReferenceExpression);
 
     Value makeTemplateSignature(Value templateProg);
     Type makeTemplateIdFor(Value templateProg);
@@ -294,23 +305,24 @@ struct Generator : Util {
     Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
     Value newImplicitParameter(Type type);
 
-    void contextualType();
-    void contextualBool();
+    void contextualToType();
+    void contextualToBool();
     void implicitCastTo(DeductionState& state, ExternValue);
 
     void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
     void emitConstantExpr(SourceLocation, Value value);
-    void emitReferenceExpr(SourceLocation, int_t localValueIndex);
-    void declareLocal(Word name, SourceLocation, VariableDeclaration decl);
+    void emitReferenceExpr(SourceLocation, ReferenceExpression);
+    void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
 
-    JumpLabel here();
-    void emitJumpTo(Opcode, SourceLocation, int_t childCount, JumpLabel);
+    void emitJumpTo(Opcode, SourceLocation, int_t childCount, const JumpLabel&);
     JumpReference emitJump(Opcode, SourceLocation, int_t childCount);
-    void link(JumpReference, JumpLabel);
-    void emitJumpTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::Jump, location, 0, label); }
+    void linkToNextInstruction(const JumpReference& jump);
+    JumpLabel nextInstruction();
+    void link(int_t originOffset, int_t targetOffset, const LocalScope& originScope, const LocalScope& targetScope);
+    void emitJumpTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::Jump, location, 0, label); }
     JumpReference emitJump(SourceLocation location) { return emitJump(Opcode::Jump, location, 0); }
-    void emitJumpIfTo(SourceLocation location, JumpLabel label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }
+    void emitJumpIfTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }
     JumpReference emitJumpIf(SourceLocation location) { return emitJump(Opcode::JumpIf, location, 1); }
 };
 

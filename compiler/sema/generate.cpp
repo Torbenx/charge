@@ -34,6 +34,34 @@ void Generator::emitControl(Opcode op, SourceLocation location, int_t childCount
     expressionStack.back().endOffset = (uint32_t)instructionScratch.size();
 }
 
+Generator::JumpLabel Generator::nextInstruction() {
+    return { (uint32_t)instructionScratch.size(), currentScope };
+}
+
+Generator::JumpReference Generator::emitJump(Opcode op, SourceLocation location, int_t childCount) {
+    uint32_t offset = instructionScratch.size();
+    emitControl(op, location, childCount, { .jumpDistance = 0 });
+    return { offset, currentScope };
+}
+
+void Generator::linkToNextInstruction(const JumpReference& jump) {
+    int_t targetOffset = instructionScratch.size();
+    link(jump.offset, targetOffset, jump.originScope, currentScope);
+}
+
+void Generator::emitJumpTo(Opcode op, SourceLocation location, int_t childCount, const JumpLabel& label) {
+    int_t originOffset = instructionScratch.size();
+    emitControl(op, location, childCount, { .jumpDistance = 0 });
+    link(originOffset, label.offset, currentScope, label.targetScope);
+}
+
+void Generator::link(int_t originOffset, int_t targetOffset, const LocalScope& originScope, const LocalScope& targetScope) {
+    VERIFY(originScope == targetScope);
+    auto& jumpInst = instructionScratch[originOffset];
+    VERIFY(jumpInst.u.jumpDistance == 0);
+    jumpInst.u.jumpDistance = targetOffset - originOffset;
+}
+
 void Generator::emitExpression(Opcode op, SourceLocation location, int_t childCount, Type type, ExpressionData data) {
     VERIFY(expressionStack.back().endOffset == instructionScratch.size());
     expressionStack.resize(expressionStack.size() - childCount);
@@ -45,10 +73,10 @@ void Generator::emitConstantExpr(SourceLocation location, Value value) {
     emitExpression(Opcode::Constant, location, 0, typeOf(value), { .constant = value });
 }
 
-void Generator::emitReferenceExpr(SourceLocation location, int_t localValueIndex) {
+void Generator::emitReferenceExpr(SourceLocation location, ReferenceExpression expr) {
     return emitExpression(
-        Opcode::Reference, location, 0, localValues[localValueIndex].type,
-        { .referencedLocalIndex = (uint32_t)localValueIndex });
+        Opcode::Reference, location, 0, referencedType(expr),
+        { .referenceExpr = expr });
 }
 
 Value Generator::makeExpressionValue() {
@@ -113,7 +141,7 @@ Value Generator::inheriteParameters(ScopeValue parent) {
     VERIFY(parameterCount > 0);
     std::vector<Value> arguments(parameterCount, INVALID_VALUE);
     for (int_t i = 0; i < parameterCount; i++)
-        arguments[i] = addInheritedParameter(Type(), std::nullopt);
+        arguments[i] = addInheritedParameter((Type)INVALID_VALUE, std::nullopt);
 
     Value parentValue = program->addParameterize(context, { parentHandle, arguments });
     FoldBase base = asFoldBase(parentValue);
@@ -206,10 +234,10 @@ void Generator::generateIdentifierExpr() {
             for (auto entry : g.localLookupEntries) {
                 if (entry.name == name) {
                     VERIFY(&g == this);
-                    if (entry.isLocalValue())
-                        emitReferenceExpr(tok->location(), entry.localValueIndex());
+                    if (entry.data.isReference())
+                        emitReferenceExpr(tok->location(), entry.data.reference());
                     else
-                        emitConstantExpr(tok->location(), entry.constant());
+                        emitConstantExpr(tok->location(), entry.data.value());
                     return;
                 }
             }
@@ -380,20 +408,36 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
     VERIFY(!state.emitted);
     state.emitted = true;
     auto origExpr = topExpression();
-    Type parentType = origExpr.type();
+    auto forEachMemberPointer = [this, origType = origExpr.type(), &state](auto callback) {
+        Type parentType = origType;
+        for (uint32_t memberIndex : state.memberIndicies) {
+            MemberPointer memberPointer { parentType, memberIndex };
+            Type mType = memberType(memberPointer);
+            callback(mType, memberPointer);
+            parentType = mType;
+        }
+    };
+
+    if (origExpr.opcode() == Opcode::Reference) {
+        popExpression();
+        ReferenceExpression reference = origExpr.data().referenceExpr;
+        forEachMemberPointer([&](Type, MemberPointer pointer) {
+            reference = program->addMemberReferenceExpression({ reference, program->addMemberPointer(context, pointer) });
+        });
+        emitReferenceExpr(tok->location(), reference);
+        return;
+    }
     if (origExpr.category() == InstructionCategory::PValue) {
-        emitExpression(Opcode::PureInstantiation, tok->location(), 1, parentType, { .empty {} });
+        emitExpression(Opcode::PureInstantiation, tok->location(), 1, origExpr.type(), { .empty {} });
         emitMemberAccessExpr(state);
-        emitExpression(Opcode::Purify, tok->location(), 1, topExpression().type(), {});
+        emitExpression(Opcode::Purify, tok->location(), 1, topExpression().type(), { .empty {} });
         VERIFY_NOT_REACHED();
     }
-    Opcode opcode = origExpr.category() == InstructionCategory::LValue ? Opcode::LMemberAccess : Opcode::RMemberAccess;
-    for (uint32_t memberIndex : state.memberIndicies) {
-        MemberPointer memberPointer { parentType, memberIndex };
-        Type mType = memberType(memberPointer);
-        emitExpression(opcode, tok->location(), 1, mType, { .memberPointer = program->addMemberPointer(context, memberPointer) });
-        parentType = mType;
-    }
+
+    VERIFY(origExpr.category() == InstructionCategory::RValue);
+    forEachMemberPointer([&](Type memberType, MemberPointer pointer) {
+        emitExpression(Opcode::RMemberAccess, tok->location(), 1, memberType, { .memberPointer = program->addMemberPointer(context, pointer) });
+    });
 }
 
 void Generator::generateMemberAccessExprInside(MemberAccessState& state, Type baseType, Word name) {
@@ -428,12 +472,12 @@ void Generator::generateMemberAccessExpr() {
     VERIFY(state.emitted);
 }
 
-void Generator::contextualType() {
+void Generator::contextualToType() {
     auto state = selfDeduction();
     implicitCastTo(state, builtins::type_type);
 }
 
-void Generator::contextualBool() {
+void Generator::contextualToBool() {
     auto state = selfDeduction();
     implicitCastTo(state, builtins::bool_type);
 }
@@ -646,6 +690,20 @@ Type Generator::memberType(MemberPointer pointer) {
     return verifyType(fold(std::move(base), prog->runtimeParameters[pointer.memberIndex].type()));
 }
 
+Type Generator::memberType(Value memberPointerValue) {
+    if (memberPointerValue.kind() == ValueKind::MemberPointer)
+        return memberType(program->getMemberPointer(memberPointerValue));
+
+    auto memberPointerType = typeOf(memberPointerValue);
+    VERIFY(memberPointerType.kind() == ValueKind::Parameterize);
+
+    auto para = program->getParameterize(memberPointerType);
+    VERIFY(para.base == builtins::member_ptr_template.program());
+    VERIFY(para.arguments.size() == 2);
+
+    return verifyType(para.arguments[1]);
+}
+
 Type Generator::typeOf(Value value) {
     switch (value.kind()) {
     case ValueKind::TemplateSignature$Program:
@@ -734,6 +792,23 @@ Type Generator::verifyType(Value value) {
     default:
         VERIFY(typeOf(value) == builtins::type_type);
         return (Type)value;
+    }
+}
+
+Type Generator::referencedType(ReferenceExpression expr) {
+    switch (expr.kind()) {
+    case ReferenceExpressionKind::Parameter:
+        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterId()].type();
+    case ReferenceExpressionKind::LocalVariable:
+        return localVariables[expr.localVaraibleId()].type;
+    case ReferenceExpressionKind::LocalReference:
+        return localReferences[expr.localReferenceId()].type;
+    case ReferenceExpressionKind::MemberExpression: {
+        auto memberExpr = program->getMemberReferenceExpression(expr);
+        return memberType(memberExpr.memberPointer);
+    }
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 

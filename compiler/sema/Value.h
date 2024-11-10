@@ -30,6 +30,10 @@ struct NamespaceHandle {
     bool operator==(const NamespaceHandle&) const = default;
 };
 
+inline constexpr int_t VALUE_KIND_BITS = 8;
+inline constexpr uint32_t MAX_VALUE_ID = (1u << (32 - VALUE_KIND_BITS)) - 1u;
+inline constexpr uint32_t INVALID_VALUE_KIND_INDEX = (1u << VALUE_KIND_BITS) - 1u;
+
 enum class ValueKind : uint8_t {
     // The ordering in this enum determines the ordering of values
     // This ordering needs to be defined between aritatry values to make some data strutures work,
@@ -50,11 +54,9 @@ enum class ValueKind : uint8_t {
 
     Parameter,
 
-    Invalid = 15,
+    Invalid = INVALID_VALUE_KIND_INDEX,
 };
 struct Value {
-    constexpr Value()
-        : Value(ValueKind::Invalid, MAX_ID) { }
     constexpr Value(ValueKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
     constexpr explicit Value(ProgramHandle prog)
@@ -115,12 +117,10 @@ struct Value {
 
     constexpr bool operator==(const Value&) const = default;
 
-    static constexpr uint32_t MAX_ID = (1u << 28) - 1u;
-
-    uint32_t idBits : 28;
-    uint32_t kindBits : 4;
+    uint32_t idBits : (32 - VALUE_KIND_BITS);
+    uint32_t kindBits : VALUE_KIND_BITS;
 };
-inline constexpr Value INVALID_VALUE = { ValueKind::Invalid, Value::MAX_ID };
+inline constexpr Value INVALID_VALUE = { ValueKind::Invalid, MAX_VALUE_ID };
 
 struct Type : Value {
     static Type fromUint(uint32_t x) { return Type(Value::fromUint(x)); }
@@ -146,9 +146,9 @@ private:
 };
 
 struct ScopeValue {
+    static constexpr ScopeValue invalidValue() { return {}; }
     static ScopeValue fromUint(uint32_t u) { return ScopeValue(Value::fromUint(u)); }
 
-    ScopeValue() = default;
     constexpr explicit ScopeValue(Value value)
         : value(value) {
         VERIFY(value.kind() == ValueKind::Program || value.kind() == ValueKind::Namespace || value.kind() == ValueKind::Invalid);
@@ -167,8 +167,83 @@ struct ScopeValue {
     bool operator==(const ScopeValue&) const = default;
 
 private:
+    constexpr ScopeValue()
+        : value(INVALID_VALUE) { }
+
     Value value;
 };
+inline constexpr ScopeValue INVALID_SCOPE_VALUE = ScopeValue::invalidValue();
+
+enum class ReferenceExpressionKind : uint8_t {
+    Parameter,
+    LocalVariable,
+    LocalReference,
+    MemberExpression,
+    Invalid = INVALID_VALUE_KIND_INDEX,
+};
+
+struct ReferenceExpression {
+    constexpr ReferenceExpression(ReferenceExpressionKind kind, uint32_t id)
+        : idBits(id), kindBits(std::to_underlying(kind)) { }
+
+    constexpr ReferenceExpressionKind kind() const { return (ReferenceExpressionKind)kindBits; }
+    constexpr uint32_t id() const { return idBits; }
+    constexpr uint32_t localVaraibleId() const {
+        VERIFY(kind() == ReferenceExpressionKind::LocalVariable);
+        return id();
+    }
+    constexpr uint32_t parameterId() const {
+        VERIFY(kind() == ReferenceExpressionKind::Parameter);
+        return id();
+    }
+    constexpr uint32_t localReferenceId() const {
+        VERIFY(kind() == ReferenceExpressionKind::LocalReference);
+        return id();
+    }
+
+    constexpr bool operator==(const ReferenceExpression&) const = default;
+
+    uint32_t idBits : (32 - VALUE_KIND_BITS);
+    uint32_t kindBits : VALUE_KIND_BITS;
+};
+
+inline constexpr ReferenceExpression INVALID_REFERENCE_EXPRESSION = { ReferenceExpressionKind::Invalid, MAX_VALUE_ID };
+
+struct ValueOrReferenceExpression {
+    static constexpr ValueOrReferenceExpression invalidValue() { return {}; }
+
+    constexpr ValueOrReferenceExpression(Value value)
+        : idBits(value.idBits), kindBits(value.kindBits), isRefBit(0) {
+        VERIFY(value.kindBits < INVALID_VALUE_KIND_INDEX / 2);
+    }
+    constexpr ValueOrReferenceExpression(ReferenceExpression expr)
+        : idBits(expr.idBits), kindBits(expr.kindBits), isRefBit(1) {
+        VERIFY(expr.kindBits < INVALID_VALUE_KIND_INDEX / 2);
+    }
+    constexpr bool isReference() const { return isRefBit != 0; }
+    constexpr bool isValue() const { return !isReference(); }
+    Value value() const {
+        VERIFY(isValue());
+        return std::bit_cast<Value>(*this);
+    }
+    constexpr ReferenceExpression reference() const {
+        VERIFY(isReference());
+        auto tmp = *this;
+        tmp.isRefBit = 0;
+        return std::bit_cast<ReferenceExpression>(tmp);
+    }
+
+    constexpr bool operator==(const ValueOrReferenceExpression&) const = default;
+
+    uint32_t idBits : (32 - VALUE_KIND_BITS);
+    uint32_t kindBits : VALUE_KIND_BITS - 1;
+    uint32_t isRefBit : 1;
+
+private:
+    constexpr ValueOrReferenceExpression()
+        : idBits(MAX_VALUE_ID), kindBits(INVALID_VALUE_KIND_INDEX / 2), isRefBit(1) { }
+};
+
 }
 template<>
 struct optional_traits<sema::ProgramHandle> {
@@ -192,5 +267,13 @@ struct optional_traits<sema::ExternValue> {
 };
 template<>
 struct optional_traits<sema::ScopeValue> {
-    static constexpr sema::ScopeValue empty_value = {};
+    static constexpr sema::ScopeValue empty_value = sema::INVALID_SCOPE_VALUE;
+};
+template<>
+struct optional_traits<sema::ReferenceExpression> {
+    static constexpr sema::ReferenceExpression empty_value = sema::INVALID_REFERENCE_EXPRESSION;
+};
+template<>
+struct optional_traits<sema::ValueOrReferenceExpression> {
+    static constexpr sema::ValueOrReferenceExpression empty_value = sema::ValueOrReferenceExpression::invalidValue();
 };

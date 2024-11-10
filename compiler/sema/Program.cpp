@@ -52,6 +52,12 @@ Value Program::addMemberPointer(Context& context, MemberPointer ptr) {
     return Value(ValueKind::MemberPointer, id);
 }
 
+ReferenceExpression Program::addMemberReferenceExpression(MemberReferenceExpression e) {
+    auto id = memberReferenceExpressions.size();
+    memberReferenceExpressions.push_back(e);
+    return ReferenceExpression(ReferenceExpressionKind::MemberExpression, id);
+}
+
 int_t Program::importInstructions(Opcode headerCode, std::span<const Instruction> stream) {
     int_t offset = instructions.size();
     instructions.push_back({ headerCode, {}, { .blockSize = (uint32_t)stream.size() } });

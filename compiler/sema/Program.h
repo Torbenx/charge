@@ -5,7 +5,6 @@
 #include <sema/Instruction.h>
 #include <sema/Scope.h>
 
-
 namespace sema {
 
 struct Context;
@@ -86,6 +85,11 @@ private:
     std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
 };
 
+struct MemberReferenceExpression {
+    ReferenceExpression base;
+    Value memberPointer;
+};
+
 enum class ProgramStatus : uint8_t {
     Unchecked,
     SignatureCheckInProgress,
@@ -135,7 +139,7 @@ private:
     void advance() {
         m_value = Value(m_value.kind(), m_value.id() + 1);
     }
-    Value m_value;
+    Value m_value = INVALID_VALUE;
 };
 static_assert(std::forward_iterator<ValueIdIterator>);
 
@@ -256,6 +260,12 @@ struct Program {
         return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
+    ReferenceExpression addMemberReferenceExpression(MemberReferenceExpression);
+    MemberReferenceExpression getMemberReferenceExpression(ReferenceExpression e) {
+        VERIFY(e.kind() == ReferenceExpressionKind::MemberExpression);
+        return memberReferenceExpressions[e.id()];
+    }
+
     SourceLocation declarationLocation() const { return m_fields.location(); }
 
     void setType(Type type) {
@@ -351,6 +361,7 @@ public:
     ParameterizeSet parameterizes;
     RemoteExpressionSet remoteExpressions;
     MemberPointerSet memberPointers;
+    std::vector<MemberReferenceExpression> memberReferenceExpressions;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
@@ -374,7 +385,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 192);
+static_assert(sizeof(Program) == 216);
 
 struct ValueProgram : Program {
     ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
@@ -546,6 +557,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 232);
+static_assert(sizeof(ProgramUnion) == 256);
 
 }
