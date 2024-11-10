@@ -281,7 +281,6 @@ struct Generator : Util {
     Type makeTemplateIdFor(Value templateProg);
     Value makeFunctionSignature(Value value);
     Value makeExpressionValue();
-    Value makeExpressionValue(Expression);
     Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
     Type typeOfNonDependentProgram(Value value);
     Type typeOfNonDependentProgram(FoldBase base);

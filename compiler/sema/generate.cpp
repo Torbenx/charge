@@ -11,9 +11,7 @@ Instruction& Generator::topInstruction(int_t n) {
 }
 
 Expression Generator::topExpression(int_t n) {
-    auto entry = *(expressionStack.end() - n - 1);
-    auto prevEntry = *(expressionStack.end() - n - 2);
-    return Expression(&instructionScratch[entry.endOffset - 1], entry.endOffset - prevEntry.endOffset);
+    return topInstruction(n);
 }
 
 void Generator::popExpression() {
@@ -80,16 +78,18 @@ void Generator::emitReferenceExpr(SourceLocation location, ReferenceExpression e
 }
 
 Value Generator::makeExpressionValue() {
-    Value value = makeExpressionValue(topExpression());
-    popExpression();
-    return value;
-}
-
-Value Generator::makeExpressionValue(Expression expr) {
-    if (expr.opcode() == Opcode::Constant)
-        return expr.data().constant;
-    else
-        return program->addExpression(expr);
+    if (topExpression().opcode() == Opcode::Constant) {
+        Value result = topExpression().data().constant;
+        VERIFY((expressionStack.end() - 2)->endOffset == instructionScratch.size() - 1);
+        instructionScratch.pop_back();
+        expressionStack.pop_back();
+        return result;
+    }
+    auto newEnd  = instructionScratch.begin() + (expressionStack.end() - 2)->endOffset;
+    Value result = program->addExpression({ newEnd, instructionScratch.end() });
+    instructionScratch.erase(newEnd, instructionScratch.end());
+    expressionStack.pop_back();
+    return result;
 }
 
 Value Generator::makeTemplateSignature(Value templateProg) {

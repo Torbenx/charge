@@ -19,23 +19,17 @@ namespace builtins {
 };
 
 struct Expression {
-    Instruction* inst;
-    int_t size;
+    Instruction inst;
 
-    Expression(Instruction* inst, int_t size)
-        : inst(inst), size(size) {
-        VERIFY(isExpression(inst->opcode()));
+    Expression(Instruction inst)
+        : inst(inst) {
+        VERIFY(isExpression(inst.opcode()));
     }
 
-    Opcode opcode() const { return inst->opcode(); }
+    Opcode opcode() const { return inst.opcode(); }
     InstructionCategory category() const { return categoryOf(opcode()); }
-    ExpressionData data() const { return inst->u.expr.u; }
-    Type type() const { return inst->u.expr.type; }
-
-    std::span<Instruction> span() const { return { inst - (size - 1), (size_t)size }; }
-
-    Instruction* begin() const { return inst - (size - 1); }
-    Instruction* end() const { return inst + 1; }
+    ExpressionData data() const { return inst.u.expr.u; }
+    Type type() const { return inst.u.expr.type; }
 };
 
 struct ParameterizeData {
@@ -232,7 +226,7 @@ struct Program {
         , m_parent(parent)
         , parseLocation(parseLocation) { }
 
-    Value addExpression(Expression);
+    Value addExpression(std::span<const Instruction>);
 
     Value addParameterize(Context& context, Parameterize parameterize);
     Value addRemoteExpression(Context& context, RemoteExpression expr);
@@ -240,7 +234,7 @@ struct Program {
 
     Expression getExpression(ExternValue value) {
         auto instructions = getInstructions(value.id(), Opcode::ExpressionHeader);
-        return Expression(&instructions.back(), instructions.size());
+        return instructions.back();
     }
     Parameterize getParameterize(ExternValue value) {
         VERIFY(value.kind() == ValueKind::Parameterize);

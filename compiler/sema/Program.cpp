@@ -65,8 +65,8 @@ int_t Program::importInstructions(Opcode headerCode, std::span<const Instruction
     return offset;
 }
 
-Value Program::addExpression(Expression expr) {
-    return Value(ValueKind::Expression, importInstructions(Opcode::ExpressionHeader, expr.span()));
+Value Program::addExpression(std::span<const Instruction> expr) {
+    return Value(ValueKind::Expression, importInstructions(Opcode::ExpressionHeader, expr));
 }
 
 }
