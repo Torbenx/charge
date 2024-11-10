@@ -173,33 +173,6 @@ struct Generator : Util {
         DeductionState state;
     };
 
-    struct ScopedChange {
-        std::optional<Generator*> g;
-        ScopedChange() = default;
-        ScopedChange(Generator* g)
-            : g(g) { }
-        ScopedChange(const ScopedChange&) = delete;
-        ScopedChange(ScopedChange&& other)
-            : g(other.g) { other.g = std::nullopt; }
-        ScopedChange& operator=(const ScopedChange&) = delete;
-        ScopedChange& operator=(ScopedChange&& other) {
-            g = other.g;
-            other.g = std::nullopt;
-            return *this;
-        }
-    };
-
-    struct ParseScope : ScopedChange {
-        ParseScope(Generator* g, parse::TokenHandle parseLocation)
-            : ScopedChange(g) {
-            g->tok = &g->context.parseOutput.tokens[parseLocation.id()];
-        }
-        ~ParseScope() {
-            if (g.has_value())
-                g->tok = nullptr;
-        }
-    };
-
     struct LocalScope {
         std::vector<bool> parameterActiveMask;
         std::vector<bool> variableActiveMask;
@@ -263,6 +236,9 @@ struct Generator : Util {
     Generator(Context& context, ProgramHandle handle);
 
     void advance();
+    void setParseLocation(parse::TokenHandle);
+    void clearParseLocation();
+
     Instruction& topInstruction(int_t n = 0);
     Expression topExpression(int_t n = 0);
     void popExpression();

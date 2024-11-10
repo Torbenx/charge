@@ -671,12 +671,8 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     std::reverse(g.lookupStack.begin(), g.lookupStack.end());
 
     auto parseLocation = program->beginSignatureCheck();
-
-    {
-        ParseScope parseScope(&g, parseLocation);
-        g.visitDeclaration();
-    }
-
+    g.setParseLocation(parseLocation);
+    g.visitDeclaration();
     program->completeSignatureCheck();
 }
 

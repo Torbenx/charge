@@ -6,6 +6,14 @@ namespace sema {
 Generator::Generator(Context& context, ProgramHandle handle)
     : Util(context, handle) { }
 
+void Generator::setParseLocation(parse::TokenHandle parseLocation) {
+    tok = context.parseOutput.tokens.data() + parseLocation.id();
+}
+
+void Generator::clearParseLocation() {
+    tok = nullptr;
+}
+
 void Generator::advance() { tok += 1; }
 
 void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
@@ -184,11 +192,12 @@ void Generator::visitTypeDeclaration() {
     VERIFY(tok->kind() == Token::StructTypeDecl || tok->kind() == Token::ObjectTypeDecl);
     advance();
 
+    auto savedTok = tok;
     for (int_t i = 0; i < (int_t)typeProgram->runtimeParameters.size(); i++) {
         auto& member = typeProgram->runtimeParameters[i];
         VERIFY(member.kind() == RuntimeParameterKind::UncheckedMember);
 
-        ParseScope parseScope(this, member.parseLocation());
+        setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
         VERIFY(tok->data() == Value(ValueKind::Invalid, i).toUint());
         RuntimeParameterKind newKind = tok->kind() == Token::HasMemberDecl ? RuntimeParameterKind::HasMember : RuntimeParameterKind::Member;
@@ -202,6 +211,7 @@ void Generator::visitTypeDeclaration() {
     }
 
     program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
+    tok = savedTok;
 }
 
 void Generator::visitStatement() {
