@@ -11,6 +11,8 @@ inline constexpr ConstWordStringTable words {
     keyword("break"),
     keyword("catch"),
     keyword("continue"),
+    keyword("destroy"),
+    keyword("discard"),
     keyword("do"),
     keyword("elif"),
     keyword("else"),
@@ -112,6 +114,8 @@ enum class LexerToken : uint8_t {
     Break, // break
     Catch, // catch
     Continue, // continue
+    Destroy, // destroy
+    Discard, // discard
     Do, // do
     Elif, // elif
     Else, // else

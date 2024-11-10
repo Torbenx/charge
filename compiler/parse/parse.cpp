@@ -3140,6 +3140,24 @@ statement$word_case:
             // next after_return
             goto after_return$with_emit;
         }
+        if (this_identifier == words["destroy"]) {
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::DestroyStmt
+            carriedEmitTokenKind = TokenKind::DestroyStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        }
+        if (this_identifier == words["discard"]) {
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::DiscardStmt
+            carriedEmitTokenKind = TokenKind::DiscardStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        }
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
@@ -4501,6 +4519,16 @@ error$word_case:
         if (this_identifier == words["continue"]) {
             // error
             errorToken = LexerToken::Continue;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["destroy"]) {
+            // error
+            errorToken = LexerToken::Destroy;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["discard"]) {
+            // error
+            errorToken = LexerToken::Discard;
             goto handle_parse_error;
         }
         if (this_identifier == words["do"]) {

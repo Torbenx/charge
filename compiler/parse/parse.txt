@@ -373,6 +373,14 @@ SwitchState statement() then expression
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::ReturnStmt
         next after_return
+    keyword destroy
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::DestroyStmt
+        next expression
+    keyword discard
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::DiscardStmt
+        next expression
 
     punctuation }
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement

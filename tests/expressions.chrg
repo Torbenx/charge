@@ -141,4 +141,7 @@ return a;
 // expect-token EmptyReturnStmt
 return;
 
+// expect-token DestroyStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+destroy a;
+
 }

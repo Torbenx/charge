@@ -17,6 +17,8 @@ keywords = [
     "break",
     "catch",
     "continue",
+    "destroy",
+    "discard",
     "do",
     "elif",
     "else",

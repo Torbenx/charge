@@ -9,12 +9,13 @@ Generator::Generator(Context& context, ProgramHandle handle)
 void Generator::advance() { tok += 1; }
 
 void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
+    VERIFY(localVariables.size() == currentScope.variableActiveMask.size());
     int_t index = localVariables.size();
     emitControl(
         Opcode::VarDecl, location, declaration.hasInitializer ? 1 : 0,
         { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
     localVariables.push_back({ declaration.type });
-    currentScope.variableInitStates.push_back(declaration.hasInitializer);
+    currentScope.variableActiveMask.push_back(declaration.hasInitializer);
     localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::LocalVariable, index) });
 }
 
@@ -143,9 +144,9 @@ void Generator::visitFunctionDeclaration() {
         advance();
         auto info = visitVariableDeclaration(true);
 
-        VERIFY(fnProgram->runtimeParameters.size() == currentScope.parameterInitStates.size());
+        VERIFY(fnProgram->runtimeParameters.size() == currentScope.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->runtimeParameters.size();
-        currentScope.parameterInitStates.push_back(true);
+        currentScope.parameterActiveMask.push_back(true);
         localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::Parameter, parameterIndex) });
         fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
@@ -219,6 +220,25 @@ void Generator::visitStatement() {
         advance();
         auto info = visitVariableDeclaration(false);
         declareLocalVariable(name, nameLoc, info);
+    } else if (tok->kind() == Token::DestroyStmt || tok->kind() == Token::DiscardStmt) {
+        bool isDiscard = tok->kind() == Token::DiscardStmt;
+        SourceLocation location = tok->location();
+        advance();
+
+        visitExpression();
+        auto expr = topExpression();
+        popExpression();
+        VERIFY(expr.category() == InstructionCategory::LValue);
+        VERIFY(expr.opcode() == Opcode::Reference);
+        auto reference = expr.data().referenceExpr;
+
+        VERIFY(reference.kind() != ReferenceExpressionKind::MemberExpression);
+        if (reference.kind() == ReferenceExpressionKind::LocalReference)
+            VERIFY(isDiscard);
+        else
+            VERIFY(!isDiscard);
+        emitControl(Opcode::Deactivate, location, 0, { .deactiveTarget = reference });
+        currentScope.setActive(reference, false);
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {

@@ -201,10 +201,38 @@ struct Generator : Util {
     };
 
     struct LocalScope {
-        std::vector<bool> parameterInitStates;
-        std::vector<bool> variableInitStates;
-        std::vector<bool> referenceInitStates;
+        std::vector<bool> parameterActiveMask;
+        std::vector<bool> variableActiveMask;
+        std::vector<bool> referenceActiveMask;
         // FlatSet<> trueHas;
+
+        void setActive(ReferenceExpression ref, bool newState) {
+            switch (ref.kind()) {
+            case ReferenceExpressionKind::Parameter:
+                parameterActiveMask[ref.id()] = newState;
+                break;
+            case ReferenceExpressionKind::LocalVariable:
+                variableActiveMask[ref.id()] = newState;
+                break;
+            case ReferenceExpressionKind::LocalReference:
+                referenceActiveMask[ref.id()] = newState;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        bool isActive(ReferenceExpression ref) const {
+            switch (ref.kind()) {
+            case ReferenceExpressionKind::Parameter:
+                return parameterActiveMask[ref.id()];
+            case ReferenceExpressionKind::LocalVariable:
+                return variableActiveMask[ref.id()];
+            case ReferenceExpressionKind::LocalReference:
+                return referenceActiveMask[ref.id()];
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
 
         bool operator==(const LocalScope&) const = default;
     };

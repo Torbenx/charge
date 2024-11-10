@@ -4,22 +4,23 @@
 
 namespace sema {
 
-#define ENUMERATE_SEMA_INSTRUCTION_OPCODES               \
-    OP(Reference, LValue)                                \
-    OP(Constant, PValue)                                 \
-    OP(Purify, PValue) /* RValue -> PValue */            \
-    OP(Call, RValue)                                     \
-    OP(RMemberAccess, RValue)                            \
-    OP(ImplicitCopy, RValue) /* LValue -> RValue */      \
-    OP(PureInstantiation, RValue) /* PValue -> RValue */ \
-    OP(VarDecl, Control)                                 \
-    OP(CompoundStmt, Control)                            \
-    OP(Function, Control)                                \
-    OP(JumpIf, Control)                                  \
-    OP(Jump, Control)                                    \
-    OP(EndScope, Control)                                \
-    OP(Discard, Control)                                 \
-    OP(ExpressionHeader, Header)                         \
+#define ENUMERATE_SEMA_INSTRUCTION_OPCODES                             \
+    OP(Reference, LValue)                                              \
+    OP(Constant, PValue)                                               \
+    OP(Purify, PValue) /* RValue -> PValue */                          \
+    OP(Call, RValue)                                                   \
+    OP(RMemberAccess, RValue)                                          \
+    OP(ImplicitCopy, RValue) /* LValue -> RValue */                    \
+    OP(PureInstantiation, RValue) /* PValue -> RValue */               \
+    OP(VarDecl, Control)                                               \
+    OP(CompoundStmt, Control)                                          \
+    OP(Function, Control)                                              \
+    OP(JumpIf, Control)                                                \
+    OP(Jump, Control)                                                  \
+    OP(EndScope, Control)                                              \
+    OP(Discard, Control)                                               \
+    OP(Deactivate, Control) /* Destory variables, discard references*/ \
+    OP(ExpressionHeader, Header)                                       \
     OP(FunctionHeader, Header)
 
 enum class Opcode : uint8_t {
@@ -68,6 +69,7 @@ union ExpressionData {
 union InstructionData {
     uint32_t blockSize;
     int32_t jumpDistance;
+    ReferenceExpression deactiveTarget;
 
     struct {
         Type type;

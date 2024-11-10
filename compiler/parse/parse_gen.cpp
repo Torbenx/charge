@@ -114,6 +114,10 @@ std::string_view nameString(LexerToken token) {
         return "Catch";
     case LexerToken::Continue:
         return "Continue";
+    case LexerToken::Destroy:
+        return "Destroy";
+    case LexerToken::Discard:
+        return "Discard";
     case LexerToken::Do:
         return "Do";
     case LexerToken::Elif:
