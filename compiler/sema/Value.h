@@ -183,6 +183,13 @@ enum class ReferenceExpressionKind : uint8_t {
 };
 
 struct ReferenceExpression {
+    static constexpr ReferenceExpression localVariable(uint32_t id) {
+        return ReferenceExpression(ReferenceExpressionKind::LocalVariable, id);
+    }
+    static constexpr ReferenceExpression localReference(uint32_t id) {
+        return ReferenceExpression(ReferenceExpressionKind::LocalReference, id);
+    }
+
     constexpr ReferenceExpression(ReferenceExpressionKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
 

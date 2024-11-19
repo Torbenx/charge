@@ -173,7 +173,7 @@ struct Generator : Util {
         DeductionState state;
     };
 
-    struct LocalScope {
+    struct LocalState {
         std::vector<bool> parameterActiveMask;
         std::vector<bool> variableActiveMask;
         std::vector<bool> referenceActiveMask;
@@ -207,16 +207,22 @@ struct Generator : Util {
             }
         }
 
-        bool operator==(const LocalScope&) const = default;
+        bool operator==(const LocalState&) const = default;
     };
 
     struct JumpReference {
         uint32_t offset;
-        LocalScope originScope;
+        LocalState originState;
     };
     struct JumpLabel {
         uint32_t offset;
-        LocalScope targetScope;
+        LocalState targetState;
+    };
+
+    struct LocalScope {
+        uint32_t localScopeDepth = 0;
+        uint32_t localVariableCount = 0;
+        uint32_t localReferenceCount = 0;
     };
 
     using Token = parse::TokenKind;
@@ -230,8 +236,9 @@ struct Generator : Util {
     std::vector<LocalLookupEntry> localLookupEntries;
     std::vector<LocalVariable> localVariables;
     std::vector<LocalReference> localReferences;
-    LocalScope currentScope;
+    LocalState localState;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
+    uint32_t localScopeDepth = 0;
 
     Generator(Context& context, ProgramHandle handle);
 
@@ -243,6 +250,9 @@ struct Generator : Util {
     Expression topExpression(int_t n = 0);
     void popExpression();
     void popExpressions(int_t n);
+
+    LocalScope beginLocalScope(SourceLocation);
+    void endLocalScope(LocalScope scope, SourceLocation);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -322,7 +332,7 @@ struct Generator : Util {
     JumpReference emitJump(Opcode, SourceLocation, int_t childCount);
     void linkToNextInstruction(const JumpReference& jump);
     JumpLabel nextInstruction();
-    void link(int_t originOffset, int_t targetOffset, const LocalScope& originScope, const LocalScope& targetScope);
+    void link(int_t originOffset, int_t targetOffset, const LocalState& originState, const LocalState& targetState);
     void emitJumpTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::Jump, location, 0, label); }
     JumpReference emitJump(SourceLocation location) { return emitJump(Opcode::Jump, location, 0); }
     void emitJumpIfTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }

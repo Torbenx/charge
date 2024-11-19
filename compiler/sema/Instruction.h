@@ -17,6 +17,7 @@ namespace sema {
     OP(Function, Control)                                              \
     OP(JumpIf, Control)                                                \
     OP(Jump, Control)                                                  \
+    OP(BeginScope, Control)                                            \
     OP(EndScope, Control)                                              \
     OP(Discard, Control)                                               \
     OP(Deactivate, Control) /* Destory variables, discard references*/ \
@@ -69,7 +70,7 @@ union ExpressionData {
 union InstructionData {
     uint32_t blockSize;
     int32_t jumpDistance;
-    ReferenceExpression deactiveTarget;
+    ReferenceExpression deactivateTarget;
 
     struct {
         Type type;

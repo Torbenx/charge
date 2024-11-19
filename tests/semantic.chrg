@@ -165,8 +165,12 @@ static boolTest = false;
 fn ifTest() -> X: { if true: {} }
 // expect-return-type X
 fn ifTest2() -> X: { if true: { withBody1(); } }
-//; expect-return-type X
-//; fn ifTest3() -> X: { if true: { let x: X = X(); } } TODO
+// expect-return-type X
+fn ifTest3() -> X: { if true: { let x: X = X(); } }
+// expect-return-type X
+fn ifTest4() -> X: { if true: let x: X = X(); }
+// expect-return-type X
+fn ifElseTest1() -> X: { if true: let x: X = X(); else: let y: X; }
 
 // expect-object-type X
 static var staticObj: X = X();

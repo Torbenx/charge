@@ -33,28 +33,28 @@ void Generator::emitControl(Opcode op, SourceLocation location, int_t childCount
 }
 
 Generator::JumpLabel Generator::nextInstruction() {
-    return { (uint32_t)instructionScratch.size(), currentScope };
+    return { (uint32_t)instructionScratch.size(), localState };
 }
 
 Generator::JumpReference Generator::emitJump(Opcode op, SourceLocation location, int_t childCount) {
     uint32_t offset = instructionScratch.size();
     emitControl(op, location, childCount, { .jumpDistance = 0 });
-    return { offset, currentScope };
+    return { offset, localState };
 }
 
 void Generator::linkToNextInstruction(const JumpReference& jump) {
     int_t targetOffset = instructionScratch.size();
-    link(jump.offset, targetOffset, jump.originScope, currentScope);
+    link(jump.offset, targetOffset, jump.originState, localState);
 }
 
 void Generator::emitJumpTo(Opcode op, SourceLocation location, int_t childCount, const JumpLabel& label) {
     int_t originOffset = instructionScratch.size();
     emitControl(op, location, childCount, { .jumpDistance = 0 });
-    link(originOffset, label.offset, currentScope, label.targetScope);
+    link(originOffset, label.offset, localState, label.targetState);
 }
 
-void Generator::link(int_t originOffset, int_t targetOffset, const LocalScope& originScope, const LocalScope& targetScope) {
-    VERIFY(originScope == targetScope);
+void Generator::link(int_t originOffset, int_t targetOffset, const LocalState& originState, const LocalState& targetState) {
+    VERIFY(originState == targetState);
     auto& jumpInst = instructionScratch[originOffset];
     VERIFY(jumpInst.u.jumpDistance == 0);
     jumpInst.u.jumpDistance = targetOffset - originOffset;
@@ -652,7 +652,7 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 
     Generator g(context, progHandle);
     g.inheriteParameters(program->parent());
-    // built lookup stack
+    // build lookup stack
     ScopeValue scope = program->parent();
     for (;;) {
         if (scope.kind() == ValueKind::Program) {

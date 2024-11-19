@@ -174,6 +174,9 @@ void Dumper::dumpInstruction(Instruction inst) {
     case Opcode::JumpIf:
         info << fmt::format("{:+}", inst.u.jumpDistance);
         break;
+    case Opcode::Deactivate:
+        info << formatReferenceExpression(inst.u.deactivateTarget);
+        break;
     default:
         break;
     }

@@ -370,3 +370,42 @@ struct Bar: {
 
 template(T: type where has(Add) && has(Sub))
 fn foo(x: T)
+
+fn refs1(unique ref u: T, shared ref s: T, const ref c: T): {
+    unique ref uu: T = u;
+    shared ref ss: T = s;
+    const ref cc: T = c;
+}
+
+fn refs2(unique &u: T, shared &s: T, const &c: T): {
+    unique &uu: T = u;
+    shared &ss: T = s;
+    const &cc: T = c;
+
+    const{s, c}& sc: T = s;
+    const&{s, c} sc: T = s;
+}
+
+fn refs3(unique u: T, shared s: T, const c: T): {
+    unique uu: T = u;
+    shared ss: T = s;
+    const cc: T = c;
+
+    const{s, c} sc: T = s;
+}
+
+fn refs4(u: unique T, s: shared T, c: const T): {
+    uu: unique T = u;
+    ss: shared T = s;
+    cc: const T = c;
+
+    sc: const{s, c} T = s;
+}
+
+fn refs5(ref u: unique T, ref s: shared T, ref c: const T): {
+    ref uu: unique T = u;
+    ref ss: shared T = s;
+    ref cc: const T = c;
+
+    ref sc: const{s, c} T = s;
+}

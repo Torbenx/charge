@@ -16,15 +16,51 @@ void Generator::clearParseLocation() {
 
 void Generator::advance() { tok += 1; }
 
+Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
+    localScopeDepth += 1;
+    emitControl(Opcode::BeginScope, location, 0, { .empty {} });
+    return {
+        localScopeDepth,
+        (uint32_t)localState.variableActiveMask.size(),
+        (uint32_t)localState.referenceActiveMask.size()
+    };
+}
+
+void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
+    VERIFY(scope.localScopeDepth == localScopeDepth);
+    localScopeDepth -= 1;
+
+    VERIFY(localState.variableActiveMask.size() == localVariables.size());
+    while (localState.variableActiveMask.size() > scope.localVariableCount) {
+        if (localState.variableActiveMask.back()) {
+            auto ref = ReferenceExpression::localVariable(localState.variableActiveMask.size() - 1);
+            emitControl(Opcode::Deactivate, location, 0, { .deactivateTarget = ref });
+        }
+        localState.variableActiveMask.pop_back();
+        localVariables.pop_back();
+    }
+    VERIFY(localState.referenceActiveMask.size() == localReferences.size());
+    while (localState.referenceActiveMask.size() > scope.localReferenceCount) {
+        if (localState.referenceActiveMask.back()) {
+            auto ref = ReferenceExpression::localReference(localState.referenceActiveMask.size() - 1);
+            emitControl(Opcode::Deactivate, location, 0, { .deactivateTarget = ref });
+        }
+        localState.referenceActiveMask.pop_back();
+        localReferences.pop_back();
+    }
+
+    emitControl(Opcode::EndScope, location, 0, { .empty {} });
+}
+
 void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
-    VERIFY(localVariables.size() == currentScope.variableActiveMask.size());
+    VERIFY(localVariables.size() == localState.variableActiveMask.size());
     int_t index = localVariables.size();
     emitControl(
         Opcode::VarDecl, location, declaration.hasInitializer ? 1 : 0,
         { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
     localVariables.push_back({ declaration.type });
-    currentScope.variableActiveMask.push_back(declaration.hasInitializer);
-    localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::LocalVariable, index) });
+    localState.variableActiveMask.push_back(declaration.hasInitializer);
+    localLookupEntries.push_back({ name, ReferenceExpression::localVariable(index) });
 }
 
 void Generator::visitDeclaration() {
@@ -152,9 +188,9 @@ void Generator::visitFunctionDeclaration() {
         advance();
         auto info = visitVariableDeclaration(true);
 
-        VERIFY(fnProgram->runtimeParameters.size() == currentScope.parameterActiveMask.size());
+        VERIFY(fnProgram->runtimeParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->runtimeParameters.size();
-        currentScope.parameterActiveMask.push_back(true);
+        localState.parameterActiveMask.push_back(true);
         localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::Parameter, parameterIndex) });
         fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
@@ -216,14 +252,14 @@ void Generator::visitTypeDeclaration() {
 
 void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {
-        SourceLocation openBraceLoc = tok->location();
+        auto scope = beginLocalScope(tok->location());
         advance();
         while (tok->kind() != Token::EmptyNode) {
             visitStatement();
         }
         VERIFY(tok->kind() == Token::EmptyNode);
+        endLocalScope(scope, tok->location());
         advance();
-        emitControl(Opcode::EndScope, openBraceLoc, 0, { .empty {} });
     } else if (tok->kind() == Token::LetStmt || tok->kind() == Token::VarStmt) {
         Word name = Word::fromUint(tok->data());
         SourceLocation nameLoc = tok->location();
@@ -247,8 +283,8 @@ void Generator::visitStatement() {
             VERIFY(isDiscard);
         else
             VERIFY(!isDiscard);
-        emitControl(Opcode::Deactivate, location, 0, { .deactiveTarget = reference });
-        currentScope.setActive(reference, false);
+        emitControl(Opcode::Deactivate, location, 0, { .deactivateTarget = reference });
+        localState.setActive(reference, false);
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
@@ -257,17 +293,24 @@ void Generator::visitStatement() {
             contextualToBool();
 
             auto notTrueJump = emitJumpIf(ifLoc);
+            auto ifScope = beginLocalScope(ifLoc);
             visitStatement();
 
             if (tok->kind() == Token::ElseStmt) {
-                auto skipElseJump = emitJump(tok->location());
+                SourceLocation elseLoc = tok->location();
                 advance();
 
+                endLocalScope(ifScope, {});
+                auto skipElseJump = emitJump(elseLoc);
+
                 linkToNextInstruction(notTrueJump);
+                auto elseScope = beginLocalScope(elseLoc);
                 visitStatement();
+                endLocalScope(elseScope, {});
 
                 linkToNextInstruction(skipElseJump);
             } else {
+                endLocalScope(ifScope, {});
                 linkToNextInstruction(notTrueJump);
             }
         } else {
