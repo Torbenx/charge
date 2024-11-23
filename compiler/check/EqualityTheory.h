@@ -1,14 +1,14 @@
 #pragma once
 
 #include <check/LiteralInfo.h>
-#include <check/ValueTheory.h>
+#include <check/SimpleBooleanTheory.h>
 
 #include <FlatTreeSet.h>
 
 namespace check {
 
-struct EqualityTheory : SimpleBooleanTheory<> {
-    using SimpleBooleanTheory<>::SimpleBooleanTheory;
+struct EqualityTheory : SimpleBooleanTheory {
+    using SimpleBooleanTheory::SimpleBooleanTheory;
 
     //! Returns a value that is true if and only if \p a == \p b
     BooleanValue equality(Solver& solver, Value a, Value b) {

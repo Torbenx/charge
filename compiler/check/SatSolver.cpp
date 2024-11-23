@@ -1,4 +1,3 @@
-#include <check/BooleanVariables.h>
 #include <check/SatSolver.h>
 
 namespace check {
@@ -23,15 +22,22 @@ int_t Solver::attachTheory(ReasonTheory& theory) {
     return id;
 }
 
-namespace {
-    static constexpr int_t EXPLICIT_REASONS_THEORY_ID = 0;
+CodeBlockTheory::CodeBlockTheory(Solver& solver)
+    : m_theoryId(solver.attachTheory(*this)) { }
+
+int_t Solver::attachTheory(CodeBlockTheory& theory) {
+    int_t id = blockTheories.size();
+    blockTheories.push_back(&theory);
+    return id;
 }
+
+// ----------------------------- Clauses ----------------------------
 
 Solver::Clauses::Clauses(Solver& solver)
     : ReasonTheory(solver, true) { }
 
 Reason Solver::Clauses::makeReason(int_t clauseIndex, int_t literalIndex) {
-    return { .reasonTheory = EXPLICIT_REASONS_THEORY_ID, .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
+    return { .reasonTheory = (uint32_t)theoryId(), .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
 }
 
 bool Solver::Clauses::testReason(Solver&, const Reason& reason) {
@@ -109,25 +115,166 @@ void Solver::Clauses::addClause(Solver& solver, std::vector<Literal> clause) {
         LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
         Literal lit = clause[index];
         solver.infoFor(lit).instances.push_back(inst);
-        if (!solver.assignedFalseAndPropagated(lit))
+        if (!solver.assignedFalse(lit))
             mask |= literalMask(index);
     }
     VERIFY(mask != 0);
-    if (std::popcount(mask) == 1) {
-        int_t index = std::countr_zero(mask);
-        solver.assignTrue(clause[index], makeReason(clauseIndex, index));
-    }
     clauses.emplace_back(std::move(clause));
     clauseMasks.push_back(mask);
+    if (std::popcount(mask) == 1) {
+        int_t index = std::countr_zero(mask);
+        solver.assignTrue(clauses.back()[index], makeReason(clauseIndex, index));
+    }
 }
 
+// ------------------------ InternalVariables -----------------------
+
+std::string Solver::InternalVariables::formatPositiveLiteral(Solver&, int_t varId) {
+    if (varId == 0)
+        return "true";
+    return "internal" + std::to_string(varId);
+}
+std::string Solver::InternalVariables::formatNegativeLiteral(Solver&, int_t varId) {
+    if (varId == 0)
+        return "false";
+    return "!internal" + std::to_string(varId);
+}
+
+// -------------------------- BuiltinTypes --------------------------
+
+namespace {
+    constexpr uint64_t BUILTIN_TYPES_BASE_LABEL = 0;
+}
+
+uint64_t Solver::BuiltinTypes::labelOf(Solver&, Value v) {
+    return BUILTIN_TYPES_BASE_LABEL + v.valueId;
+}
+
+std::string Solver::BuiltinTypes::formatValue(Solver&, Value v) {
+    if (v == builtins::boolean_type)
+        return "bool";
+    if (v == builtins::type_type)
+        return "type";
+    VERIFY_NOT_REACHED();
+}
+
+void Solver::BuiltinTypes::enumerateValues(Solver&, std::function<void(Value)> f) {
+    f(builtins::boolean_type);
+    f(builtins::type_type);
+}
+
+TypedOperations& Solver::BuiltinTypes::operationsFor(Solver& solver, Type type) {
+    if (type == builtins::boolean_type)
+        return solver.booleanOps;
+    VERIFY_NOT_REACHED();
+}
+
+// ------------------------- BooleanEquality ------------------------
+
+void Solver::BooleanEquality::onNewVariable(Solver& solver, int_t varId) {
+    /*
+    Equalities are eagerly encoded as clauses.
+    For each equality there will be 4 clauses:
+        a != b || !a ||  b
+        a != b ||  a || !b
+        a == b ||  a ||  b
+        a == b || !a || !b
+    */
+    Link l = equalities.at(varId);
+    BooleanValue eq = positiveLiteral(varId);
+    BooleanValue neq = negativeLiteral(varId);
+    BooleanValue a { l.source };
+    BooleanValue b { l.target };
+    BooleanValue na = solver.negate(a);
+    BooleanValue nb = solver.negate(b);
+
+    if (a == b) {
+        solver.addClause({ eq });
+    } else if (a == nb) {
+        solver.addClause({ neq });
+    } else {
+        solver.addClause({ neq, na, b });
+        solver.addClause({ neq, a, nb });
+        solver.addClause({ eq, a, b });
+        solver.addClause({ eq, na, nb });
+    }
+}
+
+// -------------------------- BooleanLoads --------------------------
+
+std::string Solver::BooleanLoads::formatPositiveLiteral(Solver& solver, int_t varId) {
+    auto [location, position] = LoadSet::loadAt(varId);
+    return solver.formatLoad(location, position);
+}
+
+std::string Solver::BooleanLoads::formatNegativeLiteral(Solver& solver, int_t varId) {
+    return "!" + formatPositiveLiteral(solver, varId);
+}
+
+uint64_t Solver::BooleanLoads::labelOf(Solver&, Value value) {
+    BooleanValue lit { value };
+    return 3000 + (uint64_t)LoadSet::label(variableId(lit)) * 2 + isPositive(lit);
+}
+
+BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
+    return positiveLiteral(LoadSet::get(solver, location, position));
+}
+
+void Solver::BooleanLoads::makeData(uint32_t newHandle) {
+    VERIFY((int_t)newHandle == variableCount());
+    newVariable();
+}
+
+// ------------------------ BooleanOperations -----------------------
+
+BooleanValue Solver::BooleanOperations::equality(Solver& solver, Value a, Value b) {
+    return m_equality.equality(solver, a, b);
+}
+
+BooleanValue Solver::BooleanOperations::disequality(Solver& solver, Value a, Value b) {
+    return m_equality.disequality(solver, a, b);
+}
+
+Value Solver::BooleanOperations::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
+    return m_loads.defineLoad(solver, location, position);
+}
+
+// --------------------------- EntryBlocks --------------------------
+
+uint64_t Solver::EntryBlocks::labelOf(Solver&, BlockId) { return 0; }
+
+Value Solver::EntryBlocks::loadAtEndOfBlock(Solver& solver, MemoryLocation location, BlockId block) {
+    return loadAtPosition(solver, location, { block, 0 });
+}
+
+Value Solver::EntryBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition position) {
+    return solver.defineLoad(location, position);
+}
+
+std::string Solver::EntryBlocks::formatBlockName(Solver&, BlockId) { return "entry"; }
+
+std::string Solver::EntryBlocks::formatCodePosition(Solver&, CodePosition) { return "entry"; }
+
+// ----------------------------- Solver -----------------------------
+
 Solver::Solver()
-    : internalVariables(*this), clauses(*this) {
+    : internalVariables(*this, 0)
+    , builtinTypes(*this)
+    , clauses(*this)
+    , booleanOps(*this)
+    , entryBlocks(*this) {
     {
+        VERIFY(internalVariables.theoryId() == SOLVER_INTERNAL_VARS_THEORY_ID);
         int_t id = internalVariables.newVariable();
         VERIFY(internalVariables.positiveLiteral(id) == builtins::true_literal);
         VERIFY(internalVariables.negativeLiteral(id) == builtins::false_literal);
         addClause({ builtins::true_literal });
+    }
+    {
+        VERIFY(builtinTypes.theoryId() == BUILTIN_TYPES_THEORY_ID);
+    }
+    {
+        VERIFY(entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
     }
 }
 
@@ -183,7 +330,7 @@ void Solver::addClause(std::vector<Literal> clause) {
 
 void Solver::decideTrue(Literal literal) {
     VERIFY(!firstPropagation.has_value());
-    VERIFY(!assignedFalse(literal));
+    VERIFY(!tentativelyFalse(literal));
     decisions.push_back(TracePosition(trace.size()));
     assignTrue(literal, Reason::makeDecision(currentDecisionLevel()));
     for (auto& theory : reasonTheories)
@@ -192,10 +339,12 @@ void Solver::decideTrue(Literal literal) {
 
 bool Solver::assignTrue(Literal trueLit, Reason reason) {
     auto& theory = theoryFor(trueLit);
-    /*if (reason.isDecision())
+    if (reason.isDecision()) {
         fmt::println("deciding {}", theory.formatValue(*this, trueLit));
-    else
-        fmt::println("assigning {}", theory.formatValue(*this, trueLit));*/
+    } else {
+        fmt::print("assigning {}, reason: ", theory.formatValue(*this, trueLit));
+        dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
+    }
 
     Literal falseLit = theory.negate(*this, trueLit);
     auto& info = theory.literalInfo(*this, falseLit);
@@ -211,7 +360,7 @@ bool Solver::assignTrue(Literal trueLit, Reason reason) {
         queuePropagation(falseLit);
     }
 
-    if (theory.literalInfo(*this, trueLit).assignedFalse()) {
+    if (theory.literalInfo(*this, trueLit).tentativelyFalse()) {
         conflicts.push_back({ trueLit, reason });
         return false;
     }
@@ -250,7 +399,7 @@ bool Solver::tryLearn(Conflict conflict) {
     VERIFY(!subTrace.empty());
     SubTraceEntry conflictDecision = subTrace.front();
     VERIFY(conflictDecision.reason.isDecision());
-    if (infoFor(conflictDecision.literal).assignedFalse()) {
+    if (infoFor(conflictDecision.literal).tentativelyFalse()) {
         // If the decision was not reverted, propagating it will lead to a conflict
         return false;
     }
@@ -259,7 +408,7 @@ bool Solver::tryLearn(Conflict conflict) {
     [[maybe_unused]] auto wasReversed = [&](Literal lit) {
         return std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; }) != subTrace.end();
     };
-    [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit).assignedFalse(); };
+    [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit).tentativelyFalse(); };
     [[maybe_unused]] auto wasTrue = [&](Literal lit) { return wasFalse(negate(lit)); };
 
     std::vector<Literal> newClause;
@@ -277,7 +426,7 @@ bool Solver::tryLearn(Conflict conflict) {
 
             // VERIFY(wasFalse(lit));
 
-            if (info.assignedFalse()) {
+            if (info.tentativelyFalse()) {
                 VERIFY(info.includedInNewClause != tryLearnIndex);
                 newClause.push_back(lit);
                 info.includedInNewClause = tryLearnIndex;
@@ -313,11 +462,12 @@ bool Solver::tryLearn(Conflict conflict) {
         openLiterals -= 1;
         if (openLiterals == 0) {
             // Found a UIP
-            VERIFY(!infoFor(entry.literal).assignedFalse());
+            VERIFY(!infoFor(entry.literal).tentativelyFalse());
 
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 newClause.push_back(entry.literal);
+                fmt::print("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
             }
@@ -348,7 +498,7 @@ bool Solver::tryLearn(Conflict conflict) {
             else
                 VERIFY(wasTrue(lit));*/
 
-            if (info.assignedFalse()) {
+            if (info.tentativelyFalse()) {
                 if (info.includedInNewClause != tryLearnIndex) {
                     newClause.push_back(lit);
                     info.includedInNewClause = tryLearnIndex;
@@ -374,7 +524,7 @@ bool Solver::analyzeConflicts() {
 
     auto doesConflictPersist = [this](Conflict conflict) {
         bool isReasonValid = theoryFor(conflict.reason).testReason(*this, conflict.reason);
-        bool isImpliedLiteralFalse = infoFor(conflict.literal).assignedFalse();
+        bool isImpliedLiteralFalse = infoFor(conflict.literal).tentativelyFalse();
         return isReasonValid && isImpliedLiteralFalse;
     };
 
@@ -438,7 +588,7 @@ void Solver::backtrack(int_t targetLevel) {
                 // When the first reason is reverted we requeue the propagation.
                 info.subTraceIndex = subTrace.size();
                 subTrace.push_back({ entry.literal, entry.reason });
-                if (assignedFalseAndPropagated(entry.literal)) {
+                if (assignedFalse(entry.literal)) {
                     theory.unapplyFalseAssignment(*this, entry.literal);
                     clauses.unapplyFalseAssignment(*this, entry.literal);
                     queuePropagation(entry.literal);
@@ -459,7 +609,7 @@ void Solver::backtrack(int_t targetLevel) {
             }
         } else {
             if (info.firstReason.value() == position) {
-                if (assignedFalseAndPropagated(entry.literal)) {
+                if (assignedFalse(entry.literal)) {
                     theory.reapplyFalseAssignment(*this, entry.literal);
                     clauses.reapplyFalseAssignment(*this, entry.literal);
                 }
@@ -480,7 +630,7 @@ std::vector<Reason> Solver::collectReasons(Literal trueLit) {
     auto& theory = theoryFor(trueLit);
     Literal falseLit = theory.negate(*this, trueLit);
     const auto& info = theory.literalInfo(*this, falseLit);
-    VERIFY(info.assignedFalse());
+    VERIFY(info.tentativelyFalse());
 
     VERIFY(info.firstReason.has_value());
     VERIFY(info.lastReason.has_value());
@@ -500,7 +650,7 @@ void Solver::checkInvariances() {
     auto checkLiteral = [this](Value val) {
         Literal lit = { val };
         const auto& info = infoFor(lit);
-        if (!info.assignedFalse())
+        if (!info.tentativelyFalse())
             return;
         VERIFY(info.firstReason.has_value());
         VERIFY(info.lastReason.has_value());
@@ -559,14 +709,14 @@ void Solver::Clauses::checkInvariances(Solver& solver) {
         // VERIFY((mask & (literalMask(clause.size()) - (clause_mask_t)1)) == mask);
         for (int_t index = 0; index < (int_t)clause.size(); index++) {
             bool bitSet = (mask & literalMask(index)) != 0;
-            VERIFY(bitSet == !solver.assignedFalseAndPropagated(clause[index]));
+            VERIFY(bitSet == !solver.assignedFalse(clause[index]));
         }
         if (std::popcount(mask) == 1) {
             int_t index = std::countr_zero(mask);
             Literal trueLit = clause[index];
             auto reasons = solver.collectReasons(trueLit);
             VERIFY(std::any_of(reasons.begin(), reasons.end(), [&](Reason reason) {
-                if (reason.reasonTheory == EXPLICIT_REASONS_THEORY_ID) {
+                if (reason.reasonTheory == theoryId()) {
                     auto inst = asInstance(reason);
                     if ((int_t)inst.clauseIndex == clauseIndex) {
                         VERIFY(mask == literalMask(inst.literalIndex));
@@ -578,7 +728,7 @@ void Solver::Clauses::checkInvariances(Solver& solver) {
 
             for (Literal lit : clause) {
                 if (lit != trueLit) {
-                    VERIFY(solver.infoFor(lit).assignedFalse());
+                    VERIFY(solver.infoFor(lit).tentativelyFalse());
                     // VERIFY(solver.infoFor(lit).firstReason.value() < pos);
                 }
             }
@@ -592,11 +742,11 @@ bool Solver::checkAssignment() {
         std::optional<Literal> unassignedInternal;
         for (Literal lit : clause) {
             auto& theory = theoryFor(lit);
-            if (theory.literalInfo(*this, theory.negate(*this, lit)).assignedFalse()) {
+            if (theory.literalInfo(*this, theory.negate(*this, lit)).tentativelyFalse()) {
                 foundTrue = true;
                 break;
             }
-            if (lit.theoryId == SOLVER_INTERNAL_VARS_THEORY_ID && !theory.literalInfo(*this, lit).assignedFalse())
+            if (lit.theoryId == SOLVER_INTERNAL_VARS_THEORY_ID && !theory.literalInfo(*this, lit).tentativelyFalse())
                 unassignedInternal = lit;
         }
         if (!foundTrue) {

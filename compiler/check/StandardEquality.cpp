@@ -294,7 +294,7 @@ bool StandardEquality::testReason(Solver& solver, const Reason& reason) {
 
     // disequality
     int_t diseqId = reasonDiseqId(reason);
-    if (!solver.assignedFalse(positiveLiteral(diseqId)))
+    if (!assignedNegative(solver, diseqId))
         return false;
 
     auto [impliedA, impliedB] = equalities.at(reasonEqId(reason));

@@ -16,7 +16,7 @@ struct TopologicalOrder {
         The children are ordered inversely to the topological order. I.e. the child that appears
         first in the order is the last in this list.
         */
-        std::vector<NodeId> children;
+        std::vector<NodeId> children = {};
     };
 
     struct ReverseOrder {

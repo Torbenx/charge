@@ -5,7 +5,9 @@
 namespace check {
 
 inline constexpr int_t SOLVER_INTERNAL_VARS_THEORY_ID = 0;
-inline constexpr int_t TYPE_THEORY_ID = 1;
+inline constexpr int_t BUILTIN_TYPES_THEORY_ID = 1;
+
+inline constexpr int_t ENTRY_BLOCKS_THEORY_ID = 0;
 
 //! A value
 /*!
@@ -32,12 +34,36 @@ struct Type : Value { };
 //! A memory location value
 struct MemoryLocation : Value { };
 
+struct BlockId {
+    uint32_t theoryId : 8 = -1;
+    uint32_t blockId : 24 = -1;
+
+    bool operator==(const BlockId&) const = default;
+};
+
+//! Represent an execution position immediately after the given instruction
+struct CodePosition {
+    BlockId block = {};
+    uint32_t position = 0;
+
+    bool operator==(const CodePosition&) const = default;
+};
+
+struct Load {
+    MemoryLocation location;
+    CodePosition position;
+};
+
 namespace builtins {
     inline constexpr BooleanValue true_literal = { SOLVER_INTERNAL_VARS_THEORY_ID, 0 };
     inline constexpr BooleanValue false_literal = { SOLVER_INTERNAL_VARS_THEORY_ID, 1 };
 
-    inline constexpr Type type_type = { TYPE_THEORY_ID, 0 };
-    inline constexpr Type boolean_type = { TYPE_THEORY_ID, 1 };
+    inline constexpr Type type_type = { BUILTIN_TYPES_THEORY_ID, 0 };
+    inline constexpr Type boolean_type = { BUILTIN_TYPES_THEORY_ID, 1 };
+
+    inline constexpr BlockId entry_block = { ENTRY_BLOCKS_THEORY_ID, 0 };
+
+    inline constexpr CodePosition entry_position = { entry_block, 0 };
 }
 
 }
@@ -60,4 +86,9 @@ struct optional_traits<check::Type> {
 template<>
 struct optional_traits<check::MemoryLocation> {
     static constexpr check::MemoryLocation empty_value = check::MemoryLocation();
+};
+
+template<>
+struct optional_traits<check::BlockId> {
+    static constexpr check::BlockId empty_value = {};
 };

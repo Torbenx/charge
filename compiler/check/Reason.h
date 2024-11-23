@@ -74,8 +74,8 @@ struct ReasonTheory {
     2) By implementing backtrack() to revert to a previous state and using
        BooleanTheory::reapplyFalseAssignment() to reapply assignment that were falsely reverted.
        This is easier to achive since BooleanTheory::reapplyFalseAssignment() performs an
-       operation very similar to BooleanTheory::propagateFalseAssignment() which must supported in
-       either case.
+       operation very similar to BooleanTheory::propagateFalseAssignment() which must be supported
+       in either case.
 
     If approach 2) is used the theory should backtrack to the state is was in when newDecisionLevel()
     was called with Solver::currentDecisionLevel(). The decision level after this call should be

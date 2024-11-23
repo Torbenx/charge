@@ -1,12 +1,12 @@
-#include <check/BooleanVariables.h>
-#include <check/SatSolver.h>
 #include <gtest/gtest.h>
-#include <types.h>
 
-// #include <check/BasicBlock.h>
-#include <check/BooleanEquality.h>
+#include <check/BooleanVariables.h>
 #include <check/EqualityTheory.h>
+#include <check/Phis.h>
+#include <check/SatSolver.h>
 #include <check/StandardEquality.h>
+#include <check/StandardLoads.h>
+#include <check/StoreBlocks.h>
 #include <check/TopologicalOrder.h>
 
 #include <filesystem>
@@ -101,7 +101,7 @@ namespace {
     std::optional<std::vector<bool>> check(const Parser& parser) {
         // setup
         Solver solver;
-        BooleanVariables theory(solver);
+        BooleanVariables theory(solver, 0);
 
         // generate
         VERIFY(theory.newVariable() == 0);
@@ -136,10 +136,10 @@ namespace {
         VERIFY(solver.checkAssignment());
         std::vector<bool> assignment;
         for (int_t varId = 1; varId <= parser.variableCount; varId++) {
-            if (theory.literalInfo(theory.positiveLiteral(varId)).assignedFalse())
-                assignment.push_back(false);
-            else if (theory.literalInfo(theory.negativeLiteral(varId)).assignedFalse())
+            if (theory.assignedPositive(solver, varId))
                 assignment.push_back(true);
+            else if (theory.assignedNegative(solver, varId))
+                assignment.push_back(false);
             else
                 VERIFY_NOT_REACHED();
         }
@@ -427,7 +427,7 @@ TEST(Check, EqualityPropagation1) {
 TEST(Check, EqualityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver);
+    BooleanVariables bools(solver, 0);
     BooleanValue c = bools.positiveLiteral(bools.newVariable());
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -443,7 +443,7 @@ TEST(Check, EqualityPropagation2) {
 TEST(Check, DisequalityPropagation1) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver);
+    BooleanVariables bools(solver, 0);
     BooleanValue c = bools.positiveLiteral(bools.newVariable());
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -452,13 +452,13 @@ TEST(Check, DisequalityPropagation1) {
     solver.addClause({ values.equality.disequality(solver, s, t1) });
     solver.addClause({ values.equality.equality(solver, t1, t2) });
     solver.propagate();
-    VERIFY(solver.assignedTrue(c));
+    EXPECT_TRUE(solver.assignedTrue(c));
 }
 
 TEST(Check, DisequalityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver);
+    BooleanVariables bools(solver, 0);
     BooleanValue c = bools.positiveLiteral(bools.newVariable());
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -467,7 +467,7 @@ TEST(Check, DisequalityPropagation2) {
     solver.addClause({ values.equality.equality(solver, t1, t2) });
     solver.addClause({ values.equality.disequality(solver, s, t1) });
     solver.propagate();
-    VERIFY(solver.assignedTrue(c));
+    EXPECT_TRUE(solver.assignedTrue(c));
 }
 
 TEST(Check, EqualityProblem) {
@@ -485,9 +485,9 @@ TEST(Check, EqualityProblem) {
     solver.addClause({ values.equality.disequality(solver, t1, t2), values.equality.disequality(solver, t1, t3) });
     solver.addClause({ values.equality.equality(solver, t1, t2), values.equality.equality(solver, t1, t3), values.equality.equality(solver, t2, t3) });
 
-    solver.addClause({ values.equality.disequality(solver, t1, t2), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2)  });
-    solver.addClause({ values.equality.disequality(solver, t1, t3), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t3)  });
-    solver.addClause({ values.equality.disequality(solver, t2, t3), values.equality.equality(solver, s, t2), values.equality.equality(solver, s, t3)  });
+    solver.addClause({ values.equality.disequality(solver, t1, t2), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t2) });
+    solver.addClause({ values.equality.disequality(solver, t1, t3), values.equality.equality(solver, s, t1), values.equality.equality(solver, s, t3) });
+    solver.addClause({ values.equality.disequality(solver, t2, t3), values.equality.equality(solver, s, t2), values.equality.equality(solver, s, t3) });
 
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
@@ -527,19 +527,99 @@ TEST(Check, EqualityProblem) {
     EXPECT_FALSE(solver.analyzeConflicts());
 }
 
-/*TEST(Check, BasicBlocks) {
-    Solver solver;
-    BlockManager manager(solver);
-    TestValueTheory values(solver);
-    Loads loads(solver);
+struct TestOneOfTheory : OneOfTheory {
+    using OneOfTheory::OneOfTheory;
+    std::string formatIndex(Solver&, int_t nodeId, int_t index) override {
+        return "n" + std::to_string(nodeId) + ":" + std::to_string(index);
+    }
+    uint64_t labelOfIndex(Solver&, int_t nodeId, int_t index, bool positve) override {
+        return (nodeId * 100 + index) * 2 + positve;
+    }
+};
 
-    MemoryLocation x = {}; // TODO
-    Value v1 = values.newValue();
-    Value v2 = values.newValue();
-    solver.addClause({ values.equality.disequality(solver, v1, v2) });
-    manager.store(x, v1);
-    manager.branch(values.equality.disequality(solver, loads.load(x), v1), [&]() { manager.proveUnreachable(); });
-    manager.branch(values.equality.equality(solver, loads.load(x), v2), [&]() { manager.proveUnreachable(); });
-}*/
+TEST(Check, OneOf) {
+    Solver solver;
+    TestOneOfTheory theory(solver);
+    BooleanVariables bools(solver, 0);
+    solver.propagate();
+    int_t node = theory.newNode(solver, 3);
+
+    solver.decideTrue(theory.indexActiveLiteral(node, 0));
+    solver.propagate();
+    EXPECT_TRUE(theory.hasActiveIndex(node));
+    EXPECT_EQ(theory.activeIndex(node), 0);
+    EXPECT_TRUE(solver.assignedFalse(theory.indexActiveLiteral(node, 1)));
+    EXPECT_TRUE(solver.assignedFalse(theory.indexActiveLiteral(node, 2)));
+
+    solver.backtrack(0);
+    solver.propagate();
+    EXPECT_FALSE(theory.hasActiveIndex(node));
+
+    solver.decideTrue(theory.indexInactiveLiteral(node, 0));
+    solver.propagate();
+    solver.decideTrue(theory.indexInactiveLiteral(node, 1));
+    solver.propagate();
+    EXPECT_TRUE(theory.hasActiveIndex(node));
+    EXPECT_EQ(theory.activeIndex(node), 2);
+
+    solver.backtrack(0);
+    EXPECT_FALSE(theory.hasActiveIndex(node));
+
+    int_t bVar = bools.newVariable();
+    solver.addClause({ bools.positiveLiteral(bVar), theory.indexActiveLiteral(node, 0) });
+    solver.addClause({ bools.positiveLiteral(bVar), theory.indexActiveLiteral(node, 1) });
+    solver.decideTrue(bools.negativeLiteral(bVar));
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+}
+
+struct BooleanMemoryLocations : MemoryLocationTheory {
+    using MemoryLocationTheory::MemoryLocationTheory;
+    Type typeOf(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+    uint64_t labelOf(Solver&, Value v) override { return 1000 + v.valueId; }
+    std::string formatValue(Solver&, Value v) override { return "loc" + std::to_string(v.valueId); }
+    void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
+
+    Type loadedType(Solver&, MemoryLocation) override { return builtins::boolean_type; }
+
+    MemoryLocation newLocation() { return { (uint32_t)theoryId(), (uint32_t)(locationCount++) }; }
+
+    int_t locationCount = 0;
+};
+
+TEST(Check, Code) {
+    Solver solver;
+    StoreBlocks stores(solver);
+    Phis phis(solver, 2000);
+    BooleanMemoryLocations locations(solver);
+    solver.propagate();
+    auto loc = locations.newLocation();
+
+    BooleanValue initialLoad = (BooleanValue)solver.loadAtEndOfBlock(loc, builtins::entry_block);
+
+    auto s = stores.newBlock(1, builtins::entry_block);
+    stores.appendStore(s, loc, builtins::true_literal);
+
+    auto p = phis.newPhi(solver, 2, { builtins::entry_block, s });
+    solver.addClause({ phis.linkInactiveLiteral(p, 0), initialLoad });
+    solver.addClause({ phis.linkInactiveLiteral(p, 1), solver.negate(initialLoad) });
+
+    BooleanValue finalLoad = (BooleanValue)solver.loadAtEndOfBlock(loc, p);
+    solver.decideTrue(solver.negate(finalLoad));
+    solver.propagate();
+    ASSERT_FALSE(solver.hasConflicts());
+
+    solver.decideTrue(phis.linkActiveLiteral(p, 0));
+    solver.propagate();
+    ASSERT_TRUE(solver.hasConflicts());
+
+    ASSERT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    ASSERT_TRUE(solver.hasConflicts());
+
+    ASSERT_TRUE(solver.analyzeConflicts());
+    solver.propagate();
+    ASSERT_TRUE(solver.assignedTrue(finalLoad));
+}
 
 }

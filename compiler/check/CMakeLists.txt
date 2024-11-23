@@ -2,19 +2,29 @@ cmake_minimum_required(VERSION 3.18)
 
 target_sources(compiler
     PRIVATE
-    BasicBlock.h
-    BooleanEquality.h
     BooleanVariables.h
+    CodeBlock.h
+    CodeBlockTheory.h
     EqualityInfo.h
-    EqualityTheory.h
     EqualityTheory.cpp
+    EqualityTheory.h
+    ImplicationReasons.cpp
+    ImplicationReasons.h
     LiteralInfo.h
+    LoadSet.h
+    Phis.cpp
+    Phis.h
     Reason.h
-    SatSolver.h
     SatSolver.cpp
+    SatSolver.h
     SatTests.cpp
-    StandardEquality.h
+    SimpleBooleanTheory.cpp
+    SimpleBooleanTheory.h
     StandardEquality.cpp
+    StandardEquality.h
+    StandardLoads.h
+    StoreBlocks.cpp
+    StoreBlocks.h
     TopologicalOrder.h
     Value.h
     ValueTheory.h

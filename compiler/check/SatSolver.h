@@ -1,6 +1,10 @@
 #pragma once
 
 #include <check/BooleanVariables.h>
+#include <check/CodeBlock.h>
+#include <check/CodeBlockTheory.h>
+#include <check/EqualityTheory.h>
+#include <check/LoadSet.h>
 #include <check/Reason.h>
 
 #include <bit>
@@ -31,6 +35,9 @@ struct Solver {
     MemoryLocationTheory& theoryFor(MemoryLocation value) {
         return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
     }
+    TypeTheory& theoryFor(Type value) {
+        return static_cast<TypeTheory&>(*valueTheories[value.theoryId]);
+    }
     BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
         return theoryFor(literal).literalInfo(*this, literal);
     }
@@ -47,20 +54,80 @@ struct Solver {
         return theoryFor(value).labelOf(*this, value);
     }
 
+    Type typeOf(Value value) {
+        return theoryFor(value).typeOf(*this, value);
+    }
+
     Literal negate(Literal lit) {
         return theoryFor(lit).negate(*this, lit);
     }
 
-    bool assignedFalse(Literal lit) {
-        return theoryFor(lit).literalInfo(*this, lit).assignedFalse();
+    TypedOperations& operationsFor(Type type) {
+        return theoryFor(type).operationsFor(*this, type);
     }
 
-    bool assignedTrue(Literal lit) {
-        auto& theory = theoryFor(lit);
-        return theory.literalInfo(*this, theory.negate(*this, lit)).assignedFalse();
+    Literal equality(Value a, Value b) {
+        Type type = typeOf(a);
+        VERIFY(type == typeOf(b));
+        return operationsFor(type).equality(*this, a, b);
+    }
+    Literal disequality(Value a, Value b) {
+        Type type = typeOf(a);
+        VERIFY(type == typeOf(b));
+        return operationsFor(type).disequality(*this, a, b);
+    }
+
+    Type loadedType(MemoryLocation location) {
+        return theoryFor(location).loadedType(*this, location);
+    }
+
+    Value defineLoad(MemoryLocation location, CodePosition position) {
+        return operationsFor(loadedType(location)).defineLoad(*this, location, position);
+    }
+
+    bool tentativelyFalse(Literal lit) {
+        return theoryFor(lit).literalInfo(*this, lit).tentativelyFalse();
     }
 
     std::strong_ordering compare(Value a, Value b) { return labelOf(a) <=> labelOf(b); }
+
+    CodeBlockTheory& theoryFor(BlockId block) { return *blockTheories[block.theoryId]; }
+
+    uint64_t labelOf(BlockId block) { return theoryFor(block).labelOf(*this, block); }
+
+    Value loadAtPosition(MemoryLocation location, CodePosition position) {
+        return theoryFor(position.block).loadAtPosition(*this, location, position);
+    }
+    Value loadAtEndOfBlock(MemoryLocation location, BlockId block) {
+        return theoryFor(block).loadAtEndOfBlock(*this, location, block);
+    }
+
+    std::strong_ordering compare(BlockId a, BlockId b) { return labelOf(a) <=> labelOf(b); }
+
+    std::strong_ordering compare(CodePosition a, CodePosition b) {
+        auto blockOrdering = compare(a.block, b.block);
+        if (blockOrdering != 0)
+            return blockOrdering;
+        return a.position <=> b.position;
+    }
+
+    std::strong_ordering compare(Load a, Load b) {
+        auto locOrdering = compare(a.location, b.location);
+        if (locOrdering != 0)
+            return locOrdering;
+        return compare(a.position, b.position);
+    }
+
+    std::string formatBlockName(BlockId block) {
+        return theoryFor(block).formatBlockName(*this, block);
+    }
+    std::string formatCodePosition(CodePosition position) {
+        return theoryFor(position.block).formatCodePosition(*this, position);
+    }
+
+    std::string formatLoad(MemoryLocation location, CodePosition position) {
+        return "load(" + formatValue(location) + " @ " + formatCodePosition(position) + ")";
+    }
 
     //! Returns the current decision level of the solver
     /*!
@@ -72,11 +139,15 @@ struct Solver {
     int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
 
     //! Returns true if \p lit is assigned false and this assignment was propagated to the clause masks
-    bool assignedFalseAndPropagated(Literal lit) {
+    bool assignedFalse(Literal lit) {
         const auto& info = infoFor(lit);
-        if (!info.assignedFalse())
+        if (!info.tentativelyFalse())
             return false;
         return lit != firstPropagation && !info.prevPropagation.has_value();
+    }
+
+    bool assignedTrue(Literal lit) {
+        return tentativelyFalse(negate(lit));
     }
 
     //! Append \p lit the end of the propagation queue
@@ -127,12 +198,6 @@ struct Solver {
         info.prevPropagation = std::nullopt;
         info.nextPropagation = std::nullopt;
     }
-
-    //! Helper for adding clauses
-    /*!
-    The size of \p clause must be less or equal to MAX_CLAUSE_SIZE.
-    */
-    void addClauseInternal(std::vector<Literal> clause);
 
     //! Add a clause to the problem
     /*!
@@ -202,6 +267,17 @@ struct Solver {
         return m_scratchClause;
     }
 
+    /*template<std::derived_from<CodeBlock> T, typename... Args>
+    BlockId newBlock(Args&&... args) {
+        BlockId id { (uint32_t)codeBlocks.size() };
+        codeBlocks.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+        return id;
+    }
+    CodeBlock& block(BlockId id) {
+        VERIFY(id.id() < codeBlocks.size());
+        return *codeBlocks[id.id()];
+    }*/
+
 private:
     struct Clauses : ReasonTheory {
         Clauses(Solver& solver);
@@ -235,6 +311,63 @@ private:
 
         //! The actual clauses, just arrays of literals
         std::vector<std::vector<Literal>> clauses;
+    };
+
+    struct InternalVariables : BooleanVariables {
+        using BooleanVariables::BooleanVariables;
+        std::string formatPositiveLiteral(Solver&, int_t varId) override;
+        std::string formatNegativeLiteral(Solver&, int_t varId) override;
+    };
+
+    struct BuiltinTypes : TypeTheory {
+        using TypeTheory::TypeTheory;
+
+        uint64_t labelOf(Solver&, Value) override;
+        std::string formatValue(Solver&, Value) override;
+        void enumerateValues(Solver&, std::function<void(Value)> visitor) override;
+        TypedOperations& operationsFor(Solver&, Type) override;
+    };
+    friend BuiltinTypes;
+
+    struct BooleanEquality : EqualityTheory {
+        using EqualityTheory::EqualityTheory;
+        void onNewVariable(Solver& solver, int_t varId) override;
+        void propagateFalseAssignment(Solver&, BooleanValue) override { }
+        void reapplyFalseAssignment(Solver&, BooleanValue) override { }
+        void unapplyFalseAssignment(Solver&, BooleanValue) override { }
+    };
+
+    struct BooleanLoads : SimpleBooleanTheory, LoadSet<BooleanLoads, void> {
+        using SimpleBooleanTheory::SimpleBooleanTheory;
+        void propagateFalseAssignment(Solver&, BooleanValue) override { }
+        void reapplyFalseAssignment(Solver&, BooleanValue) override { }
+        void unapplyFalseAssignment(Solver&, BooleanValue) override { }
+        std::string formatPositiveLiteral(Solver&, int_t) override;
+        std::string formatNegativeLiteral(Solver&, int_t) override;
+        uint64_t labelOf(Solver&, Value) override;
+        BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
+        void makeData(uint32_t newHandle);
+    };
+
+    struct BooleanOperations : TypedOperations {
+        BooleanOperations(Solver& solver)
+            : m_equality(solver), m_loads(solver) { }
+
+        BooleanValue equality(Solver&, Value, Value) override;
+        BooleanValue disequality(Solver&, Value, Value) override;
+        Value defineLoad(Solver&, MemoryLocation, CodePosition) override;
+
+        BooleanEquality m_equality;
+        BooleanLoads m_loads;
+    };
+
+    struct EntryBlocks : CodeBlockTheory {
+        using CodeBlockTheory::CodeBlockTheory;
+        uint64_t labelOf(Solver&, BlockId) override;
+        Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) override;
+        Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;
+        std::string formatBlockName(Solver&, BlockId) override;
+        std::string formatCodePosition(Solver&, CodePosition) override;
     };
 
     //! An entry in the trace
@@ -275,6 +408,14 @@ private:
     */
     int_t attachTheory(ReasonTheory& theory);
 
+    friend CodeBlockTheory;
+    //! Attach a new theory to the solver
+    /*!
+    Called by the CodeBlockTheory constructor.
+    \returns the theory id for \p theory
+    */
+    int_t attachTheory(CodeBlockTheory& theory);
+
     //! Scratch space to hold a temporary clause
     /*!
     This is useful for reason theories that lazily generate clauses.
@@ -306,11 +447,17 @@ private:
 
     std::vector<ValueTheory*> valueTheories;
     std::vector<ReasonTheory*> reasonTheories;
+    std::vector<CodeBlockTheory*> blockTheories;
+
+    std::vector<std::unique_ptr<CodeBlock>> codeBlocks;
 
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 
-    BooleanVariables internalVariables;
+    InternalVariables internalVariables;
+    BuiltinTypes builtinTypes;
     Clauses clauses;
+    BooleanOperations booleanOps;
+    EntryBlocks entryBlocks;
 };
 
 }

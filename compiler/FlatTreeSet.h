@@ -99,10 +99,11 @@ protected:
     const node_type& node_at(uint32_t handle) const {
         return *reinterpret_cast<const node_type*>(&nodes[handle]);
     }
+    uint32_t nextNodeHandle() { return nodes.size(); }
     uint32_t makeNode(TreeLabel label, const data_type& data)
         requires std::is_void_v<array_type>
     {
-        uint32_t handle = nodes.size();
+        uint32_t handle = nextNodeHandle();
         nodes.emplace_back(label, data);
         return handle;
     }
@@ -110,7 +111,7 @@ protected:
         requires(!std::is_void_v<array_type>)
     {
         static_assert(alignof(array_type) <= 4);
-        uint32_t handle = nodes.size();
+        uint32_t handle = nextNodeHandle();
         nodes.resize(nodes.size() + (sizeof(node_type) + array.size() * sizeof(array_type)) / 4);
         std::construct_at(&node_at(handle), label, data, array.size());
         std::copy(array.begin(), array.end(), reinterpret_cast<array_type*>(&node_at(handle) + 1));
