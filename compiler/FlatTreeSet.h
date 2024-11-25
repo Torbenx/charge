@@ -52,14 +52,14 @@ template<typename data_type, typename array_type>
 struct Node : NodeBase {
     data_type data;
     uint32_t arraySize;
-    Node(TreeLabel label, const data_type& data, uint32_t arraySize)
-        : NodeBase(label), data(data), arraySize(arraySize) { }
+    Node(TreeLabel label, data_type data, uint32_t arraySize)
+        : NodeBase(label), data(std::move(data)), arraySize(arraySize) { }
 };
 template<typename data_type>
 struct Node<data_type, void> : NodeBase {
     data_type data;
-    explicit Node(TreeLabel label, const data_type& data)
-        : NodeBase(label), data(data) { }
+    explicit Node(TreeLabel label, data_type data)
+        : NodeBase(label), data(std::move(data)) { }
 };
 
 template<typename Impl, typename data_type, typename array_type = void>
@@ -100,11 +100,11 @@ protected:
         return *reinterpret_cast<const node_type*>(&nodes[handle]);
     }
     uint32_t nextNodeHandle() { return nodes.size(); }
-    uint32_t makeNode(TreeLabel label, const data_type& data)
+    uint32_t makeNode(TreeLabel label, data_type data)
         requires std::is_void_v<array_type>
     {
         uint32_t handle = nextNodeHandle();
-        nodes.emplace_back(label, data);
+        nodes.emplace_back(label, std::move(data));
         return handle;
     }
     uint32_t makeNode(TreeLabel label, const data_type& data, std::span<const array_type> array)

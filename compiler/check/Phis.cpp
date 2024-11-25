@@ -99,12 +99,13 @@ ReasonTheory::ClauseAndIndex OneOfTheory::reasonToClause(Solver& solver, const R
 
 // ------------------------------ Phis ------------------------------
 
-std::strong_ordering Phis::LocationCache::compare(Solver& solver, MemoryLocation a, BlockId, const std::pair<MemoryLocation, CachedValues>& pair) {
+std::strong_ordering Phis::LocationCache::compare(Solver& solver, MemoryLocation a, BlockId, int_t, const std::pair<MemoryLocation, CachedValues>& pair) {
     return solver.compare(a, pair.first);
 }
-uint32_t Phis::LocationCache::makeNode(Solver& solver, MemoryLocation location, BlockId block, TreeLabel label) {
+uint32_t Phis::LocationCache::makeNode(Solver& solver, MemoryLocation location, BlockId block, int_t parentCount, TreeLabel label) {
     Value load = solver.defineLoad(location, { block, 0 });
-    return Base::makeNode(label, std::make_pair(location, CachedValues { load, std::nullopt }));
+    auto equalityCache = std::make_unique<std::optional<BooleanValue>[]>(parentCount);
+    return Base::makeNode(label, std::make_pair(location, CachedValues { load, std::move(equalityCache) }));
 }
 
 Phis::Phis(Solver& solver, uint64_t baseLabel)
@@ -145,7 +146,7 @@ uint64_t Phis::labelOfBlock(Solver&, BlockId block) {
 Value Phis::loadAtEndOfBlock(Solver& solver, MemoryLocation location, BlockId block) {
     Phi& phi = get(block);
     int_t oldSize = phi.locations.size();
-    auto& cache = phi.locations.at(phi.locations.get(solver, location, block));
+    auto& cache = phi.locations.at(phi.locations.get(solver, location, block, phi.parents.size()));
     bool isNewLocation = phi.locations.size() == oldSize;
 
     if (isNewLocation && hasActiveIndex(block.blockId)) {
@@ -164,14 +165,14 @@ void Phis::onIndexActivated(Solver& solver, int_t nodeId, int_t link) {
 }
 
 void Phis::propagteActiveLink(Solver& solver, BlockId block, MemoryLocation location, int_t link, CachedValues& cache) {
-    //if (!cache.equality.has_value()) {
+    std::optional<BooleanValue>& equality = cache.equalities[link];
+    if (!equality.has_value()) {
         Value v = solver.loadAtEndOfBlock(location, get(block).parents[link]);
-        cache.equality = solver.equality(cache.load, v);
-    //}
+        equality = solver.equality(cache.load, v);
+    }
 
-    BooleanValue equality = cache.equality.value();
     BooleanValue negatedCondition = indexInactiveLiteral(block.blockId, link);
-    solver.assignTrue(equality, implications.makeImplicationReason(negatedCondition, equality));
+    solver.assignTrue(equality.value(), implications.makeImplicationReason(negatedCondition, equality.value()));
 }
 
 Value Phis::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition position) {

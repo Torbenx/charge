@@ -123,17 +123,17 @@ struct Phis : CodeBlockTheory, private OneOfTheory {
 private:
     struct CachedValues {
         Value load;
-        std::optional<BooleanValue> equality;
+        std::unique_ptr<std::optional<BooleanValue>[]> equalities;
     };
 
     struct LocationCache : FlatTreeSetDetail::Base<LocationCache, std::pair<MemoryLocation, CachedValues>> {
 
-        uint32_t get(Solver& solver, MemoryLocation loc, BlockId block) {
-            return Base::get(solver, loc, block);
+        uint32_t get(Solver& solver, MemoryLocation loc, BlockId block, int_t parentCount) {
+            return Base::get(solver, loc, block, parentCount);
         }
 
-        std::strong_ordering compare(Solver& solver, MemoryLocation, BlockId, const std::pair<MemoryLocation, CachedValues>&);
-        uint32_t makeNode(Solver&, MemoryLocation, BlockId, TreeLabel);
+        std::strong_ordering compare(Solver& solver, MemoryLocation, BlockId, int_t, const std::pair<MemoryLocation, CachedValues>&);
+        uint32_t makeNode(Solver&, MemoryLocation, BlockId, int_t, TreeLabel);
 
         MemoryLocation keyAt(uint32_t handle) { return Base::at(handle).first; }
         CachedValues& at(uint32_t handle) { return Base::at(handle).second; }
