@@ -10,7 +10,7 @@ struct StoreBlocks : CodeBlockTheory {
     std::string formatBlockName(Solver&, BlockId) override;
     std::string formatCodePosition(Solver&, CodePosition) override;
 
-    uint64_t labelOf(Solver&, BlockId) override;
+    uint64_t labelOfBlock(Solver&, BlockId) override;
 
     Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) override;
     Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;

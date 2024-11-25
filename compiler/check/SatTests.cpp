@@ -209,11 +209,10 @@ TEST(Check, SatProblems) {
 
 struct TestValueTheory : EquatableValueTheory {
     TestValueTheory(Solver& solver)
-        : EquatableValueTheory(solver), equality(solver) { }
+        : EquatableValueTheory(solver, (ValueKind)-1), equality(solver) { }
 
-    uint64_t labelOf(Solver&, Value v) override { return baseLabel + v.valueId; }
+    uint64_t labelOfValue(Solver&, Value v) override { return baseLabel + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
-    Type typeOf(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
 
     Value newValue() {
@@ -223,7 +222,6 @@ struct TestValueTheory : EquatableValueTheory {
     }
 
     EqualityInfo& equalityInfo(Solver&, Value v) override { return infos[v.valueId]; }
-    void propagateEquality(Solver&, Value, Value) override { }
 
     Reason equalityReason(Solver& solver, Value v1, Value v2) {
         return equality.equalityReason(equality.variableId(equality.equality(solver, v1, v2)));
@@ -574,13 +572,11 @@ TEST(Check, OneOf) {
 }
 
 struct BooleanMemoryLocations : MemoryLocationTheory {
-    using MemoryLocationTheory::MemoryLocationTheory;
-    Type typeOf(Solver&, Value) override { VERIFY_NOT_REACHED(); }
-    uint64_t labelOf(Solver&, Value v) override { return 1000 + v.valueId; }
+    BooleanMemoryLocations(Solver& solver)
+        : MemoryLocationTheory(solver, ValueKind::Boolean) { }
+    uint64_t labelOfValue(Solver&, Value v) override { return 1000 + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return "loc" + std::to_string(v.valueId); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
-
-    Type loadedType(Solver&, MemoryLocation) override { return builtins::boolean_type; }
 
     MemoryLocation newLocation() { return { (uint32_t)theoryId(), (uint32_t)(locationCount++) }; }
 

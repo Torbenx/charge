@@ -2,8 +2,8 @@
 
 namespace check {
 
-ValueTheory::ValueTheory(Solver& solver)
-    : m_theoryId(solver.attachTheory(*this)) { }
+ValueTheory::ValueTheory(Solver& solver, ValueKind kind)
+    : m_theoryId(solver.attachTheory(*this)), m_valuesKind(kind) { }
 
 int_t Solver::attachTheory(ValueTheory& theory) {
     int_t id = valueTheories.size();
@@ -140,35 +140,6 @@ std::string Solver::InternalVariables::formatNegativeLiteral(Solver&, int_t varI
     return "!internal" + std::to_string(varId);
 }
 
-// -------------------------- BuiltinTypes --------------------------
-
-namespace {
-    constexpr uint64_t BUILTIN_TYPES_BASE_LABEL = 0;
-}
-
-uint64_t Solver::BuiltinTypes::labelOf(Solver&, Value v) {
-    return BUILTIN_TYPES_BASE_LABEL + v.valueId;
-}
-
-std::string Solver::BuiltinTypes::formatValue(Solver&, Value v) {
-    if (v == builtins::boolean_type)
-        return "bool";
-    if (v == builtins::type_type)
-        return "type";
-    VERIFY_NOT_REACHED();
-}
-
-void Solver::BuiltinTypes::enumerateValues(Solver&, std::function<void(Value)> f) {
-    f(builtins::boolean_type);
-    f(builtins::type_type);
-}
-
-TypedOperations& Solver::BuiltinTypes::operationsFor(Solver& solver, Type type) {
-    if (type == builtins::boolean_type)
-        return solver.booleanOps;
-    VERIFY_NOT_REACHED();
-}
-
 // ------------------------- BooleanEquality ------------------------
 
 void Solver::BooleanEquality::onNewVariable(Solver& solver, int_t varId) {
@@ -211,7 +182,7 @@ std::string Solver::BooleanLoads::formatNegativeLiteral(Solver& solver, int_t va
     return "!" + formatPositiveLiteral(solver, varId);
 }
 
-uint64_t Solver::BooleanLoads::labelOf(Solver&, Value value) {
+uint64_t Solver::BooleanLoads::labelOfValue(Solver&, Value value) {
     BooleanValue lit { value };
     return 3000 + (uint64_t)LoadSet::label(variableId(lit)) * 2 + isPositive(lit);
 }
@@ -225,23 +196,25 @@ void Solver::BooleanLoads::makeData(uint32_t newHandle) {
     newVariable();
 }
 
-// ------------------------ BooleanOperations -----------------------
+// ---------------------------- Booleans ----------------------------
 
-BooleanValue Solver::BooleanOperations::equality(Solver& solver, Value a, Value b) {
+BooleanValue Solver::Booleans::equality(Solver& solver, Value a, Value b) {
     return m_equality.equality(solver, a, b);
 }
 
-BooleanValue Solver::BooleanOperations::disequality(Solver& solver, Value a, Value b) {
+BooleanValue Solver::Booleans::disequality(Solver& solver, Value a, Value b) {
     return m_equality.disequality(solver, a, b);
 }
 
-Value Solver::BooleanOperations::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
+Value Solver::Booleans::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
     return m_loads.defineLoad(solver, location, position);
 }
 
+std::string Solver::Booleans::formatValueKind(Solver&, ValueKind) { return "bool"; }
+
 // --------------------------- EntryBlocks --------------------------
 
-uint64_t Solver::EntryBlocks::labelOf(Solver&, BlockId) { return 0; }
+uint64_t Solver::EntryBlocks::labelOfBlock(Solver&, BlockId) { return 0; }
 
 Value Solver::EntryBlocks::loadAtEndOfBlock(Solver& solver, MemoryLocation location, BlockId block) {
     return loadAtPosition(solver, location, { block, 0 });
@@ -259,9 +232,8 @@ std::string Solver::EntryBlocks::formatCodePosition(Solver&, CodePosition) { ret
 
 Solver::Solver()
     : internalVariables(*this, 0)
-    , builtinTypes(*this)
     , clauses(*this)
-    , booleanOps(*this)
+    , booleans(*this)
     , entryBlocks(*this) {
     {
         VERIFY(internalVariables.theoryId() == SOLVER_INTERNAL_VARS_THEORY_ID);
@@ -271,7 +243,8 @@ Solver::Solver()
         addClause({ builtins::true_literal });
     }
     {
-        VERIFY(builtinTypes.theoryId() == BUILTIN_TYPES_THEORY_ID);
+        VERIFY((size_t)ValueKind::Boolean == kindTheories.size());
+        kindTheories.push_back(&booleans);
     }
     {
         VERIFY(entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
@@ -339,12 +312,12 @@ void Solver::decideTrue(Literal literal) {
 
 bool Solver::assignTrue(Literal trueLit, Reason reason) {
     auto& theory = theoryFor(trueLit);
-    if (reason.isDecision()) {
+    /*if (reason.isDecision()) {
         fmt::println("deciding {}", theory.formatValue(*this, trueLit));
     } else {
         fmt::print("assigning {}, reason: ", theory.formatValue(*this, trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
-    }
+    }*/
 
     Literal falseLit = theory.negate(*this, trueLit);
     auto& info = theory.literalInfo(*this, falseLit);
@@ -467,7 +440,6 @@ bool Solver::tryLearn(Conflict conflict) {
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 newClause.push_back(entry.literal);
-                fmt::print("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
             }

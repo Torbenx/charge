@@ -35,9 +35,6 @@ struct Solver {
     MemoryLocationTheory& theoryFor(MemoryLocation value) {
         return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
     }
-    TypeTheory& theoryFor(Type value) {
-        return static_cast<TypeTheory&>(*valueTheories[value.theoryId]);
-    }
     BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
         return theoryFor(literal).literalInfo(*this, literal);
     }
@@ -51,38 +48,38 @@ struct Solver {
     }
 
     uint64_t labelOf(Value value) {
-        return theoryFor(value).labelOf(*this, value);
+        return theoryFor(value).labelOfValue(*this, value);
     }
 
-    Type typeOf(Value value) {
-        return theoryFor(value).typeOf(*this, value);
+    ValueKind kindOf(Value value) {
+        return theoryFor(value).valuesKind();
     }
 
     Literal negate(Literal lit) {
         return theoryFor(lit).negate(*this, lit);
     }
 
-    TypedOperations& operationsFor(Type type) {
-        return theoryFor(type).operationsFor(*this, type);
+    ValueKindTheory& theoryFor(ValueKind kind) {
+        return *kindTheories[(int_t)kind];
     }
 
     Literal equality(Value a, Value b) {
-        Type type = typeOf(a);
-        VERIFY(type == typeOf(b));
-        return operationsFor(type).equality(*this, a, b);
+        ValueKind kind = kindOf(a);
+        VERIFY(kind == kindOf(b));
+        return theoryFor(kind).equality(*this, a, b);
     }
     Literal disequality(Value a, Value b) {
-        Type type = typeOf(a);
-        VERIFY(type == typeOf(b));
-        return operationsFor(type).disequality(*this, a, b);
+        ValueKind kind = kindOf(a);
+        VERIFY(kind == kindOf(b));
+        return theoryFor(kind).disequality(*this, a, b);
     }
 
-    Type loadedType(MemoryLocation location) {
-        return theoryFor(location).loadedType(*this, location);
+    ValueKind loadedKind(MemoryLocation location) {
+        return theoryFor(location).loadedKind();
     }
 
     Value defineLoad(MemoryLocation location, CodePosition position) {
-        return operationsFor(loadedType(location)).defineLoad(*this, location, position);
+        return theoryFor(loadedKind(location)).defineLoad(*this, location, position);
     }
 
     bool tentativelyFalse(Literal lit) {
@@ -93,7 +90,7 @@ struct Solver {
 
     CodeBlockTheory& theoryFor(BlockId block) { return *blockTheories[block.theoryId]; }
 
-    uint64_t labelOf(BlockId block) { return theoryFor(block).labelOf(*this, block); }
+    uint64_t labelOf(BlockId block) { return theoryFor(block).labelOfBlock(*this, block); }
 
     Value loadAtPosition(MemoryLocation location, CodePosition position) {
         return theoryFor(position.block).loadAtPosition(*this, location, position);
@@ -319,16 +316,6 @@ private:
         std::string formatNegativeLiteral(Solver&, int_t varId) override;
     };
 
-    struct BuiltinTypes : TypeTheory {
-        using TypeTheory::TypeTheory;
-
-        uint64_t labelOf(Solver&, Value) override;
-        std::string formatValue(Solver&, Value) override;
-        void enumerateValues(Solver&, std::function<void(Value)> visitor) override;
-        TypedOperations& operationsFor(Solver&, Type) override;
-    };
-    friend BuiltinTypes;
-
     struct BooleanEquality : EqualityTheory {
         using EqualityTheory::EqualityTheory;
         void onNewVariable(Solver& solver, int_t varId) override;
@@ -344,18 +331,19 @@ private:
         void unapplyFalseAssignment(Solver&, BooleanValue) override { }
         std::string formatPositiveLiteral(Solver&, int_t) override;
         std::string formatNegativeLiteral(Solver&, int_t) override;
-        uint64_t labelOf(Solver&, Value) override;
+        uint64_t labelOfValue(Solver&, Value) override;
         BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
         void makeData(uint32_t newHandle);
     };
 
-    struct BooleanOperations : TypedOperations {
-        BooleanOperations(Solver& solver)
+    struct Booleans : ValueKindTheory {
+        Booleans(Solver& solver)
             : m_equality(solver), m_loads(solver) { }
 
         BooleanValue equality(Solver&, Value, Value) override;
         BooleanValue disequality(Solver&, Value, Value) override;
         Value defineLoad(Solver&, MemoryLocation, CodePosition) override;
+        std::string formatValueKind(Solver&, ValueKind) override;
 
         BooleanEquality m_equality;
         BooleanLoads m_loads;
@@ -363,7 +351,7 @@ private:
 
     struct EntryBlocks : CodeBlockTheory {
         using CodeBlockTheory::CodeBlockTheory;
-        uint64_t labelOf(Solver&, BlockId) override;
+        uint64_t labelOfBlock(Solver&, BlockId) override;
         Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) override;
         Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;
         std::string formatBlockName(Solver&, BlockId) override;
@@ -445,6 +433,7 @@ private:
     //! Positions of the decisions in the trace
     std::vector<TracePosition> decisions;
 
+    std::vector<ValueKindTheory*> kindTheories;
     std::vector<ValueTheory*> valueTheories;
     std::vector<ReasonTheory*> reasonTheories;
     std::vector<CodeBlockTheory*> blockTheories;
@@ -454,9 +443,8 @@ private:
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 
     InternalVariables internalVariables;
-    BuiltinTypes builtinTypes;
     Clauses clauses;
-    BooleanOperations booleanOps;
+    Booleans booleans;
     EntryBlocks entryBlocks;
 };
 

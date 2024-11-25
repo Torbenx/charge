@@ -17,7 +17,7 @@ struct BooleanVariables : SimpleBooleanTheory {
         return result;
     }
 
-    uint64_t labelOf(Solver&, Value v) override {
+    uint64_t labelOfValue(Solver&, Value v) override {
         BooleanValue lit { v };
         return m_baseLabel + variableId(lit) * 2 + isPositive(lit);
     }

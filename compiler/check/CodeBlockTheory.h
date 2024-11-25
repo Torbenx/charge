@@ -17,7 +17,7 @@ struct CodeBlockTheory {
     virtual std::string formatBlockName(Solver&, BlockId) = 0;
     virtual std::string formatCodePosition(Solver&, CodePosition) = 0;
 
-    virtual uint64_t labelOf(Solver&, BlockId) = 0;
+    virtual uint64_t labelOfBlock(Solver&, BlockId) = 0;
     virtual Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) = 0;
     virtual Value loadAtPosition(Solver&, MemoryLocation, CodePosition) = 0;
 

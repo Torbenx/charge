@@ -6,27 +6,20 @@
 namespace check {
 
 struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, EquatableValueTheory::EqualityInfo> {
-    StandardLoads(Solver& solver)
-        : EquatableValueTheory(solver) { }
+    using EquatableValueTheory::EquatableValueTheory;
 
     Value load(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
         return Value { (uint32_t)theoryId(), id };
     }
 
-    Type typeOf(Solver& solver, Value v) override {
-        return solver.loadedType(loadAt(v.valueId).location);
-    }
-
-    uint64_t labelOf(Solver&, Value v) override {
+    uint64_t labelOfValue(Solver&, Value v) override {
         return baseLabel + (uint64_t)LoadSet::label(v.valueId);
     }
 
     EqualityInfo& equalityInfo(Solver&, Value v) override {
         return LoadSet::at(v.valueId);
     }
-
-    void propagateEquality(Solver&, Value, Value) override { }
 
     std::string formatValue(Solver& solver, Value v) override {
         auto [loc, pos] = LoadSet::loadAt(v.valueId);

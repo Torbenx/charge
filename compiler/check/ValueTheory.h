@@ -7,24 +7,25 @@ namespace check {
 struct Solver;
 
 struct ValueTheory {
-    ValueTheory(Solver& solver);
+    ValueTheory(Solver& solver, ValueKind valuesKind);
     virtual ~ValueTheory() = default;
     ValueTheory(const ValueTheory&) = delete;
     ValueTheory(ValueTheory&&) = delete;
     ValueTheory& operator=(const ValueTheory&) = delete;
     ValueTheory& operator=(ValueTheory&&) = delete;
 
-    virtual Type typeOf(Solver&, Value) = 0;
-    virtual uint64_t labelOf(Solver&, Value) = 0;
+    virtual uint64_t labelOfValue(Solver&, Value) = 0;
 
     virtual std::string formatValue(Solver&, Value) = 0;
 
     virtual void enumerateValues(Solver&, std::function<void(Value)> visitor) = 0;
 
     int_t theoryId() const { return m_theoryId; }
+    ValueKind valuesKind() const { return m_valuesKind; }
 
 private:
     uint8_t m_theoryId;
+    ValueKind m_valuesKind;
 };
 
 struct EquatableValueTheory : ValueTheory {
@@ -33,15 +34,13 @@ struct EquatableValueTheory : ValueTheory {
     using ValueTheory::ValueTheory;
 
     virtual EqualityInfo& equalityInfo(Solver&, Value) = 0;
-    virtual void propagateEquality(Solver&, Value source, Value target) = 0;
 };
 
 struct BooleanTheory : ValueTheory {
     struct LiteralInfo;
 
-    using ValueTheory::ValueTheory;
-
-    Type typeOf(Solver&, Value) override { return builtins::boolean_type; }
+    BooleanTheory(Solver& solver)
+        : ValueTheory(solver, ValueKind::Boolean) { }
 
     virtual BooleanValue negate(Solver&, BooleanValue) = 0;
     virtual LiteralInfo& literalInfo(Solver&, BooleanValue) = 0;
@@ -60,24 +59,21 @@ struct BooleanTheory : ValueTheory {
     virtual void unapplyFalseAssignment(Solver&, BooleanValue) = 0;
 };
 
-struct TypedOperations {
+struct MemoryLocationTheory : ValueTheory {
+    MemoryLocationTheory(Solver& solver, ValueKind loadedKind)
+        : ValueTheory(solver, ValueKind::MemoryLocation), m_loadedKind(loadedKind) { }
+
+    ValueKind loadedKind() const { return m_loadedKind; }
+
+private:
+    ValueKind m_loadedKind;
+};
+
+struct ValueKindTheory {
+    virtual std::string formatValueKind(Solver&, ValueKind) = 0;
     virtual BooleanValue equality(Solver&, Value, Value) = 0;
     virtual BooleanValue disequality(Solver&, Value, Value) = 0;
     virtual Value defineLoad(Solver&, MemoryLocation, CodePosition) = 0;
-};
-struct TypeTheory : ValueTheory {
-    using ValueTheory::ValueTheory;
-
-    Type typeOf(Solver&, Value) override { return builtins::type_type; }
-
-    virtual TypedOperations& operationsFor(Solver&, Type) = 0;
-};
-
-struct MemoryLocationTheory : ValueTheory {
-    using ValueTheory::ValueTheory;
-
-    //! Type of a load from the location
-    virtual Type loadedType(Solver&, MemoryLocation) = 0;
 };
 
 }

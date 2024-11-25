@@ -15,7 +15,7 @@ std::string StoreBlocks::formatCodePosition(Solver& solver, CodePosition positio
     return formatBlockName(solver, position.block) + ":" + std::to_string(position.position);
 }
 
-uint64_t StoreBlocks::labelOf(Solver&, BlockId block) {
+uint64_t StoreBlocks::labelOfBlock(Solver&, BlockId block) {
     return get(block).label;
 }
 
@@ -29,7 +29,7 @@ Value StoreBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodeP
     for (int_t storeIndex = position.position; storeIndex >= 0; storeIndex--) {
         Store& store = block.stores[position.position];
 
-        if (solver.loadedType(store.location) != solver.loadedType(location))
+        if (solver.loadedKind(store.location) != solver.loadedKind(location))
             continue;
         if (store.location == location)
             return store.value;

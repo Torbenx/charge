@@ -31,7 +31,7 @@ struct OneOfTheory : SimpleBooleanTheory, private ReasonTheory {
 
     std::string formatPositiveLiteral(Solver&, int_t varId) override;
     std::string formatNegativeLiteral(Solver& solver, int_t varId) override;
-    uint64_t labelOf(Solver&, Value) override;
+    uint64_t labelOfValue(Solver&, Value) override;
 
     void propagateFalseAssignment(Solver&, BooleanValue) override;
     void reapplyFalseAssignment(Solver&, BooleanValue) override { }
@@ -115,7 +115,7 @@ struct Phis : CodeBlockTheory, private OneOfTheory {
     std::string formatBlockName(Solver&, BlockId) override;
     std::string formatCodePosition(Solver&, CodePosition) override;
 
-    uint64_t labelOf(Solver&, BlockId) override;
+    uint64_t labelOfBlock(Solver&, BlockId) override;
 
     Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) override;
     Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;

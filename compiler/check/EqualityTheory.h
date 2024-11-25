@@ -23,7 +23,7 @@ struct EqualityTheory : SimpleBooleanTheory {
     std::string formatPositiveLiteral(Solver&, int_t varId) override;
     std::string formatNegativeLiteral(Solver&, int_t varId) override;
 
-    uint64_t labelOf(Solver&, Value v) override {
+    uint64_t labelOfValue(Solver&, Value v) override {
         BooleanValue lit { v };
         return baseLabel + (uint64_t)equalities.label(variableId(lit)) * 2 + isPositive(lit);
     }

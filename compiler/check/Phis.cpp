@@ -18,7 +18,7 @@ std::string OneOfTheory::formatNegativeLiteral(Solver& solver, int_t varId) {
     return "!" + formatPositiveLiteral(solver, varId);
 }
 
-uint64_t OneOfTheory::labelOf(Solver& solver, Value v) {
+uint64_t OneOfTheory::labelOfValue(Solver& solver, Value v) {
     BooleanValue lit { v };
     int_t varId = variableId(lit);
     int_t nodeId = findNodeForVar(varId);
@@ -138,7 +138,7 @@ std::string Phis::formatCodePosition(Solver& solver, CodePosition position) {
     return formatBlockName(solver, position.block);
 }
 
-uint64_t Phis::labelOf(Solver&, BlockId block) {
+uint64_t Phis::labelOfBlock(Solver&, BlockId block) {
     return get(block).label;
 }
 
