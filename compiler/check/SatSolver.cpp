@@ -224,6 +224,12 @@ Value Solver::EntryBlocks::loadAtPosition(Solver& solver, MemoryLocation locatio
     return solver.defineLoad(location, position);
 }
 
+BooleanValue Solver::EntryBlocks::blockActiveLiteral(Solver&, BlockId) {
+    // Since the entry block has no parents this doesn't really matter,
+    // but in principle it should be active as long as any some block is active.
+    return builtins::true_literal;
+}
+
 std::string Solver::EntryBlocks::formatBlockName(Solver&, BlockId) { return "entry"; }
 
 std::string Solver::EntryBlocks::formatCodePosition(Solver&, CodePosition) { return "entry"; }
@@ -718,15 +724,14 @@ bool Solver::checkAssignment() {
                 foundTrue = true;
                 break;
             }
-            if (lit.theoryId == SOLVER_INTERNAL_VARS_THEORY_ID && !theory.literalInfo(*this, lit).tentativelyFalse())
+            if (lit.theoryId == internalVariables.theoryId() && !theory.literalInfo(*this, lit).tentativelyFalse())
                 unassignedInternal = lit;
         }
         if (!foundTrue) {
-            if (unassignedInternal.has_value()) {
-                decideTrue(unassignedInternal.value());
-                return true;
-            }
-            return false;
+            if (!unassignedInternal.has_value())
+                return false;
+            decideTrue(unassignedInternal.value());
+            propagate();
         }
     }
     return true;

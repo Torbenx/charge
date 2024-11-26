@@ -525,47 +525,40 @@ TEST(Check, EqualityProblem) {
     EXPECT_FALSE(solver.analyzeConflicts());
 }
 
-struct TestOneOfTheory : OneOfTheory {
-    using OneOfTheory::OneOfTheory;
-    std::string formatIndex(Solver&, int_t nodeId, int_t index) override {
-        return "n" + std::to_string(nodeId) + ":" + std::to_string(index);
-    }
-    uint64_t labelOfIndex(Solver&, int_t nodeId, int_t index, bool positve) override {
-        return (nodeId * 100 + index) * 2 + positve;
-    }
-};
-
 TEST(Check, OneOf) {
     Solver solver;
-    TestOneOfTheory theory(solver);
+    Phis theory(solver, 1000);
     BooleanVariables bools(solver, 0);
     solver.propagate();
-    int_t node = theory.newNode(solver, 3);
-
-    solver.decideTrue(theory.indexActiveLiteral(node, 0));
+    std::vector parents { BlockId { 1, 0 }, BlockId { 1, 1 }, BlockId { 1, 2 } };
+    BlockId phi = theory.newPhi(solver, {}, parents);
+    solver.decideTrue(theory.blockActiveLiteral(solver, phi));
     solver.propagate();
-    EXPECT_TRUE(theory.hasActiveIndex(node));
-    EXPECT_EQ(theory.activeIndex(node), 0);
-    EXPECT_TRUE(solver.assignedFalse(theory.indexActiveLiteral(node, 1)));
-    EXPECT_TRUE(solver.assignedFalse(theory.indexActiveLiteral(node, 2)));
 
-    solver.backtrack(0);
+    solver.decideTrue(theory.linkActiveLiteral(phi, 0));
     solver.propagate();
-    EXPECT_FALSE(theory.hasActiveIndex(node));
+    EXPECT_TRUE(theory.hasActiveLink(phi));
+    EXPECT_EQ(theory.activeLink(phi), 0);
+    EXPECT_TRUE(solver.assignedFalse(theory.linkActiveLiteral(phi, 1)));
+    EXPECT_TRUE(solver.assignedFalse(theory.linkActiveLiteral(phi, 2)));
 
-    solver.decideTrue(theory.indexInactiveLiteral(node, 0));
+    solver.backtrack(1);
     solver.propagate();
-    solver.decideTrue(theory.indexInactiveLiteral(node, 1));
-    solver.propagate();
-    EXPECT_TRUE(theory.hasActiveIndex(node));
-    EXPECT_EQ(theory.activeIndex(node), 2);
+    EXPECT_FALSE(theory.hasActiveLink(phi));
 
-    solver.backtrack(0);
-    EXPECT_FALSE(theory.hasActiveIndex(node));
+    solver.decideTrue(theory.linkInactiveLiteral(phi, 0));
+    solver.propagate();
+    solver.decideTrue(theory.linkInactiveLiteral(phi, 1));
+    solver.propagate();
+    EXPECT_TRUE(theory.hasActiveLink(phi));
+    EXPECT_EQ(theory.activeLink(phi), 2);
+
+    solver.backtrack(1);
+    EXPECT_FALSE(theory.hasActiveLink(phi));
 
     int_t bVar = bools.newVariable();
-    solver.addClause({ bools.positiveLiteral(bVar), theory.indexActiveLiteral(node, 0) });
-    solver.addClause({ bools.positiveLiteral(bVar), theory.indexActiveLiteral(node, 1) });
+    solver.addClause({ bools.positiveLiteral(bVar), theory.linkActiveLiteral(phi, 0) });
+    solver.addClause({ bools.positiveLiteral(bVar), theory.linkActiveLiteral(phi, 1) });
     solver.decideTrue(bools.negativeLiteral(bVar));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
@@ -593,12 +586,16 @@ TEST(Check, Code) {
 
     BooleanValue initialLoad = (BooleanValue)solver.loadAtEndOfBlock(loc, builtins::entry_block);
 
-    auto s = stores.newBlock(1, builtins::entry_block);
-    stores.appendStore(s, loc, builtins::true_literal);
+    auto s = stores.newBlock(solver, 1, builtins::entry_block);
+    stores.appendStore(solver, s, loc, builtins::true_literal);
 
     auto p = phis.newPhi(solver, 2, { builtins::entry_block, s });
     solver.addClause({ phis.linkInactiveLiteral(p, 0), initialLoad });
     solver.addClause({ phis.linkInactiveLiteral(p, 1), solver.negate(initialLoad) });
+
+    solver.decideTrue(solver.blockActiveLiteral(p));
+    solver.propagate();
+    ASSERT_FALSE(solver.hasConflicts());
 
     BooleanValue finalLoad = (BooleanValue)solver.loadAtEndOfBlock(loc, p);
     solver.decideTrue(solver.negate(finalLoad));

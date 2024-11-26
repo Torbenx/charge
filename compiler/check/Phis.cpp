@@ -2,34 +2,41 @@
 
 #include <check/SatSolver.h>
 
+#include <ReverseMemberPointer.h>
+
 namespace check {
 
-OneOfTheory::OneOfTheory(Solver& solver)
+// --------------------------- OneOfTheory --------------------------
+
+Phis::OneOfTheory::OneOfTheory(Solver& solver)
     : SimpleBooleanTheory(solver), ReasonTheory(solver, true) {
     nodes.push_back({ 0 });
 }
 
-std::string OneOfTheory::formatPositiveLiteral(Solver& solver, int_t varId) {
+Phis* Phis::OneOfTheory::phis() { return ReverseMemberPointer<&Phis::ones>::reverse(this); }
+
+std::string Phis::OneOfTheory::formatPositiveLiteral(Solver& solver, int_t varId) {
     int_t nodeId = findNodeForVar(varId);
-    return formatIndex(solver, nodeId, varId - nodes[nodeId].firstVarId);
+    return phis()->formatIndex(solver, nodeId, varId - nodes[nodeId].firstVarId);
 }
 
-std::string OneOfTheory::formatNegativeLiteral(Solver& solver, int_t varId) {
+std::string Phis::OneOfTheory::formatNegativeLiteral(Solver& solver, int_t varId) {
     return "!" + formatPositiveLiteral(solver, varId);
 }
 
-uint64_t OneOfTheory::labelOfValue(Solver& solver, Value v) {
+uint64_t Phis::OneOfTheory::labelOfValue(Solver& solver, Value v) {
     BooleanValue lit { v };
     int_t varId = variableId(lit);
     int_t nodeId = findNodeForVar(varId);
-    return labelOfIndex(solver, nodeId, varId - nodes[nodeId].firstVarId, isPositive(lit));
+    return phis()->labelOfIndex(solver, nodeId, varId - nodes[nodeId].firstVarId, isPositive(lit));
 }
 
-int_t OneOfTheory::newNode(Solver& solver, int_t varCount) {
+int_t Phis::OneOfTheory::newNode(Solver& solver, int_t varCount, BooleanValue activityPrecondition) {
     VERIFY((int_t)nodes.back().firstVarId == variableCount());
     int_t nodeId = nodeCount();
     std::vector<BooleanValue> oneMustBeActiveClause;
-    oneMustBeActiveClause.reserve(varCount);
+    oneMustBeActiveClause.reserve(varCount + 1);
+    oneMustBeActiveClause.push_back(solver.negate(activityPrecondition));
     for (int_t i = 0; i < varCount; i++)
         oneMustBeActiveClause.push_back(positiveLiteral(newVariable()));
     nodes.push_back({ (uint32_t)variableCount() });
@@ -37,7 +44,7 @@ int_t OneOfTheory::newNode(Solver& solver, int_t varCount) {
     return nodeId;
 }
 
-int_t OneOfTheory::findNodeForVar(int_t varId) {
+int_t Phis::OneOfTheory::findNodeForVar(int_t varId) {
     auto rit = std::partition_point(
         nodes.rbegin(), nodes.rend(),
         [=](const NodeInfo& info) {
@@ -46,7 +53,7 @@ int_t OneOfTheory::findNodeForVar(int_t varId) {
     return &*rit - nodes.data();
 }
 
-void OneOfTheory::propagateFalseAssignment(Solver& solver, BooleanValue value) {
+void Phis::OneOfTheory::propagateFalseAssignment(Solver& solver, BooleanValue value) {
     if (isPositive(value))
         return;
 
@@ -55,7 +62,7 @@ void OneOfTheory::propagateFalseAssignment(Solver& solver, BooleanValue value) {
     auto& node = nodes[nodeId];
     VERIFY(node.activeIndex == INVALID_ACTIVE_INDEX);
     node.activeIndex = activeVarId - node.firstVarId;
-    onIndexActivated(solver, nodeId, activeVarId - node.firstVarId);
+    phis()->onIndexActivated(solver, nodeId, activeVarId - node.firstVarId);
 
     int_t endVarId = nodes[nodeId + 1].firstVarId;
     for (int_t varId = node.firstVarId; varId < endVarId; varId++) {
@@ -68,7 +75,7 @@ void OneOfTheory::propagateFalseAssignment(Solver& solver, BooleanValue value) {
     }
 }
 
-void OneOfTheory::unapplyFalseAssignment(Solver&, BooleanValue value) {
+void Phis::OneOfTheory::unapplyFalseAssignment(Solver&, BooleanValue value) {
     if (isPositive(value))
         return;
 
@@ -78,23 +85,37 @@ void OneOfTheory::unapplyFalseAssignment(Solver&, BooleanValue value) {
     nodes[nodeId].activeIndex = INVALID_ACTIVE_INDEX;
 }
 
-Reason OneOfTheory::makeOtherVarActiveReason(int_t nodeId, int_t activeVarId, int_t inactiveVarId) {
+Reason Phis::OneOfTheory::makeOtherVarActiveReason(int_t nodeId, int_t activeVarId, int_t inactiveVarId) {
     return Reason { (uint32_t)ReasonTheory::theoryId(), (uint32_t)nodeId, (uint32_t)activeVarId, (uint32_t)inactiveVarId };
 }
 
-int_t OneOfTheory::reasonNodeId(const Reason& reason) { return reason.data0; }
-int_t OneOfTheory::reasonActiveVarId(const Reason& reason) { return reason.data1; }
-int_t OneOfTheory::reasonInactiveVarId(const Reason& reason) { return reason.data2; }
+int_t Phis::OneOfTheory::reasonNodeId(const Reason& reason) { return reason.data0; }
+int_t Phis::OneOfTheory::reasonActiveVarId(const Reason& reason) { return reason.data1; }
+int_t Phis::OneOfTheory::reasonInactiveVarId(const Reason& reason) { return reason.data2; }
 
-bool OneOfTheory::testReason(Solver& solver, const Reason& reason) {
+bool Phis::OneOfTheory::testReason(Solver& solver, const Reason& reason) {
     return assignedPositive(solver, reasonActiveVarId(reason));
 }
 
-ReasonTheory::ClauseAndIndex OneOfTheory::reasonToClause(Solver& solver, const Reason& reason) {
+ReasonTheory::ClauseAndIndex Phis::OneOfTheory::reasonToClause(Solver& solver, const Reason& reason) {
     auto& clause = solver.scratchClause();
     clause.push_back(negativeLiteral(reasonActiveVarId(reason)));
     clause.push_back(negativeLiteral(reasonInactiveVarId(reason)));
     return { clause, 1 };
+}
+
+// ---------------------- BlockActiveVariables ----------------------
+
+Phis* Phis::BlockActiveVariables::phis() {
+    return ReverseMemberPointer<&Phis::blockActiveVariables>::reverse(this);
+}
+
+std::string Phis::BlockActiveVariables::formatPositiveLiteral(Solver& solver, int_t varId) {
+    return "active(" + phis()->formatBlockName(solver, phis()->blockFromId(varId)) + ")";
+}
+
+std::string Phis::BlockActiveVariables::formatNegativeLiteral(Solver& solver, int_t varId) {
+    return "!" + formatPositiveLiteral(solver, varId);
 }
 
 // ------------------------------ Phis ------------------------------
@@ -109,10 +130,14 @@ uint32_t Phis::LocationCache::makeNode(Solver& solver, MemoryLocation location, 
 }
 
 Phis::Phis(Solver& solver, uint64_t baseLabel)
-    : CodeBlockTheory(solver), OneOfTheory(solver), implications(solver), baseLabel(baseLabel) { }
+    : CodeBlockTheory(solver)
+    , ones(solver)
+    , implications(solver)
+    , blockActiveVariables(solver, baseLabel + 100)
+    , baseLabel(baseLabel) { }
 
 std::string Phis::formatIndex(Solver& solver, int_t nodeId, int_t index) {
-    BlockId block { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)nodeId };
+    BlockId block = blockFromId(nodeId);
     return formatBlockName(solver, block) + "->" + solver.formatBlockName(get(block).parents[index]);
 }
 
@@ -122,8 +147,12 @@ uint64_t Phis::labelOfIndex(Solver&, int_t nodeId, int_t index, bool positive) {
 }
 
 BlockId Phis::newPhi(Solver& solver, uint32_t label, std::vector<BlockId> parents) {
-    BlockId block { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)blocks.size() };
-    int_t nodeId = newNode(solver, parents.size());
+    BlockId block = blockFromId(blocks.size());
+
+    int_t blockActiveVar = blockActiveVariables.newVariable();
+    VERIFY(blockActiveVar == (int_t)block.blockId);
+
+    int_t nodeId = ones.newNode(solver, parents.size(), blockActiveVariables.positiveLiteral(blockActiveVar));
     VERIFY(nodeId == (int_t)block.blockId);
 
     blocks.push_back({ label, std::move(parents) });
@@ -149,16 +178,20 @@ Value Phis::loadAtEndOfBlock(Solver& solver, MemoryLocation location, BlockId bl
     auto& cache = phi.locations.at(phi.locations.get(solver, location, block, phi.parents.size()));
     bool isNewLocation = phi.locations.size() == oldSize;
 
-    if (isNewLocation && hasActiveIndex(block.blockId)) {
-        propagteActiveLink(solver, block, location, activeIndex(block.blockId), cache);
+    if (isNewLocation && ones.hasActiveIndex(block.blockId)) {
+        propagteActiveLink(solver, block, location, ones.activeIndex(block.blockId), cache);
     }
 
     return cache.load;
 }
 
 void Phis::onIndexActivated(Solver& solver, int_t nodeId, int_t link) {
-    BlockId block { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)nodeId };
+    BlockId block = blockFromId(nodeId);
     Phi& phi = get(block);
+
+    BooleanValue negatedCondition = ones.indexInactiveLiteral(block.blockId, link);
+    implications.makeImplicationReason(negatedCondition, solver.blockActiveLiteral(phi.parents[link]));
+
     for (int_t locIndex = 0; locIndex < phi.locations.size(); locIndex++) {
         propagteActiveLink(solver, block, phi.locations.keyAt(locIndex), link, phi.locations.at(locIndex));
     }
@@ -171,12 +204,16 @@ void Phis::propagteActiveLink(Solver& solver, BlockId block, MemoryLocation loca
         equality = solver.equality(cache.load, v);
     }
 
-    BooleanValue negatedCondition = indexInactiveLiteral(block.blockId, link);
+    BooleanValue negatedCondition = ones.indexInactiveLiteral(block.blockId, link);
     solver.assignTrue(equality.value(), implications.makeImplicationReason(negatedCondition, equality.value()));
 }
 
 Value Phis::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition position) {
     return loadAtEndOfBlock(solver, location, position.block);
+}
+
+BooleanValue Phis::blockActiveLiteral(Solver&, BlockId block) {
+    return blockActiveVariables.positiveLiteral(block.blockId);
 }
 
 }

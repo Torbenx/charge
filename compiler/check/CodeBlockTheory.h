@@ -21,6 +21,8 @@ struct CodeBlockTheory {
     virtual Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) = 0;
     virtual Value loadAtPosition(Solver&, MemoryLocation, CodePosition) = 0;
 
+    virtual BooleanValue blockActiveLiteral(Solver&, BlockId) = 0;
+
     int_t theoryId() const { return m_theoryId; }
 
 private:

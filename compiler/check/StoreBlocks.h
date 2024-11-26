@@ -15,8 +15,10 @@ struct StoreBlocks : CodeBlockTheory {
     Value loadAtEndOfBlock(Solver&, MemoryLocation, BlockId) override;
     Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;
 
-    BlockId newBlock(uint32_t label, BlockId parent);
-    void appendStore(BlockId, MemoryLocation, Value);
+    BooleanValue blockActiveLiteral(Solver&, BlockId) override;
+
+    BlockId newBlock(Solver&, uint32_t label, BlockId parent);
+    void appendStore(Solver&, BlockId, MemoryLocation, Value);
 
 private:
     struct Store {
@@ -26,6 +28,7 @@ private:
     struct Block {
         BlockId parent;
         uint32_t label;
+        BooleanValue blockActiveLiteral;
         std::vector<Store> stores = {};
     };
 

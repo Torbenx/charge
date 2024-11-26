@@ -92,6 +92,10 @@ struct Solver {
 
     uint64_t labelOf(BlockId block) { return theoryFor(block).labelOfBlock(*this, block); }
 
+    BooleanValue blockActiveLiteral(BlockId block) {
+        return theoryFor(block).blockActiveLiteral(*this, block);
+    }
+
     Value loadAtPosition(MemoryLocation location, CodePosition position) {
         return theoryFor(position.block).loadAtPosition(*this, location, position);
     }
@@ -356,6 +360,7 @@ private:
         Value loadAtPosition(Solver&, MemoryLocation, CodePosition) override;
         std::string formatBlockName(Solver&, BlockId) override;
         std::string formatCodePosition(Solver&, CodePosition) override;
+        BooleanValue blockActiveLiteral(Solver&, BlockId) override;
     };
 
     //! An entry in the trace

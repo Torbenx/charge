@@ -40,14 +40,19 @@ Value StoreBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodeP
     return solver.loadAtEndOfBlock(location, block.parent);
 }
 
-BlockId StoreBlocks::newBlock(uint32_t label, BlockId parent) {
+BlockId StoreBlocks::newBlock(Solver& solver, uint32_t label, BlockId parent) {
     BlockId result { (uint32_t)theoryId(), (uint32_t)blocks.size() };
-    blocks.push_back({ parent, label });
+    // This block is active if and only if the parent block is.
+    blocks.push_back({ parent, label, solver.blockActiveLiteral(parent) });
     return result;
 }
 
-void StoreBlocks::appendStore(BlockId block, MemoryLocation location, Value value) {
+void StoreBlocks::appendStore(Solver&, BlockId block, MemoryLocation location, Value value) {
     get(block).stores.push_back({ location, value });
+}
+
+BooleanValue StoreBlocks::blockActiveLiteral(Solver&, BlockId block) {
+    return get(block).blockActiveLiteral;
 }
 
 StoreBlocks::Block& StoreBlocks::get(BlockId b) { return blocks[b.blockId]; }

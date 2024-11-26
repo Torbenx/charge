@@ -10,17 +10,18 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.cpp"
                    DEPENDS parse/parse.txt parse/parse.py parse/parse.cpp.in)
 
 add_executable(compiler
-    log.cpp
-    log.h
-    PageBumpAllocator.h
-    tests.cpp
-    types.h
-    windows_allocdetail.cpp
-    WordTable.h
     FlatSet.cpp
     FlatSet.h
     FlatTreeSet.cpp
     FlatTreeSet.h
+    log.cpp
+    log.h
+    PageBumpAllocator.h
+    ReverseMemberPointer.h
+    tests.cpp
+    types.h
+    windows_allocdetail.cpp
+    WordTable.h
 )
 
 add_subdirectory(parse)
