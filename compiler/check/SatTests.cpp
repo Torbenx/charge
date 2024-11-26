@@ -525,12 +525,51 @@ TEST(Check, EqualityProblem) {
     EXPECT_FALSE(solver.analyzeConflicts());
 }
 
+struct TestBlockTheory : CodeBlockTheory, BooleanVariables {
+    TestBlockTheory(Solver& solver)
+        : CodeBlockTheory(solver), BooleanVariables(solver, 5000) { }
+
+    BlockId newBlock() {
+        int_t id = variableCount();
+        newVariable();
+        return BlockId { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)id };
+    }
+
+    std::string formatBlockName(Solver&, BlockId block) override {
+        return "test" + std::to_string(block.blockId);
+    }
+    std::string formatCodePosition(Solver& solver, CodePosition pos) override {
+        return formatBlockName(solver, pos.block);
+    }
+    uint64_t labelOfBlock(Solver&, BlockId block) override {
+        return 500 + block.blockId;
+    }
+    Value loadAtEndOfBlock(Solver& solver, MemoryLocation loc, BlockId block) override {
+        return loadAtPosition(solver, loc, { block, 0 });
+    }
+    Value loadAtPosition(Solver& solver, MemoryLocation loc, CodePosition pos) override {
+        return solver.defineLoad(loc, pos);
+    }
+    BooleanValue blockActiveLiteral(Solver&, BlockId block) override {
+        return positiveLiteral(block.blockId);
+    }
+
+    std::string formatPositiveLiteral(Solver& solver, int_t varId) override {
+        return "active(" + formatBlockName(solver, { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)varId }) + ")";
+    }
+    std::string formatNegativeLiteral(Solver& solver, int_t varId) override {
+        return "!" + formatPositiveLiteral(solver, varId);
+    }
+};
+
 TEST(Check, OneOf) {
     Solver solver;
     Phis theory(solver, 1000);
     BooleanVariables bools(solver, 0);
+    TestBlockTheory blocks(solver);
+
     solver.propagate();
-    std::vector parents { BlockId { 1, 0 }, BlockId { 1, 1 }, BlockId { 1, 2 } };
+    std::vector parents { blocks.newBlock(), blocks.newBlock(), blocks.newBlock() };
     BlockId phi = theory.newPhi(solver, {}, parents);
     solver.decideTrue(theory.blockActiveLiteral(solver, phi));
     solver.propagate();

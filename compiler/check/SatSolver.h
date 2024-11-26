@@ -130,6 +130,15 @@ struct Solver {
         return "load(" + formatValue(location) + " @ " + formatCodePosition(position) + ")";
     }
 
+    void implicationAssignTrue(BooleanValue negatedPremise, BooleanValue consequence) {
+        VERIFY(assignedFalse(negatedPremise));
+        assignTrue(consequence, implication.makeImplicationReason(negatedPremise, consequence));
+    }
+
+    void unitAssignTrue(BooleanValue lit) {
+        assignTrue(lit, unitReasons.makeUnitReason(lit));
+    }
+
     //! Returns the current decision level of the solver
     /*!
     The decision level is equal to the number of decisions that were made minus 1.
@@ -217,7 +226,7 @@ struct Solver {
     /*!
     This called either by decideTrue() or internally, for example by propagate() or addClause().
     */
-    bool assignTrue(Literal trueLit, Reason reason);
+    void assignTrue(Literal trueLit, Reason reason);
 
     //! Propagate the false assignments in the propagation queue to the clause masks
     /*!
@@ -263,21 +272,18 @@ struct Solver {
     //! Return whether the solver has any conflicts
     bool hasConflicts() const { return !conflicts.empty(); }
 
+    //! Simplify the clause
+    /*!
+    This considers the unit clauses and removes literals that are always
+    and detects if any literal is always true.
+    \returns true, if the clause always true and thus redundant
+    */
+    bool simplifyClause(std::vector<Literal>& clause);
+
     std::vector<BooleanValue>& scratchClause() {
         m_scratchClause.clear();
         return m_scratchClause;
     }
-
-    /*template<std::derived_from<CodeBlock> T, typename... Args>
-    BlockId newBlock(Args&&... args) {
-        BlockId id { (uint32_t)codeBlocks.size() };
-        codeBlocks.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
-        return id;
-    }
-    CodeBlock& block(BlockId id) {
-        VERIFY(id.id() < codeBlocks.size());
-        return *codeBlocks[id.id()];
-    }*/
 
 private:
     struct Clauses : ReasonTheory {
@@ -361,6 +367,58 @@ private:
         std::string formatBlockName(Solver&, BlockId) override;
         std::string formatCodePosition(Solver&, CodePosition) override;
         BooleanValue blockActiveLiteral(Solver&, BlockId) override;
+    };
+
+    struct UnitReasons : ReasonTheory {
+        UnitReasons(Solver& solver)
+            : ReasonTheory(solver, true) { }
+
+        static BooleanValue reasonLiteral(const Reason& reason) {
+            return std::bit_cast<BooleanValue>(reason.data1);
+        }
+
+        Reason makeUnitReason(BooleanValue lit) {
+            return { (uint32_t)theoryId(), std::bit_cast<uint32_t>(lit) };
+        }
+
+        bool testReason(Solver&, const Reason&) override { return true; }
+        ClauseAndIndex reasonToClause(Solver& solver, const Reason& reason) override {
+            auto& clause = solver.scratchClause();
+            clause.push_back(reasonLiteral(reason));
+            return { clause, 0 };
+        }
+
+        void newDecisionLevel(Solver&) override { }
+        void backtrack(Solver&) override { }
+    };
+
+    struct Implication : ReasonTheory {
+        Implication(Solver& solver)
+            : ReasonTheory(solver, false) { }
+
+        static BooleanValue reasonNegatedPremise(const Reason& reason) {
+            return std::bit_cast<BooleanValue>(reason.data1);
+        }
+        static BooleanValue reasonConsequence(const Reason& reason) {
+            return std::bit_cast<BooleanValue>(reason.data2);
+        }
+
+        Reason makeImplicationReason(BooleanValue negatedPremise, BooleanValue consequence) {
+            return { (uint32_t)theoryId(), 0, std::bit_cast<uint32_t>(negatedPremise), std::bit_cast<uint32_t>(consequence) };
+        }
+
+        bool testReason(Solver& solver, const Reason& reason) override {
+            return solver.assignedFalse(reasonNegatedPremise(reason));
+        }
+        ClauseAndIndex reasonToClause(Solver& solver, const Reason& reason) override {
+            auto& clause = solver.scratchClause();
+            clause.push_back(reasonNegatedPremise(reason));
+            clause.push_back(reasonConsequence(reason));
+            return { clause, 1 };
+        }
+
+        void newDecisionLevel(Solver&) override { }
+        void backtrack(Solver&) override { }
     };
 
     //! An entry in the trace
@@ -451,6 +509,8 @@ private:
     Clauses clauses;
     Booleans booleans;
     EntryBlocks entryBlocks;
+    Implication implication;
+    UnitReasons unitReasons;
 };
 
 }

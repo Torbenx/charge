@@ -240,7 +240,9 @@ Solver::Solver()
     : internalVariables(*this, 0)
     , clauses(*this)
     , booleans(*this)
-    , entryBlocks(*this) {
+    , entryBlocks(*this)
+    , implication(*this)
+    , unitReasons(*this) {
     {
         VERIFY(internalVariables.theoryId() == SOLVER_INTERNAL_VARS_THEORY_ID);
         int_t id = internalVariables.newVariable();
@@ -262,7 +264,39 @@ std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
     return { internalVariables.positiveLiteral(varId), internalVariables.negativeLiteral(varId) };
 }
 
+bool Solver::simplifyClause(std::vector<Literal>& clause) {
+    bool seenUnitTrue = false;
+    auto newEnd = std::partition(clause.begin(), clause.end(), [&](Literal lit) {
+        auto& theory = theoryFor(lit);
+        auto nreason = theory.literalInfo(*this, theory.negate(*this, lit)).firstReason;
+        if (nreason.has_value() && at(nreason.value()).reason.reasonTheory == unitReasons.theoryId())
+            seenUnitTrue = true;
+
+        auto reason = theory.literalInfo(*this, lit).firstReason;
+        if (!reason.has_value())
+            return true;
+        return at(reason.value()).reason.reasonTheory != unitReasons.theoryId();
+    });
+    if (seenUnitTrue)
+        return true;
+
+    // The clause can end up empty when all literals are false due to unit clauses.
+    // In that case the problem is always unsatisfiable, but clause must kept to determine that.
+    if (newEnd != clause.begin())
+        clause.erase(newEnd, clause.end());
+
+    return false;
+}
+
 void Solver::addClause(std::vector<Literal> clause) {
+    if (simplifyClause(clause))
+        return;
+
+    if (clause.size() == 1) {
+        unitAssignTrue(clause[0]);
+        return;
+    }
+
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
     if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
         clauses.addClause(*this, std::move(clause));
@@ -316,7 +350,7 @@ void Solver::decideTrue(Literal literal) {
         theory->newDecisionLevel(*this);
 }
 
-bool Solver::assignTrue(Literal trueLit, Reason reason) {
+void Solver::assignTrue(Literal trueLit, Reason reason) {
     auto& theory = theoryFor(trueLit);
     /*if (reason.isDecision()) {
         fmt::println("deciding {}", theory.formatValue(*this, trueLit));
@@ -341,9 +375,7 @@ bool Solver::assignTrue(Literal trueLit, Reason reason) {
 
     if (theory.literalInfo(*this, trueLit).tentativelyFalse()) {
         conflicts.push_back({ trueLit, reason });
-        return false;
     }
-    return true;
 }
 
 bool Solver::propagate() {

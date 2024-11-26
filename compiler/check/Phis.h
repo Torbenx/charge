@@ -2,7 +2,7 @@
 
 #include <check/BooleanVariables.h>
 #include <check/CodeBlockTheory.h>
-#include <check/ImplicationReasons.h>
+#include <check/Reason.h>
 
 #include <FlatTreeSet.h>
 
@@ -132,7 +132,6 @@ private:
 
     std::vector<Phi> blocks;
     OneOfTheory ones;
-    ImplicationReasons implications;
     BlockActiveVariables blockActiveVariables;
     uint64_t baseLabel;
 };

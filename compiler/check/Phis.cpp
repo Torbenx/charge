@@ -132,7 +132,6 @@ uint32_t Phis::LocationCache::makeNode(Solver& solver, MemoryLocation location, 
 Phis::Phis(Solver& solver, uint64_t baseLabel)
     : CodeBlockTheory(solver)
     , ones(solver)
-    , implications(solver)
     , blockActiveVariables(solver, baseLabel + 100)
     , baseLabel(baseLabel) { }
 
@@ -152,10 +151,11 @@ BlockId Phis::newPhi(Solver& solver, uint32_t label, std::vector<BlockId> parent
     int_t blockActiveVar = blockActiveVariables.newVariable();
     VERIFY(blockActiveVar == (int_t)block.blockId);
 
-    int_t nodeId = ones.newNode(solver, parents.size(), blockActiveVariables.positiveLiteral(blockActiveVar));
-    VERIFY(nodeId == (int_t)block.blockId);
-
+    int_t linkCount = parents.size();
     blocks.push_back({ label, std::move(parents) });
+
+    int_t nodeId = ones.newNode(solver, linkCount, blockActiveVariables.positiveLiteral(blockActiveVar));
+    VERIFY(nodeId == (int_t)block.blockId);
 
     return block;
 }
@@ -190,7 +190,7 @@ void Phis::onIndexActivated(Solver& solver, int_t nodeId, int_t link) {
     Phi& phi = get(block);
 
     BooleanValue negatedCondition = ones.indexInactiveLiteral(block.blockId, link);
-    implications.makeImplicationReason(negatedCondition, solver.blockActiveLiteral(phi.parents[link]));
+    solver.implicationAssignTrue(negatedCondition, solver.blockActiveLiteral(phi.parents[link]));
 
     for (int_t locIndex = 0; locIndex < phi.locations.size(); locIndex++) {
         propagteActiveLink(solver, block, phi.locations.keyAt(locIndex), link, phi.locations.at(locIndex));
@@ -205,7 +205,7 @@ void Phis::propagteActiveLink(Solver& solver, BlockId block, MemoryLocation loca
     }
 
     BooleanValue negatedCondition = ones.indexInactiveLiteral(block.blockId, link);
-    solver.assignTrue(equality.value(), implications.makeImplicationReason(negatedCondition, equality.value()));
+    solver.implicationAssignTrue(negatedCondition, equality.value());
 }
 
 Value Phis::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition position) {

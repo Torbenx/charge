@@ -8,8 +8,6 @@ target_sources(compiler
     EqualityInfo.h
     EqualityTheory.cpp
     EqualityTheory.h
-    ImplicationReasons.cpp
-    ImplicationReasons.h
     LiteralInfo.h
     LoadSet.h
     Phis.cpp
