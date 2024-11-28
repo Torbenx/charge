@@ -478,6 +478,7 @@ bool Solver::tryLearn(Conflict conflict) {
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 newClause.push_back(entry.literal);
+                // fmt::print("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
             }

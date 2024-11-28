@@ -5,6 +5,8 @@ target_sources(compiler
     BooleanVariables.h
     CodeBlock.h
     CodeBlockTheory.h
+    Enums.cpp
+    Enums.h
     EqualityInfo.h
     EqualityTheory.cpp
     EqualityTheory.h

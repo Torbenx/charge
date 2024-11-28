@@ -574,20 +574,24 @@ TEST(Check, OneOf) {
     solver.decideTrue(theory.blockActiveLiteral(solver, phi));
     solver.propagate();
 
-    solver.decideTrue(theory.linkActiveLiteral(phi, 0));
+    auto active0 = theory.linkActiveLiteral(solver, phi, 0);
+    auto active1 = theory.linkActiveLiteral(solver, phi, 1);
+    auto active2 = theory.linkActiveLiteral(solver, phi, 2);
+
+    solver.decideTrue(active0);
     solver.propagate();
     EXPECT_TRUE(theory.hasActiveLink(phi));
     EXPECT_EQ(theory.activeLink(phi), 0);
-    EXPECT_TRUE(solver.assignedFalse(theory.linkActiveLiteral(phi, 1)));
-    EXPECT_TRUE(solver.assignedFalse(theory.linkActiveLiteral(phi, 2)));
+    EXPECT_TRUE(solver.assignedFalse(active1));
+    EXPECT_TRUE(solver.assignedFalse(active2));
 
     solver.backtrack(1);
     solver.propagate();
     EXPECT_FALSE(theory.hasActiveLink(phi));
 
-    solver.decideTrue(theory.linkInactiveLiteral(phi, 0));
+    solver.decideTrue(solver.negate(active0));
     solver.propagate();
-    solver.decideTrue(theory.linkInactiveLiteral(phi, 1));
+    solver.decideTrue(solver.negate(active1));
     solver.propagate();
     EXPECT_TRUE(theory.hasActiveLink(phi));
     EXPECT_EQ(theory.activeLink(phi), 2);
@@ -596,8 +600,8 @@ TEST(Check, OneOf) {
     EXPECT_FALSE(theory.hasActiveLink(phi));
 
     int_t bVar = bools.newVariable();
-    solver.addClause({ bools.positiveLiteral(bVar), theory.linkActiveLiteral(phi, 0) });
-    solver.addClause({ bools.positiveLiteral(bVar), theory.linkActiveLiteral(phi, 1) });
+    solver.addClause({ bools.positiveLiteral(bVar), active0 });
+    solver.addClause({ bools.positiveLiteral(bVar), active1 });
     solver.decideTrue(bools.negativeLiteral(bVar));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
@@ -643,8 +647,8 @@ TEST(Check, Code) {
     stores.appendStore(solver, s, loc, builtins::true_literal);
 
     auto p = phis.newPhi(solver, 2, { builtins::entry_block, s });
-    solver.addClause({ phis.linkInactiveLiteral(p, 0), initialLoad });
-    solver.addClause({ phis.linkInactiveLiteral(p, 1), solver.negate(initialLoad) });
+    solver.addClause({ phis.linkInactiveLiteral(solver, p, 0), initialLoad });
+    solver.addClause({ phis.linkInactiveLiteral(solver, p, 1), solver.negate(initialLoad) });
 
     solver.decideTrue(solver.blockActiveLiteral(p));
     solver.propagate();
@@ -655,7 +659,7 @@ TEST(Check, Code) {
     solver.propagate();
     ASSERT_FALSE(solver.hasConflicts());
 
-    solver.decideTrue(phis.linkActiveLiteral(p, 0));
+    solver.decideTrue(phis.linkActiveLiteral(solver, p, 0));
     solver.propagate();
     ASSERT_TRUE(solver.hasConflicts());
 
