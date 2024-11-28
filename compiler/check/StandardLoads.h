@@ -23,12 +23,7 @@ struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, Equa
 
     std::string formatValue(Solver& solver, Value v) override {
         auto [loc, pos] = LoadSet::loadAt(v.valueId);
-        std::string result = "load(";
-        result += solver.formatValue(loc);
-        result += " @ ";
-        // TODO: Format position
-        result += ")";
-        return result;
+        return solver.formatLoad(loc, pos);
     }
 
     void enumerateValues(Solver&, std::function<void(Value)> f) override {
@@ -39,7 +34,7 @@ struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, Equa
 private:
     uint64_t baseLabel = 0;
 
-    EqualityInfo makeData(uint32_t newId) {
+    EqualityInfo makeData(Solver&, uint32_t newId, MemoryLocation, CodePosition) {
         return EqualityInfo({ (uint32_t)theoryId(), newId });
     }
 

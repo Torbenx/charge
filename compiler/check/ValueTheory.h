@@ -59,14 +59,25 @@ struct BooleanTheory : ValueTheory {
     virtual void unapplyFalseAssignment(Solver&, BooleanValue) = 0;
 };
 
-struct MemoryLocationTheory : ValueTheory {
-    MemoryLocationTheory(Solver& solver, ValueKind loadedKind)
-        : ValueTheory(solver, ValueKind::MemoryLocation), m_loadedKind(loadedKind) { }
+struct MemoryLocationTheory : EquatableValueTheory {
+    MemoryLocationTheory(Solver& solver)
+        : EquatableValueTheory(solver, ValueKind::MemoryLocation) { }
 
-    ValueKind loadedKind() const { return m_loadedKind; }
+    virtual Type typeAtLocation(Solver&, MemoryLocation) = 0;
+};
 
-private:
-    ValueKind m_loadedKind;
+struct MemberExpressionTheory : EquatableValueTheory {
+    MemberExpressionTheory(Solver& solver)
+        : EquatableValueTheory(solver, ValueKind::MemberExpression) { }
+
+    virtual Type memberType(Solver&, MemberExpression) = 0;
+};
+
+struct TypeTheory : EquatableValueTheory {
+    TypeTheory(Solver& solver)
+        : EquatableValueTheory(solver, ValueKind::Type) { }
+
+    virtual std::optional<ValueKind> loadedKind(Solver&, Type) = 0;
 };
 
 struct ValueKindTheory {

@@ -603,16 +603,30 @@ TEST(Check, OneOf) {
     EXPECT_TRUE(solver.hasConflicts());
 }
 
+struct BooleanTypes : TypeTheory {
+    using TypeTheory::TypeTheory;
+    std::optional<ValueKind> loadedKind(Solver&, Type) override { return ValueKind::Boolean; }
+    std::string formatValue(Solver&, Value) override { return "bool"; }
+    uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+    void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
+    EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+
+    Type type() { return { (uint32_t)theoryId(), 0 }; }
+};
+
 struct BooleanMemoryLocations : MemoryLocationTheory {
     BooleanMemoryLocations(Solver& solver)
-        : MemoryLocationTheory(solver, ValueKind::Boolean) { }
+        : MemoryLocationTheory(solver), types(solver) { }
     uint64_t labelOfValue(Solver&, Value v) override { return 1000 + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return "loc" + std::to_string(v.valueId); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
+    EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+    Type typeAtLocation(Solver&, MemoryLocation) override { return types.type(); }
 
     MemoryLocation newLocation() { return { (uint32_t)theoryId(), (uint32_t)(locationCount++) }; }
 
     int_t locationCount = 0;
+    BooleanTypes types;
 };
 
 TEST(Check, Code) {

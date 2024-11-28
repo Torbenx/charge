@@ -41,13 +41,13 @@ private:
         return solver.compare({ loc, pos }, data.load);
     }
 
-    uint32_t makeNode(Solver&, MemoryLocation loc, CodePosition pos, TreeLabel label) {
+    uint32_t makeNode(Solver& solver, MemoryLocation loc, CodePosition pos, TreeLabel label) {
         uint32_t nextHandle = Base::nextNodeHandle();
         if constexpr (std::is_void_v<T>) {
-            impl()->makeData(nextHandle);
+            impl()->makeData(solver, nextHandle, loc, pos);
             return Base::makeNode(label, Data { .load = { loc, pos } });
         } else {
-            return Base::makeNode(label, Data { .load = { loc, pos }, .data = impl()->makeData(nextHandle) });
+            return Base::makeNode(label, Data { .load = { loc, pos }, .data = impl()->makeData(solver, nextHandle, loc, pos) });
         }
     }
 

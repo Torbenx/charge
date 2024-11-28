@@ -10,7 +10,9 @@ inline constexpr int_t ENTRY_BLOCKS_THEORY_ID = 0;
 
 enum class ValueKind : uint8_t {
     Boolean,
+    Type,
     MemoryLocation,
+    MemberExpression,
 };
 
 //! A value
@@ -27,13 +29,21 @@ struct Value {
 //! A boolean value
 /*!
 In the literature on boolean satisfiability this would be called a literal.
-For literal X there exist the complementary literal NOT X. These will always belong to the same theory.
+For each literal X there exist the complementary literal NOT X. These will always belong to the same theory.
 \see BooleanTheory::negate()
 */
 struct BooleanValue : Value { };
 
 //! A memory location value
 struct MemoryLocation : Value { };
+
+//! A member expression value
+/*!
+In this context a member can be either a member of a composite type or an element of an array.
+*/
+struct MemberExpression : Value { };
+
+struct Type : Value { };
 
 struct BlockId {
     uint32_t theoryId : 8 = -1;
@@ -66,22 +76,15 @@ namespace builtins {
 
 }
 
-template<>
-struct optional_traits<check::Value> {
-    static constexpr check::Value empty_value = check::Value();
-};
-
-template<>
-struct optional_traits<check::BooleanValue> {
-    static constexpr check::BooleanValue empty_value = check::BooleanValue();
-};
-
-template<>
-struct optional_traits<check::MemoryLocation> {
-    static constexpr check::MemoryLocation empty_value = check::MemoryLocation();
+template<std::derived_from<check::Value> T>
+struct optional_traits<T> {
+    static constexpr T empty_value = T();
 };
 
 template<>
 struct optional_traits<check::BlockId> {
     static constexpr check::BlockId empty_value = {};
 };
+
+static_assert(sizeof(std::optional<check::Value>) == sizeof(check::Value));
+static_assert(sizeof(std::optional<check::BooleanValue>) == sizeof(check::BooleanValue));

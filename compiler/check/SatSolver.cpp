@@ -191,7 +191,7 @@ BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation loc
     return positiveLiteral(LoadSet::get(solver, location, position));
 }
 
-void Solver::BooleanLoads::makeData(uint32_t newHandle) {
+void Solver::BooleanLoads::makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition) {
     VERIFY((int_t)newHandle == variableCount());
     newVariable();
 }
@@ -533,7 +533,7 @@ bool Solver::analyzeConflicts() {
     VERIFY(!conflicts.empty());
 
     auto doesConflictPersist = [this](Conflict conflict) {
-        bool isReasonValid = theoryFor(conflict.reason).testReason(*this, conflict.reason);
+        bool isReasonValid = testReason(conflict.reason);
         bool isImpliedLiteralFalse = infoFor(conflict.literal).tentativelyFalse();
         return isReasonValid && isImpliedLiteralFalse;
     };
@@ -592,7 +592,7 @@ void Solver::backtrack(int_t targetLevel) {
         auto& info = theory.literalInfo(*this, entry.literal);
         // VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
 
-        bool revert = entry.reason.isDecision() || !theoryFor(entry.reason).testReason(*this, entry.reason);
+        bool revert = entry.reason.isDecision() || !testReason(entry.reason);
         if (revert) {
             if (info.firstReason.value() == position) {
                 // When the first reason is reverted we requeue the propagation.

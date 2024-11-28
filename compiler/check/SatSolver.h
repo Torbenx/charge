@@ -26,21 +26,32 @@ struct Solver {
         return *valueTheories[id];
     }
 
-    ValueTheory& theoryFor(Value value) {
-        return *valueTheories[value.theoryId];
-    }
-    BooleanTheory& theoryFor(BooleanValue value) {
-        return static_cast<BooleanTheory&>(*valueTheories[value.theoryId]);
-    }
-    MemoryLocationTheory& theoryFor(MemoryLocation value) {
-        return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
-    }
-    BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
-        return theoryFor(literal).literalInfo(*this, literal);
+    // ValueKindTheory
+    ValueKindTheory& theoryFor(ValueKind kind) {
+        return *kindTheories[(int_t)kind];
     }
 
-    ReasonTheory& theoryFor(const Reason& reason) {
-        return *reasonTheories[reason.reasonTheory];
+    Literal equality(Value a, Value b) {
+        ValueKind kind = kindOf(a);
+        VERIFY(kind == kindOf(b));
+        return theoryFor(kind).equality(*this, a, b);
+    }
+
+    Literal disequality(Value a, Value b) {
+        ValueKind kind = kindOf(a);
+        VERIFY(kind == kindOf(b));
+        return theoryFor(kind).disequality(*this, a, b);
+    }
+
+    Value defineLoad(MemoryLocation location, CodePosition position) {
+        auto maybeKind = loadedKind(location);
+        VERIFY(maybeKind.has_value());
+        return theoryFor(maybeKind.value()).defineLoad(*this, location, position);
+    }
+
+    // ValueTheory
+    ValueTheory& theoryFor(Value value) {
+        return *valueTheories[value.theoryId];
     }
 
     std::string formatValue(Value value) {
@@ -55,40 +66,69 @@ struct Solver {
         return theoryFor(value).valuesKind();
     }
 
+    std::strong_ordering compare(Value a, Value b) { return labelOf(a) <=> labelOf(b); }
+
+    // BooleanTheory
+    BooleanTheory& theoryFor(BooleanValue value) {
+        return static_cast<BooleanTheory&>(*valueTheories[value.theoryId]);
+    }
+
+    BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
+        return theoryFor(literal).literalInfo(*this, literal);
+    }
+
     Literal negate(Literal lit) {
         return theoryFor(lit).negate(*this, lit);
-    }
-
-    ValueKindTheory& theoryFor(ValueKind kind) {
-        return *kindTheories[(int_t)kind];
-    }
-
-    Literal equality(Value a, Value b) {
-        ValueKind kind = kindOf(a);
-        VERIFY(kind == kindOf(b));
-        return theoryFor(kind).equality(*this, a, b);
-    }
-    Literal disequality(Value a, Value b) {
-        ValueKind kind = kindOf(a);
-        VERIFY(kind == kindOf(b));
-        return theoryFor(kind).disequality(*this, a, b);
-    }
-
-    ValueKind loadedKind(MemoryLocation location) {
-        return theoryFor(location).loadedKind();
-    }
-
-    Value defineLoad(MemoryLocation location, CodePosition position) {
-        return theoryFor(loadedKind(location)).defineLoad(*this, location, position);
     }
 
     bool tentativelyFalse(Literal lit) {
         return theoryFor(lit).literalInfo(*this, lit).tentativelyFalse();
     }
 
-    std::strong_ordering compare(Value a, Value b) { return labelOf(a) <=> labelOf(b); }
+    // MemoryLocationTheory
+    MemoryLocationTheory& theoryFor(MemoryLocation value) {
+        return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
+    }
 
-    CodeBlockTheory& theoryFor(BlockId block) { return *blockTheories[block.theoryId]; }
+    Type typeAtLocation(MemoryLocation location) {
+        return theoryFor(location).typeAtLocation(*this, location);
+    }
+
+    std::optional<ValueKind> loadedKind(MemoryLocation location) {
+        return loadedKind(typeAtLocation(location));
+    }
+
+    // MemberExpressionTheory
+    MemberExpressionTheory& theoryFor(MemberExpression value) {
+        return static_cast<MemberExpressionTheory&>(*valueTheories[value.theoryId]);
+    }
+
+    Type memberType(MemberExpression expr) {
+        return theoryFor(expr).memberType(*this, expr);
+    }
+
+    // TypeTheory
+    TypeTheory& theoryFor(Type value) {
+        return static_cast<TypeTheory&>(*valueTheories[value.theoryId]);
+    }
+
+    std::optional<ValueKind> loadedKind(Type type) {
+        return theoryFor(type).loadedKind(*this, type);
+    }
+
+    // ReasonTheory
+    ReasonTheory& theoryFor(const Reason& reason) {
+        return *reasonTheories[reason.reasonTheory];
+    }
+
+    bool testReason(const Reason& reason) {
+        return theoryFor(reason).testReason(*this, reason);
+    }
+
+    // CodeBlockTheory
+    CodeBlockTheory& theoryFor(BlockId block) {
+        return *blockTheories[block.theoryId];
+    }
 
     uint64_t labelOf(BlockId block) { return theoryFor(block).labelOfBlock(*this, block); }
 
@@ -99,6 +139,7 @@ struct Solver {
     Value loadAtPosition(MemoryLocation location, CodePosition position) {
         return theoryFor(position.block).loadAtPosition(*this, location, position);
     }
+
     Value loadAtEndOfBlock(MemoryLocation location, BlockId block) {
         return theoryFor(block).loadAtEndOfBlock(*this, location, block);
     }
@@ -130,13 +171,23 @@ struct Solver {
         return "load(" + formatValue(location) + " @ " + formatCodePosition(position) + ")";
     }
 
+    // Solver
+
+    Reason makeImplicationReason(BooleanValue negatedPremise, BooleanValue consequence) {
+        return implication.makeImplicationReason(negatedPremise, consequence);
+    }
+
     void implicationAssignTrue(BooleanValue negatedPremise, BooleanValue consequence) {
         VERIFY(assignedFalse(negatedPremise));
-        assignTrue(consequence, implication.makeImplicationReason(negatedPremise, consequence));
+        assignTrue(consequence, makeImplicationReason(negatedPremise, consequence));
+    }
+
+    Reason makeUnitReason(BooleanValue lit) {
+        return unitReasons.makeUnitReason(lit);
     }
 
     void unitAssignTrue(BooleanValue lit) {
-        assignTrue(lit, unitReasons.makeUnitReason(lit));
+        assignTrue(lit, makeUnitReason(lit));
     }
 
     //! Returns the current decision level of the solver
@@ -343,7 +394,7 @@ private:
         std::string formatNegativeLiteral(Solver&, int_t) override;
         uint64_t labelOfValue(Solver&, Value) override;
         BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
-        void makeData(uint32_t newHandle);
+        void makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition);
     };
 
     struct Booleans : ValueKindTheory {

@@ -34,7 +34,7 @@ struct EquatableValueTheory::EqualityInfo {
         bool operator==(const Edge&) const = default;
     };
 
-    EqualityInfo(Value v)
+    explicit EqualityInfo(Value v)
         : root(v) { }
 
     Value root;
@@ -44,7 +44,7 @@ struct EquatableValueTheory::EqualityInfo {
     uint32_t backtrackTracePosition = -1; //!< Position of the trace entry where this value ceased to be a root or -1 if it is a root
     std::vector<TreeNode> tree;
     std::vector<Edge> edges;
-    std::vector<uint32_t> disequalities; //! Sorted list of disequalities this node is a part of
+    std::vector<uint32_t> disequalities; //!< Sorted list of disequalities this node is a part of
 };
 
 }

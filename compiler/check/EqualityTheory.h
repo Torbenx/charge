@@ -12,11 +12,15 @@ struct EqualityTheory : SimpleBooleanTheory {
 
     //! Returns a value that is true if and only if \p a == \p b
     BooleanValue equality(Solver& solver, Value a, Value b) {
+        if (a == b)
+            return builtins::true_literal;
         return positiveLiteral(equalityVariable(solver, a, b));
     }
 
     //! Returns a value that is true if and only if \p a != \p b
     BooleanValue disequality(Solver& solver, Value a, Value b) {
+        if (a == b)
+            return builtins::false_literal;
         return negativeLiteral(equalityVariable(solver, a, b));
     }
 
