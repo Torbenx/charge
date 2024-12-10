@@ -8,8 +8,6 @@ target_sources(compiler
     Generator.h
     Instruction.cpp
     Instruction.h
-    Node.cpp
-    Node.h
     parse.cpp
     Program.cpp
     Program.h

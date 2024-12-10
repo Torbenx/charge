@@ -179,6 +179,7 @@ enum class ReferenceExpressionKind : uint8_t {
     LocalVariable,
     LocalReference,
     MemberExpression,
+    OpaqueExpression,
     Invalid = INVALID_VALUE_KIND_INDEX,
 };
 
@@ -205,6 +206,10 @@ struct ReferenceExpression {
     }
     constexpr uint32_t localReferenceId() const {
         VERIFY(kind() == ReferenceExpressionKind::LocalReference);
+        return id();
+    }
+    constexpr uint32_t opaqueExpressionId() const {
+        VERIFY(kind() == ReferenceExpressionKind::OpaqueExpression);
         return id();
     }
 

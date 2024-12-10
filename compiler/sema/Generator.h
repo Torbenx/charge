@@ -160,6 +160,10 @@ struct Generator : Util {
         Type type;
     };
 
+    struct OpaqueReferenceExpression {
+        Type type;
+    };
+
     enum class WildcardMeaning : uint8_t {
         Error,
         ImplicitTemplate,
@@ -236,6 +240,7 @@ struct Generator : Util {
     std::vector<LocalLookupEntry> localLookupEntries;
     std::vector<LocalVariable> localVariables;
     std::vector<LocalReference> localReferences;
+    std::vector<OpaqueReferenceExpression> opaqueReferenceExpressions;
     LocalState localState;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;

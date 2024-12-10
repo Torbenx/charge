@@ -803,6 +803,8 @@ Type Generator::referencedType(ReferenceExpression expr) {
         auto memberExpr = program->getMemberReferenceExpression(expr);
         return memberType(memberExpr.memberPointer);
     }
+    case ReferenceExpressionKind::OpaqueExpression:
+        return opaqueReferenceExpressions[expr.opaqueExpressionId()].type;
     default:
         VERIFY_NOT_REACHED();
     }
