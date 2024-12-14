@@ -1,7 +1,7 @@
 #pragma once
 
 #include <WordTable.h>
-#include <sema/Value.h>
+#include <sema/Constant.h>
 
 namespace sema {
 

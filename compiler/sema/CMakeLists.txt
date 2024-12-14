@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 
 target_sources(compiler
     PRIVATE
+    Constant.h
     Context.h
     dump.cpp
     generate.cpp
@@ -14,5 +15,4 @@ target_sources(compiler
     Scope.h
     Util.cpp
     Util.h
-    Value.h
 )

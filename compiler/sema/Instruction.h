@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sema/Value.h>
+#include <sema/Constant.h>
 
 namespace sema {
 
