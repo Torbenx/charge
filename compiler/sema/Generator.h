@@ -12,14 +12,14 @@ struct Context;
 struct LookupCache {
     WordTable table;
 
-    std::optional<Value> get(Word name) {
+    std::optional<Constant> get(Word name) {
         auto result = table.findWord(name);
         if (result.found)
-            return Value::fromUint(table.entries[result.bucket].payload);
+            return Constant::fromUint(table.entries[result.bucket].payload);
         return std::nullopt;
     }
 
-    void insert(Word name, Value value) {
+    void insert(Word name, Constant value) {
         table.insertWord(name, value.toUint());
     }
 };
@@ -27,44 +27,44 @@ struct LookupCache {
 struct FoldBase {
     Program* program;
     ProgramHandle programHandle;
-    Value value;
-    std::span<const Value> arguments;
+    Constant value;
+    std::span<const Constant> arguments;
 };
 
-struct ValuePair {
-    ExternValue pValue;
-    Value aValue;
+struct ConstantPair {
+    ExternConstant pValue;
+    Constant aValue;
 };
-struct ValuePairCompare {
-    std::strong_ordering operator()(Context& context, Program* argProg, Program* paramProg, ValuePair left, ValuePair right) const {
+struct ConstantPairCompare {
+    std::strong_ordering operator()(Context& context, Program* argProg, Program* paramProg, ConstantPair left, ConstantPair right) const {
         auto paramOdering = Util(context, context.programHandle(argProg)).compare(left.aValue, right.aValue);
         if (paramOdering != 0)
             return paramOdering;
-        return Util(context, context.programHandle(paramProg)).compare(Value(left.pValue), Value(right.pValue));
+        return Util(context, context.programHandle(paramProg)).compare(Constant(left.pValue), Constant(right.pValue));
     }
 };
-using ValuePairSet = FlatSet<ValuePair, ValuePairCompare, Context&, Program*, Program*>;
+using ConstantPairSet = FlatSet<ConstantPair, ConstantPairCompare, Context&, Program*, Program*>;
 
 struct DeductionState {
     Program* program;
     ProgramHandle programHandle;
     std::vector<bool> explicitArgumentsMap;
-    std::vector<Value> arguments;
-    ValuePairSet equalities;
+    std::vector<Constant> arguments;
+    ConstantPairSet equalities;
 
     DeductionState(Program* prog, ProgramHandle handle, int_t parameterCount)
         : program(prog)
         , programHandle(handle)
         , explicitArgumentsMap(parameterCount, false)
-        , arguments(parameterCount, INVALID_VALUE) { }
+        , arguments(parameterCount, INVALID_CONSTANT) { }
 
     void copyParameters(int_t count) {
         for (int_t i = 0; i < count; i++)
-            explicitArgument(i, Value(ValueKind::CopyOfParameter, i));
+            explicitArgument(i, Constant(ConstantKind::CopyOfParameter, i));
     }
 
-    void explicitArgument(int_t i, Value value) {
-        VERIFY(arguments[i] == INVALID_VALUE);
+    void explicitArgument(int_t i, Constant value) {
+        VERIFY(arguments[i] == INVALID_CONSTANT);
         VERIFY(!explicitArgumentsMap[i]);
         arguments[i] = value;
         explicitArgumentsMap[i] = true;
@@ -74,25 +74,25 @@ struct DeductionState {
 
     bool isComplete() const {
         for (auto arg : arguments) {
-            if (arg == INVALID_VALUE)
+            if (arg == INVALID_CONSTANT)
                 return false;
         }
         return true;
     }
 
-    FoldBase toFoldBase(Value baseValue) {
+    FoldBase toFoldBase(Constant baseValue) {
         return FoldBase { program, programHandle, baseValue, arguments };
     }
 };
 
-constexpr std::vector<Value> copyParameters(int_t parameterCount) {
-    std::vector<Value> result;
+constexpr std::vector<Constant> copyParameters(int_t parameterCount) {
+    std::vector<Constant> result;
     result.reserve(parameterCount);
     for (int_t i = 0; i < parameterCount; i++)
-        result.push_back(Value(ValueKind::CopyOfParameter, i));
+        result.push_back(Constant(ConstantKind::CopyOfParameter, i));
     return result;
 }
-constexpr std::vector<Value> copyParameters(Program* prog) {
+constexpr std::vector<Constant> copyParameters(Program* prog) {
     return copyParameters(prog->parameters.size());
 }
 
@@ -140,7 +140,7 @@ private:
 struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
-        ValueOrReferenceExpression data;
+        ConstantOrReferenceExpression data;
     };
 
     struct ReferenceUnitLock {
@@ -281,55 +281,55 @@ struct Generator : Util {
     static void signatureCheck(Context& context, ProgramHandle progHandle);
     static void generateBuiltins(Context& context);
 
-    FoldBase asFoldBase(Value value);
-    std::optional<FoldBase> tryAsFoldBase(Value value);
-    Value fold(Value base, ExternValue v);
-    Value fold(FoldBase base, ExternValue v);
-    bool staticMatch(DeductionState& state, ExternValue pValue, Value aValue);
+    FoldBase asFoldBase(Constant value);
+    std::optional<FoldBase> tryAsFoldBase(Constant value);
+    Constant fold(Constant base, ExternConstant v);
+    Constant fold(FoldBase base, ExternConstant v);
+    bool staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
 
     RuntimeParameter member(MemberPointer pointer);
     Type memberType(MemberPointer pointer);
-    Type memberType(Value memberPointerValue);
-    Type typeOf(Value);
-    Type verifyType(Value value);
+    Type memberType(Constant memberPointer);
+    Type typeOf(Constant);
+    Type verifyType(Constant);
     Type referencedType(ReferenceExpression);
 
-    Value makeTemplateSignature(Value templateProg);
-    Type makeTemplateIdFor(Value templateProg);
-    Value makeFunctionSignature(Value value);
-    Value makeExpressionValue();
-    Value makeParameterize(ProgramHandle base, std::span<const Value> arguments);
-    Type typeOfNonDependentProgram(Value value);
+    Constant makeTemplateSignature(Constant templateProg);
+    Type makeTemplateIdFor(Constant templateProg);
+    Constant makeFunctionSignature(Constant value);
+    Constant makeExpressionConstant();
+    Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
+    Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    Value generateDeclarationLiteral(ScopeValue rawValue, std::span<const Value> parentArgs);
+    Constant generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> parentArgs);
     void generateIdentifierExpr();
     void generateParameterizeExpr(std::span<const Word> argumentNames);
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(CallTarget base);
-    std::optional<Value> lookupInType(TypeProgram* typeProg, std::span<const Value> arguments, Word name);
+    std::optional<Constant> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
     void generateStaticAccessExpr();
     struct MemberAccessState;
     void emitMemberAccessExpr(MemberAccessState& state);
     void generateMemberAccessExprInside(MemberAccessState& state, Type type, Word name);
     void generateMemberAccessExpr();
 
-    Value inheriteParameters(ScopeValue parent);
+    Constant inheriteParameters(ScopeConstant parent);
 
-    ReferenceExpression addParameter(Word name, Type type, std::optional<Value> defaultValue);
-    ReferenceExpression addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
-    ReferenceExpression addInheritedParameter(Type type, std::optional<Value> defaultValue);
+    ReferenceExpression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    ReferenceExpression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    ReferenceExpression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
     ReferenceExpression newImplicitParameter(Type type);
 
     void makeRValue(SourceLocation);
 
     void contextualToType(SourceLocation);
     void contextualToBool(SourceLocation);
-    void implicitCastTo(SourceLocation, DeductionState&, ExternValue);
+    void implicitCastTo(SourceLocation, DeductionState&, ExternConstant);
 
     void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
-    void emitConstantExpr(SourceLocation, Value value);
+    void emitConstantExpr(SourceLocation, Constant value);
     void emitReferenceExpr(SourceLocation, ReferenceExpression);
     void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
 

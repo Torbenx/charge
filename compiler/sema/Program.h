@@ -13,7 +13,7 @@ struct RuntimeParameter;
 namespace builtins {
 
 #define BUILTIN_TYPE(name) constexpr inline Type name##_type { BuiltinId::name##_type };
-#define BUILTIN(name, cppName) constexpr inline Value cppName { BuiltinId::cppName };
+#define BUILTIN(name, cppName) constexpr inline Constant cppName { BuiltinId::cppName };
 #include <sema/builtins.inc>
 
 };
@@ -35,11 +35,11 @@ struct Expression {
 
 struct ParameterizeData {
     ProgramHandle base;
-    std::vector<Value> arguments;
+    std::vector<Constant> arguments;
 };
 struct Parameterize {
     ProgramHandle base;
-    std::span<const Value> arguments;
+    std::span<const Constant> arguments;
 
     static Parameterize fromData(const ParameterizeData& data) {
         return { data.base, { data.arguments.data(), data.arguments.size() } };
@@ -55,8 +55,8 @@ private:
 };
 
 struct RemoteExpression {
-    Value base;
-    ExternValue expression;
+    Constant base;
+    ExternConstant expression;
 };
 struct RemoteExpressionSet : FlatTreeSetDetail::Base<RemoteExpressionSet, RemoteExpression> {
     uint32_t get(Context& context, ProgramHandle prog, RemoteExpression);
@@ -82,7 +82,7 @@ private:
 
 struct MemberReferenceExpression {
     ReferenceExpression base;
-    Value memberPointer;
+    Constant memberPointer;
 };
 
 enum class ProgramStatus : uint8_t {
@@ -98,58 +98,58 @@ enum class ProgramKind : uint8_t {
     Function,
 };
 
-struct ValueIdIterator {
-    using value_type = Value;
+struct ConstantIdIterator {
+    using value_type = Constant;
     using difference_type = int_t;
 
-    ValueIdIterator() = default;
-    explicit ValueIdIterator(Value value)
+    ConstantIdIterator() = default;
+    explicit ConstantIdIterator(Constant value)
         : m_value(value) { }
-    ValueIdIterator(const ValueIdIterator&) = default;
-    ValueIdIterator(ValueIdIterator&&) = default;
-    ValueIdIterator& operator=(const ValueIdIterator&) = default;
-    ValueIdIterator& operator=(ValueIdIterator&&) = default;
+    ConstantIdIterator(const ConstantIdIterator&) = default;
+    ConstantIdIterator(ConstantIdIterator&&) = default;
+    ConstantIdIterator& operator=(const ConstantIdIterator&) = default;
+    ConstantIdIterator& operator=(ConstantIdIterator&&) = default;
 
-    Value value() const {
+    Constant value() const {
         return m_value;
     }
-    ValueIdIterator& operator++() {
+    ConstantIdIterator& operator++() {
         advance();
         return *this;
     }
-    ValueIdIterator operator++(int) {
-        ValueIdIterator copy = *this;
+    ConstantIdIterator operator++(int) {
+        ConstantIdIterator copy = *this;
         advance();
         return copy;
     }
-    Value operator*() const { return value(); }
+    Constant operator*() const { return value(); }
 
-    auto operator<=>(const ValueIdIterator& other) const {
+    auto operator<=>(const ConstantIdIterator& other) const {
         VERIFY(m_value.kind() == other.m_value.kind());
         return m_value.id() <=> other.m_value.id();
     }
-    bool operator==(const ValueIdIterator&) const = default;
+    bool operator==(const ConstantIdIterator&) const = default;
 
 private:
     void advance() {
-        m_value = Value(m_value.kind(), m_value.id() + 1);
+        m_value = Constant(m_value.kind(), m_value.id() + 1);
     }
-    Value m_value = INVALID_VALUE;
+    Constant m_value = INVALID_CONSTANT;
 };
-static_assert(std::forward_iterator<ValueIdIterator>);
+static_assert(std::forward_iterator<ConstantIdIterator>);
 
-struct ValueIdRange {
-    ValueIdIterator begin() const {
-        return ValueIdIterator(Value(endValue.kind(), 0));
+struct ConstantIdRange {
+    ConstantIdIterator begin() const {
+        return ConstantIdIterator(Constant(endValue.kind(), 0));
     }
-    ValueIdIterator end() const {
-        return ValueIdIterator(endValue);
+    ConstantIdIterator end() const {
+        return ConstantIdIterator(endValue);
     }
 
-    ValueIdRange(ValueKind kind, uint32_t endId)
+    ConstantIdRange(ConstantKind kind, uint32_t endId)
         : endValue(kind, endId) { }
 
-    Value endValue;
+    Constant endValue;
 };
 
 struct InstructionBlock {
@@ -215,43 +215,43 @@ struct InstructionBlockRange {
 struct Program {
     struct Parameter {
         Word name;
-        ExternValue type;
-        std::optional<Value> defaultValue;
+        ExternConstant type;
+        std::optional<Constant> defaultValue;
 
         bool implicit() const { return name.empty(); }
     };
 
-    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue parent, SourceLocation location)
+    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant parent, SourceLocation location)
         : m_fields(Fields(kind), location)
         , m_name(name)
         , m_parent(parent)
         , parseLocation(parseLocation) { }
 
-    Value addExpression(std::span<const Instruction>);
+    Constant addExpression(std::span<const Instruction>);
 
-    Value addParameterize(Context& context, Parameterize parameterize);
-    Value addRemoteExpression(Context& context, RemoteExpression expr);
-    Value addMemberPointer(Context& context, MemberPointer pointer);
+    Constant addParameterize(Context& context, Parameterize parameterize);
+    Constant addRemoteExpression(Context& context, RemoteExpression expr);
+    Constant addMemberPointer(Context& context, MemberPointer pointer);
 
-    Expression getExpression(ExternValue value) {
+    Expression getExpression(ExternConstant value) {
         auto instructions = getInstructions(value.id(), Opcode::ExpressionHeader);
         return instructions.back();
     }
-    Parameterize getParameterize(ExternValue value) {
-        VERIFY(value.kind() == ValueKind::Parameterize);
+    Parameterize getParameterize(ExternConstant value) {
+        VERIFY(value.kind() == ConstantKind::Parameterize);
         return Parameterize::fromData(parameterizes.at(value.id()));
     }
-    RemoteExpression getRemoteExpression(ExternValue value) {
-        VERIFY(value.kind() == ValueKind::RemoteExpression);
+    RemoteExpression getRemoteExpression(ExternConstant value) {
+        VERIFY(value.kind() == ConstantKind::RemoteExpression);
         return remoteExpressions.at(value.id());
     }
-    MemberPointer getMemberPointer(ExternValue value) {
-        VERIFY(value.kind() == ValueKind::MemberPointer);
+    MemberPointer getMemberPointer(ExternConstant value) {
+        VERIFY(value.kind() == ConstantKind::MemberPointer);
         return memberPointers.at(value.id());
     }
-    std::strong_ordering compareParameterizes(Value a, Value b) {
-        VERIFY(a.kind() == ValueKind::Parameterize);
-        VERIFY(b.kind() == ValueKind::Parameterize);
+    std::strong_ordering compareParameterizes(Constant a, Constant b) {
+        VERIFY(a.kind() == ConstantKind::Parameterize);
+        VERIFY(b.kind() == ConstantKind::Parameterize);
         return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
@@ -268,7 +268,7 @@ struct Program {
         m_type = type;
     }
 
-    ScopeValue parent() const {
+    ScopeConstant parent() const {
         return m_parent;
     }
 
@@ -308,30 +308,30 @@ struct Program {
     NamespaceHandle translate(NamespaceHandle handle) const {
         return namespaceTranslationBuffer[handle.id()];
     }
-    ScopeValue translate(ScopeValue value) const {
-        if (value.kind() == ValueKind::Program)
+    ScopeConstant translate(ScopeConstant value) const {
+        if (value.kind() == ConstantKind::Program)
             return translate(value.program());
-        if (value.kind() == ValueKind::Namespace)
+        if (value.kind() == ConstantKind::Namespace)
             return translate(value.nsHandle());
         return value;
     }
 
-    ProgramHandle baseProgram(ExternValue value) {
-        if (value.kind() == ValueKind::Program)
+    ProgramHandle baseProgram(ExternConstant value) {
+        if (value.kind() == ConstantKind::Program)
             return value.program();
-        if (value.kind() == ValueKind::Parameterize)
+        if (value.kind() == ConstantKind::Parameterize)
             return getParameterize(value).base;
         VERIFY_NOT_REACHED();
     }
 
-    ValueIdRange parameterizeValues() const {
-        return ValueIdRange(ValueKind::Parameterize, parameterizes.size());
+    ConstantIdRange parameterizeConstants() const {
+        return ConstantIdRange(ConstantKind::Parameterize, parameterizes.size());
     }
-    ValueIdRange memberPointerValues() const {
-        return ValueIdRange(ValueKind::MemberPointer, memberPointers.size());
+    ConstantIdRange memberPointerConstants() const {
+        return ConstantIdRange(ConstantKind::MemberPointer, memberPointers.size());
     }
-    ValueIdRange remoteExpressionValues() const {
-        return ValueIdRange(ValueKind::RemoteExpression, remoteExpressions.size());
+    ConstantIdRange remoteExpressionConstants() const {
+        return ConstantIdRange(ConstantKind::RemoteExpression, remoteExpressions.size());
     }
 
 public:
@@ -361,9 +361,9 @@ public:
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
 
-    std::optional<ExternValue> m_type;
+    std::optional<ExternConstant> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
-    ScopeValue m_parent;
+    ScopeConstant m_parent;
     parse::TokenHandle parseLocation;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
@@ -383,26 +383,26 @@ protected:
 static_assert(sizeof(Program) == 216);
 
 struct ValueProgram : Program {
-    ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+    ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : Program(ProgramKind::Value, name, parseLocation, rawParent, location) { }
 
-    void setValue(Value value) {
+    void setValue(Constant value) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
         m_subClassData = value.toUint();
     }
 
-    ExternValue value() const {
+    ExternConstant value() const {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
-        return Value::fromUint(m_subClassData);
+        return Constant::fromUint(m_subClassData);
     }
-    ExternValue type() const { return m_type.value(); }
+    ExternConstant type() const { return m_type.value(); }
 };
 
 struct ObjectProgram : Program {
-    ObjectProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+    ObjectProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : Program(ProgramKind::Object, name, parseLocation, rawParent, location) { }
 
-    ExternValue objectType() const { return m_type.value(); }
+    ExternConstant objectType() const { return m_type.value(); }
 };
 
 enum class RuntimeParameterKind : uint8_t {
@@ -449,14 +449,14 @@ struct RuntimeParameter {
 };
 
 struct CallableProgram : Program {
-    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : Program(kind, name, parseLocation, rawParent, location) { }
 
     std::vector<RuntimeParameter> runtimeParameters;
 };
 
 struct FunctionProgram : CallableProgram {
-    FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+    FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
     void setBody(std::span<const Instruction> body) {
@@ -467,11 +467,11 @@ struct FunctionProgram : CallableProgram {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return getInstructions(m_subClassData, Opcode::FunctionHeader);
     }
-    ExternValue returnType() const { return m_type.value(); }
+    ExternConstant returnType() const { return m_type.value(); }
 };
 
 struct TypeProgram : CallableProgram, Scope {
-    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location)
+    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Type, name, parseLocation, rawParent, location) { }
 };
 
@@ -512,7 +512,7 @@ union ProgramUnion {
     FunctionProgram function;
     TypeProgram type;
 
-    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeValue rawParent, SourceLocation location) {
+    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location) {
         switch (kind) {
         case ProgramKind::Value:
             std::construct_at(&value, name, parseLocation, rawParent, location);

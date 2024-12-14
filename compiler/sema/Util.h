@@ -10,7 +10,7 @@ struct Util {
     Program* get(ProgramHandle);
     Namespace* get(NamespaceHandle);
 
-    std::strong_ordering compare(Value, Value);
+    std::strong_ordering compare(Constant, Constant);
     std::strong_ordering compare(ProgramHandle, ProgramHandle);
     std::strong_ordering compare(NamespaceHandle, NamespaceHandle);
     std::strong_ordering compare(Parameterize, Parameterize);

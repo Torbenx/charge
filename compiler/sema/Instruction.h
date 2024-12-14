@@ -54,9 +54,9 @@ inline bool isExpression(Opcode opcode) {
 }
 
 union ExpressionData {
-    Value constant;
-    Value callTarget;
-    Value memberPointer;
+    Constant constant;
+    Constant callTarget;
+    Constant memberPointer;
     ReferenceExpression referenceExpr;
 
     struct {

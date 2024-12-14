@@ -215,7 +215,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
 }
 
 template<DeclarationKind kind>
-static sema::ScopeValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
@@ -260,7 +260,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
-    sema::ScopeValue this_declaration = sema::INVALID_SCOPE_VALUE;
+    sema::ScopeConstant this_declaration = sema::INVALID_SCOPE_CONSTANT;
     TokenHandle declarationBegin = {};
     Word argumentName;
 

@@ -14,7 +14,7 @@ enum class BuiltinId : uint32_t {
     COUNT,
 };
 
-struct Value;
+struct Constant;
 
 struct ProgramHandle {
     uint32_t m_id = -1;
@@ -30,14 +30,14 @@ struct NamespaceHandle {
     bool operator==(const NamespaceHandle&) const = default;
 };
 
-inline constexpr int_t VALUE_KIND_BITS = 8;
-inline constexpr uint32_t MAX_VALUE_ID = (1u << (32 - VALUE_KIND_BITS)) - 1u;
-inline constexpr uint32_t INVALID_VALUE_KIND_INDEX = (1u << VALUE_KIND_BITS) - 1u;
+inline constexpr int_t CONSTANT_KIND_BITS = 8;
+inline constexpr uint32_t MAX_CONSTANT_ID = (1u << (32 - CONSTANT_KIND_BITS)) - 1u;
+inline constexpr uint32_t INVALID_CONSTANT_KIND_INDEX = (1u << CONSTANT_KIND_BITS) - 1u;
 
-enum class ValueKind : uint8_t {
-    // The ordering in this enum determines the ordering of values
-    // This ordering needs to be defined between aritatry values to make some data strutures work,
-    // but it is most important between values of the same type where it used to orient equalities.
+enum class ConstantKind : uint8_t {
+    // The ordering in this enum determines the ordering of constants
+    // This ordering needs to be defined between aritatry constants to make some data strutures work,
+    // but it is most important between constants of the same type where it used to orient equalities.
 
     Program, // either not dependent or a template
     Namespace,
@@ -54,125 +54,125 @@ enum class ValueKind : uint8_t {
 
     CopyOfParameter,
 
-    Invalid = INVALID_VALUE_KIND_INDEX,
+    Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
-struct Value {
-    constexpr Value(ValueKind kind, uint32_t id)
+struct Constant {
+    constexpr Constant(ConstantKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
-    constexpr explicit Value(ProgramHandle prog)
-        : Value(ValueKind::Program, prog.id()) { }
-    constexpr explicit Value(NamespaceHandle ns)
-        : Value(ValueKind::Namespace, ns.id()) { }
-    constexpr Value(BuiltinId id)
-        : Value(ProgramHandle(std::to_underlying(id))) { }
+    constexpr explicit Constant(ProgramHandle prog)
+        : Constant(ConstantKind::Program, prog.id()) { }
+    constexpr explicit Constant(NamespaceHandle ns)
+        : Constant(ConstantKind::Namespace, ns.id()) { }
+    constexpr Constant(BuiltinId id)
+        : Constant(ProgramHandle(std::to_underlying(id))) { }
 
-    static Value fromUint(uint32_t x) { return std::bit_cast<Value>(x); }
+    static Constant fromUint(uint32_t x) { return std::bit_cast<Constant>(x); }
     uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }
 
     constexpr uint32_t id() const { return idBits; }
-    constexpr ValueKind kind() const { return (ValueKind)kindBits; }
+    constexpr ConstantKind kind() const { return (ConstantKind)kindBits; }
 
     constexpr ProgramHandle program() const {
-        VERIFY(kind() == ValueKind::Program);
+        VERIFY(kind() == ConstantKind::Program);
         return { id() };
     }
     constexpr NamespaceHandle nsHandle() const {
-        VERIFY(kind() == ValueKind::Namespace);
+        VERIFY(kind() == ConstantKind::Namespace);
         return { id() };
     }
     constexpr ProgramHandle templateSignatureProgram() const {
-        VERIFY(kind() == ValueKind::TemplateSignature$Program);
+        VERIFY(kind() == ConstantKind::TemplateSignature$Program);
         return { id() };
     }
-    constexpr Value templateSignatureBaseValue() const {
-        if (kind() == ValueKind::TemplateSignature$Program)
-            return Value(ValueKind::Program, id());
-        if (kind() == ValueKind::TemplateSignature$Parameterize)
-            return Value(ValueKind::Parameterize, id());
+    constexpr Constant templateSignatureBaseConstant() const {
+        if (kind() == ConstantKind::TemplateSignature$Program)
+            return Constant(ConstantKind::Program, id());
+        if (kind() == ConstantKind::TemplateSignature$Parameterize)
+            return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }
     constexpr ProgramHandle functionSignatureProgram() const {
-        VERIFY(kind() == ValueKind::FunctionSignature$Program);
+        VERIFY(kind() == ConstantKind::FunctionSignature$Program);
         return { id() };
     }
-    constexpr Value functionSignatureBaseValue() const {
-        if (kind() == ValueKind::FunctionSignature$Program)
-            return Value(ValueKind::Program, id());
-        if (kind() == ValueKind::FunctionSignature$Parameterize)
-            return Value(ValueKind::Parameterize, id());
+    constexpr Constant functionSignatureBaseConstant() const {
+        if (kind() == ConstantKind::FunctionSignature$Program)
+            return Constant(ConstantKind::Program, id());
+        if (kind() == ConstantKind::FunctionSignature$Parameterize)
+            return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }
     constexpr int_t expressionIndex() const {
-        VERIFY(kind() == ValueKind::Expression);
+        VERIFY(kind() == ConstantKind::Expression);
         return id();
     }
     constexpr int_t parameterIndex() const {
-        VERIFY(kind() == ValueKind::CopyOfParameter);
+        VERIFY(kind() == ConstantKind::CopyOfParameter);
         return id();
     }
     constexpr bool booleanValue() const {
-        VERIFY(kind() == ValueKind::BooleanLiteral);
+        VERIFY(kind() == ConstantKind::BooleanLiteral);
         return idBits != 0;
     }
 
-    constexpr bool operator==(const Value&) const = default;
+    constexpr bool operator==(const Constant&) const = default;
 
-    uint32_t idBits : (32 - VALUE_KIND_BITS);
-    uint32_t kindBits : VALUE_KIND_BITS;
+    uint32_t idBits : (32 - CONSTANT_KIND_BITS);
+    uint32_t kindBits : CONSTANT_KIND_BITS;
 };
-inline constexpr Value INVALID_VALUE = { ValueKind::Invalid, MAX_VALUE_ID };
+inline constexpr Constant INVALID_CONSTANT = { ConstantKind::Invalid, MAX_CONSTANT_ID };
 
-struct Type : Value {
-    static Type fromUint(uint32_t x) { return Type(Value::fromUint(x)); }
-    using Value::Value;
-    constexpr explicit Type(Value value)
-        : Value(value) { }
+struct Type : Constant {
+    static Type fromUint(uint32_t x) { return Type(Constant::fromUint(x)); }
+    using Constant::Constant;
+    constexpr explicit Type(Constant value)
+        : Constant(value) { }
 };
 
-struct ExternValue {
-    constexpr ExternValue(Value value)
+struct ExternConstant {
+    constexpr ExternConstant(Constant value)
         : value(value) { }
 
     constexpr uint32_t id() const { return value.id(); }
-    constexpr ValueKind kind() const { return value.kind(); }
+    constexpr ConstantKind kind() const { return value.kind(); }
     constexpr ProgramHandle program() const { return value.program(); }
 
-    constexpr explicit operator Value() const { return value; }
+    constexpr explicit operator Constant() const { return value; }
 
-    bool operator==(const ExternValue&) const = default;
+    bool operator==(const ExternConstant&) const = default;
 
 private:
-    Value value;
+    Constant value;
 };
 
-struct ScopeValue {
-    static constexpr ScopeValue invalidValue() { return {}; }
-    static ScopeValue fromUint(uint32_t u) { return ScopeValue(Value::fromUint(u)); }
+struct ScopeConstant {
+    static constexpr ScopeConstant invalidValue() { return {}; }
+    static ScopeConstant fromUint(uint32_t u) { return ScopeConstant(Constant::fromUint(u)); }
 
-    constexpr explicit ScopeValue(Value value)
+    constexpr explicit ScopeConstant(Constant value)
         : value(value) {
-        VERIFY(value.kind() == ValueKind::Program || value.kind() == ValueKind::Namespace || value.kind() == ValueKind::Invalid);
+        VERIFY(value.kind() == ConstantKind::Program || value.kind() == ConstantKind::Namespace || value.kind() == ConstantKind::Invalid);
     }
-    constexpr ScopeValue(ProgramHandle prog)
+    constexpr ScopeConstant(ProgramHandle prog)
         : value(prog) { }
-    constexpr ScopeValue(NamespaceHandle ns)
+    constexpr ScopeConstant(NamespaceHandle ns)
         : value(ns) { }
 
-    constexpr ValueKind kind() const { return value.kind(); }
+    constexpr ConstantKind kind() const { return value.kind(); }
     constexpr ProgramHandle program() const { return value.program(); }
     constexpr NamespaceHandle nsHandle() const { return value.nsHandle(); }
 
     uint32_t toUint() const { return value.toUint(); }
 
-    bool operator==(const ScopeValue&) const = default;
+    bool operator==(const ScopeConstant&) const = default;
 
 private:
-    constexpr ScopeValue()
-        : value(INVALID_VALUE) { }
+    constexpr ScopeConstant()
+        : value(INVALID_CONSTANT) { }
 
-    Value value;
+    Constant value;
 };
-inline constexpr ScopeValue INVALID_SCOPE_VALUE = ScopeValue::invalidValue();
+inline constexpr ScopeConstant INVALID_SCOPE_CONSTANT = ScopeConstant::invalidValue();
 
 enum class ReferenceExpressionKind : uint8_t {
     Parameter,
@@ -181,7 +181,7 @@ enum class ReferenceExpressionKind : uint8_t {
     LocalReference,
     MemberExpression,
     OpaqueExpression,
-    Invalid = INVALID_VALUE_KIND_INDEX,
+    Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 
 struct ReferenceExpression {
@@ -209,9 +209,9 @@ struct ReferenceExpression {
         VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
         return id();
     }
-    constexpr Value copyTemplateParameter() const {
+    constexpr Constant copyTemplateParameter() const {
         VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
-        return Value(ValueKind::CopyOfParameter, id());
+        return Constant(ConstantKind::CopyOfParameter, id());
     }
     constexpr int_t localReferenceIndex() const {
         VERIFY(kind() == ReferenceExpressionKind::LocalReference);
@@ -224,28 +224,28 @@ struct ReferenceExpression {
 
     constexpr bool operator==(const ReferenceExpression&) const = default;
 
-    uint32_t idBits : (32 - VALUE_KIND_BITS);
-    uint32_t kindBits : VALUE_KIND_BITS;
+    uint32_t idBits : (32 - CONSTANT_KIND_BITS);
+    uint32_t kindBits : CONSTANT_KIND_BITS;
 };
 
-inline constexpr ReferenceExpression INVALID_REFERENCE_EXPRESSION = { ReferenceExpressionKind::Invalid, MAX_VALUE_ID };
+inline constexpr ReferenceExpression INVALID_REFERENCE_EXPRESSION = { ReferenceExpressionKind::Invalid, MAX_CONSTANT_ID };
 
-struct ValueOrReferenceExpression {
-    static constexpr ValueOrReferenceExpression invalidValue() { return {}; }
+struct ConstantOrReferenceExpression {
+    static constexpr ConstantOrReferenceExpression invalidValue() { return {}; }
 
-    constexpr ValueOrReferenceExpression(Value value)
+    constexpr ConstantOrReferenceExpression(Constant value)
         : idBits(value.idBits), kindBits(value.kindBits), isRefBit(0) {
-        VERIFY(value.kindBits < INVALID_VALUE_KIND_INDEX / 2);
+        VERIFY(value.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
-    constexpr ValueOrReferenceExpression(ReferenceExpression expr)
+    constexpr ConstantOrReferenceExpression(ReferenceExpression expr)
         : idBits(expr.idBits), kindBits(expr.kindBits), isRefBit(1) {
-        VERIFY(expr.kindBits < INVALID_VALUE_KIND_INDEX / 2);
+        VERIFY(expr.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
     constexpr bool isReference() const { return isRefBit != 0; }
-    constexpr bool isValue() const { return !isReference(); }
-    Value value() const {
-        VERIFY(isValue());
-        return std::bit_cast<Value>(*this);
+    constexpr bool isConstant() const { return !isReference(); }
+    Constant constant() const {
+        VERIFY(isConstant());
+        return std::bit_cast<Constant>(*this);
     }
     constexpr ReferenceExpression reference() const {
         VERIFY(isReference());
@@ -254,15 +254,15 @@ struct ValueOrReferenceExpression {
         return std::bit_cast<ReferenceExpression>(tmp);
     }
 
-    constexpr bool operator==(const ValueOrReferenceExpression&) const = default;
+    constexpr bool operator==(const ConstantOrReferenceExpression&) const = default;
 
-    uint32_t idBits : (32 - VALUE_KIND_BITS);
-    uint32_t kindBits : VALUE_KIND_BITS - 1;
+    uint32_t idBits : (32 - CONSTANT_KIND_BITS);
+    uint32_t kindBits : CONSTANT_KIND_BITS - 1;
     uint32_t isRefBit : 1;
 
 private:
-    constexpr ValueOrReferenceExpression()
-        : idBits(MAX_VALUE_ID), kindBits(INVALID_VALUE_KIND_INDEX / 2), isRefBit(1) { }
+    constexpr ConstantOrReferenceExpression()
+        : idBits(MAX_CONSTANT_ID), kindBits(INVALID_CONSTANT_KIND_INDEX / 2), isRefBit(1) { }
 };
 
 }
@@ -275,26 +275,26 @@ struct optional_traits<sema::NamespaceHandle> {
     static constexpr sema::NamespaceHandle empty_value = {};
 };
 template<>
-struct optional_traits<sema::Value> {
-    static constexpr sema::Value empty_value = sema::INVALID_VALUE;
+struct optional_traits<sema::Constant> {
+    static constexpr sema::Constant empty_value = sema::INVALID_CONSTANT;
 };
 template<>
 struct optional_traits<sema::Type> {
-    static constexpr sema::Type empty_value = (sema::Type)sema::INVALID_VALUE;
+    static constexpr sema::Type empty_value = (sema::Type)sema::INVALID_CONSTANT;
 };
 template<>
-struct optional_traits<sema::ExternValue> {
-    static constexpr sema::ExternValue empty_value = sema::INVALID_VALUE;
+struct optional_traits<sema::ExternConstant> {
+    static constexpr sema::ExternConstant empty_value = sema::INVALID_CONSTANT;
 };
 template<>
-struct optional_traits<sema::ScopeValue> {
-    static constexpr sema::ScopeValue empty_value = sema::INVALID_SCOPE_VALUE;
+struct optional_traits<sema::ScopeConstant> {
+    static constexpr sema::ScopeConstant empty_value = sema::INVALID_SCOPE_CONSTANT;
 };
 template<>
 struct optional_traits<sema::ReferenceExpression> {
     static constexpr sema::ReferenceExpression empty_value = sema::INVALID_REFERENCE_EXPRESSION;
 };
 template<>
-struct optional_traits<sema::ValueOrReferenceExpression> {
-    static constexpr sema::ValueOrReferenceExpression empty_value = sema::ValueOrReferenceExpression::invalidValue();
+struct optional_traits<sema::ConstantOrReferenceExpression> {
+    static constexpr sema::ConstantOrReferenceExpression empty_value = sema::ConstantOrReferenceExpression::invalidValue();
 };

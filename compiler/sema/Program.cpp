@@ -35,21 +35,21 @@ std::strong_ordering MemberPointerSet::compare(Context& context, ProgramHandle p
     return Util(context, program).compare(a, b);
 }
 
-Value Program::addParameterize(Context& context, Parameterize para) {
+Constant Program::addParameterize(Context& context, Parameterize para) {
     VERIFY(!para.arguments.empty());
     auto id = parameterizes.get(context, context.programHandle(this), para);
-    return Value(ValueKind::Parameterize, id);
+    return Constant(ConstantKind::Parameterize, id);
 }
 
-Value Program::addRemoteExpression(Context& context, RemoteExpression expr) {
-    VERIFY(expr.expression.kind() == ValueKind::Expression);
+Constant Program::addRemoteExpression(Context& context, RemoteExpression expr) {
+    VERIFY(expr.expression.kind() == ConstantKind::Expression);
     auto id = remoteExpressions.get(context, context.programHandle(this), expr);
-    return Value(ValueKind::RemoteExpression, id);
+    return Constant(ConstantKind::RemoteExpression, id);
 }
 
-Value Program::addMemberPointer(Context& context, MemberPointer ptr) {
+Constant Program::addMemberPointer(Context& context, MemberPointer ptr) {
     auto id = memberPointers.get(context, context.programHandle(this), ptr);
-    return Value(ValueKind::MemberPointer, id);
+    return Constant(ConstantKind::MemberPointer, id);
 }
 
 ReferenceExpression Program::addMemberReferenceExpression(MemberReferenceExpression e) {
@@ -65,8 +65,8 @@ int_t Program::importInstructions(Opcode headerCode, std::span<const Instruction
     return offset;
 }
 
-Value Program::addExpression(std::span<const Instruction> expr) {
-    return Value(ValueKind::Expression, importInstructions(Opcode::ExpressionHeader, expr));
+Constant Program::addExpression(std::span<const Instruction> expr) {
+    return Constant(ConstantKind::Expression, importInstructions(Opcode::ExpressionHeader, expr));
 }
 
 }

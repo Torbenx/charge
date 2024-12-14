@@ -87,7 +87,7 @@ void Generator::visitTemplateParameters() {
         VERIFY(!explicitParameter.name.empty());
 
         program->parameters.push_back(explicitParameter);
-        parameterTypes.push_back(verifyType((Value)explicitParameter.type));
+        parameterTypes.push_back(verifyType((Constant)explicitParameter.type));
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -102,7 +102,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':', but there is currently no token for that
         visitExpression();
         contextualToType(conversionLocation);
-        variableType = verifyType(makeExpressionValue());
+        variableType = verifyType(makeExpressionConstant());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
         variableType = verifyType(newImplicitParameter(builtins::type_type).copyTemplateParameter());
@@ -126,7 +126,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         state.copyParameters(program->parameters.size());
         implicitCastTo(assignLocation, state, type);
         VERIFY(state.isComplete());
-        type = verifyType(fold(state.toFoldBase(INVALID_VALUE), type));
+        type = verifyType(fold(state.toFoldBase(INVALID_CONSTANT), type));
 
         hasInitializer = true;
     }
@@ -154,9 +154,9 @@ Program::Parameter Generator::visitTemplateParameter() {
     advance();
 
     auto info = visitVariableDeclaration(true);
-    std::optional<Value> initializer;
+    std::optional<Constant> initializer;
     if (info.hasInitializer)
-        initializer = makeExpressionValue();
+        initializer = makeExpressionConstant();
     return { name, info.type, initializer };
 }
 
@@ -169,7 +169,7 @@ void Generator::visitStaticVariableDeclaration() {
     program->setType(info.type);
     if (program->kind() == ProgramKind::Value) {
         auto* valueProgram = cast<ValueProgram>(program);
-        valueProgram->setValue(makeExpressionValue());
+        valueProgram->setValue(makeExpressionConstant());
     }
 }
 
@@ -213,7 +213,7 @@ void Generator::visitFunctionDeclaration() {
             advance();
             visitExpression();
             contextualToType(conversionLocation);
-            program->setType(verifyType(makeExpressionValue()));
+            program->setType(verifyType(makeExpressionConstant()));
         } else {
             // TODO: Implement return type deduction
             VERIFY_NOT_REACHED();
@@ -240,14 +240,14 @@ void Generator::visitTypeDeclaration() {
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
-        VERIFY(tok->data() == Value(ValueKind::Invalid, i).toUint());
+        VERIFY(tok->data() == Constant(ConstantKind::Invalid, i).toUint());
         RuntimeParameterKind newKind = tok->kind() == Token::HasMemberDecl ? RuntimeParameterKind::HasMember : RuntimeParameterKind::Member;
         advance();
 
         SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
         visitExpression();
         contextualToType(conversionLocation);
-        Type type = verifyType(makeExpressionValue());
+        Type type = verifyType(makeExpressionConstant());
 
         member = RuntimeParameter(newKind, member.name, type, member.location());
     }

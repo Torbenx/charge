@@ -15,35 +15,35 @@ Namespace* Util::get(NamespaceHandle progHandle) {
     return context.getNamespace(program->translate(progHandle));
 }
 
-std::strong_ordering Util::compare(Value a, Value b) {
+std::strong_ordering Util::compare(Constant a, Constant b) {
     auto kindOrdering = a.kind() <=> b.kind();
     if (kindOrdering != 0)
         return kindOrdering;
 
     switch (a.kind()) {
-        case ValueKind::Program:
+        case ConstantKind::Program:
             return compare(a.program(), b.program());
-        case ValueKind::Namespace:
+        case ConstantKind::Namespace:
             return compare(a.nsHandle(), b.nsHandle());
-        case ValueKind::TemplateSignature$Program:
+        case ConstantKind::TemplateSignature$Program:
             return compare(a.templateSignatureProgram(), b.templateSignatureProgram());
-        case ValueKind::TemplateSignature$Parameterize:
-            return compare(a.templateSignatureBaseValue(), b.templateSignatureBaseValue());
-        case ValueKind::FunctionSignature$Program:
+        case ConstantKind::TemplateSignature$Parameterize:
+            return compare(a.templateSignatureBaseConstant(), b.templateSignatureBaseConstant());
+        case ConstantKind::FunctionSignature$Program:
             return compare(a.functionSignatureProgram(), b.functionSignatureProgram());
-        case ValueKind::FunctionSignature$Parameterize:
-            return compare(a.functionSignatureBaseValue(), b.functionSignatureBaseValue());
-        case ValueKind::BooleanLiteral:
+        case ConstantKind::FunctionSignature$Parameterize:
+            return compare(a.functionSignatureBaseConstant(), b.functionSignatureBaseConstant());
+        case ConstantKind::BooleanLiteral:
             return a.booleanValue() <=> b.booleanValue();
-        case ValueKind::MemberPointer:
+        case ConstantKind::MemberPointer:
             return compare(program->getMemberPointer(a), program->getMemberPointer(b));
-        case ValueKind::Parameterize:
+        case ConstantKind::Parameterize:
             return program->compareParameterizes(a, b);
-        case ValueKind::Expression:
+        case ConstantKind::Expression:
             return a.expressionIndex() <=> b.expressionIndex();
-        case ValueKind::RemoteExpression:
+        case ConstantKind::RemoteExpression:
             return compare(program->getRemoteExpression(a), program->getRemoteExpression(b));
-        case ValueKind::CopyOfParameter:
+        case ConstantKind::CopyOfParameter:
             return a.parameterIndex() <=> b.parameterIndex();
         default:
             VERIFY_NOT_REACHED();
@@ -96,7 +96,7 @@ std::strong_ordering Util::compare(RemoteExpression a, RemoteExpression b) {
     if (baseOrdering != 0)
         return baseOrdering;
 
-    return Value(a.expression).expressionIndex() <=> Value(b.expression).expressionIndex();
+    return Constant(a.expression).expressionIndex() <=> Constant(b.expression).expressionIndex();
 }
 
 }

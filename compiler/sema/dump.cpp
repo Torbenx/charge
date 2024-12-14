@@ -28,28 +28,28 @@ struct Dumper {
         output += '\n';
     }
 
-    std::string formatScopeValue(ScopeValue value) {
-        if (value.kind() == ValueKind::Program)
+    std::string formatScopeConstant(ScopeConstant value) {
+        if (value.kind() == ConstantKind::Program)
             return formatProgram(value.program());
-        if (value.kind() == ValueKind::Namespace)
+        if (value.kind() == ConstantKind::Namespace)
             return formatNamespace(value.nsHandle());
         return "<invalid scope value>";
     }
     std::string formatProgram(ProgramHandle progHandle) {
         Program* prog = context.program(progHandle);
         std::string name(context.wordTable.view(prog->name()));
-        auto parentValue = prog->translate(prog->parent());
-        if (parentValue.kind() == ValueKind::Program)
-            return formatProgram(parentValue.program()) + "::" + name;
+        auto parent = prog->translate(prog->parent());
+        if (parent.kind() == ConstantKind::Program)
+            return formatProgram(parent.program()) + "::" + name;
 
-        VERIFY(parentValue.kind() == ValueKind::Namespace);
-        auto path = formatNamespaceInternal(parentValue.nsHandle());
+        VERIFY(parent.kind() == ConstantKind::Namespace);
+        auto path = formatNamespaceInternal(parent.nsHandle());
         if (path.empty())
             return name;
         return path + "::" + name;
     }
     std::string formatNamespaceInternal(NamespaceHandle nsHandle) {
-        Namespace* ns = context.getNamespace(Value(nsHandle).nsHandle());
+        Namespace* ns = context.getNamespace(Constant(nsHandle).nsHandle());
         if (ns->name.empty())
             return {};
         std::string name(context.wordTable.view(ns->name));
@@ -66,39 +66,39 @@ struct Dumper {
             return "<global namespace>";
         return result;
     }
-    std::string formatValue(Value v) {
-        return formatValue(program, v);
+    std::string formatConstant(Constant v) {
+        return formatConstant(program, v);
     }
-    std::string formatValue(Program* prog, Value v) {
-        if (v == INVALID_VALUE)
+    std::string formatConstant(Program* prog, Constant v) {
+        if (v == INVALID_CONSTANT)
             return "<invalid>";
         std::string result;
         switch (v.kind()) {
-        case ValueKind::Program:
+        case ConstantKind::Program:
             return formatProgram(prog->translate(v.program()));
-        case ValueKind::Namespace:
+        case ConstantKind::Namespace:
             return formatNamespace(prog->translate(v.nsHandle()));
-        case ValueKind::TemplateSignature$Program:
-        case ValueKind::TemplateSignature$Parameterize:
-            return "templsig(" + formatValue(prog, v.templateSignatureBaseValue()) + ")";
-        case ValueKind::FunctionSignature$Program:
-        case ValueKind::FunctionSignature$Parameterize:
-            return "fnsig(" + formatValue(prog, v.functionSignatureBaseValue()) + ")";
-        case ValueKind::BooleanLiteral:
+        case ConstantKind::TemplateSignature$Program:
+        case ConstantKind::TemplateSignature$Parameterize:
+            return "templsig(" + formatConstant(prog, v.templateSignatureBaseConstant()) + ")";
+        case ConstantKind::FunctionSignature$Program:
+        case ConstantKind::FunctionSignature$Parameterize:
+            return "fnsig(" + formatConstant(prog, v.functionSignatureBaseConstant()) + ")";
+        case ConstantKind::BooleanLiteral:
             return v.booleanValue() ? "true" : "false";
-        case ValueKind::Expression:
+        case ConstantKind::Expression:
             result += "e";
             break;
-        case ValueKind::Parameterize:
+        case ConstantKind::Parameterize:
             result += "p";
             break;
-        case ValueKind::RemoteExpression:
+        case ConstantKind::RemoteExpression:
             result += "re";
             break;
-        case ValueKind::MemberPointer:
+        case ConstantKind::MemberPointer:
             result += "m";
             break;
-        case ValueKind::CopyOfParameter:
+        case ConstantKind::CopyOfParameter:
             result += '#';
             break;
         default:
@@ -142,7 +142,7 @@ struct Dumper {
         const auto& member = parentProg->runtimeParameters[pointer.memberIndex];
         if (member.name.empty()) {
             VERIFY(member.kind() == RuntimeParameterKind::HasMember);
-            return "(has " + formatValue(parentProg, member.type()) + ")";
+            return "(has " + formatConstant(parentProg, member.type()) + ")";
         } else {
             return (std::string)context.wordTable.view(member.name);
         }
@@ -152,26 +152,26 @@ struct Dumper {
 void Dumper::dumpInstruction(Instruction inst) {
     std::stringstream line, info;
     if (isExpression(inst.opcode()))
-        line << "[" << formatValue(inst.u.expr.type) << "]";
+        line << "[" << formatConstant(inst.u.expr.type) << "]";
 
     line << nameString(inst.opcode());
     switch (inst.opcode()) {
     case Opcode::VarDecl: {
         auto decl = inst.u.decl;
-        info << "[" << formatValue(decl.type) << "]r" << decl.localValueIndex;
+        info << "[" << formatConstant(decl.type) << "]r" << decl.localValueIndex;
         break;
     }
     case Opcode::Reference:
         info << formatReferenceExpression(inst.u.expr.u.referenceExpr);
         break;
     case Opcode::Constant:
-        info << formatValue(inst.u.expr.u.constant);
+        info << formatConstant(inst.u.expr.u.constant);
         break;
     case Opcode::Call:
-        info << formatValue(inst.u.expr.u.callTarget);
+        info << formatConstant(inst.u.expr.u.callTarget);
         break;
     case Opcode::RMemberAccess:
-        info << formatValue(inst.u.expr.u.memberPointer);
+        info << formatConstant(inst.u.expr.u.memberPointer);
         break;
     case Opcode::Jump:
     case Opcode::JumpIf:
@@ -192,44 +192,44 @@ void Dumper::dumpProgram(Program* prog) {
     this->program = prog;
     dumpLine(formatProgram(context.programHandle(prog)) + ":");
     if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
-        dumpLine("parent = " + formatScopeValue(prog->translate(prog->parent())));
+        dumpLine("parent = " + formatScopeConstant(prog->translate(prog->parent())));
     }
     switch (prog->kind()) {
     case ProgramKind::Value:
-        dumpLine("type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
-        dumpLine("value = " + formatValue(Value::fromUint(prog->m_subClassData)));
+        dumpLine("type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
+        dumpLine("value = " + formatConstant(Constant::fromUint(prog->m_subClassData)));
         break;
     case ProgramKind::Object:
-        dumpLine("object-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+        dumpLine("object-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         break;
     case ProgramKind::Function:
-        dumpLine("return-type = " + formatValue((Value)prog->m_type.value_or(INVALID_VALUE)));
+        dumpLine("return-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         // dumpNode(cast<FunctionProgram>(prog)->body(), "body = ");
         break;
     default:
         break;
     }
-    for (Value value : std::views::join(std::array { program->parameterizeValues(), program->memberPointerValues(), program->remoteExpressionValues() })) {
+    for (Constant value : std::views::join(std::array { program->parameterizeConstants(), program->memberPointerConstants(), program->remoteExpressionConstants() })) {
         std::ostringstream line;
-        line << formatValue(value) << " = ";
+        line << formatConstant(value) << " = ";
         switch (value.kind()) {
-        case ValueKind::Parameterize: {
+        case ConstantKind::Parameterize: {
             auto parameterize = program->getParameterize(value);
             line << formatProgram(parameterize.base) << "{";
             for (int_t i = 0; i < (int_t)parameterize.arguments.size() - 1; i++)
-                line << formatValue(parameterize.arguments[i]) << ", ";
-            line << formatValue(parameterize.arguments.back()) << "}";
+                line << formatConstant(parameterize.arguments[i]) << ", ";
+            line << formatConstant(parameterize.arguments.back()) << "}";
             break;
         }
-        case ValueKind::RemoteExpression: {
+        case ConstantKind::RemoteExpression: {
             auto rExpr = program->getRemoteExpression(value);
-            VERIFY(rExpr.expression.kind() == ValueKind::Expression);
-            line << formatValue(rExpr.base) << "/e" << rExpr.expression.id();
+            VERIFY(rExpr.expression.kind() == ConstantKind::Expression);
+            line << formatConstant(rExpr.base) << "/e" << rExpr.expression.id();
             break;
         }
-        case ValueKind::MemberPointer: {
+        case ConstantKind::MemberPointer: {
             auto pointer = program->getMemberPointer(value);
-            line << formatValue(pointer.parentType) << "." << formatMember(prog, pointer);
+            line << formatConstant(pointer.parentType) << "." << formatMember(prog, pointer);
             break;
         }
         default:
