@@ -58,9 +58,9 @@ struct DeductionState {
         , explicitArgumentsMap(parameterCount, false)
         , arguments(parameterCount, INVALID_VALUE) { }
 
-    void identityMap(int_t count) {
+    void copyParameters(int_t count) {
         for (int_t i = 0; i < count; i++)
-            explicitArgument(i, Value(ValueKind::Parameter, i));
+            explicitArgument(i, Value(ValueKind::CopyOfParameter, i));
     }
 
     void explicitArgument(int_t i, Value value) {
@@ -85,15 +85,15 @@ struct DeductionState {
     }
 };
 
-constexpr std::vector<Value> identityParameterMap(int_t parameterCount) {
+constexpr std::vector<Value> copyParameters(int_t parameterCount) {
     std::vector<Value> result;
     result.reserve(parameterCount);
     for (int_t i = 0; i < parameterCount; i++)
-        result.push_back(Value(ValueKind::Parameter, i));
+        result.push_back(Value(ValueKind::CopyOfParameter, i));
     return result;
 }
-constexpr std::vector<Value> identityParameterMap(Program* prog) {
-    return identityParameterMap(prog->parameters.size());
+constexpr std::vector<Value> copyParameters(Program* prog) {
+    return copyParameters(prog->parameters.size());
 }
 
 #define ENUMERATE_LOOKUP_CONTEXT_KINDS \
@@ -286,8 +286,6 @@ struct Generator : Util {
     Value fold(Value base, ExternValue v);
     Value fold(FoldBase base, ExternValue v);
     bool staticMatch(DeductionState& state, ExternValue pValue, Value aValue);
-    FoldBase selfFold();
-    DeductionState selfDeduction();
 
     RuntimeParameter member(MemberPointer pointer);
     Type memberType(MemberPointer pointer);
@@ -318,14 +316,16 @@ struct Generator : Util {
 
     Value inheriteParameters(ScopeValue parent);
 
-    Value addParameter(Word name, Type type, std::optional<Value> defaultValue);
-    Value addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
-    Value addInheritedParameter(Type type, std::optional<Value> defaultValue);
-    Value newImplicitParameter(Type type);
+    ReferenceExpression addParameter(Word name, Type type, std::optional<Value> defaultValue);
+    ReferenceExpression addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue);
+    ReferenceExpression addInheritedParameter(Type type, std::optional<Value> defaultValue);
+    ReferenceExpression newImplicitParameter(Type type);
 
-    void contextualToType();
-    void contextualToBool();
-    void implicitCastTo(DeductionState& state, ExternValue);
+    void makeRValue(SourceLocation);
+
+    void contextualToType(SourceLocation);
+    void contextualToBool(SourceLocation);
+    void implicitCastTo(SourceLocation, DeductionState&, ExternValue);
 
     void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);

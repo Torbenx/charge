@@ -85,7 +85,7 @@ Value Generator::makeExpressionValue() {
         expressionStack.pop_back();
         return result;
     }
-    auto newEnd  = instructionScratch.begin() + (expressionStack.end() - 2)->endOffset;
+    auto newEnd = instructionScratch.begin() + (expressionStack.end() - 2)->endOffset;
     Value result = program->addExpression({ newEnd, instructionScratch.end() });
     instructionScratch.erase(newEnd, instructionScratch.end());
     expressionStack.pop_back();
@@ -139,11 +139,11 @@ Value Generator::inheriteParameters(ScopeValue parent) {
     // inherite parameters
     int_t parameterCount = parentProg->parameters.size();
     VERIFY(parameterCount > 0);
-    std::vector<Value> arguments(parameterCount, INVALID_VALUE);
+    std::vector<Value> parentArguments(parameterCount, INVALID_VALUE);
     for (int_t i = 0; i < parameterCount; i++)
-        arguments[i] = addInheritedParameter((Type)INVALID_VALUE, std::nullopt);
+        parentArguments[i] = addInheritedParameter((Type)INVALID_VALUE, std::nullopt).copyTemplateParameter();
 
-    Value parentValue = program->addParameterize(context, { parentHandle, arguments });
+    Value parentValue = program->addParameterize(context, { parentHandle, parentArguments });
     FoldBase base = asFoldBase(parentValue);
     for (int_t i = 0; i < parameterCount; i++) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
@@ -206,14 +206,14 @@ void Generator::generateIdentifierExpr() {
         }
         case LookupContext::Kind::Type: {
             TypeProgram* prog = lookupCtx.getType();
-            auto result = lookupInType(prog, identityParameterMap(prog), name);
+            auto result = lookupInType(prog, copyParameters(prog), name);
             if (result.has_value()) {
                 emitConstantExpr(tok->location(), result.value());
                 return;
             }
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitConstantExpr(tok->location(), Value(ValueKind::Parameter, i));
+                    emitReferenceExpr(tok->location(), ReferenceExpression(ReferenceExpressionKind::TemplateParameter, i));
                     return;
                 }
             }
@@ -223,7 +223,7 @@ void Generator::generateIdentifierExpr() {
             Program* prog = lookupCtx.getTemplateParameters();
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitConstantExpr(tok->location(), Value(ValueKind::Parameter, i));
+                    emitReferenceExpr(tok->location(), ReferenceExpression(ReferenceExpressionKind::TemplateParameter, i));
                     return;
                 }
             }
@@ -261,6 +261,7 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
             int_t pIndex = state.program->inheritedParameterCount;
             int_t aIndex = 0;
             for (; tok->kind() == Token::CallArgument; aIndex++, pIndex++) {
+                SourceLocation conversionLocation = tok->location();
                 advance();
 
                 // Find next explicit parameter
@@ -270,7 +271,7 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
 
                 ExternValue pType = state.program->parameters[pIndex].type;
                 visitExpression();
-                implicitCastTo(state, pType);
+                implicitCastTo(conversionLocation, state, pType);
                 state.explicitArgument(pIndex, makeExpressionValue());
             }
             VERIFY(tok->kind() == Token::EmptyNode);
@@ -317,7 +318,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             Program* baseProg = context.program(baseValue.program());
             VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
-            state.identityMap(baseProg->inheritedParameterCount);
+            state.copyParameters(baseProg->inheritedParameterCount);
             popExpression();
             return { std::move(state) };
         } else if (baseValue.kind() == ValueKind::Parameterize) {
@@ -343,9 +344,10 @@ void Generator::generateCallExpr(CallTarget target) {
         int_t argumentIndex = 0;
         const auto& parameters = callableProg->runtimeParameters;
         while (tok->kind() == Token::CallArgument) {
+            SourceLocation conversionLocation = tok->location();
             advance();
             visitExpression();
-            implicitCastTo(state, parameters[argumentIndex].type());
+            implicitCastTo(conversionLocation, state, parameters[argumentIndex].type());
             argumentIndex += 1;
         }
         VERIFY(tok->kind() == Token::EmptyNode);
@@ -353,7 +355,7 @@ void Generator::generateCallExpr(CallTarget target) {
 
         VERIFY(state.isComplete());
         Value callTarget = makeParameterize(state.programHandle, state.arguments);
-        Type returnType = verifyType(fold(callTarget, callableProg->returnType()));
+        Type returnType = verifyType(callableProg->kind() == ProgramKind::Type ? callTarget : fold(callTarget, cast<FunctionProgram>(callableProg)->returnType()));
         emitExpression(Opcode::Call, SourceLocation(), parameters.size(), returnType, { .callTarget = callTarget });
         return;
     }
@@ -427,12 +429,6 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
         emitReferenceExpr(tok->location(), reference);
         return;
     }
-    if (origExpr.category() == InstructionCategory::PValue) {
-        emitExpression(Opcode::PureInstantiation, tok->location(), 1, origExpr.type(), { .empty {} });
-        emitMemberAccessExpr(state);
-        emitExpression(Opcode::Purify, tok->location(), 1, topExpression().type(), { .empty {} });
-        VERIFY_NOT_REACHED();
-    }
 
     VERIFY(origExpr.category() == InstructionCategory::RValue);
     forEachMemberPointer([&](Type memberType, MemberPointer pointer) {
@@ -472,18 +468,38 @@ void Generator::generateMemberAccessExpr() {
     VERIFY(state.emitted);
 }
 
-void Generator::contextualToType() {
-    auto state = selfDeduction();
-    implicitCastTo(state, builtins::type_type);
+void Generator::makeRValue(SourceLocation location) {
+    auto expr = topExpression();
+    if (expr.category() == InstructionCategory::RValue)
+        return;
+
+    if (expr.opcode() == Opcode::Reference) {
+        auto ref = expr.data().referenceExpr;
+        if (ref.kind() == ReferenceExpressionKind::TemplateParameter) {
+            popExpression();
+            emitConstantExpr(expr.location(), Value(ValueKind::CopyOfParameter, ref.templateParameterIndex()));
+            return;
+        }
+    }
+
+    emitExpression(Opcode::ImplicitCopy, location, 1, expr.type(), { .empty {} });
 }
 
-void Generator::contextualToBool() {
-    auto state = selfDeduction();
-    implicitCastTo(state, builtins::bool_type);
+void Generator::contextualToType(SourceLocation location) {
+    // We can get away with this state because parameter-side value is so simple
+    DeductionState state(program, programHandle, 0);
+    implicitCastTo(location, state, builtins::type_type);
 }
 
-void Generator::implicitCastTo(DeductionState& state, ExternValue pType) {
+void Generator::contextualToBool(SourceLocation location) {
+    // We can get away with this state because parameter-side value is so simple
+    DeductionState state(program, programHandle, 0);
+    implicitCastTo(location, state, builtins::bool_type);
+}
+
+void Generator::implicitCastTo(SourceLocation location, DeductionState& state, ExternValue pType) {
     bool sameType = staticMatch(state, pType, topExpression().type());
+    makeRValue(location);
     VERIFY(sameType);
 }
 
@@ -502,50 +518,29 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Value base) {
         Program* baseProg = context.program(param.base);
         if (baseProg->parameters.size() != param.arguments.size())
             return std::nullopt;
-        return FoldBase { context.program(param.base), param.base, base, asVector(param.arguments) };
+        return FoldBase { context.program(param.base), param.base, base, param.arguments };
     }
     return std::nullopt;
 }
 
-FoldBase Generator::selfFold() {
-    FoldBase base {
-        program,
-        programHandle,
-        INVALID_VALUE,
-        identityParameterMap(program),
-    };
-    return base;
-}
-
-DeductionState Generator::selfDeduction() {
-    DeductionState state(program, programHandle, program->parameters.size());
-    state.identityMap(program->parameters.size());
-    return state;
-}
-
 // pValue and aValue must be known to have the same type
 bool Generator::staticMatch(DeductionState& state, ExternValue pValue, Value aValue) {
-    if (pValue.kind() == ValueKind::Parameter) {
+    if (pValue.kind() == ValueKind::CopyOfParameter) {
         int_t index = pValue.id();
         if (state.arguments[index] == INVALID_VALUE) {
             state.arguments[index] = aValue;
             VERIFY(!state.isExplicitArgument(index));
-            return true;
-        }
-        if (state.program == program && pValue == state.arguments[index]) {
-            // TODO: This needs to be here to break recursion. But is it correct?
+        } else {
+            // TODO: In many cases this could determined right here by comparing state.arguments[index] and aValue.
+            //       This would require either a separate compare function or recursion with some weird DeductionState.
             state.equalities.add(context, program, state.program, { pValue, aValue });
-            return true;
         }
-        auto selfState = selfDeduction();
-        bool result = staticMatch(selfState, state.arguments[index], aValue);
-        state.equalities.unionWith(context, program, state.program, selfState.equalities);
-        return result;
+        return true;
     }
 
     if (pValue.kind() == ValueKind::Expression || pValue.kind() == ValueKind::RemoteExpression
         || aValue.kind() == ValueKind::Expression || aValue.kind() == ValueKind::RemoteExpression
-        || aValue.kind() == ValueKind::Parameter) {
+        || aValue.kind() == ValueKind::CopyOfParameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
         state.equalities.add(context, program, state.program, { pValue, aValue });
         return true;
@@ -610,7 +605,8 @@ Value Generator::fold(FoldBase base, ExternValue v) {
     switch (v.kind()) {
     case ValueKind::Program:
         return (Value)foldProgram(Value(v).program());
-    case ValueKind::Parameter:
+    case ValueKind::CopyOfParameter:
+        // TODO: Actually perform a copy?
         return base.arguments[v.id()];
     case ValueKind::Namespace:
         return (Value)base.program->translate(Value(v).nsHandle());
@@ -719,7 +715,7 @@ Type Generator::typeOf(Value value) {
         auto base = asFoldBase(rExpr.base);
         return verifyType(fold(base, base.program->getExpression(rExpr.expression).type()));
     }
-    case ValueKind::Parameter:
+    case ValueKind::CopyOfParameter:
         return parameterTypes[value.id()];
     case ValueKind::Parameterize: {
         auto para = program->getParameterize(value);
@@ -794,41 +790,43 @@ Type Generator::verifyType(Value value) {
 Type Generator::referencedType(ReferenceExpression expr) {
     switch (expr.kind()) {
     case ReferenceExpressionKind::Parameter:
-        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterId()].type();
+        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
+    case ReferenceExpressionKind::TemplateParameter:
+        return parameterTypes[expr.templateParameterIndex()];
     case ReferenceExpressionKind::LocalVariable:
-        return localVariables[expr.localVaraibleId()].type;
+        return localVariables[expr.localVaraibleIndex()].type;
     case ReferenceExpressionKind::LocalReference:
-        return localReferences[expr.localReferenceId()].type;
+        return localReferences[expr.localReferenceIndex()].type;
     case ReferenceExpressionKind::MemberExpression: {
         auto memberExpr = program->getMemberReferenceExpression(expr);
         return memberType(memberExpr.memberPointer);
     }
     case ReferenceExpressionKind::OpaqueExpression:
-        return opaqueReferenceExpressions[expr.opaqueExpressionId()].type;
+        return opaqueReferenceExpressions[expr.opaqueExpressionIndex()].type;
     default:
         VERIFY_NOT_REACHED();
     }
 }
 
-Value Generator::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
+ReferenceExpression Generator::addParameter(Word name, Type type, std::optional<Value> defaultValue) {
     VERIFY(parameterTypes.size() == program->parameters.size());
     uint32_t parameterIndex = program->parameters.size();
     parameterTypes.push_back(type);
     program->parameters.push_back({ name, type, defaultValue });
-    return Value(ValueKind::Parameter, parameterIndex);
+    return ReferenceExpression(ReferenceExpressionKind::TemplateParameter, parameterIndex);
 }
 
-Value Generator::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
+ReferenceExpression Generator::addExplicitParameter(Word name, Type type, std::optional<Value> defaultValue) {
     return addParameter(name, type, defaultValue);
 }
 
-Value Generator::newImplicitParameter(Type type) {
+ReferenceExpression Generator::newImplicitParameter(Type type) {
     uint32_t parameterIndex = parameterTypes.size();
     parameterTypes.push_back(type);
-    return Value(ValueKind::Parameter, parameterIndex);
+    return ReferenceExpression(ReferenceExpressionKind::TemplateParameter, parameterIndex);
 }
 
-Value Generator::addInheritedParameter(Type type, std::optional<Value> defaultValue) {
+ReferenceExpression Generator::addInheritedParameter(Type type, std::optional<Value> defaultValue) {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
     program->inheritedParameterCount += 1;
     return addParameter(Word(), type, defaultValue);
@@ -859,7 +857,6 @@ struct BuiltinGenerator : Generator {
     }
 
     ~BuiltinGenerator() {
-        program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
         program->completeSignatureCheck();
         context.popScope();
     }

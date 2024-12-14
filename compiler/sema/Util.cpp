@@ -43,7 +43,7 @@ std::strong_ordering Util::compare(Value a, Value b) {
             return a.expressionIndex() <=> b.expressionIndex();
         case ValueKind::RemoteExpression:
             return compare(program->getRemoteExpression(a), program->getRemoteExpression(b));
-        case ValueKind::Parameter:
+        case ValueKind::CopyOfParameter:
             return a.parameterIndex() <=> b.parameterIndex();
         default:
             VERIFY_NOT_REACHED();

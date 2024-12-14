@@ -98,7 +98,7 @@ struct Dumper {
         case ValueKind::MemberPointer:
             result += "m";
             break;
-        case ValueKind::Parameter:
+        case ValueKind::CopyOfParameter:
             result += '#';
             break;
         default:
@@ -115,6 +115,9 @@ struct Dumper {
         switch (e.kind()) {
         case ReferenceExpressionKind::Parameter:
             result += "arg";
+            break;
+        case ReferenceExpressionKind::TemplateParameter:
+            result += "#";
             break;
         case ReferenceExpressionKind::LocalVariable:
             result += "var";

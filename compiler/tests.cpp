@@ -134,7 +134,7 @@ struct ParameterExpr : CheckExpr {
         : parameterIndex(index) { }
 
     void check(Context&, Program*, Value value) const override {
-        VERIFY(value.kind() == ValueKind::Parameter);
+        VERIFY(value.kind() == ValueKind::CopyOfParameter);
         VERIFY((int_t)value.id() == parameterIndex);
     }
 };

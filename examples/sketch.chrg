@@ -409,3 +409,11 @@ fn refs5(ref u: unique T, ref s: shared T, ref c: const T): {
 
     ref sc: const{s, c} T = s;
 }
+
+fn refs6(u: &unique T, s: &shared T, c: &const T): {
+    let uu: &unique T = u;
+    let ss: &shared T = s;
+    let cc: &const T = c;
+
+    let sc: &const{s, c} T = s;
+}

@@ -30,6 +30,7 @@ struct Expression {
     InstructionCategory category() const { return categoryOf(opcode()); }
     ExpressionData data() const { return inst.u.expr.u; }
     Type type() const { return inst.u.expr.type; }
+    SourceLocation location() const { return inst.location(); }
 };
 
 struct ParameterizeData {
@@ -452,7 +453,6 @@ struct CallableProgram : Program {
         : Program(kind, name, parseLocation, rawParent, location) { }
 
     std::vector<RuntimeParameter> runtimeParameters;
-    ExternValue returnType() const { return m_type.value(); }
 };
 
 struct FunctionProgram : CallableProgram {
@@ -467,6 +467,7 @@ struct FunctionProgram : CallableProgram {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return getInstructions(m_subClassData, Opcode::FunctionHeader);
     }
+    ExternValue returnType() const { return m_type.value(); }
 };
 
 struct TypeProgram : CallableProgram, Scope {

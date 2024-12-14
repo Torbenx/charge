@@ -182,6 +182,7 @@ namespace parameter_expr_match: {
 template(T1: type, T2: type)
 struct blub: { }
 
+// expect-return-type #0
 template(T: type)
 fn target(b: blub{T, T}) -> T: { }
 

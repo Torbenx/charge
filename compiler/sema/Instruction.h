@@ -4,24 +4,21 @@
 
 namespace sema {
 
-#define ENUMERATE_SEMA_INSTRUCTION_OPCODES                             \
-    OP(Reference, LValue)                                              \
-    OP(Constant, PValue)                                               \
-    OP(Purify, PValue) /* RValue -> PValue */                          \
-    OP(Call, RValue)                                                   \
-    OP(RMemberAccess, RValue)                                          \
-    OP(ImplicitCopy, RValue) /* LValue -> RValue */                    \
-    OP(PureInstantiation, RValue) /* PValue -> RValue */               \
-    OP(VarDecl, Control)                                               \
-    OP(CompoundStmt, Control)                                          \
-    OP(Function, Control)                                              \
-    OP(JumpIf, Control)                                                \
-    OP(Jump, Control)                                                  \
-    OP(BeginScope, Control)                                            \
-    OP(EndScope, Control)                                              \
-    OP(Discard, Control)                                               \
-    OP(Deactivate, Control) /* Destory variables, discard references*/ \
-    OP(ExpressionHeader, Header)                                       \
+#define ENUMERATE_SEMA_INSTRUCTION_OPCODES                              \
+    OP(Reference, LValue)                                               \
+    OP(Constant, RValue)                                                \
+    OP(Call, RValue)                                                    \
+    OP(RMemberAccess, RValue)                                           \
+    OP(ImplicitCopy, RValue) /* LValue -> RValue */                     \
+    OP(VarDecl, Control)                                                \
+    OP(Function, Control)                                               \
+    OP(JumpIf, Control)                                                 \
+    OP(Jump, Control)                                                   \
+    OP(BeginScope, Control)                                             \
+    OP(EndScope, Control)                                               \
+    OP(Discard, Control)                                                \
+    OP(Deactivate, Control) /* Destory variables, discard references */ \
+    OP(ExpressionHeader, Header)                                        \
     OP(FunctionHeader, Header)
 
 enum class Opcode : uint8_t {
@@ -34,7 +31,6 @@ std::string_view nameString(Opcode opcode);
 enum class InstructionCategory : uint8_t {
     LValue,
     RValue,
-    PValue,
     Control,
     Header,
 };
@@ -54,7 +50,7 @@ inline InstructionCategory categoryOf(Opcode opcode) {
 }
 
 inline bool isExpression(Opcode opcode) {
-    return categoryOf(opcode) <= InstructionCategory::PValue;
+    return categoryOf(opcode) <= InstructionCategory::RValue;
 }
 
 union ExpressionData {

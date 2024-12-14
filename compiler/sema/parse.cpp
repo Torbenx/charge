@@ -99,15 +99,18 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
     if (tok->kind() != Token::AssignStmt) {
         // parse type
         wildcardMeaning = WildcardMeaning::ImplicitTemplate;
+        SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':', but there is currently no token for that
         visitExpression();
-        contextualToType();
+        contextualToType(conversionLocation);
         variableType = verifyType(makeExpressionValue());
         wildcardMeaning = WildcardMeaning::Error;
     } else {
-        variableType = verifyType(newImplicitParameter(builtins::type_type));
+        variableType = verifyType(newImplicitParameter(builtins::type_type).copyTemplateParameter());
     }
     Type type = variableType.value();
+
     VERIFY(tok->kind() == Token::AssignStmt);
+    SourceLocation assignLocation = tok->location();
     advance();
 
     bool hasInitializer = false;
@@ -120,8 +123,8 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
         visitExpression();
 
         DeductionState state(program, programHandle, parameterTypes.size());
-        state.identityMap(program->parameters.size());
-        implicitCastTo(state, type);
+        state.copyParameters(program->parameters.size());
+        implicitCastTo(assignLocation, state, type);
         VERIFY(state.isComplete());
         type = verifyType(fold(state.toFoldBase(INVALID_VALUE), type));
 
@@ -206,8 +209,10 @@ void Generator::visitFunctionDeclaration() {
         program->setType(topExpression().type());
     } else {
         if (tok->kind() == Token::ReturnType) {
+            SourceLocation conversionLocation = tok->location();
             advance();
             visitExpression();
+            contextualToType(conversionLocation);
             program->setType(verifyType(makeExpressionValue()));
         } else {
             // TODO: Implement return type deduction
@@ -239,14 +244,14 @@ void Generator::visitTypeDeclaration() {
         RuntimeParameterKind newKind = tok->kind() == Token::HasMemberDecl ? RuntimeParameterKind::HasMember : RuntimeParameterKind::Member;
         advance();
 
+        SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
         visitExpression();
-        contextualToType();
+        contextualToType(conversionLocation);
         Type type = verifyType(makeExpressionValue());
 
         member = RuntimeParameter(newKind, member.name, type, member.location());
     }
 
-    program->setType(verifyType(makeParameterize(programHandle, identityParameterMap(program))));
     tok = savedTok;
 }
 
@@ -290,7 +295,7 @@ void Generator::visitStatement() {
         if (tok->kind() == Token::IfStmt) {
             SourceLocation ifLoc = tok->location();
             advance();
-            contextualToBool();
+            contextualToBool(ifLoc);
 
             auto notTrueJump = emitJumpIf(ifLoc);
             auto ifScope = beginLocalScope(ifLoc);

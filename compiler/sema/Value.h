@@ -52,7 +52,7 @@ enum class ValueKind : uint8_t {
     Expression,
     RemoteExpression,
 
-    Parameter,
+    CopyOfParameter,
 
     Invalid = INVALID_VALUE_KIND_INDEX,
 };
@@ -107,7 +107,7 @@ struct Value {
         return id();
     }
     constexpr int_t parameterIndex() const {
-        VERIFY(kind() == ValueKind::Parameter);
+        VERIFY(kind() == ValueKind::CopyOfParameter);
         return id();
     }
     constexpr bool booleanValue() const {
@@ -176,6 +176,7 @@ inline constexpr ScopeValue INVALID_SCOPE_VALUE = ScopeValue::invalidValue();
 
 enum class ReferenceExpressionKind : uint8_t {
     Parameter,
+    TemplateParameter,
     LocalVariable,
     LocalReference,
     MemberExpression,
@@ -195,20 +196,28 @@ struct ReferenceExpression {
         : idBits(id), kindBits(std::to_underlying(kind)) { }
 
     constexpr ReferenceExpressionKind kind() const { return (ReferenceExpressionKind)kindBits; }
-    constexpr uint32_t id() const { return idBits; }
-    constexpr uint32_t localVaraibleId() const {
+    constexpr int_t id() const { return idBits; }
+    constexpr int_t localVaraibleIndex() const {
         VERIFY(kind() == ReferenceExpressionKind::LocalVariable);
         return id();
     }
-    constexpr uint32_t parameterId() const {
+    constexpr int_t parameterIndex() const {
         VERIFY(kind() == ReferenceExpressionKind::Parameter);
         return id();
     }
-    constexpr uint32_t localReferenceId() const {
+    constexpr int_t templateParameterIndex() const {
+        VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
+        return id();
+    }
+    constexpr Value copyTemplateParameter() const {
+        VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
+        return Value(ValueKind::CopyOfParameter, id());
+    }
+    constexpr int_t localReferenceIndex() const {
         VERIFY(kind() == ReferenceExpressionKind::LocalReference);
         return id();
     }
-    constexpr uint32_t opaqueExpressionId() const {
+    constexpr int_t opaqueExpressionIndex() const {
         VERIFY(kind() == ReferenceExpressionKind::OpaqueExpression);
         return id();
     }

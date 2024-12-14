@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __INTELLISENSE__
+    #pragma diag_suppress 28
+    #pragma diag_suppress 3133
+#endif
+
 #include <log.h>
 
 #include <cstdint>
