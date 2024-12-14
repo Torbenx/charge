@@ -57,7 +57,7 @@ union ExpressionData {
     Constant constant;
     Constant callTarget;
     Constant memberPointer;
-    ReferenceExpression referenceExpr;
+    Reference reference;
 
     struct {
     } empty;
@@ -66,7 +66,7 @@ union ExpressionData {
 union InstructionData {
     uint32_t blockSize;
     int32_t jumpDistance;
-    ReferenceExpression deactivateTarget;
+    Reference deactivateTarget;
 
     struct {
         Type type;

@@ -108,26 +108,26 @@ struct Dumper {
         return result;
     }
 
-    std::string formatReferenceExpression(ReferenceExpression e) {
-        if (e == INVALID_REFERENCE_EXPRESSION)
+    std::string formatReference(Reference e) {
+        if (e == INVALID_REFERENCE)
             return "<invalid>";
         std::string result;
         switch (e.kind()) {
-        case ReferenceExpressionKind::Parameter:
+        case ReferenceKind::Parameter:
             result += "arg";
             break;
-        case ReferenceExpressionKind::TemplateParameter:
+        case ReferenceKind::TemplateParameter:
             result += "#";
             break;
-        case ReferenceExpressionKind::LocalVariable:
+        case ReferenceKind::LocalVariable:
             result += "var";
             break;
-        case ReferenceExpressionKind::LocalReference:
+        case ReferenceKind::LocalReference:
             result += "ref";
             break;
-        case ReferenceExpressionKind::MemberExpression: {
-            auto memberExpr = program->getMemberReferenceExpression(e);
-            return formatReferenceExpression(memberExpr.base)
+        case ReferenceKind::MemberExpression: {
+            auto memberExpr = program->getMemberReference(e);
+            return formatReference(memberExpr.base)
                 + "." + formatMember(program, program->getMemberPointer(memberExpr.memberPointer));
         }
         default:
@@ -162,7 +162,7 @@ void Dumper::dumpInstruction(Instruction inst) {
         break;
     }
     case Opcode::Reference:
-        info << formatReferenceExpression(inst.u.expr.u.referenceExpr);
+        info << formatReference(inst.u.expr.u.reference);
         break;
     case Opcode::Constant:
         info << formatConstant(inst.u.expr.u.constant);
@@ -178,7 +178,7 @@ void Dumper::dumpInstruction(Instruction inst) {
         info << fmt::format("{:+}", inst.u.jumpDistance);
         break;
     case Opcode::Deactivate:
-        info << formatReferenceExpression(inst.u.deactivateTarget);
+        info << formatReference(inst.u.deactivateTarget);
         break;
     default:
         break;

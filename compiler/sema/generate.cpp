@@ -71,10 +71,10 @@ void Generator::emitConstantExpr(SourceLocation location, Constant value) {
     emitExpression(Opcode::Constant, location, 0, typeOf(value), { .constant = value });
 }
 
-void Generator::emitReferenceExpr(SourceLocation location, ReferenceExpression expr) {
+void Generator::emitReferenceExpr(SourceLocation location, Reference ref) {
     return emitExpression(
-        Opcode::Reference, location, 0, referencedType(expr),
-        { .referenceExpr = expr });
+        Opcode::Reference, location, 0, referencedType(ref),
+        { .reference = ref });
 }
 
 Constant Generator::makeExpressionConstant() {
@@ -213,7 +213,7 @@ void Generator::generateIdentifierExpr() {
             }
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitReferenceExpr(tok->location(), ReferenceExpression(ReferenceExpressionKind::TemplateParameter, i));
+                    emitReferenceExpr(tok->location(), Reference(ReferenceKind::TemplateParameter, i));
                     return;
                 }
             }
@@ -223,7 +223,7 @@ void Generator::generateIdentifierExpr() {
             Program* prog = lookupCtx.getTemplateParameters();
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitReferenceExpr(tok->location(), ReferenceExpression(ReferenceExpressionKind::TemplateParameter, i));
+                    emitReferenceExpr(tok->location(), Reference(ReferenceKind::TemplateParameter, i));
                     return;
                 }
             }
@@ -422,9 +422,9 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
 
     if (origExpr.opcode() == Opcode::Reference) {
         popExpression();
-        ReferenceExpression reference = origExpr.data().referenceExpr;
+        Reference reference = origExpr.data().reference;
         forEachMemberPointer([&](Type, MemberPointer pointer) {
-            reference = program->addMemberReferenceExpression({ reference, program->addMemberPointer(context, pointer) });
+            reference = program->addMemberReference({ reference, program->addMemberPointer(context, pointer) });
         });
         emitReferenceExpr(tok->location(), reference);
         return;
@@ -474,8 +474,8 @@ void Generator::makeRValue(SourceLocation location) {
         return;
 
     if (expr.opcode() == Opcode::Reference) {
-        auto ref = expr.data().referenceExpr;
-        if (ref.kind() == ReferenceExpressionKind::TemplateParameter) {
+        auto ref = expr.data().reference;
+        if (ref.kind() == ReferenceKind::TemplateParameter) {
             popExpression();
             emitConstantExpr(expr.location(), Constant(ConstantKind::CopyOfParameter, ref.templateParameterIndex()));
             return;
@@ -787,46 +787,46 @@ Type Generator::verifyType(Constant value) {
     }
 }
 
-Type Generator::referencedType(ReferenceExpression expr) {
+Type Generator::referencedType(Reference expr) {
     switch (expr.kind()) {
-    case ReferenceExpressionKind::Parameter:
+    case ReferenceKind::Parameter:
         return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
-    case ReferenceExpressionKind::TemplateParameter:
+    case ReferenceKind::TemplateParameter:
         return parameterTypes[expr.templateParameterIndex()];
-    case ReferenceExpressionKind::LocalVariable:
+    case ReferenceKind::LocalVariable:
         return localVariables[expr.localVaraibleIndex()].type;
-    case ReferenceExpressionKind::LocalReference:
+    case ReferenceKind::LocalReference:
         return localReferences[expr.localReferenceIndex()].type;
-    case ReferenceExpressionKind::MemberExpression: {
-        auto memberExpr = program->getMemberReferenceExpression(expr);
+    case ReferenceKind::MemberExpression: {
+        auto memberExpr = program->getMemberReference(expr);
         return memberType(memberExpr.memberPointer);
     }
-    case ReferenceExpressionKind::OpaqueExpression:
-        return opaqueReferenceExpressions[expr.opaqueExpressionIndex()].type;
+    case ReferenceKind::OpaqueExpression:
+        return opaqueReferences[expr.opaqueExpressionIndex()].type;
     default:
         VERIFY_NOT_REACHED();
     }
 }
 
-ReferenceExpression Generator::addParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Reference Generator::addParameter(Word name, Type type, std::optional<Constant> defaultValue) {
     VERIFY(parameterTypes.size() == program->parameters.size());
     uint32_t parameterIndex = program->parameters.size();
     parameterTypes.push_back(type);
     program->parameters.push_back({ name, type, defaultValue });
-    return ReferenceExpression(ReferenceExpressionKind::TemplateParameter, parameterIndex);
+    return Reference(ReferenceKind::TemplateParameter, parameterIndex);
 }
 
-ReferenceExpression Generator::addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Reference Generator::addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue) {
     return addParameter(name, type, defaultValue);
 }
 
-ReferenceExpression Generator::newImplicitParameter(Type type) {
+Reference Generator::newImplicitParameter(Type type) {
     uint32_t parameterIndex = parameterTypes.size();
     parameterTypes.push_back(type);
-    return ReferenceExpression(ReferenceExpressionKind::TemplateParameter, parameterIndex);
+    return Reference(ReferenceKind::TemplateParameter, parameterIndex);
 }
 
-ReferenceExpression Generator::addInheritedParameter(Type type, std::optional<Constant> defaultValue) {
+Reference Generator::addInheritedParameter(Type type, std::optional<Constant> defaultValue) {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
     program->inheritedParameterCount += 1;
     return addParameter(Word(), type, defaultValue);

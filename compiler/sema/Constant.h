@@ -174,7 +174,7 @@ private:
 };
 inline constexpr ScopeConstant INVALID_SCOPE_CONSTANT = ScopeConstant::invalidValue();
 
-enum class ReferenceExpressionKind : uint8_t {
+enum class ReferenceKind : uint8_t {
     Parameter,
     TemplateParameter,
     LocalVariable,
@@ -184,60 +184,60 @@ enum class ReferenceExpressionKind : uint8_t {
     Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 
-struct ReferenceExpression {
-    static constexpr ReferenceExpression localVariable(uint32_t id) {
-        return ReferenceExpression(ReferenceExpressionKind::LocalVariable, id);
+struct Reference {
+    static constexpr Reference localVariable(uint32_t id) {
+        return Reference(ReferenceKind::LocalVariable, id);
     }
-    static constexpr ReferenceExpression localReference(uint32_t id) {
-        return ReferenceExpression(ReferenceExpressionKind::LocalReference, id);
+    static constexpr Reference localReference(uint32_t id) {
+        return Reference(ReferenceKind::LocalReference, id);
     }
 
-    constexpr ReferenceExpression(ReferenceExpressionKind kind, uint32_t id)
+    constexpr Reference(ReferenceKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
 
-    constexpr ReferenceExpressionKind kind() const { return (ReferenceExpressionKind)kindBits; }
+    constexpr ReferenceKind kind() const { return (ReferenceKind)kindBits; }
     constexpr int_t id() const { return idBits; }
     constexpr int_t localVaraibleIndex() const {
-        VERIFY(kind() == ReferenceExpressionKind::LocalVariable);
+        VERIFY(kind() == ReferenceKind::LocalVariable);
         return id();
     }
     constexpr int_t parameterIndex() const {
-        VERIFY(kind() == ReferenceExpressionKind::Parameter);
+        VERIFY(kind() == ReferenceKind::Parameter);
         return id();
     }
     constexpr int_t templateParameterIndex() const {
-        VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
+        VERIFY(kind() == ReferenceKind::TemplateParameter);
         return id();
     }
     constexpr Constant copyTemplateParameter() const {
-        VERIFY(kind() == ReferenceExpressionKind::TemplateParameter);
+        VERIFY(kind() == ReferenceKind::TemplateParameter);
         return Constant(ConstantKind::CopyOfParameter, id());
     }
     constexpr int_t localReferenceIndex() const {
-        VERIFY(kind() == ReferenceExpressionKind::LocalReference);
+        VERIFY(kind() == ReferenceKind::LocalReference);
         return id();
     }
     constexpr int_t opaqueExpressionIndex() const {
-        VERIFY(kind() == ReferenceExpressionKind::OpaqueExpression);
+        VERIFY(kind() == ReferenceKind::OpaqueExpression);
         return id();
     }
 
-    constexpr bool operator==(const ReferenceExpression&) const = default;
+    constexpr bool operator==(const Reference&) const = default;
 
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
 
-inline constexpr ReferenceExpression INVALID_REFERENCE_EXPRESSION = { ReferenceExpressionKind::Invalid, MAX_CONSTANT_ID };
+inline constexpr Reference INVALID_REFERENCE = { ReferenceKind::Invalid, MAX_CONSTANT_ID };
 
-struct ConstantOrReferenceExpression {
-    static constexpr ConstantOrReferenceExpression invalidValue() { return {}; }
+struct ConstantOrReference {
+    static constexpr ConstantOrReference invalidValue() { return {}; }
 
-    constexpr ConstantOrReferenceExpression(Constant value)
+    constexpr ConstantOrReference(Constant value)
         : idBits(value.idBits), kindBits(value.kindBits), isRefBit(0) {
         VERIFY(value.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
-    constexpr ConstantOrReferenceExpression(ReferenceExpression expr)
+    constexpr ConstantOrReference(Reference expr)
         : idBits(expr.idBits), kindBits(expr.kindBits), isRefBit(1) {
         VERIFY(expr.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
@@ -247,21 +247,21 @@ struct ConstantOrReferenceExpression {
         VERIFY(isConstant());
         return std::bit_cast<Constant>(*this);
     }
-    constexpr ReferenceExpression reference() const {
+    Reference reference() const {
         VERIFY(isReference());
         auto tmp = *this;
         tmp.isRefBit = 0;
-        return std::bit_cast<ReferenceExpression>(tmp);
+        return std::bit_cast<Reference>(tmp);
     }
 
-    constexpr bool operator==(const ConstantOrReferenceExpression&) const = default;
+    constexpr bool operator==(const ConstantOrReference&) const = default;
 
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS - 1;
     uint32_t isRefBit : 1;
 
 private:
-    constexpr ConstantOrReferenceExpression()
+    constexpr ConstantOrReference()
         : idBits(MAX_CONSTANT_ID), kindBits(INVALID_CONSTANT_KIND_INDEX / 2), isRefBit(1) { }
 };
 
@@ -291,10 +291,10 @@ struct optional_traits<sema::ScopeConstant> {
     static constexpr sema::ScopeConstant empty_value = sema::INVALID_SCOPE_CONSTANT;
 };
 template<>
-struct optional_traits<sema::ReferenceExpression> {
-    static constexpr sema::ReferenceExpression empty_value = sema::INVALID_REFERENCE_EXPRESSION;
+struct optional_traits<sema::Reference> {
+    static constexpr sema::Reference empty_value = sema::INVALID_REFERENCE;
 };
 template<>
-struct optional_traits<sema::ConstantOrReferenceExpression> {
-    static constexpr sema::ConstantOrReferenceExpression empty_value = sema::ConstantOrReferenceExpression::invalidValue();
+struct optional_traits<sema::ConstantOrReference> {
+    static constexpr sema::ConstantOrReference empty_value = sema::ConstantOrReference::invalidValue();
 };

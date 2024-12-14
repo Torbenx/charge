@@ -80,8 +80,8 @@ private:
     std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
 };
 
-struct MemberReferenceExpression {
-    ReferenceExpression base;
+struct MemberReference {
+    Reference base;
     Constant memberPointer;
 };
 
@@ -255,10 +255,10 @@ struct Program {
         return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
-    ReferenceExpression addMemberReferenceExpression(MemberReferenceExpression);
-    MemberReferenceExpression getMemberReferenceExpression(ReferenceExpression e) {
-        VERIFY(e.kind() == ReferenceExpressionKind::MemberExpression);
-        return memberReferenceExpressions[e.id()];
+    Reference addMemberReference(MemberReference);
+    MemberReference getMemberReference(Reference e) {
+        VERIFY(e.kind() == ReferenceKind::MemberExpression);
+        return memberReferences[e.id()];
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -356,7 +356,7 @@ public:
     ParameterizeSet parameterizes;
     RemoteExpressionSet remoteExpressions;
     MemberPointerSet memberPointers;
-    std::vector<MemberReferenceExpression> memberReferenceExpressions;
+    std::vector<MemberReference> memberReferences;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;

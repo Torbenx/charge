@@ -140,7 +140,7 @@ private:
 struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
-        ConstantOrReferenceExpression data;
+        ConstantOrReference data;
     };
 
     struct ReferenceUnitLock {
@@ -148,7 +148,7 @@ struct Generator : Util {
         uint32_t sharedBit : 1;
 
         bool shared() const { return sharedBit != 0; }
-        ReferenceExpression expr() const { return std::bit_cast<ReferenceExpression>(exprBits); }
+        Reference expr() const { return std::bit_cast<Reference>(exprBits); }
     };
 
     struct LocalReference {
@@ -160,7 +160,7 @@ struct Generator : Util {
         Type type;
     };
 
-    struct OpaqueReferenceExpression {
+    struct OpaqueReference {
         Type type;
     };
 
@@ -183,28 +183,28 @@ struct Generator : Util {
         std::vector<bool> referenceActiveMask;
         // FlatSet<> trueHas;
 
-        void setActive(ReferenceExpression ref, bool newState) {
+        void setActive(Reference ref, bool newState) {
             switch (ref.kind()) {
-            case ReferenceExpressionKind::Parameter:
+            case ReferenceKind::Parameter:
                 parameterActiveMask[ref.id()] = newState;
                 break;
-            case ReferenceExpressionKind::LocalVariable:
+            case ReferenceKind::LocalVariable:
                 variableActiveMask[ref.id()] = newState;
                 break;
-            case ReferenceExpressionKind::LocalReference:
+            case ReferenceKind::LocalReference:
                 referenceActiveMask[ref.id()] = newState;
                 break;
             default:
                 VERIFY_NOT_REACHED();
             }
         }
-        bool isActive(ReferenceExpression ref) const {
+        bool isActive(Reference ref) const {
             switch (ref.kind()) {
-            case ReferenceExpressionKind::Parameter:
+            case ReferenceKind::Parameter:
                 return parameterActiveMask[ref.id()];
-            case ReferenceExpressionKind::LocalVariable:
+            case ReferenceKind::LocalVariable:
                 return variableActiveMask[ref.id()];
-            case ReferenceExpressionKind::LocalReference:
+            case ReferenceKind::LocalReference:
                 return referenceActiveMask[ref.id()];
             default:
                 VERIFY_NOT_REACHED();
@@ -240,7 +240,7 @@ struct Generator : Util {
     std::vector<LocalLookupEntry> localLookupEntries;
     std::vector<LocalVariable> localVariables;
     std::vector<LocalReference> localReferences;
-    std::vector<OpaqueReferenceExpression> opaqueReferenceExpressions;
+    std::vector<OpaqueReference> opaqueReferences;
     LocalState localState;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;
@@ -292,7 +292,7 @@ struct Generator : Util {
     Type memberType(Constant memberPointer);
     Type typeOf(Constant);
     Type verifyType(Constant);
-    Type referencedType(ReferenceExpression);
+    Type referencedType(Reference);
 
     Constant makeTemplateSignature(Constant templateProg);
     Type makeTemplateIdFor(Constant templateProg);
@@ -316,10 +316,10 @@ struct Generator : Util {
 
     Constant inheriteParameters(ScopeConstant parent);
 
-    ReferenceExpression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    ReferenceExpression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    ReferenceExpression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
-    ReferenceExpression newImplicitParameter(Type type);
+    Reference addParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    Reference addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    Reference addInheritedParameter(Type type, std::optional<Constant> defaultValue);
+    Reference newImplicitParameter(Type type);
 
     void makeRValue(SourceLocation);
 
@@ -330,7 +330,7 @@ struct Generator : Util {
     void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
     void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
     void emitConstantExpr(SourceLocation, Constant value);
-    void emitReferenceExpr(SourceLocation, ReferenceExpression);
+    void emitReferenceExpr(SourceLocation, Reference);
     void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
 
     void emitJumpTo(Opcode, SourceLocation, int_t childCount, const JumpLabel&);

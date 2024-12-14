@@ -33,7 +33,7 @@ void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
     VERIFY(localState.variableActiveMask.size() == localVariables.size());
     while (localState.variableActiveMask.size() > scope.localVariableCount) {
         if (localState.variableActiveMask.back()) {
-            auto ref = ReferenceExpression::localVariable(localState.variableActiveMask.size() - 1);
+            auto ref = Reference::localVariable(localState.variableActiveMask.size() - 1);
             emitControl(Opcode::Deactivate, location, 0, { .deactivateTarget = ref });
         }
         localState.variableActiveMask.pop_back();
@@ -42,7 +42,7 @@ void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
     VERIFY(localState.referenceActiveMask.size() == localReferences.size());
     while (localState.referenceActiveMask.size() > scope.localReferenceCount) {
         if (localState.referenceActiveMask.back()) {
-            auto ref = ReferenceExpression::localReference(localState.referenceActiveMask.size() - 1);
+            auto ref = Reference::localReference(localState.referenceActiveMask.size() - 1);
             emitControl(Opcode::Deactivate, location, 0, { .deactivateTarget = ref });
         }
         localState.referenceActiveMask.pop_back();
@@ -60,7 +60,7 @@ void Generator::declareLocalVariable(Word name, SourceLocation location, Variabl
         { .decl = { .type = declaration.type, .localValueIndex = (uint32_t)index } });
     localVariables.push_back({ declaration.type });
     localState.variableActiveMask.push_back(declaration.hasInitializer);
-    localLookupEntries.push_back({ name, ReferenceExpression::localVariable(index) });
+    localLookupEntries.push_back({ name, Reference::localVariable(index) });
 }
 
 void Generator::visitDeclaration() {
@@ -194,7 +194,7 @@ void Generator::visitFunctionDeclaration() {
         VERIFY(fnProgram->runtimeParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->runtimeParameters.size();
         localState.parameterActiveMask.push_back(true);
-        localLookupEntries.push_back({ name, ReferenceExpression(ReferenceExpressionKind::Parameter, parameterIndex) });
+        localLookupEntries.push_back({ name, Reference(ReferenceKind::Parameter, parameterIndex) });
         fnProgram->runtimeParameters.push_back({ RuntimeParameterKind::LetParameter, name, info.type, nameLoc });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
@@ -281,10 +281,10 @@ void Generator::visitStatement() {
         popExpression();
         VERIFY(expr.category() == InstructionCategory::LValue);
         VERIFY(expr.opcode() == Opcode::Reference);
-        auto reference = expr.data().referenceExpr;
+        auto reference = expr.data().reference;
 
-        VERIFY(reference.kind() != ReferenceExpressionKind::MemberExpression);
-        if (reference.kind() == ReferenceExpressionKind::LocalReference)
+        VERIFY(reference.kind() != ReferenceKind::MemberExpression);
+        if (reference.kind() == ReferenceKind::LocalReference)
             VERIFY(isDiscard);
         else
             VERIFY(!isDiscard);
