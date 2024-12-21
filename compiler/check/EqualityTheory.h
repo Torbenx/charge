@@ -10,6 +10,8 @@ namespace check {
 struct EqualityTheory : SimpleBooleanTheory {
     using SimpleBooleanTheory::SimpleBooleanTheory;
 
+    int_t equalityVariable(Solver&, Value a, Value b);
+
     //! Returns a value that is true if and only if \p a == \p b
     BooleanValue equality(Solver& solver, Value a, Value b) {
         if (a == b)
@@ -32,6 +34,9 @@ struct EqualityTheory : SimpleBooleanTheory {
         return baseLabel + (uint64_t)equalities.label(variableId(lit)) * 2 + isPositive(lit);
     }
 
+    void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) override;
+    bool isVariableActive(Solver&, int_t) override;
+
 protected:
     struct Link {
         Value source;
@@ -50,8 +55,6 @@ protected:
         uint32_t makeNode(Solver&, const Link& link, TreeLabel label);
         std::strong_ordering compare(Solver& solver, const Link& a, const Link& b);
     };
-
-    int_t equalityVariable(Solver&, Value a, Value b);
 
     static Link orient(Solver&, Value a, Value b);
 

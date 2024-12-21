@@ -140,7 +140,7 @@ private:
 struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
-        ConstantOrReference data;
+        ExpressionResult data;
     };
 
     struct ReferenceUnitLock {
@@ -152,6 +152,7 @@ struct Generator : Util {
     };
 
     struct LocalReference {
+        ExpressionCategory category;
         Type type;
         std::vector<ReferenceUnitLock> locks;
     };
@@ -164,13 +165,17 @@ struct Generator : Util {
         Type type;
     };
 
+    struct ValueSlotInfo {
+        Type type;
+    };
+
     enum class WildcardMeaning : uint8_t {
         Error,
         ImplicitTemplate,
     };
 
     struct ExpressionStackItem {
-        uint32_t endOffset;
+        uint32_t startOffset;
     };
 
     struct CallTarget {
@@ -214,15 +219,6 @@ struct Generator : Util {
         bool operator==(const LocalState&) const = default;
     };
 
-    struct JumpReference {
-        uint32_t offset;
-        LocalState originState;
-    };
-    struct JumpLabel {
-        uint32_t offset;
-        LocalState targetState;
-    };
-
     struct LocalScope {
         uint32_t localScopeDepth = 0;
         uint32_t localVariableCount = 0;
@@ -233,17 +229,19 @@ struct Generator : Util {
 
     const parse::TokenInfo* tok = nullptr;
 
-    std::vector<Instruction> instructionScratch;
-    std::vector<ExpressionStackItem> expressionStack = { ExpressionStackItem { .endOffset = 0 } };
+    std::vector<Instruction*> instructionScratch;
+    std::vector<ExpressionStackItem> expressionStack;
     std::vector<Type> parameterTypes;
     std::vector<LookupContext> lookupStack;
     std::vector<LocalLookupEntry> localLookupEntries;
     std::vector<LocalVariable> localVariables;
     std::vector<LocalReference> localReferences;
     std::vector<OpaqueReference> opaqueReferences;
+    std::vector<ValueSlotInfo> valueSlots;
     LocalState localState;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;
+    OwnedExpressionResult currentExpression = OwnedExpressionResult(INVALID_EXPRESSION_RESULT);
 
     Generator(Context& context, ProgramHandle handle);
 
@@ -251,10 +249,8 @@ struct Generator : Util {
     void setParseLocation(parse::TokenHandle);
     void clearParseLocation();
 
-    Instruction& topInstruction(int_t n = 0);
-    Expression topExpression(int_t n = 0);
-    void popExpression();
-    void popExpressions(int_t n);
+    ExpressionResult topExpression();
+    OwnedExpressionResult takeTopExpression();
 
     LocalScope beginLocalScope(SourceLocation);
     void endLocalScope(LocalScope scope, SourceLocation);
@@ -265,7 +261,7 @@ struct Generator : Util {
         Type type;
         bool hasInitializer;
     };
-    VariableDeclaration visitVariableDeclaration(bool deduceFromInitializer);
+    VariableDeclaration visitVariableDeclaration(ExpressionCategory expectedCategory, bool programParameters);
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
     void visitFunctionDeclaration();
@@ -291,13 +287,15 @@ struct Generator : Util {
     Type memberType(MemberPointer pointer);
     Type memberType(Constant memberPointer);
     Type typeOf(Constant);
+    Type resultType(ExpressionResult);
     Type verifyType(Constant);
     Type referencedType(Reference);
+    ExpressionCategory categoryOf(ExpressionResult);
 
     Constant makeTemplateSignature(Constant templateProg);
     Type makeTemplateIdFor(Constant templateProg);
     Constant makeFunctionSignature(Constant value);
-    Constant makeExpressionConstant();
+    Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
@@ -321,27 +319,34 @@ struct Generator : Util {
     Reference addInheritedParameter(Type type, std::optional<Constant> defaultValue);
     Reference newImplicitParameter(Type type);
 
-    void makeRValue(SourceLocation);
+    void toValueExpression(SourceLocation);
 
     void contextualToType(SourceLocation);
     void contextualToBool(SourceLocation);
-    void implicitCastTo(SourceLocation, DeductionState&, ExternConstant);
+    void initialize(SourceLocation, DeductionState&, ExpressionCategory expectCategory, ExternConstant expectedType);
 
-    void emitControl(Opcode, SourceLocation, int_t childCount, InstructionData data);
-    void emitExpression(Opcode, SourceLocation, int_t childCount, Type type, ExpressionData data);
-    void emitConstantExpr(SourceLocation, Constant value);
+    OwnedValueSlot newValueSlot(Type type) {
+        auto id = valueSlots.size();
+        valueSlots.push_back({ type });
+        return OwnedValueSlot(id);
+    }
+
+    template<typename T, typename... Args>
+    T* allocateInstruction(Args&&... args) {
+        return context.instructionAllocator.allocate<T>(std::forward<Args>(args)...);
+    }
+
+    template<typename T, typename... Args>
+    T* emitControl(Args&&... args) {
+        T* ptr = context.instructionAllocator.allocate<T>(std::forward<Args>(args)...);
+        instructionScratch.push_back(ptr);
+        return ptr;
+    }
+
+    void emitInstructionExpr(Instruction*, OwnedExpressionResult);
+    void emitConstantExpr(SourceLocation, Constant);
     void emitReferenceExpr(SourceLocation, Reference);
     void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
-
-    void emitJumpTo(Opcode, SourceLocation, int_t childCount, const JumpLabel&);
-    JumpReference emitJump(Opcode, SourceLocation, int_t childCount);
-    void linkToNextInstruction(const JumpReference& jump);
-    JumpLabel nextInstruction();
-    void link(int_t originOffset, int_t targetOffset, const LocalState& originState, const LocalState& targetState);
-    void emitJumpTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::Jump, location, 0, label); }
-    JumpReference emitJump(SourceLocation location) { return emitJump(Opcode::Jump, location, 0); }
-    void emitJumpIfTo(SourceLocation location, const JumpLabel& label) { emitJumpTo(Opcode::JumpIf, location, 1, label); }
-    JumpReference emitJumpIf(SourceLocation location) { return emitJump(Opcode::JumpIf, location, 1); }
 };
 
 }

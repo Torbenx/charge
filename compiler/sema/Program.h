@@ -16,21 +16,16 @@ namespace builtins {
 #define BUILTIN(name, cppName) constexpr inline Constant cppName { BuiltinId::cppName };
 #include <sema/builtins.inc>
 
+inline constexpr Constant false_constant { ConstantKind::BooleanLiteral, 0 };
+inline constexpr Constant true_constant { ConstantKind::BooleanLiteral, 1 };
+
 };
 
-struct Expression {
-    Instruction inst;
-
-    Expression(Instruction inst)
-        : inst(inst) {
-        VERIFY(isExpression(inst.opcode()));
-    }
-
-    Opcode opcode() const { return inst.opcode(); }
-    InstructionCategory category() const { return categoryOf(opcode()); }
-    ExpressionData data() const { return inst.u.expr.u; }
-    Type type() const { return inst.u.expr.type; }
-    SourceLocation location() const { return inst.location(); }
+enum class ExpressionCategory : uint8_t {
+    Value,
+    UniqueReference,
+    SharedReference,
+    ConstReference,
 };
 
 struct ParameterizeData {
@@ -54,17 +49,17 @@ private:
     std::strong_ordering compare(Context&, ProgramHandle, Parameterize, ParameterizeData&);
 };
 
-struct RemoteExpression {
+struct RemoteComputation {
     Constant base;
-    ExternConstant expression;
+    ExternConstant computation;
 };
-struct RemoteExpressionSet : FlatTreeSetDetail::Base<RemoteExpressionSet, RemoteExpression> {
-    uint32_t get(Context& context, ProgramHandle prog, RemoteExpression);
+struct RemoteComputationSet : FlatTreeSetDetail::Base<RemoteComputationSet, RemoteComputation> {
+    uint32_t get(Context& context, ProgramHandle prog, RemoteComputation);
 
 private:
     friend Base;
-    uint32_t makeNode(Context&, ProgramHandle, RemoteExpression, TreeLabel);
-    std::strong_ordering compare(Context&, ProgramHandle, RemoteExpression, RemoteExpression);
+    uint32_t makeNode(Context&, ProgramHandle, RemoteComputation, TreeLabel);
+    std::strong_ordering compare(Context&, ProgramHandle, RemoteComputation, RemoteComputation);
 };
 
 struct MemberPointer {
@@ -78,6 +73,18 @@ private:
     friend Base;
     uint32_t makeNode(Context&, ProgramHandle, MemberPointer, TreeLabel);
     std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
+};
+
+struct ComputedConstantData {
+    ValueSlot value;
+    Type type;
+    std::vector<Instruction*> body;
+};
+
+struct ComputedConstant {
+    ValueSlot value;
+    Type type;
+    std::span<Instruction* const> body;
 };
 
 struct MemberReference {
@@ -152,66 +159,6 @@ struct ConstantIdRange {
     Constant endValue;
 };
 
-struct InstructionBlock {
-    explicit InstructionBlock(Instruction* header)
-        : m_header(header) { VERIFY(categoryOf(header->opcode()) == InstructionCategory::Header); }
-
-    std::span<Instruction> instructions() const {
-        return { m_header + 1, m_header->u.blockSize };
-    }
-    Instruction* header() const { return m_header; }
-    Opcode headerCode() const { return m_header->opcode(); }
-
-    Instruction* begin() const { return m_header + 1; }
-    Instruction* end() const { return m_header + 1 + m_header->u.blockSize; }
-
-private:
-    Instruction* m_header = nullptr;
-};
-
-struct InstructionBlockIterator {
-    using value_type = InstructionBlock;
-    using difference_type = int_t;
-
-    InstructionBlockIterator() = default;
-    explicit InstructionBlockIterator(Instruction* header)
-        : header(header) { }
-
-    InstructionBlock block() const { return InstructionBlock { header }; }
-    InstructionBlockIterator& operator++() {
-        advance();
-        return *this;
-    }
-    InstructionBlockIterator operator++(int) {
-        InstructionBlockIterator copy = *this;
-        advance();
-        return copy;
-    }
-    InstructionBlock operator*() const { return block(); }
-
-    auto operator<=>(const InstructionBlockIterator& other) const {
-        return header <=> other.header;
-    }
-    bool operator==(const InstructionBlockIterator&) const = default;
-
-private:
-    void advance() { header = block().end(); }
-
-    Instruction* header = nullptr;
-};
-static_assert(std::forward_iterator<InstructionBlockIterator>);
-
-struct InstructionBlockRange {
-    InstructionBlockIterator begin() const {
-        return InstructionBlockIterator { instructions.data() };
-    }
-    InstructionBlockIterator end() const {
-        return InstructionBlockIterator { instructions.data() + instructions.size() };
-    }
-
-    std::span<Instruction> instructions;
-};
-
 struct Program {
     struct Parameter {
         Word name;
@@ -227,23 +174,23 @@ struct Program {
         , m_parent(parent)
         , parseLocation(parseLocation) { }
 
-    Constant addExpression(std::span<const Instruction>);
-
+    Constant addComputedConstant(Context&, ComputedConstant);
     Constant addParameterize(Context& context, Parameterize parameterize);
-    Constant addRemoteExpression(Context& context, RemoteExpression expr);
+    Constant addRemoteComputedConstant(Context& context, RemoteComputation);
     Constant addMemberPointer(Context& context, MemberPointer pointer);
 
-    Expression getExpression(ExternConstant value) {
-        auto instructions = getInstructions(value.id(), Opcode::ExpressionHeader);
-        return instructions.back();
+    ComputedConstant getComputedConstant(ExternConstant value) {
+        VERIFY(value.kind() == ConstantKind::Computed);
+        const auto& c = computations[value.id()];
+        return { c.value, c.type, c.body };
     }
     Parameterize getParameterize(ExternConstant value) {
         VERIFY(value.kind() == ConstantKind::Parameterize);
         return Parameterize::fromData(parameterizes.at(value.id()));
     }
-    RemoteExpression getRemoteExpression(ExternConstant value) {
-        VERIFY(value.kind() == ConstantKind::RemoteExpression);
-        return remoteExpressions.at(value.id());
+    RemoteComputation getRemoteComputedConstant(ExternConstant value) {
+        VERIFY(value.kind() == ConstantKind::RemoteComputed);
+        return remoteComputations.at(value.id());
     }
     MemberPointer getMemberPointer(ExternConstant value) {
         VERIFY(value.kind() == ConstantKind::MemberPointer);
@@ -283,9 +230,6 @@ struct Program {
     }
 
     void dump(Context&);
-    InstructionBlockRange instructionBlocks() {
-        return InstructionBlockRange { instructions };
-    }
 
     parse::TokenHandle beginSignatureCheck() {
         VERIFY(status() == ProgramStatus::Unchecked);
@@ -324,14 +268,17 @@ struct Program {
         VERIFY_NOT_REACHED();
     }
 
+    ConstantIdRange computedConstants() const {
+        return ConstantIdRange(ConstantKind::Computed, computations.size());
+    }
     ConstantIdRange parameterizeConstants() const {
         return ConstantIdRange(ConstantKind::Parameterize, parameterizes.size());
     }
     ConstantIdRange memberPointerConstants() const {
         return ConstantIdRange(ConstantKind::MemberPointer, memberPointers.size());
     }
-    ConstantIdRange remoteExpressionConstants() const {
-        return ConstantIdRange(ConstantKind::RemoteExpression, remoteExpressions.size());
+    ConstantIdRange remoteComputedConstants() const {
+        return ConstantIdRange(ConstantKind::RemoteComputed, remoteComputations.size());
     }
 
 public:
@@ -354,8 +301,9 @@ public:
     std::vector<Parameter> parameters;
     std::vector<Instruction> instructions;
     ParameterizeSet parameterizes;
-    RemoteExpressionSet remoteExpressions;
+    RemoteComputationSet remoteComputations;
     MemberPointerSet memberPointers;
+    std::vector<ComputedConstantData> computations;
     std::vector<MemberReference> memberReferences;
 
 protected:
@@ -369,18 +317,10 @@ protected:
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;
 
-    int_t importInstructions(Opcode headerCode, std::span<const Instruction> instructions);
-
-    std::span<Instruction> getInstructions(int_t offset, Opcode headerCode) {
-        VERIFY(categoryOf(headerCode) == InstructionCategory::Header);
-        VERIFY(instructions[offset].opcode() == headerCode);
-        return { instructions.data() + offset + 1, instructions[offset].u.blockSize };
-    }
-
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 216);
+static_assert(sizeof(Program) == 240);
 
 struct ValueProgram : Program {
     ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
@@ -409,12 +349,31 @@ enum class RuntimeParameterKind : uint8_t {
     UncheckedMember,
     Member,
     HasMember,
-    LetParameter,
-    VarParameter,
-    InParameter,
-    InOutParameter,
-    OutParameter,
+
+    LetVariable,
+    VarVariable,
+    UniqueReference,
+    SharedReference,
+    ConstReference,
 };
+
+inline ExpressionCategory expectedInitializerCategory(RuntimeParameterKind kind) {
+    switch (kind) {
+    case RuntimeParameterKind::HasMember:
+    case RuntimeParameterKind::Member:
+    case RuntimeParameterKind::VarVariable:
+    case RuntimeParameterKind::LetVariable:
+        return ExpressionCategory::Value;
+    case RuntimeParameterKind::UniqueReference:
+        return ExpressionCategory::UniqueReference;
+    case RuntimeParameterKind::SharedReference:
+        return ExpressionCategory::SharedReference;
+    case RuntimeParameterKind::ConstReference:
+        return ExpressionCategory::ConstReference;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 
 struct RuntimeParameter {
     TaggedSourceLocation<RuntimeParameterKind> m_location;
@@ -459,15 +418,11 @@ struct FunctionProgram : CallableProgram {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
-    void setBody(std::span<const Instruction> body) {
-        VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
-        m_subClassData = importInstructions(Opcode::FunctionHeader, body);
-    }
-    std::span<Instruction> body() {
-        VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
-        return getInstructions(m_subClassData, Opcode::FunctionHeader);
-    }
+    void setBody(std::span<Instruction* const> body) { m_body.assign(body.begin(), body.end()); }
+    std::span<Instruction* const> body() { return m_body; }
     ExternConstant returnType() const { return m_type.value(); }
+
+    std::vector<Instruction*> m_body;
 };
 
 struct TypeProgram : CallableProgram, Scope {
@@ -480,22 +435,22 @@ constexpr std::optional<T*> try_cast(Program* prog) {
     switch (prog->kind()) {
     case ProgramKind::Value:
         if constexpr (std::derived_from<ValueProgram, T>)
-            return static_cast<T*>(prog);
+            return static_cast<ValueProgram*>(prog);
         else
             return std::nullopt;
     case ProgramKind::Object:
         if constexpr (std::derived_from<ObjectProgram, T>)
-            return static_cast<T*>(prog);
+            return static_cast<ObjectProgram*>(prog);
         else
             return std::nullopt;
     case ProgramKind::Type:
         if constexpr (std::derived_from<TypeProgram, T>)
-            return static_cast<T*>(prog);
+            return static_cast<TypeProgram*>(prog);
         else
             return std::nullopt;
     case ProgramKind::Function:
         if constexpr (std::derived_from<FunctionProgram, T>)
-            return static_cast<T*>(prog);
+            return static_cast<FunctionProgram*>(prog);
         else
             return std::nullopt;
     default:
@@ -552,6 +507,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 256);
+static_assert(sizeof(ProgramUnion) == 288);
 
 }

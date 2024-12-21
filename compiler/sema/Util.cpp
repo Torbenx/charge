@@ -39,10 +39,10 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
             return compare(program->getMemberPointer(a), program->getMemberPointer(b));
         case ConstantKind::Parameterize:
             return program->compareParameterizes(a, b);
-        case ConstantKind::Expression:
-            return a.expressionIndex() <=> b.expressionIndex();
-        case ConstantKind::RemoteExpression:
-            return compare(program->getRemoteExpression(a), program->getRemoteExpression(b));
+        case ConstantKind::Computed:
+            return a.id() <=> b.id();
+        case ConstantKind::RemoteComputed:
+            return compare(program->getRemoteComputedConstant(a), program->getRemoteComputedConstant(b));
         case ConstantKind::CopyOfParameter:
             return a.parameterIndex() <=> b.parameterIndex();
         default:
@@ -91,12 +91,12 @@ std::strong_ordering Util::compare(MemberPointer a, MemberPointer b) {
     return a.memberIndex <=> b.memberIndex;
 }
 
-std::strong_ordering Util::compare(RemoteExpression a, RemoteExpression b) {
+std::strong_ordering Util::compare(RemoteComputation a, RemoteComputation b) {
     auto baseOrdering = compare(a.base, b.base);
     if (baseOrdering != 0)
         return baseOrdering;
 
-    return Constant(a.expression).expressionIndex() <=> Constant(b.expression).expressionIndex();
+    return Constant(a.computation).id() <=> Constant(b.computation).id();
 }
 
 }

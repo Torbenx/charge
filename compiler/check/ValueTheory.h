@@ -15,8 +15,13 @@ struct ValueTheory {
     ValueTheory& operator=(ValueTheory&&) = delete;
 
     virtual uint64_t labelOfValue(Solver&, Value) = 0;
-
     virtual std::string formatValue(Solver&, Value) = 0;
+
+    //! Collect a set of literals that imply that the value is inactive
+    virtual void collectValueInactiveReasons(Solver&, Value, std::vector<BooleanValue>&) { }
+
+    //! Must be return true if and only if all literals added by collectValueInactiveReasons for the value are false
+    virtual bool isValueActive(Solver&, Value) { return true; }
 
     virtual void enumerateValues(Solver&, std::function<void(Value)> visitor) = 0;
 
@@ -64,6 +69,7 @@ struct MemoryLocationTheory : EquatableValueTheory {
         : EquatableValueTheory(solver, ValueKind::MemoryLocation) { }
 
     virtual Type typeAtLocation(Solver&, MemoryLocation) = 0;
+    // virtual std::optional<CodePosition> declarationPosition() = 0;
 };
 
 struct MemberExpressionTheory : EquatableValueTheory {
@@ -77,7 +83,10 @@ struct TypeTheory : EquatableValueTheory {
     TypeTheory(Solver& solver)
         : EquatableValueTheory(solver, ValueKind::Type) { }
 
-    virtual std::optional<ValueKind> loadedKind(Solver&, Type) = 0;
+    //! Return the scalar value kind to use for a value of the given type
+    virtual std::optional<ValueKind> scalarKind(Solver&, Type) = 0;
+
+    // virtual std::optional<Type> dereferencedType(Solver&, Type) = 0;
 };
 
 struct ValueKindTheory {

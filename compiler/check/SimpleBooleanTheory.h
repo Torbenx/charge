@@ -32,6 +32,16 @@ struct SimpleBooleanTheory : BooleanTheory {
             return formatNegativeLiteral(solver, varId);
     }
 
+    virtual void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) { }
+    virtual bool isVariableActive(Solver&, int_t) { return true; }
+
+    void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
+        collectVariableInactiveReasons(solver, variableId({ v }), clause);
+    }
+    bool isValueActive(Solver& solver, Value v) override {
+        return isVariableActive(solver, variableId({ v }));
+    }
+
     void enumerateValues(Solver&, std::function<void(Value)> f) override {
         for (int_t i = find; i < variableCount(); i++) {
             f(positiveLiteral(i));

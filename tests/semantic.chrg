@@ -57,7 +57,7 @@ fn f2(t) => X;
 // expect-return-type type;
 fn f3(t: type) => X;
 // expect-return-type type;
-fn f4(t: type = X) => X;
+fn f4(t: type) => X;
 
 fn t1() => X;
 // expect-type function_id{@fnsig(t1)}
@@ -112,7 +112,7 @@ static call_refT = refT(func4ref);
 template(T: type) fn refArg(arg: T) => arg;
 
 // expect-return-type #0
-template(T: type) fn refArg2(arg0: T, arg1: T = arg0) => arg1;
+template(T: type) fn refArg2(arg0: T, arg1: T) => arg1;
 
 struct CallMe: { t: type; }
 // expect-type CallMe
@@ -138,15 +138,12 @@ static BaseMyX = Base::MyX;
 static DerivedMyX = Derived::MyX;
 
 struct WithMember: { member: X; }
-// expect-type X
-static AccessMember = WithMember(X()).member;
+// expect-return-type X
+fn accessMember(w: shared WithMember) => w.member;
 
 struct DerivedWithMember: { has WithMember; }
-// expect-type X
-static accessDerivedMember = DerivedWithMember(WithMember(X())).member;
-
 // expect-return-type X
-fn accessDerivedMember2(w: DerivedWithMember) => w.member;
+fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
 
 // expect-return-type X
 fn withBody1() -> X: { }
@@ -172,11 +169,6 @@ fn ifTest4() -> X: { if true: let x: X = X(); }
 // expect-return-type X
 fn ifElseTest1() -> X: { if true: let x: X = X(); else: let y: X; }
 
-// expect-object-type X
-static var staticObj: X = X();
-// expect-type ptr{X} ;; TODO: This is wrong!
-static accessObj = staticObj;
-
 namespace parameter_expr_match: {
 
 template(T1: type, T2: type)
@@ -194,4 +186,13 @@ static test1 = target(blub{T, X}());
 template(T: type)
 static test2 = target(blub{X, T}());
 
+}
+
+// expect-return-type X
+fn referenceParameter(x: shared X) -> X: { }
+
+// expect-return-type X
+fn passReference() -> X: {
+    let x: X;
+    referenceParameter(x);
 }

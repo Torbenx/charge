@@ -108,9 +108,6 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    if (kind == TokenKind::ImplicitKindParameter) {
-        VERIFY(data != 0);
-    }
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 

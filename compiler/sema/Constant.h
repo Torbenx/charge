@@ -49,8 +49,8 @@ enum class ConstantKind : uint8_t {
     MemberPointer,
 
     Parameterize, // either all argument substituted or just the inherited ones
-    Expression,
-    RemoteExpression,
+    Computed,
+    RemoteComputed,
 
     CopyOfParameter,
 
@@ -101,10 +101,6 @@ struct Constant {
         if (kind() == ConstantKind::FunctionSignature$Parameterize)
             return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
-    }
-    constexpr int_t expressionIndex() const {
-        VERIFY(kind() == ConstantKind::Expression);
-        return id();
     }
     constexpr int_t parameterIndex() const {
         VERIFY(kind() == ConstantKind::CopyOfParameter);
@@ -230,39 +226,107 @@ struct Reference {
 
 inline constexpr Reference INVALID_REFERENCE = { ReferenceKind::Invalid, MAX_CONSTANT_ID };
 
-struct ConstantOrReference {
-    static constexpr ConstantOrReference invalidValue() { return {}; }
+struct ValueSlot {
+    constexpr explicit ValueSlot(uint32_t id)
+        : idBits(id) { }
 
-    constexpr ConstantOrReference(Constant value)
-        : idBits(value.idBits), kindBits(value.kindBits), isRefBit(0) {
+    uint32_t index() const { return idBits; }
+
+    bool operator==(const ValueSlot&) const = default;
+
+    uint32_t idBits;
+};
+
+inline constexpr ValueSlot INVALID_VALUE_SLOT { MAX_CONSTANT_ID };
+
+struct OwnedValueSlot : ValueSlot {
+    using ValueSlot::ValueSlot;
+
+    OwnedValueSlot(const OwnedValueSlot&) = delete;
+    OwnedValueSlot& operator=(const OwnedValueSlot&) = delete;
+
+    OwnedValueSlot(OwnedValueSlot&& other)
+        : ValueSlot(other) { (ValueSlot&)other = INVALID_VALUE_SLOT; }
+    OwnedValueSlot& operator=(OwnedValueSlot&& other) {
+        VERIFY(*this == INVALID_VALUE_SLOT);
+        (ValueSlot&)*this = other;
+        (ValueSlot&)other = INVALID_VALUE_SLOT;
+        return *this;
+    }
+    constexpr ~OwnedValueSlot() { VERIFY(*this == INVALID_VALUE_SLOT); }
+
+    ValueSlot release() {
+        ValueSlot ret = *this;
+        (ValueSlot&)*this = INVALID_VALUE_SLOT;
+        return ret;
+    }
+};
+
+struct ExpressionResult {
+    constexpr ExpressionResult(Constant value)
+        : idBits(value.idBits), kindBits(value.kindBits) {
         VERIFY(value.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
-    constexpr ConstantOrReference(Reference expr)
-        : idBits(expr.idBits), kindBits(expr.kindBits), isRefBit(1) {
-        VERIFY(expr.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
+    constexpr ExpressionResult(Reference ref)
+        : idBits(ref.idBits), kindBits(ref.kindBits + 128) {
+        VERIFY(ref.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
     }
-    constexpr bool isReference() const { return isRefBit != 0; }
-    constexpr bool isConstant() const { return !isReference(); }
+    constexpr ExpressionResult(ValueSlot slot)
+        : idBits(slot.idBits), kindBits(255) { }
+    constexpr bool isConstant() const { return kindBits < 128; }
+    constexpr bool isValueSlot() const { return kindBits == 255; }
+    constexpr bool isReference() const { return !isConstant() && !isValueSlot(); }
     Constant constant() const {
         VERIFY(isConstant());
         return std::bit_cast<Constant>(*this);
     }
+    ValueSlot valueSlot() const {
+        VERIFY(isValueSlot());
+        return ValueSlot(idBits);
+    }
     Reference reference() const {
         VERIFY(isReference());
         auto tmp = *this;
-        tmp.isRefBit = 0;
+        tmp.kindBits -= 128;
         return std::bit_cast<Reference>(tmp);
     }
 
-    constexpr bool operator==(const ConstantOrReference&) const = default;
+    constexpr bool operator==(const ExpressionResult&) const = default;
 
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
-    uint32_t kindBits : CONSTANT_KIND_BITS - 1;
-    uint32_t isRefBit : 1;
+    uint32_t kindBits : CONSTANT_KIND_BITS;
+};
 
-private:
-    constexpr ConstantOrReference()
-        : idBits(MAX_CONSTANT_ID), kindBits(INVALID_CONSTANT_KIND_INDEX / 2), isRefBit(1) { }
+static constexpr ExpressionResult INVALID_EXPRESSION_RESULT = INVALID_VALUE_SLOT;
+
+struct OwnedExpressionResult : ExpressionResult {
+    explicit constexpr OwnedExpressionResult(ExpressionResult base)
+        : ExpressionResult(base) { }
+    constexpr OwnedExpressionResult(Constant value)
+        : ExpressionResult(value) { }
+    constexpr OwnedExpressionResult(Reference ref)
+        : ExpressionResult(ref) { }
+    constexpr OwnedExpressionResult(OwnedValueSlot slot)
+        : ExpressionResult(slot) { (ValueSlot&)slot = INVALID_VALUE_SLOT; }
+
+    OwnedExpressionResult(const OwnedExpressionResult&) = delete;
+    OwnedExpressionResult& operator=(const OwnedExpressionResult&) = delete;
+
+    OwnedExpressionResult(OwnedExpressionResult&& other)
+        : ExpressionResult(other) { (ExpressionResult&)other = INVALID_VALUE_SLOT; }
+    OwnedExpressionResult& operator=(OwnedExpressionResult&& other) {
+        VERIFY(!isValueSlot() || valueSlot() == INVALID_VALUE_SLOT);
+        (ExpressionResult&)*this = other;
+        (ExpressionResult&)other = INVALID_VALUE_SLOT;
+        return *this;
+    }
+    constexpr ~OwnedExpressionResult() { VERIFY(!isValueSlot() || valueSlot() == INVALID_VALUE_SLOT); }
+
+    ExpressionResult release() {
+        ExpressionResult ret = *this;
+        (ExpressionResult&)*this = INVALID_VALUE_SLOT;
+        return ret;
+    }
 };
 
 }
@@ -295,6 +359,10 @@ struct optional_traits<sema::Reference> {
     static constexpr sema::Reference empty_value = sema::INVALID_REFERENCE;
 };
 template<>
-struct optional_traits<sema::ConstantOrReference> {
-    static constexpr sema::ConstantOrReference empty_value = sema::ConstantOrReference::invalidValue();
+struct optional_traits<sema::ValueSlot> {
+    static constexpr sema::ValueSlot empty_value = sema::INVALID_VALUE_SLOT;
+};
+template<>
+struct optional_traits<sema::ExpressionResult> {
+    static constexpr sema::ExpressionResult empty_value = sema::INVALID_EXPRESSION_RESULT;
 };

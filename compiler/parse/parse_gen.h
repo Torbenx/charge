@@ -10,6 +10,7 @@ inline constexpr ConstWordStringTable words {
     keyword("assign"),
     keyword("break"),
     keyword("catch"),
+    keyword("const"),
     keyword("continue"),
     keyword("destroy"),
     keyword("discard"),
@@ -22,22 +23,21 @@ inline constexpr ConstWordStringTable words {
     keyword("guard"),
     keyword("has"),
     keyword("if"),
-    keyword("in"),
     keyword("incomplete"),
-    keyword("inout"),
     keyword("let"),
     keyword("loop"),
     keyword("match"),
     keyword("namespace"),
     keyword("object"),
-    keyword("out"),
     keyword("property"),
     keyword("return"),
+    keyword("shared"),
     keyword("static"),
     keyword("struct"),
     keyword("template"),
     keyword("trait"),
     keyword("try"),
+    keyword("unique"),
     keyword("var"),
     keyword("virtual"),
     keyword("while"),
@@ -113,6 +113,7 @@ enum class LexerToken : uint8_t {
     Assign, // assign
     Break, // break
     Catch, // catch
+    Const, // const
     Continue, // continue
     Destroy, // destroy
     Discard, // discard
@@ -125,22 +126,21 @@ enum class LexerToken : uint8_t {
     Guard, // guard
     Has, // has
     If, // if
-    In, // in
     Incomplete, // incomplete
-    Inout, // inout
     Let, // let
     Loop, // loop
     Match, // match
     Namespace, // namespace
     Object, // object
-    Out, // out
     Property, // property
     Return, // return
+    Shared, // shared
     Static, // static
     Struct, // struct
     Template, // template
     Trait, // trait
     Try, // try
+    Unique, // unique
     Var, // var
     Virtual, // virtual
     While, // while
@@ -165,14 +165,18 @@ enum class State {
     SingleOrCompoundStatement,
     AfterStatement,
     Statement,
+    LetStatement,
+    VarStatement,
     AfterReturn,
     ElseBranch,
-    CheckVarAfterLet,
-    VariableDeclaration,
+    AfterSimpleVariableDeclarationId,
     AfterVariableDeclarationId,
+    VariableType,
+    AfterVariableTypeModifier,
     AfterParameters,
     FirstParameter,
     Parameter,
+    VarParameter,
     NoDeclaration,
     NamespaceDeclaration,
     NamespaceDeclarationId,
@@ -190,7 +194,6 @@ enum class State {
     TypeDeclarationBody,
     MemberDeclaration,
     AfterStatic,
-    StaticLetVariableDeclaration,
     StaticVarVariableDeclaration,
     AfterDeclaration,
     Error,

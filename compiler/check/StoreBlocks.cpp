@@ -34,7 +34,7 @@ Value StoreBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodeP
         if (store.location == location)
             return store.value;
 
-        VERIFY_NOT_REACHED();
+        BooleanValue b = solver.equality(location, store.location);
     }
 
     return solver.loadAtEndOfBlock(location, block.parent);

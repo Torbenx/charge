@@ -174,9 +174,11 @@ void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
             if (edge.eqId == eqId)
                 continue;
             Value otherRoot = infoFor(solver, edge.otherValue).root;
-            forEachCommonElement(infoFor(solver, otherRoot).disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
+            const auto& otherRootInfo = infoFor(solver, otherRoot);
+            forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
                 assignDisequal(solver, edge.eqId, diseqId);
             });
+            watch(solver, sourceInfo.root, targetInfo.root);
         }
     }
     mergeInto(sourceDiseq, targetDiseq);
@@ -207,8 +209,10 @@ void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propaga
     Value targetRoot = infoFor(solver, target).root;
     if (shareAny(infoFor(solver, sourceRoot).disequalities, infoFor(solver, targetRoot).disequalities))
         return;
+    if (isDisequalityWatched(solver, sourceRoot, targetRoot))
+        return;
 
-    auto addDisequality = [this, &solver, diseqId](Value parent) {
+    auto addDisequality = [&solver, diseqId](Value parent) {
         auto& disequalities = infoFor(solver, parent).disequalities;
         auto it = std::lower_bound(disequalities.begin(), disequalities.end(), diseqId);
         disequalities.insert(it, diseqId);
@@ -216,7 +220,7 @@ void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propaga
     forEachParentOf(solver, source, addDisequality);
     forEachParentOf(solver, target, addDisequality);
 
-    disequalityTrace.push_back(diseqId);
+    disequalityTrace.push_back({ (uint32_t)diseqId });
 
     if (propagate) {
         Value root = infoFor(solver, target).root;
@@ -307,38 +311,17 @@ void StandardEquality::onNewVariable(Solver& solver, int_t eqId) {
     addEdge(solver, source, target, eqId);
     addEdge(solver, target, source, eqId);
 
-    const auto& sInfo = infoFor(solver, source);
-    const auto& tInfo = infoFor(solver, target);
-    if (sInfo.root == tInfo.root) {
+    const auto& sourceInfo = infoFor(solver, source);
+    const auto& targetInfo = infoFor(solver, target);
+    if (sourceInfo.root == targetInfo.root) {
         assignEqual(solver, eqId);
     } else {
-        forEachCommonElement(sInfo.disequalities, tInfo.disequalities, [this, &solver, eqId](int_t diseqId) {
+        const auto& sourceRootInfo = infoFor(solver, sourceInfo.root);
+        const auto& targetRootInfo = infoFor(solver, targetInfo.root);
+        forEachCommonElement(sourceRootInfo.disequalities, targetRootInfo.disequalities, [this, &solver, eqId](int_t diseqId) {
             assignDisequal(solver, eqId, diseqId);
         });
-    }
-}
-
-void StandardEquality::forEachParentOf(Solver& solver, Value value, auto&& callback) {
-    const auto& valueInfo = infoFor(solver, value);
-    callback(valueInfo.root);
-
-    int_t valueIndex = valueInfo.treeOffset;
-    const auto& tree = infoFor(solver, valueInfo.root).tree;
-    int_t rootIndex = -1;
-    for (;;) {
-        if (rootIndex == valueIndex)
-            break;
-
-        int_t index = rootIndex + 1;
-        for (;;) {
-            int_t nextIndex = index + tree[index].subTreeSize;
-            if (nextIndex > valueIndex)
-                break;
-            index = nextIndex;
-        }
-        rootIndex = index;
-
-        callback(tree[rootIndex].value);
+        watch(solver, sourceInfo.root, targetInfo.root);
     }
 }
 
@@ -348,7 +331,7 @@ void StandardEquality::addEdge(Solver& solver, Value value, Value otherValue, in
     int_t edgeInsertPos = valueInfo.edgesOffset;
     EqualityInfo::Edge edge { .otherValue = otherValue, .eqId = (uint32_t)eqId };
 
-    forEachParentOf(solver, value, [this, &solver, edgeInsertPos, edge](Value parent) {
+    forEachParentOf(solver, value, [&solver, edgeInsertPos, edge](Value parent) {
         auto& info = infoFor(solver, parent);
         info.edges.insert(info.edges.begin() + (edgeInsertPos - info.edgesOffset), edge);
     });
@@ -484,26 +467,26 @@ void StandardEquality::backtrack(Solver& solver) {
     backtrackTrace.assign(equalityTrace.begin() + targetSize, equalityTrace.end());
 
     while ((int_t)equalityTrace.size() > targetSize) {
-        auto entry = equalityTrace.back();
+        auto [link, roots] = equalityTrace.back();
         equalityTrace.pop_back();
         int_t backtrackTracePos = equalityTrace.size() - targetSize;
 
-        auto& sourceRootInfo = infoFor(solver, entry.roots.source);
-        auto& targetRootInfo = infoFor(solver, entry.roots.target);
-        VERIFY(targetRootInfo.root == entry.roots.source);
+        auto& sourceRootInfo = infoFor(solver, roots.source);
+        auto& targetRootInfo = infoFor(solver, roots.target);
+        VERIFY(targetRootInfo.root == roots.source);
         sourceRootInfo.tree.resize(targetRootInfo.treeOffset);
         sourceRootInfo.edges.resize(targetRootInfo.edgesOffset);
         unmergeFrom(sourceRootInfo.disequalities, targetRootInfo.disequalities);
         int_t newEdgesSize = sourceRootInfo.edges.size();
 
-        targetRootInfo.root = entry.roots.target;
+        targetRootInfo.root = roots.target;
         targetRootInfo.treeOffset = -1;
         targetRootInfo.edgesOffset = 0;
         targetRootInfo.backtrackCounter = backtrackCounter;
         targetRootInfo.backtrackTracePosition = backtrackTracePos;
         for (int_t i = 0; i < (int_t)targetRootInfo.tree.size(); i++) {
             auto& info = infoFor(solver, targetRootInfo.tree[i].value);
-            info.root = entry.roots.target;
+            info.root = roots.target;
             info.treeOffset = i;
             info.edgesOffset -= newEdgesSize;
         }
@@ -512,11 +495,11 @@ void StandardEquality::backtrack(Solver& solver) {
 
     targetSize = disequalityDecisionPoints[lastLevelToRevert];
     while ((int_t)disequalityTrace.size() > targetSize) {
-        int_t diseqId = disequalityTrace.back();
+        auto [diseqId] = disequalityTrace.back();
         disequalityTrace.pop_back();
         auto [source, target] = equalities.at(diseqId);
 
-        auto removeDisequality = [this, &solver, diseqId](Value parent) {
+        auto removeDisequality = [&solver, diseqId](Value parent) {
             auto& disequalities = infoFor(solver, parent).disequalities;
             auto it = std::lower_bound(disequalities.begin(), disequalities.end(), diseqId);
             VERIFY(it != disequalities.end());
@@ -530,7 +513,7 @@ void StandardEquality::backtrack(Solver& solver) {
 }
 
 void StandardEquality::checkInvariances(Solver& solver) {
-    auto checkValue = [this, &solver](Value value) {
+    auto checkValue = [&solver](Value value) {
         const auto& info = infoFor(solver, value);
         const auto& rootInfo = infoFor(solver, info.root);
         if (info.treeOffset == -1) {

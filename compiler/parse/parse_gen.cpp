@@ -112,6 +112,8 @@ std::string_view nameString(LexerToken token) {
         return "Break";
     case LexerToken::Catch:
         return "Catch";
+    case LexerToken::Const:
+        return "Const";
     case LexerToken::Continue:
         return "Continue";
     case LexerToken::Destroy:
@@ -136,12 +138,8 @@ std::string_view nameString(LexerToken token) {
         return "Has";
     case LexerToken::If:
         return "If";
-    case LexerToken::In:
-        return "In";
     case LexerToken::Incomplete:
         return "Incomplete";
-    case LexerToken::Inout:
-        return "Inout";
     case LexerToken::Let:
         return "Let";
     case LexerToken::Loop:
@@ -152,12 +150,12 @@ std::string_view nameString(LexerToken token) {
         return "Namespace";
     case LexerToken::Object:
         return "Object";
-    case LexerToken::Out:
-        return "Out";
     case LexerToken::Property:
         return "Property";
     case LexerToken::Return:
         return "Return";
+    case LexerToken::Shared:
+        return "Shared";
     case LexerToken::Static:
         return "Static";
     case LexerToken::Struct:
@@ -168,6 +166,8 @@ std::string_view nameString(LexerToken token) {
         return "Trait";
     case LexerToken::Try:
         return "Try";
+    case LexerToken::Unique:
+        return "Unique";
     case LexerToken::Var:
         return "Var";
     case LexerToken::Virtual:
@@ -215,22 +215,30 @@ std::string_view nameString(State state) {
         return "AfterStatement";
     case State::Statement:
         return "Statement";
+    case State::LetStatement:
+        return "LetStatement";
+    case State::VarStatement:
+        return "VarStatement";
     case State::AfterReturn:
         return "AfterReturn";
     case State::ElseBranch:
         return "ElseBranch";
-    case State::CheckVarAfterLet:
-        return "CheckVarAfterLet";
-    case State::VariableDeclaration:
-        return "VariableDeclaration";
+    case State::AfterSimpleVariableDeclarationId:
+        return "AfterSimpleVariableDeclarationId";
     case State::AfterVariableDeclarationId:
         return "AfterVariableDeclarationId";
+    case State::VariableType:
+        return "VariableType";
+    case State::AfterVariableTypeModifier:
+        return "AfterVariableTypeModifier";
     case State::AfterParameters:
         return "AfterParameters";
     case State::FirstParameter:
         return "FirstParameter";
     case State::Parameter:
         return "Parameter";
+    case State::VarParameter:
+        return "VarParameter";
     case State::NoDeclaration:
         return "NoDeclaration";
     case State::NamespaceDeclaration:
@@ -265,8 +273,6 @@ std::string_view nameString(State state) {
         return "MemberDeclaration";
     case State::AfterStatic:
         return "AfterStatic";
-    case State::StaticLetVariableDeclaration:
-        return "StaticLetVariableDeclaration";
     case State::StaticVarVariableDeclaration:
         return "StaticVarVariableDeclaration";
     case State::AfterDeclaration:

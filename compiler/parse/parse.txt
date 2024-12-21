@@ -365,10 +365,9 @@ SwitchState statement() then expression
         pushScope ScopeKind::IfExprOrStmt
         next expression
     keyword let
-        next check_var_after_let
+        next let_statement
     keyword var
-        tokenKind = TokenKind::VarStmt
-        next variable_declaration
+        next var_statement
     keyword return
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::ReturnStmt
@@ -390,6 +389,15 @@ SwitchState statement() then expression
     then
         pushScope ScopeKind::LeftExpr
 
+LinearState let_statement() then error
+    identifier
+        emitToken TokenKind::LetValueDecl, this_identifier
+        next after_variable_declaration_id
+LinearState var_statement() then error
+    identifier
+        emitToken TokenKind::VarValueDecl, this_identifier
+        next after_simple_variable_declaration_id
+
 LinearState after_return() then expression
     punctuation ;
         popScope ScopeKind::RightExpr
@@ -403,20 +411,13 @@ LinearState else_branch() then error
 
 # --- Variable declaration
 
-LinearState check_var_after_let() then variable_declaration
-    keyword var
-        tokenKind = TokenKind::VarStmt
-        next variable_declaration
-    then
-        tokenKind = TokenKind::LetStmt
-LinearState variable_declaration(tokenKind) then error
-    identifier
-        emitToken tokenKind, this_identifier
-        next after_variable_declaration_id
-LinearState after_variable_declaration_id() then error
+LinearState after_simple_variable_declaration_id() then after_variable_declaration_id
     punctuation :
         pushScope ScopeKind::VariableType
         next expression
+LinearState after_variable_declaration_id() then error
+    punctuation :
+        next variable_type
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt
@@ -436,6 +437,40 @@ LinearState after_variable_declaration_id() then error
         emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next after_parameters
+LinearState variable_type() then expression
+    keyword unique
+        updateKind TokenKind::UniqueReferenceDecl
+        next after_variable_type_modifier
+    keyword shared
+        updateKind TokenKind::SharedReferenceDecl
+        next after_variable_type_modifier
+    keyword const
+        updateKind TokenKind::ConstReferenceDecl
+        next after_variable_type_modifier
+    then
+        pushScope ScopeKind::VariableType
+LinearState after_variable_type_modifier() then expression
+    punctuation =
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::AssignStmt
+        next expression
+    punctuation ;
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
+        next after_statement
+    punctuation ,
+        popScope ScopeKind::Parameter
+        pushScope ScopeKind::Parameter
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
+        next parameter
+    punctuation )
+        popScope ScopeKind::Parameter
+        emitToken TokenKind::AssignStmt
+        emitToken TokenKind::ExpressionStmt
+        next after_parameters
+    then
+        pushScope ScopeKind::VariableType
 
 # --- Parameters
 
@@ -455,24 +490,16 @@ LinearState first_parameter() then parameter
     then
         pushScope ScopeKind::Parameter
 
-LinearState parameter() then variable_declaration
-    keyword in
-        tokenKind = TokenKind::InParameter
-        next variable_declaration
-    keyword inout
-        tokenKind = TokenKind::InOutParameter
-        next variable_declaration
-    keyword out
-        tokenKind = TokenKind::OutParameter
-        next variable_declaration
-    keyword let
-        tokenKind = TokenKind::LetParameter
-        next variable_declaration
+LinearState parameter() then error
+    identifier
+        emitToken TokenKind::LetValueDecl, this_identifier
+        next after_variable_declaration_id
     keyword var
-        tokenKind = TokenKind::VarParameter
-        next variable_declaration
-    then
-        tokenKind = TokenKind::ImplicitKindParameter
+        next var_parameter
+LinearState var_parameter() then error
+    identifier
+        emitToken TokenKind::VarValueDecl, this_identifier
+        next after_simple_variable_declaration_id
 
 # --- Declarations
 
@@ -607,24 +634,17 @@ LinearState member_declaration() then templated_declaration
         next after_variable_declaration_id
 
 LinearState after_static() then error
-    keyword let
-        next static_let_variable_declaration
     keyword var
         next static_var_variable_declaration
     identifier
         commitDeclaration DeclarationKind::StaticValue, this_identifier
-        emitToken TokenKind::StaticLetDecl, this_declaration
-        next after_variable_declaration_id
-LinearState static_let_variable_declaration() then error
-    identifier
-        commitDeclaration DeclarationKind::StaticValue, this_identifier
-        emitToken TokenKind::StaticLetDecl, this_declaration
-        next after_variable_declaration_id
+        emitToken TokenKind::LetValueDecl, this_declaration
+        next after_simple_variable_declaration_id
 LinearState static_var_variable_declaration() then error
     identifier
         commitDeclaration DeclarationKind::StaticObject, this_identifier
-        emitToken TokenKind::StaticVarDecl, this_declaration
-        next after_variable_declaration_id
+        emitToken TokenKind::VarValueDecl, this_declaration
+        next after_simple_variable_declaration_id
 
 LinearState after_declaration() then error
     then

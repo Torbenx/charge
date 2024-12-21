@@ -66,6 +66,14 @@ struct Solver {
         return theoryFor(value).valuesKind();
     }
 
+    void collectInactiveReasons(Value value, std::vector<BooleanValue>& clause) {
+        theoryFor(value).collectValueInactiveReasons(*this, value, clause);
+    }
+
+    bool isActive(Value value) {
+        return theoryFor(value).isValueActive(*this, value);
+    }
+
     std::strong_ordering compare(Value a, Value b) { return labelOf(a) <=> labelOf(b); }
 
     // BooleanTheory
@@ -113,7 +121,7 @@ struct Solver {
     }
 
     std::optional<ValueKind> loadedKind(Type type) {
-        return theoryFor(type).loadedKind(*this, type);
+        return theoryFor(type).scalarKind(*this, type);
     }
 
     // ReasonTheory
@@ -135,6 +143,8 @@ struct Solver {
     BooleanValue blockActiveLiteral(BlockId block) {
         return theoryFor(block).blockActiveLiteral(*this, block);
     }
+
+    bool isActive(BlockId block) { return assignedTrue(blockActiveLiteral(block)); }
 
     Value loadAtPosition(MemoryLocation location, CodePosition position) {
         return theoryFor(position.block).loadAtPosition(*this, location, position);
@@ -393,6 +403,8 @@ private:
         std::string formatPositiveLiteral(Solver&, int_t) override;
         std::string formatNegativeLiteral(Solver&, int_t) override;
         uint64_t labelOfValue(Solver&, Value) override;
+        void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) override;
+        bool isVariableActive(Solver&, int_t) override;
         BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
         void makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition);
     };

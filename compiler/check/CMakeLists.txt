@@ -12,6 +12,8 @@ target_sources(compiler
     EqualityTheory.h
     LiteralInfo.h
     LoadSet.h
+    MemoryLocations.cpp
+    MemoryLocations.h
     Phis.cpp
     Phis.h
     Reason.h

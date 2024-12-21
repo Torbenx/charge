@@ -15,7 +15,7 @@ struct Util {
     std::strong_ordering compare(NamespaceHandle, NamespaceHandle);
     std::strong_ordering compare(Parameterize, Parameterize);
     std::strong_ordering compare(MemberPointer, MemberPointer);
-    std::strong_ordering compare(RemoteExpression, RemoteExpression);
+    std::strong_ordering compare(RemoteComputation, RemoteComputation);
 
     Context& context;
     Program* program;

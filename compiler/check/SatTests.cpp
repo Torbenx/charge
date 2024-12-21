@@ -525,6 +525,90 @@ TEST(Check, EqualityProblem) {
     EXPECT_FALSE(solver.analyzeConflicts());
 }
 
+TEST(Check, DisequalityOfParentAppliesToNewEdgeAddedOnChild) {
+    Solver solver;
+    TestValueTheory values(solver);
+    Value v1 = values.newValue();
+    Value v2 = values.newValue();
+    Value v3 = values.newValue();
+    solver.propagate();
+
+    solver.decideTrue(values.equality.equality(solver, v1, v2));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    solver.decideTrue(values.equality.disequality(solver, v1, v3));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    BooleanValue e23 = values.equality.equality(solver, v2, v3);
+    EXPECT_TRUE(solver.tentativelyFalse(e23));
+    solver.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e23));
+}
+
+TEST(Check, OutOfOrderRevertedDisequalities) {
+    Solver solver;
+    TestValueTheory values(solver);
+    Value v1 = values.newValue();
+    Value v2 = values.newValue();
+    Value v3 = values.newValue();
+    solver.propagate();
+
+    BooleanValue e13 = values.equality.equality(solver, v1, v3);
+    BooleanValue e23 = values.equality.equality(solver, v2, v3);
+
+    solver.decideTrue(values.equality.equality(solver, v1, v2));
+    solver.propagate();
+
+    // assign v1 != v3
+    solver.decideTrue(solver.negate(e13));
+    solver.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e13));
+    EXPECT_TRUE(solver.assignedFalse(e23));
+
+    // assign v2 != v3
+    solver.addClause({ solver.negate(e23) });
+    solver.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e13));
+    EXPECT_TRUE(solver.assignedFalse(e23));
+
+    // revert v1 != v3
+    solver.backtrack(solver.currentDecisionLevel());
+    solver.propagate();
+
+    // check v2 != v3 still holds
+    EXPECT_TRUE(solver.assignedFalse(e13));
+    EXPECT_TRUE(solver.assignedFalse(e23));
+}
+
+TEST(Check, DisequalityCleanedUpInParents) {
+    Solver solver;
+    TestValueTheory values(solver);
+    Value v1 = values.newValue();
+    Value v2 = values.newValue();
+    Value v3 = values.newValue();
+    Value v4 = values.newValue();
+    solver.propagate();
+
+
+    solver.decideTrue(values.equality.disequality(solver, v3, v4));
+    solver.propagate();
+
+    solver.decideTrue(values.equality.equality(solver, v1, v3));
+    solver.propagate();
+
+    solver.decideTrue(values.equality.equality(solver, v2, v4));
+    solver.propagate();
+
+    solver.backtrack(0);
+    solver.propagate();
+
+    BooleanValue e12 = values.equality.equality(solver, v1, v2);
+    solver.propagate();
+    EXPECT_FALSE(solver.assignedFalse(e12));
+}
+
 struct TestBlockTheory : CodeBlockTheory, BooleanVariables {
     TestBlockTheory(Solver& solver)
         : CodeBlockTheory(solver), BooleanVariables(solver, 5000) { }
@@ -609,7 +693,7 @@ TEST(Check, OneOf) {
 
 struct BooleanTypes : TypeTheory {
     using TypeTheory::TypeTheory;
-    std::optional<ValueKind> loadedKind(Solver&, Type) override { return ValueKind::Boolean; }
+    std::optional<ValueKind> scalarKind(Solver&, Type) override { return ValueKind::Boolean; }
     std::string formatValue(Solver&, Value) override { return "bool"; }
     uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
@@ -670,6 +754,24 @@ TEST(Check, Code) {
     ASSERT_TRUE(solver.analyzeConflicts());
     solver.propagate();
     ASSERT_TRUE(solver.assignedTrue(finalLoad));
+}
+
+TEST(Check, DISABLED_Declaration) {
+    Solver solver;
+    StoreBlocks stores(solver);
+    Phis phis(solver, 2000);
+    BooleanMemoryLocations locations(solver);
+    solver.propagate();
+
+    BlockId s = stores.newBlock(solver, 1, builtins::entry_block);
+    MemoryLocation ptrLoc = locations.newLocation();
+
+    MemoryLocation boolLoc = locations.newLocation();
+    stores.appendStore(solver, s, boolLoc, builtins::true_literal);
+
+    stores.appendStore(solver, s, MemoryLocation { solver.loadAtEndOfBlock(ptrLoc, s) }, builtins::false_literal);
+
+    solver.decideTrue(solver.negate(BooleanValue { solver.loadAtEndOfBlock(boolLoc, s) }));
 }
 
 }

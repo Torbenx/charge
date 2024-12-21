@@ -15,13 +15,13 @@ std::strong_ordering ParameterizeSet::compare(Context& context, ProgramHandle pr
     return Util(context, program).compare(a, Parameterize::fromData(b));
 }
 
-uint32_t RemoteExpressionSet::get(Context& context, ProgramHandle prog, RemoteExpression expr) {
+uint32_t RemoteComputationSet::get(Context& context, ProgramHandle prog, RemoteComputation expr) {
     return Base::get(context, prog, expr);
 }
-uint32_t RemoteExpressionSet::makeNode(Context&, ProgramHandle, RemoteExpression expr, TreeLabel label) {
+uint32_t RemoteComputationSet::makeNode(Context&, ProgramHandle, RemoteComputation expr, TreeLabel label) {
     return Base::makeNode(label, expr);
 }
-std::strong_ordering RemoteExpressionSet::compare(Context& context, ProgramHandle program, RemoteExpression a, RemoteExpression b) {
+std::strong_ordering RemoteComputationSet::compare(Context& context, ProgramHandle program, RemoteComputation a, RemoteComputation b) {
     return Util(context, program).compare(a, b);
 }
 
@@ -41,10 +41,10 @@ Constant Program::addParameterize(Context& context, Parameterize para) {
     return Constant(ConstantKind::Parameterize, id);
 }
 
-Constant Program::addRemoteExpression(Context& context, RemoteExpression expr) {
-    VERIFY(expr.expression.kind() == ConstantKind::Expression);
-    auto id = remoteExpressions.get(context, context.programHandle(this), expr);
-    return Constant(ConstantKind::RemoteExpression, id);
+Constant Program::addRemoteComputedConstant(Context& context, RemoteComputation expr) {
+    VERIFY(expr.computation.kind() == ConstantKind::Computed);
+    auto id = remoteComputations.get(context, context.programHandle(this), expr);
+    return Constant(ConstantKind::RemoteComputed, id);
 }
 
 Constant Program::addMemberPointer(Context& context, MemberPointer ptr) {
@@ -52,21 +52,16 @@ Constant Program::addMemberPointer(Context& context, MemberPointer ptr) {
     return Constant(ConstantKind::MemberPointer, id);
 }
 
+Constant Program::addComputedConstant(Context&, ComputedConstant c) {
+    auto id = computations.size();
+    computations.push_back({ c.value, c.type, { c.body.begin(), c.body.end() } });
+    return Constant(ConstantKind::Computed, id);
+}
+
 Reference Program::addMemberReference(MemberReference e) {
     auto id = memberReferences.size();
     memberReferences.push_back(e);
     return Reference(ReferenceKind::MemberExpression, id);
-}
-
-int_t Program::importInstructions(Opcode headerCode, std::span<const Instruction> stream) {
-    int_t offset = instructions.size();
-    instructions.push_back({ headerCode, {}, { .blockSize = (uint32_t)stream.size() } });
-    instructions.insert(instructions.end(), stream.begin(), stream.end());
-    return offset;
-}
-
-Constant Program::addExpression(std::span<const Instruction> expr) {
-    return Constant(ConstantKind::Expression, importInstructions(Opcode::ExpressionHeader, expr));
 }
 
 }

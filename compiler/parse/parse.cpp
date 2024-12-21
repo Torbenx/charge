@@ -108,9 +108,6 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    if (kind == TokenKind::ImplicitKindParameter) {
-        VERIFY(data != 0);
-    }
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
@@ -297,22 +294,30 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto after_statement$no_emit;
     case State::Statement:
         goto statement$no_emit;
+    case State::LetStatement:
+        goto let_statement$no_emit;
+    case State::VarStatement:
+        goto var_statement$no_emit;
     case State::AfterReturn:
         goto after_return$no_emit;
     case State::ElseBranch:
         goto else_branch$no_emit;
-    case State::CheckVarAfterLet:
-        goto check_var_after_let$no_emit;
-    case State::VariableDeclaration:
-        goto variable_declaration$no_emit;
+    case State::AfterSimpleVariableDeclarationId:
+        goto after_simple_variable_declaration_id$no_emit;
     case State::AfterVariableDeclarationId:
         goto after_variable_declaration_id$no_emit;
+    case State::VariableType:
+        goto variable_type$no_emit;
+    case State::AfterVariableTypeModifier:
+        goto after_variable_type_modifier$no_emit;
     case State::AfterParameters:
         goto after_parameters$no_emit;
     case State::FirstParameter:
         goto first_parameter$no_emit;
     case State::Parameter:
         goto parameter$no_emit;
+    case State::VarParameter:
+        goto var_parameter$no_emit;
     case State::NoDeclaration:
         VERIFY_NOT_REACHED();
     case State::NamespaceDeclaration:
@@ -347,8 +352,6 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto member_declaration$no_emit;
     case State::AfterStatic:
         goto after_static$no_emit;
-    case State::StaticLetVariableDeclaration:
-        goto static_let_variable_declaration$no_emit;
     case State::StaticVarVariableDeclaration:
         goto static_var_variable_declaration$no_emit;
     case State::AfterDeclaration:
@@ -1900,11 +1903,8 @@ comma_after_expression$no_emit:
         // ifScope ScopeKind::Parameter
         if (scopePosition[0] == ScopeKind::Parameter) {
             // then parameter
-            // tokenKind = TokenKind::ImplicitKindParameter
-            tokenKind = TokenKind::ImplicitKindParameter;
-            // -> variable_declaration
-            // emitToken tokenKind, this_identifier
-            carriedEmitTokenKind = tokenKind;
+            // emitToken TokenKind::LetValueDecl, this_identifier
+            carriedEmitTokenKind = TokenKind::LetValueDecl;
             carriedEmitTokenData = this_identifier.toUint();
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
@@ -1934,11 +1934,8 @@ comma_after_expression$no_emit:
             // emitToken TokenKind::ExpressionStmt
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
-            // tokenKind = TokenKind::ImplicitKindParameter
-            tokenKind = TokenKind::ImplicitKindParameter;
-            // -> variable_declaration
-            // emitToken tokenKind, this_identifier
-            carriedEmitTokenKind = tokenKind;
+            // emitToken TokenKind::LetValueDecl, this_identifier
+            carriedEmitTokenKind = TokenKind::LetValueDecl;
             carriedEmitTokenData = this_identifier.toUint();
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
@@ -1966,11 +1963,8 @@ comma_after_expression$no_emit:
             // emitToken TokenKind::ExpressionStmt
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
-            // tokenKind = TokenKind::ImplicitKindParameter
-            tokenKind = TokenKind::ImplicitKindParameter;
-            // -> variable_declaration
-            // emitToken tokenKind, this_identifier
-            carriedEmitTokenKind = tokenKind;
+            // emitToken TokenKind::LetValueDecl, this_identifier
+            carriedEmitTokenKind = TokenKind::LetValueDecl;
             carriedEmitTokenData = this_identifier.toUint();
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
@@ -3122,14 +3116,12 @@ statement$word_case:
             goto expression$no_emit;
         }
         if (this_identifier == words["let"]) {
-            // next check_var_after_let
-            goto check_var_after_let$no_emit;
+            // next let_statement
+            goto let_statement$no_emit;
         }
         if (this_identifier == words["var"]) {
-            // tokenKind = TokenKind::VarStmt
-            tokenKind = TokenKind::VarStmt;
-            // next variable_declaration
-            goto variable_declaration$no_emit;
+            // next var_statement
+            goto var_statement$no_emit;
         }
         if (this_identifier == words["return"]) {
             // pushScope ScopeKind::RightExpr
@@ -3171,6 +3163,54 @@ statement$word_case:
     carriedEmitTokenData = this_identifier.toUint();
     // next after_expression
     goto after_expression$with_emit;
+
+    // LinearState let_statement
+let_statement$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::LetStatement;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // emitToken TokenKind::LetValueDecl, this_identifier
+        carriedEmitTokenKind = TokenKind::LetValueDecl;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_variable_declaration_id
+        goto after_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState var_statement
+var_statement$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::VarStatement;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // emitToken TokenKind::VarValueDecl, this_identifier
+        carriedEmitTokenKind = TokenKind::VarValueDecl;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
 
     // LinearState after_return
 after_return$with_emit:
@@ -3217,77 +3257,13 @@ else_branch$no_emit:
     // then error
     goto error$as_then;
 
-    // LinearState check_var_after_let
-check_var_after_let$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
-    tokBegin = tokEnd;
-    parseState = State::CheckVarAfterLet;
-    if (isWordFirstCharacter(tokEnd[0])) {
-        {
-            auto wordAndPos = readWord(tokEnd, state);
-            tokEnd = wordAndPos.position;
-            this_identifier = wordAndPos.word;
-        }
-        if (this_identifier.keyword()) {
-        LABEL_MAYBE_UNUSED check_var_after_let$keyword_check:
-            if (this_identifier == words["var"]) {
-                // tokenKind = TokenKind::VarStmt
-                tokenKind = TokenKind::VarStmt;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
-            }
-            // tokenKind = TokenKind::LetStmt
-            tokenKind = TokenKind::LetStmt;
-            // -> variable_declaration
-            // -> error
-            goto error$keyword_check;
-        }
-        // tokenKind = TokenKind::LetStmt
-        tokenKind = TokenKind::LetStmt;
-        // -> variable_declaration
-        // emitToken tokenKind, this_identifier
-        carriedEmitTokenKind = tokenKind;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
-    }
-    // tokenKind = TokenKind::LetStmt
-    tokenKind = TokenKind::LetStmt;
-    // then variable_declaration
-    goto variable_declaration$as_then;
-
-    // LinearState variable_declaration
-variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
-    tokBegin = tokEnd;
-    parseState = State::VariableDeclaration;
-variable_declaration$as_then:
-    if (isWordFirstCharacter(tokEnd[0])) {
-        {
-            auto wordAndPos = readWord(tokEnd, state);
-            tokEnd = wordAndPos.position;
-            this_identifier = wordAndPos.word;
-        }
-        if (this_identifier.keyword()) {
-            // -> error
-            goto error$keyword_check;
-        }
-        // emitToken tokenKind, this_identifier
-        carriedEmitTokenKind = tokenKind;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
-    }
-    // then error
-    goto error$as_then;
-
-    // LinearState after_variable_declaration_id
-after_variable_declaration_id$with_emit:
+    // LinearState after_simple_variable_declaration_id
+after_simple_variable_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
-after_variable_declaration_id$no_emit:
+after_simple_variable_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::AfterVariableDeclarationId;
+    parseState = State::AfterSimpleVariableDeclarationId;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -3296,6 +3272,25 @@ after_variable_declaration_id$no_emit:
             scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
             // next expression
             goto expression$no_emit;
+        }
+    }
+    // then after_variable_declaration_id
+    goto after_variable_declaration_id$as_then;
+
+    // LinearState after_variable_declaration_id
+after_variable_declaration_id$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+after_variable_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterVariableDeclarationId;
+after_variable_declaration_id$as_then:
+    if (std::string_view(tokEnd, 1) == ":"sv) {
+        char next = tokEnd[1];
+        if (next != ':') {
+            tokEnd += 1;
+            // next variable_type
+            goto variable_type$no_emit;
         }
     }
     if (std::string_view(tokEnd, 1) == "="sv) {
@@ -3363,6 +3358,129 @@ after_variable_declaration_id$no_emit:
     }
     // then error
     goto error$as_then;
+
+    // LinearState variable_type
+variable_type$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::VariableType;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED variable_type$keyword_check:
+            if (this_identifier == words["unique"]) {
+                // updateKind TokenKind::UniqueReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::UniqueReferenceDecl);
+                // next after_variable_type_modifier
+                goto after_variable_type_modifier$no_emit;
+            }
+            if (this_identifier == words["shared"]) {
+                // updateKind TokenKind::SharedReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::SharedReferenceDecl);
+                // next after_variable_type_modifier
+                goto after_variable_type_modifier$no_emit;
+            }
+            if (this_identifier == words["const"]) {
+                // updateKind TokenKind::ConstReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::ConstReferenceDecl);
+                // next after_variable_type_modifier
+                goto after_variable_type_modifier$no_emit;
+            }
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            goto expression$keyword_check;
+        }
+        // pushScope ScopeKind::VariableType
+        scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // pushScope ScopeKind::VariableType
+    scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+    // then expression
+    goto expression$as_then;
+
+    // LinearState after_variable_type_modifier
+after_variable_type_modifier$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterVariableTypeModifier;
+    if (std::string_view(tokEnd, 1) == "="sv) {
+        char next = tokEnd[1];
+        if (next != '=' && next != '>') {
+            tokEnd += 1;
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::AssignStmt
+            carriedEmitTokenKind = TokenKind::AssignStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        }
+    }
+    if (std::string_view(tokEnd, 1) == ";"sv) {
+        tokEnd += 1;
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
+        carriedEmitTokenData = 0;
+        // next after_statement
+        goto after_statement$with_emit;
+    }
+    if (std::string_view(tokEnd, 1) == ","sv) {
+        tokEnd += 1;
+        // popScope ScopeKind::Parameter
+        {
+            auto result = popScope(scopePosition, ScopeKind::Parameter);
+            if (result == nullptr) {
+                errorToken = LexerToken::Comma;
+                goto handle_parse_error;
+            }
+            scopePosition = result;
+        }
+        // pushScope ScopeKind::Parameter
+        scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
+        carriedEmitTokenData = 0;
+        // next parameter
+        goto parameter$with_emit;
+    }
+    if (std::string_view(tokEnd, 1) == ")"sv) {
+        tokEnd += 1;
+        // popScope ScopeKind::Parameter
+        {
+            auto result = popScope(scopePosition, ScopeKind::Parameter);
+            if (result == nullptr) {
+                errorToken = LexerToken::RightParen;
+                goto handle_parse_error;
+            }
+            scopePosition = result;
+        }
+        // emitToken TokenKind::AssignStmt
+        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
+        carriedEmitTokenData = 0;
+        // next after_parameters
+        goto after_parameters$with_emit;
+    }
+    // pushScope ScopeKind::VariableType
+    scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+    // then expression
+    goto expression$as_then;
 
     // LinearState after_parameters
 after_parameters$with_emit:
@@ -3435,55 +3553,45 @@ parameter$as_then:
         }
         if (this_identifier.keyword()) {
         LABEL_MAYBE_UNUSED parameter$keyword_check:
-            if (this_identifier == words["in"]) {
-                // tokenKind = TokenKind::InParameter
-                tokenKind = TokenKind::InParameter;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
-            }
-            if (this_identifier == words["inout"]) {
-                // tokenKind = TokenKind::InOutParameter
-                tokenKind = TokenKind::InOutParameter;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
-            }
-            if (this_identifier == words["out"]) {
-                // tokenKind = TokenKind::OutParameter
-                tokenKind = TokenKind::OutParameter;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
-            }
-            if (this_identifier == words["let"]) {
-                // tokenKind = TokenKind::LetParameter
-                tokenKind = TokenKind::LetParameter;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
-            }
             if (this_identifier == words["var"]) {
-                // tokenKind = TokenKind::VarParameter
-                tokenKind = TokenKind::VarParameter;
-                // next variable_declaration
-                goto variable_declaration$no_emit;
+                // next var_parameter
+                goto var_parameter$no_emit;
             }
-            // tokenKind = TokenKind::ImplicitKindParameter
-            tokenKind = TokenKind::ImplicitKindParameter;
-            // -> variable_declaration
             // -> error
             goto error$keyword_check;
         }
-        // tokenKind = TokenKind::ImplicitKindParameter
-        tokenKind = TokenKind::ImplicitKindParameter;
-        // -> variable_declaration
-        // emitToken tokenKind, this_identifier
-        carriedEmitTokenKind = tokenKind;
+        // emitToken TokenKind::LetValueDecl, this_identifier
+        carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = this_identifier.toUint();
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
-    // tokenKind = TokenKind::ImplicitKindParameter
-    tokenKind = TokenKind::ImplicitKindParameter;
-    // then variable_declaration
-    goto variable_declaration$as_then;
+    // then error
+    goto error$as_then;
+
+    // LinearState var_parameter
+var_parameter$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::VarParameter;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // emitToken TokenKind::VarValueDecl, this_identifier
+        carriedEmitTokenKind = TokenKind::VarValueDecl;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
 
     // LinearState no_declaration
 no_declaration$as_then:
@@ -3974,10 +4082,6 @@ after_static$no_emit:
         }
         if (this_identifier.keyword()) {
         LABEL_MAYBE_UNUSED after_static$keyword_check:
-            if (this_identifier == words["let"]) {
-                // next static_let_variable_declaration
-                goto static_let_variable_declaration$no_emit;
-            }
             if (this_identifier == words["var"]) {
                 // next static_var_variable_declaration
                 goto static_var_variable_declaration$no_emit;
@@ -3987,37 +4091,11 @@ after_static$no_emit:
         }
         // commitDeclaration DeclarationKind::StaticValue, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticValue>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::StaticLetDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::StaticLetDecl;
+        // emitToken TokenKind::LetValueDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = this_declaration.toUint();
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
-    }
-    // then error
-    goto error$as_then;
-
-    // LinearState static_let_variable_declaration
-static_let_variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
-    tokBegin = tokEnd;
-    parseState = State::StaticLetVariableDeclaration;
-    if (isWordFirstCharacter(tokEnd[0])) {
-        {
-            auto wordAndPos = readWord(tokEnd, state);
-            tokEnd = wordAndPos.position;
-            this_identifier = wordAndPos.word;
-        }
-        if (this_identifier.keyword()) {
-            // -> error
-            goto error$keyword_check;
-        }
-        // commitDeclaration DeclarationKind::StaticValue, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticValue>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::StaticLetDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::StaticLetDecl;
-        carriedEmitTokenData = this_declaration.toUint();
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
     }
     // then error
     goto error$as_then;
@@ -4039,11 +4117,11 @@ static_var_variable_declaration$no_emit:
         }
         // commitDeclaration DeclarationKind::StaticObject, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticObject>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::StaticVarDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::StaticVarDecl;
+        // emitToken TokenKind::VarValueDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = this_declaration.toUint();
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
     }
     // then error
     goto error$as_then;
@@ -4516,6 +4594,11 @@ error$word_case:
             errorToken = LexerToken::Catch;
             goto handle_parse_error;
         }
+        if (this_identifier == words["const"]) {
+            // error
+            errorToken = LexerToken::Const;
+            goto handle_parse_error;
+        }
         if (this_identifier == words["continue"]) {
             // error
             errorToken = LexerToken::Continue;
@@ -4576,19 +4659,9 @@ error$word_case:
             errorToken = LexerToken::If;
             goto handle_parse_error;
         }
-        if (this_identifier == words["in"]) {
-            // error
-            errorToken = LexerToken::In;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["incomplete"]) {
             // error
             errorToken = LexerToken::Incomplete;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["inout"]) {
-            // error
-            errorToken = LexerToken::Inout;
             goto handle_parse_error;
         }
         if (this_identifier == words["let"]) {
@@ -4616,11 +4689,6 @@ error$word_case:
             errorToken = LexerToken::Object;
             goto handle_parse_error;
         }
-        if (this_identifier == words["out"]) {
-            // error
-            errorToken = LexerToken::Out;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["property"]) {
             // error
             errorToken = LexerToken::Property;
@@ -4629,6 +4697,11 @@ error$word_case:
         if (this_identifier == words["return"]) {
             // error
             errorToken = LexerToken::Return;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["shared"]) {
+            // error
+            errorToken = LexerToken::Shared;
             goto handle_parse_error;
         }
         if (this_identifier == words["static"]) {
@@ -4654,6 +4727,11 @@ error$word_case:
         if (this_identifier == words["try"]) {
             // error
             errorToken = LexerToken::Try;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["unique"]) {
+            // error
+            errorToken = LexerToken::Unique;
             goto handle_parse_error;
         }
         if (this_identifier == words["var"]) {

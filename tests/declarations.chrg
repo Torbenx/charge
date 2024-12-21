@@ -1,35 +1,43 @@
 
 // expect-token FunctionDecl
-// expect-token InParameter; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token InOutParameter; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token OutParameter; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token VarParameter; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token LetParameter; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token ImplicitKindParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token UniqueReferenceDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token SharedReferenceDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token ConstReferenceDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token VarValueDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f1(in x, inout y, out z, var a, let b, c): { }
+fn f1(x: unique, y: shared, z: const, var a, b): { }
 
 // expect-token FunctionDecl
-// expect-token InParameter; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token UniqueReferenceDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token SharedReferenceDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token ConstReferenceDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token VarValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f2(in x = init): { }
+fn f1x(x: unique type, y: shared = init, z: const type = init, var a: type, b = init): { }
 
 // expect-token FunctionDecl
-// expect-token InParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f3(in x: type): { }
+fn f2(x = init): { }
 
 // expect-token FunctionDecl
-// expect-token InParameter; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
-// expect-token InParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f4(in x = init, in y): { }
+fn f3(x: type): { }
 
 // expect-token FunctionDecl
-// expect-token InParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
-// expect-token InParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token VarValueDecl; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f5(in x: type, in y): { }
+fn f4(x = init, var y): { }
+
+// expect-token FunctionDecl
+// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token VarValueDecl; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f5(x: type, var y): { }
 
 // expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType; expect-token IdentifierExpr
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
@@ -69,32 +77,29 @@ struct H1: {
     }
 }
 
-// expect-token StaticLetDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token ExpressionStmt
 static v1;
 
-// expect-token StaticLetDecl; expect-token AssignStmt; expect-token ExpressionStmt
-static let v2;
-
-// expect-token StaticVarDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token VarValueDecl; expect-token AssignStmt; expect-token ExpressionStmt
 static var v3;
 
-// expect-token StaticLetDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
 static w1: type;
 
-// expect-token StaticLetDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 static w2 = init;
 
-// expect-token StaticLetDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 static w3: type = init;
 
-//expect-token TemplateAttribute; expect-token ImplicitKindParameter; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
+//expect-token TemplateAttribute; expect-token LetValueDecl; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
 template(T) struct T1: { }
 
-//expect-token TemplateAttribute; expect-token ImplicitKindParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
+//expect-token TemplateAttribute; expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
 template(T: type) struct T2: { }
 
-//expect-token TemplateAttribute; expect-token ImplicitKindParameter; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
+//expect-token TemplateAttribute; expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
 template(T = init) struct T3: { }
 
-//expect-token TemplateAttribute; expect-token ImplicitKindParameter; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
+//expect-token TemplateAttribute; expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructTypeDecl
 template(T: type = init) struct T4: { }

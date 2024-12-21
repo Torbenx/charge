@@ -159,22 +159,18 @@ void Solver::BooleanEquality::onNewVariable(Solver& solver, int_t varId) {
     BooleanValue na = solver.negate(a);
     BooleanValue nb = solver.negate(b);
 
-    if (a == b) {
-        solver.addClause({ eq });
-    } else if (a == nb) {
-        solver.addClause({ neq });
-    } else {
-        solver.addClause({ neq, na, b });
-        solver.addClause({ neq, a, nb });
-        solver.addClause({ eq, a, b });
-        solver.addClause({ eq, na, nb });
-    }
+    VERIFY(a != b);
+    VERIFY(a != nb);
+    solver.addClause({ neq, na, b });
+    solver.addClause({ neq, a, nb });
+    solver.addClause({ eq, a, b });
+    solver.addClause({ eq, na, nb });
 }
 
 // -------------------------- BooleanLoads --------------------------
 
 std::string Solver::BooleanLoads::formatPositiveLiteral(Solver& solver, int_t varId) {
-    auto [location, position] = LoadSet::loadAt(varId);
+    auto [location, position] = loadAt(varId);
     return solver.formatLoad(location, position);
 }
 
@@ -187,8 +183,16 @@ uint64_t Solver::BooleanLoads::labelOfValue(Solver&, Value value) {
     return 3000 + (uint64_t)LoadSet::label(variableId(lit)) * 2 + isPositive(lit);
 }
 
+void Solver::BooleanLoads::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
+    clause.push_back(solver.negate(solver.blockActiveLiteral(loadAt(varId).position.block)));
+}
+
+bool Solver::BooleanLoads::isVariableActive(Solver& solver, int_t varId) {
+    return solver.assignedTrue(solver.blockActiveLiteral(loadAt(varId).position.block));
+}
+
 BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
-    return positiveLiteral(LoadSet::get(solver, location, position));
+    return positiveLiteral(get(solver, location, position));
 }
 
 void Solver::BooleanLoads::makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition) {
@@ -198,11 +202,45 @@ void Solver::BooleanLoads::makeData(Solver&, uint32_t newHandle, MemoryLocation,
 
 // ---------------------------- Booleans ----------------------------
 
-BooleanValue Solver::Booleans::equality(Solver& solver, Value a, Value b) {
+BooleanValue Solver::Booleans::equality(Solver& solver, Value va, Value vb) {
+    BooleanValue a { va };
+    BooleanValue b { vb };
+
+    if (a == b)
+        return builtins::true_literal;
+    if (a == solver.negate(b))
+        return builtins::false_literal;
+
+    if (a == builtins::true_literal)
+        return b;
+    if (b == builtins::true_literal)
+        return a;
+    if (a == builtins::false_literal)
+        return solver.negate(b);
+    if (b == builtins::false_literal)
+        return solver.negate(a);
+
     return m_equality.equality(solver, a, b);
 }
 
-BooleanValue Solver::Booleans::disequality(Solver& solver, Value a, Value b) {
+BooleanValue Solver::Booleans::disequality(Solver& solver, Value va, Value vb) {
+    BooleanValue a { va };
+    BooleanValue b { vb };
+
+    if (a == b)
+        return builtins::false_literal;
+    if (a == solver.negate(Literal { b }))
+        return builtins::true_literal;
+
+    if (a == builtins::true_literal)
+        return solver.negate(b);
+    if (b == builtins::true_literal)
+        return solver.negate(a);
+    if (a == builtins::false_literal)
+        return b;
+    if (b == builtins::false_literal)
+        return a;
+
     return m_equality.disequality(solver, a, b);
 }
 
@@ -226,7 +264,7 @@ Value Solver::EntryBlocks::loadAtPosition(Solver& solver, MemoryLocation locatio
 
 BooleanValue Solver::EntryBlocks::blockActiveLiteral(Solver&, BlockId) {
     // Since the entry block has no parents this doesn't really matter,
-    // but in principle it should be active as long as any some block is active.
+    // but in principle it should be active as long as some block is active.
     return builtins::true_literal;
 }
 
@@ -289,8 +327,16 @@ bool Solver::simplifyClause(std::vector<Literal>& clause) {
 }
 
 void Solver::addClause(std::vector<Literal> clause) {
+    for (int_t i = 0; i < (int_t)clause.size(); i++)
+        collectInactiveReasons(clause[i], clause);
+
     if (simplifyClause(clause))
         return;
+
+    auto comp = [this](Literal a, Literal b) { return compare(a, b) < 0; };
+    std::sort(clause.begin(), clause.end(), comp);
+    auto newEnd = std::unique(clause.begin(), clause.end());
+    clause.erase(newEnd, clause.end());
 
     if (clause.size() == 1) {
         unitAssignTrue(clause[0]);
