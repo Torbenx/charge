@@ -253,7 +253,7 @@ struct Generator : Util {
     OwnedExpressionResult takeTopExpression();
 
     LocalScope beginLocalScope(SourceLocation);
-    void endLocalScope(LocalScope scope, SourceLocation);
+    sema::LocalScope endLocalScope(LocalScope scope, SourceLocation);
 
     void visitDeclaration();
     void visitTemplateParameters();

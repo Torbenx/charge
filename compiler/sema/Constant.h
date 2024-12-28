@@ -14,6 +14,13 @@ enum class BuiltinId : uint32_t {
     COUNT,
 };
 
+enum class ExpressionCategory : uint8_t {
+    Value,
+    UniqueReference,
+    SharedReference,
+    ConstReference,
+};
+
 struct Constant;
 
 struct ProgramHandle {

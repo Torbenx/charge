@@ -18,19 +18,19 @@ OwnedExpressionResult Generator::takeTopExpression() {
 void Generator::emitConstantExpr(SourceLocation location, Constant value) {
     VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
     currentExpression = value;
-    expressionStack.push_back({ .startOffset = (uint32_t)expressionStack.size() });
+    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
 }
 
 void Generator::emitReferenceExpr(SourceLocation location, Reference ref) {
     VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
     currentExpression = ref;
-    expressionStack.push_back({ .startOffset = (uint32_t)expressionStack.size() });
+    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
 }
 
 void Generator::emitInstructionExpr(Instruction* inst, OwnedExpressionResult result) {
     VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
     currentExpression = std::move(result);
-    expressionStack.push_back({ .startOffset = (uint32_t)expressionStack.size() });
+    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
     instructionScratch.push_back(inst);
 }
 

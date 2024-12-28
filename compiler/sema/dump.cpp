@@ -164,9 +164,11 @@ void Dumper::dumpInstruction(Instruction* inst) {
     switch (inst->opcode()) {
     case Opcode::Call: {
         auto* call = cast<CallInstruction>(inst);
-        line << "[" << formatConstant(call->returnType) << "] " << formatConstant(call->callTarget) << " (";
-        for (auto arg : call->arugments()) {
-            line << formatExpressionResult(arg) << ", ";
+        line << "[" << formatConstant(call->returnType) << "] " << formatConstant(call->callTarget) << "(";
+        if (!call->arugments().empty()) {
+            for (int_t i = 0; i < (int_t)call->arugments().size() - 1; i++)
+                line << formatExpressionResult(call->arugments()[i]) << ", ";
+            line << formatExpressionResult(call->arugments().back());
         }
         line << ")";
         break;
@@ -175,14 +177,25 @@ void Dumper::dumpInstruction(Instruction* inst) {
         line << "Copy " << formatReference(cast<ImplicitCopyInstruction>(inst)->copyFrom);
         break;
     }
+    case Opcode::Compound: {
+        auto* compInst = cast<CompoundInstruction>(inst);
+        dumpLine("block:");
+        indentation.push_back("  ");
+        for (auto* inst : compInst->body())
+            dumpInstruction(inst);
+        indentation.pop_back();
+        return;
+    }
     case Opcode::Branch: {
         auto* branchInst = cast<BranchInstruction>(inst);
+        bool first = true;
         for (auto& branch : branchInst->branches()) {
-            dumpLine("if " + formatExpressionResult(branch.conidition));
+            dumpLine((first ? "if " : "elif ") + formatExpressionResult(branch.condition) + ":");
             indentation.push_back("  ");
             for (auto* inst : branch.body())
                 dumpInstruction(inst);
             indentation.pop_back();
+            first = false;
         }
         return;
     }
@@ -193,7 +206,7 @@ void Dumper::dumpInstruction(Instruction* inst) {
         break;
     case Opcode::Initialize: {
         auto* init = cast<InitializeInstruction>(inst);
-        line << formatReference(init->target) << " = " << formatExpressionResult(init->initializer);
+        line << formatReference(init->target) << " <- " << formatExpressionResult(init->initializer);
         break;
     }
     default:
@@ -219,7 +232,7 @@ void Dumper::dumpProgram(Program* prog) {
     case ProgramKind::Function:
         dumpLine("return-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         indentation.push_back("  ");
-        for (auto* inst : cast<FunctionProgram>(prog)->body())
+        for (auto* inst : cast<FunctionProgram>(prog)->body().body())
             dumpInstruction(inst);
         indentation.pop_back();
         break;

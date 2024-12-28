@@ -36,7 +36,7 @@ void Generator::advance() { tok += 1; }
 
 Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
     localScopeDepth += 1;
-    // emitControl(Opcode::BeginScope, location, 0, { .empty {} });
+    expressionStack.push_back({ (uint32_t)instructionScratch.size() });
     return {
         localScopeDepth,
         (uint32_t)localState.variableActiveMask.size(),
@@ -44,7 +44,7 @@ Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
     };
 }
 
-void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
+sema::LocalScope Generator::endLocalScope(LocalScope scope, SourceLocation location) {
     VERIFY(scope.localScopeDepth == localScopeDepth);
     localScopeDepth -= 1;
 
@@ -57,6 +57,7 @@ void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
         localState.variableActiveMask.pop_back();
         localVariables.pop_back();
     }
+
     VERIFY(localState.referenceActiveMask.size() == localReferences.size());
     while (localState.referenceActiveMask.size() > scope.localReferenceCount) {
         if (localState.referenceActiveMask.back()) {
@@ -67,7 +68,12 @@ void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
         localReferences.pop_back();
     }
 
-    // emitControl(Opcode::EndScope, location, 0, { .empty {} });
+    VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
+    auto newEnd = instructionScratch.begin() + expressionStack.back().startOffset;
+    sema::LocalScope result({ newEnd, instructionScratch.end() });
+    instructionScratch.erase(newEnd, instructionScratch.end());
+    expressionStack.pop_back();
+    return result;
 }
 
 void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
@@ -201,8 +207,6 @@ void Generator::visitFunctionDeclaration() {
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
 
-    int_t scratchSizeAtBegin = instructionScratch.size();
-
     lookupStack.push_back(LookupContext::forLocal(this));
 
     auto runtimeParameterKind = [](Token token) {
@@ -241,12 +245,20 @@ void Generator::visitFunctionDeclaration() {
     advance();
 
     if (tok->kind() == Token::BodyExpr) {
-        advance();
-        visitExpression();
-        VERIFY(tok->kind() == Token::ExpressionStmt);
+        SourceLocation arrowLoc = tok->location();
+        auto body = beginLocalScope(arrowLoc);
         advance();
 
+        visitExpression();
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        SourceLocation endLoc = tok->location();
+        advance();
+
+        toValueExpression(arrowLoc);
         program->setType(resultType(topExpression()));
+        emitControl<InitializeInstruction>(arrowLoc, Reference(ReferenceKind::Parameter, fnProgram->runtimeParameters.size()), takeTopExpression());
+
+       fnProgram->setBody(endLocalScope(body, endLoc));
     } else {
         if (tok->kind() == Token::ReturnType) {
             SourceLocation conversionLocation = tok->location();
@@ -259,11 +271,12 @@ void Generator::visitFunctionDeclaration() {
             VERIFY_NOT_REACHED();
         }
         VERIFY(tok->kind() == Token::FunctionBody);
+        auto body = beginLocalScope(tok->location());
         advance();
+
         visitStatement();
+        fnProgram->setBody(endLocalScope(body, {}));
     }
-    fnProgram->setBody({ instructionScratch.begin() + scratchSizeAtBegin, instructionScratch.end() });
-    instructionScratch.erase(instructionScratch.begin() + scratchSizeAtBegin, instructionScratch.end());
 }
 
 void Generator::visitTypeDeclaration() {
@@ -303,7 +316,7 @@ void Generator::visitStatement() {
             visitStatement();
         }
         VERIFY(tok->kind() == Token::EmptyNode);
-        endLocalScope(scope, tok->location());
+        emitControl<CompoundInstruction>(tok->location(), endLocalScope(scope, tok->location()));
         advance();
     } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
         || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::SharedReferenceDecl
@@ -343,31 +356,17 @@ void Generator::visitStatement() {
 
             OwnedExpressionResult condition = takeTopExpression();
 
-            expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
             auto ifScope = beginLocalScope(ifLoc);
             visitStatement();
-            endLocalScope(ifScope, {});
-
-            {
-                auto newEnd = instructionScratch.begin() + expressionStack.back().startOffset;
-                branchInst->addBranch(std::move(condition), { newEnd, instructionScratch.end() });
-                instructionScratch.erase(newEnd, instructionScratch.end());
-            }
+            branchInst->addBranch(endLocalScope(ifScope, {}), std::move(condition));
 
             if (tok->kind() == Token::ElseStmt) {
                 SourceLocation elseLoc = tok->location();
                 advance();
 
-                expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
                 auto elseScope = beginLocalScope(elseLoc);
                 visitStatement();
-                endLocalScope(elseScope, {});
-
-                {
-                    auto newEnd = instructionScratch.begin() + expressionStack.back().startOffset;
-                    branchInst->addBranch(builtins::true_constant, { newEnd, instructionScratch.end() });
-                    instructionScratch.erase(newEnd, instructionScratch.end());
-                }
+                branchInst->addBranch( endLocalScope(elseScope, {}), builtins::true_constant);
             }
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);

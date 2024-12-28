@@ -21,13 +21,6 @@ inline constexpr Constant true_constant { ConstantKind::BooleanLiteral, 1 };
 
 };
 
-enum class ExpressionCategory : uint8_t {
-    Value,
-    UniqueReference,
-    SharedReference,
-    ConstReference,
-};
-
 struct ParameterizeData {
     ProgramHandle base;
     std::vector<Constant> arguments;
@@ -418,11 +411,11 @@ struct FunctionProgram : CallableProgram {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
-    void setBody(std::span<Instruction* const> body) { m_body.assign(body.begin(), body.end()); }
-    std::span<Instruction* const> body() { return m_body; }
+    void setBody(LocalScope body) { m_body = std::move(body); }
+    const LocalScope& body() { return m_body; }
     ExternConstant returnType() const { return m_type.value(); }
 
-    std::vector<Instruction*> m_body;
+    LocalScope m_body;
 };
 
 struct TypeProgram : CallableProgram, Scope {
@@ -507,6 +500,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 288);
+static_assert(sizeof(ProgramUnion) == 336);
 
 }

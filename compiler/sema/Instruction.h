@@ -10,7 +10,8 @@ namespace sema {
     OP(Discard)                            \
     OP(Deactivate)                         \
     OP(ImplicitCopy)                       \
-    OP(Initialize)
+    OP(Initialize)                         \
+    OP(Compound)
 
 enum class Opcode : uint8_t {
 #define OP(opcode) opcode,
@@ -82,19 +83,47 @@ struct InitializeInstruction : Instruction {
     ExpressionResult initializer;
 };
 
-struct BranchInstruction : Instruction {
-    struct Branch {
-        std::span<Instruction* const> body() const { return m_body; }
+struct LocalScope {
+    struct VariableDeclaration {
+        SourceLocation location() const { return m_location; }
 
-        ExpressionResult conidition;
-        std::vector<Instruction*> m_body;
+        SourceLocation m_location;
+        Type type;
+    };
+    struct ReferenceDeclaration {
+        SourceLocation location() const { return m_location.location(); }
+        ExpressionCategory category() const { return m_location.tag(); }
+
+        TaggedSourceLocation<ExpressionCategory> m_location;
+        Type type;
+    };
+
+    LocalScope() = default;
+    explicit LocalScope(std::vector<Instruction*> body)
+        : m_body(std::move(body)) { }
+
+    void setBody(std::vector<Instruction*> body) {
+        m_body = std::move(body);
+    }
+    std::span<Instruction* const> body() const { return m_body; }
+
+    std::vector<VariableDeclaration> variableDeclarations;
+    std::vector<ReferenceDeclaration> referenceDeclarations;
+    std::vector<Instruction*> m_body;
+};
+
+struct BranchInstruction : Instruction {
+    struct Branch : LocalScope {
+        Branch(LocalScope scope, ExpressionResult condition)
+            : LocalScope(std::move(scope)), condition(condition) { }
+        ExpressionResult condition;
     };
 
     BranchInstruction(SourceLocation location)
         : Instruction(Opcode::Branch, location) { }
 
-    void addBranch(OwnedExpressionResult condition, std::vector<Instruction*> body) {
-        m_branches.push_back({ condition.release(), std::move(body) });
+    Branch& addBranch(LocalScope scope, OwnedExpressionResult condition) {
+        return m_branches.emplace_back(std::move(scope), condition.release());
     }
 
     std::span<const Branch> branches() const { return m_branches; }
@@ -102,11 +131,13 @@ struct BranchInstruction : Instruction {
     std::vector<Branch> m_branches;
 };
 
-struct LoopInstruction : Instruction {
-    std::span<Instruction* const> body() const { return m_body; }
+struct CompoundInstruction : Instruction, LocalScope {
+    CompoundInstruction(SourceLocation location, LocalScope scope)
+        : Instruction(Opcode::Compound, location), LocalScope(std::move(scope)) { }
+};
 
+struct LoopInstruction : Instruction, LocalScope {
     ExpressionResult latchCondition;
-    std::vector<Instruction*> m_body;
 };
 
 template<typename T>
