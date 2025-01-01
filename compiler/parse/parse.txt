@@ -440,16 +440,16 @@ LinearState after_variable_declaration_id() then error
 LinearState variable_type() then expression
     keyword unique
         updateKind TokenKind::UniqueReferenceDecl
-        next after_variable_type_modifier
+        next after_variable_unique_modifier
     keyword shared
         updateKind TokenKind::SharedReferenceDecl
-        next after_variable_type_modifier
+        next after_variable_shared_modifier
     keyword const
-        updateKind TokenKind::ConstReferenceDecl
-        next after_variable_type_modifier
+        updateKind TokenKind::ConstSharedReferenceDecl
+        next after_variable_const_modifier
     then
         pushScope ScopeKind::VariableType
-LinearState after_variable_type_modifier() then expression
+LinearState after_variable_modifier() then expression
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt
@@ -471,6 +471,20 @@ LinearState after_variable_type_modifier() then expression
         next after_parameters
     then
         pushScope ScopeKind::VariableType
+LinearState after_variable_unique_modifier() then after_variable_modifier
+    keyword const
+        updateKind TokenKind::ConstUniqueReferenceDecl
+        next after_variable_modifier
+LinearState after_variable_shared_modifier() then after_variable_modifier
+    keyword const
+        updateKind TokenKind::ConstSharedReferenceDecl
+        next after_variable_modifier
+LinearState after_variable_const_modifier() then after_variable_modifier
+    keyword shared
+        next after_variable_modifier
+    keyword unique
+        updateKind TokenKind::ConstUniqueReferenceDecl
+        next after_variable_modifier
 
 # --- Parameters
 

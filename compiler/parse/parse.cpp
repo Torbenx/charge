@@ -308,8 +308,14 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto after_variable_declaration_id$no_emit;
     case State::VariableType:
         goto variable_type$no_emit;
-    case State::AfterVariableTypeModifier:
-        goto after_variable_type_modifier$no_emit;
+    case State::AfterVariableModifier:
+        goto after_variable_modifier$no_emit;
+    case State::AfterVariableUniqueModifier:
+        goto after_variable_unique_modifier$no_emit;
+    case State::AfterVariableSharedModifier:
+        goto after_variable_shared_modifier$no_emit;
+    case State::AfterVariableConstModifier:
+        goto after_variable_const_modifier$no_emit;
     case State::AfterParameters:
         goto after_parameters$no_emit;
     case State::FirstParameter:
@@ -3375,20 +3381,20 @@ variable_type$no_emit:
             if (this_identifier == words["unique"]) {
                 // updateKind TokenKind::UniqueReferenceDecl
                 state.parseOutput.tokens.back().setKind(TokenKind::UniqueReferenceDecl);
-                // next after_variable_type_modifier
-                goto after_variable_type_modifier$no_emit;
+                // next after_variable_unique_modifier
+                goto after_variable_unique_modifier$no_emit;
             }
             if (this_identifier == words["shared"]) {
                 // updateKind TokenKind::SharedReferenceDecl
                 state.parseOutput.tokens.back().setKind(TokenKind::SharedReferenceDecl);
-                // next after_variable_type_modifier
-                goto after_variable_type_modifier$no_emit;
+                // next after_variable_shared_modifier
+                goto after_variable_shared_modifier$no_emit;
             }
             if (this_identifier == words["const"]) {
-                // updateKind TokenKind::ConstReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::ConstReferenceDecl);
-                // next after_variable_type_modifier
-                goto after_variable_type_modifier$no_emit;
+                // updateKind TokenKind::ConstSharedReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::ConstSharedReferenceDecl);
+                // next after_variable_const_modifier
+                goto after_variable_const_modifier$no_emit;
             }
             // pushScope ScopeKind::VariableType
             scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -3409,11 +3415,12 @@ variable_type$no_emit:
     // then expression
     goto expression$as_then;
 
-    // LinearState after_variable_type_modifier
-after_variable_type_modifier$no_emit:
+    // LinearState after_variable_modifier
+after_variable_modifier$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::AfterVariableTypeModifier;
+    parseState = State::AfterVariableModifier;
+after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
         if (next != '=' && next != '>') {
@@ -3481,6 +3488,124 @@ after_variable_type_modifier$no_emit:
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // then expression
     goto expression$as_then;
+
+    // LinearState after_variable_unique_modifier
+after_variable_unique_modifier$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterVariableUniqueModifier;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
+            if (this_identifier == words["const"]) {
+                // updateKind TokenKind::ConstUniqueReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::ConstUniqueReferenceDecl);
+                // next after_variable_modifier
+                goto after_variable_modifier$no_emit;
+            }
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            goto expression$keyword_check;
+        }
+        // -> after_variable_modifier
+        // pushScope ScopeKind::VariableType
+        scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // then after_variable_modifier
+    goto after_variable_modifier$as_then;
+
+    // LinearState after_variable_shared_modifier
+after_variable_shared_modifier$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterVariableSharedModifier;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
+            if (this_identifier == words["const"]) {
+                // updateKind TokenKind::ConstSharedReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::ConstSharedReferenceDecl);
+                // next after_variable_modifier
+                goto after_variable_modifier$no_emit;
+            }
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            goto expression$keyword_check;
+        }
+        // -> after_variable_modifier
+        // pushScope ScopeKind::VariableType
+        scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // then after_variable_modifier
+    goto after_variable_modifier$as_then;
+
+    // LinearState after_variable_const_modifier
+after_variable_const_modifier$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterVariableConstModifier;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED after_variable_const_modifier$keyword_check:
+            if (this_identifier == words["shared"]) {
+                // next after_variable_modifier
+                goto after_variable_modifier$no_emit;
+            }
+            if (this_identifier == words["unique"]) {
+                // updateKind TokenKind::ConstUniqueReferenceDecl
+                state.parseOutput.tokens.back().setKind(TokenKind::ConstUniqueReferenceDecl);
+                // next after_variable_modifier
+                goto after_variable_modifier$no_emit;
+            }
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            goto expression$keyword_check;
+        }
+        // -> after_variable_modifier
+        // pushScope ScopeKind::VariableType
+        scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // then after_variable_modifier
+    goto after_variable_modifier$as_then;
 
     // LinearState after_parameters
 after_parameters$with_emit:

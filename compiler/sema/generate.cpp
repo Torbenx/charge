@@ -472,7 +472,14 @@ void Generator::initialize(SourceLocation location, DeductionState& state, Expre
         toValueExpression(location);
     } else {
         VERIFY(inputCategory != ExpressionCategory::Value); // initializing a reference with a value requires making temporary
-        VERIFY(inputCategory <= expectedCategory); // only down casts allowed
+
+        if (expectedCategory != inputCategory) {
+            // only down casts allowed
+            if (expectedCategory == ExpressionCategory::SharedReference || expectedCategory == ExpressionCategory::ConstUniqueReference)
+                VERIFY(inputCategory == ExpressionCategory::UniqueReference);
+            else
+                VERIFY(expectedCategory == ExpressionCategory::ConstSharedReference);
+        }
     }
 }
 
@@ -657,7 +664,7 @@ ExpressionCategory Generator::categoryOf(ExpressionResult expr) {
     case ReferenceKind::LocalReference:
         return localReferences[ref.localReferenceIndex()].category;
     case ReferenceKind::TemplateParameter:
-        return ExpressionCategory::ConstReference;
+        return ExpressionCategory::ConstSharedReference;
     case ReferenceKind::MemberExpression:
         return categoryOf(program->getMemberReference(ref).base);
     default:

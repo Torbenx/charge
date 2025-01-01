@@ -1,18 +1,22 @@
 
 template(T: type)
 struct refcell: {
-    struct unique_ref: {
-        invariant(self, cell) {
-            prove cell.shared_refcount == INVALID_REFCOUNT;
 
-            if !std::uniquely_referenced(&self):
-                prove !std::referenced(cell.target);
+    struct unique_ref: {
+        invariant(cell: shared): {
+            prove cell.shared_refcount == INVALID_REFCOUNT;
+        }
+        invariant(self: unique, cell: shared): {
+            prove !std::referenced(cell.target);
         }
 
-        fn get(unique inout self) -> (ref<shared self, unique *cell.target> r: T): { r = *cell.target; }
+        fn get(self: unique) -> (r: unique T): {
+            r = *cell.target;
+            reference unique self with r;
+        }
 
         has destroy_behavior: {
-            fn destruct(unique var self, shared inout cell): {
+            fn destruct(self: unique, cell: shared): {
                 cell.shared_refcount = 0;
             }
         }
@@ -21,18 +25,23 @@ struct refcell: {
     }
 
     struct shared_ref: {
-        invariant {
+        invariant(cell: shared): {
             prove cell.shared_refcount > 0 && cell.shared_refcount < INVALID_REFCOUNT;
 
-            prove !std::uniquely_referenced(target);
-            if !std::referenced(&self):
-                prove std::shared_reference_count(cell.target) < cell.shared_refcount;
+            prove !std::uniquely_referenced(cell.target);
         }
 
-        fn get(shared inout self, shared inout cell) -> (ref<shared self, shared *cell.target> r: T): { r = *cell.target; }
+        invariant(self: shared, cell: shared): {
+            prove std::shared_reference_count(cell.target) < cell.shared_refcount;
+        }
+
+        fn get(self: shared, cell: shared) -> (r: shared T): {
+            r = *cell.target;
+            reference shared self with r;
+        }
 
         has destroy_behavior: {
-            fn destruct(unique self, shared inout cell): {
+            fn destruct(self: unique, cell: shared): {
                 cell.shared_refcount -= 1;
                 if cell.shared_refcount == 0: {
                     prove std::shared_reference_count(cell.target) == 0;
@@ -44,7 +53,7 @@ struct refcell: {
         relationship cell: refcell{T};
     }
 
-    invariant {
+    invariant(self: shared): {
         if shared_refcount == 0: {
             prove !std::referenced(target);
         } elif shared_refcount < INVALID_REFCOUNT: {
@@ -53,20 +62,20 @@ struct refcell: {
         }
     }
 
-    fn unique_borrow(shared inout self) -> unique_ref: {
+    fn unique_borrow(self: shared) -> unique_ref: {
         assert shared_refcount == 0;
         shared_refcount = INVALID_REFCOUNT;
         return unique_ref(self);
     }
 
-    fn shared_borrow(shared inout self) -> shared_ref: {
+    fn shared_borrow(self: shared) -> shared_ref: {
         assert shared_refcount < INVALID_REFCOUNT;
         shared_refcount += 1;
         assert shared_refcount < INVALID_REFCOUNT;
         return shared_ref(self);
     }
 
-    private let INVALID_REFCOUNT: bits = numeric_limits<bits>::max();
+    static INVALID_REFCOUNT: bits = numeric_limits<bits>::max();
 
     internal target: ptr{T};
     internal shared_refcount: bits = 0;

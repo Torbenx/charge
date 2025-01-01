@@ -13,8 +13,10 @@ namespace {
             return ExpressionCategory::UniqueReference;
         case parse::TokenKind::SharedReferenceDecl:
             return ExpressionCategory::SharedReference;
-        case parse::TokenKind::ConstReferenceDecl:
-            return ExpressionCategory::ConstReference;
+        case parse::TokenKind::ConstUniqueReferenceDecl:
+            return ExpressionCategory::ConstUniqueReference;
+        case parse::TokenKind::ConstSharedReferenceDecl:
+            return ExpressionCategory::ConstSharedReference;
         default:
             VERIFY_NOT_REACHED();
         }
@@ -219,8 +221,10 @@ void Generator::visitFunctionDeclaration() {
             return RuntimeParameterKind::UniqueReference;
         case Token::SharedReferenceDecl:
             return RuntimeParameterKind::SharedReference;
-        case Token::ConstReferenceDecl:
-            return RuntimeParameterKind::ConstReference;
+        case Token::ConstUniqueReferenceDecl:
+            return RuntimeParameterKind::ConstUniqueReference;
+        case Token::ConstSharedReferenceDecl:
+            return RuntimeParameterKind::ConstSharedReference;
         default:
             VERIFY_NOT_REACHED();
         }
@@ -258,7 +262,7 @@ void Generator::visitFunctionDeclaration() {
         program->setType(resultType(topExpression()));
         emitControl<InitializeInstruction>(arrowLoc, Reference(ReferenceKind::Parameter, fnProgram->runtimeParameters.size()), takeTopExpression());
 
-       fnProgram->setBody(endLocalScope(body, endLoc));
+        fnProgram->setBody(endLocalScope(body, endLoc));
     } else {
         if (tok->kind() == Token::ReturnType) {
             SourceLocation conversionLocation = tok->location();
@@ -319,8 +323,8 @@ void Generator::visitStatement() {
         emitControl<CompoundInstruction>(tok->location(), endLocalScope(scope, tok->location()));
         advance();
     } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
-        || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::SharedReferenceDecl
-        || tok->kind() == Token::ConstReferenceDecl) {
+        || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::ConstUniqueReferenceDecl
+        || tok->kind() == Token::SharedReferenceDecl || tok->kind() == Token::ConstSharedReferenceDecl) {
         auto expectedCategory = expectedInitializerCategory(tok->kind());
         Word name = Word::fromUint(tok->data());
         SourceLocation nameLoc = tok->location();
@@ -366,7 +370,7 @@ void Generator::visitStatement() {
 
                 auto elseScope = beginLocalScope(elseLoc);
                 visitStatement();
-                branchInst->addBranch( endLocalScope(elseScope, {}), builtins::true_constant);
+                branchInst->addBranch(endLocalScope(elseScope, {}), builtins::true_constant);
             }
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);

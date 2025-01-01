@@ -229,8 +229,14 @@ std::string_view nameString(State state) {
         return "AfterVariableDeclarationId";
     case State::VariableType:
         return "VariableType";
-    case State::AfterVariableTypeModifier:
-        return "AfterVariableTypeModifier";
+    case State::AfterVariableModifier:
+        return "AfterVariableModifier";
+    case State::AfterVariableUniqueModifier:
+        return "AfterVariableUniqueModifier";
+    case State::AfterVariableSharedModifier:
+        return "AfterVariableSharedModifier";
+    case State::AfterVariableConstModifier:
+        return "AfterVariableConstModifier";
     case State::AfterParameters:
         return "AfterParameters";
     case State::FirstParameter:

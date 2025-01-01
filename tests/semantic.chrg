@@ -196,3 +196,12 @@ fn passReference() -> X: {
     let x: X;
     referenceParameter(x);
 }
+
+
+fn addConst(x1: const unique X, x2: const shared X) -> X: { }
+fn addShared(x1: shared X, x2: const shared X) -> X: { }
+// expect-return-type X
+fn testRefCast(x1: unique X, x2: shared X, x3: const unique X) -> X: {
+    addConst(x1, x2);
+    addShared(x1, x3);
+}

@@ -203,6 +203,7 @@ void Dumper::dumpInstruction(Instruction* inst) {
         line << "Deactivate " << formatReference(cast<DeactivateInstruction>(inst)->target);
         break;
     case Opcode::Discard:
+        line << "Discard " << formatExpressionResult(cast<DiscardInstruction>(inst)->value);
         break;
     case Opcode::Initialize: {
         auto* init = cast<InitializeInstruction>(inst);

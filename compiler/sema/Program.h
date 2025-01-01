@@ -347,7 +347,8 @@ enum class RuntimeParameterKind : uint8_t {
     VarVariable,
     UniqueReference,
     SharedReference,
-    ConstReference,
+    ConstUniqueReference,
+    ConstSharedReference,
 };
 
 inline ExpressionCategory expectedInitializerCategory(RuntimeParameterKind kind) {
@@ -361,8 +362,10 @@ inline ExpressionCategory expectedInitializerCategory(RuntimeParameterKind kind)
         return ExpressionCategory::UniqueReference;
     case RuntimeParameterKind::SharedReference:
         return ExpressionCategory::SharedReference;
-    case RuntimeParameterKind::ConstReference:
-        return ExpressionCategory::ConstReference;
+    case RuntimeParameterKind::ConstUniqueReference:
+        return ExpressionCategory::ConstUniqueReference;
+    case RuntimeParameterKind::ConstSharedReference:
+        return ExpressionCategory::ConstSharedReference;
     default:
         VERIFY_NOT_REACHED();
     }

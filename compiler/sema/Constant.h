@@ -17,8 +17,9 @@ enum class BuiltinId : uint32_t {
 enum class ExpressionCategory : uint8_t {
     Value,
     UniqueReference,
+    ConstUniqueReference,
     SharedReference,
-    ConstReference,
+    ConstSharedReference,
 };
 
 struct Constant;
