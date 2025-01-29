@@ -38,7 +38,6 @@ void Generator::advance() { tok += 1; }
 
 Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
     localScopeDepth += 1;
-    expressionStack.push_back({ (uint32_t)instructionScratch.size() });
     return {
         localScopeDepth,
         (uint32_t)localState.variableActiveMask.size(),
@@ -46,15 +45,15 @@ Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
     };
 }
 
-sema::LocalScope Generator::endLocalScope(LocalScope scope, SourceLocation location) {
+void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
     VERIFY(scope.localScopeDepth == localScopeDepth);
     localScopeDepth -= 1;
 
     VERIFY(localState.variableActiveMask.size() == localVariables.size());
     while (localState.variableActiveMask.size() > scope.localVariableCount) {
         if (localState.variableActiveMask.back()) {
-            auto ref = Reference::localVariable(localState.variableActiveMask.size() - 1);
-            emitControl<DeactivateInstruction>(location, ref);
+            auto ref = Expression::variableReference(localState.variableActiveMask.size() - 1);
+            emitDeactivate(location, ref);
         }
         localState.variableActiveMask.pop_back();
         localVariables.pop_back();
@@ -63,19 +62,14 @@ sema::LocalScope Generator::endLocalScope(LocalScope scope, SourceLocation locat
     VERIFY(localState.referenceActiveMask.size() == localReferences.size());
     while (localState.referenceActiveMask.size() > scope.localReferenceCount) {
         if (localState.referenceActiveMask.back()) {
-            auto ref = Reference::localReference(localState.referenceActiveMask.size() - 1);
-            emitControl<DeactivateInstruction>(location, ref);
+            auto ref = Expression::referenceReference(localState.referenceActiveMask.size() - 1);
+            emitDeactivate(location, ref);
         }
         localState.referenceActiveMask.pop_back();
         localReferences.pop_back();
     }
 
-    VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
-    auto newEnd = instructionScratch.begin() + expressionStack.back().startOffset;
-    sema::LocalScope result({ newEnd, instructionScratch.end() });
-    instructionScratch.erase(newEnd, instructionScratch.end());
-    expressionStack.pop_back();
-    return result;
+    VERIFY(currentExpression == INVALID_EXPRESSION);
 }
 
 void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
@@ -83,10 +77,10 @@ void Generator::declareLocalVariable(Word name, SourceLocation location, Variabl
     int_t index = localVariables.size();
     localVariables.push_back({ declaration.type });
     localState.variableActiveMask.push_back(declaration.hasInitializer);
-    localLookupEntries.push_back({ name, Reference::localVariable(index) });
+    localLookupEntries.push_back({ name, Expression::variableReference(index) });
 
     if (declaration.hasInitializer)
-        emitControl<InitializeInstruction>(location, Reference::localVariable(index), takeTopExpression());
+        emitInitialize(location, Expression::variableReference(index), takeTopExpression());
 }
 
 void Generator::visitDeclaration() {
@@ -147,7 +141,6 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(ExpressionCat
             VERIFY_NOT_REACHED();
         }
         visitExpression();
-        VERIFY(!expressionStack.empty());
 
         DeductionState state(program, programHandle, parameterTypes.size());
         state.copyParameters(program->parameters.size());
@@ -242,14 +235,14 @@ void Generator::visitFunctionDeclaration() {
         VERIFY(fnProgram->runtimeParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->runtimeParameters.size();
         localState.parameterActiveMask.push_back(true);
-        localLookupEntries.push_back({ name, Reference(ReferenceKind::Parameter, parameterIndex) });
+        localLookupEntries.push_back({ name, Expression::parameterReference(parameterIndex) });
         fnProgram->runtimeParameters.push_back({ parameterKind, name, info.type, nameLoc });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
-
     if (tok->kind() == Token::BodyExpr) {
         SourceLocation arrowLoc = tok->location();
+        auto bodyScopeInst = emitBlockScope(arrowLoc);
         auto body = beginLocalScope(arrowLoc);
         advance();
 
@@ -260,9 +253,10 @@ void Generator::visitFunctionDeclaration() {
 
         toValueExpression(arrowLoc);
         program->setType(resultType(topExpression()));
-        emitControl<InitializeInstruction>(arrowLoc, Reference(ReferenceKind::Parameter, fnProgram->runtimeParameters.size()), takeTopExpression());
+        emitInitialize(arrowLoc, Expression::parameterReference(fnProgram->runtimeParameters.size()), takeTopExpression());
 
-        fnProgram->setBody(endLocalScope(body, endLoc));
+        endLocalScope(body, endLoc);
+        fnProgram->setBody(emitScopeEndAndTake(endLoc, bodyScopeInst));
     } else {
         if (tok->kind() == Token::ReturnType) {
             SourceLocation conversionLocation = tok->location();
@@ -275,11 +269,14 @@ void Generator::visitFunctionDeclaration() {
             VERIFY_NOT_REACHED();
         }
         VERIFY(tok->kind() == Token::FunctionBody);
+        auto bodyScopeInst = emitBlockScope(tok->location());
         auto body = beginLocalScope(tok->location());
         advance();
 
         visitStatement();
-        fnProgram->setBody(endLocalScope(body, {}));
+        SourceLocation endLoc; // TODO: Should be the ';'
+        endLocalScope(body, endLoc);
+        fnProgram->setBody(emitScopeEndAndTake(endLoc, bodyScopeInst));
     }
 }
 
@@ -314,13 +311,15 @@ void Generator::visitTypeDeclaration() {
 
 void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {
+        auto blockScopeInst = emitBlockScope(tok->location());
         auto scope = beginLocalScope(tok->location());
         advance();
         while (tok->kind() != Token::EmptyNode) {
             visitStatement();
         }
         VERIFY(tok->kind() == Token::EmptyNode);
-        emitControl<CompoundInstruction>(tok->location(), endLocalScope(scope, tok->location()));
+        endLocalScope(scope, tok->location());
+        emitScopeEnd(tok->location(), blockScopeInst);
         advance();
     } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
         || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::ConstUniqueReferenceDecl
@@ -331,52 +330,53 @@ void Generator::visitStatement() {
         advance();
         auto info = visitVariableDeclaration(expectedCategory, false);
         declareLocalVariable(name, nameLoc, info);
-    } else if (tok->kind() == Token::DestroyStmt || tok->kind() == Token::DiscardStmt) {
-        bool isDiscard = tok->kind() == Token::DiscardStmt;
+    } else if (tok->kind() == Token::DestroyStmt) {
         SourceLocation location = tok->location();
         advance();
-
         visitExpression();
-        auto expr = topExpression();
-        takeTopExpression();
-        VERIFY(expr.isReference());
-        auto reference = expr.reference();
+        auto expr = takeTopExpression();
 
-        VERIFY(reference.kind() != ReferenceKind::MemberExpression);
-        if (reference.kind() == ReferenceKind::LocalReference)
-            VERIFY(isDiscard);
-        else
-            VERIFY(!isDiscard);
-        emitControl<DeactivateInstruction>(location, reference);
-        localState.setActive(reference, false);
+        VERIFY(expr.kind() == ExpressionKind::VariableReference || expr.kind() == ExpressionKind::ParameterReference);
+        localState.setActive(expr, false);
+        emitDeactivate(location, expr);
+    } else if (tok->kind() == Token::DiscardStmt) {
+        SourceLocation location = tok->location();
+        advance();
+        visitExpression();
+        auto expr = takeTopExpression();
+
+        VERIFY(expr.kind() == ExpressionKind::ReferenceReference);
+        localState.setActive(expr, false);
+        emitDeactivate(location, expr);
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
             SourceLocation ifLoc = tok->location();
-            auto* branchInst = emitControl<BranchInstruction>(ifLoc);
 
             advance();
             contextualToBool(ifLoc);
 
-            OwnedExpressionResult condition = takeTopExpression();
+            auto lastBranchInst = emitBranch(ifLoc, takeTopExpression());
 
             auto ifScope = beginLocalScope(ifLoc);
             visitStatement();
-            branchInst->addBranch(endLocalScope(ifScope, {}), std::move(condition));
+            endLocalScope(ifScope, SourceLocation());
 
             if (tok->kind() == Token::ElseStmt) {
                 SourceLocation elseLoc = tok->location();
+                lastBranchInst = emitBranch(elseLoc, builtins::true_constant, lastBranchInst);
+
                 advance();
 
                 auto elseScope = beginLocalScope(elseLoc);
                 visitStatement();
-                branchInst->addBranch(endLocalScope(elseScope, {}), builtins::true_constant);
+                endLocalScope(elseScope, SourceLocation());
             }
+
+            emitScopeEnd(SourceLocation(), lastBranchInst);
         } else {
             VERIFY(tok->kind() == Token::ExpressionStmt);
-            if (!topExpression().isReference()) {
-                emitControl<DiscardInstruction>(tok->location(), takeTopExpression());
-            }
+            emitDiscard(tok->location(), takeTopExpression());
             advance();
         }
     }
@@ -409,8 +409,9 @@ void Generator::visitPostfixExpr() {
             generateParameterizeExpr(argumentNames);
         } else if (tok->kind() == Token::CallExpr) {
             CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data()));
+            SourceLocation callLoc = tok->location();
             advance();
-            generateCallExpr(std::move(target));
+            generateCallExpr(callLoc, std::move(target));
         } else if (tok->kind() == Token::StaticAccessExpr) {
             generateStaticAccessExpr();
             advance();

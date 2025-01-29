@@ -68,20 +68,42 @@ private:
     std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
 };
 
-struct ComputedConstantData {
-    ValueSlot value;
+struct CallData {
+    ExpressionCategory resultCategory;
+    Constant callTarget;
+    Type returnType;
+    std::vector<Expression> arguments;
+};
+struct Call {
+    ExpressionCategory resultCategory;
+    Constant callTarget;
+    Type returnType;
+    std::span<const Expression> arguments;
+
+    static Call fromData(const CallData& data) {
+        return { data.resultCategory, data.callTarget, data.returnType, data.arguments };
+    }
+};
+
+struct ImplicitCopy {
+    Expression copyFrom;
     Type type;
-    std::vector<Instruction*> body;
+};
+
+struct ComputedConstantData {
+    Expression value;
+    Type type;
+    std::vector<Instruction> body;
 };
 
 struct ComputedConstant {
-    ValueSlot value;
+    Expression value;
     Type type;
-    std::span<Instruction* const> body;
+    std::span<const Instruction> body;
 };
 
-struct MemberReference {
-    Reference base;
+struct MemberExpression {
+    Expression base;
     Constant memberPointer;
 };
 
@@ -195,10 +217,22 @@ struct Program {
         return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
-    Reference addMemberReference(MemberReference);
-    MemberReference getMemberReference(Reference e) {
-        VERIFY(e.kind() == ReferenceKind::MemberExpression);
-        return memberReferences[e.id()];
+    Expression addMemberExpression(MemberExpression);
+    MemberExpression getMemberReference(Expression e) {
+        VERIFY(e.kind() == ExpressionKind::MemberExpression);
+        return memberExpressions[e.id()];
+    }
+
+    Expression addCall(Call);
+    Call getCall(Expression e) {
+        VERIFY(e.kind() == ExpressionKind::Call);
+        return Call::fromData(calls.at(e.id()));
+    }
+
+    Expression addImplicitCopy(ImplicitCopy);
+    ImplicitCopy getImplicitCopy(Expression e) {
+        VERIFY(e.kind() == ExpressionKind::ImplicitCopy);
+        return implicitCopies[e.id()];
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -297,7 +331,9 @@ public:
     RemoteComputationSet remoteComputations;
     MemberPointerSet memberPointers;
     std::vector<ComputedConstantData> computations;
-    std::vector<MemberReference> memberReferences;
+    std::vector<MemberExpression> memberExpressions;
+    std::vector<CallData> calls;
+    std::vector<ImplicitCopy> implicitCopies;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
@@ -313,7 +349,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 240);
+static_assert(sizeof(Program) == 288);
 
 struct ValueProgram : Program {
     ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
@@ -414,11 +450,11 @@ struct FunctionProgram : CallableProgram {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
         : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
-    void setBody(LocalScope body) { m_body = std::move(body); }
-    const LocalScope& body() { return m_body; }
+    void setBody(std::vector<Instruction> body) { m_body = std::move(body); }
+    std::span<const Instruction> body() { return m_body; }
     ExternConstant returnType() const { return m_type.value(); }
 
-    LocalScope m_body;
+    std::vector<Instruction> m_body;
 };
 
 struct TypeProgram : CallableProgram, Scope {

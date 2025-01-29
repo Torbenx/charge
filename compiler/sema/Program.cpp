@@ -1,7 +1,8 @@
 #include <sema/Program.h>
 
-#include <sema/Util.h>
 #include <sema/Context.h>
+#include <sema/Util.h>
+
 
 namespace sema {
 
@@ -58,10 +59,27 @@ Constant Program::addComputedConstant(Context&, ComputedConstant c) {
     return Constant(ConstantKind::Computed, id);
 }
 
-Reference Program::addMemberReference(MemberReference e) {
-    auto id = memberReferences.size();
-    memberReferences.push_back(e);
-    return Reference(ReferenceKind::MemberExpression, id);
+Expression Program::addMemberExpression(MemberExpression e) {
+    auto id = memberExpressions.size();
+    memberExpressions.push_back(e);
+    return Expression(ExpressionKind::MemberExpression, id);
+}
+
+Expression Program::addCall(Call c) {
+    auto id = calls.size();
+    calls.push_back(CallData {
+        .resultCategory = c.resultCategory,
+        .callTarget = c.callTarget,
+        .returnType = c.returnType,
+        .arguments { c.arguments.begin(), c.arguments.end() },
+    });
+    return Expression(ExpressionKind::Call, id);
+}
+
+Expression Program::addImplicitCopy(ImplicitCopy copy) {
+    auto id = implicitCopies.size();
+    implicitCopies.push_back(copy);
+    return Expression(ExpressionKind::ImplicitCopy, id);
 }
 
 }

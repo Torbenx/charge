@@ -178,161 +178,104 @@ private:
 };
 inline constexpr ScopeConstant INVALID_SCOPE_CONSTANT = ScopeConstant::invalidValue();
 
-enum class ReferenceKind : uint8_t {
-    Parameter,
-    TemplateParameter,
-    LocalVariable,
-    LocalReference,
+enum class ExpressionKind : uint8_t {
+    FirstNonConstantKind = 128,
+
+    ParameterReference = FirstNonConstantKind,
+    TemplateParameterReference,
+    VariableReference,
+    ReferenceReference,
     MemberExpression,
-    OpaqueExpression,
+    Call,
+    ImplicitCopy,
     Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 
-struct Reference {
-    static constexpr Reference localVariable(uint32_t id) {
-        return Reference(ReferenceKind::LocalVariable, id);
+struct Expression {
+    static constexpr Expression variableReference(uint32_t id) {
+        return Expression(ExpressionKind::VariableReference, id);
     }
-    static constexpr Reference localReference(uint32_t id) {
-        return Reference(ReferenceKind::LocalReference, id);
+    static constexpr Expression referenceReference(uint32_t id) {
+        return Expression(ExpressionKind::ReferenceReference, id);
+    }
+    static constexpr Expression parameterReference(uint32_t id) {
+        return Expression(ExpressionKind::ParameterReference, id);
+    }
+    static constexpr Expression templateParameterReference(uint32_t id) {
+        return Expression(ExpressionKind::TemplateParameterReference, id);
     }
 
-    constexpr Reference(ReferenceKind kind, uint32_t id)
+    constexpr Expression(ExpressionKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
+    constexpr Expression(Constant constant)
+        : Expression(std::bit_cast<Expression>(constant)) { }
 
-    constexpr ReferenceKind kind() const { return (ReferenceKind)kindBits; }
+    constexpr ExpressionKind kind() const { return (ExpressionKind)kindBits; }
     constexpr int_t id() const { return idBits; }
-    constexpr int_t localVaraibleIndex() const {
-        VERIFY(kind() == ReferenceKind::LocalVariable);
-        return id();
-    }
-    constexpr int_t parameterIndex() const {
-        VERIFY(kind() == ReferenceKind::Parameter);
-        return id();
-    }
-    constexpr int_t templateParameterIndex() const {
-        VERIFY(kind() == ReferenceKind::TemplateParameter);
-        return id();
-    }
-    constexpr Constant copyTemplateParameter() const {
-        VERIFY(kind() == ReferenceKind::TemplateParameter);
-        return Constant(ConstantKind::CopyOfParameter, id());
-    }
-    constexpr int_t localReferenceIndex() const {
-        VERIFY(kind() == ReferenceKind::LocalReference);
-        return id();
-    }
-    constexpr int_t opaqueExpressionIndex() const {
-        VERIFY(kind() == ReferenceKind::OpaqueExpression);
-        return id();
-    }
 
-    constexpr bool operator==(const Reference&) const = default;
-
-    uint32_t idBits : (32 - CONSTANT_KIND_BITS);
-    uint32_t kindBits : CONSTANT_KIND_BITS;
-};
-
-inline constexpr Reference INVALID_REFERENCE = { ReferenceKind::Invalid, MAX_CONSTANT_ID };
-
-struct ValueSlot {
-    constexpr explicit ValueSlot(uint32_t id)
-        : idBits(id) { }
-
-    uint32_t index() const { return idBits; }
-
-    bool operator==(const ValueSlot&) const = default;
-
-    uint32_t idBits;
-};
-
-inline constexpr ValueSlot INVALID_VALUE_SLOT { MAX_CONSTANT_ID };
-
-struct OwnedValueSlot : ValueSlot {
-    using ValueSlot::ValueSlot;
-
-    OwnedValueSlot(const OwnedValueSlot&) = delete;
-    OwnedValueSlot& operator=(const OwnedValueSlot&) = delete;
-
-    OwnedValueSlot(OwnedValueSlot&& other)
-        : ValueSlot(other) { (ValueSlot&)other = INVALID_VALUE_SLOT; }
-    OwnedValueSlot& operator=(OwnedValueSlot&& other) {
-        VERIFY(*this == INVALID_VALUE_SLOT);
-        (ValueSlot&)*this = other;
-        (ValueSlot&)other = INVALID_VALUE_SLOT;
-        return *this;
-    }
-    constexpr ~OwnedValueSlot() { VERIFY(*this == INVALID_VALUE_SLOT); }
-
-    ValueSlot release() {
-        ValueSlot ret = *this;
-        (ValueSlot&)*this = INVALID_VALUE_SLOT;
-        return ret;
-    }
-};
-
-struct ExpressionResult {
-    constexpr ExpressionResult(Constant value)
-        : idBits(value.idBits), kindBits(value.kindBits) {
-        VERIFY(value.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
-    }
-    constexpr ExpressionResult(Reference ref)
-        : idBits(ref.idBits), kindBits(ref.kindBits + 128) {
-        VERIFY(ref.kindBits < INVALID_CONSTANT_KIND_INDEX / 2);
-    }
-    constexpr ExpressionResult(ValueSlot slot)
-        : idBits(slot.idBits), kindBits(255) { }
-    constexpr bool isConstant() const { return kindBits < 128; }
-    constexpr bool isValueSlot() const { return kindBits == 255; }
-    constexpr bool isReference() const { return !isConstant() && !isValueSlot(); }
-    Constant constant() const {
+    constexpr bool isConstant() const { return kind() < ExpressionKind::FirstNonConstantKind; }
+    constexpr Constant constant() const {
         VERIFY(isConstant());
         return std::bit_cast<Constant>(*this);
     }
-    ValueSlot valueSlot() const {
-        VERIFY(isValueSlot());
-        return ValueSlot(idBits);
+
+    constexpr int_t varaibleIndex() const {
+        VERIFY(kind() == ExpressionKind::VariableReference);
+        return id();
     }
-    Reference reference() const {
-        VERIFY(isReference());
-        auto tmp = *this;
-        tmp.kindBits -= 128;
-        return std::bit_cast<Reference>(tmp);
+    constexpr int_t parameterIndex() const {
+        VERIFY(kind() == ExpressionKind::ParameterReference);
+        return id();
+    }
+    constexpr int_t templateParameterIndex() const {
+        VERIFY(kind() == ExpressionKind::TemplateParameterReference);
+        return id();
+    }
+    constexpr Constant copyTemplateParameter() const {
+        VERIFY(kind() == ExpressionKind::TemplateParameterReference);
+        return Constant(ConstantKind::CopyOfParameter, id());
+    }
+    constexpr int_t referenceIndex() const {
+        VERIFY(kind() == ExpressionKind::ReferenceReference);
+        return id();
     }
 
-    constexpr bool operator==(const ExpressionResult&) const = default;
+    constexpr bool isInstructionResult() const {
+        return kind() == ExpressionKind::Call || kind() == ExpressionKind::ImplicitCopy;
+    }
+
+    constexpr bool operator==(const Expression&) const = default;
 
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
 
-static constexpr ExpressionResult INVALID_EXPRESSION_RESULT = INVALID_VALUE_SLOT;
+inline constexpr Expression INVALID_EXPRESSION = { ExpressionKind::Invalid, MAX_CONSTANT_ID };
 
-struct OwnedExpressionResult : ExpressionResult {
-    explicit constexpr OwnedExpressionResult(ExpressionResult base)
-        : ExpressionResult(base) { }
-    constexpr OwnedExpressionResult(Constant value)
-        : ExpressionResult(value) { }
-    constexpr OwnedExpressionResult(Reference ref)
-        : ExpressionResult(ref) { }
-    constexpr OwnedExpressionResult(OwnedValueSlot slot)
-        : ExpressionResult(slot) { (ValueSlot&)slot = INVALID_VALUE_SLOT; }
+struct OwnedExpression : Expression {
+    using Expression::Expression;
 
-    OwnedExpressionResult(const OwnedExpressionResult&) = delete;
-    OwnedExpressionResult& operator=(const OwnedExpressionResult&) = delete;
+    OwnedExpression(Expression e)
+        : Expression(e) { }
 
-    OwnedExpressionResult(OwnedExpressionResult&& other)
-        : ExpressionResult(other) { (ExpressionResult&)other = INVALID_VALUE_SLOT; }
-    OwnedExpressionResult& operator=(OwnedExpressionResult&& other) {
-        VERIFY(!isValueSlot() || valueSlot() == INVALID_VALUE_SLOT);
-        (ExpressionResult&)*this = other;
-        (ExpressionResult&)other = INVALID_VALUE_SLOT;
+    OwnedExpression(const OwnedExpression&) = delete;
+    OwnedExpression& operator=(const OwnedExpression&) = delete;
+
+    OwnedExpression(OwnedExpression&& other)
+        : Expression(other) { (Expression&)other = INVALID_EXPRESSION; }
+    OwnedExpression& operator=(OwnedExpression&& other) {
+        VERIFY(!isInstructionResult());
+        (Expression&)*this = other;
+        (Expression&)other = INVALID_EXPRESSION;
         return *this;
     }
-    constexpr ~OwnedExpressionResult() { VERIFY(!isValueSlot() || valueSlot() == INVALID_VALUE_SLOT); }
+    constexpr ~OwnedExpression() {
+        VERIFY(!isInstructionResult());
+    }
 
-    ExpressionResult release() {
-        ExpressionResult ret = *this;
-        (ExpressionResult&)*this = INVALID_VALUE_SLOT;
+    Expression release() {
+        Expression ret = *this;
+        (Expression&)*this = INVALID_EXPRESSION;
         return ret;
     }
 };
@@ -363,14 +306,6 @@ struct optional_traits<sema::ScopeConstant> {
     static constexpr sema::ScopeConstant empty_value = sema::INVALID_SCOPE_CONSTANT;
 };
 template<>
-struct optional_traits<sema::Reference> {
-    static constexpr sema::Reference empty_value = sema::INVALID_REFERENCE;
-};
-template<>
-struct optional_traits<sema::ValueSlot> {
-    static constexpr sema::ValueSlot empty_value = sema::INVALID_VALUE_SLOT;
-};
-template<>
-struct optional_traits<sema::ExpressionResult> {
-    static constexpr sema::ExpressionResult empty_value = sema::INVALID_EXPRESSION_RESULT;
+struct optional_traits<sema::Expression> {
+    static constexpr sema::Expression empty_value = sema::INVALID_EXPRESSION;
 };

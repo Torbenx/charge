@@ -138,6 +138,8 @@ std::string_view nameString(LexerToken token) {
         return "Has";
     case LexerToken::If:
         return "If";
+    case LexerToken::Impls:
+        return "Impls";
     case LexerToken::Incomplete:
         return "Incomplete";
     case LexerToken::Let:

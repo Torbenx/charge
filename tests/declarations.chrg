@@ -76,11 +76,19 @@ struct S2: {
 // expect-token StructTypeDecl;
 // expect-token HasMemberDecl; expect-token IdentifierExpr; expect-token CallExpr; expect-token EmptyNode; expect-token EmptyNode
 // expect-token HasMemberDecl; expect-token IdentifierExpr; expect-token FunctionDecl; expect-token EmptyNode; expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+// expect-token ImplsDecl; expect-token IdentifierExpr; expect-token CallExpr; expect-token EmptyNode; expect-token EmptyNode
+// expect-token ImplsDecl; expect-token IdentifierExpr; expect-token FunctionDecl; expect-token EmptyNode; expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 struct H1: {
     has m();
 
     has q: {
         fn test2(): { }
+    }
+
+    impls n();
+
+    impls p: {
+        fn test3(): { }
     }
 }
 

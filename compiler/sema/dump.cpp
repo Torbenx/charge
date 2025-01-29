@@ -10,11 +10,16 @@ struct Dumper {
     std::string output;
     Program* program = nullptr;
 
+    void popIndentation() {
+        VERIFY(!indentation.empty());
+        indentation.pop_back();
+    }
+
     Dumper(Context& context)
         : context(context) { }
 
     void dumpProgram(Program*);
-    void dumpInstruction(Instruction* inst);
+    void dumpInstructions(std::span<const Instruction> inst);
     void beginLine() {
         for (const auto& entry : indentation)
             output += entry;
@@ -108,43 +113,42 @@ struct Dumper {
         return result;
     }
 
-    std::string formatReference(Reference e) {
-        if (e == INVALID_REFERENCE)
+    std::string formatExpression(Expression e) {
+        if (e == INVALID_EXPRESSION)
             return "<invalid>";
+        if (e.isConstant())
+            return formatConstant(e.constant());
+
         std::string result;
         switch (e.kind()) {
-        case ReferenceKind::Parameter:
+        case ExpressionKind::ParameterReference:
             result += "arg";
             break;
-        case ReferenceKind::TemplateParameter:
+        case ExpressionKind::TemplateParameterReference:
             result += "#";
             break;
-        case ReferenceKind::LocalVariable:
+        case ExpressionKind::VariableReference:
             result += "var";
             break;
-        case ReferenceKind::LocalReference:
+        case ExpressionKind::ReferenceReference:
             result += "ref";
             break;
-        case ReferenceKind::MemberExpression: {
+        case ExpressionKind::MemberExpression: {
             auto memberExpr = program->getMemberReference(e);
-            return formatReference(memberExpr.base)
+            return formatExpression(memberExpr.base)
                 + "." + formatMember(program, program->getMemberPointer(memberExpr.memberPointer));
         }
+        case ExpressionKind::Call:
+            result += "call";
+            break;
+        case ExpressionKind::ImplicitCopy:
+            result += "copy";
+            break;
         default:
             VERIFY_NOT_REACHED();
         }
         result += std::to_string(e.id());
         return result;
-    }
-
-    std::string formatExpressionResult(ExpressionResult expr) {
-        if (expr.isConstant()) {
-            return formatConstant(expr.constant());
-        } else if (expr.isReference()) {
-            return formatReference(expr.reference());
-        } else {
-            return "slot" + std::to_string(expr.valueSlot().index());
-        }
     }
 
     std::string formatMember(Program* prog, MemberPointer pointer) {
@@ -159,61 +163,61 @@ struct Dumper {
     }
 };
 
-void Dumper::dumpInstruction(Instruction* inst) {
-    std::stringstream line;
-    switch (inst->opcode()) {
-    case Opcode::Call: {
-        auto* call = cast<CallInstruction>(inst);
-        line << "[" << formatConstant(call->returnType) << "] " << formatConstant(call->callTarget) << "(";
-        if (!call->arugments().empty()) {
-            for (int_t i = 0; i < (int_t)call->arugments().size() - 1; i++)
-                line << formatExpressionResult(call->arugments()[i]) << ", ";
-            line << formatExpressionResult(call->arugments().back());
+void Dumper::dumpInstructions(std::span<const Instruction> instructions) {
+    for (const auto& inst : instructions) {
+        std::stringstream line;
+        bool increaseIndentation = false;
+        switch (inst.opcode()) {
+        case Opcode::Call: {
+            auto call = program->getCall(inst.u.callExpression);
+            line << "[" << formatConstant(call.returnType) << "] " << formatConstant(call.callTarget) << "(";
+            if (!call.arguments.empty()) {
+                for (int_t i = 0; i < (int_t)call.arguments.size() - 1; i++)
+                    line << formatExpression(call.arguments[i]) << ", ";
+                line << formatExpression(call.arguments.back());
+            }
+            line << ")";
+            break;
         }
-        line << ")";
-        break;
-    }
-    case Opcode::ImplicitCopy: {
-        line << "Copy " << formatReference(cast<ImplicitCopyInstruction>(inst)->copyFrom);
-        break;
-    }
-    case Opcode::Compound: {
-        auto* compInst = cast<CompoundInstruction>(inst);
-        dumpLine("block:");
-        indentation.push_back("  ");
-        for (auto* inst : compInst->body())
-            dumpInstruction(inst);
-        indentation.pop_back();
-        return;
-    }
-    case Opcode::Branch: {
-        auto* branchInst = cast<BranchInstruction>(inst);
-        bool first = true;
-        for (auto& branch : branchInst->branches()) {
-            dumpLine((first ? "if " : "elif ") + formatExpressionResult(branch.condition) + ":");
+        case Opcode::ImplicitCopy: {
+            auto copy = program->getImplicitCopy(inst.u.implicitCopyExpression);
+            line << "[" << formatConstant(copy.type) << "]"
+                 << "Copy " << formatExpression(copy.copyFrom);
+            break;
+        }
+        case Opcode::BlockScope:
+            line << "block:";
+            increaseIndentation = true;
+            break;
+        case Opcode::Branch:
+            line << "if " << formatExpression(inst.u.scope.u.branchCondition) << ":";
+            increaseIndentation = true;
+            break;
+        case Opcode::BranchContinued:
+            line << "elif " << formatExpression(inst.u.scope.u.branchCondition) << ":";
+            popIndentation();
+            increaseIndentation = true;
+            break;
+        case Opcode::Deactivate:
+            line << "Deactivate " << formatExpression(inst.u.deactivateTarget);
+            break;
+        case Opcode::Discard:
+            line << "Discard " << formatExpression(inst.u.discardValue);
+            break;
+        case Opcode::Initialize:
+            line << formatExpression(inst.u.initialize.target) << " = " << formatExpression(inst.u.initialize.value);
+            break;
+        case Opcode::EndScope:
+            popIndentation();
+            line << "end";
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        dumpLine(line.str());
+        if (increaseIndentation)
             indentation.push_back("  ");
-            for (auto* inst : branch.body())
-                dumpInstruction(inst);
-            indentation.pop_back();
-            first = false;
-        }
-        return;
     }
-    case Opcode::Deactivate:
-        line << "Deactivate " << formatReference(cast<DeactivateInstruction>(inst)->target);
-        break;
-    case Opcode::Discard:
-        line << "Discard " << formatExpressionResult(cast<DiscardInstruction>(inst)->value);
-        break;
-    case Opcode::Initialize: {
-        auto* init = cast<InitializeInstruction>(inst);
-        line << formatReference(init->target) << " <- " << formatExpressionResult(init->initializer);
-        break;
-    }
-    default:
-        VERIFY_NOT_REACHED();
-    }
-    dumpLine(line.str());
 }
 
 void Dumper::dumpProgram(Program* prog) {
@@ -233,9 +237,8 @@ void Dumper::dumpProgram(Program* prog) {
     case ProgramKind::Function:
         dumpLine("return-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         indentation.push_back("  ");
-        for (auto* inst : cast<FunctionProgram>(prog)->body().body())
-            dumpInstruction(inst);
-        indentation.pop_back();
+        dumpInstructions(cast<FunctionProgram>(prog)->body());
+        popIndentation();
         break;
     default:
         break;
@@ -253,12 +256,12 @@ void Dumper::dumpProgram(Program* prog) {
             break;
         }
         case ConstantKind::Computed: {
-            dumpLine(line.str());
             auto expr = program->getComputedConstant(value);
+            line << formatExpression(expr.value);
+            dumpLine(line.str());
             indentation.push_back("  ");
-            for (auto* inst : expr.body)
-                dumpInstruction(inst);
-            indentation.pop_back();
+            dumpInstructions(expr.body);
+            popIndentation();
             continue;
         }
         case ConstantKind::RemoteComputed: {

@@ -5,33 +5,34 @@
 
 namespace sema {
 
-ExpressionResult Generator::topExpression() {
+Expression Generator::topExpression() {
     return currentExpression;
 }
 
-OwnedExpressionResult Generator::takeTopExpression() {
+OwnedExpression Generator::takeTopExpression() {
     VERIFY(!expressionStack.empty());
     expressionStack.pop_back();
     return std::move(currentExpression);
 }
 
-void Generator::emitConstantExpr(SourceLocation location, Constant value) {
-    VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
-    currentExpression = value;
-    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
+void Generator::emitExpression(SourceLocation, OwnedExpression e) {
+    VERIFY(currentExpression == INVALID_EXPRESSION);
+    currentExpression = std::move(e);
+    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitReferenceExpr(SourceLocation location, Reference ref) {
-    VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
-    currentExpression = ref;
-    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
+void Generator::emitCall(SourceLocation location, Call call) {
+    VERIFY(currentExpression == INVALID_EXPRESSION);
+    currentExpression = program->addCall(call);
+    instructionScratch.emplace_back(Opcode::Call, location, Instruction::Data { .callExpression = currentExpression });
+    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitInstructionExpr(Instruction* inst, OwnedExpressionResult result) {
-    VERIFY(currentExpression == INVALID_EXPRESSION_RESULT);
-    currentExpression = std::move(result);
-    expressionStack.push_back({ .startOffset = (uint32_t)instructionScratch.size() });
-    instructionScratch.push_back(inst);
+void Generator::emitImplicitCopy(SourceLocation location, ImplicitCopy copy) {
+    VERIFY(currentExpression == INVALID_EXPRESSION);
+    currentExpression = program->addImplicitCopy(copy);
+    instructionScratch.emplace_back(Opcode::ImplicitCopy, location, Instruction::Data { .implicitCopyExpression = currentExpression });
+    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
 Constant Generator::expressionToConstant() {
@@ -41,15 +42,18 @@ Constant Generator::expressionToConstant() {
     if (topExpression().isConstant())
         return takeTopExpression().constant();
 
-    VERIFY(instructionScratch.size() > expressionStack.back().startOffset);
-    auto newEnd = instructionScratch.begin() + expressionStack.back().startOffset;
+    VERIFY(expressionStack.size() >= 2);
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
+    VERIFY(std::prev(expressionStack.end(), 2)->endOffset < instructionScratch.size()); // expect a non-zero number of instructions
+    auto newEnd = instructionScratch.begin() + std::prev(expressionStack.end(), 2)->endOffset;
 
-    OwnedExpressionResult input = std::move(currentExpression);
+    OwnedExpression input = std::move(currentExpression);
     Type type = resultType(input);
-    Constant result = program->addComputedConstant(context, { input.release().valueSlot(), type, { newEnd, instructionScratch.end() } });
+    Constant result = program->addComputedConstant(context, { input.release(), type, { newEnd, instructionScratch.end() } });
 
     instructionScratch.erase(newEnd, instructionScratch.end());
     expressionStack.pop_back();
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
 
     return result;
 }
@@ -149,11 +153,11 @@ Constant Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span
 void Generator::generateIdentifierExpr() {
     Word name = Word::fromUint(tok->data());
     if (name == parse::words["false"]) {
-        emitConstantExpr(tok->location(), builtins::false_constant);
+        emitExpression(tok->location(), builtins::false_constant);
         return;
     }
     if (name == parse::words["true"]) {
-        emitConstantExpr(tok->location(), builtins::true_constant);
+        emitExpression(tok->location(), builtins::true_constant);
         return;
     }
     for (auto lookupCtx : std::views::reverse(lookupStack)) {
@@ -161,7 +165,7 @@ void Generator::generateIdentifierExpr() {
         case LookupContext::Kind::Namespace: {
             auto result = lookupCtx.getNamespace()->getDeclaration(name);
             if (result.has_value()) {
-                emitConstantExpr(tok->location(), generateDeclarationLiteral(result.value(), {}));
+                emitExpression(tok->location(), generateDeclarationLiteral(result.value(), {}));
                 return;
             }
             continue;
@@ -170,12 +174,12 @@ void Generator::generateIdentifierExpr() {
             TypeProgram* prog = lookupCtx.getType();
             auto result = lookupInType(prog, copyParameters(prog), name);
             if (result.has_value()) {
-                emitConstantExpr(tok->location(), result.value());
+                emitExpression(tok->location(), result.value());
                 return;
             }
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitReferenceExpr(tok->location(), Reference(ReferenceKind::TemplateParameter, i));
+                    emitExpression(tok->location(), Expression::templateParameterReference(i));
                     return;
                 }
             }
@@ -185,7 +189,7 @@ void Generator::generateIdentifierExpr() {
             Program* prog = lookupCtx.getTemplateParameters();
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitReferenceExpr(tok->location(), Reference(ReferenceKind::TemplateParameter, i));
+                    emitExpression(tok->location(), Expression::templateParameterReference(i));
                     return;
                 }
             }
@@ -196,10 +200,7 @@ void Generator::generateIdentifierExpr() {
             for (auto entry : g.localLookupEntries) {
                 if (entry.name == name) {
                     VERIFY(&g == this);
-                    if (entry.data.isReference())
-                        emitReferenceExpr(tok->location(), entry.data.reference());
-                    else
-                        emitConstantExpr(tok->location(), entry.data.constant());
+                    emitExpression(tok->location(), entry.data);
                     return;
                 }
             }
@@ -214,7 +215,7 @@ void Generator::generateIdentifierExpr() {
 }
 
 void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
-    ExpressionResult baseResult = topExpression();
+    Expression baseResult = topExpression();
     if (baseResult.isConstant()) {
         Constant baseValue = baseResult.constant();
         takeTopExpression();
@@ -247,7 +248,7 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
             if (state.program->kind() == ProgramKind::Value)
                 result = fold(result, cast<ValueProgram>(state.program)->value());
 
-            emitConstantExpr({}, result);
+            emitExpression({}, result);
         };
 
         if (baseValue.kind() == ConstantKind::Program) {
@@ -299,14 +300,13 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateCallExpr(CallTarget target) {
+void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
     auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Type) {
         CallableProgram* callableProg = cast<CallableProgram>(state.program);
 
-        auto returnSlot = newValueSlot((Type)INVALID_CONSTANT);
-
-        auto* callInst = allocateInstruction<CallInstruction>(SourceLocation(), callableProg->runtimeParameters.size());
+        std::vector<Expression> arguments;
+        arguments.resize(callableProg->runtimeParameters.size(), INVALID_EXPRESSION);
 
         int_t argumentIndex = 0;
         const auto& parameters = callableProg->runtimeParameters;
@@ -316,7 +316,7 @@ void Generator::generateCallExpr(CallTarget target) {
             visitExpression();
             auto expectedCategory = expectedInitializerCategory(callableProg->runtimeParameters[argumentIndex].kind());
             initialize(conversionLocation, state, expectedCategory, parameters[argumentIndex].type());
-            callInst->setArgument(argumentIndex, takeTopExpression());
+            arguments[argumentIndex] = takeTopExpression().release();
             argumentIndex += 1;
         }
         VERIFY(tok->kind() == Token::EmptyNode);
@@ -325,9 +325,7 @@ void Generator::generateCallExpr(CallTarget target) {
         VERIFY(state.isComplete());
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
         Type returnType = verifyType(callableProg->kind() == ProgramKind::Type ? callTarget : fold(callTarget, cast<FunctionProgram>(callableProg)->returnType()));
-        valueSlots[returnSlot.index()].type = returnType;
-        callInst->setCall(callTarget, returnType);
-        emitInstructionExpr(callInst, std::move(returnSlot));
+        emitCall(location, Call { ExpressionCategory::Value, callTarget, returnType, arguments });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -360,14 +358,14 @@ void Generator::generateStaticAccessExpr() {
     Constant baseValue = expressionToConstant();
     if (baseValue.kind() == ConstantKind::Namespace) {
         Namespace* ns = context.getNamespace(baseValue.nsHandle());
-        emitConstantExpr(tok->location(), generateDeclarationLiteral(ns->getDeclaration(name).value(), {}));
+        emitExpression(tok->location(), generateDeclarationLiteral(ns->getDeclaration(name).value(), {}));
         return;
     }
     if (baseValue.kind() == ConstantKind::Program || baseValue.kind() == ConstantKind::Parameterize) {
         FoldBase base = asFoldBase(baseValue);
         auto maybeValue = lookupInType(cast<TypeProgram>(base.program), base.arguments, name);
         VERIFY(maybeValue.has_value());
-        return emitConstantExpr(tok->location(), maybeValue.value());
+        return emitExpression(tok->location(), maybeValue.value());
     }
     VERIFY_NOT_REACHED();
 }
@@ -380,8 +378,7 @@ struct Generator::MemberAccessState {
 void Generator::emitMemberAccessExpr(MemberAccessState& state) {
     VERIFY(!state.emitted);
     state.emitted = true;
-    auto origExpr = topExpression();
-    auto forEachMemberPointer = [this, origType = resultType(origExpr), &state](auto callback) {
+    auto forEachMemberPointer = [this, origType = resultType(topExpression()), &state](auto callback) {
         Type parentType = origType;
         for (uint32_t memberIndex : state.memberIndicies) {
             MemberPointer memberPointer { parentType, memberIndex };
@@ -391,18 +388,12 @@ void Generator::emitMemberAccessExpr(MemberAccessState& state) {
         }
     };
 
-    if (origExpr.isReference()) {
-        takeTopExpression();
-        Reference reference = origExpr.reference();
-        forEachMemberPointer([&](Type, MemberPointer pointer) {
-            reference = program->addMemberReference({ reference, program->addMemberPointer(context, pointer) });
-        });
-        emitReferenceExpr(tok->location(), reference);
-        return;
-    }
-
-    // Member access on value expression is not supported jet
-    VERIFY_NOT_REACHED();
+    auto expr = takeTopExpression();
+    forEachMemberPointer([&](Type, MemberPointer pointer) {
+        expr = program->addMemberExpression({ std::move(expr), program->addMemberPointer(context, pointer) });
+    });
+    emitExpression(tok->location(), std::move(expr));
+    return;
 }
 
 void Generator::generateMemberAccessExprInside(MemberAccessState& state, Type baseType, Word name) {
@@ -438,17 +429,17 @@ void Generator::generateMemberAccessExpr() {
 }
 
 void Generator::toValueExpression(SourceLocation location) {
-    if (!topExpression().isReference())
+    auto inCategory = categoryOf(topExpression());
+    if (inCategory == ExpressionCategory::Value)
         return;
 
-    auto ref = takeTopExpression().reference();
-    if (ref.kind() == ReferenceKind::TemplateParameter) {
-        emitConstantExpr(location, ref.copyTemplateParameter());
+    if (topExpression().kind() == ExpressionKind::TemplateParameterReference) {
+        emitExpression(location, takeTopExpression().copyTemplateParameter());
         return;
     }
 
-    auto result = newValueSlot(referencedType(ref));
-    emitInstructionExpr(allocateInstruction<ImplicitCopyInstruction>(location, ref), std::move(result));
+    auto copyFrom = takeTopExpression();
+    emitImplicitCopy(location, ImplicitCopy { copyFrom, resultType(copyFrom) });
 }
 
 void Generator::contextualToType(SourceLocation location) {
@@ -652,23 +643,24 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     program->completeSignatureCheck();
 }
 
-ExpressionCategory Generator::categoryOf(ExpressionResult expr) {
-    if (!expr.isReference())
-        return ExpressionCategory::Value;
-
-    Reference ref = expr.reference();
-    switch (ref.kind()) {
-    case ReferenceKind::LocalVariable:
-    case ReferenceKind::Parameter:
+ExpressionCategory Generator::categoryOf(Expression expr) {
+    switch (expr.kind()) {
+    case ExpressionKind::VariableReference:
+    case ExpressionKind::ParameterReference:
         return ExpressionCategory::UniqueReference;
-    case ReferenceKind::LocalReference:
-        return localReferences[ref.localReferenceIndex()].category;
-    case ReferenceKind::TemplateParameter:
+    case ExpressionKind::ReferenceReference:
+        return localReferences[expr.referenceIndex()].category;
+    case ExpressionKind::TemplateParameterReference:
         return ExpressionCategory::ConstSharedReference;
-    case ReferenceKind::MemberExpression:
-        return categoryOf(program->getMemberReference(ref).base);
+    case ExpressionKind::MemberExpression:
+        return categoryOf(program->getMemberReference(expr).base);
+    case ExpressionKind::Call:
+        return program->getCall(expr).resultCategory;
+    case ExpressionKind::ImplicitCopy:
+        return ExpressionCategory::Value;
     default:
-        VERIFY_NOT_REACHED();
+        VERIFY(expr.isConstant());
+        return ExpressionCategory::Value;
     }
 }
 
@@ -740,14 +732,30 @@ Type Generator::typeOf(Constant value) {
     }
 }
 
-Type Generator::resultType(ExpressionResult result) {
-    if (result.isConstant())
-        return typeOf(result.constant());
-    if (result.isValueSlot())
-        return valueSlots[result.valueSlot().index()].type;
-    if (result.isReference())
-        return referencedType(result.reference());
-    VERIFY_NOT_REACHED();
+Type Generator::resultType(Expression expr) {
+    if (expr.isConstant())
+        return typeOf(expr.constant());
+
+    switch (expr.kind()) {
+    case ExpressionKind::ParameterReference:
+        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
+    case ExpressionKind::TemplateParameterReference:
+        return parameterTypes[expr.templateParameterIndex()];
+    case ExpressionKind::VariableReference:
+        return localVariables[expr.varaibleIndex()].type;
+    case ExpressionKind::ReferenceReference:
+        return localReferences[expr.referenceIndex()].type;
+    case ExpressionKind::MemberExpression: {
+        auto memberExpr = program->getMemberReference(expr);
+        return memberType(memberExpr.memberPointer);
+    }
+    case ExpressionKind::Call:
+        return program->getCall(expr).returnType;
+    case ExpressionKind::ImplicitCopy:
+        return program->getImplicitCopy(expr).type;
+    default:
+        VERIFY_NOT_REACHED();
+    }
 }
 
 Type Generator::typeOfNonDependentProgram(Constant value) {
@@ -797,46 +805,25 @@ Type Generator::verifyType(Constant value) {
     }
 }
 
-Type Generator::referencedType(Reference expr) {
-    switch (expr.kind()) {
-    case ReferenceKind::Parameter:
-        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
-    case ReferenceKind::TemplateParameter:
-        return parameterTypes[expr.templateParameterIndex()];
-    case ReferenceKind::LocalVariable:
-        return localVariables[expr.localVaraibleIndex()].type;
-    case ReferenceKind::LocalReference:
-        return localReferences[expr.localReferenceIndex()].type;
-    case ReferenceKind::MemberExpression: {
-        auto memberExpr = program->getMemberReference(expr);
-        return memberType(memberExpr.memberPointer);
-    }
-    case ReferenceKind::OpaqueExpression:
-        return opaqueReferences[expr.opaqueExpressionIndex()].type;
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-Reference Generator::addParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addParameter(Word name, Type type, std::optional<Constant> defaultValue) {
     VERIFY(parameterTypes.size() == program->parameters.size());
     uint32_t parameterIndex = program->parameters.size();
     parameterTypes.push_back(type);
     program->parameters.push_back({ name, type, defaultValue });
-    return Reference(ReferenceKind::TemplateParameter, parameterIndex);
+    return Expression::templateParameterReference(parameterIndex);
 }
 
-Reference Generator::addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue) {
     return addParameter(name, type, defaultValue);
 }
 
-Reference Generator::newImplicitParameter(Type type) {
+Expression Generator::newImplicitParameter(Type type) {
     uint32_t parameterIndex = parameterTypes.size();
     parameterTypes.push_back(type);
-    return Reference(ReferenceKind::TemplateParameter, parameterIndex);
+    return Expression::templateParameterReference(parameterIndex);
 }
 
-Reference Generator::addInheritedParameter(Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addInheritedParameter(Type type, std::optional<Constant> defaultValue) {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
     program->inheritedParameterCount += 1;
     return addParameter(Word(), type, defaultValue);

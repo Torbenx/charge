@@ -9,26 +9,26 @@ struct Derived: {
 }
 
 // traits
-incomplete struct MyTrait: {
+trait MyTrait: {
     incomplete fn someFunctionality(self);
 }
 struct Foo: {
-    has MyTrait: {
+    impls MyTrait: {
         fn someFunctionality(self): { ... };
     }
 }
 struct Bar: { }
-external Bar has MyTrait: {
+for Bar impls MyTrait: {
     fn someFunctionality(self): { ... };
 }
 
 // use traits
-template(T ?has(MyTrait): Type)
+template(T ?impls(MyTrait): type)
 fn useFunctionality(input: T): {
     input.someFunctionality();
 }
 // or shorter:
-fn useFunctionality(input: ?has(MyTrait)): {
+fn useFunctionality(input: ?impls(MyTrait)): {
     input.someFunctionality();
 }
 
@@ -43,7 +43,7 @@ struct Rectangle: {
 struct Circle: {
     has Shape: { fn draw(): { ... } }
 }
-fn drawNonRectangles(shapes: Array{ref{Shape}}): {
+fn drawNonRectangles(shapes: Array{ptr{Shape}}): {
     for shape in shapes: {
         if !dynIs{Rectangle}(*shape):
             shape.draw();
@@ -62,7 +62,7 @@ struct IPv6Address: {
     has IPAddressBase;
     address: FixedArray{uint16, 8};
 }
-static IPAddress: Type = Union{IPAddressBase};
+static IPAddress: type = union{IPAddressBase};
 fn printAddress(address: IPAddress): {
     inspect *address: {
         match(v4: IPv4Address) dyn_is(v4):
@@ -132,7 +132,7 @@ fn toString(color: Option{Color}) => inspect color: {
 }
 
 //
-template(T ?has(ops::Div): Type)
+template(T ?impls(ops::Div): type)
 fn divide(left: T, right: T) => left / right;
 fn test(): {
     let a = divide(1, 2); // => 0

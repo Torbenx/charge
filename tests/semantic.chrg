@@ -75,7 +75,7 @@ fn func1() => X;
 // expect-type type
 static call1 = func1();
 
-fn func2(x) => X;
+fn func2(x) => x;
 // expect-type type
 static call2 = func2(X);
 
@@ -96,6 +96,9 @@ static call4indirect = func4ref(X);
 static nested = func2(func1());
 // expect-type type
 static nestedRef = nested;
+
+// expect-type type
+static nested2 = func2(func2(func1()));
 
 // expect-type #0
 // expect-value #1

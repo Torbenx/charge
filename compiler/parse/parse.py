@@ -29,6 +29,7 @@ keywords = [
     "guard",
     "has",
     "if",
+    "impls",
     "incomplete",
     "let",
     "loop",

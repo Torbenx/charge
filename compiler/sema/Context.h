@@ -6,38 +6,6 @@
 
 namespace sema {
 
-struct InstructionAllocator {
-
-    struct InstructionDeleter {
-        void operator()(Instruction* ptr) const {
-            switch (ptr->opcode()) {
-
-#define OP(opcode)                                     \
-    case Opcode::opcode:                               \
-        delete static_cast<opcode##Instruction*>(ptr); \
-        break;
-
-                ENUMERATE_SEMA_INSTRUCTION_OPCODES
-
-#undef OP
-
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }
-    };
-
-    template<typename T, typename... Args>
-    T* allocate(Args&&... args) {
-        auto unique = std::unique_ptr<T, InstructionDeleter>(new T(std::forward<Args>(args)...));
-        T* ptr = unique.get();
-        instructions.emplace_back(std::move(unique));
-        return ptr;
-    }
-
-    std::vector<std::unique_ptr<Instruction, InstructionDeleter>> instructions;
-};
-
 struct Context {
     parse::Output parseOutput;
     WordStringTable wordTable { parse::words };
@@ -160,8 +128,6 @@ struct Context {
             return std::nullopt;
         return &std::prev(it)->get();
     }
-
-    InstructionAllocator instructionAllocator;
 };
 
 }

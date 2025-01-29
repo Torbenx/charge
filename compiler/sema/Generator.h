@@ -140,21 +140,12 @@ private:
 struct Generator : Util {
     struct LocalLookupEntry {
         Word name;
-        ExpressionResult data;
-    };
-
-    struct ReferenceUnitLock {
-        uint32_t exprBits : 31;
-        uint32_t sharedBit : 1;
-
-        bool shared() const { return sharedBit != 0; }
-        Reference expr() const { return std::bit_cast<Reference>(exprBits); }
+        Expression data;
     };
 
     struct LocalReference {
         ExpressionCategory category;
         Type type;
-        std::vector<ReferenceUnitLock> locks;
     };
 
     struct LocalVariable {
@@ -175,7 +166,7 @@ struct Generator : Util {
     };
 
     struct ExpressionStackItem {
-        uint32_t startOffset;
+        uint32_t endOffset;
     };
 
     struct CallTarget {
@@ -188,28 +179,28 @@ struct Generator : Util {
         std::vector<bool> referenceActiveMask;
         // FlatSet<> trueHas;
 
-        void setActive(Reference ref, bool newState) {
+        void setActive(Expression ref, bool newState) {
             switch (ref.kind()) {
-            case ReferenceKind::Parameter:
+            case ExpressionKind::ParameterReference:
                 parameterActiveMask[ref.id()] = newState;
                 break;
-            case ReferenceKind::LocalVariable:
+            case ExpressionKind::VariableReference:
                 variableActiveMask[ref.id()] = newState;
                 break;
-            case ReferenceKind::LocalReference:
+            case ExpressionKind::ReferenceReference:
                 referenceActiveMask[ref.id()] = newState;
                 break;
             default:
                 VERIFY_NOT_REACHED();
             }
         }
-        bool isActive(Reference ref) const {
+        bool isActive(Expression ref) const {
             switch (ref.kind()) {
-            case ReferenceKind::Parameter:
+            case ExpressionKind::ParameterReference:
                 return parameterActiveMask[ref.id()];
-            case ReferenceKind::LocalVariable:
+            case ExpressionKind::VariableReference:
                 return variableActiveMask[ref.id()];
-            case ReferenceKind::LocalReference:
+            case ExpressionKind::ReferenceReference:
                 return referenceActiveMask[ref.id()];
             default:
                 VERIFY_NOT_REACHED();
@@ -229,19 +220,17 @@ struct Generator : Util {
 
     const parse::TokenInfo* tok = nullptr;
 
-    std::vector<Instruction*> instructionScratch;
-    std::vector<ExpressionStackItem> expressionStack;
+    std::vector<Instruction> instructionScratch;
+    std::vector<ExpressionStackItem> expressionStack = { ExpressionStackItem { .endOffset = 0 } };
     std::vector<Type> parameterTypes;
     std::vector<LookupContext> lookupStack;
     std::vector<LocalLookupEntry> localLookupEntries;
     std::vector<LocalVariable> localVariables;
     std::vector<LocalReference> localReferences;
-    std::vector<OpaqueReference> opaqueReferences;
-    std::vector<ValueSlotInfo> valueSlots;
     LocalState localState;
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;
-    OwnedExpressionResult currentExpression = OwnedExpressionResult(INVALID_EXPRESSION_RESULT);
+    OwnedExpression currentExpression = OwnedExpression(INVALID_EXPRESSION);
 
     Generator(Context& context, ProgramHandle handle);
 
@@ -249,11 +238,11 @@ struct Generator : Util {
     void setParseLocation(parse::TokenHandle);
     void clearParseLocation();
 
-    ExpressionResult topExpression();
-    OwnedExpressionResult takeTopExpression();
+    Expression topExpression();
+    OwnedExpression takeTopExpression();
 
     LocalScope beginLocalScope(SourceLocation);
-    sema::LocalScope endLocalScope(LocalScope scope, SourceLocation);
+    void endLocalScope(LocalScope scope, SourceLocation);
 
     void visitDeclaration();
     void visitTemplateParameters();
@@ -287,10 +276,9 @@ struct Generator : Util {
     Type memberType(MemberPointer pointer);
     Type memberType(Constant memberPointer);
     Type typeOf(Constant);
-    Type resultType(ExpressionResult);
+    Type resultType(Expression);
     Type verifyType(Constant);
-    Type referencedType(Reference);
-    ExpressionCategory categoryOf(ExpressionResult);
+    ExpressionCategory categoryOf(Expression);
 
     Constant makeTemplateSignature(Constant templateProg);
     Type makeTemplateIdFor(Constant templateProg);
@@ -304,7 +292,7 @@ struct Generator : Util {
     void generateIdentifierExpr();
     void generateParameterizeExpr(std::span<const Word> argumentNames);
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
-    void generateCallExpr(CallTarget base);
+    void generateCallExpr(SourceLocation location, CallTarget base);
     std::optional<Constant> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
     void generateStaticAccessExpr();
     struct MemberAccessState;
@@ -314,10 +302,10 @@ struct Generator : Util {
 
     Constant inheriteParameters(ScopeConstant parent);
 
-    Reference addParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    Reference addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    Reference addInheritedParameter(Type type, std::optional<Constant> defaultValue);
-    Reference newImplicitParameter(Type type);
+    Expression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    Expression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    Expression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
+    Expression newImplicitParameter(Type type);
 
     void toValueExpression(SourceLocation);
 
@@ -325,27 +313,59 @@ struct Generator : Util {
     void contextualToBool(SourceLocation);
     void initialize(SourceLocation, DeductionState&, ExpressionCategory expectCategory, ExternConstant expectedType);
 
-    OwnedValueSlot newValueSlot(Type type) {
-        auto id = valueSlots.size();
-        valueSlots.push_back({ type });
-        return OwnedValueSlot(id);
+    struct InstructionHandle {
+        uint32_t offset;
+    };
+    struct ScopeInstructionHandle : InstructionHandle { };
+    struct BranchInstructionHandle : ScopeInstructionHandle { };
+    Instruction& at(InstructionHandle handle) {
+        VERIFY(handle.offset < instructionScratch.size());
+        return instructionScratch[handle.offset];
     }
 
-    template<typename T, typename... Args>
-    T* allocateInstruction(Args&&... args) {
-        return context.instructionAllocator.allocate<T>(std::forward<Args>(args)...);
+    InstructionHandle emitControl(Opcode opcode, SourceLocation location, Instruction::Data data) {
+        InstructionHandle ret { (uint32_t)instructionScratch.size() };
+        instructionScratch.emplace_back(opcode, location, data);
+
+        VERIFY(expressionStack.size() == 1); // There should be no expression scope
+        expressionStack.back().endOffset = instructionScratch.size(); // The next expression begins after us
+
+        return ret;
+    }
+    InstructionHandle emitDiscard(SourceLocation location, OwnedExpression value) {
+        return emitControl(Opcode::Discard, location, { .discardValue = value.release() });
+    }
+    InstructionHandle emitDeactivate(SourceLocation location, Expression target) {
+        return emitControl(Opcode::Deactivate, location, { .deactivateTarget = target });
+    }
+    InstructionHandle emitInitialize(SourceLocation location, Expression target, OwnedExpression value) {
+        return emitControl(Opcode::Initialize, location, { .initialize { target, value.release() } });
+    }
+    BranchInstructionHandle emitBranch(SourceLocation location, OwnedExpression condition) {
+        return BranchInstructionHandle { emitControl(Opcode::Branch, location, { .scope = { .u = { .branchCondition = condition.release() } } }) };
+    }
+    BranchInstructionHandle emitBranch(SourceLocation location, OwnedExpression condition, BranchInstructionHandle prevBranch) {
+        at(prevBranch).u.scope.bodySize = (uint32_t)(instructionScratch.size() - prevBranch.offset);
+        return BranchInstructionHandle { emitControl(Opcode::BranchContinued, location, { .scope = { .u = { .branchCondition = condition.release() } } }) };
+    }
+    ScopeInstructionHandle emitBlockScope(SourceLocation location) {
+        return ScopeInstructionHandle { emitControl(Opcode::BlockScope, location, { .scope { .u = { .empty {} } } }) };
+    }
+    InstructionHandle emitScopeEnd(SourceLocation location, ScopeInstructionHandle scope) {
+        at(scope).u.scope.bodySize = (uint32_t)(instructionScratch.size() - scope.offset);
+        return emitControl(Opcode::EndScope, location, { .empty {} });
+    }
+    std::vector<Instruction> emitScopeEndAndTake(SourceLocation location, ScopeInstructionHandle scope) {
+        emitScopeEnd(location, scope);
+        auto newEnd = instructionScratch.begin() + scope.offset;
+        std::vector<Instruction> result(newEnd, instructionScratch.end());
+        instructionScratch.erase(newEnd, instructionScratch.end());
+        return result;
     }
 
-    template<typename T, typename... Args>
-    T* emitControl(Args&&... args) {
-        T* ptr = context.instructionAllocator.allocate<T>(std::forward<Args>(args)...);
-        instructionScratch.push_back(ptr);
-        return ptr;
-    }
-
-    void emitInstructionExpr(Instruction*, OwnedExpressionResult);
-    void emitConstantExpr(SourceLocation, Constant);
-    void emitReferenceExpr(SourceLocation, Reference);
+    void emitExpression(SourceLocation, OwnedExpression);
+    void emitCall(SourceLocation, Call);
+    void emitImplicitCopy(SourceLocation, ImplicitCopy);
     void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
 };
 

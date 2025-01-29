@@ -19,6 +19,7 @@ enum class DeclarationKind : uint8_t {
     Function,
     Member,
     HasMember,
+    Impls,
 };
 
 namespace parse {
@@ -214,7 +215,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
 template<DeclarationKind kind>
 static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember || kind == DeclarationKind::Impls) {
         return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {
         return state.pushNamespaceScope(name);
@@ -4178,6 +4179,19 @@ member_declaration$as_then:
                 // next expression
                 goto expression$with_emit;
             }
+            if (this_identifier == words["impls"]) {
+                // pushScope ScopeKind::HasTypeExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // commitDeclaration DeclarationKind::Impls
+                this_declaration = commitDeclaration<DeclarationKind::Impls>(Word(), tokBegin, declarationBegin, state);
+                // emitToken TokenKind::ImplsDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::ImplsDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next expression
+                goto expression$with_emit;
+            }
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
@@ -4782,6 +4796,11 @@ error$word_case:
         if (this_identifier == words["if"]) {
             // error
             errorToken = LexerToken::If;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["impls"]) {
+            // error
+            errorToken = LexerToken::Impls;
             goto handle_parse_error;
         }
         if (this_identifier == words["incomplete"]) {

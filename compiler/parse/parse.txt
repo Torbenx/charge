@@ -641,6 +641,12 @@ LinearState member_declaration() then templated_declaration
         commitDeclaration DeclarationKind::HasMember
         emitToken TokenKind::HasMemberDecl, this_declaration
         next expression
+    keyword impls
+        pushScope ScopeKind::HasTypeExpr
+        rememberDeclarationBegin
+        commitDeclaration DeclarationKind::Impls
+        emitToken TokenKind::ImplsDecl, this_declaration
+        next expression
     identifier
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::Member, this_identifier

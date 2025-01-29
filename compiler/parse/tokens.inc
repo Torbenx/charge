@@ -100,6 +100,7 @@ DECL(StructTypeDecl, TypeDecl)
 DECL(ObjectTypeDecl, TypeDecl)
 DECL(MemberDecl, MemberDecl)
 DECL(HasMemberDecl, HasMemberDecl)
+DECL(ImplsDecl, ImplsDecl)
 
 DECL(VarValueDecl, x)
 DECL(LetValueDecl, x)
