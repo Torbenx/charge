@@ -1,21 +1,29 @@
 
 template(T: type)
 struct unique_ptr: {
-    fn get_unique(unique inout self) -> (ref<unique self, unique *target> r: T): { r = *target; }
-    fn get_shared(shared inout self) -> (ref<shared self, shared *target> r: T): { r = *target; }
+    fn get_unique(self: unique) -> unique T: {
+        let r: unique = *target;
+        reference unique self with r;
+        return r;
+    }
+    fn get_shared(self: shared) -> shared T: {
+        let r: shared = *target;
+        reference shared self with r;
+        return r;
+    }
 
-    has destroy_behavior: {
-        fn destroy(unique self): {
+    trait impl destroy_behavior: {
+        fn destroy(self: unique): {
             delete_at(target);
         }
     }
 
-    invariant {
+    invariant(self: shared) {
         prove std::deletable(target); // implies initialized
-        if !std::referenced(&self):
-            prove !std::referenced(target);
-        if !std::uniquely_referenced(&self):
-            prove !std::uniquely_referenced(target);
+        prove !std::uniquely_referenced(target);
+    }
+    invariant(self: unique) {
+        prove !std::referenced(target);
     }
 
     internal target: ptr{T};

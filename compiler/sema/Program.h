@@ -16,8 +16,10 @@ namespace builtins {
 #define BUILTIN(name, cppName) constexpr inline Constant cppName { BuiltinId::cppName };
 #include <sema/builtins.inc>
 
-inline constexpr Constant false_constant { ConstantKind::BooleanLiteral, 0 };
-inline constexpr Constant true_constant { ConstantKind::BooleanLiteral, 1 };
+    inline constexpr Constant false_constant { ConstantKind::BooleanLiteral, 0 };
+    inline constexpr Constant true_constant { ConstantKind::BooleanLiteral, 1 };
+
+    inline constexpr Constant self_constant { ConstantKind::Self, 0 };
 
 };
 
@@ -187,7 +189,7 @@ struct Program {
         : m_fields(Fields(kind), location)
         , m_name(name)
         , m_parent(parent)
-        , parseLocation(parseLocation) { }
+        , parseLocationOrSelfConstant(parseLocation.id()) { }
 
     Constant addComputedConstant(Context&, ComputedConstant);
     Constant addParameterize(Context& context, Parameterize parameterize);
@@ -263,14 +265,20 @@ struct Program {
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureCheckInProgress);
         m_fields.setTag(tag);
-        return parseLocation;
+        return parse::TokenHandle { parseLocationOrSelfConstant };
     }
 
-    void completeSignatureCheck() {
+    void completeSignatureCheck(Constant selfConstant) {
         VERIFY(status() == ProgramStatus::SignatureCheckInProgress);
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureChecked);
         m_fields.setTag(tag);
+        parseLocationOrSelfConstant = selfConstant.toUint();
+    }
+
+    ExternConstant selfConstant() const {
+        VERIFY(status() == ProgramStatus::SignatureChecked);
+        return Constant::fromUint(parseLocationOrSelfConstant);
     }
 
     ProgramHandle translate(ProgramHandle handle) const {
@@ -341,7 +349,7 @@ protected:
     std::optional<ExternConstant> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
     ScopeConstant m_parent;
-    parse::TokenHandle parseLocation;
+    uint32_t parseLocationOrSelfConstant;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;

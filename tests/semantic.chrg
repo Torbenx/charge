@@ -208,3 +208,15 @@ fn testRefCast(x1: unique X, x2: shared X, x3: const unique X) -> X: {
     addConst(x1, x2);
     addShared(x1, x3);
 }
+
+fn requiresUnique(x: unique X) -> X: { }
+// expect-return-type X
+fn refCastShouldFail(x: const shared X) -> X: {
+    requiresUnique(x); // TODO: Function parameter currently always unique
+}
+
+fn typeExpr() -> type: { }
+// expect-return-type X
+fn typeExprFold() -> X: {
+    let x: typeExpr() = X;
+}

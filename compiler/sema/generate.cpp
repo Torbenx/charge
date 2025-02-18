@@ -496,6 +496,9 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Constant base) {
 
 // pValue and aValue must be known to have the same type
 bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue) {
+    if (pValue == builtins::self_constant)
+        pValue = state.program->selfConstant(); // Will always be a parameterize or program constant
+
     if (pValue.kind() == ConstantKind::CopyOfParameter) {
         int_t index = pValue.id();
         if (state.arguments[index] == INVALID_CONSTANT) {
@@ -573,6 +576,8 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     auto foldProgram = [&base](ProgramHandle handle) {
         return base.program->translate(handle);
     };
+    if (v == builtins::self_constant)
+        v = base.program->selfConstant();
     switch (v.kind()) {
     case ConstantKind::Program:
         return (Constant)foldProgram(Constant(v).program());
@@ -592,6 +597,8 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
         return program->addRemoteComputedConstant(context, { fold(base, com.base), com.computation });
     }
     case ConstantKind::Computed:
+        if (base.value == builtins::self_constant)
+            return (Constant)v; // Must not contain any temporary template parameters
         return program->addRemoteComputedConstant(context, { base.value, v });
     case ConstantKind::Parameterize: {
         auto externPara = base.program->getParameterize(v);
@@ -640,7 +647,8 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     auto parseLocation = program->beginSignatureCheck();
     g.setParseLocation(parseLocation);
     g.visitDeclaration();
-    program->completeSignatureCheck();
+    Constant selfConstant = g.makeParameterize(progHandle, copyParameters(program));
+    program->completeSignatureCheck(selfConstant);
 }
 
 ExpressionCategory Generator::categoryOf(Expression expr) {
@@ -742,7 +750,7 @@ Type Generator::resultType(Expression expr) {
     case ExpressionKind::TemplateParameterReference:
         return parameterTypes[expr.templateParameterIndex()];
     case ExpressionKind::VariableReference:
-        return localVariables[expr.varaibleIndex()].type;
+        return localVariables[expr.variableIndex()].type;
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].type;
     case ExpressionKind::MemberExpression: {
@@ -854,7 +862,8 @@ struct BuiltinGenerator : Generator {
     }
 
     ~BuiltinGenerator() {
-        program->completeSignatureCheck();
+        Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+        program->completeSignatureCheck(selfConstant);
         context.popScope();
     }
 };

@@ -1,11 +1,13 @@
 
 struct BoolArray: {
-    has std::index{(int) -> bool}: {
+    trait impl std::ops::index{int}: {
+        static result_type: type = bool;
+
         fn index(index: int) -> (property b: bool);
-        special_case fn index(i: int) -> (out b: bool): {
+        fn impl index(self: shared i: int) -> (out b: bool): {
             b = getBit(i);
         }
-        special_case fn index(i: int) -> (let b: bool): {
+        fn impl index(self: unique, i: int) -> (let b: bool): {
             setBit(i, b);
         }
     }

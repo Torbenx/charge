@@ -355,12 +355,10 @@ struct Generator : Util {
         at(scope).u.scope.bodySize = (uint32_t)(instructionScratch.size() - scope.offset);
         return emitControl(Opcode::EndScope, location, { .empty {} });
     }
-    std::vector<Instruction> emitScopeEndAndTake(SourceLocation location, ScopeInstructionHandle scope) {
-        emitScopeEnd(location, scope);
-        auto newEnd = instructionScratch.begin() + scope.offset;
-        std::vector<Instruction> result(newEnd, instructionScratch.end());
-        instructionScratch.erase(newEnd, instructionScratch.end());
-        return result;
+    std::vector<Instruction> takeInstructions() {
+        VERIFY(expressionStack.size() == 1);
+        expressionStack.front().endOffset = 0;
+        return std::move(instructionScratch);
     }
 
     void emitExpression(SourceLocation, OwnedExpression);

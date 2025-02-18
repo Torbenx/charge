@@ -57,6 +57,7 @@ enum class ConstantKind : uint8_t {
     MemberPointer,
 
     Parameterize, // either all argument substituted or just the inherited ones
+    Self,
     Computed,
     RemoteComputed,
 
@@ -219,7 +220,7 @@ struct Expression {
         return std::bit_cast<Constant>(*this);
     }
 
-    constexpr int_t varaibleIndex() const {
+    constexpr int_t variableIndex() const {
         VERIFY(kind() == ExpressionKind::VariableReference);
         return id();
     }

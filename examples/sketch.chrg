@@ -4,21 +4,21 @@ struct Bar: {
     add: T = 0;
     vals: Array{T} = ( 1, 2, 3 );
 
-    fn get(i: int) -> T: {
+    fn get(self: const, i: int) -> T: {
         return vals[i] + add;
     }
 }
-special_case struct Bar{int}: {
+struct impl Bar{int}: {
     add: int = -1;
     vals: Array{int} = ( -1, -2, -3 );
 
-    fn get(i: int) => 0;
-    fn get(i: int): { return 0; }
-    fn get(i: int) -> int: { return 0; }
+    fn get(self: const, i: int) => 0;
+    fn get(self: const, i: int): { return 0; }
+    fn get(self: const, i: int) -> int: { return 0; }
 }
 
 template(T: Type)
-fn appendTo(v&: Array{T}, item: T): {
+fn appendTo(v: unique Array{T}, item: T): {
     v.append(item);
 }
 
@@ -26,56 +26,56 @@ template(T: Type)
 static sizeOf: int = sizeof(T);
 
 
-with(cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type)
+match(cparams: Array{TupleElement}, cargs: Tuple{cparams}, params: Array{TupleElement}, RetT: Type)
 template(f{cargs..}: (params..) -> RetT)
 fn call(args..: Tuple{undeduced(params)}) -> RetT: {
     return f{cargs..}(args..);
 }
 
-template(T: Type, size: int)
+template(T: type, size: int)
 fn test(defaultValue: T = (), table: FixedArray{T, size});
 fn callTest(): {
     call{test}((), { 1, 2, 3 }); // -> call{test{T = int, size = 3}}
     call{test{T = int}}(table = ()); // -> call{test{T = int, size = 0}}
 }
 
-template(special: Type, base: Template)
+template(special: type, base: template)
 fn isSpecializationOf() => false;
-template(base: Template)
-special_case fn isSpecializationOf{base{_..}, base}() => true;
+template(base: template)
+fn impl isSpecializationOf{base{_..}, base}() => true;
 
 
 template(x: int)
 fn recurse();
 template(x ?[# > 0]: int)
-special_case fn recurse{x}(): {
+fn impl recurse{x}(): {
     recurse{x - 1}();
 }
-special_case fn recurse{0}(): {
+fn impl recurse{0}(): {
     // base case
 }
 
 template(x ?[# >= 0]: int)
-special_case fn recurse{x} as recursePos(): {
+fn impl recurse{x} as recursePos(): {
     recurse{x - 1}();
 }
-special_case fn recursePos{0}(): {
+fn impl recursePos{0}(): {
     // base case
 }
 
 struct Int: {
     value: int = 0;
 
-    has ConvertTo{int}: {
-        fn convert(self) => value;
+    trait impl ConvertTo{int}: {
+        fn convert(self: const) => value;
     }
 
-    has Add{int}: {
-        fn add(self, i: int) => Int(value + i);
+    trait impl Add{int}: {
+        fn add(self: const, i: int) => Int(value + i);
     }
 }
-external int has ConvertTo{Int}: {
-    fn convert(self) => Int(self);
+trait impl ConvertTo{self_type = int, Int}: {
+    fn convert(self: const) => Int(self);
 }
 
 fn bar(): {
@@ -88,7 +88,7 @@ fn bar(): {
     let lambda = [let j: int = calc(#); # == j * j];
     lambda(1);
 
-    mut i: int = 0;
+    var i: int = 0;
     let withCapture = with(j: int = i) (k: int) => j + k;
 }
 
@@ -97,7 +97,7 @@ struct vec3: {
     y: int = 0;
     z: int = 0;
 
-    fn lengthSq() -> int: { return x * x + y * y + z * z; }
+    fn lengthSq(self: const) -> int: { return x * x + y * y + z * z; }
 }
 fn get() -> vec3: {}
 fn q(): {
@@ -107,104 +107,85 @@ fn q(): {
     (l = #.lengthSq(), z = #.z, y = #.y) = get();
 }
 
-template(T: Type)
-struct Array: {
-    fn popBack(self&) -> T: {}
-    fn truncate(self&, newSize: int): {}
-}
-fn foo(): {
-    let arr: Array = ( 1, 2, 3 );
-    match(back, arr2)
-    ( back = #, arr2 = .self ) = arr.popBack();
-    match(arr3)
-    ( arr3 = .self ) = arr.truncate(3);
-
-    mut mArr: Array = ( 4, 5, 6 );
-    mArr.popBack();
-    match(foo)
-    ( foo = .self ) = [mArr].popBack();
-}
-
 struct Vec2: {
     m_x: float;
     m_y: float;
 
-    fn x(self&) <=> m_x;
+    fn x(self: shared) <=> m_x;
 }
 struct Range: {
     m_low: float;
     m_high: float;
 
-    fn low(self&) <=> m_low;
-    fn high(self&) <=> m_high;
+    fn low(self: shared) <=> m_low;
+    fn high(self: shared) <=> m_high;
 }
 struct Rect: {
     h: Range;
     v: Range;
 
-    fn bottomLeft(self&) <=> Vec2(h.low(), v.low());
+    fn bottomLeft(self: shared) <=> Vec2(h.low(), v.low());
 }
 fn onlyX(v: Vec2) => v.x();
-fn onlyX(v&: Vec2) = (x: float): { v.x() = x; }
-fn onlyX(v&: Vec2) <=> v.x();
+fn onlyX(v: shared Vec2) = (x: float): { v.x() = x; }
+fn onlyX(v: shared Vec2) <=> v.x();
 
-fn update(v&: float): { v = 2.0; }
-fn callUpdate(r&: Rect): {
+fn update(v: shared float): { v = 2.0; }
+fn callUpdate(r: shared Rect): {
     update(r.bottomLeft().x());
 }
 
 template(T: Type)
 struct Array: {
-    has Index{(int) -> T}: {
-        fn index(self&, i: int) <=> ...[i];
+    trait impl ops::index{int}: {
+        static result_type: type = T;
+
+        fn index(self: unique, i: int) <=> ...[i];
     }
 }
-special_case struct Array{bool} as BoolArray: {
-    has Index{(int) -> bool}: {
-        fn index(self, i: int) => getBit(i);
-        fn index(self&, i: int) = (v: bool):
+struct impl Array{bool} as BoolArray: {
+    trait impl ops::index{int}: {
+        fn index(self: const, i: int) => getBit(i);
+        fn index(self: unique, i: int) = (v: bool):
             setBit(i, v);
     }
 }
 
-match(T: Type)
-template(C ?has(Index{(int) -> T}): Type)
+template(C ?impl(ops::index{int}): type)
 fn withIndexType(c: C): {}
-match(T: Type)
-fn withIndexType(c: ?has(Index{(int) -> T})): {}
-match(T: Type)
-fn getFirst(arr: ?match(Array{T})) -> T: {
-    return arr.first();
+fn withIndexType(c: ?impl(ops::index{int})): {}
+fn getFirst(c: ?impl(ops::index{int})) -> typeof(c)::(ops::index{int}::result_type): {
+    return c[0];
 }
 
 
 // Binary operators:
-// +   ->   Add
-// -   ->   Sub
-// &   ->   BitAnd
-// &&  ->   LogAnd
-// ^   ->   BitXor
-// |   ->   BitOr
-// ||  ->   LogOr
-// *   ->   Mul
-// /   ->   Div
-// %   ->   Rem
-// <<  ->   Shl
-// >>  ->   Shr
+// +   ->   add
+// -   ->   subtract
+// &   ->   bitwise_and
+// &&  ->   logical_and
+// ^   ->   bitwise_xor
+// |   ->   bitwise_or
+// ||  ->   logical_or
+// *   ->   multiply
+// /   ->   divide
+// %   ->   remainder
+// <<  ->   shift_left
+// >>  ->   shift_right
 
 // Unary operators:
-// !   ->   LogNot
-// ~   ->   BitNot
-//          PreInc
-//          PreDec
-// +   ->   Plus
-// -   ->   Neg
-//          PostInc
-//          PostDec
+// !   ->   logical_not
+// ~   ->   bitwise_not
+//          pre_increment
+//          pre_decrement
+// +   ->   plus
+// -   ->   negate
+//          post_increment
+//          post_decrement
 
 // Other:
-// []  ->   Index
-// ()  ->   Invoke
+// []  ->   index
+// ()  ->   invoke
 
 enum Ordering: {
     Less;
@@ -305,16 +286,16 @@ struct BinaryOperatorExpr: {
     right: id{Expr};
     has Expr;
 }
-fn dispatch(e: id{Expr}): {
+fn dispatch(e: ptr{Expr}): {
     inspect *e: {
-        match(e&: BinaryOperatorExpr) dyn_is e: {}
+        match(e: shared BinaryOperatorExpr) dyn_is e: {}
 
-        match(left&: id{Expr}, right&: id{Expr})
+        match(left: shared id{Expr}, right: shared id{Expr})
         dyn_is BinaryOperatorExpr(BinaryOperator::Add, left, right): {}
     }
 
     if dynIs{BinaryOperatorExpr}(*e): {
-        let boe& = *e, to BinaryOperatorExpr;
+        let boe: shared = *e, to BinaryOperatorExpr;
     }
 }
 
@@ -330,23 +311,19 @@ struct ImageView: {
     }
 }
 
-object Obj: {
-    i: int = 0;
-    fn get(self) => idof(i);
-}
-fn deref(firstArg: id{int}, secondArg: id{Obj}): {
-    return *firstArg + *secondArg.get();
-}
 
-
-struct Trait: {
-    static MyType: type where(t) has(Add)(t);
+trait Trait: {
+    static open MyType ?impl(ops::symmetric_add): type;
 
     relationship myT: MyType;
 }
 struct Impl: {
     static var myInt: int = 0;
-    has Trait where MyType == int && myT is myInt;
+    trait impl Trait: {
+        static MyType = int;
+
+        relationship myT: int = myInt;
+    }
 }
 
 template(T: type)
@@ -357,19 +334,19 @@ struct iterator: {
 struct Bar: {
     storage: vector{int};
 
-    splits_inline: vector{iterator{int} where container is storage};
+    splits_inline: vector{iterator{int} ?[#.container is storage]};
 
     splits_invariant: vector{iterator{int}};
     invariant { for it in splits_invariant: prove it.container is storage; }
 
-    end_inline: iterator{int} where container is storage;
+    end_inline ?[#.container is storage]: iterator{int};
 
     end_invariant: interator{int};
     invariant { prove end_invariant.container is storage; }
 }
 
-template(T: type where has(Add) && has(Sub))
-fn foo(x: T)
+template(T ?impl(symmetric_add ?[#.result_type == T]) ?impl(symmetric_subtract ?[#.result_type == T]): type)
+fn foo(x: T) => (x + x) - x;
 
 fn refs1(unique ref u: T, shared ref s: T, const ref c: T): {
     unique ref uu: T = u;

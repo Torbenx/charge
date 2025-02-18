@@ -146,7 +146,8 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(ExpressionCat
         state.copyParameters(program->parameters.size());
         initialize(assignLocation, state, expectedCategory, type);
         VERIFY(state.isComplete());
-        type = verifyType(fold(state.toFoldBase(INVALID_CONSTANT), type));
+        // TODO: Verify that no computed constant in 'type' contains newly created implicit parameters
+        type = verifyType(fold(state.toFoldBase(builtins::self_constant), type));
 
         hasInitializer = true;
     }
@@ -240,6 +241,10 @@ void Generator::visitFunctionDeclaration() {
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
+
+    VERIFY(expressionStack.size() == 1);
+    VERIFY(expressionStack.front().endOffset == 0);
+    VERIFY(instructionScratch.empty());
     if (tok->kind() == Token::BodyExpr) {
         SourceLocation arrowLoc = tok->location();
         auto bodyScopeInst = emitBlockScope(arrowLoc);
@@ -256,7 +261,8 @@ void Generator::visitFunctionDeclaration() {
         emitInitialize(arrowLoc, Expression::parameterReference(fnProgram->runtimeParameters.size()), takeTopExpression());
 
         endLocalScope(body, endLoc);
-        fnProgram->setBody(emitScopeEndAndTake(endLoc, bodyScopeInst));
+        emitScopeEnd(endLoc, bodyScopeInst);
+        fnProgram->setBody(takeInstructions());
     } else {
         if (tok->kind() == Token::ReturnType) {
             SourceLocation conversionLocation = tok->location();
@@ -276,7 +282,8 @@ void Generator::visitFunctionDeclaration() {
         visitStatement();
         SourceLocation endLoc; // TODO: Should be the ';'
         endLocalScope(body, endLoc);
-        fnProgram->setBody(emitScopeEndAndTake(endLoc, bodyScopeInst));
+        emitScopeEnd(endLoc, bodyScopeInst);
+        fnProgram->setBody(takeInstructions());
     }
 }
 

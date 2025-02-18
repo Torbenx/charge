@@ -9,33 +9,58 @@ struct Derived: {
 }
 
 // traits
+template(self_type: type)
 trait MyTrait: {
-    incomplete fn someFunctionality(self);
+    static open associated_type: type;
+
+    static open associated_constant: int = 0;
+
+    open fn someFunctionality(self: const);
+
+    open fn someFuncWithDefault(self: const): { ... }
 }
 struct Foo: {
-    impls MyTrait: {
+    trait impl MyTrait: {
+        static associated_type: type = Foo;
+
         fn someFunctionality(self): { ... };
+
+        // Use default someFuncWithDefault
     }
 }
 struct Bar: { }
-for Bar impls MyTrait: {
+for Bar trait impl MyTrait: {
     fn someFunctionality(self): { ... };
+}
+trait impl MyTrait{self_type = Bar}: {
+    static associated_type: type = int;
+
+    static associated_constant: int = 123;
+
+    fn someFunctionality(self): { ... };
+
+    fn someFuncWithDefault(self: const): {
+        // Customize behavior ...
+
+        // Then call the default impl
+        MyTrait::someFuncWithDefault();
+    }
 }
 
 // use traits
-template(T ?impls(MyTrait): type)
+template(T ?impl(MyTrait): type)
 fn useFunctionality(input: T): {
     input.someFunctionality();
 }
 // or shorter:
-fn useFunctionality(input: ?impls(MyTrait)): {
+fn useFunctionality(input: ?impl(MyTrait)): {
     input.someFunctionality();
 }
 
 //
-incomplete struct Shape: {
-    has ClassRoot{Self};
-    incomplete virtual fn draw();
+struct Shape: {
+    has ClassRoot{self_type};
+    virtual fn draw();
 }
 struct Rectangle: {
     has Shape: { fn draw(): { ... } }
@@ -52,7 +77,7 @@ fn drawNonRectangles(shapes: Array{ptr{Shape}}): {
 
 //
 incomplete final(module) struct IPAddressBase: {
-    has ClassRoot{Self};
+    has ClassRoot{self_type};
 }
 struct IPv4Address: {
     has IPAddressBase;
@@ -78,10 +103,10 @@ struct Rect: {
     top: float;
     right: float;
     bottom: float;
-    fn topLeft(self&) <=> Vec2(left, top);
-    fn bottomLeft(self&) <=> Vec2(left, bottom);
-    fn topRight(self&) <=> Vec2(right, top);
-    fn bottomRight(self&) <=> Vec2(right, bottom);
+    fn topLeft(self: shared) <=> Vec2(left, top);
+    fn bottomLeft(self: shared) <=> Vec2(left, bottom);
+    fn topRight(self: shared) <=> Vec2(right, top);
+    fn bottomRight(self: shared) <=> Vec2(right, bottom);
 }
 
 //
@@ -94,7 +119,7 @@ fn getImpl(t: Type) -> Type: {
 }
 
 //
-incomplete struct Animal: { has ClassRoot{Self}; }
+incomplete struct Animal: { has ClassRoot{self_type}; }
 incomplete struct Mammal: { has Animal; }
 incomplete struct Reptile: { has Animal; }
 incomplete struct Legs: { }
@@ -132,7 +157,7 @@ fn toString(color: Option{Color}) => inspect color: {
 }
 
 //
-template(T ?impls(ops::Div): type)
+template(T ?impl(ops::div): type)
 fn divide(left: T, right: T) => left / right;
 fn test(): {
     let a = divide(1, 2); // => 0
@@ -142,14 +167,18 @@ fn test(): {
 //
 template(T: Type)
 struct Array: {
-    has Index{(int) -> T}: {
-        fn index(i: int) <=> ...;
+    trait impl ops::index{int}: {
+        static result_type: type = T;
+
+        fn index(self: unique, i: int) <=> ...;
     }
 }
-special_case struct Array{bool} as BoolArray: {
-    has Index{(int) -> bool}: {
-        fn index(i: int) => getBit(i);
-        fn index(i: int) = (value: bool): {
+struct impl Array{bool} as BoolArray: {
+    trait impl ops::index{int}: {
+        static result_type: type = bool;
+
+        fn index(self: unique, i: int) => getBit(i);
+        fn index(self: unique, i: int) = (value: bool): {
             setBit(i, value);
         }
     }
@@ -162,15 +191,26 @@ template(maybeColor: Option{RGB})
 fn templateExample(): { }
 
 template(color: RGB)
-special_case fn templateExample{Option(color)}
-    as templateExampleWithValue(): { }
+fn impl templateExample{Option(color)}(): { }
 
-special_case fn templateExampleWithValue{RGB(0, 0, 0)}
-    as templateExampleWithBlack(): { }
+fn impl templateExampleWithValue{RGB(0, 0, 0)}(): { }
 
 //
 template(parameters: Array{TupleElement})
 fn callFoo(arguments..: Tuple{ parameters}): {
     let newArguments = arguments.append("bar");
     foo(newArguments..);
+}
+
+// more impl
+template(self_type)
+trait MyTrait: { }
+
+template(self_type)
+fn myFunc(self): { }
+
+struct Foo: {
+    trait impl MyTrait: { }
+
+    fn impl myFunc(self): { }
 }
