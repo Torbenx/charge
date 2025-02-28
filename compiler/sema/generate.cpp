@@ -654,8 +654,24 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 ExpressionCategory Generator::categoryOf(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::VariableReference:
-    case ExpressionKind::ParameterReference:
         return ExpressionCategory::UniqueReference;
+    case ExpressionKind::ParameterReference:
+        switch(cast<FunctionProgram>(program)->runtimeParameters[expr.id()].kind()) {
+        case RuntimeParameterKind::VarVariable:
+            return ExpressionCategory::UniqueReference;
+        case RuntimeParameterKind::LetVariable:
+            return ExpressionCategory::ConstUniqueReference;
+        case RuntimeParameterKind::UniqueReference:
+            return ExpressionCategory::UniqueReference;
+        case RuntimeParameterKind::ConstUniqueReference:
+            return ExpressionCategory::ConstUniqueReference;
+        case RuntimeParameterKind::SharedReference:
+            return ExpressionCategory::SharedReference;
+        case RuntimeParameterKind::ConstSharedReference:
+            return ExpressionCategory::ConstSharedReference;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].category;
     case ExpressionKind::TemplateParameterReference:
