@@ -283,17 +283,19 @@ struct Generator : Util {
     Constant makeTemplateSignature(Constant templateProg);
     Type makeTemplateIdFor(Constant templateProg);
     Constant makeFunctionSignature(Constant value);
+    Expression makeGlobalReference(Constant value);
     Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    Constant generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> parentArgs);
+    Expression generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> parentArgs);
+    Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void generateIdentifierExpr();
     void generateParameterizeExpr(std::span<const Word> argumentNames);
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(SourceLocation location, CallTarget base);
-    std::optional<Constant> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
+    std::optional<Expression> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
     void generateStaticAccessExpr();
     struct MemberAccessState;
     void emitMemberAccessExpr(MemberAccessState& state);
@@ -307,6 +309,7 @@ struct Generator : Util {
     Expression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
     Expression newImplicitParameter(Type type);
 
+    Constant copyAsConstant(Expression);
     void toValueExpression(SourceLocation);
 
     void contextualToType(SourceLocation);

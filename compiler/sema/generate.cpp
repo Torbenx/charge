@@ -72,8 +72,18 @@ Constant Generator::makeFunctionSignature(Constant value) {
         return Constant(ConstantKind::FunctionSignature$Program, value.id());
     }
     if (value.kind() == ConstantKind::Parameterize) {
+        auto para = program->getParameterize(value);
+        VERIFY(para.arguments.size() == context.program(para.base)->parameters.size());
         return Constant(ConstantKind::FunctionSignature$Parameterize, value.id());
     }
+    VERIFY_NOT_REACHED();
+}
+
+Expression Generator::makeGlobalReference(Constant value) {
+    if (value.kind() == ConstantKind::Program)
+        return Expression(ExpressionKind::GlobalReference$Program, value.id());
+    if (value.kind() == ConstantKind::Parameterize)
+        return Expression(ExpressionKind::GlobalReference$Parameterize, value.id());
     VERIFY_NOT_REACHED();
 }
 
@@ -118,32 +128,31 @@ Constant Generator::inheriteParameters(ScopeConstant parent) {
     return parentValue;
 }
 
-Constant Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> baseArgs) {
-    auto makeProgramConstant = [this, baseArgs](ProgramHandle targetHandle) {
-        Program* targetProg = context.program(targetHandle);
-        VERIFY(targetProg->inheritedParameterCount <= baseArgs.size());
-        if (targetProg->inheritedParameterCount > 0)
-            return program->addParameterize(context, { targetHandle, baseArgs });
-        return Constant(targetHandle);
-    };
-
-    if (rawValue.kind() == ConstantKind::Namespace)
+Expression Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> baseArgs) {
+    if (rawValue.kind() == ConstantKind::Namespace) {
+        VERIFY(baseArgs.empty());
         return (Constant)rawValue.nsHandle();
-    VERIFY(rawValue.kind() == ConstantKind::Program);
+    }
 
+    VERIFY(rawValue.kind() == ConstantKind::Program);
     ProgramHandle progHandle = rawValue.program();
+    signatureCheck(context, progHandle);
+    return generateProgramLiteral(progHandle, baseArgs);
+}
+
+Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args) {
     Program* prog = context.program(progHandle);
     signatureCheck(context, progHandle);
+    Constant progValue = makeParameterize(progHandle, args);
     switch (prog->kind()) {
     case ProgramKind::Object:
     case ProgramKind::Type:
     case ProgramKind::Function:
-        return makeProgramConstant(progHandle);
+        return progValue;
     case ProgramKind::Value: {
-        Constant progValue = makeProgramConstant(progHandle);
-        if (prog->isTemplate())
+        if (prog->isTemplate() && args.size() < prog->parameterizes.size())
             return progValue;
-        return fold(progValue, cast<ValueProgram>(prog)->value());
+        return makeGlobalReference(progValue);
     }
     default:
         VERIFY_NOT_REACHED();
@@ -244,11 +253,7 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
             VERIFY(aIndex == argumentCount);
             VERIFY(pIndex == parameterCount);
             VERIFY(state.isComplete());
-            Constant result = makeParameterize(state.programHandle, state.arguments);
-            if (state.program->kind() == ProgramKind::Value)
-                result = fold(result, cast<ValueProgram>(state.program)->value());
-
-            emitExpression({}, result);
+            emitExpression({}, generateProgramLiteral(state.programHandle, state.arguments));
         };
 
         if (baseValue.kind() == ConstantKind::Program) {
@@ -276,6 +281,8 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
 
 Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {
     auto baseResult = topExpression();
+    if (baseResult.isCopiedAsConstant())
+        baseResult = copyAsConstant(baseResult);
     if (baseResult.isConstant()) {
         auto baseValue = baseResult.constant();
         if (baseValue.kind() == ConstantKind::Program) {
@@ -331,12 +338,12 @@ void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
     VERIFY_NOT_REACHED();
 }
 
-std::optional<Constant> Generator::lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name) {
+std::optional<Expression> Generator::lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name) {
     auto maybeDecl = typeProg->getDeclaration(name);
     if (maybeDecl.has_value())
         return generateDeclarationLiteral(maybeDecl.value(), arguments);
 
-    std::optional<Constant> result;
+    std::optional<Expression> result;
     for (const auto& member : typeProg->runtimeParameters) {
         if (member.kind() != RuntimeParameterKind::HasMember)
             continue;
@@ -428,17 +435,31 @@ void Generator::generateMemberAccessExpr() {
     VERIFY(state.emitted);
 }
 
+Constant Generator::copyAsConstant(Expression expr) {
+    switch (expr.kind()) {
+    case ExpressionKind::TemplateParameterReference:
+        return expr.copyTemplateParameter();
+    case ExpressionKind::GlobalReference$Program:
+    case ExpressionKind::GlobalReference$Parameterize: {
+        FoldBase base = asFoldBase(expr.globalConstant());
+        VERIFY(base.program->kind() == ProgramKind::Value);
+        return fold(base, cast<ValueProgram>(base.program)->value());
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 void Generator::toValueExpression(SourceLocation location) {
     auto inCategory = categoryOf(topExpression());
     if (inCategory == ExpressionCategory::Value)
         return;
 
-    if (topExpression().kind() == ExpressionKind::TemplateParameterReference) {
-        emitExpression(location, takeTopExpression().copyTemplateParameter());
+    auto copyFrom = takeTopExpression();
+    if (copyFrom.isCopiedAsConstant()) {
+        emitExpression(location, copyAsConstant(copyFrom));
         return;
     }
-
-    auto copyFrom = takeTopExpression();
     emitImplicitCopy(location, ImplicitCopy { copyFrom, resultType(copyFrom) });
 }
 
@@ -653,10 +674,15 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 
 ExpressionCategory Generator::categoryOf(Expression expr) {
     switch (expr.kind()) {
+    case ExpressionKind::GlobalReference$Program:
+    case ExpressionKind::GlobalReference$Parameterize:
+        return ExpressionCategory::ConstSharedReference;
+    case ExpressionKind::TemplateParameterReference:
+        return ExpressionCategory::ConstSharedReference;
     case ExpressionKind::VariableReference:
         return ExpressionCategory::UniqueReference;
     case ExpressionKind::ParameterReference:
-        switch(cast<FunctionProgram>(program)->runtimeParameters[expr.id()].kind()) {
+        switch (cast<FunctionProgram>(program)->runtimeParameters[expr.id()].kind()) {
         case RuntimeParameterKind::VarVariable:
             return ExpressionCategory::UniqueReference;
         case RuntimeParameterKind::LetVariable:
@@ -674,8 +700,6 @@ ExpressionCategory Generator::categoryOf(Expression expr) {
         }
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].category;
-    case ExpressionKind::TemplateParameterReference:
-        return ExpressionCategory::ConstSharedReference;
     case ExpressionKind::MemberExpression:
         return categoryOf(program->getMemberReference(expr).base);
     case ExpressionKind::Call:
@@ -761,10 +785,16 @@ Type Generator::resultType(Expression expr) {
         return typeOf(expr.constant());
 
     switch (expr.kind()) {
-    case ExpressionKind::ParameterReference:
-        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
+    case ExpressionKind::GlobalReference$Program:
+    case ExpressionKind::GlobalReference$Parameterize: {
+        FoldBase base = asFoldBase(expr.globalConstant());
+        VERIFY(base.program->kind() == ProgramKind::Value);
+        return verifyType(fold(base, cast<ValueProgram>(base.program)->type()));
+    }
     case ExpressionKind::TemplateParameterReference:
         return parameterTypes[expr.templateParameterIndex()];
+    case ExpressionKind::ParameterReference:
+        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
     case ExpressionKind::VariableReference:
         return localVariables[expr.variableIndex()].type;
     case ExpressionKind::ReferenceReference:

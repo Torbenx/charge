@@ -183,6 +183,8 @@ enum class ExpressionKind : uint8_t {
     FirstNonConstantKind = 128,
 
     ParameterReference = FirstNonConstantKind,
+    GlobalReference$Program,
+    GlobalReference$Parameterize,
     TemplateParameterReference,
     VariableReference,
     ReferenceReference,
@@ -240,6 +242,19 @@ struct Expression {
         VERIFY(kind() == ExpressionKind::ReferenceReference);
         return id();
     }
+    Constant globalConstant() const {
+        if (kind() == ExpressionKind::GlobalReference$Program)
+            return Constant(ConstantKind::Program, id());
+        if (kind() == ExpressionKind::GlobalReference$Parameterize)
+            return Constant(ConstantKind::Parameterize, id());
+        VERIFY_NOT_REACHED();
+    }
+
+    bool isCopiedAsConstant() const {
+        return kind() == ExpressionKind::GlobalReference$Program
+            || kind() == ExpressionKind::GlobalReference$Parameterize
+            || kind() == ExpressionKind::TemplateParameterReference;
+    }
 
     constexpr bool isInstructionResult() const {
         return kind() == ExpressionKind::Call || kind() == ExpressionKind::ImplicitCopy;
@@ -266,7 +281,7 @@ struct OwnedExpression : Expression {
         : Expression(other) { (Expression&)other = INVALID_EXPRESSION; }
     OwnedExpression& operator=(OwnedExpression&& other) {
         VERIFY(!isInstructionResult());
-        (Expression&)*this = other;
+        (Expression&)* this = other;
         (Expression&)other = INVALID_EXPRESSION;
         return *this;
     }
@@ -276,7 +291,7 @@ struct OwnedExpression : Expression {
 
     Expression release() {
         Expression ret = *this;
-        (Expression&)*this = INVALID_EXPRESSION;
+        (Expression&)* this = INVALID_EXPRESSION;
         return ret;
     }
 };
