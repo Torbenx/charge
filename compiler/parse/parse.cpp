@@ -14,8 +14,7 @@ using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
     Namespace,
     Type,
-    StaticValue,
-    StaticObject,
+    StaticVariable,
     Function,
     Member,
     HasMember,
@@ -228,11 +227,8 @@ static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosit
         case DeclarationKind::Function:
             progKind = sema::ProgramKind::Function;
             break;
-        case DeclarationKind::StaticValue:
-            progKind = sema::ProgramKind::Value;
-            break;
-        case DeclarationKind::StaticObject:
-            progKind = sema::ProgramKind::Object;
+        case DeclarationKind::StaticVariable:
+            progKind = sema::ProgramKind::Global;
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -4228,8 +4224,8 @@ after_static$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        // commitDeclaration DeclarationKind::StaticValue, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticValue>(this_identifier, tokBegin, declarationBegin, state);
+        // commitDeclaration DeclarationKind::StaticVariable, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::LetValueDecl, this_declaration
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = this_declaration.toUint();
@@ -4254,8 +4250,8 @@ static_var_variable_declaration$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        // commitDeclaration DeclarationKind::StaticObject, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticObject>(this_identifier, tokBegin, declarationBegin, state);
+        // commitDeclaration DeclarationKind::StaticVariable, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::VarValueDecl, this_declaration
         carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = this_declaration.toUint();

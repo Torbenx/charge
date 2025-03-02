@@ -116,8 +116,7 @@ enum class ProgramStatus : uint8_t {
 };
 
 enum class ProgramKind : uint8_t {
-    Value,
-    Object,
+    Global,
     Type,
     Function,
 };
@@ -359,27 +358,31 @@ protected:
 };
 static_assert(sizeof(Program) == 288);
 
-struct ValueProgram : Program {
-    ValueProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : Program(ProgramKind::Value, name, parseLocation, rawParent, location) { }
+enum class GlobalKind : uint8_t {
+    Var,
+    ConstVar,
+    Let,
+    OpenLet,
+};
 
-    void setValue(Constant value) {
+struct GlobalProgram : Program {
+    GlobalProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
+        : Program(ProgramKind::Global, name, parseLocation, rawParent, location) { }
+
+    void setInitializer(Constant value) {
         VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
         m_subClassData = value.toUint();
     }
 
-    ExternConstant value() const {
+    ExternConstant initializer() const {
         VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
         return Constant::fromUint(m_subClassData);
     }
     ExternConstant type() const { return m_type.value(); }
-};
 
-struct ObjectProgram : Program {
-    ObjectProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : Program(ProgramKind::Object, name, parseLocation, rawParent, location) { }
+    GlobalKind globalKind() const { return m_globalKind; }
 
-    ExternConstant objectType() const { return m_type.value(); }
+    GlobalKind m_globalKind = GlobalKind::Let;
 };
 
 enum class RuntimeParameterKind : uint8_t {
@@ -473,14 +476,9 @@ struct TypeProgram : CallableProgram, Scope {
 template<typename T>
 constexpr std::optional<T*> try_cast(Program* prog) {
     switch (prog->kind()) {
-    case ProgramKind::Value:
-        if constexpr (std::derived_from<ValueProgram, T>)
-            return static_cast<ValueProgram*>(prog);
-        else
-            return std::nullopt;
-    case ProgramKind::Object:
-        if constexpr (std::derived_from<ObjectProgram, T>)
-            return static_cast<ObjectProgram*>(prog);
+    case ProgramKind::Global:
+        if constexpr (std::derived_from<GlobalProgram, T>)
+            return static_cast<GlobalProgram*>(prog);
         else
             return std::nullopt;
     case ProgramKind::Type:
@@ -502,18 +500,14 @@ template<typename T>
 constexpr T* cast(Program* prog) { return try_cast<T>(prog).value(); }
 
 union ProgramUnion {
-    ValueProgram value;
-    ObjectProgram object;
+    GlobalProgram global;
     FunctionProgram function;
     TypeProgram type;
 
     ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location) {
         switch (kind) {
-        case ProgramKind::Value:
-            std::construct_at(&value, name, parseLocation, rawParent, location);
-            break;
-        case ProgramKind::Object:
-            std::construct_at(&object, name, parseLocation, rawParent, location);
+        case ProgramKind::Global:
+            std::construct_at(&global, name, parseLocation, rawParent, location);
             break;
         case ProgramKind::Function:
             std::construct_at(&function, name, parseLocation, rawParent, location);
@@ -526,15 +520,12 @@ union ProgramUnion {
         }
     }
 
-    Program& get() { return value; }
+    Program& get() { return global; }
 
     ~ProgramUnion() {
-        switch (value.kind()) {
-        case ProgramKind::Value:
-            std::destroy_at(&value);
-            break;
-        case ProgramKind::Object:
-            std::destroy_at(&object);
+        switch (global.kind()) {
+        case ProgramKind::Global:
+            std::destroy_at(&global);
             break;
         case ProgramKind::Function:
             std::destroy_at(&function);

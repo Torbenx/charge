@@ -284,6 +284,7 @@ struct Generator : Util {
     Type makeTemplateIdFor(Constant templateProg);
     Constant makeFunctionSignature(Constant value);
     Expression makeGlobalReference(Constant value);
+    Constant makeCopyOfOpenGlobal(Constant value);
     Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);

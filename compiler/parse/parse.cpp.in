@@ -14,8 +14,7 @@ using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
     Namespace,
     Type,
-    StaticValue,
-    StaticObject,
+    StaticVariable,
     Function,
     Member,
     HasMember,
@@ -228,11 +227,8 @@ static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosit
         case DeclarationKind::Function:
             progKind = sema::ProgramKind::Function;
             break;
-        case DeclarationKind::StaticValue:
-            progKind = sema::ProgramKind::Value;
-            break;
-        case DeclarationKind::StaticObject:
-            progKind = sema::ProgramKind::Object;
+        case DeclarationKind::StaticVariable:
+            progKind = sema::ProgramKind::Global;
             break;
         default:
             VERIFY_NOT_REACHED();

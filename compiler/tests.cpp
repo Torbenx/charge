@@ -278,7 +278,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-source-position",
         "line", "column", "packed-range-begin-column", "expect-identifier", "name",
-        "expect-type", "expect-value", "expect-object-type", "expect-return-type");
+        "expect-type", "expect-value", "expect-return-type");
 
     WordStringTable wordTable { words };
     sema::Context context;
@@ -366,7 +366,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             skipWhitespace();
 
             auto word = wordTable.get(cmdStr);
-            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-object-type"] || word == words["expect-return-type"]) {
+            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"]) {
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
@@ -438,11 +438,9 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         program->dump(context);
 
         if (word == words["expect-type"])
-            expr->check(context, program, (sema::Constant)cast<sema::ValueProgram>(program)->type());
+            expr->check(context, program, (sema::Constant)cast<sema::GlobalProgram>(program)->type());
         if (word == words["expect-value"])
-            expr->check(context, program, (sema::Constant)cast<sema::ValueProgram>(program)->value());
-        if (word == words["expect-object-type"])
-            expr->check(context, program, (sema::Constant)cast<sema::ObjectProgram>(program)->objectType());
+            expr->check(context, program, (sema::Constant)cast<sema::GlobalProgram>(program)->initializer());
         if (word == words["expect-return-type"])
             expr->check(context, program, (sema::Constant)cast<sema::FunctionProgram>(program)->returnType());
     }

@@ -87,6 +87,14 @@ Expression Generator::makeGlobalReference(Constant value) {
     VERIFY_NOT_REACHED();
 }
 
+Constant Generator::makeCopyOfOpenGlobal(Constant value) {
+    if (value.kind() == ConstantKind::Program)
+        return Constant(ConstantKind::CopyOfOpenGlobal$Program, value.id());
+    if (value.kind() == ConstantKind::Parameterize)
+        return Constant(ConstantKind::CopyOfOpenGlobal$Parameterize, value.id());
+    VERIFY_NOT_REACHED();
+}
+
 Type Generator::makeTemplateIdFor(Constant templateProg) {
     std::array arguments { makeTemplateSignature(templateProg) };
     return verifyType(program->addParameterize(context, { builtins::template_id_template.program(), arguments }));
@@ -145,12 +153,11 @@ Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span
     signatureCheck(context, progHandle);
     Constant progValue = makeParameterize(progHandle, args);
     switch (prog->kind()) {
-    case ProgramKind::Object:
     case ProgramKind::Type:
     case ProgramKind::Function:
         return progValue;
-    case ProgramKind::Value: {
-        if (prog->isTemplate() && args.size() < prog->parameterizes.size())
+    case ProgramKind::Global: {
+        if (prog->isTemplate() && (int_t)args.size() < prog->parameterizes.size())
             return progValue;
         return makeGlobalReference(progValue);
     }
@@ -281,8 +288,15 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
 
 Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {
     auto baseResult = topExpression();
-    if (baseResult.isCopiedAsConstant())
-        baseResult = copyAsConstant(baseResult);
+
+    // Ugly special case
+    if (baseResult.kind() == ExpressionKind::GlobalReference$Program || baseResult.kind() == ExpressionKind::GlobalReference$Parameterize) {
+        const auto base = asFoldBase(baseResult.referencedGlobal());
+        auto* globalProg = cast<GlobalProgram>(base.program);
+        if (globalProg->globalKind() == GlobalKind::Let)
+            baseResult = fold(base, globalProg->initializer());
+    }
+
     if (baseResult.isConstant()) {
         auto baseValue = baseResult.constant();
         if (baseValue.kind() == ConstantKind::Program) {
@@ -441,9 +455,9 @@ Constant Generator::copyAsConstant(Expression expr) {
         return expr.copyTemplateParameter();
     case ExpressionKind::GlobalReference$Program:
     case ExpressionKind::GlobalReference$Parameterize: {
-        FoldBase base = asFoldBase(expr.globalConstant());
-        VERIFY(base.program->kind() == ProgramKind::Value);
-        return fold(base, cast<ValueProgram>(base.program)->value());
+        FoldBase base = asFoldBase(expr.referencedGlobal());
+        VERIFY(base.program->kind() == ProgramKind::Global);
+        return fold(base, cast<GlobalProgram>(base.program)->initializer());
     }
     default:
         VERIFY_NOT_REACHED();
@@ -456,9 +470,26 @@ void Generator::toValueExpression(SourceLocation location) {
         return;
 
     auto copyFrom = takeTopExpression();
-    if (copyFrom.isCopiedAsConstant()) {
-        emitExpression(location, copyAsConstant(copyFrom));
+    switch (copyFrom.kind()) {
+    case ExpressionKind::GlobalReference$Program:
+    case ExpressionKind::GlobalReference$Parameterize: {
+        FoldBase base = asFoldBase(copyFrom.referencedGlobal());
+        VERIFY(base.program->kind() == ProgramKind::Global);
+        auto* globalProg = cast<GlobalProgram>(base.program);
+        if (globalProg->globalKind() == GlobalKind::Let) {
+            emitExpression(location, fold(base, globalProg->initializer()));
+            return;
+        } else if (globalProg->globalKind() == GlobalKind::OpenLet) {
+            emitExpression(location, makeCopyOfOpenGlobal(base.value));
+            return;
+        }
+        break;
+    }
+    case ExpressionKind::TemplateParameterReference:
+        emitExpression(location, copyFrom.copyTemplateParameter());
         return;
+    default:
+        break;
     }
     emitImplicitCopy(location, ImplicitCopy { copyFrom, resultType(copyFrom) });
 }
@@ -535,6 +566,8 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
 
     if (pValue.kind() == ConstantKind::Computed || pValue.kind() == ConstantKind::RemoteComputed
         || aValue.kind() == ConstantKind::Computed || aValue.kind() == ConstantKind::RemoteComputed
+        || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
+        || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
         || aValue.kind() == ConstantKind::CopyOfParameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
         state.equalities.add(context, program, state.program, { pValue, aValue });
@@ -605,6 +638,9 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     case ConstantKind::CopyOfParameter:
         // TODO: Actually perform a copy?
         return base.arguments[v.id()];
+    case ConstantKind::CopyOfOpenGlobal$Program:
+    case ConstantKind::CopyOfOpenGlobal$Parameterize:
+        return makeCopyOfOpenGlobal(fold(base, Constant(v).copiedGlobal()));
     case ConstantKind::Namespace:
         return (Constant)base.program->translate(Constant(v).nsHandle());
     case ConstantKind::TemplateSignature$Program:
@@ -675,8 +711,19 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
 ExpressionCategory Generator::categoryOf(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::GlobalReference$Program:
-    case ExpressionKind::GlobalReference$Parameterize:
-        return ExpressionCategory::ConstSharedReference;
+    case ExpressionKind::GlobalReference$Parameterize: {
+        auto base = asFoldBase(expr.referencedGlobal());
+        switch (cast<GlobalProgram>(base.program)->globalKind()) {
+        case GlobalKind::Var:
+            return ExpressionCategory::SharedReference;
+        case GlobalKind::ConstVar:
+        case GlobalKind::Let:
+        case GlobalKind::OpenLet:
+            return ExpressionCategory::ConstSharedReference;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
     case ExpressionKind::TemplateParameterReference:
         return ExpressionCategory::ConstSharedReference;
     case ExpressionKind::VariableReference:
@@ -757,6 +804,11 @@ Type Generator::typeOf(Constant value) {
     }
     case ConstantKind::CopyOfParameter:
         return parameterTypes[value.id()];
+    case ConstantKind::CopyOfOpenGlobal$Program:
+    case ConstantKind::CopyOfOpenGlobal$Parameterize: {
+        auto base = asFoldBase(value.copiedGlobal());
+        return verifyType(fold(base, cast<GlobalProgram>(base.program)->type()));
+    }
     case ConstantKind::Parameterize: {
         auto para = program->getParameterize(value);
         Program* baseProg = context.program(para.base);
@@ -787,9 +839,9 @@ Type Generator::resultType(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::GlobalReference$Program:
     case ExpressionKind::GlobalReference$Parameterize: {
-        FoldBase base = asFoldBase(expr.globalConstant());
-        VERIFY(base.program->kind() == ProgramKind::Value);
-        return verifyType(fold(base, cast<ValueProgram>(base.program)->type()));
+        FoldBase base = asFoldBase(expr.referencedGlobal());
+        VERIFY(base.program->kind() == ProgramKind::Global);
+        return verifyType(fold(base, cast<GlobalProgram>(base.program)->type()));
     }
     case ExpressionKind::TemplateParameterReference:
         return parameterTypes[expr.templateParameterIndex()];
@@ -822,12 +874,8 @@ Type Generator::typeOfNonDependentProgram(FoldBase base) {
         std::array arguments { makeFunctionSignature(base.value) };
         return verifyType(program->addParameterize(context, { builtins::function_id_template.program(), arguments }));
     }
-    case ProgramKind::Object: {
-        std::array arguments { (Constant)cast<ObjectProgram>(base.program)->objectType() };
-        return verifyType(program->addParameterize(context, { builtins::ptr_template.program(), arguments }));
-    }
-    case ProgramKind::Value:
-        return verifyType(fold(base, cast<ValueProgram>(base.program)->type()));
+    case ProgramKind::Global:
+        return verifyType(fold(base, cast<GlobalProgram>(base.program)->type()));
     case ProgramKind::Type:
         return builtins::type_type;
     default:
@@ -841,13 +889,12 @@ Type Generator::verifyType(Constant value) {
         Program* valueProg = context.program(value.program());
         VERIFY(!valueProg->isTemplate());
         switch (valueProg->kind()) {
-        case ProgramKind::Object:
         case ProgramKind::Function:
             VERIFY_NOT_REACHED();
         case ProgramKind::Type:
             return (Type)value;
-        case ProgramKind::Value:
-            VERIFY(cast<ValueProgram>(valueProg)->type() == builtins::type_type);
+        case ProgramKind::Global:
+            VERIFY(cast<GlobalProgram>(valueProg)->type() == builtins::type_type);
             return (Type)value;
         default:
             VERIFY_NOT_REACHED();

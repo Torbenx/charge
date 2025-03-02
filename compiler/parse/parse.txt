@@ -657,12 +657,12 @@ LinearState after_static() then error
     keyword var
         next static_var_variable_declaration
     identifier
-        commitDeclaration DeclarationKind::StaticValue, this_identifier
+        commitDeclaration DeclarationKind::StaticVariable, this_identifier
         emitToken TokenKind::LetValueDecl, this_declaration
         next after_simple_variable_declaration_id
 LinearState static_var_variable_declaration() then error
     identifier
-        commitDeclaration DeclarationKind::StaticObject, this_identifier
+        commitDeclaration DeclarationKind::StaticVariable, this_identifier
         emitToken TokenKind::VarValueDecl, this_declaration
         next after_simple_variable_declaration_id
 

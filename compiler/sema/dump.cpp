@@ -227,12 +227,9 @@ void Dumper::dumpProgram(Program* prog) {
         dumpLine("parent = " + formatScopeConstant(prog->translate(prog->parent())));
     }
     switch (prog->kind()) {
-    case ProgramKind::Value:
+    case ProgramKind::Global:
         dumpLine("type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         dumpLine("value = " + formatConstant(Constant::fromUint(prog->m_subClassData)));
-        break;
-    case ProgramKind::Object:
-        dumpLine("object-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
         break;
     case ProgramKind::Function:
         dumpLine("return-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));

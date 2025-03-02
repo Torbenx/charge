@@ -50,9 +50,9 @@ enum class ConstantKind : uint8_t {
     Program, // either not dependent or a template
     Namespace,
     TemplateSignature$Program,
-    TemplateSignature$Parameterize,
+    TemplateSignature$Parameterize, // dependent
     FunctionSignature$Program,
-    FunctionSignature$Parameterize,
+    FunctionSignature$Parameterize, // non-dependent
     BooleanLiteral,
     MemberPointer,
 
@@ -62,6 +62,8 @@ enum class ConstantKind : uint8_t {
     RemoteComputed,
 
     CopyOfParameter,
+    CopyOfOpenGlobal$Program,
+    CopyOfOpenGlobal$Parameterize, // non-dependent
 
     Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
@@ -108,6 +110,13 @@ struct Constant {
         if (kind() == ConstantKind::FunctionSignature$Program)
             return Constant(ConstantKind::Program, id());
         if (kind() == ConstantKind::FunctionSignature$Parameterize)
+            return Constant(ConstantKind::Parameterize, id());
+        VERIFY_NOT_REACHED();
+    }
+    constexpr Constant copiedGlobal() const {
+        if (kind() == ConstantKind::CopyOfOpenGlobal$Program)
+            return Constant(ConstantKind::Program, id());
+        if (kind() == ConstantKind::CopyOfOpenGlobal$Parameterize)
             return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }
@@ -184,7 +193,7 @@ enum class ExpressionKind : uint8_t {
 
     ParameterReference = FirstNonConstantKind,
     GlobalReference$Program,
-    GlobalReference$Parameterize,
+    GlobalReference$Parameterize, // non-dependent
     TemplateParameterReference,
     VariableReference,
     ReferenceReference,
@@ -242,7 +251,7 @@ struct Expression {
         VERIFY(kind() == ExpressionKind::ReferenceReference);
         return id();
     }
-    Constant globalConstant() const {
+    Constant referencedGlobal() const {
         if (kind() == ExpressionKind::GlobalReference$Program)
             return Constant(ConstantKind::Program, id());
         if (kind() == ExpressionKind::GlobalReference$Parameterize)
@@ -250,7 +259,7 @@ struct Expression {
         VERIFY_NOT_REACHED();
     }
 
-    bool isCopiedAsConstant() const {
+    bool isReferenceToStaticObject() const {
         return kind() == ExpressionKind::GlobalReference$Program
             || kind() == ExpressionKind::GlobalReference$Parameterize
             || kind() == ExpressionKind::TemplateParameterReference;

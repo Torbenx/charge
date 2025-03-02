@@ -182,18 +182,18 @@ Program::Parameter Generator::visitTemplateParameter() {
 }
 
 void Generator::visitStaticVariableDeclaration() {
+    VERIFY(program->kind() == ProgramKind::Global);
+    auto* globalProgram = cast<GlobalProgram>(program);
+
     VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
     advance();
 
     auto info = visitVariableDeclaration(ExpressionCategory::Value, false);
     VERIFY(info.hasInitializer);
     program->setType(info.type);
-    if (program->kind() == ProgramKind::Value) {
-        auto* valueProgram = cast<ValueProgram>(program);
-        valueProgram->setValue(expressionToConstant());
-    } else {
-        VERIFY_NOT_REACHED();
-    }
+    // TODO: Constants are required to be the same when copied.
+    //       For global objects this restriction is not necessary.
+    globalProgram->setInitializer(expressionToConstant());
 }
 
 void Generator::visitFunctionDeclaration() {
