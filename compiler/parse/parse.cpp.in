@@ -242,6 +242,11 @@ static void endDeclaration(ParseState& state) {
     state.popScope();
 }
 
+using GlobalKind = sema::GlobalKind;
+static void setGlobalKind(ParseState& state, GlobalKind kind) {
+    sema::cast<sema::GlobalProgram>(state.currentProgram())->m_globalKind = kind;
+}
+
 void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;

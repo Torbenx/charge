@@ -152,6 +152,8 @@ std::string_view nameString(LexerToken token) {
         return "Namespace";
     case LexerToken::Object:
         return "Object";
+    case LexerToken::Open:
+        return "Open";
     case LexerToken::Property:
         return "Property";
     case LexerToken::Return:
@@ -283,6 +285,8 @@ std::string_view nameString(State state) {
         return "AfterStatic";
     case State::StaticVarVariableDeclaration:
         return "StaticVarVariableDeclaration";
+    case State::StaticOpenVariableDeclaration:
+        return "StaticOpenVariableDeclaration";
     case State::AfterDeclaration:
         return "AfterDeclaration";
     case State::Error:

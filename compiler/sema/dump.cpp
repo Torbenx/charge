@@ -106,6 +106,9 @@ struct Dumper {
         case ConstantKind::CopyOfParameter:
             result += '#';
             break;
+        case ConstantKind::CopyOfOpenGlobal$Program:
+        case ConstantKind::CopyOfOpenGlobal$Parameterize:
+            return formatConstant(v.copiedGlobal());
         default:
             VERIFY_NOT_REACHED();
         }
@@ -127,6 +130,9 @@ struct Dumper {
         case ExpressionKind::TemplateParameterReference:
             result += "#";
             break;
+        case ExpressionKind::GlobalReference$Program:
+        case ExpressionKind::GlobalReference$Parameterize:
+            return formatConstant(e.referencedGlobal());
         case ExpressionKind::VariableReference:
             result += "var";
             break;

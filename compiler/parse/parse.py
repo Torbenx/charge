@@ -36,6 +36,7 @@ keywords = [
     "match",
     "namespace",
     "object",
+    "open",
     "property",
     "return",
     "shared",
@@ -252,6 +253,12 @@ class EndCallInstruction:
 class ErrorInstruction:
     def format(self):
         return "error"
+
+@dataclasses.dataclass
+class SetGlobalKindInstruction:
+    globalKindExpr: str
+    def format(self):
+        return "setGlobalKind " + self.globalKindExpr
 
 @dataclasses.dataclass
 class State:
@@ -492,6 +499,9 @@ class Parser:
                 self.advanceLine()
             elif first == "endCall":
                 instructions.append(EndCallInstruction())
+                self.advanceLine()
+            elif first == "setGlobalKind":
+                instructions.append(SetGlobalKindInstruction(self.parseExpr()))
                 self.advanceLine()
             else:
                 while self.line[0] == ' ':
@@ -878,6 +888,8 @@ def generateInstructions(case, instructions, thenHandler):
             line("argumentPosition = endCall(argumentPosition, state);")
         elif type(inst) is ErrorInstruction:
             generateError(case)
+        elif type(inst) is SetGlobalKindInstruction:
+            line("setGlobalKind(state, " + inst.globalKindExpr + ");")
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
 

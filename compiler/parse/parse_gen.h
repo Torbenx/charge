@@ -30,6 +30,7 @@ inline constexpr ConstWordStringTable words {
     keyword("match"),
     keyword("namespace"),
     keyword("object"),
+    keyword("open"),
     keyword("property"),
     keyword("return"),
     keyword("shared"),
@@ -134,6 +135,7 @@ enum class LexerToken : uint8_t {
     Match, // match
     Namespace, // namespace
     Object, // object
+    Open, // open
     Property, // property
     Return, // return
     Shared, // shared
@@ -200,6 +202,7 @@ enum class State {
     MemberDeclaration,
     AfterStatic,
     StaticVarVariableDeclaration,
+    StaticOpenVariableDeclaration,
     AfterDeclaration,
     Error,
 };

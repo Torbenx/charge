@@ -36,6 +36,7 @@ struct Context {
     }
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
+    Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
     void popScope() { m_scopeStack.pop_back(); }
     void pushScope(ScopeConstant value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
     void pushEmptyScope(ScopeConstant value) { m_scopeStack.push_back({ value, std::nullopt }); }

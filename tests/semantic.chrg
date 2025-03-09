@@ -214,3 +214,12 @@ fn typeExpr() -> type: { }
 fn typeExprFold() -> X: {
     let x: typeExpr() = X;
 }
+
+static var staticVar = X;
+fn needsShared(x: shared type) -> type: { }
+// expect-return-type type
+fn testStaticVarIsShared() => needsShared(staticVar);
+
+static open openVar = X;
+// expect-return-type type
+fn examineOpenVar() => openVar;

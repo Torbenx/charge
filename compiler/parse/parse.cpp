@@ -242,6 +242,11 @@ static void endDeclaration(ParseState& state) {
     state.popScope();
 }
 
+using GlobalKind = sema::GlobalKind;
+static void setGlobalKind(ParseState& state, GlobalKind kind) {
+    sema::cast<sema::GlobalProgram>(state.currentProgram())->m_globalKind = kind;
+}
+
 void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
     ScopeBuffer scopeBuffer;
     ScopeKind* scopePosition = scopeBuffer.buffer;
@@ -357,6 +362,8 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto after_static$no_emit;
     case State::StaticVarVariableDeclaration:
         goto static_var_variable_declaration$no_emit;
+    case State::StaticOpenVariableDeclaration:
+        goto static_open_variable_declaration$no_emit;
     case State::AfterDeclaration:
         goto after_declaration$no_emit;
     case State::Error:
@@ -4221,11 +4228,17 @@ after_static$no_emit:
                 // next static_var_variable_declaration
                 goto static_var_variable_declaration$no_emit;
             }
+            if (this_identifier == words["open"]) {
+                // next static_open_variable_declaration
+                goto static_open_variable_declaration$no_emit;
+            }
             // -> error
             goto error$keyword_check;
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        // setGlobalKind GlobalKind::Let
+        setGlobalKind(state, GlobalKind::Let);
         // emitToken TokenKind::LetValueDecl, this_declaration
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = this_declaration.toUint();
@@ -4252,8 +4265,38 @@ static_var_variable_declaration$no_emit:
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        // setGlobalKind GlobalKind::Var
+        setGlobalKind(state, GlobalKind::Var);
         // emitToken TokenKind::VarValueDecl, this_declaration
         carriedEmitTokenKind = TokenKind::VarValueDecl;
+        carriedEmitTokenData = this_declaration.toUint();
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState static_open_variable_declaration
+static_open_variable_declaration$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::StaticOpenVariableDeclaration;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // commitDeclaration DeclarationKind::StaticVariable, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        // setGlobalKind GlobalKind::OpenLet
+        setGlobalKind(state, GlobalKind::OpenLet);
+        // emitToken TokenKind::LetValueDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = this_declaration.toUint();
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
@@ -4827,6 +4870,11 @@ error$word_case:
         if (this_identifier == words["object"]) {
             // error
             errorToken = LexerToken::Object;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["open"]) {
+            // error
+            errorToken = LexerToken::Open;
             goto handle_parse_error;
         }
         if (this_identifier == words["property"]) {
