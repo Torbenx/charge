@@ -138,8 +138,8 @@ std::string_view nameString(LexerToken token) {
         return "Has";
     case LexerToken::If:
         return "If";
-    case LexerToken::Impls:
-        return "Impls";
+    case LexerToken::Impl:
+        return "Impl";
     case LexerToken::Incomplete:
         return "Incomplete";
     case LexerToken::Let:
@@ -249,6 +249,12 @@ std::string_view nameString(State state) {
         return "Parameter";
     case State::VarParameter:
         return "VarParameter";
+    case State::ImplExpression:
+        return "ImplExpression";
+    case State::AfterImplExpression:
+        return "AfterImplExpression";
+    case State::ImplAccessExpression:
+        return "ImplAccessExpression";
     case State::NoDeclaration:
         return "NoDeclaration";
     case State::NamespaceDeclaration:

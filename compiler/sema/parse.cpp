@@ -87,7 +87,7 @@ void Generator::visitDeclaration() {
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
     }
-    if (tok->kind() == Token::ObjectTypeDecl || tok->kind() == Token::StructTypeDecl) {
+    if (tok->kind() == Token::TypeDecl) {
         visitTypeDeclaration();
     } else if (tok->kind() == Token::VarValueDecl || tok->kind() == Token::LetValueDecl) {
         visitStaticVariableDeclaration();
@@ -291,7 +291,7 @@ void Generator::visitTypeDeclaration() {
     VERIFY(program->kind() == ProgramKind::Type);
     auto* typeProgram = cast<TypeProgram>(program);
 
-    VERIFY(tok->kind() == Token::StructTypeDecl || tok->kind() == Token::ObjectTypeDecl);
+    VERIFY(tok->kind() == Token::TypeDecl);
     advance();
 
     auto savedTok = tok;

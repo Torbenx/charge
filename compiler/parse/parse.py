@@ -29,7 +29,7 @@ keywords = [
     "guard",
     "has",
     "if",
-    "impls",
+    "impl",
     "incomplete",
     "let",
     "loop",
@@ -218,6 +218,13 @@ class CommitDeclarationInstruction:
         if not self.nameExpr is None:
             ret += ", " + self.nameExpr
         return ret
+
+@dataclasses.dataclass
+class CommitImplDeclarationInstruction:
+    declKindExpr: str
+
+    def format(self):
+        return "commitImplDeclaration " + self.declKindExpr
 
 @dataclasses.dataclass
 class RememberDeclarationBeginInstruction:
@@ -481,6 +488,9 @@ class Parser:
                     self.line = self.line[1:]
                     nameExpr = self.parseExpr()
                 instructions.append(CommitDeclarationInstruction(declKindExpr, nameExpr))
+                self.advanceLine()
+            elif first == "commitImplDeclaration":
+                instructions.append(CommitImplDeclarationInstruction(self.parseExpr()))
                 self.advanceLine()
             elif first == "rememberDeclarationBegin":
                 instructions.append(RememberDeclarationBeginInstruction())
@@ -873,6 +883,8 @@ def generateInstructions(case, instructions, thenHandler):
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
             line("this_declaration = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, state);")
+        elif type(inst) is CommitImplDeclarationInstruction:
+            line("this_declaration = commitImplDeclaration<" + inst.declKindExpr + ">(tokBegin, declarationBegin, state);")
         elif type(inst) is RememberDeclarationBeginInstruction:
             line("declarationBegin = state.parseOutput.currentToken();")
         elif type(inst) is EndDeclarationInstruction:

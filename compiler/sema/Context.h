@@ -18,6 +18,7 @@ struct Context {
         std::optional<Scope*> scope;
     };
     std::vector<ScopeStackEntry> m_scopeStack;
+    std::vector<ProgramHandle> m_implDeclarations;
 
     Context(std::string_view source)
         : parseOutput(source) {
@@ -47,6 +48,17 @@ struct Context {
         std::optional<Scope*> scope = currentScope();
         if (scope.has_value())
             scope->addDeclaration(name, (ScopeConstant)progHandle);
+
+        if (kind == ProgramKind::Type) {
+            pushScope((ScopeConstant)progHandle, cast<TypeProgram>(program(progHandle)));
+        } else {
+            pushEmptyScope((ScopeConstant)progHandle);
+        }
+        return (ScopeConstant)progHandle;
+    }
+    ScopeConstant pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location) {
+        ProgramHandle progHandle = newProgram(kind, Word(), parseLocation, m_scopeStack.back().value, location);
+        m_implDeclarations.push_back(progHandle);
 
         if (kind == ProgramKind::Type) {
             pushScope((ScopeConstant)progHandle, cast<TypeProgram>(program(progHandle)));

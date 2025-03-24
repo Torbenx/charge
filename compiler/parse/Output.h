@@ -27,8 +27,10 @@ inline bool isUnaryExpr(TokenKind kind) {
     SCOPE(IfExprOrStmt)       \
     SCOPE(CompoundStmt)       \
     SCOPE(Paren)              \
+    SCOPE(ParenInImplExpr)    \
     SCOPE(Square)             \
     SCOPE(Brace)              \
+    SCOPE(BraceInImplExpr)    \
     SCOPE(LeftExpr)           \
     SCOPE(RightExpr)          \
     SCOPE(VariableType)       \
@@ -43,7 +45,9 @@ inline bool isUnaryExpr(TokenKind kind) {
     SCOPE(FunctionParameters) \
     SCOPE(Type)               \
     SCOPE(HasTypeExpr)        \
-    SCOPE(TemplateParameters)
+    SCOPE(TemplateParameters) \
+    SCOPE(TypeImplExpression) \
+    SCOPE(FunctionImplExpression)
 
 enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,

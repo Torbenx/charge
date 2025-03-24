@@ -23,7 +23,7 @@ inline constexpr ConstWordStringTable words {
     keyword("guard"),
     keyword("has"),
     keyword("if"),
-    keyword("impls"),
+    keyword("impl"),
     keyword("incomplete"),
     keyword("let"),
     keyword("loop"),
@@ -128,7 +128,7 @@ enum class LexerToken : uint8_t {
     Guard, // guard
     Has, // has
     If, // if
-    Impls, // impls
+    Impl, // impl
     Incomplete, // incomplete
     Let, // let
     Loop, // loop
@@ -184,6 +184,9 @@ enum class State {
     FirstParameter,
     Parameter,
     VarParameter,
+    ImplExpression,
+    AfterImplExpression,
+    ImplAccessExpression,
     NoDeclaration,
     NamespaceDeclaration,
     NamespaceDeclarationId,

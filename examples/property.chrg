@@ -4,7 +4,7 @@ struct BoolArray: {
         static result_type: type = bool;
 
         fn index(index: int) -> (property b: bool);
-        fn impl index(self: shared i: int) -> (out b: bool): {
+        fn impl index(self: shared, i: int) -> (out b: bool): {
             b = getBit(i);
         }
         fn impl index(self: unique, i: int) -> (let b: bool): {

@@ -18,7 +18,6 @@ enum class DeclarationKind : uint8_t {
     Function,
     Member,
     HasMember,
-    Impls,
 };
 
 namespace parse {
@@ -214,7 +213,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
 template<DeclarationKind kind>
 static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember || kind == DeclarationKind::Impls) {
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {
         return state.pushNamespaceScope(name);
@@ -235,6 +234,13 @@ static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosit
         }
         return state.pushStaticScope(progKind, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     }
+}
+
+template<DeclarationKind kind>
+static sema::ScopeConstant commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    static_assert(kind == DeclarationKind::Type || kind == DeclarationKind::Function);
+    sema::ProgramKind progKind = kind == DeclarationKind::Type ? sema::ProgramKind::Type : sema::ProgramKind::Function;
+    return state.pushStaticImplScope(progKind, declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 
 static void endDeclaration(ParseState& state) {

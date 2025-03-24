@@ -18,7 +18,6 @@ enum class DeclarationKind : uint8_t {
     Function,
     Member,
     HasMember,
-    Impls,
 };
 
 namespace parse {
@@ -214,7 +213,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
 template<DeclarationKind kind>
 static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember || kind == DeclarationKind::Impls) {
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {
         return state.pushNamespaceScope(name);
@@ -235,6 +234,13 @@ static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosit
         }
         return state.pushStaticScope(progKind, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     }
+}
+
+template<DeclarationKind kind>
+static sema::ScopeConstant commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    static_assert(kind == DeclarationKind::Type || kind == DeclarationKind::Function);
+    sema::ProgramKind progKind = kind == DeclarationKind::Type ? sema::ProgramKind::Type : sema::ProgramKind::Function;
+    return state.pushStaticImplScope(progKind, declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 
 static void endDeclaration(ParseState& state) {
@@ -279,7 +285,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     case State::CommaElse:
         goto comma_else$no_emit;
     case State::CheckDesignatedArgument:
-        VERIFY_NOT_REACHED();
+        goto check_designated_argument$no_emit;
     case State::MaybeDesignatedArgument:
         goto maybe_designated_argument$no_emit;
     case State::FirstArgumentParen:
@@ -326,6 +332,12 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto parameter$no_emit;
     case State::VarParameter:
         goto var_parameter$no_emit;
+    case State::ImplExpression:
+        goto impl_expression$no_emit;
+    case State::AfterImplExpression:
+        goto after_impl_expression$no_emit;
+    case State::ImplAccessExpression:
+        goto impl_access_expression$no_emit;
     case State::NoDeclaration:
         VERIFY_NOT_REACHED();
     case State::NamespaceDeclaration:
@@ -1072,6 +1084,23 @@ after_expression$as_then:
             // next after_parameters
             goto after_parameters$with_emit;
         }
+        // ifScope ScopeKind::ParenInImplExpr
+        if (scopePosition[0] == ScopeKind::ParenInImplExpr) {
+            // popScope ScopeKind::ParenInImplExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::ParenInImplExpr);
+                if (result == nullptr) {
+                    errorToken = LexerToken::RightParen;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // emitToken TokenKind::EmptyNode
+            carriedEmitTokenKind = TokenKind::EmptyNode;
+            carriedEmitTokenData = 0;
+            // next after_impl_expression
+            goto after_impl_expression$with_emit;
+        }
         // popScope ScopeKind::Paren
         {
             auto result = popScope(scopePosition, ScopeKind::Paren);
@@ -1639,6 +1668,25 @@ after_expression$as_then:
     }
     case '}': {
         tokEnd += 1;
+        // ifScope ScopeKind::BraceInImplExpr
+        if (scopePosition[0] == ScopeKind::BraceInImplExpr) {
+            // popScope ScopeKind::BraceInImplExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::BraceInImplExpr);
+                if (result == nullptr) {
+                    errorToken = LexerToken::RightBrace;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // endCall
+            argumentPosition = endCall(argumentPosition, state);
+            // emitToken TokenKind::EmptyNode
+            carriedEmitTokenKind = TokenKind::EmptyNode;
+            carriedEmitTokenData = 0;
+            // next after_impl_expression
+            goto after_impl_expression$with_emit;
+        }
         // popScope ScopeKind::Brace
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
@@ -1811,6 +1859,25 @@ comma_after_expression$no_emit:
     }
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
+        // ifScope ScopeKind::BraceInImplExpr
+        if (scopePosition[0] == ScopeKind::BraceInImplExpr) {
+            // popScope ScopeKind::BraceInImplExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::BraceInImplExpr);
+                if (result == nullptr) {
+                    errorToken = LexerToken::RightBrace;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // endCall
+            argumentPosition = endCall(argumentPosition, state);
+            // emitToken TokenKind::EmptyNode
+            carriedEmitTokenKind = TokenKind::EmptyNode;
+            carriedEmitTokenData = 0;
+            // next after_impl_expression
+            goto after_impl_expression$with_emit;
+        }
         // popScope ScopeKind::Brace
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
@@ -1897,8 +1964,8 @@ comma_after_expression$no_emit:
                 // then parameter
                 goto parameter$keyword_check;
             }
-            // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
-            if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace) {
+            // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
+            if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
                 // then check_designated_argument
                 // callArgument
                 argumentPosition = addCallArgument(argumentPosition, Word());
@@ -1979,8 +2046,8 @@ comma_after_expression$no_emit:
             // next after_variable_declaration_id
             goto after_variable_declaration_id$with_emit;
         }
-        // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
-        if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace) {
+        // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
+        if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
             // then check_designated_argument
             // argumentName = this_identifier
             argumentName = this_identifier;
@@ -2049,8 +2116,8 @@ comma_after_expression$no_emit:
         // then parameter
         goto parameter$as_then;
     }
-    // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
-    if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace) {
+    // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
+    if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
         // then check_designated_argument
         goto check_designated_argument$as_then;
     }
@@ -2074,6 +2141,10 @@ comma_else$no_emit:
     goto error$as_then;
 
     // LinearState check_designated_argument
+check_designated_argument$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::CheckDesignatedArgument;
 check_designated_argument$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -3722,6 +3793,116 @@ var_parameter$no_emit:
     // then error
     goto error$as_then;
 
+    // LinearState impl_expression
+impl_expression$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+impl_expression$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::ImplExpression;
+    if (std::string_view(tokEnd, 1) == "("sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::ParenInImplExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::ParenInImplExpr);
+        // emitToken TokenKind::ParenthesizedExpr
+        carriedEmitTokenKind = TokenKind::ParenthesizedExpr;
+        carriedEmitTokenData = 0;
+        // next expression
+        goto expression$with_emit;
+    }
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_impl_expression
+        goto after_impl_expression$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_impl_expression
+after_impl_expression$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+after_impl_expression$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterImplExpression;
+    if (std::string_view(tokEnd, 2) == "::"sv) {
+        tokEnd += 2;
+        // next impl_access_expression
+        goto impl_access_expression$no_emit;
+    }
+    if (std::string_view(tokEnd, 1) == "{"sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::BraceInImplExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::BraceInImplExpr);
+        // emitCallToken TokenKind::Parameterize
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, state);
+        // next check_designated_argument
+        goto check_designated_argument$no_emit;
+    }
+    // ifScope ScopeKind::TypeImplExpression
+    if (scopePosition[0] == ScopeKind::TypeImplExpression) {
+        // popScope ScopeKind::TypeImplExpression
+        {
+            auto result = popScope(scopePosition, ScopeKind::TypeImplExpression);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // then after_type_declaration_id
+        goto after_type_declaration_id$as_then;
+    }
+    // ifScope ScopeKind::FunctionImplExpression
+    if (scopePosition[0] == ScopeKind::FunctionImplExpression) {
+        // popScope ScopeKind::FunctionImplExpression
+        {
+            auto result = popScope(scopePosition, ScopeKind::FunctionImplExpression);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // then after_function_declaration_id
+        goto after_function_declaration_id$as_then;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState impl_access_expression
+impl_access_expression$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::ImplAccessExpression;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> error
+            goto error$keyword_check;
+        }
+        // emitToken TokenKind::StaticAccessExpr, this_identifier
+        carriedEmitTokenKind = TokenKind::StaticAccessExpr;
+        carriedEmitTokenData = this_identifier.toUint();
+        // next after_impl_expression
+        goto after_impl_expression$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
     // LinearState no_declaration
 no_declaration$as_then:
     if (std::string_view(tokEnd, 1) == "}"sv) {
@@ -3881,16 +4062,6 @@ templated_declaration$as_then:
             if (this_identifier == words["struct"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
-                // tokenKind = TokenKind::StructTypeDecl
-                tokenKind = TokenKind::StructTypeDecl;
-                // next type_declaration_id
-                goto type_declaration_id$no_emit;
-            }
-            if (this_identifier == words["object"]) {
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // tokenKind = TokenKind::ObjectTypeDecl
-                tokenKind = TokenKind::ObjectTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
@@ -3952,14 +4123,6 @@ templated_declaration_with_attributes$as_then:
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
-                // tokenKind = TokenKind::StructTypeDecl
-                tokenKind = TokenKind::StructTypeDecl;
-                // next type_declaration_id
-                goto type_declaration_id$no_emit;
-            }
-            if (this_identifier == words["object"]) {
-                // tokenKind = TokenKind::ObjectTypeDecl
-                tokenKind = TokenKind::ObjectTypeDecl;
                 // next type_declaration_id
                 goto type_declaration_id$no_emit;
             }
@@ -4013,6 +4176,18 @@ function_declaration_id$no_emit:
             this_identifier = wordAndPos.word;
         }
         if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED function_declaration_id$keyword_check:
+            if (this_identifier == words["impl"]) {
+                // commitImplDeclaration DeclarationKind::Function
+                this_declaration = commitImplDeclaration<DeclarationKind::Function>(tokBegin, declarationBegin, state);
+                // pushScope ScopeKind::FunctionImplExpression
+                scopePosition = pushScope(scopePosition, ScopeKind::FunctionImplExpression);
+                // emitToken TokenKind::FunctionImplDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::FunctionImplDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next impl_expression
+                goto impl_expression$with_emit;
+            }
             // -> error
             goto error$keyword_check;
         }
@@ -4034,6 +4209,7 @@ after_function_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::AfterFunctionDeclarationId;
+after_function_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::FunctionParameters
@@ -4108,13 +4284,25 @@ type_declaration_id$no_emit:
             this_identifier = wordAndPos.word;
         }
         if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED type_declaration_id$keyword_check:
+            if (this_identifier == words["impl"]) {
+                // commitImplDeclaration DeclarationKind::Type
+                this_declaration = commitImplDeclaration<DeclarationKind::Type>(tokBegin, declarationBegin, state);
+                // pushScope ScopeKind::TypeImplExpression
+                scopePosition = pushScope(scopePosition, ScopeKind::TypeImplExpression);
+                // emitToken TokenKind::TypeImplDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::TypeImplDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next impl_expression
+                goto impl_expression$with_emit;
+            }
             // -> error
             goto error$keyword_check;
         }
         // commitDeclaration DeclarationKind::Type, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Type>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken tokenKind, this_declaration
-        carriedEmitTokenKind = tokenKind;
+        // emitToken TokenKind::TypeDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::TypeDecl;
         carriedEmitTokenData = this_declaration.toUint();
         // next after_type_declaration_id
         goto after_type_declaration_id$with_emit;
@@ -4129,6 +4317,7 @@ after_type_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::AfterTypeDeclarationId;
+after_type_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -4178,19 +4367,6 @@ member_declaration$as_then:
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
                 // emitToken TokenKind::HasMemberDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
-                carriedEmitTokenData = this_declaration.toUint();
-                // next expression
-                goto expression$with_emit;
-            }
-            if (this_identifier == words["impls"]) {
-                // pushScope ScopeKind::HasTypeExpr
-                scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // commitDeclaration DeclarationKind::Impls
-                this_declaration = commitDeclaration<DeclarationKind::Impls>(Word(), tokBegin, declarationBegin, state);
-                // emitToken TokenKind::ImplsDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::ImplsDecl;
                 carriedEmitTokenData = this_declaration.toUint();
                 // next expression
                 goto expression$with_emit;
@@ -4837,9 +5013,9 @@ error$word_case:
             errorToken = LexerToken::If;
             goto handle_parse_error;
         }
-        if (this_identifier == words["impls"]) {
+        if (this_identifier == words["impl"]) {
             // error
-            errorToken = LexerToken::Impls;
+            errorToken = LexerToken::Impl;
             goto handle_parse_error;
         }
         if (this_identifier == words["incomplete"]) {

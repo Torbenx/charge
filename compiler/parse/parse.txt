@@ -192,6 +192,10 @@ SwitchState after_expression() then error
             emitToken TokenKind::AssignStmt
             emitToken TokenKind::ExpressionStmt
             next after_parameters
+        ifScope ScopeKind::ParenInImplExpr
+            popScope ScopeKind::ParenInImplExpr
+            emitToken TokenKind::EmptyNode
+            next after_impl_expression
         popScope ScopeKind::Paren
         endCall
         emitToken TokenKind::EmptyNode
@@ -202,6 +206,11 @@ SwitchState after_expression() then error
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
+        ifScope ScopeKind::BraceInImplExpr
+            popScope ScopeKind::BraceInImplExpr
+            endCall
+            emitToken TokenKind::EmptyNode
+            next after_impl_expression
         popScope ScopeKind::Brace
         endCall
         emitToken TokenKind::EmptyNode
@@ -263,6 +272,11 @@ LinearState comma_after_expression() then error
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation }
+        ifScope ScopeKind::BraceInImplExpr
+            popScope ScopeKind::BraceInImplExpr
+            endCall
+            emitToken TokenKind::EmptyNode
+            next after_impl_expression
         popScope ScopeKind::Brace
         endCall
         emitToken TokenKind::EmptyNode
@@ -284,7 +298,7 @@ LinearState comma_after_expression() then error
             pushScope ScopeKind::Parameter
             emitToken TokenKind::ExpressionStmt
             then parameter
-        ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace
+        ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
             then check_designated_argument
 
 LinearState comma_else() then error
@@ -515,6 +529,37 @@ LinearState var_parameter() then error
         emitToken TokenKind::VarValueDecl, this_identifier
         next after_simple_variable_declaration_id
 
+# --- Impl expression
+
+LinearState impl_expression() then error
+    identifier
+        emitToken TokenKind::IdentifierExpr, this_identifier
+        next after_impl_expression
+    punctuation (
+        pushScope ScopeKind::ParenInImplExpr
+        emitToken TokenKind::ParenthesizedExpr
+        next expression
+
+LinearState after_impl_expression() then error
+    punctuation ::
+        next impl_access_expression
+    punctuation {
+        pushScope ScopeKind::BraceInImplExpr
+        emitCallToken TokenKind::Parameterize
+        next check_designated_argument
+    then
+        ifScope ScopeKind::TypeImplExpression
+            popScope ScopeKind::TypeImplExpression
+            then after_type_declaration_id
+        ifScope ScopeKind::FunctionImplExpression
+            popScope ScopeKind::FunctionImplExpression
+            then after_function_declaration_id
+
+LinearState impl_access_expression() then error
+    identifier
+        emitToken TokenKind::StaticAccessExpr, this_identifier
+        next after_impl_expression
+
 # --- Declarations
 
 LinearState no_declaration() then error
@@ -557,11 +602,6 @@ LinearState templated_declaration() then no_declaration
         next function_declaration_id
     keyword struct
         rememberDeclarationBegin
-        tokenKind = TokenKind::StructTypeDecl
-        next type_declaration_id
-    keyword object
-        rememberDeclarationBegin
-        tokenKind = TokenKind::ObjectTypeDecl
         next type_declaration_id
     keyword static
         rememberDeclarationBegin
@@ -578,10 +618,6 @@ LinearState templated_declaration_with_attributes() then error
     keyword fn
         next function_declaration_id
     keyword struct
-        tokenKind = TokenKind::StructTypeDecl
-        next type_declaration_id
-    keyword object
-        tokenKind = TokenKind::ObjectTypeDecl
         next type_declaration_id
     keyword static
         next after_static
@@ -598,6 +634,11 @@ LinearState function_declaration_id() then error
         commitDeclaration DeclarationKind::Function, this_identifier
         emitToken TokenKind::FunctionDecl, this_declaration
         next after_function_declaration_id
+    keyword impl
+        commitImplDeclaration DeclarationKind::Function
+        pushScope ScopeKind::FunctionImplExpression
+        emitToken TokenKind::FunctionImplDecl, this_declaration
+        next impl_expression
 LinearState after_function_declaration_id() then error
     punctuation (
         pushScope ScopeKind::FunctionParameters
@@ -622,11 +663,17 @@ LinearState after_function_parameters() then error
         emitToken TokenKind::BodyExpr
         next expression
 
-LinearState type_declaration_id(tokenKind) then error
+LinearState type_declaration_id() then error
     identifier
         commitDeclaration DeclarationKind::Type, this_identifier
-        emitToken tokenKind, this_declaration
+        emitToken TokenKind::TypeDecl, this_declaration
         next after_type_declaration_id
+    keyword impl
+        commitImplDeclaration DeclarationKind::Type
+        pushScope ScopeKind::TypeImplExpression
+        emitToken TokenKind::TypeImplDecl, this_declaration
+        next impl_expression
+
 LinearState after_type_declaration_id() then error
     punctuation :
         next type_declaration_body
@@ -640,12 +687,6 @@ LinearState member_declaration() then templated_declaration
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::HasMember
         emitToken TokenKind::HasMemberDecl, this_declaration
-        next expression
-    keyword impls
-        pushScope ScopeKind::HasTypeExpr
-        rememberDeclarationBegin
-        commitDeclaration DeclarationKind::Impls
-        emitToken TokenKind::ImplsDecl, this_declaration
         next expression
     identifier
         rememberDeclarationBegin
