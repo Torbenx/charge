@@ -278,7 +278,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
         "expect-no-error", "expect-token", "expect-source-position",
         "line", "column", "packed-range-begin-column", "expect-identifier", "name",
-        "expect-type", "expect-value", "expect-return-type");
+        "expect-type", "expect-value", "expect-return-type", "expect-impl");
 
     WordStringTable wordTable { words };
     sema::Context context;
@@ -366,7 +366,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             skipWhitespace();
 
             auto word = wordTable.get(cmdStr);
-            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"]) {
+            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"] || word == words["expect-impl"]) {
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
@@ -443,6 +443,10 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
             expr->check(context, program, (sema::Constant)cast<sema::GlobalProgram>(program)->initializer());
         if (word == words["expect-return-type"])
             expr->check(context, program, (sema::Constant)cast<sema::FunctionProgram>(program)->returnType());
+        if (word == words["expect-impl"]) {
+            verify(program->isImpl());
+            expr->check(context, program, (sema::Constant)program->selfConstant());
+        }
     }
 
     Command popCommand(Word cause) {

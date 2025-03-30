@@ -198,6 +198,9 @@ void Generator::visitStaticVariableDeclaration() {
     // TODO: Constants are required to be the same when copied.
     //       For global objects this restriction is not necessary.
     globalProgram->setInitializer(expressionToConstant());
+
+    Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+    program->completeSignatureCheck(false, selfConstant);
 }
 
 void Generator::visitFunctionImplDeclaration() {
@@ -205,12 +208,29 @@ void Generator::visitFunctionImplDeclaration() {
     advance();
     visitExpression();
     Constant implOf = expressionToConstant();
-    VERIFY(implOf.kind() == ConstantKind::Parameterize);
-    program->setImplConstant(implOf);
-    auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Function);
 
     visitFunctionParametersAndBody();
+
+    checkFunctionImplDeclaration(implOf);
+}
+
+void Generator::visitFunctionDeclaration() {
+    VERIFY(tok->kind() == Token::FunctionDecl);
+    advance();
+    visitFunctionParametersAndBody();
+
+    if (auto implOf = resolveImplicitImplTarget(); implOf.has_value()) {
+        checkFunctionImplDeclaration(implOf.value());
+    } else {
+        Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+        program->completeSignatureCheck(false, selfConstant);
+    }
+}
+
+void Generator::checkFunctionImplDeclaration(Constant implOf) {
+    VERIFY(implOf.kind() == ConstantKind::Parameterize);
+    auto base = asFoldBase(implOf);
+    VERIFY(base.program->kind() == ProgramKind::Function);
 
     auto* implProgram = cast<FunctionProgram>(program);
     auto* baseProg = cast<FunctionProgram>(base.program);
@@ -224,16 +244,13 @@ void Generator::visitFunctionImplDeclaration() {
         VERIFY(baseParameter.kind() == implParameter.kind());
         bool match = staticMatch(state, baseParameter.type(), implParameter.type());
         VERIFY(match);
+        // TODO: What about the initializer?
     }
 
     bool match = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
     VERIFY(match);
-}
 
-void Generator::visitFunctionDeclaration() {
-    VERIFY(tok->kind() == Token::FunctionDecl);
-    advance();
-    visitFunctionParametersAndBody();
+    program->completeSignatureCheck(true, implOf);
 }
 
 void Generator::visitFunctionParametersAndBody() {
@@ -329,18 +346,32 @@ void Generator::visitTypeImplDeclaration() {
     advance();
     visitExpression();
     Constant implOf = expressionToConstant();
-    VERIFY(implOf.kind() == ConstantKind::Parameterize);
-    program->setImplConstant(implOf);
-    auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Type);
 
     visitTypeMembers();
+
+    checkTypeImplDeclaration(implOf);
 }
 
 void Generator::visitTypeDeclaration() {
     VERIFY(tok->kind() == Token::TypeDecl);
     advance();
     visitTypeMembers();
+
+    if (auto implOf = resolveImplicitImplTarget(); implOf.has_value()) {
+        checkTypeImplDeclaration(implOf.value());
+    } else {
+        Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+        program->completeSignatureCheck(false, selfConstant);
+    }
+}
+
+void Generator::checkTypeImplDeclaration(Constant implOf) {
+    VERIFY(implOf.kind() == ConstantKind::Parameterize);
+    auto base = asFoldBase(implOf);
+    VERIFY(base.program->kind() == ProgramKind::Type);
+    // TODO: Do checks
+
+    program->completeSignatureCheck(true, implOf);
 }
 
 void Generator::visitTypeMembers() {

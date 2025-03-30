@@ -42,7 +42,11 @@ struct Dumper {
     }
     std::string formatProgram(ProgramHandle progHandle) {
         Program* prog = context.program(progHandle);
-        std::string name(context.wordTable.view(prog->name()));
+        std::string name;
+        if (prog->isImpl())
+            name = "(impl " + formatConstant(prog, (Constant)prog->selfConstant()) + ")";
+        else
+            name = context.wordTable.view(prog->name());
         auto parent = prog->translate(prog->parent());
         if (parent.kind() == ConstantKind::Program)
             return formatProgram(parent.program()) + "::" + name;

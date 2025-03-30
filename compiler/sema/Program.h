@@ -256,20 +256,9 @@ struct Program {
     bool isTemplate() const {
         return parameters.size() > inheritedParameterCount;
     }
+    int_t nonInheritedParameterCount() const { return parameters.size() - inheritedParameterCount; }
     bool isImpl() const {
-        return m_implExpression.has_value();
-    }
-    Constant implConstant() const {
-        return m_implExpression.value();
-    }
-    Parameterize implParameterize() {
-        return getParameterize(implConstant());
-    }
-
-    void setImplConstant(Constant c) {
-        VERIFY(c.kind() == ConstantKind::Parameterize);
-        VERIFY(!m_implExpression.has_value());
-        m_implExpression = c;
+        return m_fields.tag().isImpl();
     }
 
     void dump(Context&);
@@ -282,10 +271,11 @@ struct Program {
         return parse::TokenHandle { parseLocationOrSelfConstant };
     }
 
-    void completeSignatureCheck(Constant selfConstant) {
+    void completeSignatureCheck(bool isImpl, Constant selfConstant) {
         VERIFY(status() == ProgramStatus::SignatureCheckInProgress);
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureChecked);
+        tag.setImpl(isImpl);
         m_fields.setTag(tag);
         parseLocationOrSelfConstant = selfConstant.toUint();
     }
@@ -334,6 +324,7 @@ public:
     struct Fields {
         uint8_t kindBits : 2;
         uint8_t statusBits : 3;
+        uint8_t implBit : 1 = 0;
 
         Fields(ProgramKind kind)
             : kindBits(std::to_underlying(kind))
@@ -342,6 +333,8 @@ public:
         void setStatus(ProgramStatus status) { statusBits = std::to_underlying(status); }
         ProgramStatus status() const { return (ProgramStatus)statusBits; }
         ProgramKind kind() const { return (ProgramKind)kindBits; }
+        void setImpl(bool isImpl) { implBit = isImpl; }
+        bool isImpl() const { return implBit != 0; }
     };
     TaggedSourceLocation<Fields> m_fields;
     uint32_t inheritedParameterCount = 0;
@@ -364,7 +357,6 @@ protected:
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
     ScopeConstant m_parent;
     uint32_t parseLocationOrSelfConstant;
-    std::optional<Constant> m_implExpression; // Always a complete parameterize constant
 
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;
@@ -372,7 +364,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 296);
+static_assert(sizeof(Program) == 288);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -554,6 +546,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 344);
+static_assert(sizeof(ProgramUnion) == 336);
 
 }

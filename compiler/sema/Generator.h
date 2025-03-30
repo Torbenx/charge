@@ -273,9 +273,11 @@ struct Generator : Util {
     void visitStaticVariableDeclaration();
     void visitFunctionImplDeclaration();
     void visitFunctionDeclaration();
+    void checkFunctionImplDeclaration(Constant implOf);
     void visitFunctionParametersAndBody();
     void visitTypeImplDeclaration();
     void visitTypeDeclaration();
+    void checkTypeImplDeclaration(Constant implOf);
     void visitTypeMembers();
 
     void visitStatement();
@@ -312,6 +314,7 @@ struct Generator : Util {
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
+    std::optional<Constant> resolveImplicitImplTarget();
     Expression generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> parentArgs);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void generateIdentifierExpr();

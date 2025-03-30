@@ -137,6 +137,59 @@ Constant Generator::inheriteParameters(ScopeConstant parent) {
     return parentValue;
 }
 
+std::optional<Constant> Generator::resolveImplicitImplTarget() {
+    if (program->parent().kind() != ConstantKind::Program)
+        return std::nullopt;
+    ProgramHandle parentProgHandle = program->parent().program();
+    Program* parentProg = context.program(parentProgHandle);
+    if (!parentProg->isImpl())
+        return std::nullopt;
+
+    VERIFY(parentProg->kind() == ProgramKind::Type);
+    Constant parentImplOf = fold(makeParameterize(parentProgHandle, copyParameters(parentProg)), parentProg->selfConstant());
+    auto parentImplPara = program->getParameterize(parentImplOf);
+
+    auto implTarget = cast<TypeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
+    VERIFY(implTarget.has_value());
+    VERIFY(implTarget.value().kind() == ConstantKind::Program);
+    ProgramHandle implOfProgHandle = implTarget.value().program();
+    signatureCheck(context, implOfProgHandle);
+    Program* implOfProg = context.program(implOfProgHandle);
+
+    VERIFY(program->kind() == implOfProg->kind());
+    DeductionState state(implOfProg, implOfProgHandle, implOfProg->parameters.size());
+    VERIFY(implOfProg->inheritedParameterCount == parentImplPara.arguments.size());
+    for (int_t i = 0; i < (int_t)implOfProg->inheritedParameterCount; i++)
+        state.explicitArgument(i, parentImplPara.arguments[i]);
+
+    // Match explicit parameter against each over
+    int_t parameterIndex = program->inheritedParameterCount;
+    int_t implParameterIndex = implOfProg->inheritedParameterCount;
+    for (;; parameterIndex++, implParameterIndex++) {
+        // Find next explict parameters
+        while (parameterIndex < (int_t)program->parameters.size() && program->parameters[parameterIndex].implicit())
+            parameterIndex += 1;
+        while (implParameterIndex < (int_t)implOfProg->parameters.size() && implOfProg->parameters[implParameterIndex].implicit())
+            implParameterIndex += 1;
+        if (parameterIndex == (int_t)program->parameters.size()) {
+            VERIFY(implParameterIndex == (int_t)implOfProg->parameters.size());
+            break;
+        }
+        VERIFY(implParameterIndex < (int_t)implOfProg->parameters.size());
+
+        auto parameter = program->parameters[parameterIndex];
+        auto implParameter = implOfProg->parameters[implParameterIndex];
+        VERIFY(parameter.name == implParameter.name);
+        bool match = staticMatch(state, implParameter.type, (Constant)parameter.type);
+        VERIFY(match);
+        state.explicitArgument(implParameterIndex, Constant(ConstantKind::CopyOfParameter, parameterIndex));
+        // TODO: What about the initializer?
+    }
+
+    VERIFY(state.isComplete());
+    return makeParameterize(implOfProgHandle, state.arguments);
+}
+
 Expression Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> baseArgs) {
     if (rawValue.kind() == ConstantKind::Namespace) {
         VERIFY(baseArgs.empty());
@@ -700,11 +753,13 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     for (;;) {
         if (scope.kind() == ConstantKind::Program) {
             Program* scopeProg = context.program(scope.program());
-            g.lookupStack.push_back(LookupContext::forContainingType(cast<TypeProgram>(scopeProg)));
             if (scopeProg->isImpl()) {
                 // TODO: Find a nicer way to do this. Maybe it is not necessary to eagerly fold the impl expression?
                 Constant parentPara = g.makeParameterize(scope.program(), copyParameters(scopeProg));
-                g.lookupStack.push_back(LookupContext::forContainingTypeImpl(g.fold(parentPara, scopeProg->implConstant())));
+                g.lookupStack.push_back(LookupContext::forContainingTypeImpl(g.fold(parentPara, scopeProg->selfConstant())));
+            } else {
+                // TODO: Even when this is an impl, there can be private members in this program.
+                g.lookupStack.push_back(LookupContext::forContainingType(cast<TypeProgram>(scopeProg)));
             }
             scope = scopeProg->translate(scopeProg->parent());
         } else if (scope.kind() == ConstantKind::Namespace) {
@@ -721,8 +776,6 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     auto parseLocation = program->beginSignatureCheck();
     g.setParseLocation(parseLocation);
     g.visitDeclaration();
-    Constant selfConstant = g.makeParameterize(progHandle, copyParameters(program));
-    program->completeSignatureCheck(selfConstant);
 }
 
 ExpressionCategory Generator::categoryOf(Expression expr) {
@@ -973,7 +1026,7 @@ struct BuiltinGenerator : Generator {
 
     ~BuiltinGenerator() {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
-        program->completeSignatureCheck(selfConstant);
+        program->completeSignatureCheck(false, selfConstant);
         context.popScope();
     }
 };

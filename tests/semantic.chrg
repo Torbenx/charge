@@ -228,7 +228,7 @@ fn examineOpenVar() => openVar;
 template(T: type)
 fn baseFunc(t: T) -> T: { }
 
-// expect-return-type type
+// expect-impl baseFunc{X}
 fn impl baseFunc{X}(t: X) -> type: { }
 
 template(T: type)
@@ -237,15 +237,24 @@ struct BaseType: {
 
     template(S: type)
     fn tmplFunc(t: T, s: S) -> type: { }
+
+    template(x)
+    fn implicitTmplFunc() -> type: { }
 }
 
+// expect-impl BaseType{X}
 struct impl BaseType{X}: {
+    // expect-impl BaseType::baseFunc{X}
     fn baseFunc(t: X) -> X: { }
 
-    //; expect-return-type type
-    //;template(S: type)
-    //;fn tmplFunc(t: X, s: S) -> type: { }
+    // expect-impl BaseType::tmplFunc{X, #0}
+    template(S: type)
+    fn tmplFunc(t: X, s: S) -> type: { }
 
-    // expect-return-type type
+    // expect-impl BaseType::tmplFunc{X, X}
     fn impl tmplFunc{X}(t: X, s: X) -> type: { }
+
+    // expect-impl BaseType::implicitTmplFunc{X, type, #0}
+    template(x: type)
+    fn implicitTmplFunc() -> type: { }
 }
