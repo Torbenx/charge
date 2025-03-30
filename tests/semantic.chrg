@@ -223,3 +223,29 @@ fn testStaticVarIsShared() => needsShared(staticVar);
 static open openVar = X;
 // expect-return-type type
 fn examineOpenVar() => openVar;
+
+
+template(T: type)
+fn baseFunc(t: T) -> T: { }
+
+// expect-return-type type
+fn impl baseFunc{X}(t: X) -> type: { }
+
+template(T: type)
+struct BaseType: {
+    fn baseFunc(t: T) -> T: { }
+
+    template(S: type)
+    fn tmplFunc(t: T, s: S) -> type: { }
+}
+
+struct impl BaseType{X}: {
+    fn baseFunc(t: X) -> X: { }
+
+    //; expect-return-type type
+    //;template(S: type)
+    //;fn tmplFunc(t: X, s: S) -> type: { }
+
+    // expect-return-type type
+    fn impl tmplFunc{X}(t: X, s: X) -> type: { }
+}

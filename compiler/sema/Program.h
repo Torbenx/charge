@@ -256,6 +256,21 @@ struct Program {
     bool isTemplate() const {
         return parameters.size() > inheritedParameterCount;
     }
+    bool isImpl() const {
+        return m_implExpression.has_value();
+    }
+    Constant implConstant() const {
+        return m_implExpression.value();
+    }
+    Parameterize implParameterize() {
+        return getParameterize(implConstant());
+    }
+
+    void setImplConstant(Constant c) {
+        VERIFY(c.kind() == ConstantKind::Parameterize);
+        VERIFY(!m_implExpression.has_value());
+        m_implExpression = c;
+    }
 
     void dump(Context&);
 
@@ -349,6 +364,7 @@ protected:
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
     ScopeConstant m_parent;
     uint32_t parseLocationOrSelfConstant;
+    std::optional<Constant> m_implExpression; // Always a complete parameterize constant
 
     const ProgramHandle* programTranslationBuffer = nullptr;
     const NamespaceHandle* namespaceTranslationBuffer = nullptr;
@@ -356,7 +372,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 288);
+static_assert(sizeof(Program) == 296);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -538,6 +554,6 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 336);
+static_assert(sizeof(ProgramUnion) == 344);
 
 }

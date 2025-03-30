@@ -89,10 +89,14 @@ void Generator::visitDeclaration() {
     }
     if (tok->kind() == Token::TypeDecl) {
         visitTypeDeclaration();
+    } else if (tok->kind() == Token::TypeImplDecl) {
+        visitTypeImplDeclaration();
     } else if (tok->kind() == Token::VarValueDecl || tok->kind() == Token::LetValueDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
         visitFunctionDeclaration();
+    } else if (tok->kind() == Token::FunctionImplDecl) {
+        visitFunctionImplDeclaration();
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -196,12 +200,45 @@ void Generator::visitStaticVariableDeclaration() {
     globalProgram->setInitializer(expressionToConstant());
 }
 
-void Generator::visitFunctionDeclaration() {
-    VERIFY(program->kind() == ProgramKind::Function);
-    auto* fnProgram = cast<FunctionProgram>(program);
+void Generator::visitFunctionImplDeclaration() {
+    VERIFY(tok->kind() == Token::FunctionImplDecl);
+    advance();
+    visitExpression();
+    Constant implOf = expressionToConstant();
+    VERIFY(implOf.kind() == ConstantKind::Parameterize);
+    program->setImplConstant(implOf);
+    auto base = asFoldBase(implOf);
+    VERIFY(base.program->kind() == ProgramKind::Function);
 
+    visitFunctionParametersAndBody();
+
+    auto* implProgram = cast<FunctionProgram>(program);
+    auto* baseProg = cast<FunctionProgram>(base.program);
+
+    VERIFY(implProgram->runtimeParameters.size() == baseProg->runtimeParameters.size());
+    auto state = DeductionState::fromFoldBase(base);
+    for (int_t index = 0; index < (int_t)implProgram->runtimeParameters.size(); index++) {
+        const auto& baseParameter = baseProg->runtimeParameters[index];
+        const auto& implParameter = implProgram->runtimeParameters[index];
+        VERIFY(baseParameter.name == implParameter.name);
+        VERIFY(baseParameter.kind() == implParameter.kind());
+        bool match = staticMatch(state, baseParameter.type(), implParameter.type());
+        VERIFY(match);
+    }
+
+    bool match = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
+    VERIFY(match);
+}
+
+void Generator::visitFunctionDeclaration() {
     VERIFY(tok->kind() == Token::FunctionDecl);
     advance();
+    visitFunctionParametersAndBody();
+}
+
+void Generator::visitFunctionParametersAndBody() {
+    VERIFY(program->kind() == ProgramKind::Function);
+    auto* fnProgram = cast<FunctionProgram>(program);
 
     lookupStack.push_back(LookupContext::forLocal(this));
 
@@ -287,12 +324,28 @@ void Generator::visitFunctionDeclaration() {
     }
 }
 
-void Generator::visitTypeDeclaration() {
-    VERIFY(program->kind() == ProgramKind::Type);
-    auto* typeProgram = cast<TypeProgram>(program);
+void Generator::visitTypeImplDeclaration() {
+    VERIFY(tok->kind() == Token::TypeImplDecl);
+    advance();
+    visitExpression();
+    Constant implOf = expressionToConstant();
+    VERIFY(implOf.kind() == ConstantKind::Parameterize);
+    program->setImplConstant(implOf);
+    auto base = asFoldBase(implOf);
+    VERIFY(base.program->kind() == ProgramKind::Type);
 
+    visitTypeMembers();
+}
+
+void Generator::visitTypeDeclaration() {
     VERIFY(tok->kind() == Token::TypeDecl);
     advance();
+    visitTypeMembers();
+}
+
+void Generator::visitTypeMembers() {
+    VERIFY(program->kind() == ProgramKind::Type);
+    auto* typeProgram = cast<TypeProgram>(program);
 
     auto savedTok = tok;
     for (int_t i = 0; i < (int_t)typeProgram->runtimeParameters.size(); i++) {

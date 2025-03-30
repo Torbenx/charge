@@ -132,6 +132,7 @@ Constant Generator::inheriteParameters(ScopeConstant parent) {
     for (int_t i = 0; i < parameterCount; i++) {
         Type type = verifyType(fold(base, base.program->parameters[i].type));
         program->parameters[i].type = type;
+        parameterTypes[i] = type;
     }
     return parentValue;
 }
@@ -186,8 +187,8 @@ void Generator::generateIdentifierExpr() {
             }
             continue;
         }
-        case LookupContext::Kind::Type: {
-            TypeProgram* prog = lookupCtx.getType();
+        case LookupContext::Kind::ContainingType: {
+            TypeProgram* prog = lookupCtx.getContainingType();
             auto result = lookupInType(prog, copyParameters(prog), name);
             if (result.has_value()) {
                 emitExpression(tok->location(), result.value());
@@ -219,6 +220,16 @@ void Generator::generateIdentifierExpr() {
                     emitExpression(tok->location(), entry.data);
                     return;
                 }
+            }
+            continue;
+        }
+        case LookupContext::Kind::ContainingTypeImpl: {
+            Constant implOf = lookupCtx.getContainingTypeImpl();
+            auto para = program->getParameterize(implOf);
+            auto result = lookupInType(cast<TypeProgram>(context.program(para.base)), para.arguments, name);
+            if (result.has_value()) {
+                emitExpression(tok->location(), result.value());
+                return;
             }
             continue;
         }
@@ -353,6 +364,7 @@ void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
 }
 
 std::optional<Expression> Generator::lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name) {
+    VERIFY(arguments.size() == typeProg->parameters.size());
     auto maybeDecl = typeProg->getDeclaration(name);
     if (maybeDecl.has_value())
         return generateDeclarationLiteral(maybeDecl.value(), arguments);
@@ -688,7 +700,12 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     for (;;) {
         if (scope.kind() == ConstantKind::Program) {
             Program* scopeProg = context.program(scope.program());
-            g.lookupStack.push_back(LookupContext::forType(cast<TypeProgram>(scopeProg)));
+            g.lookupStack.push_back(LookupContext::forContainingType(cast<TypeProgram>(scopeProg)));
+            if (scopeProg->isImpl()) {
+                // TODO: Find a nicer way to do this. Maybe it is not necessary to eagerly fold the impl expression?
+                Constant parentPara = g.makeParameterize(scope.program(), copyParameters(scopeProg));
+                g.lookupStack.push_back(LookupContext::forContainingTypeImpl(g.fold(parentPara, scopeProg->implConstant())));
+            }
             scope = scopeProg->translate(scopeProg->parent());
         } else if (scope.kind() == ConstantKind::Namespace) {
             Namespace* scopeNS = context.getNamespace(scope.nsHandle());

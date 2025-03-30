@@ -52,6 +52,13 @@ struct DeductionState {
     std::vector<Constant> arguments;
     ConstantPairSet equalities;
 
+    static DeductionState fromFoldBase(FoldBase base) {
+        DeductionState state(base.program, base.programHandle, base.arguments.size());
+        for (int_t i = 0; i < (int_t)base.arguments.size(); i++)
+            state.explicitArgument(i, base.arguments[i]);
+        return state;
+    }
+
     DeductionState(Program* prog, ProgramHandle handle, int_t parameterCount)
         : program(prog)
         , programHandle(handle)
@@ -97,11 +104,13 @@ constexpr std::vector<Constant> copyParameters(Program* prog) {
 }
 
 #define ENUMERATE_LOOKUP_CONTEXT_KINDS \
-    KIND(Namespace, Namespace)         \
-    KIND(Type, TypeProgram)            \
-    KIND(Local, Generator)             \
-    KIND(TemplateParameters, Program)
+    KIND(Namespace, Namespace*)        \
+    KIND(ContainingType, TypeProgram*) \
+    KIND(Local, Generator*)            \
+    KIND(TemplateParameters, Program*) \
+    KIND(ContainingTypeImpl, Constant) /* Always a parameterize constant */
 
+//! Lookup context structure, main look up logic in Generator::generateIdentifierExpr()
 struct LookupContext {
     enum class Kind : uint8_t {
 #define KIND(name, type) name,
@@ -111,13 +120,13 @@ struct LookupContext {
 
     Kind kind() const { return (Kind)(bits & TAG_MASK); }
 
-#define KIND(name, type)                        \
-    static LookupContext for##name(type* arg) { \
-        return LookupContext(Kind::name, arg);  \
-    }                                           \
-    type* get##name() const {                   \
-        VERIFY(kind() == Kind::name);           \
-        return ptr<type>();                     \
+#define KIND(name, type)                       \
+    static LookupContext for##name(type arg) { \
+        return LookupContext(Kind::name, arg); \
+    }                                          \
+    type get##name() const {                   \
+        VERIFY(kind() == Kind::name);          \
+        return get<type>();                    \
     }
     ENUMERATE_LOOKUP_CONTEXT_KINDS
 #undef KIND
@@ -130,9 +139,18 @@ private:
         VERIFY((static_cast<uintptr_t>(kind) & ~TAG_MASK) == 0u);
         VERIFY((reinterpret_cast<uintptr_t>(ptr) & TAG_MASK) == 0u);
     }
+    LookupContext(Kind kind, Constant c)
+        : bits(static_cast<uintptr_t>(kind) | (static_cast<uintptr_t>(c.toUint()) << 32)) {
+        static_assert(sizeof(uintptr_t) == 8);
+    }
 
     template<typename T>
-    T* ptr() const { return reinterpret_cast<T*>(bits & ~TAG_MASK); }
+    T get() const
+        requires(std::is_pointer_v<T>)
+    { return reinterpret_cast<T>(bits & ~TAG_MASK); }
+
+    template<std::same_as<Constant> T>
+    Constant get() const { return Constant::fromUint(bits >> 32); }
 
     uintptr_t bits;
 };
@@ -253,8 +271,12 @@ struct Generator : Util {
     VariableDeclaration visitVariableDeclaration(ExpressionCategory expectedCategory, bool programParameters);
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
+    void visitFunctionImplDeclaration();
     void visitFunctionDeclaration();
+    void visitFunctionParametersAndBody();
+    void visitTypeImplDeclaration();
     void visitTypeDeclaration();
+    void visitTypeMembers();
 
     void visitStatement();
     void visitExpression();
