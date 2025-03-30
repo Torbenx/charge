@@ -170,14 +170,6 @@ struct Generator : Util {
         Type type;
     };
 
-    struct OpaqueReference {
-        Type type;
-    };
-
-    struct ValueSlotInfo {
-        Type type;
-    };
-
     enum class WildcardMeaning : uint8_t {
         Error,
         ImplicitTemplate,
@@ -249,6 +241,7 @@ struct Generator : Util {
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;
     OwnedExpression currentExpression = OwnedExpression(INVALID_EXPRESSION);
+    std::optional<DeductionState> lazyParameterizeState;
 
     Generator(Context& context, ProgramHandle handle);
 
@@ -256,8 +249,11 @@ struct Generator : Util {
     void setParseLocation(parse::TokenHandle);
     void clearParseLocation();
 
+    void resolveLazyExpressions();
     Expression topExpression();
     OwnedExpression takeTopExpression();
+    DeductionState takeLazyParameterize();
+    bool isTopExpressionLazyParameterize();
 
     LocalScope beginLocalScope(SourceLocation);
     void endLocalScope(LocalScope scope, SourceLocation);

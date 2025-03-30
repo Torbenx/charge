@@ -200,6 +200,9 @@ enum class ExpressionKind : uint8_t {
     MemberExpression,
     Call,
     ImplicitCopy,
+
+    LazyParameterize,
+
     Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 

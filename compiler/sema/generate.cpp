@@ -5,14 +5,38 @@
 
 namespace sema {
 
+void Generator::resolveLazyExpressions() {
+    if (currentExpression.kind() == ExpressionKind::LazyParameterize) {
+        VERIFY(lazyParameterizeState.has_value());
+        VERIFY(lazyParameterizeState.value().isComplete());
+        currentExpression = generateDeclarationLiteral(lazyParameterizeState.value().programHandle, lazyParameterizeState.value().arguments);
+        lazyParameterizeState.reset();
+    }
+}
+
 Expression Generator::topExpression() {
+    resolveLazyExpressions();
     return currentExpression;
 }
 
 OwnedExpression Generator::takeTopExpression() {
     VERIFY(!expressionStack.empty());
     expressionStack.pop_back();
+    resolveLazyExpressions();
     return std::move(currentExpression);
+}
+
+DeductionState Generator::takeLazyParameterize() {
+    VERIFY(currentExpression.kind() == ExpressionKind::LazyParameterize);
+    VERIFY(lazyParameterizeState.has_value());
+    DeductionState result = std::move(lazyParameterizeState.value());
+    lazyParameterizeState.reset();
+    currentExpression = INVALID_EXPRESSION;
+    return result;
+}
+
+bool Generator::isTopExpressionLazyParameterize() {
+    return currentExpression.kind() == ExpressionKind::LazyParameterize;
 }
 
 void Generator::emitExpression(SourceLocation, OwnedExpression e) {
@@ -322,9 +346,8 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
             advance();
 
             VERIFY(aIndex == argumentCount);
-            VERIFY(pIndex == parameterCount);
-            VERIFY(state.isComplete());
-            emitExpression({}, generateProgramLiteral(state.programHandle, state.arguments));
+            lazyParameterizeState = std::move(state);
+            emitExpression({}, Expression(ExpressionKind::LazyParameterize, 0));
         };
 
         if (baseValue.kind() == ConstantKind::Program) {
@@ -351,7 +374,18 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
 }
 
 Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {
-    auto baseResult = topExpression();
+    Expression baseResult = INVALID_EXPRESSION;
+    if (isTopExpressionLazyParameterize()) {
+        DeductionState state = takeLazyParameterize();
+        if (state.program->kind() == ProgramKind::Global) {
+            VERIFY(state.isComplete());
+            baseResult = generateDeclarationLiteral(state.programHandle, state.arguments);
+        } else {
+            VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
+            return { std::move(state) };
+        }
+    } else
+        baseResult = topExpression();
 
     // Ugly special case
     if (baseResult.kind() == ExpressionKind::GlobalReference$Program || baseResult.kind() == ExpressionKind::GlobalReference$Parameterize) {

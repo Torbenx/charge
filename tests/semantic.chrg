@@ -258,3 +258,9 @@ struct impl BaseType{X}: {
     template(x: type)
     fn implicitTmplFunc() -> type: { }
 }
+
+template(T: type, S: type)
+fn mixedTemplateFunction(t: T, s: S) -> S: { }
+
+// expect-type type
+static callMixedTemplateFunction = mixedTemplateFunction{X}(X(), X);
