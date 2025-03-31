@@ -161,13 +161,13 @@ Constant Generator::inheriteParameters(ScopeConstant parent) {
     return parentValue;
 }
 
-std::optional<Constant> Generator::resolveImplicitImplTarget() {
+bool Generator::resolveImplicitImplTarget() {
     if (program->parent().kind() != ConstantKind::Program)
-        return std::nullopt;
+        return false;
     ProgramHandle parentProgHandle = program->parent().program();
     Program* parentProg = context.program(parentProgHandle);
     if (!parentProg->isImpl())
-        return std::nullopt;
+        return false;
 
     VERIFY(parentProg->kind() == ProgramKind::Type);
     Constant parentImplOf = fold(makeParameterize(parentProgHandle, copyParameters(parentProg)), parentProg->selfConstant());
@@ -210,8 +210,9 @@ std::optional<Constant> Generator::resolveImplicitImplTarget() {
         // TODO: What about the initializer?
     }
 
-    VERIFY(state.isComplete());
-    return makeParameterize(implOfProgHandle, state.arguments);
+    lazyParameterizeState = std::move(state);
+    emitExpression({}, Expression(ExpressionKind::LazyParameterize, 0));
+    return true;
 }
 
 Expression Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> baseArgs) {

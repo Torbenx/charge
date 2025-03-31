@@ -211,7 +211,7 @@ void Generator::visitFunctionImplDeclaration() {
 
     visitFunctionParametersAndBody();
 
-    checkFunctionImplDeclaration(implOf);
+    checkFunctionImplDeclaration(DeductionState::fromFoldBase(asFoldBase(implOf)));
 }
 
 void Generator::visitFunctionDeclaration() {
@@ -219,24 +219,22 @@ void Generator::visitFunctionDeclaration() {
     advance();
     visitFunctionParametersAndBody();
 
-    if (auto implOf = resolveImplicitImplTarget(); implOf.has_value()) {
-        checkFunctionImplDeclaration(implOf.value());
+    if (resolveImplicitImplTarget()) {
+        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->runtimeParameters, [](const RuntimeParameter& param) { return param.name; });
+        std::vector<Word> parameterNames { parameterNamesRange.begin(), parameterNamesRange.end() };
+        auto [state] = resolveCallTarget(parameterNames);
+        checkFunctionImplDeclaration(std::move(state));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
     }
 }
 
-void Generator::checkFunctionImplDeclaration(Constant implOf) {
-    VERIFY(implOf.kind() == ConstantKind::Parameterize);
-    auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Function);
-
+void Generator::checkFunctionImplDeclaration(DeductionState state) {
     auto* implProgram = cast<FunctionProgram>(program);
-    auto* baseProg = cast<FunctionProgram>(base.program);
+    auto* baseProg = cast<FunctionProgram>(state.program);
 
     VERIFY(implProgram->runtimeParameters.size() == baseProg->runtimeParameters.size());
-    auto state = DeductionState::fromFoldBase(base);
     for (int_t index = 0; index < (int_t)implProgram->runtimeParameters.size(); index++) {
         const auto& baseParameter = baseProg->runtimeParameters[index];
         const auto& implParameter = implProgram->runtimeParameters[index];
@@ -250,7 +248,8 @@ void Generator::checkFunctionImplDeclaration(Constant implOf) {
     bool match = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
     VERIFY(match);
 
-    program->completeSignatureCheck(true, implOf);
+    VERIFY(state.isComplete());
+    program->completeSignatureCheck(true, makeParameterize(state.programHandle, state.arguments));
 }
 
 void Generator::visitFunctionParametersAndBody() {
@@ -357,8 +356,8 @@ void Generator::visitTypeDeclaration() {
     advance();
     visitTypeMembers();
 
-    if (auto implOf = resolveImplicitImplTarget(); implOf.has_value()) {
-        checkTypeImplDeclaration(implOf.value());
+    if (resolveImplicitImplTarget()) {
+        checkTypeImplDeclaration(expressionToConstant());
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);

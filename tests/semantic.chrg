@@ -240,6 +240,8 @@ struct BaseType: {
 
     template(x)
     fn implicitTmplFunc() -> type: { }
+
+    fn implicitTmplFunc2(x) -> type: { }
 }
 
 // expect-impl BaseType{X}
@@ -257,6 +259,9 @@ struct impl BaseType{X}: {
     // expect-impl BaseType::implicitTmplFunc{X, type, #0}
     template(x: type)
     fn implicitTmplFunc() -> type: { }
+
+    // expect-impl BaseType::implicitTmplFunc2{X, type}
+    fn implicitTmplFunc2(x: type) -> type: { }
 }
 
 template(T: type, S: type)
