@@ -214,7 +214,7 @@ template<DeclarationKind kind>
 static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // fmt::println("commitDeclaration {}", state.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
-        return state.pushMemberScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {
         return state.pushNamespaceScope(name);
     } else {

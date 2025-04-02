@@ -117,7 +117,7 @@ void Generator::visitTemplateParameters() {
     advance();
 }
 
-Generator::VariableDeclaration Generator::visitVariableDeclaration(ExpressionCategory expectedCategory, bool programParameters) {
+Generator::VariableDeclaration Generator::visitVariableDeclaration(Constant expectedCategory, bool programParameters) {
     std::optional<Type> variableType;
     VERIFY(parameterTypes.size() == program->parameters.size());
     if (tok->kind() != Token::AssignStmt) {
@@ -178,7 +178,7 @@ Program::Parameter Generator::visitTemplateParameter() {
     Word name = Word::fromUint(tok->data());
     advance();
 
-    auto info = visitVariableDeclaration(ExpressionCategory::Value, true);
+    auto info = visitVariableDeclaration(Constant(ExpressionCategory::Value), true);
     std::optional<Constant> initializer;
     if (info.hasInitializer)
         initializer = expressionToConstant();
@@ -192,7 +192,7 @@ void Generator::visitStaticVariableDeclaration() {
     VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
     advance();
 
-    auto info = visitVariableDeclaration(ExpressionCategory::Value, false);
+    auto info = visitVariableDeclaration(Constant(ExpressionCategory::Value), false);
     VERIFY(info.hasInitializer);
     program->setType(info.type);
     // TODO: Constants are required to be the same when copied.
@@ -220,7 +220,7 @@ void Generator::visitFunctionDeclaration() {
     visitFunctionParametersAndBody();
 
     if (resolveImplicitImplTarget()) {
-        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->runtimeParameters, [](const RuntimeParameter& param) { return param.name; });
+        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->functionParameters, [](const FunctionParameter& param) { return param.name(); });
         std::vector<Word> parameterNames { parameterNamesRange.begin(), parameterNamesRange.end() };
         auto [state] = resolveCallTarget(parameterNames);
         checkFunctionImplDeclaration(std::move(state));
@@ -234,14 +234,15 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
     auto* implProgram = cast<FunctionProgram>(program);
     auto* baseProg = cast<FunctionProgram>(state.program);
 
-    VERIFY(implProgram->runtimeParameters.size() == baseProg->runtimeParameters.size());
-    for (int_t index = 0; index < (int_t)implProgram->runtimeParameters.size(); index++) {
-        const auto& baseParameter = baseProg->runtimeParameters[index];
-        const auto& implParameter = implProgram->runtimeParameters[index];
-        VERIFY(baseParameter.name == implParameter.name);
-        VERIFY(baseParameter.kind() == implParameter.kind());
-        bool match = staticMatch(state, baseParameter.type(), implParameter.type());
-        VERIFY(match);
+    VERIFY(implProgram->functionParameters.size() == baseProg->functionParameters.size());
+    for (int_t index = 0; index < (int_t)implProgram->functionParameters.size(); index++) {
+        const auto& baseParameter = baseProg->functionParameters[index];
+        const auto& implParameter = implProgram->functionParameters[index];
+        VERIFY(baseParameter.name() == implParameter.name());
+        bool categoriesMatch = staticMatch(state, baseParameter.category(), implParameter.category());
+        VERIFY(categoriesMatch);
+        bool typesMatch = staticMatch(state, baseParameter.type(), implParameter.type());
+        VERIFY(typesMatch);
         // TODO: What about the initializer?
     }
 
@@ -258,39 +259,19 @@ void Generator::visitFunctionParametersAndBody() {
 
     lookupStack.push_back(LookupContext::forLocal(this));
 
-    auto runtimeParameterKind = [](Token token) {
-        switch (token) {
-        case Token::LetValueDecl:
-            return RuntimeParameterKind::LetVariable;
-        case Token::VarValueDecl:
-            return RuntimeParameterKind::VarVariable;
-        case Token::UniqueReferenceDecl:
-            return RuntimeParameterKind::UniqueReference;
-        case Token::SharedReferenceDecl:
-            return RuntimeParameterKind::SharedReference;
-        case Token::ConstUniqueReferenceDecl:
-            return RuntimeParameterKind::ConstUniqueReference;
-        case Token::ConstSharedReferenceDecl:
-            return RuntimeParameterKind::ConstSharedReference;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-
     while (tok->kind() != Token::EmptyNode) {
-        auto parameterKind = runtimeParameterKind(tok->kind());
-        auto expectedCategory = expectedInitializerCategory(tok->kind());
+        auto expectedCategory = Constant(expectedInitializerCategory(tok->kind()));
         Word name = Word::fromUint(tok->data());
         auto nameLoc = tok->location();
         advance();
         auto info = visitVariableDeclaration(expectedCategory, true);
         VERIFY(!info.hasInitializer);
 
-        VERIFY(fnProgram->runtimeParameters.size() == localState.parameterActiveMask.size());
-        int_t parameterIndex = fnProgram->runtimeParameters.size();
+        VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
+        int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
         localLookupEntries.push_back({ name, Expression::parameterReference(parameterIndex) });
-        fnProgram->runtimeParameters.push_back({ parameterKind, name, info.type, nameLoc });
+        fnProgram->functionParameters.push_back({ nameLoc, name, info.type, expectedCategory });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -311,7 +292,7 @@ void Generator::visitFunctionParametersAndBody() {
 
         toValueExpression(arrowLoc);
         program->setType(resultType(topExpression()));
-        emitInitialize(arrowLoc, Expression::parameterReference(fnProgram->runtimeParameters.size()), takeTopExpression());
+        emitInitialize(arrowLoc, Expression::returnValueReference(fnProgram), takeTopExpression());
 
         endLocalScope(body, endLoc);
         emitScopeEnd(endLoc, bodyScopeInst);
@@ -378,22 +359,19 @@ void Generator::visitTypeMembers() {
     auto* typeProgram = cast<TypeProgram>(program);
 
     auto savedTok = tok;
-    for (int_t i = 0; i < (int_t)typeProgram->runtimeParameters.size(); i++) {
-        auto& member = typeProgram->runtimeParameters[i];
-        VERIFY(member.kind() == RuntimeParameterKind::UncheckedMember);
+    for (int_t i = 0; i < (int_t)typeProgram->members.size(); i++) {
+        auto& member = typeProgram->members[i];
+        VERIFY(!member.isChecked());
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
         VERIFY(tok->data() == Constant(ConstantKind::Invalid, i).toUint());
-        RuntimeParameterKind newKind = tok->kind() == Token::HasMemberDecl ? RuntimeParameterKind::HasMember : RuntimeParameterKind::Member;
         advance();
 
         SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
         visitExpression();
         contextualToType(conversionLocation);
-        Type type = verifyType(expressionToConstant());
-
-        member = RuntimeParameter(newKind, member.name, type, member.location());
+        member.setType(verifyType(expressionToConstant()));
     }
 
     tok = savedTok;
@@ -414,7 +392,7 @@ void Generator::visitStatement() {
     } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
         || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::ConstUniqueReferenceDecl
         || tok->kind() == Token::SharedReferenceDecl || tok->kind() == Token::ConstSharedReferenceDecl) {
-        auto expectedCategory = expectedInitializerCategory(tok->kind());
+        auto expectedCategory = Constant(expectedInitializerCategory(tok->kind()));
         Word name = Word::fromUint(tok->data());
         SourceLocation nameLoc = tok->location();
         advance();

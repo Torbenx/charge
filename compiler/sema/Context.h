@@ -80,13 +80,13 @@ struct Context {
         pushScope((ScopeConstant)nsHandle, getNamespace(nsHandle));
         return (ScopeConstant)nsHandle;
     }
-    ScopeConstant pushMemberScope(Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+    ScopeConstant pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
         std::optional<Scope*> scope = currentScope();
         VERIFY(scope.has_value());
         TypeProgram* program = static_cast<TypeProgram*>(scope.value());
         VERIFY(program->kind() == ProgramKind::Type);
-        int_t id = program->runtimeParameters.size();
-        program->runtimeParameters.emplace_back(name, parseLocation, location);
+        int_t id = program->members.size();
+        program->members.emplace_back(location, isHas, name, parseLocation);
         pushEmptyScope(INVALID_SCOPE_CONSTANT); // TODO: Avoid this
         return ScopeConstant(Constant(ConstantKind::Invalid, id));
     }

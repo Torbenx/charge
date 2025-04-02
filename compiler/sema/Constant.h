@@ -23,6 +23,7 @@ enum class ExpressionCategory : uint8_t {
 };
 
 struct Constant;
+struct FunctionProgram;
 
 struct ProgramHandle {
     uint32_t m_id = -1;
@@ -54,6 +55,7 @@ enum class ConstantKind : uint8_t {
     FunctionSignature$Program,
     FunctionSignature$Parameterize, // non-dependent
     BooleanLiteral,
+    ExpressionCategoryLiteral,
     MemberPointer,
 
     Parameterize, // either all argument substituted or just the inherited ones
@@ -74,6 +76,8 @@ struct Constant {
         : Constant(ConstantKind::Program, prog.id()) { }
     constexpr explicit Constant(NamespaceHandle ns)
         : Constant(ConstantKind::Namespace, ns.id()) { }
+    constexpr explicit Constant(ExpressionCategory category)
+        : Constant(ConstantKind::ExpressionCategoryLiteral, std::to_underlying(category)) { }
     constexpr Constant(BuiltinId id)
         : Constant(ProgramHandle(std::to_underlying(id))) { }
 
@@ -127,6 +131,11 @@ struct Constant {
     constexpr bool booleanValue() const {
         VERIFY(kind() == ConstantKind::BooleanLiteral);
         return idBits != 0;
+    }
+
+    constexpr ExpressionCategory expressionCategory() const {
+        VERIFY(kind() == ConstantKind::ExpressionCategoryLiteral);
+        return (ExpressionCategory)idBits;
     }
 
     constexpr bool operator==(const Constant&) const = default;
@@ -216,6 +225,7 @@ struct Expression {
     static constexpr Expression parameterReference(uint32_t id) {
         return Expression(ExpressionKind::ParameterReference, id);
     }
+    static constexpr Expression returnValueReference(FunctionProgram* prog);
     static constexpr Expression templateParameterReference(uint32_t id) {
         return Expression(ExpressionKind::TemplateParameterReference, id);
     }

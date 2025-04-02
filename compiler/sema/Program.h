@@ -71,13 +71,13 @@ private:
 };
 
 struct CallData {
-    ExpressionCategory resultCategory;
+    Constant resultCategory;
     Constant callTarget;
     Type returnType;
     std::vector<Expression> arguments;
 };
 struct Call {
-    ExpressionCategory resultCategory;
+    Constant resultCategory;
     Constant callTarget;
     Type returnType;
     std::span<const Expression> arguments;
@@ -393,93 +393,108 @@ struct GlobalProgram : Program {
     GlobalKind m_globalKind = GlobalKind::Let;
 };
 
-enum class RuntimeParameterKind : uint8_t {
-    UncheckedMember,
-    Member,
-    HasMember,
+template<typename P>
+struct callParameters;
 
-    LetVariable,
-    VarVariable,
-    UniqueReference,
-    SharedReference,
-    ConstUniqueReference,
-    ConstSharedReference,
-};
-
-inline ExpressionCategory expectedInitializerCategory(RuntimeParameterKind kind) {
-    switch (kind) {
-    case RuntimeParameterKind::HasMember:
-    case RuntimeParameterKind::Member:
-    case RuntimeParameterKind::VarVariable:
-    case RuntimeParameterKind::LetVariable:
-        return ExpressionCategory::Value;
-    case RuntimeParameterKind::UniqueReference:
-        return ExpressionCategory::UniqueReference;
-    case RuntimeParameterKind::SharedReference:
-        return ExpressionCategory::SharedReference;
-    case RuntimeParameterKind::ConstUniqueReference:
-        return ExpressionCategory::ConstUniqueReference;
-    case RuntimeParameterKind::ConstSharedReference:
-        return ExpressionCategory::ConstSharedReference;
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-struct RuntimeParameter {
-    TaggedSourceLocation<RuntimeParameterKind> m_location;
+struct CallParameter {
     Word name;
-    union {
-        parse::TokenHandle parseLocation; // active for unchecked kinds
-        Type type;
-    } u;
-
-    RuntimeParameter(RuntimeParameterKind kind, Word name, Type type, SourceLocation location)
-        : m_location(kind, location), name(name), u { .type = type } { }
-
-    RuntimeParameter(Word name, parse::TokenHandle parseLocation, SourceLocation location)
-        : m_location(RuntimeParameterKind::UncheckedMember, location)
-        , name(name)
-        , u { .parseLocation = parseLocation } { }
-
-    void setKind(RuntimeParameterKind kind) {
-        m_location.setTag(kind);
-    }
-
-    RuntimeParameterKind kind() const { return m_location.tag(); }
-    SourceLocation location() const { return m_location.location(); }
-    Type type() const {
-        VERIFY(kind() != RuntimeParameterKind::UncheckedMember);
-        return u.type;
-    }
-    parse::TokenHandle parseLocation() const {
-        VERIFY(kind() == RuntimeParameterKind::UncheckedMember);
-        return u.parseLocation;
-    }
+    Type type;
+    Constant expectedInitializerCategory;
 };
 
-struct CallableProgram : Program {
-    CallableProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : Program(kind, name, parseLocation, rawParent, location) { }
-
-    std::vector<RuntimeParameter> runtimeParameters;
+template<typename P>
+concept CallableProgram = requires(P* program, int_t index) {
+    { callParameters<P>::get(program) } -> std::ranges::random_access_range;
+    { callParameters<P>::get(program)[index] } -> std::same_as<CallParameter>;
 };
 
-struct FunctionProgram : CallableProgram {
+struct FunctionParameter {
+private:
+    SourceLocation m_location;
+    Word m_name;
+    Type m_type;
+    Constant m_category;
+
+public:
+    FunctionParameter(SourceLocation location, Word name, Type type, Constant category)
+        : m_location(location), m_name(name), m_type(type), m_category(category) { }
+
+    SourceLocation location() const { return m_location; }
+    Word name() const { return m_name; }
+    Type type() const { return m_type; }
+    Constant category() const { return m_category; }
+
+    operator CallParameter() const { return { name(), type(), category() }; }
+};
+struct FunctionProgram : Program {
     FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : CallableProgram(ProgramKind::Function, name, parseLocation, rawParent, location) { }
+        : Program(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
     void setBody(std::vector<Instruction> body) { m_body = std::move(body); }
     std::span<const Instruction> body() { return m_body; }
     ExternConstant returnType() const { return m_type.value(); }
 
+    std::vector<FunctionParameter> functionParameters;
     std::vector<Instruction> m_body;
 };
-
-struct TypeProgram : CallableProgram, Scope {
-    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : CallableProgram(ProgramKind::Type, name, parseLocation, rawParent, location) { }
+template<>
+struct callParameters<FunctionProgram> {
+    static auto get(FunctionProgram* prog) {
+        return std::views::transform(prog->functionParameters, [](const FunctionParameter& p) -> CallParameter { return p; });
+    }
 };
+static_assert(CallableProgram<FunctionProgram>);
+
+struct Member {
+private:
+    struct Fields {
+        bool hasBit : 1;
+        bool checkedBit : 1;
+    };
+    TaggedSourceLocation<Fields> m_fields;
+    Word m_name;
+    union {
+        parse::TokenHandle parseLocation;
+        Type type;
+    } u;
+
+public:
+    Member(SourceLocation location, bool isHas, Word name, parse::TokenHandle parseLocation)
+        : m_fields(Fields { .hasBit = isHas, .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
+
+    void setType(Type type) {
+        VERIFY(!isChecked());
+        auto tag = m_fields.tag();
+        tag.checkedBit = true;
+        m_fields.setTag(tag);
+        u.type = type;
+    }
+
+    bool isHas() const { return m_fields.tag().hasBit; }
+    bool isChecked() const { return m_fields.tag().checkedBit; }
+    SourceLocation location() const { return m_fields.location(); }
+    Type type() const {
+        VERIFY(isChecked());
+        return u.type;
+    }
+    parse::TokenHandle parseLocation() const {
+        VERIFY(!isChecked());
+        return u.parseLocation;
+    }
+    Word name() const { return m_name; }
+};
+struct TypeProgram : Program, Scope {
+    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
+        : Program(ProgramKind::Type, name, parseLocation, rawParent, location) { }
+    std::vector<Member> members;
+};
+template<>
+struct callParameters<TypeProgram> {
+    static auto get(TypeProgram* program) {
+        return std::views::transform(program->members, [](Member m) -> CallParameter { return { m.name(), m.type(), Constant(ExpressionCategory::Value) }; });
+    }
+};
+static_assert(CallableProgram<TypeProgram>);
 
 template<typename T>
 constexpr std::optional<T*> try_cast(Program* prog) {
@@ -506,6 +521,58 @@ constexpr std::optional<T*> try_cast(Program* prog) {
 
 template<typename T>
 constexpr T* cast(Program* prog) { return try_cast<T>(prog).value(); }
+
+template<typename P, template<typename> typename r>
+concept implements = requires(P* program) { r<P>::get(program); };
+
+template<template<typename> typename r>
+constexpr bool try_visit(Program* prog, auto&& callable) {
+    switch (prog->kind()) {
+    case ProgramKind::Global:
+        if constexpr (implements<GlobalProgram, r>) {
+            callable(r<GlobalProgram>::get(static_cast<GlobalProgram*>(prog)));
+            return true;
+        } else
+            return false;
+    case ProgramKind::Type:
+        if constexpr (implements<TypeProgram, r>) {
+            callable(r<TypeProgram>::get(static_cast<TypeProgram*>(prog)));
+            return true;
+        } else
+            return false;
+    case ProgramKind::Function:
+        if constexpr (implements<FunctionProgram, r>) {
+            callable(r<FunctionProgram>::get(static_cast<FunctionProgram*>(prog)));
+            return true;
+        } else
+            return false;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+};
+
+template<template<typename> typename r>
+constexpr auto visit(Program* prog, auto&& callable) {
+    switch (prog->kind()) {
+    case ProgramKind::Global:
+        if constexpr (implements<GlobalProgram, r>) {
+            return callable(r<GlobalProgram>::get(static_cast<GlobalProgram*>(prog)));
+        } else
+            VERIFY_NOT_REACHED();
+    case ProgramKind::Type:
+        if constexpr (implements<TypeProgram, r>) {
+            return callable(r<TypeProgram>::get(static_cast<TypeProgram*>(prog)));
+        } else
+            VERIFY_NOT_REACHED();
+    case ProgramKind::Function:
+        if constexpr (implements<FunctionProgram, r>) {
+            return callable(r<FunctionProgram>::get(static_cast<FunctionProgram*>(prog)));
+        } else
+            VERIFY_NOT_REACHED();
+    default:
+        VERIFY_NOT_REACHED();
+    }
+};
 
 union ProgramUnion {
     GlobalProgram global;
@@ -547,5 +614,9 @@ union ProgramUnion {
     }
 };
 static_assert(sizeof(ProgramUnion) == 336);
+
+inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
+    return parameterReference(prog->functionParameters.size());
+}
 
 }

@@ -162,7 +162,7 @@ struct Generator : Util {
     };
 
     struct LocalReference {
-        ExpressionCategory category;
+        Constant category;
         Type type;
     };
 
@@ -264,7 +264,7 @@ struct Generator : Util {
         Type type;
         bool hasInitializer;
     };
-    VariableDeclaration visitVariableDeclaration(ExpressionCategory expectedCategory, bool programParameters);
+    VariableDeclaration visitVariableDeclaration(Constant expectedCategory, bool programParameters);
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
     void visitFunctionImplDeclaration();
@@ -292,13 +292,13 @@ struct Generator : Util {
     Constant fold(FoldBase base, ExternConstant v);
     bool staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
 
-    RuntimeParameter member(MemberPointer pointer);
+    Member member(MemberPointer pointer);
     Type memberType(MemberPointer pointer);
     Type memberType(Constant memberPointer);
     Type typeOf(Constant);
     Type resultType(Expression);
     Type verifyType(Constant);
-    ExpressionCategory categoryOf(Expression);
+    Constant categoryOf(Expression);
 
     Constant makeTemplateSignature(Constant templateProg);
     Type makeTemplateIdFor(Constant templateProg);
@@ -317,6 +317,8 @@ struct Generator : Util {
     void generateParameterizeExpr(std::span<const Word> argumentNames);
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(SourceLocation location, CallTarget base);
+    template<std::ranges::random_access_range R>
+    std::vector<Expression> generateCallArguments(DeductionState& state, R parameters);
     std::optional<Expression> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
     void generateStaticAccessExpr();
     struct MemberAccessState;
@@ -336,7 +338,7 @@ struct Generator : Util {
 
     void contextualToType(SourceLocation);
     void contextualToBool(SourceLocation);
-    void initialize(SourceLocation, DeductionState&, ExpressionCategory expectCategory, ExternConstant expectedType);
+    void initialize(SourceLocation, DeductionState&, ExternConstant expectCategory, ExternConstant expectedType);
 
     struct InstructionHandle {
         uint32_t offset;

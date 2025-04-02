@@ -54,6 +54,7 @@ keywords = [
 specialWords = [
     "bool",
     "error",
+    "expression_category",
     "false",
     "function_id",
     "function_signature",

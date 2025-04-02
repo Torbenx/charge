@@ -13,6 +13,8 @@ BUILTIN_TYPE(error)
 
 BUILTIN_TYPE(namespace)
 
+BUILTIN_TYPE(expression_category)
+
 BUILTIN_TYPE(template_signature)
 BUILTIN_TEMPLATE(template_id)
 

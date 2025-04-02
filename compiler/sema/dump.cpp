@@ -163,12 +163,11 @@ struct Dumper {
 
     std::string formatMember(Program* prog, MemberPointer pointer) {
         auto* parentProg = cast<TypeProgram>(context.program(prog->baseProgram(pointer.parentType)));
-        const auto& member = parentProg->runtimeParameters[pointer.memberIndex];
-        if (member.name.empty()) {
-            VERIFY(member.kind() == RuntimeParameterKind::HasMember);
+        const auto& member = parentProg->members[pointer.memberIndex];
+        if (member.isHas()) {
             return "(has " + formatConstant(parentProg, member.type()) + ")";
         } else {
-            return (std::string)context.wordTable.view(member.name);
+            return (std::string)context.wordTable.view(member.name());
         }
     }
 };

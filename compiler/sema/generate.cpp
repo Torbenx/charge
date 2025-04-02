@@ -340,7 +340,7 @@ void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
 
                 ExternConstant pType = state.program->parameters[pIndex].type;
                 visitExpression();
-                initialize(conversionLocation, state, ExpressionCategory::Value, pType);
+                initialize(conversionLocation, state, Constant(ExpressionCategory::Value), pType);
                 state.explicitArgument(pIndex, expressionToConstant());
             }
             VERIFY(tok->kind() == Token::EmptyNode);
@@ -382,7 +382,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             VERIFY(state.isComplete());
             baseResult = generateDeclarationLiteral(state.programHandle, state.arguments);
         } else {
-            VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
+            // VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
             return { std::move(state) };
         }
     } else
@@ -400,7 +400,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
         auto baseValue = baseResult.constant();
         if (baseValue.kind() == ConstantKind::Program) {
             Program* baseProg = context.program(baseValue.program());
-            VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
+            // VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
             state.copyParameters(baseProg->inheritedParameterCount);
             takeTopExpression();
@@ -408,7 +408,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
         } else if (baseValue.kind() == ConstantKind::Parameterize) {
             auto param = program->getParameterize(baseValue);
             Program* baseProg = context.program(param.base);
-            VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
+            // VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             VERIFY(param.arguments.size() <= baseProg->parameters.size());
             DeductionState state(baseProg, param.base, param.arguments.size());
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
@@ -423,32 +423,40 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
 void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
     auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Type) {
-        CallableProgram* callableProg = cast<CallableProgram>(state.program);
 
-        std::vector<Expression> arguments;
-        arguments.resize(callableProg->runtimeParameters.size(), INVALID_EXPRESSION);
-
-        int_t argumentIndex = 0;
-        const auto& parameters = callableProg->runtimeParameters;
-        while (tok->kind() == Token::CallArgument) {
-            SourceLocation conversionLocation = tok->location();
-            advance();
-            visitExpression();
-            auto expectedCategory = expectedInitializerCategory(callableProg->runtimeParameters[argumentIndex].kind());
-            initialize(conversionLocation, state, expectedCategory, parameters[argumentIndex].type());
-            arguments[argumentIndex] = takeTopExpression().release();
-            argumentIndex += 1;
-        }
-        VERIFY(tok->kind() == Token::EmptyNode);
-        advance();
+        auto arguments = visit<callParameters>(state.program, [this, &state](auto parameters) { return generateCallArguments(state, parameters); });
 
         VERIFY(state.isComplete());
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-        Type returnType = verifyType(callableProg->kind() == ProgramKind::Type ? callTarget : fold(callTarget, cast<FunctionProgram>(callableProg)->returnType()));
-        emitCall(location, Call { ExpressionCategory::Value, callTarget, returnType, arguments });
+        Type returnType = verifyType(state.program->kind() == ProgramKind::Type ? callTarget : fold(callTarget, cast<FunctionProgram>(state.program)->returnType()));
+        emitCall(location, Call { Constant(ExpressionCategory::Value), callTarget, returnType, arguments });
         return;
     }
     VERIFY_NOT_REACHED();
+}
+
+template<std::ranges::random_access_range R>
+std::vector<Expression> Generator::generateCallArguments(DeductionState& state, R parameters) {
+    int_t parameterCount = std::ssize(parameters);
+    std::vector<Expression> arguments;
+    arguments.resize(parameterCount, INVALID_EXPRESSION);
+
+    int_t argumentIndex = 0;
+    while (tok->kind() == Token::CallArgument) {
+        VERIFY(argumentIndex < parameterCount);
+        CallParameter parameter = parameters[argumentIndex];
+        SourceLocation conversionLocation = tok->location();
+        advance();
+        visitExpression();
+        initialize(conversionLocation, state, parameter.expectedInitializerCategory, parameter.type);
+        arguments[argumentIndex] = takeTopExpression().release();
+        argumentIndex += 1;
+    }
+    VERIFY(argumentIndex == parameterCount);
+    VERIFY(tok->kind() == Token::EmptyNode);
+    advance();
+
+    return arguments;
 }
 
 std::optional<Expression> Generator::lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name) {
@@ -458,8 +466,8 @@ std::optional<Expression> Generator::lookupInType(TypeProgram* typeProg, std::sp
         return generateDeclarationLiteral(maybeDecl.value(), arguments);
 
     std::optional<Expression> result;
-    for (const auto& member : typeProg->runtimeParameters) {
-        if (member.kind() != RuntimeParameterKind::HasMember)
+    for (const auto& member : typeProg->members) {
+        if (!member.isHas())
             continue;
         Type baseType = member.type();
         if (baseType.kind() == ConstantKind::Program || baseType.kind() == ConstantKind::Parameterize) {
@@ -524,16 +532,16 @@ void Generator::generateMemberAccessExprInside(MemberAccessState& state, Type ba
     auto base = asFoldBase(baseType);
     VERIFY(base.program->kind() == ProgramKind::Type);
     TypeProgram* prog = cast<TypeProgram>(base.program);
-    const auto& members = prog->runtimeParameters;
+    const auto& members = prog->members;
     for (int_t i = 0; i < (int_t)members.size(); i++) {
-        if (members[i].name == name) {
+        if (members[i].name() == name) {
             state.memberIndicies.push_back(i);
             emitMemberAccessExpr(state);
             return;
         }
     }
     for (int_t i = 0; i < (int_t)members.size(); i++) {
-        if (members[i].kind() == RuntimeParameterKind::HasMember) {
+        if (members[i].isHas()) {
             state.memberIndicies.push_back(i);
             generateMemberAccessExprInside(state, members[i].type(), name);
             state.memberIndicies.pop_back();
@@ -566,7 +574,8 @@ Constant Generator::copyAsConstant(Expression expr) {
 
 void Generator::toValueExpression(SourceLocation location) {
     auto inCategory = categoryOf(topExpression());
-    if (inCategory == ExpressionCategory::Value)
+    VERIFY(inCategory.kind() == ConstantKind::ExpressionCategoryLiteral); // TODO: Make this generic
+    if (inCategory == Constant(ExpressionCategory::Value))
         return;
 
     auto copyFrom = takeTopExpression();
@@ -597,20 +606,29 @@ void Generator::toValueExpression(SourceLocation location) {
 void Generator::contextualToType(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
     DeductionState state(program, programHandle, 0);
-    initialize(location, state, ExpressionCategory::Value, builtins::type_type);
+    initialize(location, state, Constant(ExpressionCategory::Value), builtins::type_type);
 }
 
 void Generator::contextualToBool(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
     DeductionState state(program, programHandle, 0);
-    initialize(location, state, ExpressionCategory::Value, builtins::bool_type);
+    initialize(location, state, Constant(ExpressionCategory::Value), builtins::bool_type);
 }
 
-void Generator::initialize(SourceLocation location, DeductionState& state, ExpressionCategory expectedCategory, ExternConstant expectedType) {
+void Generator::initialize(SourceLocation location, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
     auto expr = topExpression();
     bool sameType = staticMatch(state, expectedType, resultType(expr));
     VERIFY(sameType);
-    auto inputCategory = categoryOf(expr);
+    auto inputCategoryConstant = categoryOf(expr);
+    if (expectedCategoryConstant.kind() != ConstantKind::ExpressionCategoryLiteral) {
+        bool match = staticMatch(state, expectedCategoryConstant, inputCategoryConstant);
+        VERIFY(match);
+        return;
+    }
+
+    VERIFY(inputCategoryConstant.kind() == ConstantKind::ExpressionCategoryLiteral); // TODO: Make this generic
+    auto inputCategory = inputCategoryConstant.expressionCategory();
+    auto expectedCategory = Constant(expectedCategoryConstant).expressionCategory();
     if (expectedCategory == ExpressionCategory::Value) {
         toValueExpression(location);
     } else {
@@ -717,6 +735,8 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
     }
     case ConstantKind::BooleanLiteral:
         return Constant(pValue).booleanValue() == aValue.booleanValue();
+    case ConstantKind::ExpressionCategoryLiteral:
+        return Constant(pValue).expressionCategory() == aValue.expressionCategory();
     default:
         VERIFY_NOT_REACHED();
     }
@@ -770,6 +790,8 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     }
     case ConstantKind::BooleanLiteral:
         return (Constant)v;
+    case ConstantKind::ExpressionCategoryLiteral:
+        return (Constant)v;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -813,43 +835,29 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     g.visitDeclaration();
 }
 
-ExpressionCategory Generator::categoryOf(Expression expr) {
+Constant Generator::categoryOf(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::GlobalReference$Program:
     case ExpressionKind::GlobalReference$Parameterize: {
         auto base = asFoldBase(expr.referencedGlobal());
         switch (cast<GlobalProgram>(base.program)->globalKind()) {
         case GlobalKind::Var:
-            return ExpressionCategory::SharedReference;
+            return Constant(ExpressionCategory::SharedReference);
         case GlobalKind::ConstVar:
         case GlobalKind::Let:
         case GlobalKind::OpenLet:
-            return ExpressionCategory::ConstSharedReference;
+            return Constant(ExpressionCategory::ConstSharedReference);
         default:
             VERIFY_NOT_REACHED();
         }
     }
     case ExpressionKind::TemplateParameterReference:
-        return ExpressionCategory::ConstSharedReference;
+        return Constant(ExpressionCategory::ConstSharedReference);
     case ExpressionKind::VariableReference:
-        return ExpressionCategory::UniqueReference;
+        return Constant(ExpressionCategory::UniqueReference);
     case ExpressionKind::ParameterReference:
-        switch (cast<FunctionProgram>(program)->runtimeParameters[expr.id()].kind()) {
-        case RuntimeParameterKind::VarVariable:
-            return ExpressionCategory::UniqueReference;
-        case RuntimeParameterKind::LetVariable:
-            return ExpressionCategory::ConstUniqueReference;
-        case RuntimeParameterKind::UniqueReference:
-            return ExpressionCategory::UniqueReference;
-        case RuntimeParameterKind::ConstUniqueReference:
-            return ExpressionCategory::ConstUniqueReference;
-        case RuntimeParameterKind::SharedReference:
-            return ExpressionCategory::SharedReference;
-        case RuntimeParameterKind::ConstSharedReference:
-            return ExpressionCategory::ConstSharedReference;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        // TODO: References to the return value are currently represented as parameter references but are not handled here.
+        return cast<FunctionProgram>(program)->functionParameters[expr.id()].category();
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].category;
     case ExpressionKind::MemberExpression:
@@ -857,21 +865,21 @@ ExpressionCategory Generator::categoryOf(Expression expr) {
     case ExpressionKind::Call:
         return program->getCall(expr).resultCategory;
     case ExpressionKind::ImplicitCopy:
-        return ExpressionCategory::Value;
+        return Constant(ExpressionCategory::Value);
     default:
         VERIFY(expr.isConstant());
-        return ExpressionCategory::Value;
+        return Constant(ExpressionCategory::Value);
     }
 }
 
-RuntimeParameter Generator::member(MemberPointer pointer) {
-    return cast<TypeProgram>(asFoldBase(pointer.parentType).program)->runtimeParameters[pointer.memberIndex];
+Member Generator::member(MemberPointer pointer) {
+    return cast<TypeProgram>(asFoldBase(pointer.parentType).program)->members[pointer.memberIndex];
 }
 
 Type Generator::memberType(MemberPointer pointer) {
     auto base = asFoldBase(pointer.parentType);
     auto* prog = cast<TypeProgram>(base.program);
-    return verifyType(fold(std::move(base), prog->runtimeParameters[pointer.memberIndex].type()));
+    return verifyType(fold(std::move(base), prog->members[pointer.memberIndex].type()));
 }
 
 Type Generator::memberType(Constant memberPointerValue) {
@@ -900,6 +908,8 @@ Type Generator::typeOf(Constant value) {
         return builtins::namespace_type;
     case ConstantKind::BooleanLiteral:
         return builtins::bool_type;
+    case ConstantKind::ExpressionCategoryLiteral:
+        return builtins::expression_category_type;
     case ConstantKind::Computed:
         return program->getComputedConstant(value).type;
     case ConstantKind::RemoteComputed: {
@@ -951,7 +961,7 @@ Type Generator::resultType(Expression expr) {
     case ExpressionKind::TemplateParameterReference:
         return parameterTypes[expr.templateParameterIndex()];
     case ExpressionKind::ParameterReference:
-        return cast<FunctionProgram>(program)->runtimeParameters[expr.parameterIndex()].type();
+        return cast<FunctionProgram>(program)->functionParameters[expr.parameterIndex()].type();
     case ExpressionKind::VariableReference:
         return localVariables[expr.variableIndex()].type;
     case ExpressionKind::ReferenceReference:
@@ -1078,6 +1088,9 @@ void Generator::generateBuiltins(Context& context) {
     }
     {
         BuiltinGenerator g { context, BuiltinId::namespace_type };
+    }
+    {
+        BuiltinGenerator g { context, BuiltinId::expression_category_type };
     }
 
     // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
