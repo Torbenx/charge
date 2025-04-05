@@ -615,6 +615,12 @@ void Generator::contextualToBool(SourceLocation location) {
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::bool_type);
 }
 
+void Generator::contextualToExpressionCategory(SourceLocation location) {
+    // We can get away with this state because parameter-side value is so simple
+    DeductionState state(program, programHandle, 0);
+    initialize(location, state, Constant(ExpressionCategory::Value), builtins::expression_category_type);
+}
+
 void Generator::initialize(SourceLocation location, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
     auto expr = topExpression();
     bool sameType = staticMatch(state, expectedType, resultType(expr));

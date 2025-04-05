@@ -95,6 +95,21 @@ struct Dumper {
             return "fnsig(" + formatConstant(prog, v.functionSignatureBaseConstant()) + ")";
         case ConstantKind::BooleanLiteral:
             return v.booleanValue() ? "true" : "false";
+        case ConstantKind::ExpressionCategoryLiteral:
+            switch (v.expressionCategory()) {
+            case ExpressionCategory::Value:
+                return "expression_category::value";
+            case ExpressionCategory::UniqueReference:
+                return "expression_category::unique_ref";
+            case ExpressionCategory::SharedReference:
+                return "expression_category::shared_ref";
+            case ExpressionCategory::ConstUniqueReference:
+                return "expression_category::const_unique_ref";
+            case ExpressionCategory::ConstSharedReference:
+                return "expression_category::const_shared_ref";
+            default:
+                VERIFY_NOT_REACHED();
+            }
         case ConstantKind::Computed:
             result += "e";
             break;

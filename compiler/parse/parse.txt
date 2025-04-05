@@ -461,6 +461,10 @@ LinearState variable_type() then expression
     keyword const
         updateKind TokenKind::ConstSharedReferenceDecl
         next after_variable_const_modifier
+    punctuation <
+        pushScope ScopeKind::GenericCategoryExpression
+        updateKind TokenKind::GenericCategoryVariableDecl
+        next impl_expression
     then
         pushScope ScopeKind::VariableType
 LinearState after_variable_modifier() then expression
@@ -547,6 +551,9 @@ LinearState after_impl_expression() then error
         pushScope ScopeKind::BraceInImplExpr
         emitCallToken TokenKind::Parameterize
         next check_designated_argument
+    punctuation >
+        popScope ScopeKind::GenericCategoryExpression
+        next after_variable_modifier
     then
         ifScope ScopeKind::TypeImplExpression
             popScope ScopeKind::TypeImplExpression

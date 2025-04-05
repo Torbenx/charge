@@ -21,33 +21,34 @@ inline bool isUnaryExpr(TokenKind kind) {
     return kind >= TokenKind::FirstUnaryExpr && kind <= TokenKind::LastUnaryExpr;
 }
 
-#define ENUMERATE_SCOPE_KINDS \
-    SCOPE(Invalid)            \
-    SCOPE(IfExpr)             \
-    SCOPE(IfExprOrStmt)       \
-    SCOPE(CompoundStmt)       \
-    SCOPE(Paren)              \
-    SCOPE(ParenInImplExpr)    \
-    SCOPE(Square)             \
-    SCOPE(Brace)              \
-    SCOPE(BraceInImplExpr)    \
-    SCOPE(LeftExpr)           \
-    SCOPE(RightExpr)          \
-    SCOPE(VariableType)       \
-    SCOPE(IfBranch)           \
-    SCOPE(ElseBranch)         \
-    SCOPE(PlainStatement)     \
-    SCOPE(Argument)           \
-    SCOPE(Parameter)          \
-    SCOPE(Namespace)          \
-    SCOPE(FunctionBody)       \
-    SCOPE(ReturnType)         \
-    SCOPE(FunctionParameters) \
-    SCOPE(Type)               \
-    SCOPE(HasTypeExpr)        \
-    SCOPE(TemplateParameters) \
-    SCOPE(TypeImplExpression) \
-    SCOPE(FunctionImplExpression)
+#define ENUMERATE_SCOPE_KINDS     \
+    SCOPE(Invalid)                \
+    SCOPE(IfExpr)                 \
+    SCOPE(IfExprOrStmt)           \
+    SCOPE(CompoundStmt)           \
+    SCOPE(Paren)                  \
+    SCOPE(ParenInImplExpr)        \
+    SCOPE(Square)                 \
+    SCOPE(Brace)                  \
+    SCOPE(BraceInImplExpr)        \
+    SCOPE(LeftExpr)               \
+    SCOPE(RightExpr)              \
+    SCOPE(VariableType)           \
+    SCOPE(IfBranch)               \
+    SCOPE(ElseBranch)             \
+    SCOPE(PlainStatement)         \
+    SCOPE(Argument)               \
+    SCOPE(Parameter)              \
+    SCOPE(Namespace)              \
+    SCOPE(FunctionBody)           \
+    SCOPE(ReturnType)             \
+    SCOPE(FunctionParameters)     \
+    SCOPE(Type)                   \
+    SCOPE(HasTypeExpr)            \
+    SCOPE(TemplateParameters)     \
+    SCOPE(TypeImplExpression)     \
+    SCOPE(FunctionImplExpression) \
+    SCOPE(GenericCategoryExpression)
 
 enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,

@@ -3,26 +3,6 @@
 
 namespace sema {
 
-namespace {
-    ExpressionCategory expectedInitializerCategory(parse::TokenKind kind) {
-        switch (kind) {
-        case parse::TokenKind::LetValueDecl:
-        case parse::TokenKind::VarValueDecl:
-            return ExpressionCategory::Value;
-        case parse::TokenKind::UniqueReferenceDecl:
-            return ExpressionCategory::UniqueReference;
-        case parse::TokenKind::SharedReferenceDecl:
-            return ExpressionCategory::SharedReference;
-        case parse::TokenKind::ConstUniqueReferenceDecl:
-            return ExpressionCategory::ConstUniqueReference;
-        case parse::TokenKind::ConstSharedReferenceDecl:
-            return ExpressionCategory::ConstSharedReference;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-}
-
 Generator::Generator(Context& context, ProgramHandle handle)
     : Util(context, handle) { }
 
@@ -72,15 +52,15 @@ void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
     VERIFY(currentExpression == INVALID_EXPRESSION);
 }
 
-void Generator::declareLocalVariable(Word name, SourceLocation location, VariableDeclaration declaration) {
+void Generator::declareLocalVariable(VariableDeclaration decl) {
     VERIFY(localVariables.size() == localState.variableActiveMask.size());
     int_t index = localVariables.size();
-    localVariables.push_back({ declaration.type });
-    localState.variableActiveMask.push_back(declaration.hasInitializer);
-    localLookupEntries.push_back({ name, Expression::variableReference(index) });
+    localVariables.push_back({ decl.type });
+    localState.variableActiveMask.push_back(decl.hasInitializer);
+    localLookupEntries.push_back({ decl.name, Expression::variableReference(index) });
 
-    if (declaration.hasInitializer)
-        emitInitialize(location, Expression::variableReference(index), takeTopExpression());
+    if (decl.hasInitializer)
+        emitInitialize(decl.location, Expression::variableReference(index), takeTopExpression());
 }
 
 void Generator::visitDeclaration() {
@@ -117,7 +97,44 @@ void Generator::visitTemplateParameters() {
     advance();
 }
 
-Generator::VariableDeclaration Generator::visitVariableDeclaration(Constant expectedCategory, bool programParameters) {
+Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
+    Word name = Word::fromUint(tok->data());
+    SourceLocation nameLoc = tok->location();
+
+    Token declKind = tok->kind();
+    advance();
+    Constant expectedCategory = INVALID_CONSTANT;
+    switch (declKind) {
+    case Token::LetValueDecl:
+    case Token::VarValueDecl:
+        expectedCategory = Constant(ExpressionCategory::Value);
+        break;
+    case Token::UniqueReferenceDecl:
+        expectedCategory = Constant(ExpressionCategory::UniqueReference);
+        break;
+    case Token::SharedReferenceDecl:
+        expectedCategory = Constant(ExpressionCategory::SharedReference);
+        break;
+    case Token::ConstUniqueReferenceDecl:
+        expectedCategory = Constant(ExpressionCategory::ConstUniqueReference);
+        break;
+    case Token::ConstSharedReferenceDecl:
+        expectedCategory = Constant(ExpressionCategory::ConstSharedReference);
+        break;
+    case Token::GenericCategoryVariableDecl:
+        visitExpression();
+        contextualToExpressionCategory(nameLoc); // TODO: Maybe not the best location
+        expectedCategory = expressionToConstant();
+        break;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+
+    auto info = visitVariableTypeAndInitializer(expectedCategory, programParameters);
+    return { nameLoc, name, info.type, expectedCategory, info.hasInitializer };
+}
+
+Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters) {
     std::optional<Type> variableType;
     VERIFY(parameterTypes.size() == program->parameters.size());
     if (tok->kind() != Token::AssignStmt) {
@@ -178,7 +195,7 @@ Program::Parameter Generator::visitTemplateParameter() {
     Word name = Word::fromUint(tok->data());
     advance();
 
-    auto info = visitVariableDeclaration(Constant(ExpressionCategory::Value), true);
+    auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), true);
     std::optional<Constant> initializer;
     if (info.hasInitializer)
         initializer = expressionToConstant();
@@ -192,7 +209,7 @@ void Generator::visitStaticVariableDeclaration() {
     VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
     advance();
 
-    auto info = visitVariableDeclaration(Constant(ExpressionCategory::Value), false);
+    auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), false);
     VERIFY(info.hasInitializer);
     program->setType(info.type);
     // TODO: Constants are required to be the same when copied.
@@ -260,18 +277,14 @@ void Generator::visitFunctionParametersAndBody() {
     lookupStack.push_back(LookupContext::forLocal(this));
 
     while (tok->kind() != Token::EmptyNode) {
-        auto expectedCategory = Constant(expectedInitializerCategory(tok->kind()));
-        Word name = Word::fromUint(tok->data());
-        auto nameLoc = tok->location();
-        advance();
-        auto info = visitVariableDeclaration(expectedCategory, true);
+        auto info = visitVariableDeclaration(true);
         VERIFY(!info.hasInitializer);
 
         VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
-        localLookupEntries.push_back({ name, Expression::parameterReference(parameterIndex) });
-        fnProgram->functionParameters.push_back({ nameLoc, name, info.type, expectedCategory });
+        localLookupEntries.push_back({ info.name, Expression::parameterReference(parameterIndex) });
+        fnProgram->functionParameters.push_back({ info.location, info.name, info.type, info.expressionCategory });
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -392,12 +405,7 @@ void Generator::visitStatement() {
     } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
         || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::ConstUniqueReferenceDecl
         || tok->kind() == Token::SharedReferenceDecl || tok->kind() == Token::ConstSharedReferenceDecl) {
-        auto expectedCategory = Constant(expectedInitializerCategory(tok->kind()));
-        Word name = Word::fromUint(tok->data());
-        SourceLocation nameLoc = tok->location();
-        advance();
-        auto info = visitVariableDeclaration(expectedCategory, false);
-        declareLocalVariable(name, nameLoc, info);
+        declareLocalVariable(visitVariableDeclaration(false));
     } else if (tok->kind() == Token::DestroyStmt) {
         SourceLocation location = tok->location();
         advance();

@@ -269,3 +269,16 @@ fn mixedTemplateFunction(t: T, s: S) -> S: { }
 
 // expect-type type
 static callMixedTemplateFunction = mixedTemplateFunction{X}(X(), X);
+
+template(value)
+struct ConstantValue: { }
+
+template(c: expression_category)
+fn genericExpressionCategory(p: <c> X) -> ConstantValue{c}: { }
+
+static staticX: X = X();
+//; expect-type ConstantValue{expression_category::const_shared_ref}
+static testGenericExpressionDeduction1 = genericExpressionCategory(staticX);
+
+//; expect-type ConstantValue{expression_category::value}
+static testGenericExpressionDeduction2 = genericExpressionCategory(X());

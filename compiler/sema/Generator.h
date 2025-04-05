@@ -260,11 +260,19 @@ struct Generator : Util {
 
     void visitDeclaration();
     void visitTemplateParameters();
-    struct VariableDeclaration {
+    struct VariableTypeAndInitializer {
         Type type;
         bool hasInitializer;
     };
-    VariableDeclaration visitVariableDeclaration(Constant expectedCategory, bool programParameters);
+    VariableTypeAndInitializer visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters);
+    struct VariableDeclaration {
+        SourceLocation location;
+        Word name;
+        Type type;
+        Constant expressionCategory;
+        bool hasInitializer;
+    };
+    VariableDeclaration visitVariableDeclaration(bool programParameters);
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
     void visitFunctionImplDeclaration();
@@ -338,6 +346,7 @@ struct Generator : Util {
 
     void contextualToType(SourceLocation);
     void contextualToBool(SourceLocation);
+    void contextualToExpressionCategory(SourceLocation);
     void initialize(SourceLocation, DeductionState&, ExternConstant expectCategory, ExternConstant expectedType);
 
     struct InstructionHandle {
@@ -391,7 +400,7 @@ struct Generator : Util {
     void emitExpression(SourceLocation, OwnedExpression);
     void emitCall(SourceLocation, Call);
     void emitImplicitCopy(SourceLocation, ImplicitCopy);
-    void declareLocalVariable(Word name, SourceLocation, VariableDeclaration);
+    void declareLocalVariable(VariableDeclaration);
 };
 
 }

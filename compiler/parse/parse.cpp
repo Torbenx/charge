@@ -3445,6 +3445,18 @@ variable_type$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::VariableType;
+    if (std::string_view(tokEnd, 1) == "<"sv) {
+        char next = tokEnd[1];
+        if (next != '<' && next != '=') {
+            tokEnd += 1;
+            // pushScope ScopeKind::GenericCategoryExpression
+            scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
+            // updateKind TokenKind::GenericCategoryVariableDecl
+            state.parseOutput.tokens.back().setKind(TokenKind::GenericCategoryVariableDecl);
+            // next impl_expression
+            goto impl_expression$no_emit;
+        }
+    }
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, state);
@@ -3849,6 +3861,23 @@ after_impl_expression$no_emit:
         argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, state);
         // next check_designated_argument
         goto check_designated_argument$no_emit;
+    }
+    if (std::string_view(tokEnd, 1) == ">"sv) {
+        char next = tokEnd[1];
+        if (next != '=' && next != '>') {
+            tokEnd += 1;
+            // popScope ScopeKind::GenericCategoryExpression
+            {
+                auto result = popScope(scopePosition, ScopeKind::GenericCategoryExpression);
+                if (result == nullptr) {
+                    errorToken = LexerToken::Greater;
+                    goto handle_parse_error;
+                }
+                scopePosition = result;
+            }
+            // next after_variable_modifier
+            goto after_variable_modifier$no_emit;
+        }
     }
     // ifScope ScopeKind::TypeImplExpression
     if (scopePosition[0] == ScopeKind::TypeImplExpression) {

@@ -108,6 +108,7 @@ DECL(UniqueReferenceDecl, x)
 DECL(SharedReferenceDecl, x)
 DECL(ConstUniqueReferenceDecl, x)
 DECL(ConstSharedReferenceDecl, x)
+DECL(GenericCategoryVariableDecl, x)
 
 ATTRIBUTE(TemplateAttribute)
 ATTRIBUTE(IncompleteAttribute)
