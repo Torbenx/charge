@@ -1135,7 +1135,9 @@ void Generator::generateBuiltins(Context& context) {
         BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::type_type };
     }
     {
-        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::bool_type };
+        BuiltinGenerator g { context, ProgramKind::Enum, BuiltinId::bool_type };
+        g.addEnumValue(parse::words["false"], builtins::false_constant);
+        g.addEnumValue(parse::words["true"], builtins::true_constant);
     }
     {
         BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::error_type };

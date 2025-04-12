@@ -312,3 +312,19 @@ struct DeriveFromEnum: {
 // expect-type E1
 // expect-value @enumValue(E1, val)
 static accessEnumValueViaDerivedStruct = DeriveFromEnum::val;
+
+// expect-type bool
+// expect-value @enumValue(bool, false)
+static examineFalse = false;
+
+// expect-type bool
+// expect-value @enumValue(bool, false)
+static examineNestedFalse = bool::false;
+
+// expect-type bool
+// expect-value @enumValue(bool, true)
+static examineTrue = true;
+
+// expect-type bool
+// expect-value @enumValue(bool, true)
+static examineNestedTrue = bool::true;

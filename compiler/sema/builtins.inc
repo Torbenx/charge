@@ -13,7 +13,7 @@
 
 BUILTIN_TYPE(type)
 
-BUILTIN_TYPE(bool)
+BUILTIN_ENUM(bool, BooleanLiteral)
 
 BUILTIN_TYPE(error)
 
