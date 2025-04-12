@@ -33,12 +33,15 @@ struct Dumper {
         output += '\n';
     }
 
-    std::string formatScopeConstant(ScopeConstant value) {
-        if (value.kind() == ConstantKind::Program)
+    std::string formatDeclarationValue(DeclarationValue value) {
+        switch (value.kind()) {
+        case DeclarationValueKind::Program:
             return formatProgram(value.program());
-        if (value.kind() == ConstantKind::Namespace)
+        case DeclarationValueKind::Namespace:
             return formatNamespace(value.nsHandle());
-        return "<invalid scope value>";
+        default:
+            return "<invalid scope value>";
+        }
     }
     std::string formatProgram(ProgramHandle progHandle) {
         Program* prog = context.program(progHandle);
@@ -48,10 +51,10 @@ struct Dumper {
         else
             name = context.wordTable.view(prog->name());
         auto parent = prog->translate(prog->parent());
-        if (parent.kind() == ConstantKind::Program)
+        if (parent.kind() == DeclarationValueKind::Program)
             return formatProgram(parent.program()) + "::" + name;
 
-        VERIFY(parent.kind() == ConstantKind::Namespace);
+        VERIFY(parent.kind() == DeclarationValueKind::Namespace);
         auto path = formatNamespaceInternal(parent.nsHandle());
         if (path.empty())
             return name;
@@ -110,6 +113,9 @@ struct Dumper {
             default:
                 VERIFY_NOT_REACHED();
             }
+        case ConstantKind::EnumValue:
+            result += "ev";
+            break;
         case ConstantKind::Computed:
             result += "e";
             break;
@@ -177,13 +183,18 @@ struct Dumper {
     }
 
     std::string formatMember(Program* prog, MemberPointer pointer) {
-        auto* parentProg = cast<TypeProgram>(context.program(prog->baseProgram(pointer.parentType)));
-        const auto& member = parentProg->members[pointer.memberIndex];
-        if (member.isHas()) {
-            return "(has " + formatConstant(parentProg, member.type()) + ")";
-        } else {
-            return (std::string)context.wordTable.view(member.name());
+        std::string result;
+        for (auto link : pointer) {
+            if (!result.empty())
+                result += ".";
+            auto* parentProg = cast<StructProgram>(context.program(prog->baseProgram(link.parentType).value()));
+            const auto& member = parentProg->members[link.memberIndex];
+            if (member.isHas())
+                result += "(has " + formatConstant(prog, link.memberType) + ")";
+            else
+                result += context.wordTable.view(member.name());
         }
+        return result;
     }
 };
 
@@ -248,7 +259,7 @@ void Dumper::dumpProgram(Program* prog) {
     this->program = prog;
     dumpLine(formatProgram(context.programHandle(prog)) + ":");
     if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
-        dumpLine("parent = " + formatScopeConstant(prog->translate(prog->parent())));
+        dumpLine("parent = " + formatDeclarationValue(prog->translate(prog->parent())));
     }
     switch (prog->kind()) {
     case ProgramKind::Global:
@@ -264,7 +275,7 @@ void Dumper::dumpProgram(Program* prog) {
     default:
         break;
     }
-    for (Constant value : std::views::join(std::array { program->parameterizeConstants(), program->memberPointerConstants(), program->computedConstants(), program->remoteComputedConstants() })) {
+    for (Constant value : std::views::join(std::array { program->parameterizeConstants(), program->memberPointerConstants(), program->computedConstants(), program->remoteComputedConstants(), program->enumValueConstants() })) {
         std::ostringstream line;
         line << formatConstant(value) << " = ";
         switch (value.kind()) {
@@ -293,7 +304,13 @@ void Dumper::dumpProgram(Program* prog) {
         }
         case ConstantKind::MemberPointer: {
             auto pointer = program->getMemberPointer(value);
-            line << formatConstant(pointer.parentType) << "." << formatMember(prog, pointer);
+            line << formatConstant(pointer.originType()) << "." << formatMember(prog, pointer);
+            break;
+        }
+        case ConstantKind::EnumValue: {
+            auto enumValue = program->getEnumValue(value);
+            auto* enumProg = cast<EnumProgram>(context.program(program->baseProgram(enumValue.enumType).value()));
+            line << formatConstant((Constant)enumValue.enumType) << "::" << context.wordTable.view(enumProg->values[enumValue.valueIndex].name());
             break;
         }
         default:

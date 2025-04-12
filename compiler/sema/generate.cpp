@@ -9,7 +9,7 @@ void Generator::resolveLazyExpressions() {
     if (currentExpression.kind() == ExpressionKind::LazyParameterize) {
         VERIFY(lazyParameterizeState.has_value());
         VERIFY(lazyParameterizeState.value().isComplete());
-        currentExpression = generateDeclarationLiteral(lazyParameterizeState.value().programHandle, lazyParameterizeState.value().arguments);
+        currentExpression = generateProgramLiteral(lazyParameterizeState.value().programHandle, lazyParameterizeState.value().arguments);
         lazyParameterizeState.reset();
     }
 }
@@ -132,11 +132,11 @@ Constant Generator::makeParameterize(ProgramHandle base, std::span<const Constan
     return program->addParameterize(context, { base, arguments });
 }
 
-Constant Generator::inheriteParameters(ScopeConstant parent) {
-    if (parent.kind() == ConstantKind::Namespace)
+Constant Generator::inheriteParameters(DeclarationValue parent) {
+    if (parent.kind() == DeclarationValueKind::Namespace)
         return (Constant)parent.nsHandle();
 
-    VERIFY(parent.kind() == ConstantKind::Program);
+    VERIFY(parent.kind() == DeclarationValueKind::Program);
 
     ProgramHandle parentHandle = parent.program();
     signatureCheck(context, parentHandle);
@@ -162,20 +162,20 @@ Constant Generator::inheriteParameters(ScopeConstant parent) {
 }
 
 bool Generator::resolveImplicitImplTarget() {
-    if (program->parent().kind() != ConstantKind::Program)
+    if (program->parent().kind() != DeclarationValueKind::Program)
         return false;
     ProgramHandle parentProgHandle = program->parent().program();
     Program* parentProg = context.program(parentProgHandle);
     if (!parentProg->isImpl())
         return false;
 
-    VERIFY(parentProg->kind() == ProgramKind::Type);
+    VERIFY(try_cast<ScopeProgram>(parentProg).has_value());
     Constant parentImplOf = fold(makeParameterize(parentProgHandle, copyParameters(parentProg)), parentProg->selfConstant());
     auto parentImplPara = program->getParameterize(parentImplOf);
 
-    auto implTarget = cast<TypeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
+    auto implTarget = cast<ScopeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
     VERIFY(implTarget.has_value());
-    VERIFY(implTarget.value().kind() == ConstantKind::Program);
+    VERIFY(implTarget.value().kind() == DeclarationValueKind::Program);
     ProgramHandle implOfProgHandle = implTarget.value().program();
     signatureCheck(context, implOfProgHandle);
     Program* implOfProg = context.program(implOfProgHandle);
@@ -213,110 +213,6 @@ bool Generator::resolveImplicitImplTarget() {
     lazyParameterizeState = std::move(state);
     emitExpression({}, Expression(ExpressionKind::LazyParameterize, 0));
     return true;
-}
-
-Expression Generator::generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> baseArgs) {
-    if (rawValue.kind() == ConstantKind::Namespace) {
-        VERIFY(baseArgs.empty());
-        return (Constant)rawValue.nsHandle();
-    }
-
-    VERIFY(rawValue.kind() == ConstantKind::Program);
-    ProgramHandle progHandle = rawValue.program();
-    signatureCheck(context, progHandle);
-    return generateProgramLiteral(progHandle, baseArgs);
-}
-
-Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args) {
-    Program* prog = context.program(progHandle);
-    signatureCheck(context, progHandle);
-    Constant progValue = makeParameterize(progHandle, args);
-    switch (prog->kind()) {
-    case ProgramKind::Type:
-    case ProgramKind::Function:
-        return progValue;
-    case ProgramKind::Global: {
-        if (prog->isTemplate() && (int_t)args.size() < prog->parameterizes.size())
-            return progValue;
-        return makeGlobalReference(progValue);
-    }
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-void Generator::generateIdentifierExpr() {
-    Word name = Word::fromUint(tok->data());
-    if (name == parse::words["false"]) {
-        emitExpression(tok->location(), builtins::false_constant);
-        return;
-    }
-    if (name == parse::words["true"]) {
-        emitExpression(tok->location(), builtins::true_constant);
-        return;
-    }
-    for (auto lookupCtx : std::views::reverse(lookupStack)) {
-        switch (lookupCtx.kind()) {
-        case LookupContext::Kind::Namespace: {
-            auto result = lookupCtx.getNamespace()->getDeclaration(name);
-            if (result.has_value()) {
-                emitExpression(tok->location(), generateDeclarationLiteral(result.value(), {}));
-                return;
-            }
-            continue;
-        }
-        case LookupContext::Kind::ContainingType: {
-            TypeProgram* prog = lookupCtx.getContainingType();
-            auto result = lookupInType(prog, copyParameters(prog), name);
-            if (result.has_value()) {
-                emitExpression(tok->location(), result.value());
-                return;
-            }
-            for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
-                if (prog->parameters[i].name == name) {
-                    emitExpression(tok->location(), Expression::templateParameterReference(i));
-                    return;
-                }
-            }
-            continue;
-        };
-        case LookupContext::Kind::TemplateParameters: {
-            Program* prog = lookupCtx.getTemplateParameters();
-            for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
-                if (prog->parameters[i].name == name) {
-                    emitExpression(tok->location(), Expression::templateParameterReference(i));
-                    return;
-                }
-            }
-            continue;
-        }
-        case LookupContext::Kind::Local: {
-            Generator& g = *lookupCtx.getLocal();
-            for (auto entry : g.localLookupEntries) {
-                if (entry.name == name) {
-                    VERIFY(&g == this);
-                    emitExpression(tok->location(), entry.data);
-                    return;
-                }
-            }
-            continue;
-        }
-        case LookupContext::Kind::ContainingTypeImpl: {
-            Constant implOf = lookupCtx.getContainingTypeImpl();
-            auto para = program->getParameterize(implOf);
-            auto result = lookupInType(cast<TypeProgram>(context.program(para.base)), para.arguments, name);
-            if (result.has_value()) {
-                emitExpression(tok->location(), result.value());
-                return;
-            }
-            continue;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-    fmt::println("Failed to lookup '{}'", context.wordTable.view(name));
-    VERIFY_NOT_REACHED();
 }
 
 void Generator::generateParameterizeExpr(std::span<const Word> argumentNames) {
@@ -380,7 +276,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
         DeductionState state = takeLazyParameterize();
         if (state.program->kind() == ProgramKind::Global) {
             VERIFY(state.isComplete());
-            baseResult = generateDeclarationLiteral(state.programHandle, state.arguments);
+            baseResult = generateProgramLiteral(state.programHandle, state.arguments);
         } else {
             // VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
             return { std::move(state) };
@@ -422,13 +318,13 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
 
 void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
     auto& state = target.state;
-    if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Type) {
+    if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Struct) {
 
         auto arguments = visit<callParameters>(state.program, [this, &state](auto parameters) { return generateCallArguments(state, parameters); });
 
         VERIFY(state.isComplete());
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-        Type returnType = verifyType(state.program->kind() == ProgramKind::Type ? callTarget : fold(callTarget, cast<FunctionProgram>(state.program)->returnType()));
+        Type returnType = verifyType(state.program->kind() == ProgramKind::Struct ? callTarget : fold(callTarget, cast<FunctionProgram>(state.program)->returnType()));
         emitCall(location, Call { Constant(ExpressionCategory::Value), callTarget, returnType, arguments });
         return;
     }
@@ -459,27 +355,177 @@ std::vector<Expression> Generator::generateCallArguments(DeductionState& state, 
     return arguments;
 }
 
-std::optional<Expression> Generator::lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name) {
-    VERIFY(arguments.size() == typeProg->parameters.size());
-    auto maybeDecl = typeProg->getDeclaration(name);
-    if (maybeDecl.has_value())
-        return generateDeclarationLiteral(maybeDecl.value(), arguments);
+MemberPointerData Generator::generateMemberPointer(Type originType, std::span<const uint32_t> memberIndices) {
+    MemberPointerData result;
+    result.m_data.push_back(originType.toUint());
+    for (uint32_t memberIndex : memberIndices)
+        extendMemberPointer(result, memberIndex);
+    return result;
+}
 
-    std::optional<Expression> result;
-    for (const auto& member : typeProg->members) {
+void Generator::extendMemberPointer(MemberPointerData& pointer, uint32_t memberIndex) {
+    Type parentType = Type::fromUint(pointer.m_data.back());
+    pointer.m_data.push_back(memberIndex);
+
+    auto base = asFoldBase(parentType);
+    const auto& members = cast<StructProgram>(base.program)->members;
+    VERIFY(memberIndex < members.size());
+    Type memberType = verifyType(fold(base, members[memberIndex].type()));
+    pointer.m_data.push_back(memberType.toUint());
+}
+
+void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog) {
+    auto maybeResult = prog->getDeclaration(state.lookupName);
+    if (maybeResult.has_value()) {
+        state.setResult(generateMemberPointer(state.originType, state.memberIndices), maybeResult.value());
+        return;
+    }
+
+    if (prog->kind() != ProgramKind::Struct)
+        return;
+
+    auto* structProg = cast<StructProgram>(prog);
+    for (int_t memberIndex = 0; memberIndex < (int_t)structProg->members.size(); memberIndex++) {
+        const auto& member = structProg->members[memberIndex];
+        if (member.name() == state.lookupName) {
+            state.setResult(generateMemberPointer(state.originType, state.memberIndices), { DeclarationValueKind::Member, (uint32_t)memberIndex });
+            return;
+        }
+
         if (!member.isHas())
             continue;
-        Type baseType = member.type();
-        if (baseType.kind() == ConstantKind::Program || baseType.kind() == ConstantKind::Parameterize) {
-            FoldBase base = asFoldBase(baseType);
-            auto maybeValue = lookupInType(cast<TypeProgram>(base.program), base.arguments, name);
-            if (maybeValue.has_value()) {
-                VERIFY(!result.has_value());
-                result = maybeValue;
+        auto memberProg = structProg->baseProgram(member.type());
+        if (!memberProg.has_value())
+            continue;
+        state.memberIndices.push_back(memberIndex);
+        internalLookupRecurse(state, cast<ScopeProgram>(context.program(memberProg.value())));
+        state.memberIndices.pop_back();
+    }
+}
+
+Generator::InternalLookupResult Generator::internalLookup(Type type, Word name) {
+    auto baseProg = baseProgram(type);
+    if (!baseProg.has_value())
+        return InternalLookupResult();
+
+    InternalLookupState state(type, name);
+    internalLookupRecurse(state, cast<ScopeProgram>(context.program(baseProg.value())));
+    return state.result;
+}
+
+Expression Generator::generateDeclarationLiteral(InternalLookupResult result) {
+    VERIFY(result.value.has_value());
+    return generateDeclarationLiteral(result.value.value(), result.memberPointer().memberType());
+}
+
+Expression Generator::generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent) {
+    switch (rawValue.kind()) {
+    case DeclarationValueKind::Namespace: {
+        VERIFY(!parent.has_value());
+        return (Constant)rawValue.nsHandle();
+    }
+    case DeclarationValueKind::Program: {
+        ProgramHandle progHandle = rawValue.program();
+        signatureCheck(context, progHandle);
+
+        std::span<const Constant> parentArgs;
+        if (parent.has_value())
+            parentArgs = asFoldBase(parent.value()).arguments;
+        return generateProgramLiteral(progHandle, parentArgs);
+    }
+    case DeclarationValueKind::EnumValue: {
+        VERIFY(context.program(baseProgram(parent.value()).value())->kind() == ProgramKind::Enum);
+        return program->addEnumValue(context, { parent.value(), rawValue.id() });
+    }
+    default:
+        // Members are handled in each calling context individually
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args) {
+    Program* prog = context.program(progHandle);
+    signatureCheck(context, progHandle);
+    Constant progValue = makeParameterize(progHandle, args);
+    switch (prog->kind()) {
+    case ProgramKind::Struct:
+    case ProgramKind::Function:
+    case ProgramKind::Enum:
+        return progValue;
+    case ProgramKind::Global: {
+        if (prog->isTemplate() && (int_t)args.size() < prog->parameterizes.size())
+            return progValue;
+        return makeGlobalReference(progValue);
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+void Generator::generateIdentifierExpr() {
+    Word name = Word::fromUint(tok->data());
+    if (name == parse::words["false"]) {
+        emitExpression(tok->location(), builtins::false_constant);
+        return;
+    }
+    if (name == parse::words["true"]) {
+        emitExpression(tok->location(), builtins::true_constant);
+        return;
+    }
+    for (auto lookupCtx : std::views::reverse(lookupStack)) {
+        switch (lookupCtx.kind()) {
+        case LookupContext::Kind::Namespace: {
+            auto result = lookupCtx.getNamespace()->getDeclaration(name);
+            if (result.has_value()) {
+                emitExpression(tok->location(), generateDeclarationLiteral(result.value(), std::nullopt));
+                return;
             }
+            continue;
+        }
+        case LookupContext::Kind::TemplateParameters: {
+            Program* prog = lookupCtx.getTemplateParameters();
+            for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
+                if (prog->parameters[i].name == name) {
+                    emitExpression(tok->location(), Expression::templateParameterReference(i));
+                    return;
+                }
+            }
+            continue;
+        }
+        case LookupContext::Kind::Local: {
+            Generator& g = *lookupCtx.getLocal();
+            for (auto entry : g.localLookupEntries) {
+                if (entry.name == name) {
+                    VERIFY(&g == this);
+                    emitExpression(tok->location(), entry.data);
+                    return;
+                }
+            }
+            continue;
+        }
+        case LookupContext::Kind::ContainingType: {
+            Type type = lookupCtx.getContainingType();
+            auto result = internalLookup(type, name);
+            if (result.value.has_value()) {
+                VERIFY(result.value->kind() != DeclarationValueKind::Member); // Member should be looked up with .member or ::member
+                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result)));
+                return;
+            }
+            auto base = asFoldBase(type);
+            for (int_t i = base.program->inheritedParameterCount; i < (int_t)base.program->parameters.size(); i++) {
+                if (base.program->parameters[i].name == name) {
+                    emitExpression(tok->location(), Expression::templateParameterReference(i));
+                    return;
+                }
+            }
+            continue;
+        }
+        default:
+            VERIFY_NOT_REACHED();
         }
     }
-    return result;
+    fmt::println("Failed to lookup '{}'", context.wordTable.view(name));
+    VERIFY_NOT_REACHED();
 }
 
 void Generator::generateStaticAccessExpr() {
@@ -487,74 +533,39 @@ void Generator::generateStaticAccessExpr() {
     Constant baseValue = expressionToConstant();
     if (baseValue.kind() == ConstantKind::Namespace) {
         Namespace* ns = context.getNamespace(baseValue.nsHandle());
-        emitExpression(tok->location(), generateDeclarationLiteral(ns->getDeclaration(name).value(), {}));
+        emitExpression(tok->location(), generateDeclarationLiteral(ns->getDeclaration(name).value(), std::nullopt));
         return;
     }
     if (baseValue.kind() == ConstantKind::Program || baseValue.kind() == ConstantKind::Parameterize) {
         FoldBase base = asFoldBase(baseValue);
-        auto maybeValue = lookupInType(cast<TypeProgram>(base.program), base.arguments, name);
-        VERIFY(maybeValue.has_value());
-        return emitExpression(tok->location(), maybeValue.value());
+        if (base.program->kind() == ProgramKind::Struct || base.program->kind() == ProgramKind::Enum) {
+            auto result = internalLookup(verifyType(baseValue), name);
+            VERIFY(result.value.has_value());
+            if (result.value->kind() == DeclarationValueKind::Member) {
+                extendMemberPointer(result.memberPointerData, result.value->id());
+                emitExpression(tok->location(), program->addMemberPointer(context, result.memberPointerData));
+            } else {
+                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result)));
+            }
+            return;
+        }
     }
     VERIFY_NOT_REACHED();
 }
 
-struct Generator::MemberAccessState {
-    std::vector<uint32_t> memberIndicies;
-    bool emitted = false;
-};
-
-void Generator::emitMemberAccessExpr(MemberAccessState& state) {
-    VERIFY(!state.emitted);
-    state.emitted = true;
-    auto forEachMemberPointer = [this, origType = resultType(topExpression()), &state](auto callback) {
-        Type parentType = origType;
-        for (uint32_t memberIndex : state.memberIndicies) {
-            MemberPointer memberPointer { parentType, memberIndex };
-            Type mType = memberType(memberPointer);
-            callback(mType, memberPointer);
-            parentType = mType;
-        }
-    };
-
-    auto expr = takeTopExpression();
-    forEachMemberPointer([&](Type, MemberPointer pointer) {
-        expr = program->addMemberExpression({ std::move(expr), program->addMemberPointer(context, pointer) });
-    });
-    emitExpression(tok->location(), std::move(expr));
-    return;
-}
-
-void Generator::generateMemberAccessExprInside(MemberAccessState& state, Type baseType, Word name) {
-    if (baseType.kind() != ConstantKind::Program && baseType.kind() != ConstantKind::Parameterize)
-        return;
-
-    auto base = asFoldBase(baseType);
-    VERIFY(base.program->kind() == ProgramKind::Type);
-    TypeProgram* prog = cast<TypeProgram>(base.program);
-    const auto& members = prog->members;
-    for (int_t i = 0; i < (int_t)members.size(); i++) {
-        if (members[i].name() == name) {
-            state.memberIndicies.push_back(i);
-            emitMemberAccessExpr(state);
-            return;
-        }
-    }
-    for (int_t i = 0; i < (int_t)members.size(); i++) {
-        if (members[i].isHas()) {
-            state.memberIndicies.push_back(i);
-            generateMemberAccessExprInside(state, members[i].type(), name);
-            state.memberIndicies.pop_back();
-        }
-    }
-}
-
 void Generator::generateMemberAccessExpr() {
+    auto baseExpr = takeTopExpression();
     Word name = Word::fromUint(tok->data());
-    Type baseType = resultType(topExpression());
-    MemberAccessState state;
-    generateMemberAccessExprInside(state, baseType, name);
-    VERIFY(state.emitted);
+    Type baseType = resultType(baseExpr);
+    auto result = internalLookup(baseType, name);
+    VERIFY(result.value.has_value());
+    if (result.value->kind() == DeclarationValueKind::Member) {
+        extendMemberPointer(result.memberPointerData, result.value->id());
+        auto memberExpr = program->addMemberExpression({ baseExpr, program->addMemberPointer(context, result.memberPointerData) });
+        emitExpression(tok->location(), memberExpr);
+    } else {
+        emitExpression(tok->location(), generateDeclarationLiteral(std::move(result)));
+    }
 }
 
 Constant Generator::copyAsConstant(Expression expr) {
@@ -650,6 +661,17 @@ void Generator::initialize(SourceLocation location, DeductionState& state, Exter
     }
 }
 
+std::optional<ProgramHandle> Generator::baseProgram(Constant value) {
+    if (value.kind() == ConstantKind::Program) {
+        return value.program();
+    } else if (value.kind() == ConstantKind::Parameterize) {
+        auto para = program->getParameterize(value);
+        return para.base;
+    } else {
+        return std::nullopt;
+    }
+}
+
 FoldBase Generator::asFoldBase(Constant base) {
     return tryAsFoldBase(base).value();
 }
@@ -735,9 +757,21 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
     case ConstantKind::MemberPointer: {
         auto pMember = state.program->getMemberPointer(pValue);
         auto aMember = program->getMemberPointer(aValue);
-        if (!staticMatch(state, pMember.parentType, aMember.parentType))
+        if (!staticMatch(state, pMember.originType(), aMember.originType()))
             return false;
-        return pMember.memberIndex == aMember.memberIndex;
+        if (pMember.linkCount() != aMember.linkCount())
+            return false;
+        for (int_t linkIndex = 0; linkIndex < aMember.linkCount(); linkIndex++) {
+            if (pMember[linkIndex].memberIndex != aMember[linkIndex].memberIndex)
+                return false;
+        }
+        return true;
+    }
+    case ConstantKind::EnumValue: {
+        // The types must be the same as a precondition
+        auto pEnumValue = state.program->getEnumValue(pValue);
+        auto aEnumValue = program->getEnumValue(aValue);
+        return pEnumValue.valueIndex == aEnumValue.valueIndex;
     }
     case ConstantKind::BooleanLiteral:
         return Constant(pValue).booleanValue() == aValue.booleanValue();
@@ -792,7 +826,17 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     }
     case ConstantKind::MemberPointer: {
         auto externMember = base.program->getMemberPointer(v);
-        return program->addMemberPointer(context, { verifyType(fold(base, externMember.parentType)), externMember.memberIndex });
+        MemberPointerData member;
+        member.m_data.push_back(fold(base, externMember.originType()).toUint());
+        for (auto link : externMember) {
+            member.m_data.push_back(link.memberIndex);
+            member.m_data.push_back(link.memberType.toUint());
+        }
+        return program->addMemberPointer(context, member);
+    }
+    case ConstantKind::EnumValue: {
+        auto enumValue = base.program->getEnumValue(v);
+        return program->addEnumValue(context, { fold(base, enumValue.enumType), enumValue.valueIndex });
     }
     case ConstantKind::BooleanLiteral:
         return (Constant)v;
@@ -812,20 +856,19 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     Generator g(context, progHandle);
     g.inheriteParameters(program->parent());
     // build lookup stack
-    ScopeConstant scope = program->parent();
+    DeclarationValue scope = program->parent();
     for (;;) {
-        if (scope.kind() == ConstantKind::Program) {
+        if (scope.kind() == DeclarationValueKind::Program) {
             Program* scopeProg = context.program(scope.program());
+            Constant parentPara = g.makeParameterize(scope.program(), copyParameters(scopeProg));
             if (scopeProg->isImpl()) {
-                // TODO: Find a nicer way to do this. Maybe it is not necessary to eagerly fold the impl expression?
-                Constant parentPara = g.makeParameterize(scope.program(), copyParameters(scopeProg));
-                g.lookupStack.push_back(LookupContext::forContainingTypeImpl(g.fold(parentPara, scopeProg->selfConstant())));
+                g.lookupStack.push_back(LookupContext::forContainingType(g.verifyType(g.fold(parentPara, scopeProg->selfConstant()))));
             } else {
                 // TODO: Even when this is an impl, there can be private members in this program.
-                g.lookupStack.push_back(LookupContext::forContainingType(cast<TypeProgram>(scopeProg)));
+                g.lookupStack.push_back(LookupContext::forContainingType(g.verifyType(parentPara)));
             }
             scope = scopeProg->translate(scopeProg->parent());
-        } else if (scope.kind() == ConstantKind::Namespace) {
+        } else if (scope.kind() == DeclarationValueKind::Namespace) {
             Namespace* scopeNS = context.getNamespace(scope.nsHandle());
             g.lookupStack.push_back(LookupContext::forNamespace(scopeNS));
             if (!scopeNS->parent.has_value())
@@ -839,6 +882,18 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     auto parseLocation = program->beginSignatureCheck();
     g.setParseLocation(parseLocation);
     g.visitDeclaration();
+}
+
+Type Generator::memberType(Constant memberPointer) {
+    if (memberPointer.kind() == ConstantKind::MemberPointer)
+        return program->getMemberPointer(memberPointer).memberType();
+
+    auto type = typeOf(memberPointer);
+    VERIFY(type.kind() == ConstantKind::Parameterize);
+    auto para = program->getParameterize(type);
+    VERIFY(para.base == builtins::member_ptr_template.program());
+    VERIFY(para.arguments.size() == 2);
+    return verifyType(para.arguments[1]);
 }
 
 Constant Generator::categoryOf(Expression expr) {
@@ -878,30 +933,6 @@ Constant Generator::categoryOf(Expression expr) {
     }
 }
 
-Member Generator::member(MemberPointer pointer) {
-    return cast<TypeProgram>(asFoldBase(pointer.parentType).program)->members[pointer.memberIndex];
-}
-
-Type Generator::memberType(MemberPointer pointer) {
-    auto base = asFoldBase(pointer.parentType);
-    auto* prog = cast<TypeProgram>(base.program);
-    return verifyType(fold(std::move(base), prog->members[pointer.memberIndex].type()));
-}
-
-Type Generator::memberType(Constant memberPointerValue) {
-    if (memberPointerValue.kind() == ConstantKind::MemberPointer)
-        return memberType(program->getMemberPointer(memberPointerValue));
-
-    auto memberPointerType = typeOf(memberPointerValue);
-    VERIFY(memberPointerType.kind() == ConstantKind::Parameterize);
-
-    auto para = program->getParameterize(memberPointerType);
-    VERIFY(para.base == builtins::member_ptr_template.program());
-    VERIFY(para.arguments.size() == 2);
-
-    return verifyType(para.arguments[1]);
-}
-
 Type Generator::typeOf(Constant value) {
     switch (value.kind()) {
     case ConstantKind::TemplateSignature$Program:
@@ -923,6 +954,13 @@ Type Generator::typeOf(Constant value) {
         auto base = asFoldBase(rExpr.base);
         return verifyType(fold(base, base.program->getComputedConstant(rExpr.computation).type));
     }
+    case ConstantKind::MemberPointer: {
+        MemberPointer pointer = program->getMemberPointer(value);
+        std::array<Constant, 2> arguments { pointer.originType(), pointer.memberType() };
+        return verifyType(makeParameterize(builtins::member_ptr_template.program(), arguments));
+    }
+    case ConstantKind::EnumValue:
+        return verifyType((Constant)program->getEnumValue(value).enumType);
     case ConstantKind::CopyOfParameter:
         return parameterTypes[value.id()];
     case ConstantKind::CopyOfOpenGlobal$Program:
@@ -942,11 +980,6 @@ Type Generator::typeOf(Constant value) {
         if (!prog->isDependent())
             return typeOfNonDependentProgram(value);
         return makeTemplateIdFor(value);
-    }
-    case ConstantKind::MemberPointer: {
-        MemberPointer pointer = program->getMemberPointer(value);
-        std::array<Constant, 2> arguments { pointer.parentType, memberType(pointer) };
-        return verifyType(makeParameterize(builtins::member_ptr_template.program(), arguments));
     }
     default:
         VERIFY_NOT_REACHED();
@@ -997,7 +1030,8 @@ Type Generator::typeOfNonDependentProgram(FoldBase base) {
     }
     case ProgramKind::Global:
         return verifyType(fold(base, cast<GlobalProgram>(base.program)->type()));
-    case ProgramKind::Type:
+    case ProgramKind::Struct:
+    case ProgramKind::Enum:
         return builtins::type_type;
     default:
         VERIFY_NOT_REACHED();
@@ -1012,7 +1046,8 @@ Type Generator::verifyType(Constant value) {
         switch (valueProg->kind()) {
         case ProgramKind::Function:
             VERIFY_NOT_REACHED();
-        case ProgramKind::Type:
+        case ProgramKind::Struct:
+        case ProgramKind::Enum:
             return (Type)value;
         case ProgramKind::Global:
             VERIFY(cast<GlobalProgram>(valueProg)->type() == builtins::type_type);
@@ -1064,14 +1099,27 @@ struct BuiltinGenerator : Generator {
         }
     }
 
-    static ProgramHandle createScope(Context& context, BuiltinId id) {
-        auto value = context.pushStaticScope(ProgramKind::Type, nameOf(id), {}, {});
-        VERIFY(value == (ScopeConstant)Constant(id));
+    static ProgramHandle createScope(Context& context, ProgramKind progKind, BuiltinId id) {
+        auto value = context.pushStaticScope(progKind, nameOf(id), {}, {});
+        VERIFY(value.kind() == DeclarationValueKind::Program);
+        VERIFY(value.id() == std::to_underlying(id));
         return value.program();
     }
 
-    BuiltinGenerator(Context& context, BuiltinId id)
-        : Generator(context, createScope(context, id)) {
+    void addEnumValue(Word name, Constant expectedValue) {
+        auto* enumProgram = cast<EnumProgram>(program);
+        int_t valueIndex = enumProgram->values.size();
+        enumProgram->values.emplace_back(SourceLocation(), name, std::nullopt);
+        enumProgram->addDeclaration(name, DeclarationValue(DeclarationValueKind::EnumValue, valueIndex));
+
+        VERIFY(!program->isDependent());
+        Constant actualValue = program->addEnumValue(context, { (Type)programHandle, (uint32_t)valueIndex });
+        VERIFY(actualValue.kind() != ConstantKind::EnumValue);
+        VERIFY(actualValue == expectedValue);
+    }
+
+    BuiltinGenerator(Context& context, ProgramKind progKind, BuiltinId id)
+        : Generator(context, createScope(context, progKind, id)) {
         program->beginSignatureCheck();
     }
 
@@ -1084,19 +1132,25 @@ struct BuiltinGenerator : Generator {
 
 void Generator::generateBuiltins(Context& context) {
     {
-        BuiltinGenerator g { context, BuiltinId::type_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::type_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::bool_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::bool_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::error_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::error_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::namespace_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::namespace_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::expression_category_type };
+        BuiltinGenerator g { context, ProgramKind::Enum, BuiltinId::expression_category_type };
+        // Must match the order of the c++ enum
+        g.addEnumValue(parse::words["value"], Constant(ExpressionCategory::Value));
+        g.addEnumValue(parse::words["unique_ref"], Constant(ExpressionCategory::UniqueReference));
+        g.addEnumValue(parse::words["const_unique_ref"], Constant(ExpressionCategory::ConstUniqueReference));
+        g.addEnumValue(parse::words["shared_ref"], Constant(ExpressionCategory::SharedReference));
+        g.addEnumValue(parse::words["const_shared_ref"], Constant(ExpressionCategory::ConstSharedReference));
     }
 
     // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
@@ -1107,10 +1161,10 @@ void Generator::generateBuiltins(Context& context) {
     //                    = template_id{template(sig: template_signature) -> typeof(template_id{sig})}
     //                    = template_id{template(sig: template_signature) -> type}
     {
-        BuiltinGenerator g { context, BuiltinId::template_signature_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::template_signature_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::template_id_template };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::template_id_template };
         g.addExplicitParameter(parse::words["sig"], builtins::template_signature_type, {});
     }
 
@@ -1119,22 +1173,22 @@ void Generator::generateBuiltins(Context& context) {
     //                     = template_id{template(sig: function_signature) -> typeof(function_id{sig})}
     //                     = template_id{template(sig: function_signature) -> type}
     {
-        BuiltinGenerator g { context, BuiltinId::function_signature_type };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::function_signature_type };
     }
     {
-        BuiltinGenerator g { context, BuiltinId::function_id_template };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::function_id_template };
         g.addExplicitParameter(parse::words["sig"], builtins::function_signature_type, {});
     }
 
     // template(pointee_type: type) struct ptr: { }
     {
-        BuiltinGenerator g { context, BuiltinId::ptr_template };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::ptr_template };
         g.addExplicitParameter(parse::words["pointee_type"], builtins::type_type, {});
     }
 
     // template(parent_type: type, member_type: type) struct member_ptr: { }
     {
-        BuiltinGenerator g { context, BuiltinId::member_ptr_template };
+        BuiltinGenerator g { context, ProgramKind::Struct, BuiltinId::member_ptr_template };
         g.addExplicitParameter(parse::words["parent_type"], builtins::type_type, {});
         g.addExplicitParameter(parse::words["member_type"], builtins::type_type, {});
     }

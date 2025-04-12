@@ -126,6 +126,8 @@ std::string_view nameString(LexerToken token) {
         return "Elif";
     case LexerToken::Else:
         return "Else";
+    case LexerToken::Enum:
+        return "Enum";
     case LexerToken::Fn:
         return "Fn";
     case LexerToken::For:
@@ -279,14 +281,24 @@ std::string_view nameString(State state) {
         return "AfterFunctionDeclarationId";
     case State::AfterFunctionParameters:
         return "AfterFunctionParameters";
-    case State::TypeDeclarationId:
-        return "TypeDeclarationId";
-    case State::AfterTypeDeclarationId:
-        return "AfterTypeDeclarationId";
-    case State::TypeDeclarationBody:
-        return "TypeDeclarationBody";
+    case State::StructDeclarationId:
+        return "StructDeclarationId";
+    case State::AfterStructDeclarationId:
+        return "AfterStructDeclarationId";
+    case State::StructDeclarationBody:
+        return "StructDeclarationBody";
     case State::MemberDeclaration:
         return "MemberDeclaration";
+    case State::EnumDeclarationId:
+        return "EnumDeclarationId";
+    case State::AfterEnumDeclarationId:
+        return "AfterEnumDeclarationId";
+    case State::EnumDeclarationBody:
+        return "EnumDeclarationBody";
+    case State::EnumValueDeclaration:
+        return "EnumValueDeclaration";
+    case State::AfterEnumValueDeclarationId:
+        return "AfterEnumValueDeclarationId";
     case State::AfterStatic:
         return "AfterStatic";
     case State::StaticVarVariableDeclaration:

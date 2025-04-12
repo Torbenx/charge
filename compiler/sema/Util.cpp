@@ -84,11 +84,20 @@ std::strong_ordering Util::compare(Parameterize a, Parameterize b) {
 }
 
 std::strong_ordering Util::compare(MemberPointer a, MemberPointer b) {
-    auto parentTypeOrdering = compare(a.parentType, b.parentType);
+    auto parentTypeOrdering = compare(a.originType(), b.originType());
     if (parentTypeOrdering != 0)
         return parentTypeOrdering;
 
-    return a.memberIndex <=> b.memberIndex;
+    auto linkCountOrdering = a.linkCount() <=> b.linkCount();
+    if (linkCountOrdering != 0)
+        return linkCountOrdering;
+
+    for (int_t linkIndex = 0; linkIndex < a.linkCount(); linkIndex++) {
+        auto memberIndexOrdering = a[linkIndex].memberIndex <=> b[linkIndex].memberIndex;
+        if (memberIndexOrdering != 0)
+            return memberIndexOrdering;
+    }
+    return std::strong_ordering::equal;
 }
 
 std::strong_ordering Util::compare(RemoteComputation a, RemoteComputation b) {
@@ -97,6 +106,14 @@ std::strong_ordering Util::compare(RemoteComputation a, RemoteComputation b) {
         return baseOrdering;
 
     return Constant(a.computation).id() <=> Constant(b.computation).id();
+}
+
+std::strong_ordering Util::compare(EnumValue a, EnumValue b) {
+    auto typeOrdering = compare((Constant)a.enumType, (Constant)b.enumType);
+    if (typeOrdering != 0)
+        return typeOrdering;
+
+    return a.valueIndex <=> b.valueIndex;
 }
 
 }

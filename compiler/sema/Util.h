@@ -16,6 +16,7 @@ struct Util {
     std::strong_ordering compare(Parameterize, Parameterize);
     std::strong_ordering compare(MemberPointer, MemberPointer);
     std::strong_ordering compare(RemoteComputation, RemoteComputation);
+    std::strong_ordering compare(EnumValue, EnumValue);
 
     Context& context;
     Program* program;

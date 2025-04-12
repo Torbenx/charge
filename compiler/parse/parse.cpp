@@ -13,11 +13,13 @@
 using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
     Namespace,
-    Type,
+    Struct,
     StaticVariable,
     Function,
     Member,
     HasMember,
+    Enum,
+    EnumValue,
 };
 
 namespace parse {
@@ -210,37 +212,39 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
     return tokEnd;
 }
 
-template<DeclarationKind kind>
-static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
-        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
-    } else if constexpr (kind == DeclarationKind::Namespace) {
-        return state.pushNamespaceScope(name);
-    } else {
-        sema::ProgramKind progKind;
-        switch (kind) {
-        case DeclarationKind::Type:
-            progKind = sema::ProgramKind::Type;
-            break;
-        case DeclarationKind::Function:
-            progKind = sema::ProgramKind::Function;
-            break;
-        case DeclarationKind::StaticVariable:
-            progKind = sema::ProgramKind::Global;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-        return state.pushStaticScope(progKind, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
+    switch (kind) {
+    case DeclarationKind::Struct:
+        return sema::ProgramKind::Struct;
+    case DeclarationKind::Function:
+        return sema::ProgramKind::Function;
+    case DeclarationKind::StaticVariable:
+        return sema::ProgramKind::Global;
+    case DeclarationKind::Enum:
+        return sema::ProgramKind::Enum;
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 
 template<DeclarationKind kind>
-static sema::ScopeConstant commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    static_assert(kind == DeclarationKind::Type || kind == DeclarationKind::Function);
-    sema::ProgramKind progKind = kind == DeclarationKind::Type ? sema::ProgramKind::Type : sema::ProgramKind::Function;
-    return state.pushStaticImplScope(progKind, declarationBegin, locationInCurrentLine(currentPosition, state));
+static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
+        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    } else if constexpr (kind == DeclarationKind::EnumValue) {
+        return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    } else if constexpr (kind == DeclarationKind::Namespace) {
+        return state.pushNamespaceScope(name);
+    } else {
+        return state.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    }
+}
+
+template<DeclarationKind kind>
+static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum);
+    return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 
 static void endDeclaration(ParseState& state) {
@@ -265,7 +269,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
-    sema::ScopeConstant this_declaration = sema::INVALID_SCOPE_CONSTANT;
+    sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = {};
     Word argumentName;
 
@@ -362,14 +366,24 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto after_function_declaration_id$no_emit;
     case State::AfterFunctionParameters:
         VERIFY_NOT_REACHED();
-    case State::TypeDeclarationId:
-        goto type_declaration_id$no_emit;
-    case State::AfterTypeDeclarationId:
-        goto after_type_declaration_id$no_emit;
-    case State::TypeDeclarationBody:
-        goto type_declaration_body$no_emit;
+    case State::StructDeclarationId:
+        goto struct_declaration_id$no_emit;
+    case State::AfterStructDeclarationId:
+        goto after_struct_declaration_id$no_emit;
+    case State::StructDeclarationBody:
+        goto struct_declaration_body$no_emit;
     case State::MemberDeclaration:
         goto member_declaration$no_emit;
+    case State::EnumDeclarationId:
+        goto enum_declaration_id$no_emit;
+    case State::AfterEnumDeclarationId:
+        goto after_enum_declaration_id$no_emit;
+    case State::EnumDeclarationBody:
+        goto enum_declaration_body$no_emit;
+    case State::EnumValueDeclaration:
+        goto enum_value_declaration$no_emit;
+    case State::AfterEnumValueDeclarationId:
+        goto after_enum_value_declaration_id$no_emit;
     case State::AfterStatic:
         goto after_static$no_emit;
     case State::StaticVarVariableDeclaration:
@@ -1299,8 +1313,8 @@ after_expression$as_then:
                 }
                 scopePosition = result;
             }
-            // next type_declaration_body
-            goto type_declaration_body$no_emit;
+            // next struct_declaration_body
+            goto struct_declaration_body$no_emit;
         }
         // ifScope ScopeKind::ReturnType
         if (scopePosition[0] == ScopeKind::ReturnType) {
@@ -2348,8 +2362,8 @@ after_statement$no_emit:
                 // then after_declaration
                 // endDeclaration
                 endDeclaration(state);
-                // ifScope ScopeKind::Type
-                if (scopePosition[0] == ScopeKind::Type) {
+                // ifScope ScopeKind::Struct
+                if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
                     goto member_declaration$keyword_check;
                 }
@@ -2357,17 +2371,23 @@ after_statement$no_emit:
                 if (scopePosition[0] == ScopeKind::Namespace) {
                     // then namespace_declaration
                     goto namespace_declaration$keyword_check;
+                }
+                // ifScope ScopeKind::Enum
+                if (scopePosition[0] == ScopeKind::Enum) {
+                    // then enum_value_declaration
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // -> error
                 goto error$keyword_check;
             }
-            // ifScope ScopeKind::Type, ScopeKind::Namespace
-            if (scopePosition[0] == ScopeKind::Type || scopePosition[0] == ScopeKind::Namespace) {
+            // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
+            if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
                 // then after_declaration
                 // endDeclaration
                 endDeclaration(state);
-                // ifScope ScopeKind::Type
-                if (scopePosition[0] == ScopeKind::Type) {
+                // ifScope ScopeKind::Struct
+                if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
                     goto member_declaration$keyword_check;
                 }
@@ -2375,6 +2395,12 @@ after_statement$no_emit:
                 if (scopePosition[0] == ScopeKind::Namespace) {
                     // then namespace_declaration
                     goto namespace_declaration$keyword_check;
+                }
+                // ifScope ScopeKind::Enum
+                if (scopePosition[0] == ScopeKind::Enum) {
+                    // then enum_value_declaration
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // -> error
                 goto error$keyword_check;
@@ -2405,8 +2431,8 @@ after_statement$no_emit:
             // then after_declaration
             // endDeclaration
             endDeclaration(state);
-            // ifScope ScopeKind::Type
-            if (scopePosition[0] == ScopeKind::Type) {
+            // ifScope ScopeKind::Struct
+            if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
@@ -2427,19 +2453,32 @@ after_statement$no_emit:
                 // error
                 errorToken = LexerToken::Identifier;
                 goto handle_parse_error;
+            }
+            // ifScope ScopeKind::Enum
+            if (scopePosition[0] == ScopeKind::Enum) {
+                // then enum_value_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // commitDeclaration DeclarationKind::EnumValue, this_identifier
+                this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
+                // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next after_enum_value_declaration_id
+                goto after_enum_value_declaration_id$with_emit;
             }
             // -> error
             // error
             errorToken = LexerToken::Identifier;
             goto handle_parse_error;
         }
-        // ifScope ScopeKind::Type, ScopeKind::Namespace
-        if (scopePosition[0] == ScopeKind::Type || scopePosition[0] == ScopeKind::Namespace) {
+        // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
+        if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
             // then after_declaration
             // endDeclaration
             endDeclaration(state);
-            // ifScope ScopeKind::Type
-            if (scopePosition[0] == ScopeKind::Type) {
+            // ifScope ScopeKind::Struct
+            if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
@@ -2460,6 +2499,19 @@ after_statement$no_emit:
                 // error
                 errorToken = LexerToken::Identifier;
                 goto handle_parse_error;
+            }
+            // ifScope ScopeKind::Enum
+            if (scopePosition[0] == ScopeKind::Enum) {
+                // then enum_value_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // commitDeclaration DeclarationKind::EnumValue, this_identifier
+                this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
+                // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next after_enum_value_declaration_id
+                goto after_enum_value_declaration_id$with_emit;
             }
             // -> error
             // error
@@ -2499,8 +2551,8 @@ after_statement$no_emit:
         // then after_declaration
         goto after_declaration$as_then;
     }
-    // ifScope ScopeKind::Type, ScopeKind::Namespace
-    if (scopePosition[0] == ScopeKind::Type || scopePosition[0] == ScopeKind::Namespace) {
+    // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
+    if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
         // then after_declaration
         goto after_declaration$as_then;
     }
@@ -3879,18 +3931,18 @@ after_impl_expression$no_emit:
             goto after_variable_modifier$no_emit;
         }
     }
-    // ifScope ScopeKind::TypeImplExpression
-    if (scopePosition[0] == ScopeKind::TypeImplExpression) {
-        // popScope ScopeKind::TypeImplExpression
+    // ifScope ScopeKind::StructImplExpression
+    if (scopePosition[0] == ScopeKind::StructImplExpression) {
+        // popScope ScopeKind::StructImplExpression
         {
-            auto result = popScope(scopePosition, ScopeKind::TypeImplExpression);
+            auto result = popScope(scopePosition, ScopeKind::StructImplExpression);
             if (result == nullptr) {
                 goto error$as_then;
             }
             scopePosition = result;
         }
-        // then after_type_declaration_id
-        goto after_type_declaration_id$as_then;
+        // then after_struct_declaration_id
+        goto after_struct_declaration_id$as_then;
     }
     // ifScope ScopeKind::FunctionImplExpression
     if (scopePosition[0] == ScopeKind::FunctionImplExpression) {
@@ -3904,6 +3956,19 @@ after_impl_expression$no_emit:
         }
         // then after_function_declaration_id
         goto after_function_declaration_id$as_then;
+    }
+    // ifScope ScopeKind::EnumImplExpression
+    if (scopePosition[0] == ScopeKind::EnumImplExpression) {
+        // popScope ScopeKind::EnumImplExpression
+        {
+            auto result = popScope(scopePosition, ScopeKind::EnumImplExpression);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // then after_enum_declaration_id
+        goto after_enum_declaration_id$as_then;
     }
     // then error
     goto error$as_then;
@@ -3936,9 +4001,9 @@ impl_access_expression$no_emit:
 no_declaration$as_then:
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
-        // popScope ScopeKind::Namespace, ScopeKind::Type
+        // popScope ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum
         {
-            auto result = popScope(scopePosition, ScopeKind::Namespace, ScopeKind::Type);
+            auto result = popScope(scopePosition, ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum);
             if (result == nullptr) {
                 errorToken = LexerToken::RightBrace;
                 goto handle_parse_error;
@@ -4091,8 +4156,14 @@ templated_declaration$as_then:
             if (this_identifier == words["struct"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
-                // next type_declaration_id
-                goto type_declaration_id$no_emit;
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            }
+            if (this_identifier == words["enum"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
             }
             if (this_identifier == words["static"]) {
                 // rememberDeclarationBegin
@@ -4152,8 +4223,12 @@ templated_declaration_with_attributes$as_then:
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
-                // next type_declaration_id
-                goto type_declaration_id$no_emit;
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            }
+            if (this_identifier == words["enum"]) {
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
             }
             if (this_identifier == words["static"]) {
                 // next after_static
@@ -4301,11 +4376,11 @@ after_function_parameters$as_then:
     // then error
     goto error$as_then;
 
-    // LinearState type_declaration_id
-type_declaration_id$no_emit:
+    // LinearState struct_declaration_id
+struct_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::TypeDeclarationId;
+    parseState = State::StructDeclarationId;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, state);
@@ -4313,14 +4388,14 @@ type_declaration_id$no_emit:
             this_identifier = wordAndPos.word;
         }
         if (this_identifier.keyword()) {
-        LABEL_MAYBE_UNUSED type_declaration_id$keyword_check:
+        LABEL_MAYBE_UNUSED struct_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
-                // commitImplDeclaration DeclarationKind::Type
-                this_declaration = commitImplDeclaration<DeclarationKind::Type>(tokBegin, declarationBegin, state);
-                // pushScope ScopeKind::TypeImplExpression
-                scopePosition = pushScope(scopePosition, ScopeKind::TypeImplExpression);
-                // emitToken TokenKind::TypeImplDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::TypeImplDecl;
+                // commitImplDeclaration DeclarationKind::Struct
+                this_declaration = commitImplDeclaration<DeclarationKind::Struct>(tokBegin, declarationBegin, state);
+                // pushScope ScopeKind::StructImplExpression
+                scopePosition = pushScope(scopePosition, ScopeKind::StructImplExpression);
+                // emitToken TokenKind::StructImplDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::StructImplDecl;
                 carriedEmitTokenData = this_declaration.toUint();
                 // next impl_expression
                 goto impl_expression$with_emit;
@@ -4328,45 +4403,45 @@ type_declaration_id$no_emit:
             // -> error
             goto error$keyword_check;
         }
-        // commitDeclaration DeclarationKind::Type, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Type>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::TypeDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::TypeDecl;
+        // commitDeclaration DeclarationKind::Struct, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
+        // emitToken TokenKind::StructDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::StructDecl;
         carriedEmitTokenData = this_declaration.toUint();
-        // next after_type_declaration_id
-        goto after_type_declaration_id$with_emit;
+        // next after_struct_declaration_id
+        goto after_struct_declaration_id$with_emit;
     }
     // then error
     goto error$as_then;
 
-    // LinearState after_type_declaration_id
-after_type_declaration_id$with_emit:
+    // LinearState after_struct_declaration_id
+after_struct_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
-after_type_declaration_id$no_emit:
+after_struct_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::AfterTypeDeclarationId;
-after_type_declaration_id$as_then:
+    parseState = State::AfterStructDeclarationId;
+after_struct_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
             tokEnd += 1;
-            // next type_declaration_body
-            goto type_declaration_body$no_emit;
+            // next struct_declaration_body
+            goto struct_declaration_body$no_emit;
         }
     }
     // then error
     goto error$as_then;
 
-    // LinearState type_declaration_body
-type_declaration_body$no_emit:
+    // LinearState struct_declaration_body
+struct_declaration_body$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::TypeDeclarationBody;
+    parseState = State::StructDeclarationBody;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
-        // pushScope ScopeKind::Type
-        scopePosition = pushScope(scopePosition, ScopeKind::Type);
+        // pushScope ScopeKind::Struct
+        scopePosition = pushScope(scopePosition, ScopeKind::Struct);
         // next member_declaration
         goto member_declaration$no_emit;
     }
@@ -4415,6 +4490,140 @@ member_declaration$as_then:
     }
     // then templated_declaration
     goto templated_declaration$as_then;
+
+    // LinearState enum_declaration_id
+enum_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::EnumDeclarationId;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+        LABEL_MAYBE_UNUSED enum_declaration_id$keyword_check:
+            if (this_identifier == words["impl"]) {
+                // commitImplDeclaration DeclarationKind::Enum
+                this_declaration = commitImplDeclaration<DeclarationKind::Enum>(tokBegin, declarationBegin, state);
+                // pushScope ScopeKind::EnumImplExpression
+                scopePosition = pushScope(scopePosition, ScopeKind::EnumImplExpression);
+                // emitToken TokenKind::EnumImplDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::EnumImplDecl;
+                carriedEmitTokenData = this_declaration.toUint();
+                // next impl_expression
+                goto impl_expression$with_emit;
+            }
+            // -> error
+            goto error$keyword_check;
+        }
+        // commitDeclaration DeclarationKind::Enum, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
+        // emitToken TokenKind::EnumDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::EnumDecl;
+        carriedEmitTokenData = this_declaration.toUint();
+        // next after_enum_declaration_id
+        goto after_enum_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_enum_declaration_id
+after_enum_declaration_id$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+after_enum_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterEnumDeclarationId;
+after_enum_declaration_id$as_then:
+    if (std::string_view(tokEnd, 1) == ":"sv) {
+        char next = tokEnd[1];
+        if (next != ':') {
+            tokEnd += 1;
+            // next enum_declaration_body
+            goto enum_declaration_body$no_emit;
+        }
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState enum_declaration_body
+enum_declaration_body$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::EnumDeclarationBody;
+    if (std::string_view(tokEnd, 1) == "{"sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::Enum
+        scopePosition = pushScope(scopePosition, ScopeKind::Enum);
+        // next enum_value_declaration
+        goto enum_value_declaration$no_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState enum_value_declaration
+enum_value_declaration$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::EnumValueDeclaration;
+enum_value_declaration$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, state);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (this_identifier.keyword()) {
+            // -> templated_declaration
+            goto templated_declaration$keyword_check;
+        }
+        // rememberDeclarationBegin
+        declarationBegin = state.parseOutput.currentToken();
+        // commitDeclaration DeclarationKind::EnumValue, this_identifier
+        this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
+        // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
+        carriedEmitTokenData = this_declaration.toUint();
+        // next after_enum_value_declaration_id
+        goto after_enum_value_declaration_id$with_emit;
+    }
+    // then templated_declaration
+    goto templated_declaration$as_then;
+
+    // LinearState after_enum_value_declaration_id
+after_enum_value_declaration_id$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+after_enum_value_declaration_id$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, state);
+    tokBegin = tokEnd;
+    parseState = State::AfterEnumValueDeclarationId;
+    if (std::string_view(tokEnd, 1) == "="sv) {
+        char next = tokEnd[1];
+        if (next != '=' && next != '>') {
+            tokEnd += 1;
+            // updateKind TokenKind::ExplicitEnumValueDecl
+            state.parseOutput.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::AssignStmt
+            carriedEmitTokenKind = TokenKind::AssignStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        }
+    }
+    if (std::string_view(tokEnd, 1) == ";"sv) {
+        tokEnd += 1;
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
+        carriedEmitTokenData = 0;
+        // next after_declaration
+        goto after_declaration$with_emit;
+    }
+    // then error
+    goto error$as_then;
 
     // LinearState after_static
 after_static$no_emit:
@@ -4519,8 +4728,8 @@ after_declaration$no_emit:
 after_declaration$as_then:
     // endDeclaration
     endDeclaration(state);
-    // ifScope ScopeKind::Type
-    if (scopePosition[0] == ScopeKind::Type) {
+    // ifScope ScopeKind::Struct
+    if (scopePosition[0] == ScopeKind::Struct) {
         // then member_declaration
         goto member_declaration$as_then;
     }
@@ -4528,6 +4737,11 @@ after_declaration$as_then:
     if (scopePosition[0] == ScopeKind::Namespace) {
         // then namespace_declaration
         goto namespace_declaration$as_then;
+    }
+    // ifScope ScopeKind::Enum
+    if (scopePosition[0] == ScopeKind::Enum) {
+        // then enum_value_declaration
+        goto enum_value_declaration$as_then;
     }
     // then error
     goto error$as_then;
@@ -5010,6 +5224,11 @@ error$word_case:
         if (this_identifier == words["else"]) {
             // error
             errorToken = LexerToken::Else;
+            goto handle_parse_error;
+        }
+        if (this_identifier == words["enum"]) {
+            // error
+            errorToken = LexerToken::Enum;
             goto handle_parse_error;
         }
         if (this_identifier == words["fn"]) {

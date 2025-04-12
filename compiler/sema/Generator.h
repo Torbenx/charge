@@ -103,12 +103,11 @@ constexpr std::vector<Constant> copyParameters(Program* prog) {
     return copyParameters(prog->parameters.size());
 }
 
-#define ENUMERATE_LOOKUP_CONTEXT_KINDS \
-    KIND(Namespace, Namespace*)        \
-    KIND(ContainingType, TypeProgram*) \
-    KIND(Local, Generator*)            \
-    KIND(TemplateParameters, Program*) \
-    KIND(ContainingTypeImpl, Constant) /* Always a parameterize constant */
+#define ENUMERATE_LOOKUP_CONTEXT_KINDS          \
+    KIND(Namespace, Namespace*)                 \
+    KIND(Local, Generator*)                     \
+    KIND(TemplateParameters, Program*)          \
+    KIND(ContainingType, Type) /* non-dependent */
 
 //! Lookup context structure, main look up logic in Generator::generateIdentifierExpr()
 struct LookupContext {
@@ -139,7 +138,7 @@ private:
         VERIFY((static_cast<uintptr_t>(kind) & ~TAG_MASK) == 0u);
         VERIFY((reinterpret_cast<uintptr_t>(ptr) & TAG_MASK) == 0u);
     }
-    LookupContext(Kind kind, Constant c)
+    LookupContext(Kind kind, Type c)
         : bits(static_cast<uintptr_t>(kind) | (static_cast<uintptr_t>(c.toUint()) << 32)) {
         static_assert(sizeof(uintptr_t) == 8);
     }
@@ -149,8 +148,8 @@ private:
         requires(std::is_pointer_v<T>)
     { return reinterpret_cast<T>(bits & ~TAG_MASK); }
 
-    template<std::same_as<Constant> T>
-    Constant get() const { return Constant::fromUint(bits >> 32); }
+    template<std::same_as<Type> T>
+    Type get() const { return Type::fromUint(bits >> 32); }
 
     uintptr_t bits;
 };
@@ -177,6 +176,27 @@ struct Generator : Util {
 
     struct ExpressionStackItem {
         uint32_t endOffset;
+    };
+
+    struct InternalLookupResult {
+        MemberPointerData memberPointerData;
+        std::optional<DeclarationValue> value;
+
+        MemberPointer memberPointer() const { return memberPointerData; }
+    };
+    struct InternalLookupState {
+        Type originType;
+        Word lookupName;
+        std::vector<uint32_t> memberIndices;
+        InternalLookupResult result;
+
+        InternalLookupState(Type originType, Word lookupName)
+            : originType(originType), lookupName(lookupName) { }
+
+        void setResult(MemberPointerData memberPointerData, DeclarationValue value) {
+            VERIFY(!result.value.has_value());
+            result = { memberPointerData, value };
+        }
     };
 
     struct CallTarget {
@@ -279,10 +299,14 @@ struct Generator : Util {
     void visitFunctionDeclaration();
     void checkFunctionImplDeclaration(DeductionState state);
     void visitFunctionParametersAndBody();
-    void visitTypeImplDeclaration();
-    void visitTypeDeclaration();
-    void checkTypeImplDeclaration(Constant implOf);
-    void visitTypeMembers();
+    void visitStructImplDeclaration();
+    void visitStructDeclaration();
+    void checkStructImplDeclaration(Constant implOf);
+    void visitStructMembers();
+    void visitEnumImplDeclaration();
+    void visitEnumDeclaration();
+    void checkEnumImplDeclaration(Constant implOf);
+    void visitEnumValues();
 
     void visitStatement();
     void visitExpression();
@@ -294,15 +318,17 @@ struct Generator : Util {
     static void signatureCheck(Context& context, ProgramHandle progHandle);
     static void generateBuiltins(Context& context);
 
+    std::optional<ProgramHandle> baseProgram(Constant value);
     FoldBase asFoldBase(Constant value);
     std::optional<FoldBase> tryAsFoldBase(Constant value);
     Constant fold(Constant base, ExternConstant v);
     Constant fold(FoldBase base, ExternConstant v);
     bool staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
 
-    Member member(MemberPointer pointer);
-    Type memberType(MemberPointer pointer);
     Type memberType(Constant memberPointer);
+    MemberPointerData generateMemberPointer(Type originType, std::span<const uint32_t> memberIndices);
+    void extendMemberPointer(MemberPointerData& memberPointer, uint32_t memberIndex);
+
     Type typeOf(Constant);
     Type resultType(Expression);
     Type verifyType(Constant);
@@ -319,22 +345,21 @@ struct Generator : Util {
     Type typeOfNonDependentProgram(FoldBase base);
 
     bool resolveImplicitImplTarget();
-    Expression generateDeclarationLiteral(ScopeConstant rawValue, std::span<const Constant> parentArgs);
+    Expression generateDeclarationLiteral(InternalLookupResult internalResult);
+    Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
-    void generateIdentifierExpr();
     void generateParameterizeExpr(std::span<const Word> argumentNames);
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(SourceLocation location, CallTarget base);
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, R parameters);
-    std::optional<Expression> lookupInType(TypeProgram* typeProg, std::span<const Constant> arguments, Word name);
+    void internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog);
+    InternalLookupResult internalLookup(Type type, Word name);
+    void generateIdentifierExpr();
     void generateStaticAccessExpr();
-    struct MemberAccessState;
-    void emitMemberAccessExpr(MemberAccessState& state);
-    void generateMemberAccessExprInside(MemberAccessState& state, Type type, Word name);
     void generateMemberAccessExpr();
 
-    Constant inheriteParameters(ScopeConstant parent);
+    Constant inheriteParameters(DeclarationValue parent);
 
     Expression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
     Expression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);

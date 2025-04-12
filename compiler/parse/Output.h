@@ -43,11 +43,13 @@ inline bool isUnaryExpr(TokenKind kind) {
     SCOPE(FunctionBody)           \
     SCOPE(ReturnType)             \
     SCOPE(FunctionParameters)     \
-    SCOPE(Type)                   \
+    SCOPE(Struct)                 \
+    SCOPE(Enum)                   \
     SCOPE(HasTypeExpr)            \
     SCOPE(TemplateParameters)     \
-    SCOPE(TypeImplExpression)     \
+    SCOPE(StructImplExpression)   \
     SCOPE(FunctionImplExpression) \
+    SCOPE(EnumImplExpression)     \
     SCOPE(GenericCategoryExpression)
 
 enum class ScopeKind : uint8_t {

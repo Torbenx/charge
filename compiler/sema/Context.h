@@ -14,7 +14,7 @@ struct Context {
     PageBumpAllocator<ProgramHandle> identityProgramTranslation;
     PageBumpAllocator<NamespaceHandle> identityNamespaceTranslation;
     struct ScopeStackEntry {
-        ScopeConstant value;
+        DeclarationValue value;
         std::optional<Scope*> scope;
     };
     std::vector<ScopeStackEntry> m_scopeStack;
@@ -33,65 +33,78 @@ struct Context {
         identityNamespaceTranslation.clear();
         m_scopeStack.clear();
         auto globalNamespace = newNamespace(Word(), std::nullopt);
-        pushScope((ScopeConstant)globalNamespace, getNamespace(globalNamespace));
+        pushScope((DeclarationValue)globalNamespace, getNamespace(globalNamespace));
     }
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
     void popScope() { m_scopeStack.pop_back(); }
-    void pushScope(ScopeConstant value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
-    void pushEmptyScope(ScopeConstant value) { m_scopeStack.push_back({ value, std::nullopt }); }
+    void pushScope(DeclarationValue value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
+    void pushEmptyScope(DeclarationValue value) { m_scopeStack.push_back({ value, std::nullopt }); }
 
-    ScopeConstant pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+    DeclarationValue pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
         ProgramHandle progHandle = newProgram(kind, name, parseLocation, m_scopeStack.back().value, location);
 
         std::optional<Scope*> scope = currentScope();
         if (scope.has_value())
-            scope->addDeclaration(name, (ScopeConstant)progHandle);
+            scope->addDeclaration(name, (DeclarationValue)progHandle);
 
-        if (kind == ProgramKind::Type) {
-            pushScope((ScopeConstant)progHandle, cast<TypeProgram>(program(progHandle)));
+        auto scopeProg = try_cast<ScopeProgram>(program(progHandle));
+        if (scopeProg.has_value()) {
+            pushScope((DeclarationValue)progHandle, scopeProg.value());
         } else {
-            pushEmptyScope((ScopeConstant)progHandle);
+            pushEmptyScope((DeclarationValue)progHandle);
         }
-        return (ScopeConstant)progHandle;
+        return (DeclarationValue)progHandle;
     }
-    ScopeConstant pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location) {
+    DeclarationValue pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location) {
         ProgramHandle progHandle = newProgram(kind, Word(), parseLocation, m_scopeStack.back().value, location);
         m_implDeclarations.push_back(progHandle);
 
-        if (kind == ProgramKind::Type) {
-            pushScope((ScopeConstant)progHandle, cast<TypeProgram>(program(progHandle)));
+        auto scopeProg = try_cast<ScopeProgram>(program(progHandle));
+        if (scopeProg.has_value()) {
+            pushScope((DeclarationValue)progHandle, scopeProg.value());
         } else {
-            pushEmptyScope((ScopeConstant)progHandle);
+            pushEmptyScope((DeclarationValue)progHandle);
         }
-        return (ScopeConstant)progHandle;
+        return (DeclarationValue)progHandle;
     }
-    ScopeConstant pushNamespaceScope(Word name) {
+    DeclarationValue pushNamespaceScope(Word name) {
         std::optional<Scope*> scope = currentScope();
         VERIFY(scope.has_value());
-        std::optional<ScopeConstant> maybeResult = scope->getDeclaration(name);
+        std::optional<DeclarationValue> maybeResult = scope->getDeclaration(name);
         if (maybeResult.has_value()) {
-            VERIFY(maybeResult->kind() == ConstantKind::Namespace);
+            VERIFY(maybeResult->kind() == DeclarationValueKind::Namespace);
             return maybeResult.value();
         }
         auto nsHandle = newNamespace(name, m_scopeStack.back().value.nsHandle());
-        scope->addDeclaration(name, (ScopeConstant)nsHandle);
-        pushScope((ScopeConstant)nsHandle, getNamespace(nsHandle));
-        return (ScopeConstant)nsHandle;
+        scope->addDeclaration(name, (DeclarationValue)nsHandle);
+        pushScope((DeclarationValue)nsHandle, getNamespace(nsHandle));
+        return (DeclarationValue)nsHandle;
     }
-    ScopeConstant pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+    DeclarationValue pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
         std::optional<Scope*> scope = currentScope();
         VERIFY(scope.has_value());
-        TypeProgram* program = static_cast<TypeProgram*>(scope.value());
-        VERIFY(program->kind() == ProgramKind::Type);
+        StructProgram* program = static_cast<StructProgram*>(scope.value());
+        VERIFY(program->kind() == ProgramKind::Struct);
         int_t id = program->members.size();
         program->members.emplace_back(location, isHas, name, parseLocation);
-        pushEmptyScope(INVALID_SCOPE_CONSTANT); // TODO: Avoid this
-        return ScopeConstant(Constant(ConstantKind::Invalid, id));
+        pushEmptyScope(INVALID_DECLARATION_VALUE); // TODO: Avoid this
+        return DeclarationValue(DeclarationValueKind::Member, id);
+    }
+    DeclarationValue pushEnumValueScope(Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+        std::optional<Scope*> scope = currentScope();
+        VERIFY(scope.has_value());
+        EnumProgram* program = static_cast<EnumProgram*>(scope.value());
+        VERIFY(program->kind() == ProgramKind::Enum);
+        int_t id = program->values.size();
+        program->values.emplace_back(location, name, parseLocation);
+        program->addDeclaration(name, DeclarationValue(DeclarationValueKind::EnumValue, id));
+        pushEmptyScope(INVALID_DECLARATION_VALUE);
+        return DeclarationValue(DeclarationValueKind::EnumValue, id);
     }
 
-    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location) {
+    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location) {
         ProgramHandle result = { (uint32_t)programs.size() };
         identityProgramTranslation.push_back(result);
         auto* prog = programs.allocate();

@@ -57,6 +57,7 @@ enum class ConstantKind : uint8_t {
     BooleanLiteral,
     ExpressionCategoryLiteral,
     MemberPointer,
+    EnumValue,
 
     Parameterize, // either all argument substituted or just the inherited ones
     Self,
@@ -132,6 +133,19 @@ struct Constant {
         VERIFY(kind() == ConstantKind::BooleanLiteral);
         return idBits != 0;
     }
+    constexpr bool isEnumValueLiteral() const {
+        switch (kind()) {
+#define BUILTIN_ENUM(name, constant_kind) \
+    case ConstantKind::constant_kind:     \
+        return true;
+#include <sema/builtins.inc>
+
+        case ConstantKind::EnumValue:
+            return true;
+        default:
+            return false;
+        }
+    }
 
     constexpr ExpressionCategory expressionCategory() const {
         VERIFY(kind() == ConstantKind::ExpressionCategoryLiteral);
@@ -168,34 +182,58 @@ private:
     Constant value;
 };
 
-struct ScopeConstant {
-    static constexpr ScopeConstant invalidValue() { return {}; }
-    static ScopeConstant fromUint(uint32_t u) { return ScopeConstant(Constant::fromUint(u)); }
+enum class DeclarationValueKind : uint8_t {
+    Program,
+    Namespace,
+    Member,
+    EnumValue,
 
-    constexpr explicit ScopeConstant(Constant value)
-        : value(value) {
-        VERIFY(value.kind() == ConstantKind::Program || value.kind() == ConstantKind::Namespace || value.kind() == ConstantKind::Invalid);
+    Invalid = INVALID_CONSTANT_KIND_INDEX
+};
+
+struct DeclarationValue {
+    static DeclarationValue fromUint(uint32_t u) { return std::bit_cast<DeclarationValue>(u); }
+
+    static DeclarationValue fromConstant(Constant c) {
+        switch (c.kind()) {
+        case ConstantKind::Program:
+            return c.program();
+        case ConstantKind::Namespace:
+            return c.nsHandle();
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
-    constexpr ScopeConstant(ProgramHandle prog)
-        : value(prog) { }
-    constexpr ScopeConstant(NamespaceHandle ns)
-        : value(ns) { }
 
-    constexpr ConstantKind kind() const { return value.kind(); }
-    constexpr ProgramHandle program() const { return value.program(); }
-    constexpr NamespaceHandle nsHandle() const { return value.nsHandle(); }
+    constexpr DeclarationValue(DeclarationValueKind kind, uint32_t id)
+        : idBits(id), kindBits(std::to_underlying(kind)) {
+    }
+    constexpr DeclarationValue(ProgramHandle prog)
+        : DeclarationValue(DeclarationValueKind::Program, prog.id()) { }
+    constexpr DeclarationValue(NamespaceHandle ns)
+        : DeclarationValue(DeclarationValueKind::Namespace, ns.id()) { }
 
-    uint32_t toUint() const { return value.toUint(); }
+    constexpr DeclarationValueKind kind() const { return (DeclarationValueKind)kindBits; }
+    uint32_t id() const { return idBits; }
 
-    bool operator==(const ScopeConstant&) const = default;
+    constexpr ProgramHandle program() const {
+        VERIFY(kind() == DeclarationValueKind::Program);
+        return ProgramHandle(id());
+    }
+    constexpr NamespaceHandle nsHandle() const {
+        VERIFY(kind() == DeclarationValueKind::Namespace);
+        return NamespaceHandle(id());
+    }
+
+    uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }
+
+    bool operator==(const DeclarationValue&) const = default;
 
 private:
-    constexpr ScopeConstant()
-        : value(INVALID_CONSTANT) { }
-
-    Constant value;
+    uint32_t idBits : (32 - CONSTANT_KIND_BITS);
+    uint32_t kindBits : CONSTANT_KIND_BITS;
 };
-inline constexpr ScopeConstant INVALID_SCOPE_CONSTANT = ScopeConstant::invalidValue();
+inline constexpr DeclarationValue INVALID_DECLARATION_VALUE = { DeclarationValueKind::Invalid, MAX_CONSTANT_ID };
 
 enum class ExpressionKind : uint8_t {
     FirstNonConstantKind = 128,
@@ -340,8 +378,8 @@ struct optional_traits<sema::ExternConstant> {
     static constexpr sema::ExternConstant empty_value = sema::INVALID_CONSTANT;
 };
 template<>
-struct optional_traits<sema::ScopeConstant> {
-    static constexpr sema::ScopeConstant empty_value = sema::INVALID_SCOPE_CONSTANT;
+struct optional_traits<sema::DeclarationValue> {
+    static constexpr sema::DeclarationValue empty_value = sema::INVALID_DECLARATION_VALUE;
 };
 template<>
 struct optional_traits<sema::Expression> {

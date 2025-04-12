@@ -69,21 +69,21 @@ namespace sema {
 struct NestedName {
     std::vector<Word> parts;
 
-    bool match(Context& ctx, Program* prog, ScopeConstant value) const {
+    bool match(Context& ctx, Program* prog, DeclarationValue value) const {
         for (Word expectedName : std::views::reverse(parts)) {
-            if (value.kind() == ConstantKind::Program) {
+            if (value.kind() == DeclarationValueKind::Program) {
                 auto* targetProg = ctx.program(prog->translate(value.program()));
                 if (targetProg->name() != expectedName)
                     return false;
                 value = targetProg->parent();
                 prog = targetProg;
-            } else if (value.kind() == ConstantKind::Namespace) {
+            } else if (value.kind() == DeclarationValueKind::Namespace) {
                 auto* ns = ctx.getNamespace(value.nsHandle());
                 if (ns->name != expectedName)
                     return false;
                 if (!ns->parent.has_value())
                     return false;
-                value = (ScopeConstant)ns->parent.value();
+                value = ns->parent.value();
             } else {
                 VERIFY_NOT_REACHED();
             }
@@ -110,7 +110,7 @@ struct ParameterizeExpr : CheckExpr {
         VERIFY(value.kind() == ConstantKind::Parameterize);
         auto parameterize = prog->getParameterize(value);
 
-        VERIFY(base.match(ctx, prog, (ScopeConstant)parameterize.base));
+        VERIFY(base.match(ctx, prog, parameterize.base));
 
         VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
@@ -125,7 +125,7 @@ struct LiteralExpr : CheckExpr {
 
     void check(Context& ctx, Program* prog, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::Program || value.kind() == ConstantKind::Namespace);
-        VERIFY(literal.match(ctx, prog, (ScopeConstant)value));
+        VERIFY(literal.match(ctx, prog, DeclarationValue::fromConstant(value)));
     }
 };
 struct ParameterExpr : CheckExpr {
@@ -160,6 +160,22 @@ struct FunctionSignatureExpr : CheckExpr {
         VERIFY(value.kind() == ConstantKind::FunctionSignature$Program
             || value.kind() == ConstantKind::FunctionSignature$Parameterize);
         signatureValue->check(ctx, prog, value.functionSignatureBaseConstant());
+    }
+};
+struct EnumValueExpr : CheckExpr {
+    std::unique_ptr<CheckExpr> typeExpr;
+    Word valueName;
+
+    EnumValueExpr(std::unique_ptr<CheckExpr> typeExpr, Word valueName)
+        : typeExpr(std::move(typeExpr)), valueName(valueName) { }
+
+    void check(Context& ctx, Program* prog, Constant value) const override {
+        VERIFY(value.isEnumValueLiteral());
+        auto enumValue = prog->getEnumValue(value);
+        typeExpr->check(ctx, prog, (Constant)enumValue.enumType);
+
+        auto* enumProg = cast<EnumProgram>(ctx.program(prog->baseProgram(enumValue.enumType).value()));
+        VERIFY(enumProg->values[enumValue.valueIndex].name() == valueName);
     }
 };
 
@@ -230,6 +246,14 @@ struct CheckExprParser {
                 auto sigExpr = parse();
                 consume(")");
                 return std::make_unique<FunctionSignatureExpr>(std::move(sigExpr));
+            }
+            if (id == "enumValue") {
+                consume("(");
+                auto typeExpr = parse();
+                consume(",");
+                auto valueName = readId();
+                consume(")");
+                return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.wordTable.get(valueName));
             }
         }
 

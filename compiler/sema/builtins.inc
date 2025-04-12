@@ -1,8 +1,14 @@
+#ifndef BUILTIN
+#define BUILTIN(name, cppName)
+#endif
 #ifndef BUILTIN_TYPE
 #define BUILTIN_TYPE(name) BUILTIN(name, name##_type)
 #endif
 #ifndef BUILTIN_TEMPLATE
 #define BUILTIN_TEMPLATE(name) BUILTIN(name, name##_template)
+#endif
+#ifndef BUILTIN_ENUM
+#define BUILTIN_ENUM(name, constant_kind) BUILTIN_TYPE(name)
 #endif
 
 BUILTIN_TYPE(type)
@@ -13,7 +19,7 @@ BUILTIN_TYPE(error)
 
 BUILTIN_TYPE(namespace)
 
-BUILTIN_TYPE(expression_category)
+BUILTIN_ENUM(expression_category, ExpressionCategoryLiteral)
 
 BUILTIN_TYPE(template_signature)
 BUILTIN_TEMPLATE(template_id)
@@ -27,4 +33,5 @@ BUILTIN_TEMPLATE(member_ptr)
 
 #undef BUILTIN_TYPE
 #undef BUILTIN_TEMPLATE
+#undef BUILTIN_ENUM
 #undef BUILTIN

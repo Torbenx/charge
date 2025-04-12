@@ -67,16 +67,20 @@ void Generator::visitDeclaration() {
     if (tok->kind() == Token::TemplateAttribute) {
         visitTemplateParameters();
     }
-    if (tok->kind() == Token::TypeDecl) {
-        visitTypeDeclaration();
-    } else if (tok->kind() == Token::TypeImplDecl) {
-        visitTypeImplDeclaration();
+    if (tok->kind() == Token::StructDecl) {
+        visitStructDeclaration();
+    } else if (tok->kind() == Token::StructImplDecl) {
+        visitStructImplDeclaration();
     } else if (tok->kind() == Token::VarValueDecl || tok->kind() == Token::LetValueDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
         visitFunctionDeclaration();
     } else if (tok->kind() == Token::FunctionImplDecl) {
         visitFunctionImplDeclaration();
+    } else if (tok->kind() == Token::EnumDecl) {
+        visitEnumDeclaration();
+    } else if (tok->kind() == Token::EnumImplDecl) {
+        visitEnumImplDeclaration();
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -237,7 +241,7 @@ void Generator::visitFunctionDeclaration() {
     visitFunctionParametersAndBody();
 
     if (resolveImplicitImplTarget()) {
-        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->functionParameters, [](const FunctionParameter& param) { return param.name(); });
+        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->functionParameters, [](const FunctionProgram::Parameter& param) { return param.name(); });
         std::vector<Word> parameterNames { parameterNamesRange.begin(), parameterNamesRange.end() };
         auto [state] = resolveCallTarget(parameterNames);
         checkFunctionImplDeclaration(std::move(state));
@@ -334,42 +338,42 @@ void Generator::visitFunctionParametersAndBody() {
     }
 }
 
-void Generator::visitTypeImplDeclaration() {
-    VERIFY(tok->kind() == Token::TypeImplDecl);
+void Generator::visitStructImplDeclaration() {
+    VERIFY(tok->kind() == Token::StructImplDecl);
     advance();
     visitExpression();
     Constant implOf = expressionToConstant();
 
-    visitTypeMembers();
+    visitStructMembers();
 
-    checkTypeImplDeclaration(implOf);
+    checkStructImplDeclaration(implOf);
 }
 
-void Generator::visitTypeDeclaration() {
-    VERIFY(tok->kind() == Token::TypeDecl);
+void Generator::visitStructDeclaration() {
+    VERIFY(tok->kind() == Token::StructDecl);
     advance();
-    visitTypeMembers();
+    visitStructMembers();
 
     if (resolveImplicitImplTarget()) {
-        checkTypeImplDeclaration(expressionToConstant());
+        checkStructImplDeclaration(expressionToConstant());
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
     }
 }
 
-void Generator::checkTypeImplDeclaration(Constant implOf) {
+void Generator::checkStructImplDeclaration(Constant implOf) {
     VERIFY(implOf.kind() == ConstantKind::Parameterize);
     auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Type);
+    VERIFY(base.program->kind() == ProgramKind::Struct);
     // TODO: Do checks
 
     program->completeSignatureCheck(true, implOf);
 }
 
-void Generator::visitTypeMembers() {
-    VERIFY(program->kind() == ProgramKind::Type);
-    auto* typeProgram = cast<TypeProgram>(program);
+void Generator::visitStructMembers() {
+    VERIFY(program->kind() == ProgramKind::Struct);
+    auto* typeProgram = cast<StructProgram>(program);
 
     auto savedTok = tok;
     for (int_t i = 0; i < (int_t)typeProgram->members.size(); i++) {
@@ -378,7 +382,7 @@ void Generator::visitTypeMembers() {
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
-        VERIFY(tok->data() == Constant(ConstantKind::Invalid, i).toUint());
+        VERIFY(tok->data() == DeclarationValue(DeclarationValueKind::Member, i).toUint());
         advance();
 
         SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
@@ -389,6 +393,61 @@ void Generator::visitTypeMembers() {
 
     tok = savedTok;
 }
+
+void Generator::visitEnumImplDeclaration() {
+    VERIFY(tok->kind() == Token::EnumImplDecl);
+    advance();
+    visitExpression();
+    Constant implOf = expressionToConstant();
+
+    visitEnumValues();
+
+    checkEnumImplDeclaration(implOf);
+}
+
+void Generator::visitEnumDeclaration() {
+    VERIFY(tok->kind() == Token::EnumDecl);
+    advance();
+    visitEnumValues();
+
+    if (resolveImplicitImplTarget()) {
+        checkEnumImplDeclaration(expressionToConstant());
+    } else {
+        Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+        program->completeSignatureCheck(false, selfConstant);
+    }
+}
+
+void Generator::checkEnumImplDeclaration(Constant implOf) {
+    VERIFY(implOf.kind() == ConstantKind::Parameterize);
+    auto base = asFoldBase(implOf);
+    VERIFY(base.program->kind() == ProgramKind::Enum);
+    // TODO: Do checks
+
+    program->completeSignatureCheck(true, implOf);
+}
+
+void Generator::visitEnumValues() {
+    VERIFY(program->kind() == ProgramKind::Enum);
+    auto* enumProgram = cast<EnumProgram>(program);
+
+    auto savedTok = tok;
+    for (int_t i = 0; i < (int_t)enumProgram->values.size(); i++) {
+        auto& value = enumProgram->values[i];
+        VERIFY(!value.isChecked());
+
+        setParseLocation(value.parseLocation());
+        VERIFY(tok->kind() == Token::ImplicitEnumValueDecl || tok->kind() == Token::ExplicitEnumValueDecl);
+        VERIFY(tok->data() == DeclarationValue(DeclarationValueKind::EnumValue, i).toUint());
+        advance();
+
+        // TODO: Actually set value once ints are supported
+        value.setValue(std::nullopt);
+    }
+
+    tok = savedTok;
+}
+
 
 void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {

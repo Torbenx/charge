@@ -58,16 +58,103 @@ private:
 };
 
 struct MemberPointer {
-    Type parentType; // always non-dependent
-    uint32_t memberIndex;
+    struct Link {
+        Type parentType;
+        uint32_t memberIndex;
+        Type memberType;
+    };
+    struct iterator {
+    private:
+        using it_t = std::span<const uint32_t>::const_iterator;
+        it_t m_it;
+
+    public:
+        using value_type = Link;
+        using difference_type = int_t;
+
+        iterator() = default;
+        explicit iterator(it_t it)
+            : m_it(it) { }
+        iterator(const iterator&) = default;
+        iterator(iterator&&) = default;
+        iterator& operator=(const iterator&) = default;
+        iterator& operator=(iterator&&) = default;
+
+        iterator& operator++() {
+            m_it += 2;
+            return *this;
+        }
+        iterator operator++(int) {
+            iterator copy = *this;
+            m_it += 2;
+            return copy;
+        }
+        iterator& operator--() {
+            m_it -= 2;
+            return *this;
+        }
+        iterator operator--(int) {
+            iterator copy = *this;
+            m_it -= 2;
+            return copy;
+        }
+        Link operator*() const { return { Type::fromUint(*std::prev(m_it)), *m_it, Type::fromUint(*std::next(m_it)) }; }
+
+        auto operator<=>(const iterator& other) const {
+            return m_it <=> other.m_it;
+        }
+        bool operator==(const iterator&) const = default;
+    };
+
+    // The even elements 0, 2, ... are types, the odd elements 1, 3, ... are member indices.
+    // Should always have odd length.
+    std::span<const uint32_t> m_data;
+
+    Type memberType() const {
+        VERIFY(!m_data.empty());
+        return Type::fromUint(m_data.back());
+    }
+    Type originType() const {
+        VERIFY(!m_data.empty());
+        return Type::fromUint(m_data.front());
+    }
+    bool isIdentity() const {
+        VERIFY(!m_data.empty());
+        return m_data.size() == 1;
+    }
+    int_t linkCount() const { return m_data.size() / 2; }
+
+    iterator begin() const { return iterator(m_data.begin() + 1); }
+    iterator end() const { return iterator(m_data.end()); }
+
+    Link operator[](int_t index) const { return *iterator(m_data.begin() + 2 * index); }
 };
-struct MemberPointerSet : FlatTreeSetDetail::Base<MemberPointerSet, MemberPointer> {
+static_assert(std::bidirectional_iterator<MemberPointer::iterator>);
+
+struct MemberPointerData {
+    std::vector<uint32_t> m_data;
+    operator MemberPointer() const { return { m_data }; }
+};
+struct MemberPointerSet : FlatTreeSetDetail::Base<MemberPointerSet, MemberPointerData> {
     uint32_t get(Context& context, ProgramHandle prog, MemberPointer);
 
 private:
     friend Base;
     uint32_t makeNode(Context&, ProgramHandle, MemberPointer, TreeLabel);
     std::strong_ordering compare(Context&, ProgramHandle, MemberPointer, MemberPointer);
+};
+
+struct EnumValue {
+    ExternConstant enumType;
+    uint32_t valueIndex;
+};
+struct EnumValueSet : FlatTreeSetDetail::Base<EnumValueSet, EnumValue> {
+    uint32_t get(Context& context, ProgramHandle prog, EnumValue);
+
+private:
+    friend Base;
+    uint32_t makeNode(Context&, ProgramHandle, EnumValue, TreeLabel);
+    std::strong_ordering compare(Context&, ProgramHandle, EnumValue, EnumValue);
 };
 
 struct CallData {
@@ -115,10 +202,16 @@ enum class ProgramStatus : uint8_t {
     SignatureChecked,
 };
 
+#define ENUMERATE_PROGRAM_KINDS \
+    PROGRAM_KIND(Global)        \
+    PROGRAM_KIND(Struct)        \
+    PROGRAM_KIND(Function)      \
+    PROGRAM_KIND(Enum)
+
 enum class ProgramKind : uint8_t {
-    Global,
-    Type,
-    Function,
+#define PROGRAM_KIND(kind) kind,
+    ENUMERATE_PROGRAM_KINDS
+#undef PROGRAM_KIND
 };
 
 struct ConstantIdIterator {
@@ -184,7 +277,7 @@ struct Program {
         bool implicit() const { return name.empty(); }
     };
 
-    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant parent, SourceLocation location)
+    Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue parent, SourceLocation location)
         : m_fields(Fields(kind), location)
         , m_name(name)
         , m_parent(parent)
@@ -194,6 +287,7 @@ struct Program {
     Constant addParameterize(Context& context, Parameterize parameterize);
     Constant addRemoteComputedConstant(Context& context, RemoteComputation);
     Constant addMemberPointer(Context& context, MemberPointer pointer);
+    Constant addEnumValue(Context& context, EnumValue value);
 
     ComputedConstant getComputedConstant(ExternConstant value) {
         VERIFY(value.kind() == ConstantKind::Computed);
@@ -211,6 +305,19 @@ struct Program {
     MemberPointer getMemberPointer(ExternConstant value) {
         VERIFY(value.kind() == ConstantKind::MemberPointer);
         return memberPointers.at(value.id());
+    }
+    EnumValue getEnumValue(ExternConstant value) {
+        switch (value.kind()) {
+#define BUILTIN_ENUM(name, constant_kind) \
+    case ConstantKind::constant_kind:     \
+        return { builtins::name##_type, value.id() };
+#include <sema/builtins.inc>
+
+        case ConstantKind::EnumValue:
+            return enumValues.at(value.id());
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
     std::strong_ordering compareParameterizes(Constant a, Constant b) {
         VERIFY(a.kind() == ConstantKind::Parameterize);
@@ -243,7 +350,7 @@ struct Program {
         m_type = type;
     }
 
-    ScopeConstant parent() const {
+    DeclarationValue parent() const {
         return m_parent;
     }
 
@@ -291,20 +398,20 @@ struct Program {
     NamespaceHandle translate(NamespaceHandle handle) const {
         return namespaceTranslationBuffer[handle.id()];
     }
-    ScopeConstant translate(ScopeConstant value) const {
-        if (value.kind() == ConstantKind::Program)
+    DeclarationValue translate(DeclarationValue value) const {
+        if (value.kind() == DeclarationValueKind::Program)
             return translate(value.program());
-        if (value.kind() == ConstantKind::Namespace)
+        if (value.kind() == DeclarationValueKind::Namespace)
             return translate(value.nsHandle());
         return value;
     }
 
-    ProgramHandle baseProgram(ExternConstant value) {
+    std::optional<ProgramHandle> baseProgram(ExternConstant value) {
         if (value.kind() == ConstantKind::Program)
             return value.program();
         if (value.kind() == ConstantKind::Parameterize)
             return getParameterize(value).base;
-        VERIFY_NOT_REACHED();
+        return std::nullopt;
     }
 
     ConstantIdRange computedConstants() const {
@@ -318,6 +425,9 @@ struct Program {
     }
     ConstantIdRange remoteComputedConstants() const {
         return ConstantIdRange(ConstantKind::RemoteComputed, remoteComputations.size());
+    }
+    ConstantIdRange enumValueConstants() const {
+        return ConstantIdRange(ConstantKind::EnumValue, enumValues.size());
     }
 
 public:
@@ -345,6 +455,7 @@ public:
     ParameterizeSet parameterizes;
     RemoteComputationSet remoteComputations;
     MemberPointerSet memberPointers;
+    EnumValueSet enumValues;
     std::vector<ComputedConstantData> computations;
     std::vector<MemberExpression> memberExpressions;
     std::vector<CallData> calls;
@@ -355,7 +466,7 @@ protected:
 
     std::optional<ExternConstant> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
-    ScopeConstant m_parent;
+    DeclarationValue m_parent;
     uint32_t parseLocationOrSelfConstant;
 
     const ProgramHandle* programTranslationBuffer = nullptr;
@@ -364,7 +475,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 288);
+static_assert(sizeof(Program) == 320);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -374,7 +485,7 @@ enum class GlobalKind : uint8_t {
 };
 
 struct GlobalProgram : Program {
-    GlobalProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
+    GlobalProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
         : Program(ProgramKind::Global, name, parseLocation, rawParent, location) { }
 
     void setInitializer(Constant value) {
@@ -398,8 +509,8 @@ struct callParameters;
 
 struct CallParameter {
     Word name;
-    Type type;
-    Constant expectedInitializerCategory;
+    ExternConstant type;
+    ExternConstant expectedInitializerCategory;
 };
 
 template<typename P>
@@ -408,112 +519,158 @@ concept CallableProgram = requires(P* program, int_t index) {
     { callParameters<P>::get(program)[index] } -> std::same_as<CallParameter>;
 };
 
-struct FunctionParameter {
-private:
-    SourceLocation m_location;
-    Word m_name;
-    Type m_type;
-    Constant m_category;
-
-public:
-    FunctionParameter(SourceLocation location, Word name, Type type, Constant category)
-        : m_location(location), m_name(name), m_type(type), m_category(category) { }
-
-    SourceLocation location() const { return m_location; }
-    Word name() const { return m_name; }
-    Type type() const { return m_type; }
-    Constant category() const { return m_category; }
-
-    operator CallParameter() const { return { name(), type(), category() }; }
-};
 struct FunctionProgram : Program {
-    FunctionProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
+    struct Parameter {
+    private:
+        SourceLocation m_location;
+        Word m_name;
+        Type m_type;
+        Constant m_category;
+
+    public:
+        Parameter(SourceLocation location, Word name, Type type, Constant category)
+            : m_location(location), m_name(name), m_type(type), m_category(category) { }
+
+        SourceLocation location() const { return m_location; }
+        Word name() const { return m_name; }
+        Type type() const { return m_type; }
+        Constant category() const { return m_category; }
+
+        operator CallParameter() const { return { name(), type(), category() }; }
+    };
+    FunctionProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
         : Program(ProgramKind::Function, name, parseLocation, rawParent, location) { }
 
     void setBody(std::vector<Instruction> body) { m_body = std::move(body); }
     std::span<const Instruction> body() { return m_body; }
     ExternConstant returnType() const { return m_type.value(); }
 
-    std::vector<FunctionParameter> functionParameters;
+    std::vector<Parameter> functionParameters;
     std::vector<Instruction> m_body;
 };
 template<>
 struct callParameters<FunctionProgram> {
     static auto get(FunctionProgram* prog) {
-        return std::views::transform(prog->functionParameters, [](const FunctionParameter& p) -> CallParameter { return p; });
+        return std::views::transform(prog->functionParameters, [](const FunctionProgram::Parameter& p) -> CallParameter { return p; });
     }
 };
 static_assert(CallableProgram<FunctionProgram>);
 
-struct Member {
-private:
-    struct Fields {
-        bool hasBit : 1;
-        bool checkedBit : 1;
-    };
-    TaggedSourceLocation<Fields> m_fields;
-    Word m_name;
-    union {
-        parse::TokenHandle parseLocation;
-        Type type;
-    } u;
-
-public:
-    Member(SourceLocation location, bool isHas, Word name, parse::TokenHandle parseLocation)
-        : m_fields(Fields { .hasBit = isHas, .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
-
-    void setType(Type type) {
-        VERIFY(!isChecked());
-        auto tag = m_fields.tag();
-        tag.checkedBit = true;
-        m_fields.setTag(tag);
-        u.type = type;
-    }
-
-    bool isHas() const { return m_fields.tag().hasBit; }
-    bool isChecked() const { return m_fields.tag().checkedBit; }
-    SourceLocation location() const { return m_fields.location(); }
-    Type type() const {
-        VERIFY(isChecked());
-        return u.type;
-    }
-    parse::TokenHandle parseLocation() const {
-        VERIFY(!isChecked());
-        return u.parseLocation;
-    }
-    Word name() const { return m_name; }
+struct ScopeProgram : Program, Scope {
+    ScopeProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
+        : Program(kind, name, parseLocation, rawParent, location) { }
 };
-struct TypeProgram : Program, Scope {
-    TypeProgram(Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location)
-        : Program(ProgramKind::Type, name, parseLocation, rawParent, location) { }
+
+struct StructProgram : ScopeProgram {
+    struct Member {
+    private:
+        struct Fields {
+            bool hasBit : 1;
+            bool checkedBit : 1;
+        };
+        TaggedSourceLocation<Fields> m_fields;
+        Word m_name;
+        union {
+            parse::TokenHandle parseLocation;
+            ExternConstant type;
+        } u;
+
+    public:
+        Member(SourceLocation location, bool isHas, Word name, parse::TokenHandle parseLocation)
+            : m_fields(Fields { .hasBit = isHas, .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
+
+        void setType(Type type) {
+            VERIFY(!isChecked());
+            auto tag = m_fields.tag();
+            tag.checkedBit = true;
+            m_fields.setTag(tag);
+            u.type = type;
+        }
+
+        bool isHas() const { return m_fields.tag().hasBit; }
+        bool isChecked() const { return m_fields.tag().checkedBit; }
+        SourceLocation location() const { return m_fields.location(); }
+        ExternConstant type() const {
+            VERIFY(isChecked());
+            return u.type;
+        }
+        parse::TokenHandle parseLocation() const {
+            VERIFY(!isChecked());
+            return u.parseLocation;
+        }
+        Word name() const { return m_name; }
+    };
+
+    StructProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
+        : ScopeProgram(ProgramKind::Struct, name, parseLocation, rawParent, location) { }
     std::vector<Member> members;
 };
 template<>
-struct callParameters<TypeProgram> {
-    static auto get(TypeProgram* program) {
-        return std::views::transform(program->members, [](Member m) -> CallParameter { return { m.name(), m.type(), Constant(ExpressionCategory::Value) }; });
+struct callParameters<StructProgram> {
+    static auto get(StructProgram* program) {
+        return std::views::transform(program->members, [](StructProgram::Member m) -> CallParameter { return { m.name(), m.type(), Constant(ExpressionCategory::Value) }; });
     }
 };
-static_assert(CallableProgram<TypeProgram>);
+static_assert(CallableProgram<StructProgram>);
+
+struct EnumProgram : ScopeProgram {
+    struct Value {
+    private:
+        struct Fields {
+            bool checkedBit : 1;
+        };
+        TaggedSourceLocation<Fields> m_fields;
+        Word m_name;
+        union {
+            parse::TokenHandle parseLocation;
+            std::optional<ExternConstant> explicitValue;
+        } u;
+
+    public:
+        Value(SourceLocation location, Word name, parse::TokenHandle parseLocation)
+            : m_fields(Fields { .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
+        Value(SourceLocation location, Word name, std::optional<ExternConstant> explicitValue)
+            : m_fields(Fields { .checkedBit = true }, location), m_name(name), u { .explicitValue = explicitValue } { }
+
+        bool isChecked() const { return m_fields.tag().checkedBit; }
+        SourceLocation location() const { return m_fields.location(); }
+        Word name() const { return m_name; }
+        std::optional<ExternConstant> explicitValue() const {
+            VERIFY(isChecked());
+            return u.explicitValue;
+        }
+        parse::TokenHandle parseLocation() const {
+            VERIFY(!isChecked());
+            return u.parseLocation;
+        }
+
+        void setValue(std::optional<ExternConstant> explicitValue) {
+            VERIFY(!isChecked());
+            auto tag = m_fields.tag();
+            tag.checkedBit = true;
+            m_fields.setTag(tag);
+            u.explicitValue = explicitValue;
+        }
+    };
+
+    EnumProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
+        : ScopeProgram(ProgramKind::Enum, name, parseLocation, rawParent, location) { }
+    std::vector<Value> values;
+};
 
 template<typename T>
 constexpr std::optional<T*> try_cast(Program* prog) {
     switch (prog->kind()) {
-    case ProgramKind::Global:
-        if constexpr (std::derived_from<GlobalProgram, T>)
-            return static_cast<GlobalProgram*>(prog);
-        else
+#define PROGRAM_KIND(kind)                                 \
+    case ProgramKind::kind:                                \
+        if constexpr (std::derived_from<kind##Program, T>) \
+            return static_cast<kind##Program*>(prog);      \
+        else                                               \
             return std::nullopt;
-    case ProgramKind::Type:
-        if constexpr (std::derived_from<TypeProgram, T>)
-            return static_cast<TypeProgram*>(prog);
-        else
-            return std::nullopt;
-    case ProgramKind::Function:
-        if constexpr (std::derived_from<FunctionProgram, T>)
-            return static_cast<FunctionProgram*>(prog);
-        else
-            return std::nullopt;
+
+        ENUMERATE_PROGRAM_KINDS
+#undef PROGRAM_KIND
+
     default:
         VERIFY_NOT_REACHED();
     }
@@ -528,24 +685,17 @@ concept implements = requires(P* program) { r<P>::get(program); };
 template<template<typename> typename r>
 constexpr bool try_visit(Program* prog, auto&& callable) {
     switch (prog->kind()) {
-    case ProgramKind::Global:
-        if constexpr (implements<GlobalProgram, r>) {
-            callable(r<GlobalProgram>::get(static_cast<GlobalProgram*>(prog)));
-            return true;
-        } else
+#define PROGRAM_KIND(kind)                                                      \
+    case ProgramKind::kind:                                                     \
+        if constexpr (implements<kind##Program, r>) {                           \
+            callable(r<kind##Program>::get(static_cast<kind##Program*>(prog))); \
+            return true;                                                        \
+        } else                                                                  \
             return false;
-    case ProgramKind::Type:
-        if constexpr (implements<TypeProgram, r>) {
-            callable(r<TypeProgram>::get(static_cast<TypeProgram*>(prog)));
-            return true;
-        } else
-            return false;
-    case ProgramKind::Function:
-        if constexpr (implements<FunctionProgram, r>) {
-            callable(r<FunctionProgram>::get(static_cast<FunctionProgram*>(prog)));
-            return true;
-        } else
-            return false;
+
+        ENUMERATE_PROGRAM_KINDS
+#undef PROGRAM_KIND
+
     default:
         VERIFY_NOT_REACHED();
     }
@@ -554,66 +704,68 @@ constexpr bool try_visit(Program* prog, auto&& callable) {
 template<template<typename> typename r>
 constexpr auto visit(Program* prog, auto&& callable) {
     switch (prog->kind()) {
-    case ProgramKind::Global:
-        if constexpr (implements<GlobalProgram, r>) {
-            return callable(r<GlobalProgram>::get(static_cast<GlobalProgram*>(prog)));
-        } else
+#define PROGRAM_KIND(kind)                                                             \
+    case ProgramKind::kind:                                                            \
+        if constexpr (implements<kind##Program, r>) {                                  \
+            return callable(r<kind##Program>::get(static_cast<kind##Program*>(prog))); \
+        } else                                                                         \
             VERIFY_NOT_REACHED();
-    case ProgramKind::Type:
-        if constexpr (implements<TypeProgram, r>) {
-            return callable(r<TypeProgram>::get(static_cast<TypeProgram*>(prog)));
-        } else
-            VERIFY_NOT_REACHED();
-    case ProgramKind::Function:
-        if constexpr (implements<FunctionProgram, r>) {
-            return callable(r<FunctionProgram>::get(static_cast<FunctionProgram*>(prog)));
-        } else
-            VERIFY_NOT_REACHED();
+
+        ENUMERATE_PROGRAM_KINDS
+#undef PROGRAM_KIND
+
     default:
         VERIFY_NOT_REACHED();
     }
 };
 
 union ProgramUnion {
-    GlobalProgram global;
-    FunctionProgram function;
-    TypeProgram type;
+    GlobalProgram m_global;
+    FunctionProgram m_function;
+    StructProgram m_struct;
+    EnumProgram m_enum;
 
-    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, ScopeConstant rawParent, SourceLocation location) {
+    ProgramUnion(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location) {
         switch (kind) {
         case ProgramKind::Global:
-            std::construct_at(&global, name, parseLocation, rawParent, location);
+            std::construct_at(&m_global, name, parseLocation, rawParent, location);
             break;
         case ProgramKind::Function:
-            std::construct_at(&function, name, parseLocation, rawParent, location);
+            std::construct_at(&m_function, name, parseLocation, rawParent, location);
             break;
-        case ProgramKind::Type:
-            std::construct_at(&type, name, parseLocation, rawParent, location);
+        case ProgramKind::Struct:
+            std::construct_at(&m_struct, name, parseLocation, rawParent, location);
+            break;
+        case ProgramKind::Enum:
+            std::construct_at(&m_enum, name, parseLocation, rawParent, location);
             break;
         default:
             VERIFY_NOT_REACHED();
         }
     }
 
-    Program& get() { return global; }
+    Program& get() { return m_global; }
 
     ~ProgramUnion() {
-        switch (global.kind()) {
+        switch (m_global.kind()) {
         case ProgramKind::Global:
-            std::destroy_at(&global);
+            std::destroy_at(&m_global);
             break;
         case ProgramKind::Function:
-            std::destroy_at(&function);
+            std::destroy_at(&m_function);
             break;
-        case ProgramKind::Type:
-            std::destroy_at(&type);
+        case ProgramKind::Struct:
+            std::destroy_at(&m_struct);
+            break;
+        case ProgramKind::Enum:
+            std::destroy_at(&m_enum);
             break;
         default:
             VERIFY_NOT_REACHED();
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 336);
+static_assert(sizeof(ProgramUnion) == 368);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

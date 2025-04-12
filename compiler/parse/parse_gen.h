@@ -17,6 +17,7 @@ inline constexpr ConstWordStringTable words {
     keyword("do"),
     keyword("elif"),
     keyword("else"),
+    keyword("enum"),
     keyword("fn"),
     keyword("for"),
     keyword("forward"),
@@ -45,6 +46,8 @@ inline constexpr ConstWordStringTable words {
     keyword("while"),
     keyword("with"),
     "bool",
+    "const_shared_ref",
+    "const_unique_ref",
     "error",
     "expression_category",
     "false",
@@ -55,11 +58,14 @@ inline constexpr ConstWordStringTable words {
     "parent_type",
     "pointee_type",
     "ptr",
+    "shared_ref",
     "sig",
     "template_id",
     "template_signature",
     "true",
     "type",
+    "unique_ref",
+    "value",
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -123,6 +129,7 @@ enum class LexerToken : uint8_t {
     Do, // do
     Elif, // elif
     Else, // else
+    Enum, // enum
     Fn, // fn
     For, // for
     Forward, // forward
@@ -200,10 +207,15 @@ enum class State {
     FunctionDeclarationId,
     AfterFunctionDeclarationId,
     AfterFunctionParameters,
-    TypeDeclarationId,
-    AfterTypeDeclarationId,
-    TypeDeclarationBody,
+    StructDeclarationId,
+    AfterStructDeclarationId,
+    StructDeclarationBody,
     MemberDeclaration,
+    EnumDeclarationId,
+    AfterEnumDeclarationId,
+    EnumDeclarationBody,
+    EnumValueDeclaration,
+    AfterEnumValueDeclarationId,
     AfterStatic,
     StaticVarVariableDeclaration,
     StaticOpenVariableDeclaration,

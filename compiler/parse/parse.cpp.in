@@ -13,11 +13,13 @@
 using namespace std::string_view_literals;
 enum class DeclarationKind : uint8_t {
     Namespace,
-    Type,
+    Struct,
     StaticVariable,
     Function,
     Member,
     HasMember,
+    Enum,
+    EnumValue,
 };
 
 namespace parse {
@@ -210,37 +212,39 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
     return tokEnd;
 }
 
-template<DeclarationKind kind>
-static sema::ScopeConstant commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
-        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
-    } else if constexpr (kind == DeclarationKind::Namespace) {
-        return state.pushNamespaceScope(name);
-    } else {
-        sema::ProgramKind progKind;
-        switch (kind) {
-        case DeclarationKind::Type:
-            progKind = sema::ProgramKind::Type;
-            break;
-        case DeclarationKind::Function:
-            progKind = sema::ProgramKind::Function;
-            break;
-        case DeclarationKind::StaticVariable:
-            progKind = sema::ProgramKind::Global;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-        return state.pushStaticScope(progKind, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
+    switch (kind) {
+    case DeclarationKind::Struct:
+        return sema::ProgramKind::Struct;
+    case DeclarationKind::Function:
+        return sema::ProgramKind::Function;
+    case DeclarationKind::StaticVariable:
+        return sema::ProgramKind::Global;
+    case DeclarationKind::Enum:
+        return sema::ProgramKind::Enum;
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 
 template<DeclarationKind kind>
-static sema::ScopeConstant commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    static_assert(kind == DeclarationKind::Type || kind == DeclarationKind::Function);
-    sema::ProgramKind progKind = kind == DeclarationKind::Type ? sema::ProgramKind::Type : sema::ProgramKind::Function;
-    return state.pushStaticImplScope(progKind, declarationBegin, locationInCurrentLine(currentPosition, state));
+static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    // fmt::println("commitDeclaration {}", state.wordTable.view(name));
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
+        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    } else if constexpr (kind == DeclarationKind::EnumValue) {
+        return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    } else if constexpr (kind == DeclarationKind::Namespace) {
+        return state.pushNamespaceScope(name);
+    } else {
+        return state.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    }
+}
+
+template<DeclarationKind kind>
+static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum);
+    return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 
 static void endDeclaration(ParseState& state) {
@@ -265,7 +269,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
-    sema::ScopeConstant this_declaration = sema::INVALID_SCOPE_CONSTANT;
+    sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = {};
     Word argumentName;
 

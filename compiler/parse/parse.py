@@ -23,6 +23,7 @@ keywords = [
     "do",
     "elif",
     "else",
+    "enum",
     "fn",
     "for",
     "forward",
@@ -53,6 +54,8 @@ keywords = [
 ]
 specialWords = [
     "bool",
+    "const_shared_ref",
+    "const_unique_ref",
     "error",
     "expression_category",
     "false",
@@ -63,11 +66,14 @@ specialWords = [
     "parent_type",
     "pointee_type",
     "ptr",
+    "shared_ref",
     "sig",
     "template_id",
     "template_signature",
     "true",
     "type",
+    "unique_ref",
+    "value",
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]

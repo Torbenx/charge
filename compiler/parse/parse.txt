@@ -239,7 +239,7 @@ SwitchState after_expression() then error
     punctuation :
         ifScope ScopeKind::HasTypeExpr
             popScope ScopeKind::HasTypeExpr
-            next type_declaration_body
+            next struct_declaration_body
         ifScope ScopeKind::ReturnType
             popScope ScopeKind::ReturnType
             pushScope ScopeKind::FunctionBody
@@ -368,7 +368,7 @@ LinearState after_statement() then statement
         ifScope ScopeKind::FunctionBody
             popScope ScopeKind::FunctionBody
             then after_declaration
-        ifScope ScopeKind::Type, ScopeKind::Namespace
+        ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
             then after_declaration
         popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         pushScope ScopeKind::PlainStatement
@@ -555,12 +555,15 @@ LinearState after_impl_expression() then error
         popScope ScopeKind::GenericCategoryExpression
         next after_variable_modifier
     then
-        ifScope ScopeKind::TypeImplExpression
-            popScope ScopeKind::TypeImplExpression
-            then after_type_declaration_id
+        ifScope ScopeKind::StructImplExpression
+            popScope ScopeKind::StructImplExpression
+            then after_struct_declaration_id
         ifScope ScopeKind::FunctionImplExpression
             popScope ScopeKind::FunctionImplExpression
             then after_function_declaration_id
+        ifScope ScopeKind::EnumImplExpression
+            popScope ScopeKind::EnumImplExpression
+            then after_enum_declaration_id
 
 LinearState impl_access_expression() then error
     identifier
@@ -571,7 +574,7 @@ LinearState impl_access_expression() then error
 
 LinearState no_declaration() then error
     punctuation }
-        popScope ScopeKind::Namespace, ScopeKind::Type
+        popScope ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum
         next after_declaration
     end
 
@@ -609,7 +612,10 @@ LinearState templated_declaration() then no_declaration
         next function_declaration_id
     keyword struct
         rememberDeclarationBegin
-        next type_declaration_id
+        next struct_declaration_id
+    keyword enum
+        rememberDeclarationBegin
+        next enum_declaration_id
     keyword static
         rememberDeclarationBegin
         next after_static
@@ -625,7 +631,9 @@ LinearState templated_declaration_with_attributes() then error
     keyword fn
         next function_declaration_id
     keyword struct
-        next type_declaration_id
+        next struct_declaration_id
+    keyword enum
+        next enum_declaration_id
     keyword static
         next after_static
 
@@ -670,23 +678,22 @@ LinearState after_function_parameters() then error
         emitToken TokenKind::BodyExpr
         next expression
 
-LinearState type_declaration_id() then error
+LinearState struct_declaration_id() then error
     identifier
-        commitDeclaration DeclarationKind::Type, this_identifier
-        emitToken TokenKind::TypeDecl, this_declaration
-        next after_type_declaration_id
+        commitDeclaration DeclarationKind::Struct, this_identifier
+        emitToken TokenKind::StructDecl, this_declaration
+        next after_struct_declaration_id
     keyword impl
-        commitImplDeclaration DeclarationKind::Type
-        pushScope ScopeKind::TypeImplExpression
-        emitToken TokenKind::TypeImplDecl, this_declaration
+        commitImplDeclaration DeclarationKind::Struct
+        pushScope ScopeKind::StructImplExpression
+        emitToken TokenKind::StructImplDecl, this_declaration
         next impl_expression
-
-LinearState after_type_declaration_id() then error
+LinearState after_struct_declaration_id() then error
     punctuation :
-        next type_declaration_body
-LinearState type_declaration_body() then error
+        next struct_declaration_body
+LinearState struct_declaration_body() then error
     punctuation {
-        pushScope ScopeKind::Type
+        pushScope ScopeKind::Struct
         next member_declaration
 LinearState member_declaration() then templated_declaration
     keyword has
@@ -700,6 +707,39 @@ LinearState member_declaration() then templated_declaration
         commitDeclaration DeclarationKind::Member, this_identifier
         emitToken TokenKind::MemberDecl, this_declaration
         next after_variable_declaration_id
+
+LinearState enum_declaration_id() then error
+    identifier
+        commitDeclaration DeclarationKind::Enum, this_identifier
+        emitToken TokenKind::EnumDecl, this_declaration
+        next after_enum_declaration_id
+    keyword impl
+        commitImplDeclaration DeclarationKind::Enum
+        pushScope ScopeKind::EnumImplExpression
+        emitToken TokenKind::EnumImplDecl, this_declaration
+        next impl_expression
+LinearState after_enum_declaration_id() then error
+    punctuation :
+        next enum_declaration_body
+LinearState enum_declaration_body() then error
+    punctuation {
+        pushScope ScopeKind::Enum
+        next enum_value_declaration
+LinearState enum_value_declaration() then templated_declaration
+    identifier
+        rememberDeclarationBegin
+        commitDeclaration DeclarationKind::EnumValue, this_identifier
+        emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+        next after_enum_value_declaration_id
+LinearState after_enum_value_declaration_id() then error
+    punctuation =
+        updateKind TokenKind::ExplicitEnumValueDecl
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::AssignStmt
+        next expression
+    punctuation ;
+        emitToken TokenKind::ExpressionStmt
+        next after_declaration
 
 LinearState after_static() then error
     keyword var
@@ -727,7 +767,9 @@ LinearState static_open_variable_declaration() then error
 LinearState after_declaration() then error
     then
         endDeclaration
-        ifScope ScopeKind::Type
+        ifScope ScopeKind::Struct
             then member_declaration
         ifScope ScopeKind::Namespace
             then namespace_declaration
+        ifScope ScopeKind::Enum
+            then enum_value_declaration

@@ -8,14 +8,14 @@ namespace sema {
 struct Scope {
     WordTable m_table;
 
-    std::optional<ScopeConstant> getDeclaration(Word name) const {
+    std::optional<DeclarationValue> getDeclaration(Word name) const {
         auto result = m_table.findWord(name);
         if (result.found)
-            return ScopeConstant::fromUint(m_table.entries[result.bucket].payload);
+            return DeclarationValue::fromUint(m_table.entries[result.bucket].payload);
         return std::nullopt;
     }
 
-    void addDeclaration(Word name, ScopeConstant value) {
+    void addDeclaration(Word name, DeclarationValue value) {
         [[maybe_unused]] bool existedAlready = m_table.insertWord(name, value.toUint());
         VERIFY(!existedAlready);
     }

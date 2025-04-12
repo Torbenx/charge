@@ -3,7 +3,6 @@
 #include <sema/Context.h>
 #include <sema/Util.h>
 
-
 namespace sema {
 
 uint32_t ParameterizeSet::get(Context& context, ProgramHandle prog, Parameterize para) {
@@ -30,9 +29,19 @@ uint32_t MemberPointerSet::get(Context& context, ProgramHandle prog, MemberPoint
     return Base::get(context, prog, ptr);
 }
 uint32_t MemberPointerSet::makeNode(Context&, ProgramHandle, MemberPointer ptr, TreeLabel label) {
-    return Base::makeNode(label, ptr);
+    return Base::makeNode(label, MemberPointerData { std::vector<uint32_t> { ptr.m_data.begin(), ptr.m_data.end() } });
 }
 std::strong_ordering MemberPointerSet::compare(Context& context, ProgramHandle program, MemberPointer a, MemberPointer b) {
+    return Util(context, program).compare(a, b);
+}
+
+uint32_t EnumValueSet::get(Context& context, ProgramHandle prog, EnumValue value) {
+    return Base::get(context, prog, value);
+}
+uint32_t EnumValueSet::makeNode(Context&, ProgramHandle, EnumValue value, TreeLabel label) {
+    return Base::makeNode(label, value);
+}
+std::strong_ordering EnumValueSet::compare(Context& context, ProgramHandle program, EnumValue a, EnumValue b) {
     return Util(context, program).compare(a, b);
 }
 
@@ -51,6 +60,16 @@ Constant Program::addRemoteComputedConstant(Context& context, RemoteComputation 
 Constant Program::addMemberPointer(Context& context, MemberPointer ptr) {
     auto id = memberPointers.get(context, context.programHandle(this), ptr);
     return Constant(ConstantKind::MemberPointer, id);
+}
+
+Constant Program::addEnumValue(Context& context, EnumValue value) {
+#define BUILTIN_ENUM(name, constant_kind)        \
+    if (value.enumType == builtins::name##_type) \
+        return Constant(ConstantKind::constant_kind, value.valueIndex);
+#include <sema/builtins.inc>
+
+    auto id = enumValues.get(context, context.programHandle(this), value);
+    return Constant(ConstantKind::EnumValue, id);
 }
 
 Constant Program::addComputedConstant(Context&, ComputedConstant c) {

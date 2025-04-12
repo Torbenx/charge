@@ -140,13 +140,25 @@ static BaseMyX = Base::MyX;
 // expect-value X
 static DerivedMyX = Derived::MyX;
 
+template(T: type) struct Wrapped: { }
+template(T: type) struct BaseT: { static TofBase = T; }
+template(T: type) struct DerivedT: { static TofDerived = T; has BaseT{Wrapped{T}}; }
+// expect-value X
+static testTofDerived = DerivedT{X}::TofDerived;
+// expect-value Wrapped{X}
+static testTofBase = DerivedT{X}::TofBase;
+
 struct WithMember: { member: X; }
 // expect-return-type X
 fn accessMember(w: shared WithMember) => w.member;
+// expect-type member_ptr{WithMember, X}
+static memberPointer = WithMember::member;
 
 struct DerivedWithMember: { has WithMember; }
 // expect-return-type X
 fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
+// expect-type member_ptr{DerivedWithMember, X}
+static composedMemberPointer = DerivedWithMember::member;
 
 // expect-return-type X
 fn withBody1() -> X: { }
@@ -277,8 +289,26 @@ template(c: expression_category)
 fn genericExpressionCategory(p: <c> X) -> ConstantValue{c}: { }
 
 static staticX: X = X();
-//; expect-type ConstantValue{expression_category::const_shared_ref}
+// expect-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
 static testGenericExpressionDeduction1 = genericExpressionCategory(staticX);
 
-//; expect-type ConstantValue{expression_category::value}
+// expect-type ConstantValue{expression_category, @enumValue(expression_category, value)}
 static testGenericExpressionDeduction2 = genericExpressionCategory(X());
+
+// expect-type expression_category
+// expect-value @enumValue(expression_category, value)
+static expressionCategoryTest = expression_category::value;
+
+enum E1: {
+    val;
+}
+// expect-type E1
+// expect-value @enumValue(E1, val)
+static examineEnumValue = E1::val;
+
+struct DeriveFromEnum: {
+    has E1;
+}
+// expect-type E1
+// expect-value @enumValue(E1, val)
+static accessEnumValueViaDerivedStruct = DeriveFromEnum::val;
