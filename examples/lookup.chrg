@@ -1,0 +1,21 @@
+fn foo(): {
+    // There are 3 kinds of look up expressions:
+
+    name; // identifier expressions
+    // - performs look up in context stack
+    // - looking up a member is an error
+    // - doesn't bind 'self' argument
+
+    base::name; // static access expressions
+    ::name;     // equivalent to self_type::name
+    // - performs look up only in 'base'
+    // - looking up a member gives a member pointer
+    // - doesn't bind 'self' argument
+
+    base.name; // member access expressions
+    .name;     // equivalent to self.name
+    // - performs look up first in 'base' then in context stack
+    // - looking up a member gives an access member expression
+    // - looking up a  function with a 'self' parameter binds 'base' to it
+    // - all other results are an error
+}

@@ -101,38 +101,35 @@ void Generator::visitTemplateParameters() {
     advance();
 }
 
+Constant Generator::visitVariableExpressionCategory(Token variableKind) {
+    switch (variableKind) {
+    case Token::LetValueDecl:
+    case Token::VarValueDecl:
+        return Constant(ExpressionCategory::Value);
+    case Token::UniqueReferenceDecl:
+        return Constant(ExpressionCategory::UniqueReference);
+    case Token::SharedReferenceDecl:
+        return Constant(ExpressionCategory::SharedReference);
+    case Token::ConstUniqueReferenceDecl:
+        return Constant(ExpressionCategory::ConstUniqueReference);
+    case Token::ConstSharedReferenceDecl:
+        return Constant(ExpressionCategory::ConstSharedReference);
+    case Token::GenericCategoryVariableDecl:
+        visitExpression();
+        contextualToExpressionCategory(SourceLocation());
+        return expressionToConstant();
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
     Word name = Word::fromUint(tok->data());
     SourceLocation nameLoc = tok->location();
 
     Token declKind = tok->kind();
     advance();
-    Constant expectedCategory = INVALID_CONSTANT;
-    switch (declKind) {
-    case Token::LetValueDecl:
-    case Token::VarValueDecl:
-        expectedCategory = Constant(ExpressionCategory::Value);
-        break;
-    case Token::UniqueReferenceDecl:
-        expectedCategory = Constant(ExpressionCategory::UniqueReference);
-        break;
-    case Token::SharedReferenceDecl:
-        expectedCategory = Constant(ExpressionCategory::SharedReference);
-        break;
-    case Token::ConstUniqueReferenceDecl:
-        expectedCategory = Constant(ExpressionCategory::ConstUniqueReference);
-        break;
-    case Token::ConstSharedReferenceDecl:
-        expectedCategory = Constant(ExpressionCategory::ConstSharedReference);
-        break;
-    case Token::GenericCategoryVariableDecl:
-        visitExpression();
-        contextualToExpressionCategory(nameLoc); // TODO: Maybe not the best location
-        expectedCategory = expressionToConstant();
-        break;
-    default:
-        VERIFY_NOT_REACHED();
-    }
+    Constant expectedCategory = visitVariableExpressionCategory(declKind);
 
     auto info = visitVariableTypeAndInitializer(expectedCategory, programParameters);
     return { nameLoc, name, info.type, expectedCategory, info.hasInitializer };
@@ -198,6 +195,15 @@ Program::Parameter Generator::visitTemplateParameter() {
     }
     Word name = Word::fromUint(tok->data());
     advance();
+
+    if (name == parse::words["self_type"]) {
+        // TODO: Allow default argument
+        VERIFY(tok->kind() == Token::AssignStmt);
+        advance();
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        advance();
+        return { name, builtins::type_type, std::nullopt };
+    }
 
     auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), true);
     std::optional<Constant> initializer;
@@ -280,15 +286,35 @@ void Generator::visitFunctionParametersAndBody() {
 
     lookupStack.push_back(LookupContext::forLocal(this));
 
-    while (tok->kind() != Token::EmptyNode) {
-        auto info = visitVariableDeclaration(true);
+    auto addFunctionParameter = [&](VariableDeclaration info) {
         VERIFY(!info.hasInitializer);
-
         VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
         localLookupEntries.push_back({ info.name, Expression::parameterReference(parameterIndex) });
         fnProgram->functionParameters.push_back({ info.location, info.name, info.type, info.expressionCategory });
+    };
+
+    if (tok->kind() != Token::EmptyNode) {
+        Word name = Word::fromUint(tok->data());
+        if (name == parse::words["self"]) {
+            Token tokenKind = tok->kind();
+            SourceLocation nameLoc = tok->location();
+            advance();
+            Constant expectedCategory = visitVariableExpressionCategory(tokenKind);
+
+            // TODO: Allow default argument?
+            VERIFY(tok->kind() == Token::AssignStmt);
+            advance();
+            VERIFY(tok->kind() == Token::ExpressionStmt);
+            advance();
+
+            addFunctionParameter({ nameLoc, name, lookupSelfType(), expectedCategory, false });
+        }
+    }
+
+    while (tok->kind() != Token::EmptyNode) {
+        addFunctionParameter(visitVariableDeclaration(true));
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -539,9 +565,7 @@ void Generator::visitPostfixExpr() {
     visitPrimaryExpr();
     for (;;) {
         if (tok->kind() == Token::Parameterize) {
-            auto argumentNames = context.parseOutput.argumentNames(tok->data());
-            advance();
-            generateParameterizeExpr(argumentNames);
+            generateParameterizeExpr();
         } else if (tok->kind() == Token::CallExpr) {
             CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data()));
             SourceLocation callLoc = tok->location();
@@ -552,7 +576,6 @@ void Generator::visitPostfixExpr() {
             advance();
         } else if (tok->kind() == Token::MemberAccessExpr) {
             generateMemberAccessExpr();
-            advance();
         } else {
             break;
         }

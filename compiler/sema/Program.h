@@ -5,6 +5,8 @@
 #include <sema/Instruction.h>
 #include <sema/Scope.h>
 
+#include <ranges>
+
 namespace sema {
 
 struct Context;

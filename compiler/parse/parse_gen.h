@@ -58,6 +58,8 @@ inline constexpr ConstWordStringTable words {
     "parent_type",
     "pointee_type",
     "ptr",
+    "self",
+    "self_type",
     "shared_ref",
     "sig",
     "template_id",

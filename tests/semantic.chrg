@@ -328,3 +328,40 @@ static examineTrue = true;
 // expect-type bool
 // expect-value @enumValue(bool, true)
 static examineNestedTrue = bool::true;
+
+template(Inherit: type)
+struct OuterStruct: {
+    template(Explicit: type)
+    struct InnerStruct: {
+        // expect-value OuterStruct::InnerStruct{#0, #1}
+        static myType = self_type;
+
+        // expect-return-type type
+        template(self_type) fn testSelfType() => self_type;
+
+        // expect-return-type OuterStruct::InnerStruct{#0, #1}
+        fn testSelf1(self: const shared) => self;
+
+        // expect-return-type #2
+        template(self_type) fn testSelf2(self: const shared) => self;
+    }
+}
+
+struct TestSelfCalls: {
+    fn simpleFunc(self: const shared) => self;
+
+    // expect-return-type TestSelfCalls
+    fn callSimpleFunc(mySelf: const shared TestSelfCalls) => mySelf.simpleFunc();
+
+    template(selfT: type, Explicit: type, Deduced: type)
+    struct ComplexResult: { }
+    template(self_type, Explicit: type, Deduced: type)
+    fn complexFunc(self: const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
+}
+
+struct DerivedSelfCalls: {
+    has TestSelfCalls;
+
+    // expect-return-type TestSelfCalls::ComplexResult{DerivedSelfCalls, X, bool}
+    fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);
+}

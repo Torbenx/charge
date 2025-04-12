@@ -269,6 +269,12 @@ struct Generator : Util {
     void setParseLocation(parse::TokenHandle);
     void clearParseLocation();
 
+    struct StashedExpression {
+        OwnedExpression expr;
+        uint32_t expectedExpressionStackSize;
+    };
+    StashedExpression stashTopExpression();
+    void unstashTopExpression(StashedExpression);
     void resolveLazyExpressions();
     Expression topExpression();
     OwnedExpression takeTopExpression();
@@ -285,6 +291,7 @@ struct Generator : Util {
         bool hasInitializer;
     };
     VariableTypeAndInitializer visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters);
+    Constant visitVariableExpressionCategory(Token variableKind);
     struct VariableDeclaration {
         SourceLocation location;
         Word name;
@@ -341,6 +348,7 @@ struct Generator : Util {
     Constant makeCopyOfOpenGlobal(Constant value);
     Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
+    Call makeCall(Constant callTarget, std::vector<Expression> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
@@ -348,16 +356,19 @@ struct Generator : Util {
     Expression generateDeclarationLiteral(InternalLookupResult internalResult);
     Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
-    void generateParameterizeExpr(std::span<const Word> argumentNames);
+    void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
+    void generateParameterizeExpr();
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(SourceLocation location, CallTarget base);
     template<std::ranges::random_access_range R>
-    std::vector<Expression> generateCallArguments(DeductionState& state, R parameters);
+    std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);
     void internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog);
     InternalLookupResult internalLookup(Type type, Word name);
     void generateIdentifierExpr();
     void generateStaticAccessExpr();
     void generateMemberAccessExpr();
+    Expression lookupSelfParameter();
+    Type lookupSelfType();
 
     Constant inheriteParameters(DeclarationValue parent);
 
