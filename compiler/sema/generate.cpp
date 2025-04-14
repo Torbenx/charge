@@ -407,10 +407,21 @@ void Generator::extendMemberPointer(MemberPointerData& pointer, uint32_t memberI
     pointer.m_data.push_back(memberType.toUint());
 }
 
+Type Generator::memberType(Type originType, std::span<const uint32_t> memberIndices) {
+    Type type = originType;
+    for (uint32_t memberIndex : memberIndices) {
+        auto base = asFoldBase(type);
+        const auto& members = cast<StructProgram>(base.program)->members;
+        VERIFY(memberIndex < members.size());
+        type = verifyType(fold(base, members[memberIndex].type()));
+    }
+    return type;
+}
+
 void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog) {
     auto maybeResult = prog->getDeclaration(state.lookupName);
     if (maybeResult.has_value()) {
-        state.setResult(generateMemberPointer(state.originType, state.memberIndices), maybeResult.value());
+        state.setResult(maybeResult.value());
         return;
     }
 
@@ -421,7 +432,7 @@ void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* 
     for (int_t memberIndex = 0; memberIndex < (int_t)structProg->members.size(); memberIndex++) {
         const auto& member = structProg->members[memberIndex];
         if (member.name() == state.lookupName) {
-            state.setResult(generateMemberPointer(state.originType, state.memberIndices), { DeclarationValueKind::Member, (uint32_t)memberIndex });
+            state.setResult({ DeclarationValueKind::Member, (uint32_t)memberIndex });
             return;
         }
 
@@ -436,19 +447,15 @@ void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* 
     }
 }
 
-Generator::InternalLookupResult Generator::internalLookup(Type type, Word name) {
-    auto baseProg = baseProgram(type);
-    if (!baseProg.has_value())
-        return InternalLookupResult();
-
-    InternalLookupState state(type, name);
-    internalLookupRecurse(state, cast<ScopeProgram>(context.program(baseProg.value())));
+Generator::InternalLookupResult Generator::internalLookup(ProgramHandle typeProg, Word name) {
+    InternalLookupState state(name);
+    internalLookupRecurse(state, cast<ScopeProgram>(context.program(typeProg)));
     return state.result;
 }
 
-Expression Generator::generateDeclarationLiteral(InternalLookupResult result) {
+Expression Generator::generateDeclarationLiteral(InternalLookupResult result, Type parent) {
     VERIFY(result.value.has_value());
-    return generateDeclarationLiteral(result.value.value(), result.memberPointer().memberType());
+    return generateDeclarationLiteral(result.value.value(), memberType(parent, result.memberIndices));
 }
 
 Expression Generator::generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent) {
@@ -546,10 +553,13 @@ void Generator::generateIdentifierExpr() {
         }
         case LookupContext::Kind::ContainingType: {
             Type type = lookupCtx.getContainingType();
-            auto result = internalLookup(type, name);
+            auto typeProg = baseProgram(type);
+            if (!typeProg.has_value())
+                continue;
+            auto result = internalLookup(typeProg.value(), name);
             if (result.value.has_value()) {
                 VERIFY(result.value->kind() != DeclarationValueKind::Member); // Member should be looked up with .member or ::member
-                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result)));
+                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result), type));
                 return;
             }
             auto base = asFoldBase(type);
@@ -580,13 +590,14 @@ void Generator::generateStaticAccessExpr() {
     if (baseValue.kind() == ConstantKind::Program || baseValue.kind() == ConstantKind::Parameterize) {
         FoldBase base = asFoldBase(baseValue);
         if (base.program->kind() == ProgramKind::Struct || base.program->kind() == ProgramKind::Enum) {
-            auto result = internalLookup(verifyType(baseValue), name);
+            auto result = internalLookup(base.programHandle, name);
             VERIFY(result.value.has_value());
             if (result.value->kind() == DeclarationValueKind::Member) {
-                extendMemberPointer(result.memberPointerData, result.value->id());
-                emitExpression(tok->location(), program->addMemberPointer(context, result.memberPointerData));
+                result.extendMemberIndices();
+                auto memberPointer = generateMemberPointer(verifyType(baseValue), result.memberIndices);
+                emitExpression(tok->location(), program->addMemberPointer(context, memberPointer));
             } else {
-                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result)));
+                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result), verifyType(baseValue)));
             }
             return;
         }
@@ -597,11 +608,12 @@ void Generator::generateStaticAccessExpr() {
 void Generator::generateMemberAccessExpr() {
     Word name = Word::fromUint(tok->data());
     Type baseType = resultType(topExpression());
-    auto result = internalLookup(baseType, name);
+    auto result = internalLookup(baseProgram(baseType).value(), name);
     VERIFY(result.value.has_value());
     if (result.value->kind() == DeclarationValueKind::Member) {
-        extendMemberPointer(result.memberPointerData, result.value->id());
-        auto memberExpr = program->addMemberExpression({ takeTopExpression(), program->addMemberPointer(context, result.memberPointerData) });
+        result.extendMemberIndices();
+        auto memberPointer = generateMemberPointer(baseType, result.memberIndices);
+        auto memberExpr = program->addMemberExpression({ takeTopExpression(), program->addMemberPointer(context, memberPointer) });
         emitExpression(tok->location(), memberExpr);
         advance();
         return;
@@ -615,7 +627,7 @@ void Generator::generateMemberAccessExpr() {
     auto* fnProg = cast<FunctionProgram>(context.program(progHandle));
 
     DeductionState state(fnProg, progHandle, fnProg->parameters.size());
-    auto inheritedArguments = asFoldBase(result.memberPointer().memberType()).arguments;
+    auto inheritedArguments = asFoldBase(memberType(baseType, result.memberIndices)).arguments;
     VERIFY(inheritedArguments.size() == fnProg->inheritedParameterCount);
     for (int_t i = 0; i < (int_t)fnProg->inheritedParameterCount; i++)
         state.explicitArgument(i, inheritedArguments[i]);

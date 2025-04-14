@@ -179,23 +179,27 @@ struct Generator : Util {
     };
 
     struct InternalLookupResult {
-        MemberPointerData memberPointerData;
+        std::vector<uint32_t> memberIndices;
         std::optional<DeclarationValue> value;
 
-        MemberPointer memberPointer() const { return memberPointerData; }
+        void extendMemberIndices() {
+            VERIFY(value.has_value());
+            VERIFY(value->kind() == DeclarationValueKind::Member);
+            memberIndices.push_back(value->id());
+            value.reset();
+        }
     };
     struct InternalLookupState {
-        Type originType;
         Word lookupName;
         std::vector<uint32_t> memberIndices;
         InternalLookupResult result;
 
-        InternalLookupState(Type originType, Word lookupName)
-            : originType(originType), lookupName(lookupName) { }
+        InternalLookupState(Word lookupName)
+            : lookupName(lookupName) { }
 
-        void setResult(MemberPointerData memberPointerData, DeclarationValue value) {
+        void setResult(DeclarationValue value) {
             VERIFY(!result.value.has_value());
-            result = { memberPointerData, value };
+            result = { memberIndices, value };
         }
     };
 
@@ -335,6 +339,7 @@ struct Generator : Util {
     Type memberType(Constant memberPointer);
     MemberPointerData generateMemberPointer(Type originType, std::span<const uint32_t> memberIndices);
     void extendMemberPointer(MemberPointerData& memberPointer, uint32_t memberIndex);
+    Type memberType(Type originType, std::span<const uint32_t> memberIndices);
 
     Type typeOf(Constant);
     Type resultType(Expression);
@@ -353,7 +358,7 @@ struct Generator : Util {
     Type typeOfNonDependentProgram(FoldBase base);
 
     bool resolveImplicitImplTarget();
-    Expression generateDeclarationLiteral(InternalLookupResult internalResult);
+    Expression generateDeclarationLiteral(InternalLookupResult internalResult, Type parent);
     Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
@@ -363,7 +368,7 @@ struct Generator : Util {
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);
     void internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog);
-    InternalLookupResult internalLookup(Type type, Word name);
+    InternalLookupResult internalLookup(ProgramHandle typeProg, Word name);
     void generateIdentifierExpr();
     void generateStaticAccessExpr();
     void generateMemberAccessExpr();
