@@ -101,23 +101,26 @@ void Generator::visitTemplateParameters() {
     advance();
 }
 
-Constant Generator::visitVariableExpressionCategory(Token variableKind) {
-    switch (variableKind) {
+VariableCategory Generator::visitVariableCategory() {
+    Token tokKind = tok->kind();
+    advance();
+    switch (tokKind) {
     case Token::LetValueDecl:
+        return VariableKind::Let;
     case Token::VarValueDecl:
-        return Constant(ExpressionCategory::Value);
+        return VariableKind::Var;
     case Token::UniqueReferenceDecl:
-        return Constant(ExpressionCategory::UniqueReference);
+        return VariableKind::UniqueReference;
     case Token::SharedReferenceDecl:
-        return Constant(ExpressionCategory::SharedReference);
+        return VariableKind::SharedReference;
     case Token::ConstUniqueReferenceDecl:
-        return Constant(ExpressionCategory::ConstUniqueReference);
+        return VariableKind::ConstUniqueReference;
     case Token::ConstSharedReferenceDecl:
-        return Constant(ExpressionCategory::ConstSharedReference);
+        return VariableKind::ConstSharedReference;
     case Token::GenericCategoryVariableDecl:
         visitExpression();
         contextualToExpressionCategory(SourceLocation());
-        return expressionToConstant();
+        return VariableCategory(expressionToConstant());
     default:
         VERIFY_NOT_REACHED();
     }
@@ -127,17 +130,15 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programP
     Word name = Word::fromUint(tok->data());
     SourceLocation nameLoc = tok->location();
 
-    Token declKind = tok->kind();
-    advance();
-    Constant expectedCategory = visitVariableExpressionCategory(declKind);
+    auto category = visitVariableCategory();
 
-    auto info = visitVariableTypeAndInitializer(expectedCategory, programParameters);
-    return { nameLoc, name, info.type, expectedCategory, info.hasInitializer };
+    auto info = visitVariableTypeAndInitializer(category.initializerCategory(), programParameters);
+    return { nameLoc, name, info.type, category, info.hasInitializer };
 }
 
 Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters) {
     std::optional<Type> variableType;
-    VERIFY(parameterTypes.size() == program->parameters.size());
+    VERIFY(parameterTypes.size() == program->parameters.size()); // TODO: visitVariableExpressionCategory() may have already added parameters
     if (tok->kind() != Token::AssignStmt) {
         // parse type
         wildcardMeaning = WildcardMeaning::ImplicitTemplate;
@@ -266,8 +267,11 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
         const auto& baseParameter = baseProg->functionParameters[index];
         const auto& implParameter = implProgram->functionParameters[index];
         VERIFY(baseParameter.name() == implParameter.name());
-        bool categoriesMatch = staticMatch(state, baseParameter.category(), implParameter.category());
-        VERIFY(categoriesMatch);
+        VERIFY(baseParameter.kind() == implParameter.kind());
+        if (baseParameter.kind() == VariableKind::Generic) {
+            bool categoriesMatch = staticMatch(state, baseParameter.category().genericCategory(), implParameter.category().genericCategory());
+            VERIFY(categoriesMatch);
+        }
         bool typesMatch = staticMatch(state, baseParameter.type(), implParameter.type());
         VERIFY(typesMatch);
         // TODO: What about the initializer?
@@ -292,16 +296,14 @@ void Generator::visitFunctionParametersAndBody() {
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
         localLookupEntries.push_back({ info.name, Expression::parameterReference(parameterIndex) });
-        fnProgram->functionParameters.push_back({ info.location, info.name, info.type, info.expressionCategory });
+        fnProgram->functionParameters.push_back({ info.location, info.name, info.type, info.category });
     };
 
     if (tok->kind() != Token::EmptyNode) {
         Word name = Word::fromUint(tok->data());
         if (name == parse::words["self"]) {
-            Token tokenKind = tok->kind();
             SourceLocation nameLoc = tok->location();
-            advance();
-            Constant expectedCategory = visitVariableExpressionCategory(tokenKind);
+            VariableCategory category = visitVariableCategory();
 
             // TODO: Allow default argument?
             VERIFY(tok->kind() == Token::AssignStmt);
@@ -309,7 +311,7 @@ void Generator::visitFunctionParametersAndBody() {
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
 
-            addFunctionParameter({ nameLoc, name, lookupSelfType(), expectedCategory, false });
+            addFunctionParameter({ nameLoc, name, lookupSelfType(), category, false });
         }
     }
 
@@ -474,7 +476,6 @@ void Generator::visitEnumValues() {
     tok = savedTok;
 }
 
-
 void Generator::visitStatement() {
     if (tok->kind() == Token::CompoundStmt) {
         auto blockScopeInst = emitBlockScope(tok->location());
@@ -586,6 +587,9 @@ void Generator::visitPrimaryExpr() {
     if (tok->kind() == Token::IdentifierExpr) {
         generateIdentifierExpr();
         advance();
+    } else if (tok->kind() == Token::MemberAccessExpr) {
+        emitExpression(tok->location(), lookupSelfParameter()); // TODO: Location should be the '.' not the identifier
+        generateMemberAccessExpr();
     } else {
         VERIFY_NOT_REACHED();
     }

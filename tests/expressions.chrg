@@ -10,6 +10,9 @@ fn test(): {
 /* expect-token LiteralExpr */ 1;
 /* expect-token LiteralExpr */ 'a';
 
+/* expect-token MemberAccessExpr */ .a;
+/* expect-token MemberAccessExpr */ ./**/a;
+
 /* expect-token ParenthesizedExpr; expect-token EmptyNode */ ();
 /* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a);
 /* expect-token ParenthesizedExpr; expect-token CallArgument; expect-token IdentifierExpr; expect-token EmptyNode */ (a,);

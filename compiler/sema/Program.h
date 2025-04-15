@@ -10,7 +10,6 @@
 namespace sema {
 
 struct Context;
-struct RuntimeParameter;
 
 namespace builtins {
 
@@ -521,24 +520,75 @@ concept CallableProgram = requires(P* program, int_t index) {
     { callParameters<P>::get(program)[index] } -> std::same_as<CallParameter>;
 };
 
+enum class VariableKind : uint8_t {
+    Let,
+    Var,
+    UniqueReference,
+    ConstUniqueReference,
+    SharedReference,
+    ConstSharedReference,
+    Generic,
+};
+struct VariableCategory {
+private:
+    Constant m_data;
+
+public:
+    VariableCategory(VariableKind kind)
+        : m_data(ConstantKind::Invalid, std::to_underlying(kind)) { VERIFY(kind != VariableKind::Generic); }
+    explicit VariableCategory(Constant genericCategory)
+        : m_data(genericCategory) { }
+
+    bool isGeneric() const { return m_data.kind() != ConstantKind::Invalid; }
+    VariableKind kind() const {
+        return isGeneric() ? VariableKind::Generic : VariableKind(m_data.id());
+    }
+
+    Constant genericCategory() const {
+        VERIFY(isGeneric());
+        return m_data;
+    }
+
+    Constant initializerCategory() const {
+        if (isGeneric())
+            return m_data;
+        switch (VariableKind(m_data.id())) {
+        case VariableKind::Let:
+        case VariableKind::Var:
+            return Constant(ExpressionCategory::Value);
+        case VariableKind::UniqueReference:
+            return Constant(ExpressionCategory::UniqueReference);
+        case VariableKind::SharedReference:
+            return Constant(ExpressionCategory::SharedReference);
+        case VariableKind::ConstUniqueReference:
+            return Constant(ExpressionCategory::ConstUniqueReference);
+        case VariableKind::ConstSharedReference:
+            return Constant(ExpressionCategory::ConstSharedReference);
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+};
+
 struct FunctionProgram : Program {
     struct Parameter {
     private:
         SourceLocation m_location;
         Word m_name;
         Type m_type;
-        Constant m_category;
+        VariableCategory m_category;
 
     public:
-        Parameter(SourceLocation location, Word name, Type type, Constant category)
+        Parameter(SourceLocation location, Word name, Type type, VariableCategory category)
             : m_location(location), m_name(name), m_type(type), m_category(category) { }
 
         SourceLocation location() const { return m_location; }
         Word name() const { return m_name; }
         Type type() const { return m_type; }
-        Constant category() const { return m_category; }
+        VariableKind kind() const { return m_category.kind(); }
+        VariableCategory category() const { return m_category; }
 
-        operator CallParameter() const { return { name(), type(), category() }; }
+        operator CallParameter() const { return { name(), type(), category().initializerCategory() }; }
     };
     FunctionProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
         : Program(ProgramKind::Function, name, parseLocation, rawParent, location) { }

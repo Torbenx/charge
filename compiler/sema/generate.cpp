@@ -844,6 +844,8 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
         || aValue.kind() == ConstantKind::Computed || aValue.kind() == ConstantKind::RemoteComputed
         || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
         || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
+        || pValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
+        || aValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
         || aValue.kind() == ConstantKind::CopyOfParameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
         state.equalities.add(context, program, state.program, { pValue, aValue });
@@ -926,8 +928,9 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     case ConstantKind::Program:
         return (Constant)foldProgram(Constant(v).program());
     case ConstantKind::CopyOfParameter:
-        // TODO: Actually perform a copy?
         return base.arguments[v.id()];
+    case ConstantKind::CopyOfParameterToReferenceCategory:
+        return genericToReferenceCategory(base.arguments[v.id()]);
     case ConstantKind::CopyOfOpenGlobal$Program:
     case ConstantKind::CopyOfOpenGlobal$Parameterize:
         return makeCopyOfOpenGlobal(fold(base, Constant(v).copiedGlobal()));
@@ -1026,6 +1029,44 @@ Type Generator::memberType(Constant memberPointer) {
     return verifyType(para.arguments[1]);
 }
 
+Constant Generator::genericToReferenceCategory(Constant genericCategory) {
+    if (genericCategory.kind() == ConstantKind::ExpressionCategoryLiteral) {
+        if (genericCategory.expressionCategory() == ExpressionCategory::Value)
+            return Constant(ExpressionCategory::UniqueReference);
+        return genericCategory;
+    }
+
+    if (genericCategory.kind() == ConstantKind::CopyOfParameter)
+        return Constant(ConstantKind::CopyOfParameterToReferenceCategory, genericCategory.id());
+
+    if (genericCategory.kind() == ConstantKind::CopyOfParameterToReferenceCategory)
+        return genericCategory;
+
+    // TODO: Generate a computed constant that does the conversion
+    VERIFY_NOT_REACHED();
+}
+
+Constant Generator::referenceCategory(VariableCategory variableCategory) {
+    if (variableCategory.isGeneric())
+        return genericToReferenceCategory(variableCategory.genericCategory());
+    switch (variableCategory.kind()) {
+    case VariableKind::Let:
+        return Constant(ExpressionCategory::ConstUniqueReference);
+    case VariableKind::Var:
+        return Constant(ExpressionCategory::UniqueReference);
+    case VariableKind::UniqueReference:
+        return Constant(ExpressionCategory::UniqueReference);
+    case VariableKind::SharedReference:
+        return Constant(ExpressionCategory::SharedReference);
+    case VariableKind::ConstUniqueReference:
+        return Constant(ExpressionCategory::ConstUniqueReference);
+    case VariableKind::ConstSharedReference:
+        return Constant(ExpressionCategory::ConstSharedReference);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 Constant Generator::categoryOf(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::GlobalReference$Program:
@@ -1048,7 +1089,7 @@ Constant Generator::categoryOf(Expression expr) {
         return Constant(ExpressionCategory::UniqueReference);
     case ExpressionKind::ParameterReference:
         // TODO: References to the return value are currently represented as parameter references but are not handled here.
-        return cast<FunctionProgram>(program)->functionParameters[expr.id()].category();
+        return referenceCategory(cast<FunctionProgram>(program)->functionParameters[expr.id()].category());
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].category;
     case ExpressionKind::MemberExpression:
@@ -1093,6 +1134,8 @@ Type Generator::typeOf(Constant value) {
         return verifyType((Constant)program->getEnumValue(value).enumType);
     case ConstantKind::CopyOfParameter:
         return parameterTypes[value.id()];
+    case ConstantKind::CopyOfParameterToReferenceCategory:
+        return builtins::expression_category_type;
     case ConstantKind::CopyOfOpenGlobal$Program:
     case ConstantKind::CopyOfOpenGlobal$Parameterize: {
         auto base = asFoldBase(value.copiedGlobal());

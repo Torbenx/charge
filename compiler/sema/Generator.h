@@ -295,12 +295,12 @@ struct Generator : Util {
         bool hasInitializer;
     };
     VariableTypeAndInitializer visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters);
-    Constant visitVariableExpressionCategory(Token variableKind);
+    VariableCategory visitVariableCategory();
     struct VariableDeclaration {
         SourceLocation location;
         Word name;
         Type type;
-        Constant expressionCategory;
+        VariableCategory category;
         bool hasInitializer;
     };
     VariableDeclaration visitVariableDeclaration(bool programParameters);
@@ -344,6 +344,8 @@ struct Generator : Util {
     Type typeOf(Constant);
     Type resultType(Expression);
     Type verifyType(Constant);
+    Constant referenceCategory(VariableCategory variableCategory);
+    Constant genericToReferenceCategory(Constant genericCategory);
     Constant categoryOf(Expression);
 
     Constant makeTemplateSignature(Constant templateProg);

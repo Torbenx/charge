@@ -65,6 +65,7 @@ enum class ConstantKind : uint8_t {
     RemoteComputed,
 
     CopyOfParameter,
+    CopyOfParameterToReferenceCategory,
     CopyOfOpenGlobal$Program,
     CopyOfOpenGlobal$Parameterize, // non-dependent
 
@@ -128,6 +129,10 @@ struct Constant {
     constexpr int_t parameterIndex() const {
         VERIFY(kind() == ConstantKind::CopyOfParameter);
         return id();
+    }
+    constexpr Constant originalExpressionCategory() const {
+        VERIFY(kind() == ConstantKind::CopyOfParameterToReferenceCategory);
+        return Constant(ConstantKind::CopyOfParameter, id());
     }
     constexpr bool booleanValue() const {
         VERIFY(kind() == ConstantKind::BooleanLiteral);

@@ -573,10 +573,10 @@ expression$as_then:
     }
     case '.': {
         tokEnd += 1;
-        // -> error
-        // error
-        errorToken = LexerToken::Point;
-        goto handle_parse_error;
+        // tokenKind = TokenKind::MemberAccessExpr
+        tokenKind = TokenKind::MemberAccessExpr;
+        // next access_punctuation
+        goto access_punctuation$no_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -2810,10 +2810,10 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // -> error
-        // error
-        errorToken = LexerToken::Point;
-        goto handle_parse_error;
+        // tokenKind = TokenKind::MemberAccessExpr
+        tokenKind = TokenKind::MemberAccessExpr;
+        // next access_punctuation
+        goto access_punctuation$no_emit;
     }
     case '/': {
         char next = tokEnd[1];

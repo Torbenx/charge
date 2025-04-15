@@ -24,6 +24,10 @@ SwitchState expression() then error
         emitToken TokenKind::DereferenceExpr
         next expression
 
+    punctuation .
+        tokenKind = TokenKind::MemberAccessExpr
+        next access_punctuation
+
     punctuation (
         emitCallToken TokenKind::ParenthesizedExpr
         next first_argument_paren

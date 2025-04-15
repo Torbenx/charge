@@ -365,3 +365,41 @@ struct DerivedSelfCalls: {
     // expect-return-type TestSelfCalls::ComplexResult{DerivedSelfCalls, X, bool}
     fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);
 }
+
+struct TestUnbasedAccessExprs: {
+    myMember: X;
+    // expect-return-type X
+    fn accessMyMember(self: const shared) => .myMember;
+    // expect-return-type X
+    fn accessMyMemberFunc(self: const shared) => .accessMyMember();
+}
+
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
+fn testLetParameterCategory(x: X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
+fn testVarParameterCategory(var x: X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
+fn testUniqueParameterCategory(x: unique X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
+fn testConstUniqueParameterCategory(x: const unique X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, shared_ref)}
+fn testSharedParameterCategory(x: shared X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
+fn testConstSharedParameterCategory(x: const shared X) => genericExpressionCategory(x);
+
+template(c: expression_category)
+fn genericParameterCategory(x: <c> X) => genericExpressionCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
+fn testValueParameterCategoryFold() => genericParameterCategory(X());
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
+fn testUniqueParameterCategoryFold(x: unique X) => genericParameterCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
+fn testConstUniqueParameterCategoryFold(x: const unique X) => genericParameterCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, shared_ref)}
+fn testSharedParameterCategoryFold(x: shared X) => genericParameterCategory(x);
+// expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
+fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCategory(x);
+
+// expect-return-type X
+template(c: expression_category)
+fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }

@@ -134,6 +134,8 @@ struct Dumper {
         case ConstantKind::CopyOfOpenGlobal$Program:
         case ConstantKind::CopyOfOpenGlobal$Parameterize:
             return formatConstant(v.copiedGlobal());
+        case ConstantKind::CopyOfParameterToReferenceCategory:
+            return "toReferenceCategory(" + formatConstant(v.originalExpressionCategory()) + ")";
         default:
             VERIFY_NOT_REACHED();
         }
