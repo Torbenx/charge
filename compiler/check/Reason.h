@@ -54,10 +54,10 @@ struct ReasonTheory {
     /*!
     Returns whether the clause this reason is modeling is still forcing.
     */
-    virtual bool testReason(Solver&, const Reason&) = 0;
+    virtual bool testReason(Solver&, BooleanValue, const Reason&) = 0;
 
     //! Return the clause modeled by this reason
-    virtual ClauseAndIndex reasonToClause(Solver&, const Reason&) = 0;
+    virtual ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&) = 0;
 
     //! Called by the solver when a new decision level starts
     /*!
@@ -68,13 +68,13 @@ struct ReasonTheory {
     //! Backtrack to a previous state
     /*!
     There are two approaches to implement backtracking:
-    1) By relying on BooleanTheory::unapplyFalseAssignment() to revert assignments only when
+    1) By relying on BooleanTheory::unapplyAssignment() to revert assignments only when
        required. This may have better performance due to fewer operations being performed but is
        not always applicable.
     2) By implementing backtrack() to revert to a previous state and using
-       BooleanTheory::reapplyFalseAssignment() to reapply assignment that were falsely reverted.
-       This is easier to achive since BooleanTheory::reapplyFalseAssignment() performs an
-       operation very similar to BooleanTheory::propagateFalseAssignment() which must be supported
+       BooleanTheory::reapplyAssignment() to reapply assignment that were falsely reverted.
+       This is easier to achive since BooleanTheory::reapplyAssignment() performs an
+       operation very similar to BooleanTheory::propagateAssignment() which must be supported
        in either case.
 
     If approach 2) is used the theory should backtrack to the state is was in when newDecisionLevel()

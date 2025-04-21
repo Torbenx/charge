@@ -22,9 +22,9 @@ struct BooleanVariables : SimpleBooleanTheory {
         return m_baseLabel + variableId(lit) * 2 + isPositive(lit);
     }
 
-    void propagateFalseAssignment(Solver&, BooleanValue) override { }
-    void reapplyFalseAssignment(Solver&, BooleanValue) override { }
-    void unapplyFalseAssignment(Solver&, BooleanValue) override { }
+    void propagateAssignment(Solver&, BooleanValue) override { }
+    void reapplyAssignment(Solver&, BooleanValue) override { }
+    void unapplyAssignment(Solver&, BooleanValue) override { }
 
     BooleanValue literalFromSign(int_t var) const { return var < 0 ? negativeLiteral(-var) : positiveLiteral(var); }
 

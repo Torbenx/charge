@@ -10,25 +10,27 @@ namespace check {
 struct StandardEquality : EqualityTheory, ReasonTheory {
     using Link = EqualityTheory::Link;
     using EqualityInfo = EquatableValueTheory::EqualityInfo;
-    enum class ReasonKind;
 
     StandardEquality(Solver&);
 
-    void propagateFalseAssignment(Solver&, BooleanValue) override;
-    void reapplyFalseAssignment(Solver&, BooleanValue) override;
-    void unapplyFalseAssignment(Solver&, BooleanValue) override;
+    BooleanValue equality(Solver&, Value, Value) override;
+    BooleanValue disequality(Solver&, Value, Value) override;
+
+    void propagateAssignment(Solver&, BooleanValue) override;
+    void reapplyAssignment(Solver&, BooleanValue) override;
+    void unapplyAssignment(Solver&, BooleanValue) override;
 
     void checkInvariances(Solver& solver);
 
-    int_t reasonEqId(const Reason&) const;
+    bool isUnitDisequalityReason(const Reason&) const;
     int_t reasonDiseqId(const Reason&) const;
-    bool isEqualityReason(const Reason&) const;
     std::pair<Value, Value> reasonDiseqOriented(const Reason& reason) const;
-    Reason equalityReason(int_t eqId) const;
-    Reason disequalityReason(ReasonKind kind, int_t eqId, int_t diseqId) const;
+    Reason equalityReason() const;
+    Reason disequalityReason(bool swappedConnectivity, int_t diseqId) const;
+    Reason unitDisequalityReason(Value diseqA, Value diseqB);
 
-    bool testReason(Solver&, const Reason&) override;
-    ClauseAndIndex reasonToClause(Solver&, const Reason&) override;
+    bool testReason(Solver&, BooleanValue, const Reason&) override;
+    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&) override;
     void newDecisionLevel(Solver&) override;
     void backtrack(Solver&) override;
 
@@ -40,14 +42,19 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
 protected:
     void onNewVariable(Solver&, int_t eqId) override;
 
-    virtual void watch(Solver&, Value, Value) { }
-    virtual bool isDisequalityWatched(Solver&, Value, Value) { return false; }
+    /*! \brief Return whether \p a and \p b are always disequal
+
+    If \p a and \p b are always disequal any values less the either \p a or \p b must also be always
+    disequal to the other one (and this function must be able to detect this).
+    */
+    virtual bool isUnitDisequal(Solver&, [[maybe_unused]] Value a, [[maybe_unused]] Value b) { return false; }
 
 private:
     static void addEdge(Solver&, Value value, Value otherValue, int_t eqId);
 
     void assignEqual(Solver&, int_t eqId);
     void assignDisequal(Solver&, int_t eqId, int_t diseqId);
+    void unitAssignDisequal(Solver&, int_t eqId, Value unitDiseqA, Value unitDiseqB);
 
     void pathInTree(Solver&, Value a, Value b, std::vector<BooleanValue>&);
 

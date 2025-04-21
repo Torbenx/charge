@@ -75,7 +75,7 @@ struct BooleanTheory::LiteralInfo {
 
     std::vector<LiteralInstance> instances;
 
-    bool tentativelyFalse() const { return firstReason.has_value(); }
+    bool tentativelyTrue() const { return firstReason.has_value(); }
 };
 
 }

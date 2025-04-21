@@ -89,8 +89,8 @@ struct Solver {
         return theoryFor(lit).negate(*this, lit);
     }
 
-    bool tentativelyFalse(Literal lit) {
-        return theoryFor(lit).literalInfo(*this, lit).tentativelyFalse();
+    bool tentativelyTrue(Literal lit) {
+        return theoryFor(lit).literalInfo(*this, lit).tentativelyTrue();
     }
 
     // MemoryLocationTheory
@@ -129,8 +129,8 @@ struct Solver {
         return *reasonTheories[reason.reasonTheory];
     }
 
-    bool testReason(const Reason& reason) {
-        return theoryFor(reason).testReason(*this, reason);
+    bool testReason(BooleanValue assignedLiteral, const Reason& reason) {
+        return theoryFor(reason).testReason(*this, assignedLiteral, reason);
     }
 
     // CodeBlockTheory
@@ -183,21 +183,41 @@ struct Solver {
 
     // Solver
 
+    bool isUnitTrue(BooleanValue value) {
+        auto firstReason = infoFor(value).firstReason;
+        if (!firstReason.has_value())
+            return false;
+        return at(firstReason.value()).reason.reasonTheory == unitReasons.theoryId();
+    }
+    bool isUnitFalse(BooleanValue value) { return isUnitTrue(negate(value)); }
+
     Reason makeImplicationReason(BooleanValue negatedPremise, BooleanValue consequence) {
         return implication.makeImplicationReason(negatedPremise, consequence);
     }
 
     void implicationAssignTrue(BooleanValue negatedPremise, BooleanValue consequence) {
         VERIFY(assignedFalse(negatedPremise));
+
+        // Expensive check, but important for correctness
+        // TODO: This does not work with phis currently
+        /* std::vector<BooleanValue> premisInactiveReason, consequenceInactiveReason;
+        collectInactiveReasons(negatedPremise, premisInactiveReason);
+        collectInactiveReasons(consequence, consequenceInactiveReason);
+        VERIFY(premisInactiveReason == consequenceInactiveReason);*/
+
         assignTrue(consequence, makeImplicationReason(negatedPremise, consequence));
     }
 
-    Reason makeUnitReason(BooleanValue lit) {
-        return unitReasons.makeUnitReason(lit);
-    }
+    Reason makeUnitReason() { return unitReasons.makeUnitReason(); }
 
     void unitAssignTrue(BooleanValue lit) {
-        assignTrue(lit, makeUnitReason(lit));
+        // Expensive check, but important for correctness
+        std::vector<BooleanValue> inactiveReason;
+        collectInactiveReasons(lit, inactiveReason);
+        for (BooleanValue inactiveCondition : inactiveReason)
+            VERIFY(isUnitFalse(inactiveCondition));
+
+        assignTrue(lit, makeUnitReason());
     }
 
     //! Returns the current decision level of the solver
@@ -209,21 +229,21 @@ struct Solver {
     */
     int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
 
-    //! Returns true if \p lit is assigned false and this assignment was propagated to the clause masks
-    bool assignedFalse(Literal lit) {
+    //! Returns true if \p lit is assigned true and this assignment was propagated to the clause masks
+    bool assignedTrue(Literal lit) {
         const auto& info = infoFor(lit);
-        if (!info.tentativelyFalse())
+        if (!info.tentativelyTrue())
             return false;
         return lit != firstPropagation && !info.prevPropagation.has_value();
     }
 
-    bool assignedTrue(Literal lit) {
-        return tentativelyFalse(negate(lit));
+    bool assignedFalse(Literal lit) {
+        return assignedTrue(negate(lit));
     }
 
     //! Append \p lit the end of the propagation queue
     /*!
-    Literals added to the queue should be assigned false at the point of this operation.
+    Literals added to the queue should be assigned true at the point of this operation.
     The queue will be processed by propagate() to propagate this assignment to the clause masks.
     */
     void queuePropagation(Literal lit) {
@@ -349,14 +369,14 @@ struct Solver {
 private:
     struct Clauses : ReasonTheory {
         Clauses(Solver& solver);
-        bool testReason(Solver&, const Reason& reason) override;
-        ClauseAndIndex reasonToClause(Solver&, const Reason& reason) override;
+        bool testReason(Solver&, BooleanValue assignedLiteral, const Reason& reason) override;
+        ClauseAndIndex reasonToClause(Solver&, BooleanValue assignedLiteral, const Reason& reason) override;
         void newDecisionLevel(Solver&) override;
         void backtrack(Solver&) override;
 
-        void propagateFalseAssignment(Solver&, BooleanValue);
-        void reapplyFalseAssignment(Solver&, BooleanValue);
-        void unapplyFalseAssignment(Solver&, BooleanValue);
+        void propagateAssignment(Solver&, BooleanValue);
+        void reapplyAssignment(Solver&, BooleanValue);
+        void unapplyAssignment(Solver&, BooleanValue);
         LiteralInstance asInstance(const Reason& reason);
         Reason makeReason(int_t clauseIndex, int_t literalIndex);
 
@@ -389,17 +409,19 @@ private:
 
     struct BooleanEquality : EqualityTheory {
         using EqualityTheory::EqualityTheory;
+        BooleanValue equality(Solver&, Value, Value) override;
+        BooleanValue disequality(Solver&, Value, Value) override;
         void onNewVariable(Solver& solver, int_t varId) override;
-        void propagateFalseAssignment(Solver&, BooleanValue) override { }
-        void reapplyFalseAssignment(Solver&, BooleanValue) override { }
-        void unapplyFalseAssignment(Solver&, BooleanValue) override { }
+        void propagateAssignment(Solver&, BooleanValue) override { }
+        void reapplyAssignment(Solver&, BooleanValue) override { }
+        void unapplyAssignment(Solver&, BooleanValue) override { }
     };
 
     struct BooleanLoads : SimpleBooleanTheory, LoadSet<BooleanLoads, void> {
         using SimpleBooleanTheory::SimpleBooleanTheory;
-        void propagateFalseAssignment(Solver&, BooleanValue) override { }
-        void reapplyFalseAssignment(Solver&, BooleanValue) override { }
-        void unapplyFalseAssignment(Solver&, BooleanValue) override { }
+        void propagateAssignment(Solver&, BooleanValue) override { }
+        void reapplyAssignment(Solver&, BooleanValue) override { }
+        void unapplyAssignment(Solver&, BooleanValue) override { }
         std::string formatPositiveLiteral(Solver&, int_t) override;
         std::string formatNegativeLiteral(Solver&, int_t) override;
         uint64_t labelOfValue(Solver&, Value) override;
@@ -440,14 +462,11 @@ private:
             return std::bit_cast<BooleanValue>(reason.data1);
         }
 
-        Reason makeUnitReason(BooleanValue lit) {
-            return { (uint32_t)theoryId(), std::bit_cast<uint32_t>(lit) };
-        }
-
-        bool testReason(Solver&, const Reason&) override { return true; }
-        ClauseAndIndex reasonToClause(Solver& solver, const Reason& reason) override {
+        Reason makeUnitReason() { return { (uint32_t)theoryId() }; }
+        bool testReason(Solver&, BooleanValue, const Reason&) override { return true; }
+        ClauseAndIndex reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason&) override {
             auto& clause = solver.scratchClause();
-            clause.push_back(reasonLiteral(reason));
+            clause.push_back(assignedLiteral);
             return { clause, 0 };
         }
 
@@ -462,21 +481,18 @@ private:
         static BooleanValue reasonNegatedPremise(const Reason& reason) {
             return std::bit_cast<BooleanValue>(reason.data1);
         }
-        static BooleanValue reasonConsequence(const Reason& reason) {
-            return std::bit_cast<BooleanValue>(reason.data2);
-        }
 
         Reason makeImplicationReason(BooleanValue negatedPremise, BooleanValue consequence) {
             return { (uint32_t)theoryId(), 0, std::bit_cast<uint32_t>(negatedPremise), std::bit_cast<uint32_t>(consequence) };
         }
 
-        bool testReason(Solver& solver, const Reason& reason) override {
+        bool testReason(Solver& solver, BooleanValue, const Reason& reason) override {
             return solver.assignedFalse(reasonNegatedPremise(reason));
         }
-        ClauseAndIndex reasonToClause(Solver& solver, const Reason& reason) override {
+        ClauseAndIndex reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) override {
             auto& clause = solver.scratchClause();
             clause.push_back(reasonNegatedPremise(reason));
-            clause.push_back(reasonConsequence(reason));
+            clause.push_back(assignedLiteral);
             return { clause, 1 };
         }
 

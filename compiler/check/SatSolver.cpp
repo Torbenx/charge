@@ -40,12 +40,12 @@ Reason Solver::Clauses::makeReason(int_t clauseIndex, int_t literalIndex) {
     return { .reasonTheory = (uint32_t)theoryId(), .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
 }
 
-bool Solver::Clauses::testReason(Solver&, const Reason& reason) {
+bool Solver::Clauses::testReason(Solver&, BooleanValue, const Reason& reason) {
     int_t clauseIndex = reason.data1;
     return std::popcount(clauseMasks[clauseIndex]) == 1;
 }
 
-ReasonTheory::ClauseAndIndex Solver::Clauses::reasonToClause(Solver&, const Reason& reason) {
+ReasonTheory::ClauseAndIndex Solver::Clauses::reasonToClause(Solver&, BooleanValue, const Reason& reason) {
     int_t clauseIndex = reason.data1;
     int_t literalIndex = reason.data0;
     return { clauses[clauseIndex], literalIndex };
@@ -61,11 +61,11 @@ void Solver::Clauses::newDecisionLevel(Solver&) { }
 
 void Solver::Clauses::backtrack(Solver&) { }
 
-void Solver::Clauses::reapplyFalseAssignment(Solver&, BooleanValue) { }
+void Solver::Clauses::reapplyAssignment(Solver&, BooleanValue) { }
 
-void Solver::Clauses::propagateFalseAssignment(Solver& solver, BooleanValue literal) {
+void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
     auto& literalTheory = solver.theoryFor(literal);
-    const auto& info = literalTheory.literalInfo(solver, literal);
+    const auto& info = literalTheory.literalInfo(solver, literalTheory.negate(solver, literal));
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
@@ -97,8 +97,10 @@ void Solver::Clauses::propagateFalseAssignment(Solver& solver, BooleanValue lite
     }
 }
 
-void Solver::Clauses::unapplyFalseAssignment(Solver& solver, BooleanValue literal) {
-    for (auto inst : solver.infoFor(literal).instances) {
+void Solver::Clauses::unapplyAssignment(Solver& solver, BooleanValue literal) {
+    auto& literalTheory = solver.theoryFor(literal);
+    const auto& info = literalTheory.literalInfo(solver, literalTheory.negate(solver, literal));
+    for (auto inst : info.instances) {
         auto& clauseMask = clauseMasks[inst.clauseIndex];
         auto mask = literalMask(inst.literalIndex);
         clauseMask |= mask;
@@ -141,6 +143,48 @@ std::string Solver::InternalVariables::formatNegativeLiteral(Solver&, int_t varI
 }
 
 // ------------------------- BooleanEquality ------------------------
+
+BooleanValue Solver::BooleanEquality::equality(Solver& solver, Value va, Value vb) {
+    BooleanValue a { va };
+    BooleanValue b { vb };
+
+    if (a == b)
+        return builtins::true_literal;
+    if (a == solver.negate(b))
+        return builtins::false_literal;
+
+    if (solver.isUnitTrue(a))
+        return b;
+    if (solver.isUnitTrue(b))
+        return a;
+    if (solver.isUnitFalse(a))
+        return solver.negate(b);
+    if (solver.isUnitFalse(b))
+        return solver.negate(a);
+
+    return positiveLiteral(equalityVariable(solver, a, b));
+}
+
+BooleanValue Solver::BooleanEquality::disequality(Solver& solver, Value va, Value vb) {
+    BooleanValue a { va };
+    BooleanValue b { vb };
+
+    if (a == b)
+        return builtins::false_literal;
+    if (a == solver.negate(b))
+        return builtins::true_literal;
+
+    if (solver.isUnitTrue(a))
+        return solver.negate(b);
+    if (solver.isUnitTrue(b))
+        return solver.negate(a);
+    if (solver.isUnitFalse(a))
+        return b;
+    if (solver.isUnitFalse(b))
+        return a;
+
+    return negativeLiteral(equalityVariable(solver, a, b));
+}
 
 void Solver::BooleanEquality::onNewVariable(Solver& solver, int_t varId) {
     /*
@@ -202,45 +246,11 @@ void Solver::BooleanLoads::makeData(Solver&, uint32_t newHandle, MemoryLocation,
 
 // ---------------------------- Booleans ----------------------------
 
-BooleanValue Solver::Booleans::equality(Solver& solver, Value va, Value vb) {
-    BooleanValue a { va };
-    BooleanValue b { vb };
-
-    if (a == b)
-        return builtins::true_literal;
-    if (a == solver.negate(b))
-        return builtins::false_literal;
-
-    if (a == builtins::true_literal)
-        return b;
-    if (b == builtins::true_literal)
-        return a;
-    if (a == builtins::false_literal)
-        return solver.negate(b);
-    if (b == builtins::false_literal)
-        return solver.negate(a);
-
+BooleanValue Solver::Booleans::equality(Solver& solver, Value a, Value b) {
     return m_equality.equality(solver, a, b);
 }
 
-BooleanValue Solver::Booleans::disequality(Solver& solver, Value va, Value vb) {
-    BooleanValue a { va };
-    BooleanValue b { vb };
-
-    if (a == b)
-        return builtins::false_literal;
-    if (a == solver.negate(Literal { b }))
-        return builtins::true_literal;
-
-    if (a == builtins::true_literal)
-        return solver.negate(b);
-    if (b == builtins::true_literal)
-        return solver.negate(a);
-    if (a == builtins::false_literal)
-        return b;
-    if (b == builtins::false_literal)
-        return a;
-
+BooleanValue Solver::Booleans::disequality(Solver& solver, Value a, Value b) {
     return m_equality.disequality(solver, a, b);
 }
 
@@ -305,21 +315,15 @@ std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
 bool Solver::simplifyClause(std::vector<Literal>& clause) {
     bool seenUnitTrue = false;
     auto newEnd = std::partition(clause.begin(), clause.end(), [&](Literal lit) {
-        auto& theory = theoryFor(lit);
-        auto nreason = theory.literalInfo(*this, theory.negate(*this, lit)).firstReason;
-        if (nreason.has_value() && at(nreason.value()).reason.reasonTheory == unitReasons.theoryId())
+        if (isUnitTrue(lit))
             seenUnitTrue = true;
-
-        auto reason = theory.literalInfo(*this, lit).firstReason;
-        if (!reason.has_value())
-            return true;
-        return at(reason.value()).reason.reasonTheory != unitReasons.theoryId();
+        return !isUnitFalse(lit);
     });
     if (seenUnitTrue)
         return true;
 
     // The clause can end up empty when all literals are false due to unit clauses.
-    // In that case the problem is always unsatisfiable, but clause must kept to determine that.
+    // In that case the problem is always unsatisfiable, but the clause must kept to determine that.
     if (newEnd != clause.begin())
         clause.erase(newEnd, clause.end());
 
@@ -389,7 +393,7 @@ void Solver::addClause(std::vector<Literal> clause) {
 
 void Solver::decideTrue(Literal literal) {
     VERIFY(!firstPropagation.has_value());
-    VERIFY(!tentativelyFalse(literal));
+    VERIFY(!tentativelyTrue(negate(literal)));
     decisions.push_back(TracePosition(trace.size()));
     assignTrue(literal, Reason::makeDecision(currentDecisionLevel()));
     for (auto& theory : reasonTheories)
@@ -405,21 +409,19 @@ void Solver::assignTrue(Literal trueLit, Reason reason) {
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
 
-    Literal falseLit = theory.negate(*this, trueLit);
-    auto& info = theory.literalInfo(*this, falseLit);
-
+    auto& info = theory.literalInfo(*this, trueLit);
     TracePosition tracePos(trace.size());
-    trace.push_back({ falseLit, reason, info.lastReason, std::nullopt });
+    trace.push_back({ trueLit, reason, info.lastReason, std::nullopt });
     if (info.lastReason.has_value())
         at(*info.lastReason).nextReason = tracePos;
     info.lastReason = tracePos;
 
     if (!info.firstReason.has_value()) {
         info.firstReason = tracePos;
-        queuePropagation(falseLit);
+        queuePropagation(trueLit);
     }
 
-    if (theory.literalInfo(*this, trueLit).tentativelyFalse()) {
+    if (theory.literalInfo(*this, theory.negate(*this, trueLit)).tentativelyTrue()) {
         conflicts.push_back({ trueLit, reason });
     }
 }
@@ -430,11 +432,11 @@ bool Solver::propagate() {
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
         auto& literalTheory = theoryFor(literal);
-        // fmt::println("propagating {}", literalTheory.formatValue(*this, negate(literal)));
+        // fmt::println("propagating {}", literalTheory.formatValue(*this, literal));
         removeFirstPropagation();
 
-        literalTheory.propagateFalseAssignment(*this, literal);
-        clauses.propagateFalseAssignment(*this, literal);
+        literalTheory.propagateAssignment(*this, literal);
+        clauses.propagateAssignment(*this, literal);
 
         if (!conflicts.empty())
             return false;
@@ -456,7 +458,7 @@ bool Solver::tryLearn(Conflict conflict) {
     VERIFY(!subTrace.empty());
     SubTraceEntry conflictDecision = subTrace.front();
     VERIFY(conflictDecision.reason.isDecision());
-    if (infoFor(conflictDecision.literal).tentativelyFalse()) {
+    if (infoFor(conflictDecision.literal).tentativelyTrue()) {
         // If the decision was not reverted, propagating it will lead to a conflict
         return false;
     }
@@ -465,8 +467,8 @@ bool Solver::tryLearn(Conflict conflict) {
     [[maybe_unused]] auto wasReversed = [&](Literal lit) {
         return std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; }) != subTrace.end();
     };
-    [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasReversed(lit) || infoFor(lit).tentativelyFalse(); };
-    [[maybe_unused]] auto wasTrue = [&](Literal lit) { return wasFalse(negate(lit)); };
+    [[maybe_unused]] auto wasTrue = [&](Literal lit) { return wasReversed(lit) || infoFor(lit).tentativelyTrue(); };
+    [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasTrue(negate(lit)); };
 
     std::vector<Literal> newClause;
     int_t position = subTrace.size();
@@ -476,16 +478,18 @@ bool Solver::tryLearn(Conflict conflict) {
     shouldBeVisited.resize(subTrace.size());
 
     {
-        auto [conflictClause, conflictLiteralIndex] = theoryFor(conflict.reason).reasonToClause(*this, conflict.reason);
-        for (Literal lit : conflictClause) {
-            auto& theory = theoryFor(lit);
-            auto& info = theory.literalInfo(*this, lit);
+        auto [conflictClause, conflictLiteralIndex] = theoryFor(conflict.reason).reasonToClause(*this, conflict.literal, conflict.reason);
+        for (Literal falseLit : conflictClause) {
+            auto& theory = theoryFor(falseLit);
+            Literal trueLit = theory.negate(*this, falseLit);
+            auto& info = theory.literalInfo(*this, trueLit);
 
-            // VERIFY(wasFalse(lit));
+            VERIFY(wasTrue(trueLit));
 
-            if (info.tentativelyFalse()) {
+            if (info.tentativelyTrue()) {
+                // TODO: Storing the 'includedInNewClause' guard in the opposite literal is not so nice
                 VERIFY(info.includedInNewClause != tryLearnIndex);
-                newClause.push_back(lit);
+                newClause.push_back(falseLit);
                 info.includedInNewClause = tryLearnIndex;
             } else {
                 VERIFY(!shouldBeVisited[info.subTraceIndex]);
@@ -519,11 +523,11 @@ bool Solver::tryLearn(Conflict conflict) {
         openLiterals -= 1;
         if (openLiterals == 0) {
             // Found a UIP
-            VERIFY(!infoFor(entry.literal).tentativelyFalse());
+            VERIFY(!infoFor(entry.literal).tentativelyTrue());
 
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
-                newClause.push_back(entry.literal);
+                newClause.push_back(negate(entry.literal));
                 // fmt::print("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
@@ -536,35 +540,36 @@ bool Solver::tryLearn(Conflict conflict) {
 
             newClause.clear();
             tryLearnIndex += 1;
-            Literal negatedUIP = negate(entry.literal);
-            newClause.push_back(negatedUIP);
-            infoFor(negatedUIP).includedInNewClause = tryLearnIndex;
+            newClause.push_back(entry.literal);
+            // TODO: Storing the 'includedInNewClause' guard in the opposite literal is not so nice
+            infoFor(negate(entry.literal)).includedInNewClause = tryLearnIndex;
             seenSinglePropagatingReason = true;
         } else
             seenSinglePropagatingReason = false;
 
         VERIFY(!entry.reason.isDecision());
 
-        auto [clause, forceLiteralIndex] = theoryFor(entry.reason).reasonToClause(*this, entry.reason);
+        auto [clause, forceLiteralIndex] = theoryFor(entry.reason).reasonToClause(*this, entry.literal, entry.reason);
         for (int_t index = 0; index < (int_t)clause.size(); index++) {
             Literal lit = clause[index];
-            auto& info = infoFor(lit);
+            auto& info = infoFor(negate(lit));
 
-            /*if (index != forceLiteralIndex)
+            if (index != forceLiteralIndex)
                 VERIFY(wasFalse(lit));
             else
-                VERIFY(wasTrue(lit));*/
+                VERIFY(wasTrue(lit));
 
-            if (info.tentativelyFalse()) {
+            if (info.tentativelyTrue()) {
+                // TODO: Storing the 'includedInNewClause' guard in the opposite literal is not so nice
                 if (info.includedInNewClause != tryLearnIndex) {
                     newClause.push_back(lit);
                     info.includedInNewClause = tryLearnIndex;
                 }
             } else if (index != forceLiteralIndex) {
-                /*auto it = std::find_if(subTrace.begin(), subTrace.end(), [lit](SubTraceEntry entry) { return entry.literal == lit; });
+                auto it = std::find_if(subTrace.begin(), subTrace.end(), [l = negate(lit)](SubTraceEntry entry) { return entry.literal == l; });
                 VERIFY(it != subTrace.end());
                 VERIFY(it - subTrace.begin() < position);
-                VERIFY(it - subTrace.begin() == (int_t)info.subTraceIndex);*/
+                VERIFY(it - subTrace.begin() == (int_t)info.subTraceIndex);
                 if (!shouldBeVisited[info.subTraceIndex]) {
                     openLiterals += 1;
                     shouldBeVisited[info.subTraceIndex] = true;
@@ -580,8 +585,8 @@ bool Solver::analyzeConflicts() {
     VERIFY(!conflicts.empty());
 
     auto doesConflictPersist = [this](Conflict conflict) {
-        bool isReasonValid = testReason(conflict.reason);
-        bool isImpliedLiteralFalse = infoFor(conflict.literal).tentativelyFalse();
+        bool isReasonValid = testReason(conflict.literal, conflict.reason);
+        bool isImpliedLiteralFalse = infoFor(negate(conflict.literal)).tentativelyTrue();
         return isReasonValid && isImpliedLiteralFalse;
     };
 
@@ -637,17 +642,17 @@ void Solver::backtrack(int_t targetLevel) {
         const TraceEntry entry = at(position);
         auto& theory = theoryFor(entry.literal);
         auto& info = theory.literalInfo(*this, entry.literal);
-        // VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
+        VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
 
-        bool revert = entry.reason.isDecision() || !testReason(entry.reason);
+        bool revert = entry.reason.isDecision() || !testReason(entry.literal, entry.reason);
         if (revert) {
             if (info.firstReason.value() == position) {
                 // When the first reason is reverted we requeue the propagation.
                 info.subTraceIndex = subTrace.size();
                 subTrace.push_back({ entry.literal, entry.reason });
-                if (assignedFalse(entry.literal)) {
-                    theory.unapplyFalseAssignment(*this, entry.literal);
-                    clauses.unapplyFalseAssignment(*this, entry.literal);
+                if (assignedTrue(entry.literal)) {
+                    theory.unapplyAssignment(*this, entry.literal);
+                    clauses.unapplyAssignment(*this, entry.literal);
                     queuePropagation(entry.literal);
                 }
             }
@@ -666,9 +671,9 @@ void Solver::backtrack(int_t targetLevel) {
             }
         } else {
             if (info.firstReason.value() == position) {
-                if (assignedFalse(entry.literal)) {
-                    theory.reapplyFalseAssignment(*this, entry.literal);
-                    clauses.reapplyFalseAssignment(*this, entry.literal);
+                if (assignedTrue(entry.literal)) {
+                    theory.reapplyAssignment(*this, entry.literal);
+                    clauses.reapplyAssignment(*this, entry.literal);
                 }
             }
             *(entry.prevReason.has_value() ? &at(*entry.prevReason).nextReason : &info.firstReason) = writePosition;
@@ -685,9 +690,8 @@ void Solver::backtrack(int_t targetLevel) {
 
 std::vector<Reason> Solver::collectReasons(Literal trueLit) {
     auto& theory = theoryFor(trueLit);
-    Literal falseLit = theory.negate(*this, trueLit);
-    const auto& info = theory.literalInfo(*this, falseLit);
-    VERIFY(info.tentativelyFalse());
+    const auto& info = theory.literalInfo(*this, trueLit);
+    VERIFY(info.tentativelyTrue());
 
     VERIFY(info.firstReason.has_value());
     VERIFY(info.lastReason.has_value());
@@ -707,7 +711,7 @@ void Solver::checkInvariances() {
     auto checkLiteral = [this](Value val) {
         Literal lit = { val };
         const auto& info = infoFor(lit);
-        if (!info.tentativelyFalse())
+        if (!info.tentativelyTrue())
             return;
         VERIFY(info.firstReason.has_value());
         VERIFY(info.lastReason.has_value());
@@ -785,7 +789,7 @@ void Solver::Clauses::checkInvariances(Solver& solver) {
 
             for (Literal lit : clause) {
                 if (lit != trueLit) {
-                    VERIFY(solver.infoFor(lit).tentativelyFalse());
+                    VERIFY(solver.tentativelyTrue(solver.negate(lit)));
                     // VERIFY(solver.infoFor(lit).firstReason.value() < pos);
                 }
             }
@@ -799,11 +803,11 @@ bool Solver::checkAssignment() {
         std::optional<Literal> unassignedInternal;
         for (Literal lit : clause) {
             auto& theory = theoryFor(lit);
-            if (theory.literalInfo(*this, theory.negate(*this, lit)).tentativelyFalse()) {
+            if (theory.literalInfo(*this, lit).tentativelyTrue()) {
                 foundTrue = true;
                 break;
             }
-            if (lit.theoryId == internalVariables.theoryId() && !theory.literalInfo(*this, lit).tentativelyFalse())
+            if (lit.theoryId == internalVariables.theoryId() && !theory.literalInfo(*this, theory.negate(*this, lit)).tentativelyTrue())
                 unassignedInternal = lit;
         }
         if (!foundTrue) {

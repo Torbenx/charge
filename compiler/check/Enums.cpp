@@ -41,7 +41,7 @@ int_t SetElements::getOrCreateVariable(Solver& solver, int_t setId, int_t index)
         if (setInfo.activeElementIndex != INVALID_ACTIVE_INDEX) {
             VERIFY(index != setInfo.activeElementIndex);
             int_t activeVarId = setInfo.variableIds[setInfo.activeElementIndex];
-            solver.assignTrue(negativeLiteral(varElm), makeOtherVarActiveReason(activeVarId, varElm));
+            solver.assignTrue(negativeLiteral(varElm), makeOtherVarActiveReason(activeVarId));
         }
     }
     return varElm;
@@ -54,23 +54,12 @@ int_t SetElements::newSet(Solver&, int_t setSize) {
     return setId;
 }
 
-void SetElements::propagateFalseAssignment(Solver& solver, BooleanValue value) {
+void SetElements::propagateAssignment(Solver& solver, BooleanValue value) {
     int_t assignedVarId = variableId(value);
     const auto& varInfo = variables[assignedVarId];
     auto& setInfo = sets[varInfo.setId];
 
     if (isPositive(value)) {
-        setInfo.inactiveElementCount += 1;
-        if (setInfo.inactiveElementCount == setInfo.setSize() - 1 && setInfo.activeElementIndex == INVALID_ACTIVE_INDEX) {
-            for (int_t index = 0; index < setInfo.setSize(); index++) {
-                int_t varId = getOrCreateVariable(solver, varInfo.setId, index);
-                if (!assignedNegative(solver, varId)) {
-                    solver.assignTrue(positiveLiteral(varId), makeAllOtherInactiveReason(varInfo.setId, index));
-                    break;
-                }
-            }
-        }
-    } else {
         VERIFY(setInfo.activeElementIndex == INVALID_ACTIVE_INDEX);
         setInfo.activeElementIndex = varInfo.indexInSet;
         onElementActivated(solver, varInfo.setId, varInfo.indexInSet);
@@ -81,59 +70,68 @@ void SetElements::propagateFalseAssignment(Solver& solver, BooleanValue value) {
 
             solver.assignTrue(
                 negativeLiteral(varId),
-                makeOtherVarActiveReason(assignedVarId, varId));
+                makeOtherVarActiveReason(assignedVarId));
+        }
+    } else {
+        setInfo.inactiveElementCount += 1;
+        if (setInfo.inactiveElementCount == setInfo.setSize() - 1 && setInfo.activeElementIndex == INVALID_ACTIVE_INDEX) {
+            for (int_t index = 0; index < setInfo.setSize(); index++) {
+                int_t varId = getOrCreateVariable(solver, varInfo.setId, index);
+                if (!assignedNegative(solver, varId)) {
+                    solver.assignTrue(positiveLiteral(varId), makeAllOtherInactiveReason(varInfo.setId));
+                    break;
+                }
+            }
         }
     }
 }
 
-void SetElements::unapplyFalseAssignment(Solver&, BooleanValue value) {
+void SetElements::unapplyAssignment(Solver&, BooleanValue value) {
     int_t activeVarId = variableId(value);
     const auto& varInfo = variables[activeVarId];
     auto& setInfo = sets[varInfo.setId];
 
     if (isPositive(value)) {
-        setInfo.inactiveElementCount -= 1;
-    } else {
         VERIFY(setInfo.activeElementIndex == varInfo.indexInSet);
         setInfo.activeElementIndex = INVALID_ACTIVE_INDEX;
+    } else {
+        setInfo.inactiveElementCount -= 1;
     }
 }
 
-Reason SetElements::makeOtherVarActiveReason(int_t activeVarId, int_t inactiveVarId) {
-    return Reason { (uint32_t)ReasonTheory::theoryId(), 0, (uint32_t)activeVarId, (uint32_t)inactiveVarId };
+Reason SetElements::makeOtherVarActiveReason(int_t activeVarId) {
+    return Reason { (uint32_t)ReasonTheory::theoryId(), 0, (uint32_t)activeVarId, 0 };
 }
 
-Reason SetElements::makeAllOtherInactiveReason(int_t setId, int_t activeVarId) {
-    return Reason { (uint32_t)ReasonTheory::theoryId(), 1, (uint32_t)setId, (uint32_t)activeVarId };
+Reason SetElements::makeAllOtherInactiveReason(int_t setId) {
+    return Reason { (uint32_t)ReasonTheory::theoryId(), 0, (uint32_t)setId, 0 };
 }
-bool SetElements::isAllOtherInactiveReason(const Reason& reason) { return reason.data0; }
 int_t SetElements::reasonActiveVarId(const Reason& reason) { return reason.data1; }
-int_t SetElements::reasonInactiveVarId(const Reason& reason) { return reason.data2; }
 int_t SetElements::reasonSetId(const Reason& reason) { return reason.data1; }
-int_t SetElements::reasonActiveIndex(const Reason& reason) { return reason.data2; }
 
-bool SetElements::testReason(Solver& solver, const Reason& reason) {
-    if (isAllOtherInactiveReason(reason)) {
+bool SetElements::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+    if (isPositive(assignedLiteral)) {
+        // Check that all other variables are still inactive
         int_t setId = reasonSetId(reason);
         const auto& setInfo = sets[setId];
-        return setInfo.inactiveElementCount == setInfo.setSize() - 1
-            && !solver.assignedFalse(positiveLiteral(getVariable(setId, reasonActiveIndex(reason))));
+        return setInfo.inactiveElementCount == setInfo.setSize() - 1;
     } else {
+        // Check that the active variable is still active
         return assignedPositive(solver, reasonActiveVarId(reason));
     }
 }
 
-ReasonTheory::ClauseAndIndex SetElements::reasonToClause(Solver& solver, const Reason& reason) {
+ReasonTheory::ClauseAndIndex SetElements::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     auto& clause = solver.scratchClause();
-    if (isAllOtherInactiveReason(reason)) {
+    if (isPositive(assignedLiteral)) {
         int_t setId = reasonSetId(reason);
         const auto& setInfo = sets[setId];
         for (int_t index = 0; index < setInfo.setSize(); index++)
             clause.push_back(positiveLiteral(getVariable(setId, index)));
-        return { clause, reasonActiveIndex(reason) };
+        return { clause, variables[variableId(assignedLiteral)].indexInSet };
     } else {
         clause.push_back(negativeLiteral(reasonActiveVarId(reason)));
-        clause.push_back(negativeLiteral(reasonInactiveVarId(reason)));
+        clause.push_back(assignedLiteral);
         return { clause, 1 };
     }
 }

@@ -223,8 +223,12 @@ struct TestValueTheory : EquatableValueTheory {
 
     EqualityInfo& equalityInfo(Solver&, Value v) override { return infos[v.valueId]; }
 
-    Reason equalityReason(Solver& solver, Value v1, Value v2) {
-        return equality.equalityReason(equality.variableId(equality.equality(solver, v1, v2)));
+    bool testReason(Solver& solver, BooleanValue eq) {
+        return equality.testReason(solver, eq, equality.equalityReason());
+    }
+
+    auto getEqualityClause(Solver& solver, BooleanValue eq) {
+        return equality.reasonToClause(solver, eq, equality.equalityReason());
     }
 
     uint64_t baseLabel = 0;
@@ -239,20 +243,17 @@ TEST(Check, EqualityTreePath1) {
     Value v1 = values.newValue();
     Value v2 = values.newValue();
 
-    Reason r12 = values.equalityReason(solver, v1, v2);
-    EXPECT_FALSE(values.equality.testReason(solver, r12));
-
     BooleanValue e12 = values.equality.equality(solver, v1, v2);
-    EXPECT_FALSE(values.equality.testReason(solver, r12));
+    EXPECT_FALSE(values.testReason(solver, e12));
 
     solver.decideTrue(e12);
-    EXPECT_FALSE(values.equality.testReason(solver, r12));
+    EXPECT_FALSE(values.testReason(solver, e12));
 
     solver.propagate();
-    EXPECT_TRUE(values.equality.testReason(solver, r12));
+    EXPECT_TRUE(values.testReason(solver, e12));
 
     {
-        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+        auto [clause, forcedIndex] = values.getEqualityClause(solver, e12);
         EXPECT_EQ(clause.size(), 2);
         EXPECT_EQ(forcedIndex, 0);
         EXPECT_EQ(clause[0], e12);
@@ -261,7 +262,7 @@ TEST(Check, EqualityTreePath1) {
 
     solver.backtrack(0);
     {
-        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+        auto [clause, forcedIndex] = values.getEqualityClause(solver, e12);
         EXPECT_EQ(clause.size(), 2);
         EXPECT_EQ(forcedIndex, 0);
         EXPECT_EQ(clause[0], e12);
@@ -286,10 +287,9 @@ TEST(Check, EqualityTreePath2) {
     solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(e23));
-    Reason r23 = values.equalityReason(solver, v2, v3);
-    EXPECT_TRUE(values.equality.testReason(solver, r23));
+    EXPECT_TRUE(values.testReason(solver, e23));
 
-    auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r23);
+    auto [clause, forcedIndex] = values.getEqualityClause(solver, e23);
     EXPECT_EQ(clause.size(), 3);
     EXPECT_EQ(clause[forcedIndex], e23);
     EXPECT_TRUE(std::find(clause.begin(), clause.end(), values.equality.negate(e12)) != clause.end());
@@ -313,10 +313,9 @@ TEST(Check, EqualityTreePath3) {
     solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(e12));
-    Reason r12 = values.equalityReason(solver, v1, v2);
-    EXPECT_TRUE(values.equality.testReason(solver, r12));
+    EXPECT_TRUE(values.testReason(solver, e12));
 
-    auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r12);
+    auto [clause, forcedIndex] = values.getEqualityClause(solver, e12);
     EXPECT_EQ(clause.size(), 3);
     EXPECT_EQ(clause[forcedIndex], e12);
     EXPECT_TRUE(std::find(clause.begin(), clause.end(), values.equality.negate(e13)) != clause.end());
@@ -339,10 +338,10 @@ TEST(Check, EqualityTreePath4) {
     solver.propagate();
     solver.decideTrue(values.equality.equality(solver, vals[0][2], vals[0][3]));
     solver.propagate();
-    Reason r00_03 = values.equalityReason(solver, vals[0][0], vals[0][3]);
-    EXPECT_TRUE(values.equality.testReason(solver, r00_03));
+    BooleanValue e00_03 = values.equality.equality(solver, vals[0][0], vals[0][3]);
+    EXPECT_TRUE(values.testReason(solver, e00_03));
     {
-        auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r00_03);
+        auto [clause, forcedIndex] = values.getEqualityClause(solver, e00_03);
         EXPECT_EQ(clause.size(), 4);
         EXPECT_EQ(clause[forcedIndex], values.equality.equality(solver, vals[0][0], vals[0][3]));
         EXPECT_TRUE(std::find(clause.begin(), clause.end(), values.equality.disequality(solver, vals[0][0], vals[0][1])) != clause.end());
@@ -360,14 +359,14 @@ TEST(Check, EqualityTreePath4) {
         solver.propagate();
     }
 
-    Reason r30_33 = values.equalityReason(solver, vals[3][0], vals[3][3]);
-    EXPECT_TRUE(values.equality.testReason(solver, r30_33));
-    Reason r32_33 = values.equalityReason(solver, vals[3][2], vals[3][3]);
-    EXPECT_TRUE(values.equality.testReason(solver, r32_33));
+    BooleanValue e30_33 = values.equality.equality(solver, vals[3][0], vals[3][3]);
+    EXPECT_TRUE(values.testReason(solver, e30_33));
+    BooleanValue e32_33 = values.equality.equality(solver, vals[3][2], vals[3][3]);
+    EXPECT_TRUE(values.testReason(solver, e32_33));
 
     auto testConnections = [&] {
         {
-            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r30_33);
+            auto [clause, forcedIndex] = values.getEqualityClause(solver, e30_33);
             EXPECT_EQ(clause.size(), 10);
             EXPECT_EQ(clause[forcedIndex], values.equality.equality(solver, vals[3][0], vals[3][3]));
 
@@ -385,7 +384,7 @@ TEST(Check, EqualityTreePath4) {
         }
 
         {
-            auto [clause, forcedIndex] = values.equality.reasonToClause(solver, r32_33);
+            auto [clause, forcedIndex] = values.getEqualityClause(solver, e32_33);
             EXPECT_EQ(clause.size(), 8);
             EXPECT_EQ(clause[forcedIndex], values.equality.equality(solver, vals[3][2], vals[3][3]));
 
@@ -403,8 +402,8 @@ TEST(Check, EqualityTreePath4) {
     testConnections();
 
     solver.backtrack(0);
-    EXPECT_FALSE(values.equality.testReason(solver, r30_33));
-    EXPECT_FALSE(values.equality.testReason(solver, r32_33));
+    EXPECT_FALSE(values.testReason(solver, e30_33));
+    EXPECT_FALSE(values.testReason(solver, e32_33));
 
     testConnections();
 }
@@ -542,7 +541,7 @@ TEST(Check, DisequalityOfParentAppliesToNewEdgeAddedOnChild) {
     EXPECT_FALSE(solver.hasConflicts());
 
     BooleanValue e23 = values.equality.equality(solver, v2, v3);
-    EXPECT_TRUE(solver.tentativelyFalse(e23));
+    EXPECT_TRUE(solver.tentativelyTrue(solver.negate(e23)));
     solver.propagate();
     EXPECT_TRUE(solver.assignedFalse(e23));
 }

@@ -57,13 +57,13 @@ struct SimpleBooleanTheory : BooleanTheory {
 
     std::optional<int_t> findUnassignedVariable() {
         for (int_t i = find; i < variableCount(); i++) {
-            if (literalInfo(positiveLiteral(i)).tentativelyFalse() || literalInfo(negativeLiteral(i)).tentativelyFalse())
+            if (literalInfo(positiveLiteral(i)).tentativelyTrue() || literalInfo(negativeLiteral(i)).tentativelyTrue())
                 continue;
             find = i;
             return i;
         }
         for (int_t i = 0; i < find; i++) {
-            if (literalInfo(positiveLiteral(i)).tentativelyFalse() || literalInfo(negativeLiteral(i)).tentativelyFalse())
+            if (literalInfo(positiveLiteral(i)).tentativelyTrue() || literalInfo(negativeLiteral(i)).tentativelyTrue())
                 continue;
             find = i;
             return i;

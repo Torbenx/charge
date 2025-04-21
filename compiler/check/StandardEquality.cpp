@@ -132,12 +132,6 @@ TEST(Check, MergeLists) {
     mergeUnmerge({ 1, 2, 3, 7, 8, 9 }, { 4, 5, 6 });
 }
 
-enum class StandardEquality::ReasonKind {
-    Equality,
-    Disequality, //!< Connectivity is source <-> source and target <-> target
-    SwappedDisequality, //!< Connectivity is source <-> target and target <-> source
-};
-
 void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
     auto [source, target] = equalities.at(eqId);
     if (connected(solver, source, target))
@@ -175,10 +169,14 @@ void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
                 continue;
             Value otherRoot = infoFor(solver, edge.otherValue).root;
             const auto& otherRootInfo = infoFor(solver, otherRoot);
-            forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
-                assignDisequal(solver, edge.eqId, diseqId);
-            });
-            watch(solver, sourceInfo.root, targetInfo.root);
+            // Note: Similiar code in onNewVariable()
+            if (isUnitDisequal(solver, sourceInfo.root, otherRoot)) {
+                unitAssignDisequal(solver, edge.eqId, sourceInfo.root, otherRoot);
+            } else {
+                forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
+                    assignDisequal(solver, edge.eqId, diseqId);
+                });
+            }
         }
     }
     mergeInto(sourceDiseq, targetDiseq);
@@ -209,7 +207,7 @@ void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propaga
     Value targetRoot = infoFor(solver, target).root;
     if (shareAny(infoFor(solver, sourceRoot).disequalities, infoFor(solver, targetRoot).disequalities))
         return;
-    if (isDisequalityWatched(solver, sourceRoot, targetRoot))
+    if (isUnitDisequal(solver, sourceRoot, targetRoot))
         return;
 
     auto addDisequality = [&solver, diseqId](Value parent) {
@@ -236,74 +234,103 @@ void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propaga
 }
 
 void StandardEquality::assignEqual(Solver& solver, int_t eqId) {
-    solver.assignTrue(positiveLiteral(eqId), equalityReason(eqId));
+    solver.assignTrue(positiveLiteral(eqId), equalityReason());
 }
 
 void StandardEquality::assignDisequal(Solver& solver, int_t eqId, int_t diseqId) {
-    ReasonKind kind = connected(solver, equalities.at(eqId).source, equalities.at(diseqId).source)
-        ? ReasonKind::Disequality
-        : ReasonKind::SwappedDisequality;
+    bool normalConnectivity = connected(solver, equalities.at(eqId).source, equalities.at(diseqId).source);
 
-    solver.assignTrue(negativeLiteral(eqId), disequalityReason(kind, eqId, diseqId));
+    solver.assignTrue(negativeLiteral(eqId), disequalityReason(!normalConnectivity, diseqId));
 }
 
-void StandardEquality::propagateFalseAssignment(Solver& solver, BooleanValue lit) {
+void StandardEquality::unitAssignDisequal(Solver& solver, int_t eqId, Value unitDiseqA, Value unitDiseqB) {
+    if (!connected(solver, equalities.at(eqId).source, unitDiseqA))
+        std::swap(unitDiseqA, unitDiseqB);
+
+    solver.assignTrue(negativeLiteral(eqId), unitDisequalityReason(unitDiseqA, unitDiseqB));
+}
+
+void StandardEquality::propagateAssignment(Solver& solver, BooleanValue lit) {
     if (isPositive(lit)) {
-        applyDisequal(solver, variableId(lit), true);
-    } else {
         applyEqual(solver, variableId(lit), true);
-    }
-}
-
-void StandardEquality::reapplyFalseAssignment(Solver& solver, BooleanValue lit) {
-    if (isPositive(lit)) {
-        applyDisequal(solver, variableId(lit), false);
     } else {
-        applyEqual(solver, variableId(lit), false);
+        applyDisequal(solver, variableId(lit), true);
     }
 }
 
-void StandardEquality::unapplyFalseAssignment(Solver&, BooleanValue) { }
+void StandardEquality::reapplyAssignment(Solver& solver, BooleanValue lit) {
+    if (isPositive(lit)) {
+        applyEqual(solver, variableId(lit), false);
+    } else {
+        applyDisequal(solver, variableId(lit), false);
+    }
+}
 
-bool StandardEquality::isEqualityReason(const Reason& reason) const { return (ReasonKind)reason.data0 == ReasonKind::Equality; }
-int_t StandardEquality::reasonEqId(const Reason& reason) const { return reason.data1; }
-int_t StandardEquality::reasonDiseqId(const Reason& reason) const { return reason.data2; }
+void StandardEquality::unapplyAssignment(Solver&, BooleanValue) { }
+
+bool StandardEquality::isUnitDisequalityReason(const Reason& reason) const { return reason.data0 == 2u; }
+int_t StandardEquality::reasonDiseqId(const Reason& reason) const { return reason.data1; }
 std::pair<Value, Value> StandardEquality::reasonDiseqOriented(const Reason& reason) const {
+    if (isUnitDisequalityReason(reason))
+        return { std::bit_cast<Value>(reason.data1), std::bit_cast<Value>(reason.data2) };
+
     auto [a, b] = equalities.at(reasonDiseqId(reason));
-    if ((ReasonKind)reason.data0 == ReasonKind::SwappedDisequality)
+    if (reason.data0 != 0)
         std::swap(a, b);
     return { a, b };
 }
-Reason StandardEquality::equalityReason(int_t eqId) const {
+Reason StandardEquality::equalityReason() const {
+    return Reason { (uint32_t)ReasonTheory::theoryId() };
+}
+Reason StandardEquality::disequalityReason(bool swappedConnectivity, int_t diseqId) const {
     return Reason {
         .reasonTheory = (uint32_t)ReasonTheory::theoryId(),
-        .data0 = (uint32_t)ReasonKind::Equality,
-        .data1 = (uint32_t)eqId
+        .data0 = swappedConnectivity ? 1u : 0u,
+        .data1 = (uint32_t)diseqId,
     };
 }
-Reason StandardEquality::disequalityReason(ReasonKind kind, int_t eqId, int_t diseqId) const {
+Reason StandardEquality::unitDisequalityReason(Value diseqA, Value diseqB) {
     return Reason {
         .reasonTheory = (uint32_t)ReasonTheory::theoryId(),
-        .data0 = (uint32_t)kind,
-        .data1 = (uint32_t)eqId,
-        .data2 = (uint32_t)diseqId
+        .data0 = 2u,
+        .data1 = std::bit_cast<uint32_t>(diseqA),
+        .data2 = std::bit_cast<uint32_t>(diseqB),
     };
 }
 
-bool StandardEquality::testReason(Solver& solver, const Reason& reason) {
-    if (isEqualityReason(reason)) {
-        auto [source, target] = equalities.at(reasonEqId(reason));
+bool StandardEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+    if (isPositive(assignedLiteral)) {
+        auto [source, target] = equalities.at(variableId(assignedLiteral));
         return connected(solver, source, target);
     }
 
     // disequality
-    int_t diseqId = reasonDiseqId(reason);
-    if (!assignedNegative(solver, diseqId))
+    if (!isUnitDisequalityReason(reason) && !assignedNegative(solver, reasonDiseqId(reason)))
         return false;
 
-    auto [impliedA, impliedB] = equalities.at(reasonEqId(reason));
+    auto [impliedA, impliedB] = equalities.at(variableId(assignedLiteral));
     auto [originalA, originalB] = reasonDiseqOriented(reason);
     return connected(solver, impliedA, originalA) && connected(solver, impliedB, originalB);
+}
+
+BooleanValue StandardEquality::equality(Solver& solver, Value a, Value b) {
+    if (a == b)
+        return builtins::true_literal;
+
+    if (isUnitDisequal(solver, a, b))
+        return builtins::false_literal;
+
+    return positiveLiteral(equalityVariable(solver, a, b));
+}
+
+BooleanValue StandardEquality::disequality(Solver& solver, Value a, Value b) {
+    if (a == b)
+        return builtins::false_literal;
+
+    if (isUnitDisequal(solver, a, b))
+        return builtins::true_literal;
+
+    return negativeLiteral(equalityVariable(solver, a, b));
 }
 
 void StandardEquality::onNewVariable(Solver& solver, int_t eqId) {
@@ -318,10 +345,13 @@ void StandardEquality::onNewVariable(Solver& solver, int_t eqId) {
     } else {
         const auto& sourceRootInfo = infoFor(solver, sourceInfo.root);
         const auto& targetRootInfo = infoFor(solver, targetInfo.root);
-        forEachCommonElement(sourceRootInfo.disequalities, targetRootInfo.disequalities, [this, &solver, eqId](int_t diseqId) {
-            assignDisequal(solver, eqId, diseqId);
-        });
-        watch(solver, sourceInfo.root, targetInfo.root);
+        if (isUnitDisequal(solver, sourceInfo.root, targetInfo.root)) {
+            unitAssignDisequal(solver, eqId, sourceInfo.root, targetInfo.root);
+        } else {
+            forEachCommonElement(sourceRootInfo.disequalities, targetRootInfo.disequalities, [this, &solver, eqId](int_t diseqId) {
+                assignDisequal(solver, eqId, diseqId);
+            });
+        }
     }
 }
 
@@ -429,23 +459,23 @@ void StandardEquality::path(Solver& solver, Value a, Value b, std::vector<Boolea
     }
 }
 
-ReasonTheory::ClauseAndIndex StandardEquality::reasonToClause(Solver& solver, const Reason& reason) {
+ReasonTheory::ClauseAndIndex StandardEquality::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     auto& result = solver.scratchClause();
 
-    if (isEqualityReason(reason)) {
-        int_t eqId = reasonEqId(reason);
-        result.push_back(positiveLiteral(eqId));
+    if (isPositive(assignedLiteral)) {
+        result.push_back(assignedLiteral);
 
-        auto [a, b] = equalities.at(eqId);
+        auto [a, b] = equalities.at(variableId(assignedLiteral));
         path(solver, a, b, result);
 
         return { .clause = result, .forceLiteralIndex = 0 };
     }
 
-    result.push_back(negativeLiteral(reasonEqId(reason)));
-    result.push_back(positiveLiteral(reasonDiseqId(reason)));
+    result.push_back(assignedLiteral);
+    if (!isUnitDisequalityReason(reason))
+        result.push_back(positiveLiteral(reasonDiseqId(reason)));
 
-    auto [impliedA, impliedB] = equalities.at(reasonEqId(reason));
+    auto [impliedA, impliedB] = equalities.at(variableId(assignedLiteral));
     auto [originalA, originalB] = reasonDiseqOriented(reason);
     path(solver, impliedA, originalA, result);
     path(solver, impliedB, originalB, result);

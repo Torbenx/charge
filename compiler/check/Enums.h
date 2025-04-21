@@ -28,9 +28,9 @@ struct SetElements : SimpleBooleanTheory, private ReasonTheory {
     std::string formatNegativeLiteral(Solver& solver, int_t varId) override;
     uint64_t labelOfValue(Solver&, Value) override;
 
-    void propagateFalseAssignment(Solver&, BooleanValue) override;
-    void reapplyFalseAssignment(Solver&, BooleanValue) override { }
-    void unapplyFalseAssignment(Solver&, BooleanValue) override;
+    void propagateAssignment(Solver&, BooleanValue) override;
+    void reapplyAssignment(Solver&, BooleanValue) override { }
+    void unapplyAssignment(Solver&, BooleanValue) override;
 
     int_t setCount() const { return sets.size(); }
 
@@ -62,16 +62,13 @@ private:
     int_t getOrCreateVariable(Solver& solver, int_t setId, int_t index);
     int_t getVariable(int_t setId, int_t index);
 
-    Reason makeOtherVarActiveReason(int_t activeVarId, int_t inactiveVarId);
-    Reason makeAllOtherInactiveReason(int_t setId, int_t activeIndex);
-    bool isAllOtherInactiveReason(const Reason&);
+    Reason makeOtherVarActiveReason(int_t activeVarId);
+    Reason makeAllOtherInactiveReason(int_t setId);
     int_t reasonActiveVarId(const Reason&);
-    int_t reasonInactiveVarId(const Reason&);
     int_t reasonSetId(const Reason&);
-    int_t reasonActiveIndex(const Reason&);
 
-    bool testReason(Solver&, const Reason&) override;
-    ClauseAndIndex reasonToClause(Solver&, const Reason&) override;
+    bool testReason(Solver&, BooleanValue, const Reason&) override;
+    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&) override;
     void newDecisionLevel(Solver&) override { }
     void backtrack(Solver&) override { }
 

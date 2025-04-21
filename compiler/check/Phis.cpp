@@ -26,7 +26,7 @@ void Phis::Links::onElementActivated(Solver& solver, int_t setId, int_t index) {
     BlockId block = phis()->blockFromId(setId);
     Phi& phi = phis()->get(block);
     if (index == (int_t)phi.parents.size())
-        return; // The block was explicit assigned inactive
+        return; // The block was explicitly assigned inactive
 
     BooleanValue negatedCondition = elementInactiveLiteral(solver, block.blockId, index);
     solver.implicationAssignTrue(negatedCondition, solver.blockActiveLiteral(phi.parents[index]));
