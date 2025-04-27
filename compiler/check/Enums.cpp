@@ -6,8 +6,8 @@ namespace check {
 
 // --------------------------- SetElements --------------------------
 
-SetElements::SetElements(Solver& solver)
-    : SimpleBooleanTheory(solver), ReasonTheory(solver, true) { }
+SetElements::SetElements(Solver& solver, uint64_t baseLabel)
+    : SimpleBooleanTheory(solver, baseLabel), ReasonTheory(solver, true) { }
 
 std::string SetElements::formatPositiveLiteral(Solver& solver, int_t varId) {
     const auto& info = variables[varId];
@@ -18,10 +18,9 @@ std::string SetElements::formatNegativeLiteral(Solver& solver, int_t varId) {
     return "!" + formatPositiveLiteral(solver, varId);
 }
 
-uint64_t SetElements::labelOfValue(Solver& solver, Value v) {
-    BooleanValue lit { v };
-    const auto& info = variables[variableId(lit)];
-    return labelOfElement(solver, info.setId, info.indexInSet, isPositive(lit));
+uint32_t SetElements::labelOfVariable(Solver& solver, int_t varId) {
+    const auto& info = variables[varId];
+    return labelOfElement(solver, info.setId, info.indexInSet);
 }
 
 int_t SetElements::getVariable(int_t setId, int_t index) {
@@ -35,7 +34,7 @@ int_t SetElements::getOrCreateVariable(Solver& solver, int_t setId, int_t index)
     auto& varElm = setInfo.variableIds[index];
     if (varElm == INVALID_VARIABLE_ID) {
         VERIFY((int_t)variables.size() == variableCount());
-        varElm = newVariable();
+        varElm = newVariable(solver);
         variables.push_back({ (uint32_t)setId, (uint32_t)index });
 
         if (setInfo.activeElementIndex != INVALID_ACTIVE_INDEX) {

@@ -6,7 +6,7 @@
 namespace check {
 
 struct SetElements : SimpleBooleanTheory, private ReasonTheory {
-    SetElements(Solver&);
+    SetElements(Solver&, uint64_t baseLabel);
 
     BooleanValue elementActiveLiteral(Solver& solver, int_t setId, int_t index) {
         return positiveLiteral(getOrCreateVariable(solver, setId, index));
@@ -26,7 +26,7 @@ struct SetElements : SimpleBooleanTheory, private ReasonTheory {
 
     std::string formatPositiveLiteral(Solver&, int_t varId) override;
     std::string formatNegativeLiteral(Solver& solver, int_t varId) override;
-    uint64_t labelOfValue(Solver&, Value) override;
+    uint32_t labelOfVariable(Solver&, int_t varId) override;
 
     void propagateAssignment(Solver&, BooleanValue) override;
     void reapplyAssignment(Solver&, BooleanValue) override { }
@@ -37,7 +37,7 @@ struct SetElements : SimpleBooleanTheory, private ReasonTheory {
     virtual void onElementActivated(Solver&, int_t setId, int_t index) = 0;
 
     virtual std::string formatElement(Solver&, int_t setId, int_t index) = 0;
-    virtual uint64_t labelOfElement(Solver&, int_t setId, int_t index, bool positive) = 0;
+    virtual uint32_t labelOfElement(Solver&, int_t setId, int_t index) = 0;
 
 private:
     static constexpr uint32_t INVALID_ACTIVE_INDEX = -1;

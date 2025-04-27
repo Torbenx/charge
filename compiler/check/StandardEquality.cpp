@@ -6,8 +6,8 @@
 
 namespace check {
 
-StandardEquality::StandardEquality(Solver& solver)
-    : EqualityTheory(solver), ReasonTheory(solver, true) { }
+StandardEquality::StandardEquality(Solver& solver, uint64_t baseLabel)
+    : EqualityTheory(solver, baseLabel), ReasonTheory(solver, true) { }
 
 namespace {
     using flat_set = std::vector<uint32_t>;
@@ -133,7 +133,7 @@ TEST(Check, MergeLists) {
 }
 
 void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
-    auto [source, target] = equalities.at(eqId);
+    auto [source, target] = equalityLink(eqId);
     if (connected(solver, source, target))
         return;
 
@@ -169,7 +169,7 @@ void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
                 continue;
             Value otherRoot = infoFor(solver, edge.otherValue).root;
             const auto& otherRootInfo = infoFor(solver, otherRoot);
-            // Note: Similiar code in onNewVariable()
+            // Note: Similiar code in newVariable()
             if (isUnitDisequal(solver, sourceInfo.root, otherRoot)) {
                 unitAssignDisequal(solver, edge.eqId, sourceInfo.root, otherRoot);
             } else {
@@ -202,7 +202,7 @@ void StandardEquality::applyEqual(Solver& solver, int_t eqId, bool propagate) {
 }
 
 void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propagate) {
-    auto [source, target] = equalities.at(diseqId);
+    auto [source, target] = equalityLink(diseqId);
     Value sourceRoot = infoFor(solver, source).root;
     Value targetRoot = infoFor(solver, target).root;
     if (shareAny(infoFor(solver, sourceRoot).disequalities, infoFor(solver, targetRoot).disequalities))
@@ -238,13 +238,13 @@ void StandardEquality::assignEqual(Solver& solver, int_t eqId) {
 }
 
 void StandardEquality::assignDisequal(Solver& solver, int_t eqId, int_t diseqId) {
-    bool normalConnectivity = connected(solver, equalities.at(eqId).source, equalities.at(diseqId).source);
+    bool normalConnectivity = connected(solver, equalityLink(eqId).source, equalityLink(diseqId).source);
 
     solver.assignTrue(negativeLiteral(eqId), disequalityReason(!normalConnectivity, diseqId));
 }
 
 void StandardEquality::unitAssignDisequal(Solver& solver, int_t eqId, Value unitDiseqA, Value unitDiseqB) {
-    if (!connected(solver, equalities.at(eqId).source, unitDiseqA))
+    if (!connected(solver, equalityLink(eqId).source, unitDiseqA))
         std::swap(unitDiseqA, unitDiseqB);
 
     solver.assignTrue(negativeLiteral(eqId), unitDisequalityReason(unitDiseqA, unitDiseqB));
@@ -270,11 +270,11 @@ void StandardEquality::unapplyAssignment(Solver&, BooleanValue) { }
 
 bool StandardEquality::isUnitDisequalityReason(const Reason& reason) const { return reason.data0 == 2u; }
 int_t StandardEquality::reasonDiseqId(const Reason& reason) const { return reason.data1; }
-std::pair<Value, Value> StandardEquality::reasonDiseqOriented(const Reason& reason) const {
+std::pair<Value, Value> StandardEquality::reasonDiseqOriented(const Reason& reason) {
     if (isUnitDisequalityReason(reason))
         return { std::bit_cast<Value>(reason.data1), std::bit_cast<Value>(reason.data2) };
 
-    auto [a, b] = equalities.at(reasonDiseqId(reason));
+    auto [a, b] = equalityLink(reasonDiseqId(reason));
     if (reason.data0 != 0)
         std::swap(a, b);
     return { a, b };
@@ -300,7 +300,7 @@ Reason StandardEquality::unitDisequalityReason(Value diseqA, Value diseqB) {
 
 bool StandardEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     if (isPositive(assignedLiteral)) {
-        auto [source, target] = equalities.at(variableId(assignedLiteral));
+        auto [source, target] = equalityLink(variableId(assignedLiteral));
         return connected(solver, source, target);
     }
 
@@ -308,33 +308,15 @@ bool StandardEquality::testReason(Solver& solver, BooleanValue assignedLiteral, 
     if (!isUnitDisequalityReason(reason) && !assignedNegative(solver, reasonDiseqId(reason)))
         return false;
 
-    auto [impliedA, impliedB] = equalities.at(variableId(assignedLiteral));
+    auto [impliedA, impliedB] = equalityLink(variableId(assignedLiteral));
     auto [originalA, originalB] = reasonDiseqOriented(reason);
     return connected(solver, impliedA, originalA) && connected(solver, impliedB, originalB);
 }
 
-BooleanValue StandardEquality::equality(Solver& solver, Value a, Value b) {
-    if (a == b)
-        return builtins::true_literal;
+int_t StandardEquality::newVariable(Solver& solver) {
+    int_t eqId = SimpleBooleanTheory::newVariable(solver);
 
-    if (isUnitDisequal(solver, a, b))
-        return builtins::false_literal;
-
-    return positiveLiteral(equalityVariable(solver, a, b));
-}
-
-BooleanValue StandardEquality::disequality(Solver& solver, Value a, Value b) {
-    if (a == b)
-        return builtins::false_literal;
-
-    if (isUnitDisequal(solver, a, b))
-        return builtins::true_literal;
-
-    return negativeLiteral(equalityVariable(solver, a, b));
-}
-
-void StandardEquality::onNewVariable(Solver& solver, int_t eqId) {
-    auto [source, target] = equalities.at(eqId);
+    auto [source, target] = equalityLink(eqId);
     addEdge(solver, source, target, eqId);
     addEdge(solver, target, source, eqId);
 
@@ -353,6 +335,8 @@ void StandardEquality::onNewVariable(Solver& solver, int_t eqId) {
             });
         }
     }
+
+    return eqId;
 }
 
 void StandardEquality::addEdge(Solver& solver, Value value, Value otherValue, int_t eqId) {
@@ -418,7 +402,7 @@ void StandardEquality::pathInTree(Solver& solver, Value a, Value b, std::vector<
         }
         int_t sIndex = rootIndex + tree[index].linkSource;
         int_t tIndex = index + tree[index].linkTarget;
-        result.push_back(disequality(solver, sIndex == -1 ? treeRoot : tree[sIndex].value, tree[tIndex].value));
+        result.push_back(negativeLiteral(lookupEqualityVariable(solver, sIndex == -1 ? treeRoot : tree[sIndex].value, tree[tIndex].value)));
         stack.push_back({ index, tIndex, bIndex });
         bIndex = sIndex;
     }
@@ -451,7 +435,7 @@ void StandardEquality::path(Solver& solver, Value a, Value b, std::vector<Boolea
         const auto& entry = backtrackTrace[aIndex];
         aIndex = backtrackPos(entry.roots.source);
         if (aIndex == bIndex) {
-            result.push_back(disequality(solver, entry.link.source, entry.link.target));
+            result.push_back(negativeLiteral(lookupEqualityVariable(solver, entry.link.source, entry.link.target)));
             path(solver, entry.link.target, a, result);
             path(solver, entry.link.source, b, result);
             return;
@@ -465,7 +449,7 @@ ReasonTheory::ClauseAndIndex StandardEquality::reasonToClause(Solver& solver, Bo
     if (isPositive(assignedLiteral)) {
         result.push_back(assignedLiteral);
 
-        auto [a, b] = equalities.at(variableId(assignedLiteral));
+        auto [a, b] = equalityLink(variableId(assignedLiteral));
         path(solver, a, b, result);
 
         return { .clause = result, .forceLiteralIndex = 0 };
@@ -475,7 +459,7 @@ ReasonTheory::ClauseAndIndex StandardEquality::reasonToClause(Solver& solver, Bo
     if (!isUnitDisequalityReason(reason))
         result.push_back(positiveLiteral(reasonDiseqId(reason)));
 
-    auto [impliedA, impliedB] = equalities.at(variableId(assignedLiteral));
+    auto [impliedA, impliedB] = equalityLink(variableId(assignedLiteral));
     auto [originalA, originalB] = reasonDiseqOriented(reason);
     path(solver, impliedA, originalA, result);
     path(solver, impliedB, originalB, result);
@@ -527,7 +511,7 @@ void StandardEquality::backtrack(Solver& solver) {
     while ((int_t)disequalityTrace.size() > targetSize) {
         auto [diseqId] = disequalityTrace.back();
         disequalityTrace.pop_back();
-        auto [source, target] = equalities.at(diseqId);
+        auto [source, target] = equalityLink(diseqId);
 
         auto removeDisequality = [&solver, diseqId](Value parent) {
             auto& disequalities = infoFor(solver, parent).disequalities;
@@ -563,7 +547,7 @@ void StandardEquality::checkInvariances(Solver& solver) {
         }
     };
     for (int_t eqId = 0; eqId < variableCount(); eqId++) {
-        auto [source, target] = equalities.at(eqId);
+        auto [source, target] = equalityLink(eqId);
         checkValue(source);
         checkValue(target);
     }

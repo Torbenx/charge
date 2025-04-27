@@ -104,9 +104,9 @@ namespace {
         BooleanVariables theory(solver, 0);
 
         // generate
-        VERIFY(theory.newVariable() == 0);
+        VERIFY(theory.newVariable(solver) == 0);
         for (int_t varId = 1; varId <= parser.variableCount; varId++)
-            VERIFY(theory.newVariable() == varId);
+            VERIFY(theory.newVariable(solver) == varId);
         for (const auto& clause : parser.cnf) {
             std::vector<BooleanValue> outClause;
             for (int_t i = 0; i < (int_t)clause.size(); i++)
@@ -207,9 +207,40 @@ TEST(Check, SatProblems) {
     EXPECT_EQ(count, 80);
 }
 
+struct TestEquality : StandardEquality {
+    using StandardEquality::StandardEquality;
+
+    BooleanValue equality(Solver& solver, Value a, Value b) {
+        if (a == b)
+            return builtins::true_literal;
+
+        return positiveLiteral(equalityVariable(solver, a, b));
+    }
+
+    BooleanValue disequality(Solver& solver, Value a, Value b) {
+        if (a == b)
+            return builtins::false_literal;
+
+        return negativeLiteral(equalityVariable(solver, a, b));
+    }
+
+    int_t equalityVariable(Solver& solver, Value a, Value b) {
+        int_t varId = m_equalities.get(solver, a, b);
+        if (varId == variableCount())
+            newVariable(solver);
+        return varId;
+    }
+
+    Link equalityLink(int_t varId) override { return m_equalities.at(varId); }
+    int_t lookupEqualityVariable(Solver& solver, Value a, Value b) override { return m_equalities.get(solver, a, b); }
+    uint32_t labelOfVariable(Solver&, int_t varId) override { return m_equalities.label(varId); }
+
+    SymmetricBinaryRelation<> m_equalities;
+};
+
 struct TestValueTheory : EquatableValueTheory {
     TestValueTheory(Solver& solver)
-        : EquatableValueTheory(solver, (ValueKind)-1), equality(solver) { }
+        : EquatableValueTheory(solver, (ValueKind)-1), equality(solver, 1000) { }
 
     uint64_t labelOfValue(Solver&, Value v) override { return baseLabel + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
@@ -232,7 +263,7 @@ struct TestValueTheory : EquatableValueTheory {
     }
 
     uint64_t baseLabel = 0;
-    StandardEquality equality;
+    TestEquality equality;
     std::vector<EqualityInfo> infos;
 };
 
@@ -425,7 +456,7 @@ TEST(Check, EqualityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
     BooleanVariables bools(solver, 0);
-    BooleanValue c = bools.positiveLiteral(bools.newVariable());
+    BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
     Value t2 = values.newValue();
@@ -441,7 +472,7 @@ TEST(Check, DisequalityPropagation1) {
     Solver solver;
     TestValueTheory values(solver);
     BooleanVariables bools(solver, 0);
-    BooleanValue c = bools.positiveLiteral(bools.newVariable());
+    BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
     Value t2 = values.newValue();
@@ -456,7 +487,7 @@ TEST(Check, DisequalityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
     BooleanVariables bools(solver, 0);
-    BooleanValue c = bools.positiveLiteral(bools.newVariable());
+    BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
     Value t2 = values.newValue();
@@ -590,7 +621,6 @@ TEST(Check, DisequalityCleanedUpInParents) {
     Value v4 = values.newValue();
     solver.propagate();
 
-
     solver.decideTrue(values.equality.disequality(solver, v3, v4));
     solver.propagate();
 
@@ -612,9 +642,9 @@ struct TestBlockTheory : CodeBlockTheory, BooleanVariables {
     TestBlockTheory(Solver& solver)
         : CodeBlockTheory(solver), BooleanVariables(solver, 5000) { }
 
-    BlockId newBlock() {
+    BlockId newBlock(Solver& solver) {
         int_t id = variableCount();
-        newVariable();
+        newVariable(solver);
         return BlockId { (uint32_t)CodeBlockTheory::theoryId(), (uint32_t)id };
     }
 
@@ -652,7 +682,7 @@ TEST(Check, OneOf) {
     TestBlockTheory blocks(solver);
 
     solver.propagate();
-    std::vector parents { blocks.newBlock(), blocks.newBlock(), blocks.newBlock() };
+    std::vector parents { blocks.newBlock(solver), blocks.newBlock(solver), blocks.newBlock(solver) };
     BlockId phi = theory.newPhi(solver, {}, parents);
     solver.decideTrue(theory.blockActiveLiteral(solver, phi));
     solver.propagate();
@@ -682,7 +712,7 @@ TEST(Check, OneOf) {
     solver.backtrack(1);
     EXPECT_FALSE(theory.hasActiveLink(phi));
 
-    int_t bVar = bools.newVariable();
+    int_t bVar = bools.newVariable(solver);
     solver.addClause({ bools.positiveLiteral(bVar), active0 });
     solver.addClause({ bools.positiveLiteral(bVar), active1 });
     solver.decideTrue(bools.negativeLiteral(bVar));

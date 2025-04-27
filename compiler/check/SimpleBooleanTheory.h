@@ -5,7 +5,8 @@
 namespace check {
 
 struct SimpleBooleanTheory : BooleanTheory {
-    using BooleanTheory::BooleanTheory;
+    SimpleBooleanTheory(Solver& solver, uint64_t baseLabel)
+        : BooleanTheory(solver), baseLabel(baseLabel) { }
 
     BooleanValue negate(Solver&, BooleanValue lit) override {
         return negate(lit);
@@ -32,6 +33,12 @@ struct SimpleBooleanTheory : BooleanTheory {
             return formatNegativeLiteral(solver, varId);
     }
 
+    virtual uint32_t labelOfVariable(Solver&, int_t varId) = 0;
+    uint64_t labelOfValue(Solver& solver, Value v) override {
+        BooleanValue lit { v };
+        return baseLabel + (uint64_t)labelOfVariable(solver, variableId(lit)) * 2 + isPositive(lit);
+    }
+
     virtual void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) { }
     virtual bool isVariableActive(Solver&, int_t) { return true; }
 
@@ -49,7 +56,7 @@ struct SimpleBooleanTheory : BooleanTheory {
         }
     }
 
-    int_t newVariable() {
+    virtual int_t newVariable(Solver&) {
         int_t id = variableCount();
         infos.resize(infos.size() + 2);
         return id;
@@ -82,6 +89,7 @@ struct SimpleBooleanTheory : BooleanTheory {
 private:
     std::vector<LiteralInfo> infos;
     int_t find = 0;
+    uint64_t baseLabel = 0;
 };
 
 }

@@ -45,13 +45,11 @@ private:
 
     struct Links : SetElements {
         Links(Solver& solver, uint64_t baseLabel)
-            : SetElements(solver), baseLabel(baseLabel) { }
+            : SetElements(solver, baseLabel) { }
         Phis* phis();
         std::string formatElement(Solver&, int_t setId, int_t index) override;
-        uint64_t labelOfElement(Solver&, int_t setId, int_t index, bool positive) override;
+        uint32_t labelOfElement(Solver&, int_t setId, int_t index) override;
         void onElementActivated(Solver&, int_t setId, int_t link) override;
-
-        uint64_t baseLabel;
     };
 
     struct LocationCache : FlatTreeSetDetail::Base<LocationCache, std::pair<MemoryLocation, CachedValues>> {

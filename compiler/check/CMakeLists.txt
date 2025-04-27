@@ -14,6 +14,8 @@ target_sources(compiler
     LoadSet.h
     MemoryLocations.cpp
     MemoryLocations.h
+    #PartialOrdering.cpp
+    PartialOrdering.h
     Phis.cpp
     Phis.h
     Reason.h
@@ -27,6 +29,7 @@ target_sources(compiler
     StandardLoads.h
     StoreBlocks.cpp
     StoreBlocks.h
+    SymmetricBinaryRelation.h
     TopologicalOrder.h
     Value.h
     ValueTheory.h

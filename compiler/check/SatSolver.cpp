@@ -31,6 +31,12 @@ int_t Solver::attachTheory(CodeBlockTheory& theory) {
     return id;
 }
 
+OrientedPair OrientedPair::orient(Solver& solver, Value a, Value b) {
+    if (solver.compare(a, b) > 0)
+        std::swap(a, b);
+    return { a, b };
+}
+
 // ----------------------------- Clauses ----------------------------
 
 Solver::Clauses::Clauses(Solver& solver)
@@ -186,29 +192,43 @@ BooleanValue Solver::BooleanEquality::disequality(Solver& solver, Value va, Valu
     return negativeLiteral(equalityVariable(solver, a, b));
 }
 
-void Solver::BooleanEquality::onNewVariable(Solver& solver, int_t varId) {
-    /*
-    Equalities are eagerly encoded as clauses.
-    For each equality there will be 4 clauses:
-        a != b || !a ||  b
-        a != b ||  a || !b
-        a == b ||  a ||  b
-        a == b || !a || !b
-    */
-    Link l = equalities.at(varId);
-    BooleanValue eq = positiveLiteral(varId);
-    BooleanValue neq = negativeLiteral(varId);
-    BooleanValue a { l.source };
-    BooleanValue b { l.target };
-    BooleanValue na = solver.negate(a);
-    BooleanValue nb = solver.negate(b);
+int_t Solver::BooleanEquality::equalityVariable(Solver& solver, Value a, Value b) {
+    Link link = Link::orient(solver, a, b);
+    int_t varId = m_equalities.get(solver, link);
+    if (varId == variableCount()) {
+        newVariable(solver);
 
-    VERIFY(a != b);
-    VERIFY(a != nb);
-    solver.addClause({ neq, na, b });
-    solver.addClause({ neq, a, nb });
-    solver.addClause({ eq, a, b });
-    solver.addClause({ eq, na, nb });
+        /*
+        Equalities are eagerly encoded as clauses.
+        For each equality there will be 4 clauses:
+            a != b || !a ||  b
+            a != b ||  a || !b
+            a == b ||  a ||  b
+            a == b || !a || !b
+        */
+        BooleanValue eq = positiveLiteral(varId);
+        BooleanValue neq = negativeLiteral(varId);
+        BooleanValue a { link.source };
+        BooleanValue b { link.target };
+        BooleanValue na = solver.negate(a);
+        BooleanValue nb = solver.negate(b);
+
+        VERIFY(a != b);
+        VERIFY(a != nb);
+        solver.addClause({ neq, na, b });
+        solver.addClause({ neq, a, nb });
+        solver.addClause({ eq, a, b });
+        solver.addClause({ eq, na, nb });
+    }
+    return varId;
+}
+
+uint32_t Solver::BooleanEquality::labelOfVariable(Solver&, int_t varId) {
+    return m_equalities.label(varId);
+}
+
+OrientedPair Solver::BooleanEquality::equalityLink(int_t varId) {
+    return m_equalities.at(varId);
 }
 
 // -------------------------- BooleanLoads --------------------------
@@ -222,9 +242,8 @@ std::string Solver::BooleanLoads::formatNegativeLiteral(Solver& solver, int_t va
     return "!" + formatPositiveLiteral(solver, varId);
 }
 
-uint64_t Solver::BooleanLoads::labelOfValue(Solver&, Value value) {
-    BooleanValue lit { value };
-    return 3000 + (uint64_t)LoadSet::label(variableId(lit)) * 2 + isPositive(lit);
+uint32_t Solver::BooleanLoads::labelOfVariable(Solver&, int_t varId) {
+    return LoadSet::label(varId);
 }
 
 void Solver::BooleanLoads::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
@@ -239,9 +258,9 @@ BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation loc
     return positiveLiteral(get(solver, location, position));
 }
 
-void Solver::BooleanLoads::makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition) {
+void Solver::BooleanLoads::makeData(Solver& solver, uint32_t newHandle, MemoryLocation, CodePosition) {
     VERIFY((int_t)newHandle == variableCount());
-    newVariable();
+    newVariable(solver);
 }
 
 // ---------------------------- Booleans ----------------------------
@@ -287,13 +306,13 @@ std::string Solver::EntryBlocks::formatCodePosition(Solver&, CodePosition) { ret
 Solver::Solver()
     : internalVariables(*this, 0)
     , clauses(*this)
-    , booleans(*this)
+    , booleans(*this, 2000, 3000) // TODO: Hard coded constants
     , entryBlocks(*this)
     , implication(*this)
     , unitReasons(*this) {
     {
         VERIFY(internalVariables.theoryId() == SOLVER_INTERNAL_VARS_THEORY_ID);
-        int_t id = internalVariables.newVariable();
+        int_t id = internalVariables.newVariable(*this);
         VERIFY(internalVariables.positiveLiteral(id) == builtins::true_literal);
         VERIFY(internalVariables.negativeLiteral(id) == builtins::false_literal);
         addClause({ builtins::true_literal });
@@ -308,7 +327,7 @@ Solver::Solver()
 }
 
 std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
-    int_t varId = internalVariables.newVariable();
+    int_t varId = internalVariables.newVariable(*this);
     return { internalVariables.positiveLiteral(varId), internalVariables.negativeLiteral(varId) };
 }
 

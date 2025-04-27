@@ -6,6 +6,7 @@
 #include <check/EqualityTheory.h>
 #include <check/LoadSet.h>
 #include <check/Reason.h>
+#include <check/SymmetricBinaryRelation.h>
 
 #include <bit>
 
@@ -409,12 +410,16 @@ private:
 
     struct BooleanEquality : EqualityTheory {
         using EqualityTheory::EqualityTheory;
-        BooleanValue equality(Solver&, Value, Value) override;
-        BooleanValue disequality(Solver&, Value, Value) override;
-        void onNewVariable(Solver& solver, int_t varId) override;
+        BooleanValue equality(Solver&, Value, Value);
+        BooleanValue disequality(Solver&, Value, Value);
+        int_t equalityVariable(Solver&, Value, Value);
         void propagateAssignment(Solver&, BooleanValue) override { }
         void reapplyAssignment(Solver&, BooleanValue) override { }
         void unapplyAssignment(Solver&, BooleanValue) override { }
+        uint32_t labelOfVariable(Solver&, int_t varId) override;
+        Link equalityLink(int_t varId) override;
+
+        SymmetricBinaryRelation<> m_equalities;
     };
 
     struct BooleanLoads : SimpleBooleanTheory, LoadSet<BooleanLoads, void> {
@@ -424,7 +429,7 @@ private:
         void unapplyAssignment(Solver&, BooleanValue) override { }
         std::string formatPositiveLiteral(Solver&, int_t) override;
         std::string formatNegativeLiteral(Solver&, int_t) override;
-        uint64_t labelOfValue(Solver&, Value) override;
+        uint32_t labelOfVariable(Solver&, int_t varId) override;
         void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) override;
         bool isVariableActive(Solver&, int_t) override;
         BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
@@ -432,8 +437,8 @@ private:
     };
 
     struct Booleans : ValueKindTheory {
-        Booleans(Solver& solver)
-            : m_equality(solver), m_loads(solver) { }
+        Booleans(Solver& solver, uint64_t equalityBaseLabel, uint64_t loadsBaseLabel)
+            : m_equality(solver, equalityBaseLabel), m_loads(solver, loadsBaseLabel) { }
 
         BooleanValue equality(Solver&, Value, Value) override;
         BooleanValue disequality(Solver&, Value, Value) override;

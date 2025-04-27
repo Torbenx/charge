@@ -36,9 +36,9 @@ void Phis::Links::onElementActivated(Solver& solver, int_t setId, int_t index) {
     }
 }
 
-uint64_t Phis::Links::labelOfElement(Solver&, int_t setId, int_t index, bool positive) {
+uint32_t Phis::Links::labelOfElement(Solver&, int_t setId, int_t index) {
     int_t maxParentCount = 16;
-    return baseLabel + (setId * maxParentCount + index) * 2 + positive;
+    return setId * maxParentCount + index;
 }
 
 // ------------------------------ Phis ------------------------------

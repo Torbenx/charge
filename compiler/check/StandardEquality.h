@@ -1,20 +1,15 @@
 #pragma once
 
 #include <check/EqualityInfo.h>
-#include <check/EqualityTheory.h>
 #include <check/Reason.h>
 #include <check/SatSolver.h>
 
 namespace check {
 
 struct StandardEquality : EqualityTheory, ReasonTheory {
-    using Link = EqualityTheory::Link;
     using EqualityInfo = EquatableValueTheory::EqualityInfo;
 
-    StandardEquality(Solver&);
-
-    BooleanValue equality(Solver&, Value, Value) override;
-    BooleanValue disequality(Solver&, Value, Value) override;
+    StandardEquality(Solver&, uint64_t baseLabel);
 
     void propagateAssignment(Solver&, BooleanValue) override;
     void reapplyAssignment(Solver&, BooleanValue) override;
@@ -24,7 +19,7 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
 
     bool isUnitDisequalityReason(const Reason&) const;
     int_t reasonDiseqId(const Reason&) const;
-    std::pair<Value, Value> reasonDiseqOriented(const Reason& reason) const;
+    std::pair<Value, Value> reasonDiseqOriented(const Reason& reason);
     Reason equalityReason() const;
     Reason disequalityReason(bool swappedConnectivity, int_t diseqId) const;
     Reason unitDisequalityReason(Value diseqA, Value diseqB);
@@ -39,15 +34,18 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
 
     void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
 
-protected:
-    void onNewVariable(Solver&, int_t eqId) override;
+    int_t newVariable(Solver&) override;
 
+protected:
     /*! \brief Return whether \p a and \p b are always disequal
 
     If \p a and \p b are always disequal any values less the either \p a or \p b must also be always
     disequal to the other one (and this function must be able to detect this).
     */
     virtual bool isUnitDisequal(Solver&, [[maybe_unused]] Value a, [[maybe_unused]] Value b) { return false; }
+
+    //! Must return the variable id for equality of the two values. The variable is guaranteed to exist when this is called.
+    virtual int_t lookupEqualityVariable(Solver&, Value, Value) = 0;
 
 private:
     static void addEdge(Solver&, Value value, Value otherValue, int_t eqId);

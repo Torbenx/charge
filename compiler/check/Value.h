@@ -4,6 +4,8 @@
 
 namespace check {
 
+struct Solver;
+
 inline constexpr int_t SOLVER_INTERNAL_VARS_THEORY_ID = 0;
 
 inline constexpr int_t ENTRY_BLOCKS_THEORY_ID = 0;
@@ -24,6 +26,15 @@ struct Value {
     uint32_t valueId : 24 = -1;
 
     bool operator==(const Value& other) const = default;
+};
+
+struct OrientedPair {
+    static OrientedPair orient(Solver& solver, Value a, Value b);
+
+    Value source;
+    Value target;
+
+    bool operator==(const OrientedPair&) const = default;
 };
 
 //! A boolean value
