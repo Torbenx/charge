@@ -5,8 +5,6 @@ target_sources(compiler
     BooleanVariables.h
     CodeBlock.h
     CodeBlockTheory.h
-    Enums.cpp
-    Enums.h
     EqualityInfo.h
     EqualityTheory.cpp
     EqualityTheory.h
@@ -22,6 +20,8 @@ target_sources(compiler
     SatSolver.cpp
     SatSolver.h
     SatTests.cpp
+    Sets.cpp
+    Sets.h
     SimpleBooleanTheory.cpp
     SimpleBooleanTheory.h
     StandardEquality.cpp

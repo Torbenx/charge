@@ -29,6 +29,14 @@ uint32_t PartialOrderingTheory::Unordered::labelOfVariable(Solver&, int_t varId)
     VERIFY_NOT_REACHED();
 }
 
+bool PartialOrderingTheory::Unordered::isVariableActive(Solver& solver, int_t varId) {
+    return theory()->isActive(solver, m_handles[varId]);
+}
+
+void PartialOrderingTheory::Unordered::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
+    theory()->collectInactiveReasons(solver, m_handles[varId], clause);
+}
+
 // ---------------------- PartialOrderingTheory ---------------------
 
 PartialOrderingTheory::PartialOrderingTheory(Solver& solver, uint64_t baseLabel)

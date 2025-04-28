@@ -60,13 +60,18 @@ struct PartialOrderingTheory {
 
     PartialOrderingTheory(Solver& solver, uint64_t baseLabel);
 
+    OrderingHandle order(Value a, Value b);
+
 protected:
     PartialOrderingsSet possibleOrderings(Solver&, Value, Value) { return PartialOrderingsSet::all(); }
 
 private:
     struct Entry {
-        std::array<BooleanValue, 4> literals;
+        std::array<std::optional<BooleanValue>, 4> literals = {};
         Link link;
+
+        Entry(Link link)
+            : link(link) { }
 
         BooleanValue operator[](std::partial_ordering ordering) const { return literals[toIndex(ordering)]; }
     };
@@ -107,10 +112,13 @@ private:
     void unapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
     void reapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
 
+    bool isActive(Solver&, OrderingHandle);
+    void collectInactiveReasons(Solver&, OrderingHandle, std::vector<BooleanValue>& clause);
+
     Entry& at(OrderingHandle handle) { return m_entries[handle.id]; }
     std::pair<std::string, std::string> formatValues(Solver&, OrderingHandle);
 
-    std::vector<Entry> m_entries;
+    SymmetricBinaryRelation<Entry> m_entries;
     Equality m_equality;
     Unordered m_unordered;
 };

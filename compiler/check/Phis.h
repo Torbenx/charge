@@ -2,7 +2,7 @@
 
 #include <check/BooleanVariables.h>
 #include <check/CodeBlockTheory.h>
-#include <check/Enums.h>
+#include <check/Sets.h>
 #include <check/Reason.h>
 
 
@@ -43,9 +43,9 @@ private:
         std::unique_ptr<std::optional<BooleanValue>[]> equalities;
     };
 
-    struct Links : SetElements {
+    struct Links : DynamicSets {
         Links(Solver& solver, uint64_t baseLabel)
-            : SetElements(solver, baseLabel) { }
+            : DynamicSets(solver, baseLabel) { }
         Phis* phis();
         std::string formatElement(Solver&, int_t setId, int_t index) override;
         uint32_t labelOfElement(Solver&, int_t setId, int_t index) override;
