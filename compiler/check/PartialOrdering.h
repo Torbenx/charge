@@ -8,12 +8,16 @@
 
 namespace check {
 
-static_assert(std::bit_cast<std::partial_ordering>(int8_t{ -1 }) == std::partial_ordering::less);
-static_assert(std::bit_cast<std::partial_ordering>(int8_t{ 0 }) == std::partial_ordering::equivalent);
-static_assert(std::bit_cast<std::partial_ordering>(int8_t{ 1 }) == std::partial_ordering::greater);
-static_assert(std::bit_cast<std::partial_ordering>(int8_t{ 2 }) == std::partial_ordering::unordered);
+static_assert(std::bit_cast<std::partial_ordering>(int8_t { -1 }) == std::partial_ordering::less);
+static_assert(std::bit_cast<std::partial_ordering>(int8_t { 0 }) == std::partial_ordering::equivalent);
+static_assert(std::bit_cast<std::partial_ordering>(int8_t { 1 }) == std::partial_ordering::greater);
+static_assert(std::bit_cast<std::partial_ordering>(int8_t { 2 }) == std::partial_ordering::unordered);
 
-constexpr int_t toIndex(std::partial_ordering ordering) { return std::bit_cast<int8_t>(ordering) + 1; }
+constexpr int_t poToIndex(std::partial_ordering ordering) { return std::bit_cast<int8_t>(ordering) + 1; }
+constexpr std::partial_ordering poFromIndex(int_t index) {
+    VERIFY(index >= 0 && index < 4);
+    return std::bit_cast<std::partial_ordering>(int8_t(index));
+}
 
 struct PartialOrderingsSet {
 
@@ -32,12 +36,12 @@ struct PartialOrderingsSet {
     }
 
     constexpr void set(std::partial_ordering ordering, bool value = true) {
-        m_set.set(toIndex(ordering), value);
+        m_set.set(poToIndex(ordering), value);
     }
     constexpr void clear() { m_set.reset(); }
     constexpr int_t count() const { return m_set.count(); }
     constexpr bool test(std::partial_ordering ordering) const {
-        return m_set[toIndex(ordering)];
+        return m_set[poToIndex(ordering)];
     }
 
 private:
@@ -60,7 +64,8 @@ struct PartialOrderingTheory {
 
     PartialOrderingTheory(Solver& solver, uint64_t baseLabel);
 
-    OrderingHandle order(Value a, Value b);
+    OrderingHandle order(Solver&, Value a, Value b);
+    BooleanValue literal(OrderingHandle, std::partial_ordering);
 
 protected:
     PartialOrderingsSet possibleOrderings(Solver&, Value, Value) { return PartialOrderingsSet::all(); }
@@ -73,22 +78,7 @@ private:
         Entry(Link link)
             : link(link) { }
 
-        BooleanValue operator[](std::partial_ordering ordering) const { return literals[toIndex(ordering)]; }
-    };
-
-    struct Equality : StandardEquality {
-        using StandardEquality::StandardEquality;
-
-        PartialOrderingTheory* theory() { return ReverseMemberPointer<&PartialOrderingTheory::m_equality>::reverse(this); }
-
-        bool isUnitDisequal(Solver& solver, Value a, Value b) override {
-            return !theory()->possibleOrderings(solver, a, b).test(std::partial_ordering::equivalent);
-        }
-        Link equalityLink(int_t eqId) override { return theory()->at(m_handles[eqId]).link; }
-        int_t lookupEqualityVariable(Solver&, Value, Value) override;
-        uint32_t labelOfVariable(Solver&, int_t varId) override;
-
-        std::vector<OrderingHandle> m_handles;
+        std::optional<BooleanValue>& operator[](std::partial_ordering ordering) { return literals[poToIndex(ordering)]; }
     };
 
     struct Unordered : SimpleBooleanTheory {
@@ -108,6 +98,19 @@ private:
         std::vector<OrderingHandle> m_handles;
     };
 
+    struct Equality : StandardEquality {
+        using StandardEquality::StandardEquality;
+
+        PartialOrderingTheory* theory() { return ReverseMemberPointer<&PartialOrderingTheory::m_equality>::reverse(this); }
+
+        bool isUnitDisequal(Solver& solver, Value a, Value b) override;
+        Link equalityLink(int_t eqId) override;
+        int_t lookupEqualityVariable(Solver&, Value, Value) override;
+        uint32_t labelOfVariable(Solver&, int_t varId) override;
+
+        std::vector<OrderingHandle> m_handles;
+    };
+
     void propagateAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
     void unapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
     void reapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
@@ -115,7 +118,8 @@ private:
     bool isActive(Solver&, OrderingHandle);
     void collectInactiveReasons(Solver&, OrderingHandle, std::vector<BooleanValue>& clause);
 
-    Entry& at(OrderingHandle handle) { return m_entries[handle.id]; }
+    Entry& at(OrderingHandle handle) { return m_entries.at(handle.id); }
+    uint32_t labelAt(OrderingHandle handle) { return m_entries.label(handle.id); }
     std::pair<std::string, std::string> formatValues(Solver&, OrderingHandle);
 
     SymmetricBinaryRelation<Entry> m_entries;
