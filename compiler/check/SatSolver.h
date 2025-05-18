@@ -1,7 +1,6 @@
 #pragma once
 
 #include <check/BooleanVariables.h>
-#include <check/CodeBlock.h>
 #include <check/CodeBlockTheory.h>
 #include <check/EqualityTheory.h>
 #include <check/LoadSet.h>
@@ -584,8 +583,6 @@ private:
     std::vector<ValueTheory*> valueTheories;
     std::vector<ReasonTheory*> reasonTheories;
     std::vector<CodeBlockTheory*> blockTheories;
-
-    std::vector<std::unique_ptr<CodeBlock>> codeBlocks;
 
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 

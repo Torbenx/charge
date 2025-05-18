@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.18)
 target_sources(compiler
     PRIVATE
     BooleanVariables.h
-    CodeBlock.h
     CodeBlockTheory.h
     EqualityInfo.h
     EqualityTheory.cpp
