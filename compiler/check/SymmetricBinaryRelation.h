@@ -17,7 +17,8 @@ private:
     uint32_t makeNode(Solver&, const OrientedPair& pair, TreeLabel label) {
         return Base::makeNode(label, D(pair));
     }
-    std::strong_ordering compare(std::same_as<Solver> auto& solver, const OrientedPair& a, const OrientedPair& b) {
+    std::strong_ordering compare(std::same_as<Solver> auto& solver, const OrientedPair& a, const D& d) {
+        OrientedPair b = (OrientedPair)d;
         auto targetCmp = solver.compare(a.target, b.target);
         if (targetCmp != 0)
             return targetCmp;

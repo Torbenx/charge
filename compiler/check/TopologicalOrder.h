@@ -11,17 +11,8 @@ struct TopologicalOrder {
         //! Index in the topological order
         uint32_t orderIndex = 0;
 
-        //! Children of this node
-        /*!
-        The children are ordered inversely to the topological order. I.e. the child that appears
-        first in the order is the last in this list.
-        */
+        //! Children of this node in no particular order
         std::vector<NodeId> children = {};
-    };
-
-    struct ReverseOrder {
-        const TopologicalOrder& order;
-        bool operator()(NodeId left, NodeId right) const { return order(right, left); }
     };
 
     std::vector<Node> nodes;
@@ -41,8 +32,7 @@ struct TopologicalOrder {
         Node& sNode = at(source);
         Node& tNode = at(target);
         if (sNode.orderIndex < tNode.orderIndex) {
-            auto it = std::lower_bound(sNode.children.begin(), sNode.children.end(), target, ReverseOrder { *this });
-            sNode.children.emplace(it, target);
+            sNode.children.push_back(target);
             return;
         }
 
@@ -55,11 +45,10 @@ struct TopologicalOrder {
         NodeId* subOrder = order.data() + tNode.orderIndex;
         for (; index < (int_t)mask.size(); index++) {
             if (mask[index]) {
-                for (auto childId : std::views::reverse(at(subOrder[index]).children)) {
+                for (auto childId : at(subOrder[index]).children) {
                     const Node& childNode = at(childId);
-                    if (childNode.orderIndex > sNode.orderIndex)
-                        break;
-                    mask[childNode.orderIndex - tNode.orderIndex] = true;
+                    if (childNode.orderIndex <= sNode.orderIndex) // childNode.orderIndex >= tNode.orderIndex is guaranteed
+                        mask[childNode.orderIndex - tNode.orderIndex] = true;
                 }
                 relocatedNodes.push_back(subOrder[index]);
             } else {
@@ -76,7 +65,7 @@ struct TopologicalOrder {
             at(relocatedNodes[relocIndex]).orderIndex = tNode.orderIndex + writeIndex;
         }
         std::copy(relocatedNodes.begin(), relocatedNodes.end(), order.begin() + writeIndex);
-        sNode.children.push_back(target); // The target will always the be first child after this operation
+        sNode.children.push_back(target);
     }
 
     bool operator()(NodeId left, NodeId right) const { return at(left).orderIndex < at(right).orderIndex; }

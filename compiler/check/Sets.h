@@ -7,8 +7,16 @@
 
 namespace check {
 
-struct SetsBase : private ReasonTheory {
-    SetsBase(Solver&);
+struct SetTheory : private ReasonTheory {
+    static constexpr uint32_t INVALID_ACTIVE_INDEX = -1;
+
+    struct SetFlags {
+        uint32_t activeElementIndex = INVALID_ACTIVE_INDEX;
+        uint32_t inactiveElementCount = 0;
+    };
+    using SetElements = std::span<std::optional<BooleanValue>>;
+
+    SetTheory(Solver&);
 
     bool hasActiveElement(int_t setId) {
         return setFlags(setId).activeElementIndex != INVALID_ACTIVE_INDEX;
@@ -20,14 +28,6 @@ struct SetsBase : private ReasonTheory {
     }
 
 protected:
-    static constexpr uint32_t INVALID_ACTIVE_INDEX = -1;
-
-    struct SetFlags {
-        uint32_t activeElementIndex = INVALID_ACTIVE_INDEX;
-        uint32_t inactiveElementCount = 0;
-    };
-    using SetElements = std::span<std::optional<BooleanValue>>;
-
     virtual SetFlags& setFlags(int_t setId) = 0;
     virtual SetElements setElements(int_t setId) = 0;
 
@@ -35,12 +35,14 @@ protected:
 
     virtual void onElementActivated(Solver&, [[maybe_unused]] int_t setId, [[maybe_unused]] int_t index) { }
 
+    void unitDeactivateElement(Solver&, int_t setId, int_t index);
     void propagateAssignment(Solver&, int_t setId, int_t index, bool active);
     void unapplyAssignment(Solver&, int_t setId, int_t index, bool active);
 
     BooleanValue getOrCreateElementLiteral(Solver& solver, int_t setId, int_t index);
 
 private:
+    void incrementInactiveCount(Solver& solver, int_t setId);
     BooleanValue getOrCreateElementLiteral(Solver& solver, int_t setId, SetFlags& flags, SetElements elements, int_t index);
 
     Reason makeOtherElementActiveReason(BooleanValue activeElement);
@@ -56,7 +58,7 @@ private:
     void backtrack(Solver&) override { }
 };
 
-struct DynamicSets : SimpleBooleanTheory, SetsBase {
+struct DynamicSets : SimpleBooleanTheory, SetTheory {
     DynamicSets(Solver&, uint64_t baseLabel);
 
     BooleanValue elementActiveLiteral(Solver& solver, int_t setId, int_t index) {

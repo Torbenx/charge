@@ -2,6 +2,7 @@
 
 #include <ReverseMemberPointer.h>
 #include <check/StandardEquality.h>
+#include <check/Sets.h>
 
 #include <bitset>
 #include <compare>
@@ -58,14 +59,28 @@ private:
 struct PartialOrderingTheory {
     using Link = StandardEquality::Link;
 
+    struct InternalHandle {
+        uint32_t m_id;
+
+        uint32_t id() const { return m_id; }
+    };
+
     struct OrderingHandle {
-        uint32_t id;
+        uint32_t m_id : 31;
+        uint32_t m_flipped : 1;
+
+        explicit OrderingHandle(InternalHandle handle, bool flipped = false)
+            : m_id{ handle.id() }, m_flipped(flipped ? 1 : 0) { }
+
+        uint32_t id() const { return m_id; }
+        bool flipped() const { return m_flipped != 0; }
+        InternalHandle internalHandle() const { return { id() }; }
     };
 
     PartialOrderingTheory(Solver& solver, uint64_t baseLabel);
 
     OrderingHandle order(Solver&, Value a, Value b);
-    BooleanValue literal(OrderingHandle, std::partial_ordering);
+    BooleanValue literal(Solver&, OrderingHandle, std::partial_ordering);
 
 protected:
     PartialOrderingsSet possibleOrderings(Solver&, Value, Value) { return PartialOrderingsSet::all(); }
@@ -73,19 +88,21 @@ protected:
 private:
     struct Entry {
         std::array<std::optional<BooleanValue>, 4> literals = {};
+        SetTheory::SetFlags flags;
         Link link;
 
         Entry(Link link)
             : link(link) { }
 
-        std::optional<BooleanValue>& operator[](std::partial_ordering ordering) { return literals[poToIndex(ordering)]; }
+        explicit operator OrientedPair() const { return link; }
     };
 
     struct Unordered : SimpleBooleanTheory {
         using SimpleBooleanTheory::SimpleBooleanTheory;
 
-        PartialOrderingTheory* theory() { return ReverseMemberPointer<&PartialOrderingTheory::m_unordered>::reverse(this); }
+        PartialOrderingTheory* theory();
 
+        BooleanValue newLiteral(Solver&, InternalHandle);
         std::string formatPositiveLiteral(Solver&, int_t varId) override;
         std::string formatNegativeLiteral(Solver&, int_t varId) override;
         void propagateAssignment(Solver&, BooleanValue) override;
@@ -95,36 +112,55 @@ private:
         bool isVariableActive(Solver&, int_t varId) override;
         void collectVariableInactiveReasons(Solver&, int_t varId, std::vector<BooleanValue>& clause) override;
 
-        std::vector<OrderingHandle> m_handles;
+        std::vector<InternalHandle> m_handles;
     };
 
     struct Equality : StandardEquality {
         using StandardEquality::StandardEquality;
 
-        PartialOrderingTheory* theory() { return ReverseMemberPointer<&PartialOrderingTheory::m_equality>::reverse(this); }
+        PartialOrderingTheory* theory();
 
+        BooleanValue newLiteral(Solver&, InternalHandle);
         bool isUnitDisequal(Solver& solver, Value a, Value b) override;
         Link equalityLink(int_t eqId) override;
         int_t lookupEqualityVariable(Solver&, Value, Value) override;
         uint32_t labelOfVariable(Solver&, int_t varId) override;
 
-        std::vector<OrderingHandle> m_handles;
+        std::vector<InternalHandle> m_handles;
     };
 
-    void propagateAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
-    void unapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
-    void reapplyAssignment(Solver&, OrderingHandle, std::partial_ordering, bool);
+    struct OrderingSets : SetTheory {
+        using SetTheory::SetTheory;
 
-    bool isActive(Solver&, OrderingHandle);
-    void collectInactiveReasons(Solver&, OrderingHandle, std::vector<BooleanValue>& clause);
+        PartialOrderingTheory* theory();
 
-    Entry& at(OrderingHandle handle) { return m_entries.at(handle.id); }
-    uint32_t labelAt(OrderingHandle handle) { return m_entries.label(handle.id); }
-    std::pair<std::string, std::string> formatValues(Solver&, OrderingHandle);
+        SetFlags& setFlags(int_t setId) override;
+        SetElements setElements(int_t setId) override;
+        BooleanValue makeElement(Solver&, int_t setId, int_t index) override;
 
-    SymmetricBinaryRelation<Entry> m_entries;
+        // Make these public so they can be accessed by the theory
+        using SetTheory::unitDeactivateElement;
+        using SetTheory::propagateAssignment;
+        using SetTheory::unapplyAssignment;
+
+        BooleanValue getOrCreateOrderingLiteral(Solver&, OrderingHandle, std::partial_ordering);
+    };
+
+    void propagateAssignment(Solver&, InternalHandle, std::partial_ordering, bool);
+    void unapplyAssignment(Solver&, InternalHandle, std::partial_ordering, bool);
+    void reapplyAssignment(Solver&, InternalHandle, std::partial_ordering, bool);
+
+    bool isOrderingActive(Solver&, InternalHandle);
+    void collectInactiveReasons(Solver&, InternalHandle, std::vector<BooleanValue>& clause);
+
+    Entry& entryAt(InternalHandle handle) { return m_entries.at(handle.id()); }
+    uint32_t labelAt(InternalHandle handle) { return m_entries.label(handle.id()); }
+    Link linkAt(InternalHandle handle) { return entryAt(handle).link; }
+
+    OrderingSets m_sets;
     Equality m_equality;
     Unordered m_unordered;
+    SymmetricBinaryRelation<Entry> m_entries;
 };
 
 }

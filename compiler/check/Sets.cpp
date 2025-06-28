@@ -4,16 +4,16 @@
 
 namespace check {
 
-// ----------------------------- SetsBase ----------------------------
+// ---------------------------- SetTheory ---------------------------
 
-SetsBase::SetsBase(Solver& solver)
+SetTheory::SetTheory(Solver& solver)
     : ReasonTheory(solver, true) { }
 
-BooleanValue SetsBase::getOrCreateElementLiteral(Solver& solver, int_t setId, int_t index) {
+BooleanValue SetTheory::getOrCreateElementLiteral(Solver& solver, int_t setId, int_t index) {
     return getOrCreateElementLiteral(solver, setId, setFlags(setId), setElements(setId), index);
 }
 
-BooleanValue SetsBase::getOrCreateElementLiteral(Solver& solver, int_t setId, SetFlags& flags, SetElements elements, int_t index) {
+BooleanValue SetTheory::getOrCreateElementLiteral(Solver& solver, int_t setId, SetFlags& flags, SetElements elements, int_t index) {
     auto& element = elements[index];
     if (!element.has_value()) {
         element = makeElement(solver, setId, index);
@@ -28,11 +28,34 @@ BooleanValue SetsBase::getOrCreateElementLiteral(Solver& solver, int_t setId, Se
     return element.value();
 }
 
-void SetsBase::propagateAssignment(Solver& solver, int_t setId, int_t assignedIndex, bool active) {
+void SetTheory::incrementInactiveCount(Solver& solver, int_t setId) {
     SetFlags& flags = setFlags(setId);
     SetElements elements = setElements(setId);
 
+    flags.inactiveElementCount += 1;
+    if (flags.inactiveElementCount == elements.size() - 1 && flags.activeElementIndex == INVALID_ACTIVE_INDEX) {
+        // Find the last element that is not inactive
+        for (int_t index = 0; index < (int_t)elements.size(); index++) {
+            auto element = getOrCreateElementLiteral(solver, setId, flags, elements, index);
+            if (!solver.assignedFalse(element)) {
+                solver.assignTrue(element, makeAllOtherInactiveReason(setId, index));
+                break;
+            }
+        }
+    }
+}
+
+void SetTheory::unitDeactivateElement(Solver& solver, int_t setId, int_t index) {
+    SetElements elements = setElements(setId);
+    VERIFY(!elements[index].has_value());
+    elements[index] = builtins::false_literal;
+    incrementInactiveCount(solver, setId);
+}
+
+void SetTheory::propagateAssignment(Solver& solver, int_t setId, int_t assignedIndex, bool active) {
     if (active) {
+        SetFlags& flags = setFlags(setId);
+        SetElements elements = setElements(setId);
         VERIFY(flags.activeElementIndex == INVALID_ACTIVE_INDEX);
         flags.activeElementIndex = assignedIndex;
         onElementActivated(solver, setId, assignedIndex);
@@ -47,21 +70,11 @@ void SetsBase::propagateAssignment(Solver& solver, int_t setId, int_t assignedIn
                 makeOtherElementActiveReason(elements[assignedIndex].value()));
         }
     } else {
-        flags.inactiveElementCount += 1;
-        if (flags.inactiveElementCount == elements.size() - 1 && flags.activeElementIndex == INVALID_ACTIVE_INDEX) {
-            // Find the last element that is not inactive
-            for (int_t index = 0; index < (int_t)elements.size(); index++) {
-                auto element = getOrCreateElementLiteral(solver, setId, flags, elements, index);
-                if (!solver.assignedFalse(element)) {
-                    solver.assignTrue(element, makeAllOtherInactiveReason(setId, index));
-                    break;
-                }
-            }
-        }
+        incrementInactiveCount(solver, setId);
     }
 }
 
-void SetsBase::unapplyAssignment(Solver&, int_t setId, int_t index, bool active) {
+void SetTheory::unapplyAssignment(Solver&, int_t setId, int_t index, bool active) {
     auto& flags = setFlags(setId);
     if (active) {
         VERIFY(flags.activeElementIndex == index);
@@ -71,25 +84,25 @@ void SetsBase::unapplyAssignment(Solver&, int_t setId, int_t index, bool active)
     }
 }
 
-Reason SetsBase::makeOtherElementActiveReason(BooleanValue activeElement) {
+Reason SetTheory::makeOtherElementActiveReason(BooleanValue activeElement) {
     return Reason { (uint32_t)theoryId(), 0, std::bit_cast<uint32_t>(activeElement) };
 }
 
-Reason SetsBase::makeAllOtherInactiveReason(int_t setId, int_t activeIndex) {
+Reason SetTheory::makeAllOtherInactiveReason(int_t setId, int_t activeIndex) {
     return Reason { (uint32_t)theoryId(), 1, (uint32_t)setId, (uint32_t)activeIndex };
 }
 
-bool SetsBase::isAllOtherInactiveReason(const Reason& reason) { return reason.data0 != 0; }
+bool SetTheory::isAllOtherInactiveReason(const Reason& reason) { return reason.data0 != 0; }
 
-BooleanValue SetsBase::reasonActiveElementLiteral(const Reason& reason) {
+BooleanValue SetTheory::reasonActiveElementLiteral(const Reason& reason) {
     return std::bit_cast<BooleanValue>(reason.data1);
 }
 
-int_t SetsBase::reasonActiveElementIndex(const Reason& reason) { return reason.data2; }
+int_t SetTheory::reasonActiveElementIndex(const Reason& reason) { return reason.data2; }
 
-int_t SetsBase::reasonSetId(const Reason& reason) { return reason.data1; }
+int_t SetTheory::reasonSetId(const Reason& reason) { return reason.data1; }
 
-bool SetsBase::testReason(Solver& solver, BooleanValue, const Reason& reason) {
+bool SetTheory::testReason(Solver& solver, BooleanValue, const Reason& reason) {
     if (isAllOtherInactiveReason(reason)) {
         // Check that all other variables are still inactive
         int_t setId = reasonSetId(reason);
@@ -102,7 +115,7 @@ bool SetsBase::testReason(Solver& solver, BooleanValue, const Reason& reason) {
     }
 }
 
-ReasonTheory::ClauseAndIndex SetsBase::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+ReasonTheory::ClauseAndIndex SetTheory::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     auto& clause = solver.scratchClause();
     if (isAllOtherInactiveReason(reason)) {
         int_t setId = reasonSetId(reason);
@@ -119,7 +132,7 @@ ReasonTheory::ClauseAndIndex SetsBase::reasonToClause(Solver& solver, BooleanVal
 // --------------------------- DynamicSets --------------------------
 
 DynamicSets::DynamicSets(Solver& solver, uint64_t baseLabel)
-    : SimpleBooleanTheory(solver, baseLabel), SetsBase(solver) { }
+    : SimpleBooleanTheory(solver, baseLabel), SetTheory(solver) { }
 
 std::string DynamicSets::formatPositiveLiteral(Solver& solver, int_t varId) {
     const auto& info = variables[varId];
@@ -150,12 +163,12 @@ BooleanValue DynamicSets::makeElement(Solver& solver, int_t setId, int_t index) 
 
 void DynamicSets::propagateAssignment(Solver& solver, BooleanValue lit) {
     auto varInfo = variables[variableId(lit)];
-    SetsBase::propagateAssignment(solver, varInfo.setId, varInfo.indexInSet, isPositive(lit));
+    SetTheory::propagateAssignment(solver, varInfo.setId, varInfo.indexInSet, isPositive(lit));
 }
 
 void DynamicSets::unapplyAssignment(Solver& solver, BooleanValue lit) {
     auto varInfo = variables[variableId(lit)];
-    SetsBase::unapplyAssignment(solver, varInfo.setId, varInfo.indexInSet, isPositive(lit));
+    SetTheory::unapplyAssignment(solver, varInfo.setId, varInfo.indexInSet, isPositive(lit));
 }
 
 }

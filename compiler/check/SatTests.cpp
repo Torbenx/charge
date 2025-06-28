@@ -8,6 +8,7 @@
 #include <check/StandardLoads.h>
 #include <check/StoreBlocks.h>
 #include <check/TopologicalOrder.h>
+#include <check/Types.h>
 
 #include <filesystem>
 #include <fstream>
