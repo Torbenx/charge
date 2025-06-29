@@ -69,14 +69,13 @@ namespace sema {
 struct NestedName {
     std::vector<Word> parts;
 
-    bool match(Context& ctx, Program* prog, DeclarationValue value) const {
+    bool match(Context& ctx, DeclarationValue value) const {
         for (Word expectedName : std::views::reverse(parts)) {
             if (value.kind() == DeclarationValueKind::Program) {
-                auto* targetProg = ctx.program(prog->translate(value.program()));
+                auto* targetProg = ctx.program(value.program());
                 if (targetProg->name() != expectedName)
                     return false;
-                value = targetProg->parent();
-                prog = targetProg;
+                value = ctx.localize(value.program(), targetProg->parent());
             } else if (value.kind() == DeclarationValueKind::Namespace) {
                 auto* ns = ctx.getNamespace(value.nsHandle());
                 if (ns->name != expectedName)
@@ -97,7 +96,7 @@ struct NestedName {
 struct CheckExpr {
     virtual ~CheckExpr() = default;
 
-    virtual void check(Context& ctx, Program* prog, Constant value) const = 0;
+    virtual void check(Context& ctx, ProgramHandle progHandle, Constant value) const = 0;
 };
 struct ParameterizeExpr : CheckExpr {
     NestedName base;
@@ -106,15 +105,15 @@ struct ParameterizeExpr : CheckExpr {
     ParameterizeExpr(NestedName base, std::vector<std::unique_ptr<CheckExpr>> args)
         : base(std::move(base)), arguments(std::move(args)) { }
 
-    void check(Context& ctx, Program* prog, Constant value) const override {
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::Parameterize);
-        auto parameterize = prog->getParameterize(value);
+        auto parameterize = ctx.program(progHandle)->getParameterize(value);
 
-        VERIFY(base.match(ctx, prog, parameterize.base));
+        VERIFY(base.match(ctx, ctx.localize(progHandle, parameterize.base)));
 
         VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
-            arguments[i]->check(ctx, prog, parameterize.arguments[i]);
+            arguments[i]->check(ctx, progHandle, parameterize.arguments[i]);
     }
 };
 struct LiteralExpr : CheckExpr {
@@ -123,9 +122,9 @@ struct LiteralExpr : CheckExpr {
     explicit LiteralExpr(NestedName literal)
         : literal(std::move(literal)) { }
 
-    void check(Context& ctx, Program* prog, Constant value) const override {
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::Program || value.kind() == ConstantKind::Namespace);
-        VERIFY(literal.match(ctx, prog, DeclarationValue::fromConstant(value)));
+        VERIFY(literal.match(ctx, ctx.localize(progHandle, DeclarationValue::fromConstant(value))));
     }
 };
 struct ParameterExpr : CheckExpr {
@@ -133,7 +132,7 @@ struct ParameterExpr : CheckExpr {
     explicit ParameterExpr(int_t index)
         : parameterIndex(index) { }
 
-    void check(Context&, Program*, Constant value) const override {
+    void check(Context&, ProgramHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::CopyOfParameter);
         VERIFY((int_t)value.id() == parameterIndex);
     }
@@ -144,10 +143,10 @@ struct TemplateSignatureExpr : CheckExpr {
     explicit TemplateSignatureExpr(std::unique_ptr<CheckExpr> signatureValue)
         : signatureValue(std::move(signatureValue)) { }
 
-    void check(Context& ctx, Program* prog, Constant value) const override {
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::TemplateSignature$Program
             || value.kind() == ConstantKind::TemplateSignature$Parameterize);
-        signatureValue->check(ctx, prog, value.templateSignatureBaseConstant());
+        signatureValue->check(ctx, progHandle, value.templateSignatureBaseConstant());
     }
 };
 struct FunctionSignatureExpr : CheckExpr {
@@ -156,10 +155,10 @@ struct FunctionSignatureExpr : CheckExpr {
     explicit FunctionSignatureExpr(std::unique_ptr<CheckExpr> signatureValue)
         : signatureValue(std::move(signatureValue)) { }
 
-    void check(Context& ctx, Program* prog, Constant value) const override {
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::FunctionSignature$Program
             || value.kind() == ConstantKind::FunctionSignature$Parameterize);
-        signatureValue->check(ctx, prog, value.functionSignatureBaseConstant());
+        signatureValue->check(ctx, progHandle, value.functionSignatureBaseConstant());
     }
 };
 struct EnumValueExpr : CheckExpr {
@@ -169,12 +168,12 @@ struct EnumValueExpr : CheckExpr {
     EnumValueExpr(std::unique_ptr<CheckExpr> typeExpr, Word valueName)
         : typeExpr(std::move(typeExpr)), valueName(valueName) { }
 
-    void check(Context& ctx, Program* prog, Constant value) const override {
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.isEnumValueLiteral());
-        auto enumValue = prog->getEnumValue(value);
-        typeExpr->check(ctx, prog, (Constant)enumValue.enumType);
+        auto enumValue = ctx.program(progHandle)->getEnumValue(value);
+        typeExpr->check(ctx, progHandle, (Constant)enumValue.enumType);
 
-        auto* enumProg = cast<EnumProgram>(ctx.program(prog->baseProgram(enumValue.enumType).value()));
+        auto* enumProg = cast<EnumProgram>(ctx.program(ctx.program(progHandle)->baseProgram(enumValue.enumType).value()));
         VERIFY(enumProg->values[enumValue.valueIndex].name() == valueName);
     }
 };
@@ -457,19 +456,20 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         sema::CheckExprParser parser { context, comment };
         auto expr = parser.parse();
         sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
-        sema::Generator::signatureCheck(context, context.programHandle(program));
+        sema::ProgramHandle programHandle = context.programHandle(program);
+        sema::Generator::signatureCheck(context, programHandle);
         fmt::println("-------------------------------");
         program->dump(context);
 
         if (word == words["expect-type"])
-            expr->check(context, program, (sema::Constant)cast<sema::GlobalProgram>(program)->type());
+            expr->check(context, programHandle, (sema::Constant)cast<sema::GlobalProgram>(program)->type());
         if (word == words["expect-value"])
-            expr->check(context, program, (sema::Constant)cast<sema::GlobalProgram>(program)->initializer());
+            expr->check(context, programHandle, (sema::Constant)cast<sema::GlobalProgram>(program)->initializer());
         if (word == words["expect-return-type"])
-            expr->check(context, program, (sema::Constant)cast<sema::FunctionProgram>(program)->returnType());
+            expr->check(context, programHandle, (sema::Constant)cast<sema::FunctionProgram>(program)->returnType());
         if (word == words["expect-impl"]) {
             verify(program->isImpl());
-            expr->check(context, program, (sema::Constant)program->selfConstant());
+            expr->check(context, programHandle, (sema::Constant)program->selfConstant());
         }
     }
 

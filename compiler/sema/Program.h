@@ -393,20 +393,6 @@ struct Program {
         return Constant::fromUint(parseLocationOrSelfConstant);
     }
 
-    ProgramHandle translate(ProgramHandle handle) const {
-        return programTranslationBuffer[handle.id()];
-    }
-    NamespaceHandle translate(NamespaceHandle handle) const {
-        return namespaceTranslationBuffer[handle.id()];
-    }
-    DeclarationValue translate(DeclarationValue value) const {
-        if (value.kind() == DeclarationValueKind::Program)
-            return translate(value.program());
-        if (value.kind() == DeclarationValueKind::Namespace)
-            return translate(value.nsHandle());
-        return value;
-    }
-
     std::optional<ProgramHandle> baseProgram(ExternConstant value) {
         if (value.kind() == ConstantKind::Program)
             return value.program();
@@ -470,13 +456,10 @@ protected:
     DeclarationValue m_parent;
     uint32_t parseLocationOrSelfConstant;
 
-    const ProgramHandle* programTranslationBuffer = nullptr;
-    const NamespaceHandle* namespaceTranslationBuffer = nullptr;
-
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 320);
+static_assert(sizeof(Program) == 304);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -817,7 +800,7 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 368);
+static_assert(sizeof(ProgramUnion) == 352);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

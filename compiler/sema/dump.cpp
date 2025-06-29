@@ -9,6 +9,7 @@ struct Dumper {
     std::vector<std::string> indentation;
     std::string output;
     Program* program = nullptr;
+    ProgramHandle programHandle;
 
     void popIndentation() {
         VERIFY(!indentation.empty());
@@ -18,7 +19,7 @@ struct Dumper {
     Dumper(Context& context)
         : context(context) { }
 
-    void dumpProgram(Program*);
+    void dumpProgram(ProgramHandle);
     void dumpInstructions(std::span<const Instruction> inst);
     void beginLine() {
         for (const auto& entry : indentation)
@@ -47,10 +48,10 @@ struct Dumper {
         Program* prog = context.program(progHandle);
         std::string name;
         if (prog->isImpl())
-            name = "(impl " + formatConstant(prog, (Constant)prog->selfConstant()) + ")";
+            name = "(impl " + formatConstant(progHandle, (Constant)prog->selfConstant()) + ")";
         else
             name = context.wordTable.view(prog->name());
-        auto parent = prog->translate(prog->parent());
+        auto parent = context.translate(progHandle, prog->parent());
         if (parent.kind() == DeclarationValueKind::Program)
             return formatProgram(parent.program()) + "::" + name;
 
@@ -79,23 +80,23 @@ struct Dumper {
         return result;
     }
     std::string formatConstant(Constant v) {
-        return formatConstant(program, v);
+        return formatConstant(programHandle, v);
     }
-    std::string formatConstant(Program* prog, Constant v) {
+    std::string formatConstant(ProgramHandle progHandle, Constant v) {
         if (v == INVALID_CONSTANT)
             return "<invalid>";
         std::string result;
         switch (v.kind()) {
         case ConstantKind::Program:
-            return formatProgram(prog->translate(v.program()));
+            return formatProgram(context.translate(progHandle, v.program()));
         case ConstantKind::Namespace:
-            return formatNamespace(prog->translate(v.nsHandle()));
+            return formatNamespace(context.translate(progHandle, v.nsHandle()));
         case ConstantKind::TemplateSignature$Program:
         case ConstantKind::TemplateSignature$Parameterize:
-            return "templsig(" + formatConstant(prog, v.templateSignatureBaseConstant()) + ")";
+            return "templsig(" + formatConstant(progHandle, v.templateSignatureBaseConstant()) + ")";
         case ConstantKind::FunctionSignature$Program:
         case ConstantKind::FunctionSignature$Parameterize:
-            return "fnsig(" + formatConstant(prog, v.functionSignatureBaseConstant()) + ")";
+            return "fnsig(" + formatConstant(progHandle, v.functionSignatureBaseConstant()) + ")";
         case ConstantKind::BooleanLiteral:
             return v.booleanValue() ? "true" : "false";
         case ConstantKind::ExpressionCategoryLiteral:
@@ -169,7 +170,7 @@ struct Dumper {
         case ExpressionKind::MemberExpression: {
             auto memberExpr = program->getMemberReference(e);
             return formatExpression(memberExpr.base)
-                + "." + formatMember(program, program->getMemberPointer(memberExpr.memberPointer));
+                + "." + formatMember(programHandle, program->getMemberPointer(memberExpr.memberPointer));
         }
         case ExpressionKind::Call:
             result += "call";
@@ -184,15 +185,15 @@ struct Dumper {
         return result;
     }
 
-    std::string formatMember(Program* prog, MemberPointer pointer) {
+    std::string formatMember(ProgramHandle progHandle, MemberPointer pointer) {
         std::string result;
         for (auto link : pointer) {
             if (!result.empty())
                 result += ".";
-            auto* parentProg = cast<StructProgram>(context.program(prog->baseProgram(link.parentType).value()));
+            auto* parentProg = cast<StructProgram>(context.program(context.program(progHandle)->baseProgram(link.parentType).value()));
             const auto& member = parentProg->members[link.memberIndex];
             if (member.isHas())
-                result += "(has " + formatConstant(prog, link.memberType) + ")";
+                result += "(has " + formatConstant(progHandle, link.memberType) + ")";
             else
                 result += context.wordTable.view(member.name());
         }
@@ -257,21 +258,22 @@ void Dumper::dumpInstructions(std::span<const Instruction> instructions) {
     }
 }
 
-void Dumper::dumpProgram(Program* prog) {
-    this->program = prog;
-    dumpLine(formatProgram(context.programHandle(prog)) + ":");
-    if (prog->status() >= ProgramStatus::SignatureCheckInProgress) {
-        dumpLine("parent = " + formatDeclarationValue(prog->translate(prog->parent())));
+void Dumper::dumpProgram(ProgramHandle progHandle) {
+    this->programHandle = progHandle;
+    this->program = context.program(programHandle);
+    dumpLine(formatProgram(programHandle) + ":");
+    if (program->status() >= ProgramStatus::SignatureCheckInProgress) {
+        dumpLine("parent = " + formatDeclarationValue(context.translate(progHandle, program->parent())));
     }
-    switch (prog->kind()) {
+    switch (program->kind()) {
     case ProgramKind::Global:
-        dumpLine("type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
-        dumpLine("value = " + formatConstant(Constant::fromUint(prog->m_subClassData)));
+        dumpLine("type = " + formatConstant((Constant)program->m_type.value_or(INVALID_CONSTANT)));
+        dumpLine("value = " + formatConstant(Constant::fromUint(program->m_subClassData)));
         break;
     case ProgramKind::Function:
-        dumpLine("return-type = " + formatConstant((Constant)prog->m_type.value_or(INVALID_CONSTANT)));
+        dumpLine("return-type = " + formatConstant((Constant)program->m_type.value_or(INVALID_CONSTANT)));
         indentation.push_back("  ");
-        dumpInstructions(cast<FunctionProgram>(prog)->body());
+        dumpInstructions(cast<FunctionProgram>(program)->body());
         popIndentation();
         break;
     default:
@@ -306,7 +308,7 @@ void Dumper::dumpProgram(Program* prog) {
         }
         case ConstantKind::MemberPointer: {
             auto pointer = program->getMemberPointer(value);
-            line << formatConstant(pointer.originType()) << "." << formatMember(prog, pointer);
+            line << formatConstant(pointer.originType()) << "." << formatMember(programHandle, pointer);
             break;
         }
         case ConstantKind::EnumValue: {
@@ -325,7 +327,7 @@ void Dumper::dumpProgram(Program* prog) {
 
 void Program::dump(Context& context) {
     Dumper dumper { context };
-    dumper.dumpProgram(this);
+    dumper.dumpProgram(context.programHandle(this));
     std::cout << dumper.output;
 }
 

@@ -188,12 +188,12 @@ bool Generator::resolveImplicitImplTarget() {
     auto implTarget = cast<ScopeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
     VERIFY(implTarget.has_value());
     VERIFY(implTarget.value().kind() == DeclarationValueKind::Program);
-    ProgramHandle implOfProgHandle = implTarget.value().program();
+    ProgramHandle implOfProgHandle = context.translate(parentImplPara.base, implTarget.value().program());
     signatureCheck(context, implOfProgHandle);
     Program* implOfProg = context.program(implOfProgHandle);
 
     VERIFY(program->kind() == implOfProg->kind());
-    DeductionState state(implOfProg, implOfProgHandle, implOfProg->parameters.size());
+    DeductionState state(context, implOfProgHandle);
     VERIFY(implOfProg->inheritedParameterCount == parentImplPara.arguments.size());
     for (int_t i = 0; i < (int_t)implOfProg->inheritedParameterCount; i++)
         state.explicitArgument(i, parentImplPara.arguments[i]);
@@ -272,7 +272,7 @@ void Generator::generateParameterizeExpr() {
             Program* baseProg = context.program(baseValue.program());
             VERIFY(baseProg->isTemplate());
             VERIFY(baseProg->inheritedParameterCount == 0);
-            DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
+            DeductionState state(context, baseValue.program());
             generate(std::move(state));
             return;
         }
@@ -281,7 +281,7 @@ void Generator::generateParameterizeExpr() {
             Program* baseProg = context.program(basePara.base);
             VERIFY(baseProg->isTemplate());
             VERIFY(baseProg->inheritedParameterCount == basePara.arguments.size());
-            DeductionState state(baseProg, basePara.base, baseProg->parameters.size());
+            DeductionState state(context, basePara.base);
             for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
                 state.explicitArgument(i, basePara.arguments[i]);
             generate(std::move(state));
@@ -318,7 +318,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
         if (baseValue.kind() == ConstantKind::Program) {
             Program* baseProg = context.program(baseValue.program());
             // VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
-            DeductionState state(baseProg, baseValue.program(), baseProg->parameters.size());
+            DeductionState state(context, baseValue.program(), baseProg->parameters.size());
             state.copyParameters(baseProg->inheritedParameterCount);
             takeTopExpression();
             return { std::move(state) };
@@ -327,7 +327,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             Program* baseProg = context.program(param.base);
             // VERIFY(cast<CallableProgram>(baseProg)->runtimeParameters.size() == argumentNames.size());
             VERIFY(param.arguments.size() <= baseProg->parameters.size());
-            DeductionState state(baseProg, param.base, param.arguments.size());
+            DeductionState state(context, param.base);
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
                 state.explicitArgument(i, param.arguments[i]);
             takeTopExpression();
@@ -418,10 +418,10 @@ Type Generator::memberType(Type originType, std::span<const uint32_t> memberIndi
     return type;
 }
 
-void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog) {
+void Generator::internalLookupRecurse(InternalLookupState& state, ModuleHandle module, ScopeProgram* prog) {
     auto maybeResult = prog->getDeclaration(state.lookupName);
     if (maybeResult.has_value()) {
-        state.setResult(maybeResult.value());
+        state.setResult(context.translate(module, maybeResult.value()));
         return;
     }
 
@@ -442,14 +442,14 @@ void Generator::internalLookupRecurse(InternalLookupState& state, ScopeProgram* 
         if (!memberProg.has_value())
             continue;
         state.memberIndices.push_back(memberIndex);
-        internalLookupRecurse(state, cast<ScopeProgram>(context.program(memberProg.value())));
+        internalLookupRecurse(state, context.moduleOf(memberProg.value()), cast<ScopeProgram>(context.program(memberProg.value())));
         state.memberIndices.pop_back();
     }
 }
 
 Generator::InternalLookupResult Generator::internalLookup(ProgramHandle typeProg, Word name) {
     InternalLookupState state(name);
-    internalLookupRecurse(state, cast<ScopeProgram>(context.program(typeProg)));
+    internalLookupRecurse(state, context.moduleOf(typeProg), cast<ScopeProgram>(context.program(typeProg)));
     return state.result;
 }
 
@@ -626,7 +626,7 @@ void Generator::generateMemberAccessExpr() {
     VERIFY(context.program(progHandle)->kind() == ProgramKind::Function);
     auto* fnProg = cast<FunctionProgram>(context.program(progHandle));
 
-    DeductionState state(fnProg, progHandle, fnProg->parameters.size());
+    DeductionState state(context, progHandle);
     auto inheritedArguments = asFoldBase(memberType(baseType, result.memberIndices)).arguments;
     VERIFY(inheritedArguments.size() == fnProg->inheritedParameterCount);
     for (int_t i = 0; i < (int_t)fnProg->inheritedParameterCount; i++)
@@ -746,19 +746,19 @@ void Generator::toValueExpression(SourceLocation location) {
 
 void Generator::contextualToType(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, programHandle, 0);
+    DeductionState state(program, context.module, programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::type_type);
 }
 
 void Generator::contextualToBool(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, programHandle, 0);
+    DeductionState state(program, context.module, programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::bool_type);
 }
 
 void Generator::contextualToExpressionCategory(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, programHandle, 0);
+    DeductionState state(program, context.module, programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::expression_category_type);
 }
 
@@ -811,13 +811,13 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Constant base) {
         Program* baseProg = context.program(base.program());
         if (baseProg->isDependent())
             return std::nullopt;
-        return FoldBase { baseProg, base.program(), base, {} };
+        return FoldBase { baseProg, context.moduleOf(base.program()), base.program(), base, {} };
     } else if (base.kind() == ConstantKind::Parameterize) {
         auto param = program->getParameterize(base);
         Program* baseProg = context.program(param.base);
         if (baseProg->parameters.size() != param.arguments.size())
             return std::nullopt;
-        return FoldBase { context.program(param.base), param.base, base, param.arguments };
+        return FoldBase { context.program(param.base), context.moduleOf(param.base), param.base, base, param.arguments };
     }
     return std::nullopt;
 }
@@ -835,7 +835,7 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
         } else {
             // TODO: In many cases this could determined right here by comparing state.arguments[index] and aValue.
             //       This would require either a separate compare function or recursion with some weird DeductionState.
-            state.equalities.add(context, program, state.program, { pValue, aValue });
+            state.equalities.add(context, programHandle, state.programHandle, { pValue, aValue });
         }
         return true;
     }
@@ -848,12 +848,12 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
         || aValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
         || aValue.kind() == ConstantKind::CopyOfParameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
-        state.equalities.add(context, program, state.program, { pValue, aValue });
+        state.equalities.add(context, programHandle, state.programHandle, { pValue, aValue });
         return true;
     }
 
-    auto comparePrograms = [&state](ProgramHandle pProg, ProgramHandle aProg) {
-        return state.program->translate(pProg) == aProg;
+    auto comparePrograms = [this, &state](ProgramHandle pProg, ProgramHandle aProg) {
+        return context.translate(state.module, pProg) == aProg;
     };
     auto compareParameterize = [this, &comparePrograms, &state](ExternConstant pValue, Constant aValue) {
         auto pPara = state.program->getParameterize(pValue);
@@ -874,7 +874,7 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
     case ConstantKind::Program:
         return comparePrograms(Constant(pValue).program(), aValue.program());
     case ConstantKind::Namespace:
-        return state.program->translate(Constant(pValue).nsHandle()) == aValue.nsHandle();
+        return context.translate(state.module, Constant(pValue).nsHandle()) == aValue.nsHandle();
     case ConstantKind::TemplateSignature$Program:
         return comparePrograms(Constant(pValue).templateSignatureProgram(), aValue.templateSignatureProgram()); // TODO: different programs can have the same signature
     case ConstantKind::FunctionSignature$Program:
@@ -919,8 +919,8 @@ Constant Generator::fold(Constant base, ExternConstant v) {
 }
 
 Constant Generator::fold(FoldBase base, ExternConstant v) {
-    auto foldProgram = [&base](ProgramHandle handle) {
-        return base.program->translate(handle);
+    auto foldProgram = [this, &base](ProgramHandle handle) {
+        return context.translate(base.module, handle);
     };
     if (v == builtins::self_constant)
         v = base.program->selfConstant();
@@ -935,7 +935,7 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     case ConstantKind::CopyOfOpenGlobal$Parameterize:
         return makeCopyOfOpenGlobal(fold(base, Constant(v).copiedGlobal()));
     case ConstantKind::Namespace:
-        return (Constant)base.program->translate(Constant(v).nsHandle());
+        return (Constant)context.translate(base.module, Constant(v).nsHandle());
     case ConstantKind::TemplateSignature$Program:
     case ConstantKind::TemplateSignature$Parameterize:
         return makeTemplateSignature(fold(base, Constant(v).templateSignatureBaseConstant()));
@@ -1000,7 +1000,7 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
                 // TODO: Even when this is an impl, there can be private members in this program.
                 g.lookupStack.push_back(LookupContext::forContainingType(g.verifyType(parentPara)));
             }
-            scope = scopeProg->translate(scopeProg->parent());
+            scope = context.translate(scope.program(), scopeProg->parent());
         } else if (scope.kind() == DeclarationValueKind::Namespace) {
             Namespace* scopeNS = context.getNamespace(scope.nsHandle());
             g.lookupStack.push_back(LookupContext::forNamespace(scopeNS));

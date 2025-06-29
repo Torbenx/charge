@@ -105,7 +105,11 @@ NO_INLINE static Word* endCall(Word* position, ParseState& state) {
 }
 
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
-    return { (uint32_t)(position - state.parseOutput.lines.back().begin), (uint32_t)state.parseOutput.lines.size() - 1 };
+    return {
+        0u,
+        (uint32_t)state.parseOutput.lines.size() - 1,
+        (uint32_t)(position - state.parseOutput.lines.back().begin)
+    };
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {

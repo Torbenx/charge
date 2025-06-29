@@ -7,14 +7,6 @@ namespace sema {
 Util::Util(Context& context, ProgramHandle programHandle)
     : context(context), program(context.program(programHandle)), programHandle(programHandle) { }
 
-Program* Util::get(ProgramHandle progHandle) {
-    return context.program(program->translate(progHandle));
-}
-
-Namespace* Util::get(NamespaceHandle progHandle) {
-    return context.getNamespace(program->translate(progHandle));
-}
-
 std::strong_ordering Util::compare(Constant a, Constant b) {
     auto kindOrdering = a.kind() <=> b.kind();
     if (kindOrdering != 0)
@@ -51,12 +43,14 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
 }
 
 std::strong_ordering Util::compare(ProgramHandle a, ProgramHandle b) {
-    return get(a)->declarationLocation() <=> get(b)->declarationLocation();
+    ModuleHandle m = context.moduleOf(programHandle);
+    return context.program(context.translate(m, a))->declarationLocation() <=> context.program(context.translate(m, b))->declarationLocation();
 }
 
 std::strong_ordering Util::compare(NamespaceHandle a, NamespaceHandle b) {
     // TODO: This both slow and not very nice since it does not consider nesting
-    auto nameOrdering = context.wordTable.view(get(a)->name) <=> context.wordTable.view(get(b)->name);
+    ModuleHandle m = context.moduleOf(programHandle);
+    auto nameOrdering = context.wordTable.view(context.getNamespace(context.translate(m, a))->name) <=> context.wordTable.view(context.getNamespace(context.translate(m, b))->name);
     if (nameOrdering != 0)
         return nameOrdering;
 

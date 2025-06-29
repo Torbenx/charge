@@ -26,6 +26,7 @@ struct LookupCache {
 
 struct FoldBase {
     Program* program;
+    ModuleHandle module;
     ProgramHandle programHandle;
     Constant value;
     std::span<const Constant> arguments;
@@ -36,31 +37,39 @@ struct ConstantPair {
     Constant aValue;
 };
 struct ConstantPairCompare {
-    std::strong_ordering operator()(Context& context, Program* argProg, Program* paramProg, ConstantPair left, ConstantPair right) const {
-        auto paramOdering = Util(context, context.programHandle(argProg)).compare(left.aValue, right.aValue);
+    std::strong_ordering operator()(Context& context, ProgramHandle argProg, ProgramHandle paramProg, ConstantPair left, ConstantPair right) const {
+        auto paramOdering = Util(context, argProg).compare(left.aValue, right.aValue);
         if (paramOdering != 0)
             return paramOdering;
-        return Util(context, context.programHandle(paramProg)).compare(Constant(left.pValue), Constant(right.pValue));
+        return Util(context, paramProg).compare(Constant(left.pValue), Constant(right.pValue));
     }
 };
-using ConstantPairSet = FlatSet<ConstantPair, ConstantPairCompare, Context&, Program*, Program*>;
+using ConstantPairSet = FlatSet<ConstantPair, ConstantPairCompare, Context&, ProgramHandle, ProgramHandle>;
 
 struct DeductionState {
     Program* program;
+    ModuleHandle module;
     ProgramHandle programHandle;
     std::vector<bool> explicitArgumentsMap;
     std::vector<Constant> arguments;
     ConstantPairSet equalities;
 
     static DeductionState fromFoldBase(FoldBase base) {
-        DeductionState state(base.program, base.programHandle, base.arguments.size());
+        DeductionState state(base.program, base.module, base.programHandle, base.arguments.size());
         for (int_t i = 0; i < (int_t)base.arguments.size(); i++)
             state.explicitArgument(i, base.arguments[i]);
         return state;
     }
 
-    DeductionState(Program* prog, ProgramHandle handle, int_t parameterCount)
+    DeductionState(Context& context, ProgramHandle handle)
+        : DeductionState(context, handle, context.program(handle)->parameters.size()) { }
+
+    DeductionState(Context& context, ProgramHandle handle, int_t parameterCount)
+        : DeductionState(context.program(handle), context.moduleOf(handle), handle, parameterCount) { }
+
+    DeductionState(Program* prog, ModuleHandle module, ProgramHandle handle, int_t parameterCount)
         : program(prog)
+        , module(module)
         , programHandle(handle)
         , explicitArgumentsMap(parameterCount, false)
         , arguments(parameterCount, INVALID_CONSTANT) { }
@@ -88,7 +97,7 @@ struct DeductionState {
     }
 
     FoldBase toFoldBase(Constant baseValue) {
-        return FoldBase { program, programHandle, baseValue, arguments };
+        return FoldBase { program, module, programHandle, baseValue, arguments };
     }
 };
 
@@ -103,10 +112,10 @@ constexpr std::vector<Constant> copyParameters(Program* prog) {
     return copyParameters(prog->parameters.size());
 }
 
-#define ENUMERATE_LOOKUP_CONTEXT_KINDS          \
-    KIND(Namespace, Namespace*)                 \
-    KIND(Local, Generator*)                     \
-    KIND(TemplateParameters, Program*)          \
+#define ENUMERATE_LOOKUP_CONTEXT_KINDS \
+    KIND(Namespace, Namespace*)        \
+    KIND(Local, Generator*)            \
+    KIND(TemplateParameters, Program*) \
     KIND(ContainingType, Type) /* non-dependent */
 
 //! Lookup context structure, main look up logic in Generator::generateIdentifierExpr()
@@ -369,7 +378,7 @@ struct Generator : Util {
     void generateCallExpr(SourceLocation location, CallTarget base);
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);
-    void internalLookupRecurse(InternalLookupState& state, ScopeProgram* prog);
+    void internalLookupRecurse(InternalLookupState& state, ModuleHandle module, ScopeProgram* prog);
     InternalLookupResult internalLookup(ProgramHandle typeProg, Word name);
     void generateIdentifierExpr();
     void generateStaticAccessExpr();

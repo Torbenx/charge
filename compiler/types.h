@@ -200,25 +200,29 @@ struct optional_traits<relative_pointer<Source, Target>> {
 
 struct SourceLocation {
     SourceLocation() = default;
-    SourceLocation(uint32_t offsetInLine, uint32_t lineIndex)
-        : m_offsetInLine(offsetInLine), m_lineIndex(lineIndex) { }
+    SourceLocation(uint32_t fileId, uint32_t lineIndex, uint32_t offsetInLine)
+        : m_offsetInLine(offsetInLine), m_lineIndex(lineIndex), m_fileId(fileId) { }
 
     uint32_t lineIndex() const { return m_lineIndex; }
-    uint32_t lineNumber() const { return m_lineIndex + 1; }
+    uint32_t lineNumber() const { return lineIndex() + 1; }
     uint32_t offsetInLine() const { return m_offsetInLine; }
-    uint32_t column() const { return m_offsetInLine + 1; }
+    uint32_t column() const { return offsetInLine() + 1; }
+    uint32_t fileId() const { return m_fileId; }
 
 private:
-    [[maybe_unused]] uint32_t tagBits : 8 = 0;
-    uint32_t m_offsetInLine : 24 = 0;
-    uint32_t m_lineIndex = 0;
+    [[maybe_unused]] uint64_t tagBits : 8 = 0;
+    uint64_t m_offsetInLine : 16 = 0;
+    uint64_t m_lineIndex : 24 = 0;
+    uint64_t m_fileId : 16 = 0;
 };
+static_assert(sizeof(SourceLocation) == 8);
 template<typename T>
 struct TaggedSourceLocation {
     TaggedSourceLocation(T tag, SourceLocation loc)
         : tagBits(std::bit_cast<uint8_t>(tag))
         , m_offsetInLine(loc.offsetInLine())
-        , m_lineIndex(loc.lineIndex()) { }
+        , m_lineIndex(loc.lineIndex())
+        , m_fileId(loc.fileId()) { }
 
     TaggedSourceLocation()
         requires std::is_default_constructible_v<T>
@@ -231,19 +235,22 @@ struct TaggedSourceLocation {
     void setLocation(SourceLocation loc) {
         this->m_offsetInLine = loc.offsetInLine();
         this->m_lineIndex = loc.lineIndex();
+        this->m_fileId = loc.fileId();
     }
     void setTag(T tag) {
         tagBits = std::bit_cast<uint8_t>(tag);
     }
     uint32_t lineIndex() const { return m_lineIndex; }
-    uint32_t lineNumber() const { return m_lineIndex + 1; }
+    uint32_t lineNumber() const { return lineIndex() + 1; }
     uint32_t offsetInLine() const { return m_offsetInLine; }
-    uint32_t column() const { return m_offsetInLine + 1; }
+    uint32_t column() const { return offsetInLine() + 1; }
+    uint32_t fileId() const { return m_fileId; }
 
 private:
-    uint32_t tagBits : 8 = 0;
-    uint32_t m_offsetInLine : 24 = 0;
-    uint32_t m_lineIndex = 0;
+    uint64_t tagBits : 8 = 0;
+    uint64_t m_offsetInLine : 16 = 0;
+    uint64_t m_lineIndex : 24 = 0;
+    uint64_t m_fileId : 16 = 0;
 };
 
 template<typename T1, typename T2>

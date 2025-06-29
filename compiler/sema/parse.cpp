@@ -165,7 +165,7 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
         }
         visitExpression();
 
-        DeductionState state(program, programHandle, parameterTypes.size());
+        DeductionState state(context, programHandle, parameterTypes.size());
         state.copyParameters(program->parameters.size());
         initialize(assignLocation, state, expectedCategory, type);
         VERIFY(state.isComplete());
