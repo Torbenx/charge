@@ -1003,7 +1003,7 @@ generatedLines = []
 outputIndentation = 0
 lineNoIndent("#pragma once")
 lineNoIndent()
-lineNoIndent("#include <WordTable.h>")
+lineNoIndent("#include <WordStringTable.h>")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()

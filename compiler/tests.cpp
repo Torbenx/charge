@@ -1,4 +1,4 @@
-#include <WordTable.h>
+#include <WordStringTable.h>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -75,7 +75,7 @@ struct NestedName {
                 auto* targetProg = ctx.program(value.program());
                 if (targetProg->name() != expectedName)
                     return false;
-                value = ctx.localize(value.program(), targetProg->parent());
+                value = ctx.translate(value.program(), targetProg->parent());
             } else if (value.kind() == DeclarationValueKind::Namespace) {
                 auto* ns = ctx.getNamespace(value.nsHandle());
                 if (ns->name != expectedName)
@@ -109,7 +109,7 @@ struct ParameterizeExpr : CheckExpr {
         VERIFY(value.kind() == ConstantKind::Parameterize);
         auto parameterize = ctx.program(progHandle)->getParameterize(value);
 
-        VERIFY(base.match(ctx, ctx.localize(progHandle, parameterize.base)));
+        VERIFY(base.match(ctx, ctx.translate(progHandle, parameterize.base)));
 
         VERIFY(parameterize.arguments.size() == arguments.size());
         for (int_t i = 0; i < (int_t)arguments.size(); i++)
@@ -124,7 +124,7 @@ struct LiteralExpr : CheckExpr {
 
     void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         VERIFY(value.kind() == ConstantKind::Program || value.kind() == ConstantKind::Namespace);
-        VERIFY(literal.match(ctx, ctx.localize(progHandle, DeclarationValue::fromConstant(value))));
+        VERIFY(literal.match(ctx, ctx.translate(progHandle, DeclarationValue::fromConstant(value))));
     }
 };
 struct ParameterExpr : CheckExpr {
@@ -308,7 +308,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
     CommandQueue commandQueue;
 
     TestInstrumenter(std::string_view source)
-        : context { source } { sema::Generator::generateBuiltins(context); }
+        : context { {}, source } { sema::Generator::generateBuiltins(context); }
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
         VERIFY_NOT_REACHED();
@@ -544,9 +544,9 @@ TEST(Charge, DISABLED_Benchmark) {
 
     auto sourceBuffer = readFile(file);
 
-    sema::Context context(sourceBuffer);
+    sema::ModuleInput input;
     for (int i = 0; i < 10; i++) {
-        context.reset();
+        sema::Context context({}, sourceBuffer);
         parse::parseImpl(context.parseOutput.source.data(), context, nullptr);
         VERIFY(context.m_scopeStack.size() == 1);
     }

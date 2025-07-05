@@ -26,8 +26,8 @@ struct Constant;
 struct FunctionProgram;
 
 struct ModuleHandle {
-    uint32_t m_id = -1;
-    constexpr uint32_t id() const { return m_id; }
+    uint16_t m_id = -1;
+    constexpr uint16_t id() const { return m_id; }
 
     bool operator==(const ModuleHandle&) const = default;
 };

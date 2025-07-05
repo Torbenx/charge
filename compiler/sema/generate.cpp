@@ -746,19 +746,19 @@ void Generator::toValueExpression(SourceLocation location) {
 
 void Generator::contextualToType(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, context.module, programHandle, 0);
+    DeductionState state(program, context.thisModule(), programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::type_type);
 }
 
 void Generator::contextualToBool(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, context.module, programHandle, 0);
+    DeductionState state(program, context.thisModule(), programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::bool_type);
 }
 
 void Generator::contextualToExpressionCategory(SourceLocation location) {
     // We can get away with this state because parameter-side value is so simple
-    DeductionState state(program, context.module, programHandle, 0);
+    DeductionState state(program, context.thisModule(), programHandle, 0);
     initialize(location, state, Constant(ExpressionCategory::Value), builtins::expression_category_type);
 }
 

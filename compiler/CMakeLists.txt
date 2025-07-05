@@ -21,7 +21,10 @@ add_executable(compiler
     tests.cpp
     types.h
     windows_allocdetail.cpp
+    WordStringTable.h
     WordTable.h
+    WordTranslationTable.cpp
+    WordTranslationTable.h
 )
 
 add_subdirectory(parse)

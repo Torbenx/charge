@@ -1,6 +1,6 @@
 #pragma once
 
-#include <WordTable.h>
+#include <WordStringTable.h>
 
 namespace parse {
 

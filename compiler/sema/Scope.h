@@ -19,6 +19,15 @@ struct Scope {
         [[maybe_unused]] bool existedAlready = m_table.insertWord(name, value.toUint());
         VERIFY(!existedAlready);
     }
+
+    template<typename F>
+    void forEachDeclration(F&& f) const {
+        for (int_t bucket = 0; bucket < m_table.bucketCount(); bucket++) {
+            auto entry = m_table.entries[bucket];
+            if (!entry.empty())
+                f(entry.word, DeclarationValue::fromUint(entry.payload));
+        }
+    }
 };
 
 struct Namespace : Scope {

@@ -1,20 +1,42 @@
 #pragma once
 
+#include <WordTranslationTable.h>
 #include <parse/Output.h>
 #include <sema/Program.h>
 #include <sema/Scope.h>
 
+
 namespace sema {
+
+inline constexpr size_t MODULE_PROGRAM_ID_ALIGNMENT = 256;
+
+struct ModuleInput {
+    struct ModuleReference {
+        ModuleHandle module;
+        uint32_t programIdBegin;
+        uint32_t programIdEnd;
+    };
+
+    const WordStringTable* wordTable;
+    std::span<const ModuleReference> modules;
+    std::span<ProgramUnion> ownPrograms;
+    std::span<const ModuleHandle> programModules;
+    std::span<Namespace> namespaces;
+
+    ModuleReference selfReference() const { return modules.back(); }
+};
 
 struct Context {
     struct ModuleState {
-        uint32_t programOffset;
+        ProgramUnion* programStorage = nullptr; // Actual storage begins at programStorage + programIdBegin
+        uint32_t programIdBegin = 0;
+        uint32_t programIdEnd = 0;
+        std::vector<uint16_t> programIdOffsets;
         std::vector<NamespaceHandle> namespaces;
     };
 
     parse::Output parseOutput;
     WordStringTable wordTable { parse::words };
-    PageBumpAllocator<Program*> programPointers;
     PageBumpAllocator<ModuleHandle> programModules;
     PageBumpAllocator<ProgramUnion> programStorage;
     PageBumpAllocator<Namespace> namespaces;
@@ -25,27 +47,13 @@ struct Context {
     };
     std::vector<ScopeStackEntry> m_scopeStack;
     std::vector<ProgramHandle> m_implDeclarations;
-    ModuleHandle module;
 
-    Context(std::string_view source)
+    Context(std::span<const ModuleInput> inputs, std::string_view source)
         : parseOutput(source) {
-        reset();
+        initialize(inputs);
     }
 
-    void reset() {
-        parseOutput.reset();
-        programPointers.clear();
-        programModules.clear();
-        namespaces.clear();
-        programStorage.clear();
-        m_scopeStack.clear();
-
-        module = { (uint32_t)modules.size() };
-        modules.emplace_back();
-        modules.back().programOffset = programPointers.size();
-        auto globalNamespace = newNamespace(Word(), std::nullopt);
-        pushScope((DeclarationValue)globalNamespace, getNamespace(globalNamespace));
-    }
+    void initialize(std::span<const ModuleInput> inputs);
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
@@ -53,102 +61,37 @@ struct Context {
     void pushScope(DeclarationValue value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
     void pushEmptyScope(DeclarationValue value) { m_scopeStack.push_back({ value, std::nullopt }); }
 
-    DeclarationValue pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
-        ProgramHandle progHandle = newProgram(kind, name, parseLocation, m_scopeStack.back().value, location);
+    DeclarationValue pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location);
+    DeclarationValue pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location);
+    DeclarationValue pushNamespaceScope(Word name);
+    DeclarationValue pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location);
+    DeclarationValue pushEnumValueScope(Word name, parse::TokenHandle parseLocation, SourceLocation location);
 
-        std::optional<Scope*> scope = currentScope();
-        if (scope.has_value())
-            scope->addDeclaration(name, (DeclarationValue)progHandle);
+    ModuleHandle thisModule() const { return { static_cast<uint16_t>(modules.size() - 1) }; }
 
-        auto scopeProg = try_cast<ScopeProgram>(program(progHandle));
-        if (scopeProg.has_value()) {
-            pushScope((DeclarationValue)progHandle, scopeProg.value());
-        } else {
-            pushEmptyScope((DeclarationValue)progHandle);
-        }
-        return (DeclarationValue)progHandle;
-    }
-    DeclarationValue pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location) {
-        ProgramHandle progHandle = newProgram(kind, Word(), parseLocation, m_scopeStack.back().value, location);
-        m_implDeclarations.push_back(progHandle);
-
-        auto scopeProg = try_cast<ScopeProgram>(program(progHandle));
-        if (scopeProg.has_value()) {
-            pushScope((DeclarationValue)progHandle, scopeProg.value());
-        } else {
-            pushEmptyScope((DeclarationValue)progHandle);
-        }
-        return (DeclarationValue)progHandle;
-    }
-    DeclarationValue pushNamespaceScope(Word name) {
-        std::optional<Scope*> scope = currentScope();
-        VERIFY(scope.has_value());
-        std::optional<DeclarationValue> maybeResult = scope->getDeclaration(name);
-        if (maybeResult.has_value()) {
-            VERIFY(maybeResult->kind() == DeclarationValueKind::Namespace);
-            return maybeResult.value();
-        }
-        auto nsHandle = newNamespace(name, m_scopeStack.back().value.nsHandle());
-        scope->addDeclaration(name, (DeclarationValue)nsHandle);
-        pushScope((DeclarationValue)nsHandle, getNamespace(nsHandle));
-        return (DeclarationValue)nsHandle;
-    }
-    DeclarationValue pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
-        std::optional<Scope*> scope = currentScope();
-        VERIFY(scope.has_value());
-        StructProgram* program = static_cast<StructProgram*>(scope.value());
-        VERIFY(program->kind() == ProgramKind::Struct);
-        int_t id = program->members.size();
-        program->members.emplace_back(location, isHas, name, parseLocation);
-        pushEmptyScope(INVALID_DECLARATION_VALUE); // TODO: Avoid this
-        return DeclarationValue(DeclarationValueKind::Member, id);
-    }
-    DeclarationValue pushEnumValueScope(Word name, parse::TokenHandle parseLocation, SourceLocation location) {
-        std::optional<Scope*> scope = currentScope();
-        VERIFY(scope.has_value());
-        EnumProgram* program = static_cast<EnumProgram*>(scope.value());
-        VERIFY(program->kind() == ProgramKind::Enum);
-        int_t id = program->values.size();
-        program->values.emplace_back(location, name, parseLocation);
-        program->addDeclaration(name, DeclarationValue(DeclarationValueKind::EnumValue, id));
-        pushEmptyScope(INVALID_DECLARATION_VALUE);
-        return DeclarationValue(DeclarationValueKind::EnumValue, id);
-    }
-
-    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location) {
-        ProgramHandle result = { (uint32_t)programPointers.size() };
-        auto* prog = programStorage.allocate();
-        programPointers.push_back(&prog->get());
-        programModules.push_back(module);
-        std::construct_at(prog, kind, name, parseLocation, rawParent, location);
-        return result;
-    }
+    ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location);
     Program* program(ProgramHandle handle) {
-        return programPointers[handle.id()];
+        auto& state = modules[moduleOf(handle).id()];
+        VERIFY(handle.id() >= state.programIdBegin && handle.id() <= state.programIdEnd);
+        return &state.programStorage[handle.id()].get();
     }
     ModuleHandle moduleOf(ProgramHandle handle) {
-        return programModules[handle.id()];
+        return programModules[handle.id() / MODULE_PROGRAM_ID_ALIGNMENT];
     }
     ProgramHandle translate(ModuleHandle module, ProgramHandle program) {
-        return { modules[module.id()].programOffset + program.id() };
+        return { program.id() + modules[module.id()].programIdOffsets[program.id() / MODULE_PROGRAM_ID_ALIGNMENT] * (uint32_t)MODULE_PROGRAM_ID_ALIGNMENT };
     }
     ProgramHandle translate(ProgramHandle base, ProgramHandle program) {
         return translate(moduleOf(base), program);
     }
     ProgramHandle programHandle(Program* prog) {
-        int_t id = reinterpret_cast<ProgramUnion*>(prog) - programStorage.data();
-        VERIFY(id >= 0 && id < programStorage.size());
+        auto& state = modules.back();
+        int_t id = reinterpret_cast<ProgramUnion*>(prog) - state.programStorage;
+        VERIFY(id >= (int_t)state.programIdBegin && id < (int_t)state.programIdEnd);
         return ProgramHandle(id);
     }
 
-    NamespaceHandle newNamespace(Word name, std::optional<NamespaceHandle> parent) {
-        VERIFY((int_t)modules[module.id()].namespaces.size() == namespaces.size());
-        NamespaceHandle result = { (uint32_t)namespaces.size() };
-        modules[module.id()].namespaces.push_back(result);
-        auto* ns = namespaces.allocate();
-        std::construct_at(ns, name, parent);
-        return result;
-    }
+    NamespaceHandle newNamespace(Word name, std::optional<NamespaceHandle> parent);
     Namespace* getNamespace(NamespaceHandle nsHandle) {
         return &namespaces[nsHandle.id()];
     }
@@ -162,6 +105,7 @@ struct Context {
         int_t id = ns - namespaces.data();
         return NamespaceHandle(id);
     }
+    NamespaceHandle globalNamespace() { return NamespaceHandle(0); }
 
     DeclarationValue translate(ModuleHandle module, DeclarationValue value) {
         if (value.kind() == DeclarationValueKind::Program)
@@ -174,24 +118,8 @@ struct Context {
         return translate(moduleOf(base), value);
     }
 
-    std::optional<Program*> firstDeclarationAfter(SourceLocation location) {
-        auto compare = [](ProgramUnion& prog, SourceLocation location) {
-            return prog.get().declarationLocation() < location;
-        };
-        auto it = std::lower_bound(programStorage.begin(), programStorage.end(), location, compare);
-        if (it == programStorage.end())
-            return std::nullopt;
-        return &it->get();
-    }
-    std::optional<Program*> lastDeclarationBefore(SourceLocation location) {
-        auto compare = [](ProgramUnion& prog, SourceLocation location) {
-            return prog.get().declarationLocation() < location;
-        };
-        auto it = std::lower_bound(programStorage.begin(), programStorage.end(), location, compare);
-        if (it == programStorage.begin())
-            return std::nullopt;
-        return &std::prev(it)->get();
-    }
+    std::optional<Program*> firstDeclarationAfter(SourceLocation location);
+    std::optional<Program*> lastDeclarationBefore(SourceLocation location);
 };
 
 }
