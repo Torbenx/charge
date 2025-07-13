@@ -1,0 +1,31 @@
+
+struct type: { }
+
+enum bool: {
+    false;
+    true;
+}
+
+struct namespace: { }
+
+enum expression_category: {
+    value;
+    unique_ref;
+    const_unique_ref;
+    shared_ref;
+    const_shared_ref;
+}
+
+struct template_signature: { }
+template(sig: template_signature)
+struct template_id: { }
+
+struct function_signature: { }
+template(sig: function_signature)
+struct function_id: { }
+
+template(pointee_type: type)
+struct ptr: { }
+
+template(parent_type: type, member_type: type)
+struct member_ptr: { }

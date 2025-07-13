@@ -2,17 +2,17 @@
 
 #include <WordTable.h>
 
+namespace detail {
 struct WrappedWordStringTable;
+}
 template<typename... Ts>
 struct ConstWordStringTable;
 
 class WordStringTable : private WordTable {
 private:
-    friend struct WrappedWordStringTable;
+    friend struct detail::WrappedWordStringTable;
     template<typename... Ts>
     friend struct ConstWordStringTable;
-
-    constexpr Word insertInternal(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId);
 
     char* stringStorage = nullptr;
     uint32_t stringStorageOffset = 0;
@@ -32,9 +32,9 @@ public:
     constexpr ~WordStringTable();
 
     constexpr Word get(std::string_view str);
-    // hash must match wordHash()
+    // hash must match Word::hash()
     constexpr Word getWithHash(std::string_view str, uint32_t hash);
-    constexpr Word insertKeyword(std::string_view str);
+    constexpr Word getInIdRange(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId);
 
     constexpr std::string_view view(Word word) const;
 
@@ -70,7 +70,10 @@ public:
 };
 
 // the table must have at least one free slot
-constexpr Word WordStringTable::insertInternal(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId) {
+constexpr Word WordStringTable::getInIdRange(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId) {
+    if (str.empty())
+        return Word();
+
     LookupState state = beginLookup(hash);
     for (;;) {
         Entry& entry = entries[state.bucket];
@@ -165,14 +168,7 @@ constexpr Word WordStringTable::get(std::string_view str) {
 constexpr Word WordStringTable::getWithHash(std::string_view str, uint32_t hash) {
     if (str.empty())
         return Word();
-    return insertInternal(str, hash, 1, Word::MAX_ID + 1);
-}
-constexpr Word WordStringTable::insertKeyword(std::string_view str) {
-    uint32_t hash = Word::hash(str);
-    VERIFY(hash != 0);
-    Word word = insertInternal(str, hash, 0, 1);
-    VERIFY(word.id() == 0);
-    return word;
+    return getInIdRange(str, hash, 0, Word::MAX_ID + 1);
 }
 constexpr std::string_view WordStringTable::view(Word word) const {
     if (word.empty())
@@ -182,41 +178,59 @@ constexpr std::string_view WordStringTable::view(Word word) const {
     return getStorage(entries[result.bucket].payload);
 }
 
+namespace detail {
+
 struct WrappedWordStringTable : WordStringTable {
     using WordStringTable::WordStringTable;
     constexpr ~WrappedWordStringTable() { clearPointers(); }
 };
+
 template<int_t N>
-struct ConstWordStringTableKeyword {
+struct ConstEntry {
     char buffer[N] = {};
-    constexpr ConstWordStringTableKeyword(const char* s) { std::copy_n(s, N, buffer); }
+    size_t firstValidId;
+    size_t firstInvalidId;
+    constexpr ConstEntry(const char* s, size_t firstValidId, size_t firstInvalidId)
+        : firstValidId(firstValidId), firstInvalidId(firstInvalidId) {
+        std::copy_n(s, N, buffer);
+    }
 };
 template<int_t N>
 constexpr auto keyword(const char (&s)[N]) { return ConstWordStringTableKeyword<N>(s); }
+
 template<typename T>
-struct ConstWordStringTableString;
+struct ConstEntryTrait;
 template<int_t N>
-struct ConstWordStringTableString<char[N]> {
+struct ConstEntryTrait<char[N]> {
     static constexpr int_t LENGTH = N - 1;
     static constexpr void insert(WordStringTable& table, const char (&s)[N]) {
         table.get(std::string_view(s, LENGTH));
     }
 };
 template<int_t N>
-struct ConstWordStringTableString<ConstWordStringTableKeyword<N>> {
+struct ConstEntryTrait<ConstEntry<N>> {
     static constexpr int_t LENGTH = N - 1;
-    static constexpr void insert(WordStringTable& table, const ConstWordStringTableKeyword<N>& s) {
-        table.insertKeyword(std::string_view(s.buffer, LENGTH));
+    static constexpr void insert(WordStringTable& table, const ConstEntry<N>& s) {
+        auto str = std::string_view(s.buffer, LENGTH);
+        table.getInIdRange(str, Word::hash(str), s.firstValidId, s.firstInvalidId);
     }
 };
+
+}
+
+template<int_t N>
+constexpr auto wordInIdRange(const char (&s)[N], size_t firstValidId, size_t firstInvalidId) {
+    return detail::ConstEntry<N>(s, firstValidId, firstInvalidId);
+}
+
 template<typename... Ts>
 struct ConstWordStringTable {
 private:
-    std::array<char, (alignmentCeil(ConstWordStringTableString<Ts>::LENGTH, 2) + ...) + 2 * sizeof...(Ts)> stringStorage = {};
+    std::array<char, (alignmentCeil(detail::ConstEntryTrait<Ts>::LENGTH, 2) + ...) + 2 * sizeof...(Ts)> stringStorage = {};
     std::array<WordTable::Entry, std::bit_ceil(static_cast<size_t>(sizeof...(Ts) / WordTable::MAX_LOAD_RATIO.ratio() + 0.5))> entryStorage = {};
 
-    constexpr WrappedWordStringTable get() const {
-        return WrappedWordStringTable(const_cast<decltype(entryStorage)&>(entryStorage),
+    constexpr auto get() const {
+        return detail::WrappedWordStringTable(const_cast<decltype(entryStorage)&>(entryStorage),
             const_cast<decltype(stringStorage)&>(stringStorage), sizeof...(Ts), stringStorage.size());
     }
     friend class WordStringTable;
@@ -224,13 +238,13 @@ private:
 public:
     constexpr ConstWordStringTable(const Ts&... strs) {
         WordStringTable table(entryStorage, stringStorage, 0, 0);
-        (ConstWordStringTableString<Ts>::insert(table, strs), ...);
+        (detail::ConstEntryTrait<Ts>::insert(table, strs), ...);
         VERIFY(table.stringStorageOffset == stringStorage.size());
         VERIFY(table.entryCount() == (int_t)sizeof...(Ts));
         table.clearPointers();
     }
     consteval Word operator[](std::string_view str) const {
-        WrappedWordStringTable table = get();
+        auto table = get();
         Word word = table.get(str);
         return word;
     }

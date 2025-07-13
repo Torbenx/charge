@@ -336,7 +336,6 @@ struct Generator : Util {
     void visitPrimaryExpr();
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
-    static void generateBuiltins(Context& context);
 
     std::optional<ProgramHandle> baseProgram(Constant value);
     FoldBase asFoldBase(Constant value);

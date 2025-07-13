@@ -5,69 +5,60 @@
 namespace parse {
 
 inline constexpr ConstWordStringTable words {
-    keyword("analysis"),
-    keyword("assert"),
-    keyword("assign"),
-    keyword("break"),
-    keyword("catch"),
-    keyword("const"),
-    keyword("continue"),
-    keyword("destroy"),
-    keyword("discard"),
-    keyword("do"),
-    keyword("elif"),
-    keyword("else"),
-    keyword("enum"),
-    keyword("fn"),
-    keyword("for"),
-    keyword("forward"),
-    keyword("guard"),
-    keyword("has"),
-    keyword("if"),
-    keyword("impl"),
-    keyword("incomplete"),
-    keyword("let"),
-    keyword("loop"),
-    keyword("match"),
-    keyword("namespace"),
-    keyword("object"),
-    keyword("open"),
-    keyword("property"),
-    keyword("return"),
-    keyword("shared"),
-    keyword("static"),
-    keyword("struct"),
-    keyword("template"),
-    keyword("trait"),
-    keyword("try"),
-    keyword("unique"),
-    keyword("var"),
-    keyword("virtual"),
-    keyword("while"),
-    keyword("with"),
-    "bool",
-    "const_shared_ref",
-    "const_unique_ref",
-    "error",
-    "expression_category",
-    "false",
-    "function_id",
-    "function_signature",
-    "member_ptr",
-    "member_type",
-    "parent_type",
-    "pointee_type",
-    "ptr",
-    "self",
-    "self_type",
-    "shared_ref",
-    "sig",
-    "template_id",
-    "template_signature",
-    "true",
-    "type",
-    "unique_ref",
-    "value",
+    wordInIdRange("assert", 0, 1),
+    wordInIdRange("break", 0, 1),
+    wordInIdRange("catch", 0, 1),
+    wordInIdRange("const", 0, 1),
+    wordInIdRange("continue", 0, 1),
+    wordInIdRange("destroy", 0, 1),
+    wordInIdRange("discard", 0, 1),
+    wordInIdRange("do", 0, 1),
+    wordInIdRange("elif", 0, 1),
+    wordInIdRange("else", 0, 1),
+    wordInIdRange("for", 0, 1),
+    wordInIdRange("if", 0, 1),
+    wordInIdRange("impl", 0, 1),
+    wordInIdRange("let", 0, 1),
+    wordInIdRange("return", 0, 1),
+    wordInIdRange("shared", 0, 1),
+    wordInIdRange("static", 0, 1),
+    wordInIdRange("try", 0, 1),
+    wordInIdRange("unique", 0, 1),
+    wordInIdRange("var", 0, 1),
+    wordInIdRange("while", 0, 1),
+    wordInIdRange("enum", 1, 2),
+    wordInIdRange("fn", 1, 2),
+    wordInIdRange("has", 1, 2),
+    wordInIdRange("incomplete", 1, 2),
+    wordInIdRange("namespace", 1, 2),
+    wordInIdRange("open", 1, 2),
+    wordInIdRange("struct", 1, 2),
+    wordInIdRange("template", 1, 2),
+    wordInIdRange("trait", 1, 2),
+    wordInIdRange("virtual", 1, 2),
+    wordInIdRange("bool", 2, Word::MAX_ID + 1),
+    wordInIdRange("const_shared_ref", 2, Word::MAX_ID + 1),
+    wordInIdRange("const_unique_ref", 2, Word::MAX_ID + 1),
+    wordInIdRange("error", 2, Word::MAX_ID + 1),
+    wordInIdRange("expression_category", 2, Word::MAX_ID + 1),
+    wordInIdRange("false", 2, Word::MAX_ID + 1),
+    wordInIdRange("function_id", 2, Word::MAX_ID + 1),
+    wordInIdRange("function_signature", 2, Word::MAX_ID + 1),
+    wordInIdRange("member_ptr", 2, Word::MAX_ID + 1),
+    wordInIdRange("member_type", 2, Word::MAX_ID + 1),
+    wordInIdRange("parent_type", 2, Word::MAX_ID + 1),
+    wordInIdRange("pointee_type", 2, Word::MAX_ID + 1),
+    wordInIdRange("ptr", 2, Word::MAX_ID + 1),
+    wordInIdRange("self", 2, Word::MAX_ID + 1),
+    wordInIdRange("self_type", 2, Word::MAX_ID + 1),
+    wordInIdRange("shared_ref", 2, Word::MAX_ID + 1),
+    wordInIdRange("sig", 2, Word::MAX_ID + 1),
+    wordInIdRange("template_id", 2, Word::MAX_ID + 1),
+    wordInIdRange("template_signature", 2, Word::MAX_ID + 1),
+    wordInIdRange("true", 2, Word::MAX_ID + 1),
+    wordInIdRange("type", 2, Word::MAX_ID + 1),
+    wordInIdRange("unique_ref", 2, Word::MAX_ID + 1),
+    wordInIdRange("value", 2, Word::MAX_ID + 1),
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -119,9 +110,7 @@ enum class LexerToken : uint8_t {
     EqualGreater, // =>
     LessEqualGreater, // <=>
     MinusGreater, // ->
-    Analysis, // analysis
     Assert, // assert
-    Assign, // assign
     Break, // break
     Catch, // catch
     Const, // const
@@ -131,34 +120,17 @@ enum class LexerToken : uint8_t {
     Do, // do
     Elif, // elif
     Else, // else
-    Enum, // enum
-    Fn, // fn
     For, // for
-    Forward, // forward
-    Guard, // guard
-    Has, // has
     If, // if
     Impl, // impl
-    Incomplete, // incomplete
     Let, // let
-    Loop, // loop
-    Match, // match
-    Namespace, // namespace
-    Object, // object
-    Open, // open
-    Property, // property
     Return, // return
     Shared, // shared
     Static, // static
-    Struct, // struct
-    Template, // template
-    Trait, // trait
     Try, // try
     Unique, // unique
     Var, // var
-    Virtual, // virtual
     While, // while
-    With, // with
     Identifier,
     Literal,
     EOS
@@ -170,6 +142,7 @@ enum class State {
     AfterExpression,
     CommaAfterExpression,
     CommaElse,
+    Argument,
     CheckDesignatedArgument,
     MaybeDesignatedArgument,
     FirstArgumentParen,

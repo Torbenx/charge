@@ -102,12 +102,8 @@ std::string_view nameString(LexerToken token) {
         return "LessEqualGreater";
     case LexerToken::MinusGreater:
         return "MinusGreater";
-    case LexerToken::Analysis:
-        return "Analysis";
     case LexerToken::Assert:
         return "Assert";
-    case LexerToken::Assign:
-        return "Assign";
     case LexerToken::Break:
         return "Break";
     case LexerToken::Catch:
@@ -126,62 +122,28 @@ std::string_view nameString(LexerToken token) {
         return "Elif";
     case LexerToken::Else:
         return "Else";
-    case LexerToken::Enum:
-        return "Enum";
-    case LexerToken::Fn:
-        return "Fn";
     case LexerToken::For:
         return "For";
-    case LexerToken::Forward:
-        return "Forward";
-    case LexerToken::Guard:
-        return "Guard";
-    case LexerToken::Has:
-        return "Has";
     case LexerToken::If:
         return "If";
     case LexerToken::Impl:
         return "Impl";
-    case LexerToken::Incomplete:
-        return "Incomplete";
     case LexerToken::Let:
         return "Let";
-    case LexerToken::Loop:
-        return "Loop";
-    case LexerToken::Match:
-        return "Match";
-    case LexerToken::Namespace:
-        return "Namespace";
-    case LexerToken::Object:
-        return "Object";
-    case LexerToken::Open:
-        return "Open";
-    case LexerToken::Property:
-        return "Property";
     case LexerToken::Return:
         return "Return";
     case LexerToken::Shared:
         return "Shared";
     case LexerToken::Static:
         return "Static";
-    case LexerToken::Struct:
-        return "Struct";
-    case LexerToken::Template:
-        return "Template";
-    case LexerToken::Trait:
-        return "Trait";
     case LexerToken::Try:
         return "Try";
     case LexerToken::Unique:
         return "Unique";
     case LexerToken::Var:
         return "Var";
-    case LexerToken::Virtual:
-        return "Virtual";
     case LexerToken::While:
         return "While";
-    case LexerToken::With:
-        return "With";
     case LexerToken::Identifier:
         return "Identifier";
     case LexerToken::Literal:
@@ -203,6 +165,8 @@ std::string_view nameString(State state) {
         return "CommaAfterExpression";
     case State::CommaElse:
         return "CommaElse";
+    case State::Argument:
+        return "Argument";
     case State::CheckDesignatedArgument:
         return "CheckDesignatedArgument";
     case State::MaybeDesignatedArgument:

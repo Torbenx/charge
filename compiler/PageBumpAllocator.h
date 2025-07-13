@@ -36,6 +36,8 @@ struct PageBumpAllocator {
     const T& operator[](int_t index) const { return m_begin[index]; }
     int_t size() const { return offsetBytes / sizeof(T); }
     int_t capacity() const { return capacityBytes / sizeof(T); }
+    operator std::span<T>() {  return { data(), (size_t)size() }; }
+    operator std::span<const T>() const {  return { data(), (size_t)size() }; }
 
     T* allocate() {
         uint32_t oldOffsetBytes = offsetBytes;

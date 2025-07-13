@@ -16,4 +16,5 @@ target_sources(compiler
     Scope.h
     Util.cpp
     Util.h
+    IdentifierTable.h
 )

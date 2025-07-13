@@ -270,7 +270,25 @@ struct CheckExprParser {
 
 }
 
-struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHandler {
+struct ParseErrorHandler : parse::ErrorHandler {
+    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
+        fmt::println("");
+        fmt::println(
+            "Invalid token '{}' for state '{}' and scope '{}' on line {}",
+            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.parseOutput.lines.size());
+        fmt::println("scopes:");
+        for (;;) {
+            fmt::println("  {}", parse::nameString(*scopes));
+            if (*scopes == parse::ScopeKind::Invalid)
+                break;
+            scopes -= 1;
+        }
+        fmt::println("");
+        VERIFY_NOT_REACHED();
+    }
+};
+
+struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHandler {
     struct Pair {
         Word key;
         std::string_view value;
@@ -307,8 +325,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
     sema::Context context;
     CommandQueue commandQueue;
 
-    TestInstrumenter(std::string_view source)
-        : context { {}, source } { sema::Generator::generateBuiltins(context); }
+    TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
+        : context { imports, source } { }
 
     [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
         VERIFY_NOT_REACHED();
@@ -485,22 +503,6 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, parse::ErrorHa
         }
         return cmd;
     }
-
-    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
-        fmt::println("");
-        fmt::println(
-            "Invalid token '{}' for state '{}' and scope '{}' on line {}",
-            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.parseOutput.lines.size());
-        fmt::println("scopes:");
-        for (;;) {
-            fmt::println("  {}", parse::nameString(*scopes));
-            if (*scopes == parse::ScopeKind::Invalid)
-                break;
-            scopes -= 1;
-        }
-        fmt::println("");
-        VERIFY_NOT_REACHED();
-    }
 };
 
 std::string readFile(std::filesystem::path file) {
@@ -520,11 +522,44 @@ std::string readFile(std::filesystem::path file) {
     return sourceBuffer;
 }
 
+TEST(Charge, BuiltinModule) {
+    namespace fs = std::filesystem;
+    fs::path testDir { COMPILER_TEST_DIR };
+    auto builtinModule = testDir / "builtins.chrg";
+    EXPECT_TRUE(fs::is_regular_file(builtinModule));
+    auto sourceBuffer = readFile(builtinModule);
+
+    sema::Context context({}, sourceBuffer);
+    ParseErrorHandler errorHandler;
+    parse::parseImpl(sourceBuffer.data(), context, &errorHandler);
+    for (int_t builtinId = 0; builtinId < (int_t)sema::BuiltinId::COUNT; builtinId++) {
+        auto builtin = static_cast<sema::BuiltinId>(builtinId);
+        sema::Generator::signatureCheck(context, builtin);
+    }
+
+    context.checkBuiltins();
+}
+
 TEST(Charge, Files) {
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
 
-    for (const auto& entry : fs::directory_iterator(testDir)) {
+    auto builtinModule = testDir / "builtins.chrg";
+    auto builtinModuleSrc = readFile(builtinModule);
+    sema::Context builtinContext({}, builtinModuleSrc);
+    {
+        ParseErrorHandler errorHandler;
+        parse::parseImpl(builtinModuleSrc.data(), builtinContext, &errorHandler);
+        for (int_t builtinId = 0; builtinId < (int_t)sema::BuiltinId::COUNT; builtinId++) {
+            auto builtin = static_cast<sema::BuiltinId>(builtinId);
+            sema::Generator::signatureCheck(builtinContext, builtin);
+        }
+        builtinContext.checkBuiltins();
+    }
+    auto builtinExport = builtinContext.exportModule();
+    std::span<const sema::ModuleImport> dependencies = { &builtinExport, 1 };
+
+    for (const auto& entry : fs::directory_iterator(testDir / "files")) {
         if (!entry.is_regular_file())
             continue;
         if (entry.path().extension().string() != ".chrg")
@@ -532,7 +567,7 @@ TEST(Charge, Files) {
 
         auto sourceBuffer = readFile(entry.path());
 
-        TestInstrumenter test(sourceBuffer);
+        TestInstrumenter test(dependencies, sourceBuffer);
         test.runTest();
     }
 }
@@ -544,7 +579,6 @@ TEST(Charge, DISABLED_Benchmark) {
 
     auto sourceBuffer = readFile(file);
 
-    sema::ModuleInput input;
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
         parse::parseImpl(context.parseOutput.source.data(), context, nullptr);

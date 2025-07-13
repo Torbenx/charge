@@ -34,6 +34,12 @@ struct ModuleHandle {
 
 struct ProgramHandle {
     uint32_t m_id = -1;
+    constexpr ProgramHandle() = default;
+    constexpr ProgramHandle(uint32_t id)
+        : m_id(id) { }
+    constexpr ProgramHandle(BuiltinId id)
+        : m_id(std::to_underlying(id)) { }
+
     constexpr uint32_t id() const { return m_id; }
 
     bool operator==(const ProgramHandle&) const = default;
@@ -88,7 +94,7 @@ struct Constant {
     constexpr explicit Constant(ExpressionCategory category)
         : Constant(ConstantKind::ExpressionCategoryLiteral, std::to_underlying(category)) { }
     constexpr Constant(BuiltinId id)
-        : Constant(ProgramHandle(std::to_underlying(id))) { }
+        : Constant(ProgramHandle(id)) { }
 
     static Constant fromUint(uint32_t x) { return std::bit_cast<Constant>(x); }
     uint32_t toUint() const { return std::bit_cast<uint32_t>(*this); }

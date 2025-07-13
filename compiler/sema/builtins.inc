@@ -15,8 +15,6 @@ BUILTIN_TYPE(type)
 
 BUILTIN_ENUM(bool, BooleanLiteral)
 
-BUILTIN_TYPE(error)
-
 BUILTIN_TYPE(namespace)
 
 BUILTIN_ENUM(expression_category, ExpressionCategoryLiteral)

@@ -10,10 +10,9 @@ punctuationTokens = [
     ",", ".", ":", "::", ";", "=>", "<=>", "->",
 ]
 
+# Words that are their own token
 keywords = [
-    "analysis",
     "assert",
-    "assign",
     "break",
     "catch",
     "const",
@@ -23,36 +22,34 @@ keywords = [
     "do",
     "elif",
     "else",
-    "enum",
-    "fn",
     "for",
-    "forward",
-    "guard",
-    "has",
     "if",
     "impl",
-    "incomplete",
     "let",
-    "loop",
-    "match",
-    "namespace",
-    "object",
-    "open",
-    "property",
     "return",
     "shared",
     "static",
-    "struct",
-    "template",
-    "trait",
     "try",
     "unique",
     "var",
-    "virtual",
     "while",
-    "with",
 ]
-specialWords = [
+# Identifiers that have spacial meaning in some context
+specialIdentifiers = [
+    "enum",
+    "fn",
+    "has",
+    "incomplete",
+    "namespace",
+    "open",
+    "struct",
+    "template",
+    "trait",
+    "virtual",
+]
+# Identifiers that have no special meaning in any context
+# but still need to be available at compile time.
+regularIdentifiers = [
     "bool",
     "const_shared_ref",
     "const_unique_ref",
@@ -93,6 +90,9 @@ def punctuationCppName(punc):
 def keywordCppName(keyword):
     return keyword[0].upper() + keyword[1:]
 
+def specialIdentifierCppName(identifier):
+    return identifier[0].upper() + identifier[1:]
+
 def stateCppName(name):
     parts = name.split('_')
     parts = [p[0].upper() + p[1:] for p in parts]
@@ -131,6 +131,13 @@ class KeywordCase(Case):
         self.keyword = keyword
     def cppName(self):
         return keywordCppName(self.keyword)
+
+class SpecialIdentifierCase(Case):
+    def __init__(self, identifier, instructions):
+        super().__init__(instructions)
+        self.identifier = identifier
+    def cppName(self):
+        return specialIdentifierCppName(self.identifier)
 
 class IdentifierCase(Case):
     def __init__(self, instructions):
@@ -255,6 +262,15 @@ class CallArgumentInstruction:
         return ret
 
 @dataclasses.dataclass
+class UpdateCallArgumentInstruction:
+    nameExpr: str | None
+    def format(self):
+        ret = "callArgument"
+        if not self.nameExpr is None:
+            ret += " " + self.nameExpr
+        return ret
+
+@dataclasses.dataclass
 class EmitCallTokenInstruction:
     tokenKindExpr: str
     def format(self):
@@ -302,11 +318,23 @@ class State:
     def keywordCases(self) -> [KeywordCase]:
         return [c for c in self.cases if type(c) is KeywordCase]
 
+    def specialIdentifierCase(self, identifier: str) -> SpecialIdentifierCase | None:
+        for c in self.cases:
+            if type(c) is SpecialIdentifierCase and c.identifier == identifier:
+                return c
+        return None
+
+    def specialIdentifierCases(self) -> [SpecialIdentifierCase]:
+        return [c for c in self.cases if type(c) is SpecialIdentifierCase]
+
     def identifierCase(self) -> IdentifierCase | None:
         for c in self.cases:
             if type(c) is IdentifierCase:
                 return c
         return None
+
+    def hasWordCase(self):
+        return self.identifierCase() or self.keywordCases() or self.specialIdentifierCases()
 
     def literalCase(self) -> LiteralCase | None:
         for c in self.cases:
@@ -421,7 +449,12 @@ class Parser:
                 keyword = self.parseWord()
                 self.advanceLine()
                 instructions = self.parseInstructions()
-                cases.append(KeywordCase(keyword, instructions))
+                if keyword in keywords:
+                    cases.append(KeywordCase(keyword, instructions))
+                elif keyword in specialIdentifiers:
+                    cases.append(SpecialIdentifierCase(keyword, instructions))
+                else:
+                    raise Exception(f"'{keyword}' is neither a keyword nor a special identifier")
             elif caseKind == "identifier":
                 self.advanceLine()
                 instructions = self.parseInstructions()
@@ -512,6 +545,12 @@ class Parser:
                 if not self.lineEmpty():
                     nameExpr = self.parseExpr()
                 instructions.append(CallArgumentInstruction(nameExpr))
+                self.advanceLine()
+            elif first == "updateCallArgument":
+                nameExpr = None
+                if not self.lineEmpty():
+                    nameExpr = self.parseExpr()
+                instructions.append(UpdateCallArgumentInstruction(nameExpr))
                 self.advanceLine()
             elif first == "emitCallToken":
                 instructions.append(EmitCallTokenInstruction(self.parseExpr()))
@@ -641,6 +680,29 @@ def rememberState(state):
         line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
+def collectPossibleThenStatesFromInstructions(instructions, result):
+    for inst in instructions:
+        if type(inst) is IfScopeInstruction:
+            collectPossibleThenStatesFromInstructions(inst.instructions, result)
+        if type(inst) is ThenInstruction:
+            if not inst.newState in result:
+                result.add(inst.newState)
+                collectPossibleThenStatesInto(findState(inst.newState), result)
+
+def collectPossibleThenStatesInto(state, result):
+    if state.name == "error":
+        return
+    if not state.thenCase() is None:
+        collectPossibleThenStatesFromInstructions(state.thenCase().instructions, result)
+    if not state.thenState in result:
+        result.add(state.thenState)
+        collectPossibleThenStatesInto(findState(state.thenState), result)
+
+def collectPossibleThenStates(state):
+    result = set()
+    collectPossibleThenStatesInto(state, result)
+    return result
+
 def readWord():
     line("{")
     with indent():
@@ -649,9 +711,30 @@ def readWord():
         line("this_identifier = wordAndPos.word;")
     line("}")
 
+def collectKeywordCases(state):
+    result = {}
+    seenIdentifierState = None
+    s = state
+    while s.name != "error":
+        if not s.identifierCase() is None:
+            seenIdentifierState = s
+        for c in s.keywordCases():
+            if not c.keyword in result:
+                result[c.keyword] = c
+        for c in s.specialIdentifierCases():
+            if not c.identifier in result:
+                result[c.identifier] = c
+        if not s.thenCase() is None:
+            if not seenIdentifierState is None:
+                raise Exception(f"starting from {state.name} identifier case in {seenIdentifierState.name} may shadow keywords due to then case in {s.name}")
+            break
+        s = findState(s.thenState)
+    return result
+
 def generateWordCase(state):
     readWord()
-    line("if (this_identifier.keyword()) {")
+    # Keywords
+    line("if (sema::isKeyword(this_identifier)) {")
     with indent():
         if state.keywordCases():
             labelLine("LABEL_MAYBE_UNUSED " + state.name + "$keyword_check:")
@@ -665,7 +748,38 @@ def generateWordCase(state):
         else:
             recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
     line("}")
-    recurse(state, lambda s: s.identifierCase(), lambda case: generateCaseBody(case))
+
+    labelLine("LABEL_MAYBE_UNUSED " + state.name + "$identifier_case:")
+    # Special identifiers
+    line("if (sema::isSpecialIdentifier(this_identifier)) {")
+    with indent():
+        s = state
+        seenIdentifierState = None
+        while s.name != "error":
+            if not s.identifierCase() is None:
+                seenIdentifierState = s
+            for c in s.specialIdentifierCases():
+                line("if (this_identifier == words[\"" + c.identifier + "\"]) {")
+                with indent():
+                    ss = state
+                    while not ss is s:
+                        line("// -> " + ss.thenState)
+                        ss = findState(ss.thenState)
+                    generateCaseBody(c)
+                line("}")
+            if not s.thenCase() is None:
+                if not seenIdentifierState is None:
+                    print("Checking " + state.name)
+                    for thenState in collectPossibleThenStates(s):
+                        if findState(thenState).keywordCases() or findState(thenState).specialIdentifierCases():
+                            raise Exception(f"starting from {state.name} identifier case in {seenIdentifierState.name} will shadow keywords in {thenState} due to then case in {s.name}")
+                break
+            s = findState(s.thenState)
+    line("}")
+    if state.identifierCase():
+        generateCaseBody(state.identifierCase())
+    else:
+        recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$identifier_case;"))
 
 errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
 errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
@@ -775,7 +889,7 @@ def generateSwitchState(state):
     line("case '$':")
     line("case '_':")
     with indent():
-        line("goto " + state.name + "$word_case;")
+        line("goto " + state.name + "$word_case_entry;")
 
     # default
     line("default: {")
@@ -787,14 +901,14 @@ def generateSwitchState(state):
 
     line("VERIFY_NOT_REACHED();")
 
-    labelLine(state.name + "$word_case:")
+    labelLine(state.name + "$word_case_entry:")
     generateWordCase(state)
 
 def generateLinearState(state):
     for c in state.punctuationCases():
         checkForPunctuation(c.punctuation, lambda: generateCaseBody(c))
 
-    if state.keywordCases() or state.identifierCase():
+    if state.hasWordCase():
         line("if (isWordFirstCharacter(tokEnd[0])) {")
         with indent():
             generateWordCase(state)
@@ -905,6 +1019,11 @@ def generateInstructions(case, instructions, thenHandler):
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
             line("argumentPosition = addCallArgument(argumentPosition, " + nameExpr + ");")
+        elif type(inst) is UpdateCallArgumentInstruction:
+            nameExpr = "Word()"
+            if not inst.nameExpr is None:
+                nameExpr = inst.nameExpr
+            line("updateCallArgument(argumentPosition, " + nameExpr + ");")
         elif type(inst) is EndCallInstruction:
             line("argumentPosition = endCall(argumentPosition, state);")
         elif type(inst) is ErrorInstruction:
@@ -1011,9 +1130,11 @@ lineNoIndent()
 line("inline constexpr ConstWordStringTable words {")
 with indent():
     for keyword in keywords:
-        line("keyword(\"" + keyword + "\"),")
-    for word in specialWords:
-        line("\"" + word + "\",")
+        line("wordInIdRange(\"" + keyword + "\", 0, 1),")
+    for identifier in specialIdentifiers:
+        line("wordInIdRange(\"" + identifier + "\", 1, 2),")
+    for identifier in regularIdentifiers:
+        line("wordInIdRange(\"" + identifier + "\", 2, Word::MAX_ID + 1),")
 line("};")
 
 line("enum class LexerToken : uint8_t {")

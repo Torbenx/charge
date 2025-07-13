@@ -1,6 +1,7 @@
 #pragma once
 
 #include <WordTranslationTable.h>
+#include <sema/IdentifierTable.h>
 #include <parse/Output.h>
 #include <sema/Program.h>
 #include <sema/Scope.h>
@@ -10,15 +11,15 @@ namespace sema {
 
 inline constexpr size_t MODULE_PROGRAM_ID_ALIGNMENT = 256;
 
-struct ModuleInput {
+struct ModuleImport {
     struct ModuleReference {
         ModuleHandle module;
         uint32_t programIdBegin;
         uint32_t programIdEnd;
     };
 
-    const WordStringTable* wordTable;
-    std::span<const ModuleReference> modules;
+    const IdentifierTable* wordTable;
+    std::vector<ModuleReference> modules;
     std::span<ProgramUnion> ownPrograms;
     std::span<const ModuleHandle> programModules;
     std::span<Namespace> namespaces;
@@ -36,8 +37,8 @@ struct Context {
     };
 
     parse::Output parseOutput;
-    WordStringTable wordTable { parse::words };
-    PageBumpAllocator<ModuleHandle> programModules;
+    IdentifierTable wordTable { parse::words };
+    std::vector<ModuleHandle> programModules;
     PageBumpAllocator<ProgramUnion> programStorage;
     PageBumpAllocator<Namespace> namespaces;
     std::vector<ModuleState> modules;
@@ -48,12 +49,12 @@ struct Context {
     std::vector<ScopeStackEntry> m_scopeStack;
     std::vector<ProgramHandle> m_implDeclarations;
 
-    Context(std::span<const ModuleInput> inputs, std::string_view source)
+    Context(std::span<const ModuleImport> imports, std::string_view source)
         : parseOutput(source) {
-        initialize(inputs);
+        initialize(imports);
     }
-
-    void initialize(std::span<const ModuleInput> inputs);
+    void initialize(std::span<const ModuleImport>);
+    ModuleImport exportModule();
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
@@ -68,6 +69,7 @@ struct Context {
     DeclarationValue pushEnumValueScope(Word name, parse::TokenHandle parseLocation, SourceLocation location);
 
     ModuleHandle thisModule() const { return { static_cast<uint16_t>(modules.size() - 1) }; }
+    bool isBuiltinModule() const { return modules.size() == 1; }
 
     ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location);
     Program* program(ProgramHandle handle) {
@@ -120,6 +122,8 @@ struct Context {
 
     std::optional<Program*> firstDeclarationAfter(SourceLocation location);
     std::optional<Program*> lastDeclarationBefore(SourceLocation location);
+
+    void checkBuiltins();
 };
 
 }

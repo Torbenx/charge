@@ -93,6 +93,12 @@ static Word* addCallArgument(Word* position, Word name) {
     return position;
 }
 
+static void updateCallArgument(Word* position, Word name) {
+    uint32_t count = position[0].toUint();
+    VERIFY(count != 0);
+    position[-1] = name;
+}
+
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto& outputArgs = state.parseOutput.callArguments;
@@ -292,8 +298,10 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
         goto comma_after_expression$no_emit;
     case State::CommaElse:
         goto comma_else$no_emit;
+    case State::Argument:
+        goto argument$no_emit;
     case State::CheckDesignatedArgument:
-        goto check_designated_argument$no_emit;
+        VERIFY_NOT_REACHED();
     case State::MaybeDesignatedArgument:
         goto maybe_designated_argument$no_emit;
     case State::FirstArgumentParen:
@@ -887,19 +895,19 @@ expression$as_then:
     case '#':
     case '$':
     case '_':
-        goto expression$word_case;
+        goto expression$word_case_entry;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-expression$word_case:
+expression$word_case_entry:
     {
         auto wordAndPos = readWord(tokEnd, state);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (this_identifier.keyword()) {
+    if (sema::isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED expression$keyword_check:
         if (this_identifier == words["if"]) {
             // pushScope ScopeKind::IfExpr
@@ -909,6 +917,9 @@ expression$word_case:
         }
         // -> error
         goto error$keyword_check;
+    }
+LABEL_MAYBE_UNUSED expression$identifier_case:
+    if (sema::isSpecialIdentifier(this_identifier)) {
     }
     // emitToken TokenKind::IdentifierExpr, this_identifier
     carriedEmitTokenKind = TokenKind::IdentifierExpr;
@@ -1811,26 +1822,27 @@ after_expression$as_then:
     case '#':
     case '$':
     case '_':
-        goto after_expression$word_case;
+        goto after_expression$word_case_entry;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-after_expression$word_case:
+after_expression$word_case_entry:
     {
         auto wordAndPos = readWord(tokEnd, state);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (this_identifier.keyword()) {
+    if (sema::isKeyword(this_identifier)) {
         // -> error
         goto error$keyword_check;
     }
+LABEL_MAYBE_UNUSED after_expression$identifier_case:
+    if (sema::isSpecialIdentifier(this_identifier)) {
+    }
     // -> error
-    // error
-    errorToken = LexerToken::Identifier;
-    goto handle_parse_error;
+    goto error$identifier_case;
 
     // LinearState comma_after_expression
 comma_after_expression$no_emit:
@@ -1919,7 +1931,7 @@ comma_after_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED comma_after_expression$keyword_check:
             if (this_identifier == words["else"]) {
                 // next comma_else
@@ -1984,25 +1996,25 @@ comma_after_expression$no_emit:
             }
             // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
             if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
-                // then check_designated_argument
+                // then argument
                 // callArgument
                 argumentPosition = addCallArgument(argumentPosition, Word());
                 // emitToken TokenKind::CallArgument
                 emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+                // -> check_designated_argument
                 // -> expression
                 goto expression$keyword_check;
             }
             // -> error
             goto error$keyword_check;
         }
+    LABEL_MAYBE_UNUSED comma_after_expression$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // ifScope ScopeKind::Parameter
         if (scopePosition[0] == ScopeKind::Parameter) {
             // then parameter
-            // emitToken TokenKind::LetValueDecl, this_identifier
-            carriedEmitTokenKind = TokenKind::LetValueDecl;
-            carriedEmitTokenData = this_identifier.toUint();
-            // next after_variable_declaration_id
-            goto after_variable_declaration_id$with_emit;
+            goto parameter$identifier_case;
         }
         // ifScope ScopeKind::VariableType
         if (scopePosition[0] == ScopeKind::VariableType) {
@@ -2029,11 +2041,7 @@ comma_after_expression$no_emit:
             // emitToken TokenKind::ExpressionStmt
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
-            // emitToken TokenKind::LetValueDecl, this_identifier
-            carriedEmitTokenKind = TokenKind::LetValueDecl;
-            carriedEmitTokenData = this_identifier.toUint();
-            // next after_variable_declaration_id
-            goto after_variable_declaration_id$with_emit;
+            goto parameter$identifier_case;
         }
         // ifScope ScopeKind::RightExpr
         if (scopePosition[0] == ScopeKind::RightExpr) {
@@ -2058,24 +2066,20 @@ comma_after_expression$no_emit:
             // emitToken TokenKind::ExpressionStmt
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
-            // emitToken TokenKind::LetValueDecl, this_identifier
-            carriedEmitTokenKind = TokenKind::LetValueDecl;
-            carriedEmitTokenData = this_identifier.toUint();
-            // next after_variable_declaration_id
-            goto after_variable_declaration_id$with_emit;
+            goto parameter$identifier_case;
         }
         // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
         if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
-            // then check_designated_argument
-            // argumentName = this_identifier
-            argumentName = this_identifier;
-            // next maybe_designated_argument
-            goto maybe_designated_argument$no_emit;
+            // then argument
+            // callArgument
+            argumentPosition = addCallArgument(argumentPosition, Word());
+            // emitToken TokenKind::CallArgument
+            emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+            // -> check_designated_argument
+            goto check_designated_argument$identifier_case;
         }
         // -> error
-        // error
-        errorToken = LexerToken::Identifier;
-        goto handle_parse_error;
+        goto error$identifier_case;
     }
     // ifScope ScopeKind::Parameter
     if (scopePosition[0] == ScopeKind::Parameter) {
@@ -2136,8 +2140,8 @@ comma_after_expression$no_emit:
     }
     // ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
     if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
-        // then check_designated_argument
-        goto check_designated_argument$as_then;
+        // then argument
+        goto argument$as_then;
     }
     // then error
     goto error$as_then;
@@ -2158,11 +2162,20 @@ comma_else$no_emit:
     // then error
     goto error$as_then;
 
-    // LinearState check_designated_argument
-check_designated_argument$no_emit:
+    // LinearState argument
+argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
-    parseState = State::CheckDesignatedArgument;
+    parseState = State::Argument;
+argument$as_then:
+    // callArgument
+    argumentPosition = addCallArgument(argumentPosition, Word());
+    // emitToken TokenKind::CallArgument
+    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+    // then check_designated_argument
+    goto check_designated_argument$as_then;
+
+    // LinearState check_designated_argument
 check_designated_argument$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -2170,23 +2183,18 @@ check_designated_argument$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
-            // callArgument
-            argumentPosition = addCallArgument(argumentPosition, Word());
-            // emitToken TokenKind::CallArgument
-            emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+        if (sema::isKeyword(this_identifier)) {
             // -> expression
             goto expression$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED check_designated_argument$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // argumentName = this_identifier
         argumentName = this_identifier;
         // next maybe_designated_argument
         goto maybe_designated_argument$no_emit;
     }
-    // callArgument
-    argumentPosition = addCallArgument(argumentPosition, Word());
-    // emitToken TokenKind::CallArgument
-    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
     // then expression
     goto expression$as_then;
 
@@ -2200,18 +2208,11 @@ maybe_designated_argument$no_emit:
         if (next != '=' && next != '>') {
             tokEnd += 1;
             // callArgument argumentName
-            argumentPosition = addCallArgument(argumentPosition, argumentName);
-            // emitToken TokenKind::CallArgument, argumentName
-            carriedEmitTokenKind = TokenKind::CallArgument;
-            carriedEmitTokenData = argumentName.toUint();
+            updateCallArgument(argumentPosition, argumentName);
             // next expression
-            goto expression$with_emit;
+            goto expression$no_emit;
         }
     }
-    // callArgument
-    argumentPosition = addCallArgument(argumentPosition, Word());
-    // emitToken TokenKind::CallArgument
-    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
     // emitToken TokenKind::IdentifierExpr, argumentName
     emitToken(TokenKind::IdentifierExpr, tokBegin, argumentName.toUint(), state);
     // then after_expression
@@ -2234,8 +2235,8 @@ first_argument_paren$no_emit:
     }
     // pushScope ScopeKind::Paren
     scopePosition = pushScope(scopePosition, ScopeKind::Paren);
-    // then check_designated_argument
-    goto check_designated_argument$as_then;
+    // then argument
+    goto argument$as_then;
 
     // LinearState first_argument_square
 first_argument_square$no_emit:
@@ -2254,8 +2255,8 @@ first_argument_square$no_emit:
     }
     // pushScope ScopeKind::Square
     scopePosition = pushScope(scopePosition, ScopeKind::Square);
-    // then check_designated_argument
-    goto check_designated_argument$as_then;
+    // then argument
+    goto argument$as_then;
 
     // LinearState first_argument_brace
 first_argument_brace$no_emit:
@@ -2274,8 +2275,8 @@ first_argument_brace$no_emit:
     }
     // pushScope ScopeKind::Brace
     scopePosition = pushScope(scopePosition, ScopeKind::Brace);
-    // then check_designated_argument
-    goto check_designated_argument$as_then;
+    // then argument
+    goto argument$as_then;
 
     // LinearState access_punctuation
 access_punctuation$no_emit:
@@ -2288,9 +2289,12 @@ access_punctuation$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED access_punctuation$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken tokenKind, this_identifier
         carriedEmitTokenKind = tokenKind;
@@ -2336,7 +2340,7 @@ after_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_statement$keyword_check:
             if (this_identifier == words["else"]) {
                 // popScope ScopeKind::IfBranch
@@ -2369,12 +2373,14 @@ after_statement$no_emit:
                 // ifScope ScopeKind::Struct
                 if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
-                    goto member_declaration$keyword_check;
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // ifScope ScopeKind::Namespace
                 if (scopePosition[0] == ScopeKind::Namespace) {
                     // then namespace_declaration
-                    goto namespace_declaration$keyword_check;
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // ifScope ScopeKind::Enum
                 if (scopePosition[0] == ScopeKind::Enum) {
@@ -2393,12 +2399,14 @@ after_statement$no_emit:
                 // ifScope ScopeKind::Struct
                 if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
-                    goto member_declaration$keyword_check;
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // ifScope ScopeKind::Namespace
                 if (scopePosition[0] == ScopeKind::Namespace) {
                     // then namespace_declaration
-                    goto namespace_declaration$keyword_check;
+                    // -> templated_declaration
+                    goto templated_declaration$keyword_check;
                 }
                 // ifScope ScopeKind::Enum
                 if (scopePosition[0] == ScopeKind::Enum) {
@@ -2422,6 +2430,9 @@ after_statement$no_emit:
             // -> statement
             goto statement$keyword_check;
         }
+    LABEL_MAYBE_UNUSED after_statement$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // ifScope ScopeKind::FunctionBody
         if (scopePosition[0] == ScopeKind::FunctionBody) {
             // popScope ScopeKind::FunctionBody
@@ -2438,43 +2449,20 @@ after_statement$no_emit:
             // ifScope ScopeKind::Struct
             if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // commitDeclaration DeclarationKind::Member, this_identifier
-                this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
-                // emitToken TokenKind::MemberDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::MemberDecl;
-                carriedEmitTokenData = this_declaration.toUint();
-                // next after_variable_declaration_id
-                goto after_variable_declaration_id$with_emit;
+                goto member_declaration$identifier_case;
             }
             // ifScope ScopeKind::Namespace
             if (scopePosition[0] == ScopeKind::Namespace) {
                 // then namespace_declaration
-                // -> templated_declaration
-                // -> no_declaration
-                // -> error
-                // error
-                errorToken = LexerToken::Identifier;
-                goto handle_parse_error;
+                goto namespace_declaration$identifier_case;
             }
             // ifScope ScopeKind::Enum
             if (scopePosition[0] == ScopeKind::Enum) {
                 // then enum_value_declaration
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // commitDeclaration DeclarationKind::EnumValue, this_identifier
-                this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
-                // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
-                carriedEmitTokenData = this_declaration.toUint();
-                // next after_enum_value_declaration_id
-                goto after_enum_value_declaration_id$with_emit;
+                goto enum_value_declaration$identifier_case;
             }
             // -> error
-            // error
-            errorToken = LexerToken::Identifier;
-            goto handle_parse_error;
+            goto error$identifier_case;
         }
         // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
         if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
@@ -2484,43 +2472,20 @@ after_statement$no_emit:
             // ifScope ScopeKind::Struct
             if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // commitDeclaration DeclarationKind::Member, this_identifier
-                this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
-                // emitToken TokenKind::MemberDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::MemberDecl;
-                carriedEmitTokenData = this_declaration.toUint();
-                // next after_variable_declaration_id
-                goto after_variable_declaration_id$with_emit;
+                goto member_declaration$identifier_case;
             }
             // ifScope ScopeKind::Namespace
             if (scopePosition[0] == ScopeKind::Namespace) {
                 // then namespace_declaration
-                // -> templated_declaration
-                // -> no_declaration
-                // -> error
-                // error
-                errorToken = LexerToken::Identifier;
-                goto handle_parse_error;
+                goto namespace_declaration$identifier_case;
             }
             // ifScope ScopeKind::Enum
             if (scopePosition[0] == ScopeKind::Enum) {
                 // then enum_value_declaration
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // commitDeclaration DeclarationKind::EnumValue, this_identifier
-                this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
-                // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
-                carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
-                carriedEmitTokenData = this_declaration.toUint();
-                // next after_enum_value_declaration_id
-                goto after_enum_value_declaration_id$with_emit;
+                goto enum_value_declaration$identifier_case;
             }
             // -> error
-            // error
-            errorToken = LexerToken::Identifier;
-            goto handle_parse_error;
+            goto error$identifier_case;
         }
         // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         {
@@ -2533,14 +2498,7 @@ after_statement$no_emit:
         // pushScope ScopeKind::PlainStatement
         scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
         // -> statement
-        // pushScope ScopeKind::LeftExpr
-        scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
-        // -> expression
-        // emitToken TokenKind::IdentifierExpr, this_identifier
-        carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_expression
-        goto after_expression$with_emit;
+        goto statement$identifier_case;
     }
     // ifScope ScopeKind::FunctionBody
     if (scopePosition[0] == ScopeKind::FunctionBody) {
@@ -3230,19 +3188,19 @@ statement$as_then:
     case '#':
     case '$':
     case '_':
-        goto statement$word_case;
+        goto statement$word_case_entry;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-statement$word_case:
+statement$word_case_entry:
     {
         auto wordAndPos = readWord(tokEnd, state);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (this_identifier.keyword()) {
+    if (sema::isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED statement$keyword_check:
         if (this_identifier == words["if"]) {
             // pushScope ScopeKind::LeftExpr
@@ -3292,14 +3250,13 @@ statement$word_case:
         // -> expression
         goto expression$keyword_check;
     }
+LABEL_MAYBE_UNUSED statement$identifier_case:
+    if (sema::isSpecialIdentifier(this_identifier)) {
+    }
     // pushScope ScopeKind::LeftExpr
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
     // -> expression
-    // emitToken TokenKind::IdentifierExpr, this_identifier
-    carriedEmitTokenKind = TokenKind::IdentifierExpr;
-    carriedEmitTokenData = this_identifier.toUint();
-    // next after_expression
-    goto after_expression$with_emit;
+    goto expression$identifier_case;
 
     // LinearState let_statement
 let_statement$no_emit:
@@ -3312,9 +3269,12 @@ let_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED let_statement$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::LetValueDecl;
@@ -3336,9 +3296,12 @@ var_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED var_statement$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::VarValueDecl;
@@ -3519,7 +3482,7 @@ variable_type$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
                 // updateKind TokenKind::UniqueReferenceDecl
@@ -3544,14 +3507,13 @@ variable_type$no_emit:
             // -> expression
             goto expression$keyword_check;
         }
+    LABEL_MAYBE_UNUSED variable_type$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::IdentifierExpr, this_identifier
-        carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_expression
-        goto after_expression$with_emit;
+        goto expression$identifier_case;
     }
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -3643,7 +3605,7 @@ after_variable_unique_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateKind TokenKind::ConstUniqueReferenceDecl
@@ -3657,15 +3619,14 @@ after_variable_unique_modifier$no_emit:
             // -> expression
             goto expression$keyword_check;
         }
+    LABEL_MAYBE_UNUSED after_variable_unique_modifier$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::IdentifierExpr, this_identifier
-        carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_expression
-        goto after_expression$with_emit;
+        goto expression$identifier_case;
     }
     // then after_variable_modifier
     goto after_variable_modifier$as_then;
@@ -3681,7 +3642,7 @@ after_variable_shared_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateKind TokenKind::ConstSharedReferenceDecl
@@ -3695,15 +3656,14 @@ after_variable_shared_modifier$no_emit:
             // -> expression
             goto expression$keyword_check;
         }
+    LABEL_MAYBE_UNUSED after_variable_shared_modifier$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::IdentifierExpr, this_identifier
-        carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_expression
-        goto after_expression$with_emit;
+        goto expression$identifier_case;
     }
     // then after_variable_modifier
     goto after_variable_modifier$as_then;
@@ -3719,7 +3679,7 @@ after_variable_const_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_const_modifier$keyword_check:
             if (this_identifier == words["shared"]) {
                 // next after_variable_modifier
@@ -3737,15 +3697,14 @@ after_variable_const_modifier$no_emit:
             // -> expression
             goto expression$keyword_check;
         }
+    LABEL_MAYBE_UNUSED after_variable_const_modifier$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+        }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::IdentifierExpr, this_identifier
-        carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
-        // next after_expression
-        goto after_expression$with_emit;
+        goto expression$identifier_case;
     }
     // then after_variable_modifier
     goto after_variable_modifier$as_then;
@@ -3819,7 +3778,7 @@ parameter$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED parameter$keyword_check:
             if (this_identifier == words["var"]) {
                 // next var_parameter
@@ -3827,6 +3786,9 @@ parameter$as_then:
             }
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED parameter$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::LetValueDecl;
@@ -3848,9 +3810,12 @@ var_parameter$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED var_parameter$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::VarValueDecl;
@@ -3884,9 +3849,12 @@ impl_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED impl_expression$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::IdentifierExpr, this_identifier
         carriedEmitTokenKind = TokenKind::IdentifierExpr;
@@ -3915,8 +3883,8 @@ after_impl_expression$no_emit:
         scopePosition = pushScope(scopePosition, ScopeKind::BraceInImplExpr);
         // emitCallToken TokenKind::Parameterize
         argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, state);
-        // next check_designated_argument
-        goto check_designated_argument$no_emit;
+        // next argument
+        goto argument$no_emit;
     }
     if (std::string_view(tokEnd, 1) == ">"sv) {
         char next = tokEnd[1];
@@ -3988,9 +3956,12 @@ impl_access_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED impl_access_expression$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::StaticAccessExpr, this_identifier
         carriedEmitTokenKind = TokenKind::StaticAccessExpr;
@@ -4037,21 +4008,67 @@ namespace_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
-        LABEL_MAYBE_UNUSED namespace_declaration$keyword_check:
+        if (sema::isKeyword(this_identifier)) {
+            // -> templated_declaration
+            goto templated_declaration$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED namespace_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["namespace"]) {
                 // next namespace_declaration_id
                 goto namespace_declaration_id$no_emit;
             }
-            // -> templated_declaration
-            goto templated_declaration$keyword_check;
+            if (this_identifier == words["template"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next after_template
+                goto after_template$no_emit;
+            }
+            if (this_identifier == words["incomplete"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["virtual"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["fn"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next function_declaration_id
+                goto function_declaration_id$no_emit;
+            }
+            if (this_identifier == words["struct"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            }
+            if (this_identifier == words["enum"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
+            }
         }
         // -> templated_declaration
-        // -> no_declaration
-        // -> error
-        // error
-        errorToken = LexerToken::Identifier;
-        goto handle_parse_error;
+        goto templated_declaration$identifier_case;
     }
     // then templated_declaration
     goto templated_declaration$as_then;
@@ -4067,9 +4084,12 @@ namespace_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED namespace_declaration_id$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // rememberDeclarationBegin
         declarationBegin = state.parseOutput.currentToken();
@@ -4125,8 +4145,20 @@ templated_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED templated_declaration$keyword_check:
+            if (this_identifier == words["static"]) {
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next after_static
+                goto after_static$no_emit;
+            }
+            // -> no_declaration
+            // -> error
+            goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED templated_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
@@ -4169,21 +4201,10 @@ templated_declaration$as_then:
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
-            if (this_identifier == words["static"]) {
-                // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
-                // next after_static
-                goto after_static$no_emit;
-            }
-            // -> no_declaration
-            // -> error
-            goto error$keyword_check;
         }
         // -> no_declaration
         // -> error
-        // error
-        errorToken = LexerToken::Identifier;
-        goto handle_parse_error;
+        goto error$identifier_case;
     }
     // then no_declaration
     goto no_declaration$as_then;
@@ -4202,8 +4223,17 @@ templated_declaration_with_attributes$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED templated_declaration_with_attributes$keyword_check:
+            if (this_identifier == words["static"]) {
+                // next after_static
+                goto after_static$no_emit;
+            }
+            // -> error
+            goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED templated_declaration_with_attributes$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // next after_template
                 goto after_template$no_emit;
@@ -4234,17 +4264,9 @@ templated_declaration_with_attributes$as_then:
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
-            if (this_identifier == words["static"]) {
-                // next after_static
-                goto after_static$no_emit;
-            }
-            // -> error
-            goto error$keyword_check;
         }
         // -> error
-        // error
-        errorToken = LexerToken::Identifier;
-        goto handle_parse_error;
+        goto error$identifier_case;
     }
     // then error
     goto error$as_then;
@@ -4283,7 +4305,7 @@ function_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED function_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Function
@@ -4298,6 +4320,9 @@ function_declaration_id$no_emit:
             }
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED function_declaration_id$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Function, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
@@ -4391,7 +4416,7 @@ struct_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED struct_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Struct
@@ -4406,6 +4431,9 @@ struct_declaration_id$no_emit:
             }
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED struct_declaration_id$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Struct, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
@@ -4464,8 +4492,12 @@ member_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
-        LABEL_MAYBE_UNUSED member_declaration$keyword_check:
+        if (sema::isKeyword(this_identifier)) {
+            // -> templated_declaration
+            goto templated_declaration$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED member_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["has"]) {
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
@@ -4479,8 +4511,54 @@ member_declaration$as_then:
                 // next expression
                 goto expression$with_emit;
             }
-            // -> templated_declaration
-            goto templated_declaration$keyword_check;
+            if (this_identifier == words["template"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next after_template
+                goto after_template$no_emit;
+            }
+            if (this_identifier == words["incomplete"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["virtual"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["fn"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next function_declaration_id
+                goto function_declaration_id$no_emit;
+            }
+            if (this_identifier == words["struct"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            }
+            if (this_identifier == words["enum"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
+            }
         }
         // rememberDeclarationBegin
         declarationBegin = state.parseOutput.currentToken();
@@ -4506,7 +4584,7 @@ enum_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED enum_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Enum
@@ -4521,6 +4599,9 @@ enum_declaration_id$no_emit:
             }
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED enum_declaration_id$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Enum, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
@@ -4579,9 +4660,60 @@ enum_value_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> templated_declaration
             goto templated_declaration$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED enum_value_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
+            if (this_identifier == words["template"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next after_template
+                goto after_template$no_emit;
+            }
+            if (this_identifier == words["incomplete"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["virtual"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
+            }
+            if (this_identifier == words["fn"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next function_declaration_id
+                goto function_declaration_id$no_emit;
+            }
+            if (this_identifier == words["struct"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            }
+            if (this_identifier == words["enum"]) {
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = state.parseOutput.currentToken();
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
+            }
         }
         // rememberDeclarationBegin
         declarationBegin = state.parseOutput.currentToken();
@@ -4640,18 +4772,21 @@ after_static$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_static$keyword_check:
             if (this_identifier == words["var"]) {
                 // next static_var_variable_declaration
                 goto static_var_variable_declaration$no_emit;
             }
+            // -> error
+            goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED after_static$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["open"]) {
                 // next static_open_variable_declaration
                 goto static_open_variable_declaration$no_emit;
             }
-            // -> error
-            goto error$keyword_check;
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
@@ -4677,9 +4812,12 @@ static_var_variable_declaration$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED static_var_variable_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
@@ -4705,9 +4843,12 @@ static_open_variable_declaration$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (this_identifier.keyword()) {
+        if (sema::isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
+        }
+    LABEL_MAYBE_UNUSED static_open_variable_declaration$identifier_case:
+        if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
@@ -5156,33 +5297,23 @@ error$as_then:
     case '#':
     case '$':
     case '_':
-        goto error$word_case;
+        goto error$word_case_entry;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
-error$word_case:
+error$word_case_entry:
     {
         auto wordAndPos = readWord(tokEnd, state);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (this_identifier.keyword()) {
+    if (sema::isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED error$keyword_check:
-        if (this_identifier == words["analysis"]) {
-            // error
-            errorToken = LexerToken::Analysis;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["assert"]) {
             // error
             errorToken = LexerToken::Assert;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["assign"]) {
-            // error
-            errorToken = LexerToken::Assign;
             goto handle_parse_error;
         }
         if (this_identifier == words["break"]) {
@@ -5230,34 +5361,9 @@ error$word_case:
             errorToken = LexerToken::Else;
             goto handle_parse_error;
         }
-        if (this_identifier == words["enum"]) {
-            // error
-            errorToken = LexerToken::Enum;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["fn"]) {
-            // error
-            errorToken = LexerToken::Fn;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["for"]) {
             // error
             errorToken = LexerToken::For;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["forward"]) {
-            // error
-            errorToken = LexerToken::Forward;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["guard"]) {
-            // error
-            errorToken = LexerToken::Guard;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["has"]) {
-            // error
-            errorToken = LexerToken::Has;
             goto handle_parse_error;
         }
         if (this_identifier == words["if"]) {
@@ -5270,44 +5376,9 @@ error$word_case:
             errorToken = LexerToken::Impl;
             goto handle_parse_error;
         }
-        if (this_identifier == words["incomplete"]) {
-            // error
-            errorToken = LexerToken::Incomplete;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["let"]) {
             // error
             errorToken = LexerToken::Let;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["loop"]) {
-            // error
-            errorToken = LexerToken::Loop;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["match"]) {
-            // error
-            errorToken = LexerToken::Match;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["namespace"]) {
-            // error
-            errorToken = LexerToken::Namespace;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["object"]) {
-            // error
-            errorToken = LexerToken::Object;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["open"]) {
-            // error
-            errorToken = LexerToken::Open;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["property"]) {
-            // error
-            errorToken = LexerToken::Property;
             goto handle_parse_error;
         }
         if (this_identifier == words["return"]) {
@@ -5325,21 +5396,6 @@ error$word_case:
             errorToken = LexerToken::Static;
             goto handle_parse_error;
         }
-        if (this_identifier == words["struct"]) {
-            // error
-            errorToken = LexerToken::Struct;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["template"]) {
-            // error
-            errorToken = LexerToken::Template;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["trait"]) {
-            // error
-            errorToken = LexerToken::Trait;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["try"]) {
             // error
             errorToken = LexerToken::Try;
@@ -5355,22 +5411,15 @@ error$word_case:
             errorToken = LexerToken::Var;
             goto handle_parse_error;
         }
-        if (this_identifier == words["virtual"]) {
-            // error
-            errorToken = LexerToken::Virtual;
-            goto handle_parse_error;
-        }
         if (this_identifier == words["while"]) {
             // error
             errorToken = LexerToken::While;
             goto handle_parse_error;
         }
-        if (this_identifier == words["with"]) {
-            // error
-            errorToken = LexerToken::With;
-            goto handle_parse_error;
-        }
         VERIFY_NOT_REACHED();
+    }
+LABEL_MAYBE_UNUSED error$identifier_case:
+    if (sema::isSpecialIdentifier(this_identifier)) {
     }
     // error
     errorToken = LexerToken::Identifier;

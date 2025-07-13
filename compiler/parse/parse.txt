@@ -303,45 +303,43 @@ LinearState comma_after_expression() then error
             emitToken TokenKind::ExpressionStmt
             then parameter
         ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
-            then check_designated_argument
+            then argument
 
 LinearState comma_else() then error
     punctuation =>
         emitToken TokenKind::CommaElseExpr
         next expression
 
+LinearState argument() then check_designated_argument
+    then
+        callArgument
+        emitToken TokenKind::CallArgument
 LinearState check_designated_argument() then expression
     identifier
         argumentName = this_identifier
         next maybe_designated_argument
-    then
-        callArgument
-        emitToken TokenKind::CallArgument
 LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation =
-        callArgument argumentName
-        emitToken TokenKind::CallArgument, argumentName
+        updateCallArgument argumentName
         next expression
     then
-        callArgument
-        emitToken TokenKind::CallArgument
         emitToken TokenKind::IdentifierExpr, argumentName
 
-LinearState first_argument_paren() then check_designated_argument
+LinearState first_argument_paren() then argument
     punctuation )
         endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Paren
-LinearState first_argument_square() then check_designated_argument
+LinearState first_argument_square() then argument
     punctuation ]
         endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
-LinearState first_argument_brace() then check_designated_argument
+LinearState first_argument_brace() then argument
     punctuation }
         endCall
         emitToken TokenKind::EmptyNode
@@ -554,7 +552,7 @@ LinearState after_impl_expression() then error
     punctuation {
         pushScope ScopeKind::BraceInImplExpr
         emitCallToken TokenKind::Parameterize
-        next check_designated_argument
+        next argument
     punctuation >
         popScope ScopeKind::GenericCategoryExpression
         next after_variable_modifier

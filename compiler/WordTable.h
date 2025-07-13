@@ -45,7 +45,6 @@ struct Word {
     constexpr uint32_t hash() const { return hashBits << ID_BITS; }
     constexpr uint8_t id() const { return idBits; }
     void setId(uint8_t id) { idBits = id; }
-    constexpr bool keyword() const { return idBits == 0; }
     constexpr bool operator==(const Word& other) const {
         return idBits == other.idBits && hashBits == other.hashBits;
     }

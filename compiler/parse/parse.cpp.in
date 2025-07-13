@@ -93,6 +93,12 @@ static Word* addCallArgument(Word* position, Word name) {
     return position;
 }
 
+static void updateCallArgument(Word* position, Word name) {
+    uint32_t count = position[0].toUint();
+    VERIFY(count != 0);
+    position[-1] = name;
+}
+
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto& outputArgs = state.parseOutput.callArguments;

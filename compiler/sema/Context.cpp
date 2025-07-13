@@ -2,16 +2,19 @@
 
 namespace sema {
 
-void Context::initialize(std::span<const ModuleInput> inputs) {
-    modules.resize(inputs.size() + 1);
+#define BUILTIN(name, cppName) void check_##cppName(Context&);
+#include <sema/builtins.inc>
+
+void Context::initialize(std::span<const ModuleImport> imports) {
+    modules.resize(imports.size() + 1);
 
     // Make the global namespace
     VERIFY(newNamespace(Word(), std::nullopt) == globalNamespace());
     pushScope((DeclarationValue)globalNamespace(), getNamespace(globalNamespace()));
 
     // Inputs are assumend to be topologically orderered
-    for (int_t moduleId = 0; moduleId < (int_t)inputs.size(); moduleId++) {
-        const auto& input = inputs[moduleId];
+    for (int_t moduleId = 0; moduleId < (int_t)imports.size(); moduleId++) {
+        const auto& input = imports[moduleId];
         auto& output = modules[moduleId];
         ModuleHandle moduleHandle = { (uint16_t)moduleId };
 
@@ -41,21 +44,20 @@ void Context::initialize(std::span<const ModuleInput> inputs) {
 
         // Namespaces
         for (const Namespace& inNamespace : input.namespaces) {
-            if (!inNamespace.parent.has_value()) {
-                output.namespaces.push_back(globalNamespace());
-                continue;
-            }
-
-            Word outName = inputToOutputWords.get(inNamespace.name);
-            NamespaceHandle outParent = output.namespaces.at(inNamespace.parent.value().id());
-            auto existingDecl = getNamespace(outParent)->getDeclaration(outName);
             NamespaceHandle outHandle;
-            if (existingDecl.has_value()) {
-                VERIFY(existingDecl.value().kind() == DeclarationValueKind::Namespace);
-                outHandle = existingDecl.value().nsHandle();
+            if (!inNamespace.parent.has_value()) {
+                outHandle = globalNamespace();
             } else {
-                outHandle = newNamespace(outName, outParent);
-                getNamespace(outParent)->addDeclaration(outName, outHandle);
+                Word outName = inputToOutputWords.get(inNamespace.name);
+                NamespaceHandle outParent = output.namespaces.at(inNamespace.parent.value().id());
+                auto existingDecl = getNamespace(outParent)->getDeclaration(outName);
+                if (existingDecl.has_value()) {
+                    VERIFY(existingDecl.value().kind() == DeclarationValueKind::Namespace);
+                    outHandle = existingDecl.value().nsHandle();
+                } else {
+                    outHandle = newNamespace(outName, outParent);
+                    getNamespace(outParent)->addDeclaration(outName, outHandle);
+                }
             }
             output.namespaces.push_back(outHandle);
             Namespace& outNamespace = *getNamespace(outHandle);
@@ -86,10 +88,43 @@ void Context::initialize(std::span<const ModuleInput> inputs) {
     // Setups this module
     VERIFY(programStorage.size() == 0);
     auto& thisOutput = modules.back();
+    thisOutput.programIdOffsets.resize(programModules.size(), 0);
     thisOutput.programIdBegin = programModules.size() * MODULE_PROGRAM_ID_ALIGNMENT;
     thisOutput.programIdEnd = thisOutput.programIdBegin;
     thisOutput.programStorage = programStorage.data() - thisOutput.programIdBegin;
-    thisOutput.programIdOffsets.resize(thisOutput.programIdEnd, 0);
+
+    // Reserve solts for builtin programs
+    if (isBuiltinModule()) {
+        static_assert((size_t)BuiltinId::COUNT <= MODULE_PROGRAM_ID_ALIGNMENT);
+        VERIFY(programModules.size() == 0);
+        VERIFY(thisOutput.programIdOffsets.size() == 0);
+        VERIFY(thisOutput.programIdBegin == 0);
+        VERIFY(thisOutput.programIdEnd == 0);
+        programModules.push_back(thisModule());
+        thisOutput.programIdOffsets.push_back(0);
+        for (int_t builtinId = 0; builtinId < (int_t)BuiltinId::COUNT; builtinId++)
+            programStorage.allocate();
+        thisOutput.programIdEnd = (uint32_t)BuiltinId::COUNT;
+    }
+}
+
+ModuleImport Context::exportModule() {
+    std::vector<ModuleImport::ModuleReference> references;
+    references.resize(modules.size());
+    for (int_t moduleId = 0; moduleId < (int_t)modules.size(); moduleId++) {
+        references[moduleId] = {
+            .module = ModuleHandle(moduleId),
+            .programIdBegin = modules[moduleId].programIdBegin,
+            .programIdEnd = modules[moduleId].programIdEnd,
+        };
+    }
+    return {
+        .wordTable = &wordTable,
+        .modules = std::move(references),
+        .ownPrograms = programStorage,
+        .programModules = programModules,
+        .namespaces = namespaces
+    };
 }
 
 DeclarationValue Context::pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
@@ -158,16 +193,36 @@ DeclarationValue Context::pushEnumValueScope(Word name, parse::TokenHandle parse
     return DeclarationValue(DeclarationValueKind::EnumValue, id);
 }
 
+namespace {
+
+    std::optional<ProgramHandle> getBuiltin(Word name) {
+#define BUILTIN(builtinName, builtinCppName) \
+    if (name == parse::words[#builtinName])  \
+        return ProgramHandle(BuiltinId::builtinCppName);
+#include <sema/builtins.inc>
+
+        return std::nullopt;
+    }
+
+}
+
 ProgramHandle Context::newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location) {
     auto& state = modules.back();
     VERIFY(programStorage.size() == state.programIdEnd - state.programIdBegin);
+
+    if (isBuiltinModule() && rawParent == globalNamespace()) {
+        auto builtinHandle = getBuiltin(name);
+        if (builtinHandle.has_value()) {
+            std::construct_at(&programStorage[builtinHandle.value().id()], kind, name, parseLocation, rawParent, location);
+            return builtinHandle.value();
+        }
+    }
     ProgramHandle result = { state.programIdEnd };
     state.programIdEnd += 1;
-
     auto* prog = programStorage.allocate();
     std::construct_at(prog, kind, name, parseLocation, rawParent, location);
 
-    VERIFY(programModules.size() == (int_t)state.programIdOffsets.size());
+    VERIFY(programModules.size() == state.programIdOffsets.size());
     if (result.id() / MODULE_PROGRAM_ID_ALIGNMENT >= (size_t)programModules.size()) {
         programModules.push_back(thisModule());
         state.programIdOffsets.push_back(0);
@@ -203,6 +258,103 @@ std::optional<Program*> Context::lastDeclarationBefore(SourceLocation location) 
     if (it == programStorage.begin())
         return std::nullopt;
     return &std::prev(it)->get();
+}
+
+void Context::checkBuiltins() {
+    {
+        auto* prog = cast<StructProgram>(program(builtins::type_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->members.empty());
+    }
+
+    {
+        auto* prog = cast<EnumProgram>(program(builtins::bool_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->values.size() == 2);
+        VERIFY(prog->values[0].name() == parse::words["false"]);
+        VERIFY(prog->values[1].name() == parse::words["true"]);
+    }
+
+    /*{
+        auto* prog = cast<StructProgram>(program(builtins::namespace_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->members.empty());
+    }*/
+
+    {
+        auto* prog = cast<EnumProgram>(program(builtins::expression_category_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->values.size() == 5);
+        VERIFY(prog->values[std::to_underlying(ExpressionCategory::Value)].name() == parse::words["value"]);
+        VERIFY(prog->values[std::to_underlying(ExpressionCategory::UniqueReference)].name() == parse::words["unique_ref"]);
+        VERIFY(prog->values[std::to_underlying(ExpressionCategory::ConstUniqueReference)].name() == parse::words["const_unique_ref"]);
+        VERIFY(prog->values[std::to_underlying(ExpressionCategory::SharedReference)].name() == parse::words["shared_ref"]);
+        VERIFY(prog->values[std::to_underlying(ExpressionCategory::ConstSharedReference)].name() == parse::words["const_shared_ref"]);
+    }
+
+    // template(sig: function_signature) struct function_id: { }
+    // typeof(function_id) = typeof(template(sig: function_signature) => function_id{sig})
+    //                     = template_id{template(sig: function_signature) -> typeof(function_id{sig})}
+    //                     = template_id{template(sig: function_signature) -> type}
+    {
+        auto* prog = cast<StructProgram>(program(builtins::function_signature_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->members.empty());
+    }
+    {
+        auto* prog = cast<StructProgram>(program(builtins::function_id_template.program()));
+        VERIFY(prog->parameters.size() == 1);
+        Program::Parameter expectedParameter { parse::words["sig"], builtins::function_signature_type, std::nullopt };
+        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->members.empty());
+    }
+
+    // typeof(tempalte(T: type) => expr) = template_id{template(T: type) -> typeof(expr)}
+    // cast{type}(template(T: type) -> type_expr) = template_id{template(T: type) -> type_expr}
+
+    // template(sig: template_signature) struct template_id: { }
+    // typof(template_id) = typeof(template(sig: template_signature) => template_id{sig})
+    //                    = template_id{template(sig: template_signature) -> typeof(template_id{sig})}
+    //                    = template_id{template(sig: template_signature) -> type}
+    {
+        auto* prog = cast<StructProgram>(program(builtins::template_signature_type.program()));
+        VERIFY(!prog->isDependent());
+        VERIFY(prog->members.empty());
+    }
+    {
+        auto* prog = cast<StructProgram>(program(builtins::template_id_template.program()));
+        VERIFY(prog->parameters.size() == 1);
+        Program::Parameter expectedParameter { parse::words["sig"], builtins::template_signature_type, std::nullopt };
+        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->members.empty());
+    }
+
+    // template(pointee_type: type) struct ptr: { }
+    {
+        auto* prog = cast<StructProgram>(program(builtins::ptr_template.program()));
+        VERIFY(prog->parameters.size() == 1);
+        Program::Parameter expectedParameter { parse::words["pointee_type"], builtins::type_type, std::nullopt };
+        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->members.empty());
+    }
+
+    // template(parent_type: type, member_type: type) struct member_ptr: { }
+    {
+        auto* prog = cast<StructProgram>(program(builtins::member_ptr_template.program()));
+        VERIFY(prog->parameters.size() == 2);
+        Program::Parameter firstParameter { parse::words["parent_type"], builtins::type_type, std::nullopt };
+        Program::Parameter secondParameter { parse::words["member_type"], builtins::type_type, std::nullopt };
+        VERIFY(prog->parameters[0] == firstParameter);
+        VERIFY(prog->parameters[1] == secondParameter);
+        VERIFY(prog->members.empty());
+    }
+
+    // cast{template_id}( template_function_id{template(T: type) fn(t: T) -> T)} )
+    //   = template_id{ template(T: type) -> function_id{fn(t: T) -> T} }
+
+    // template(T: type) fn(t: T) -> T = template(T: type) -> function_id{fn(t: T) -> T}
+
+    // typeof( (arg = expr) ) = cast{type}( (arg = typeof(expr)) ) = tuple{cast{tuple_signature}( (arg = typeof(expr)) )}
 }
 
 }
