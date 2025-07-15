@@ -217,12 +217,6 @@ void Dumper::dumpInstructions(std::span<const Instruction> instructions) {
             line << ")";
             break;
         }
-        case Opcode::ImplicitCopy: {
-            auto copy = program->getImplicitCopy(inst.u.implicitCopyExpression);
-            line << "[" << formatConstant(copy.type) << "]"
-                 << "Copy " << formatExpression(copy.copyFrom);
-            break;
-        }
         case Opcode::BlockScope:
             line << "block:";
             increaseIndentation = true;

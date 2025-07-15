@@ -10,6 +10,9 @@
 #ifndef BUILTIN_ENUM
 #define BUILTIN_ENUM(name, constant_kind) BUILTIN_TYPE(name)
 #endif
+#ifndef BUITLIN_FUNCTION
+#define BUILTIN_FUNCTION(name) BUILTIN(name, name##_function)
+#endif
 
 BUILTIN_TYPE(type)
 
@@ -28,6 +31,8 @@ BUILTIN_TEMPLATE(function_id)
 BUILTIN_TEMPLATE(ptr)
 
 BUILTIN_TEMPLATE(member_ptr)
+
+BUILTIN_FUNCTION(copy)
 
 #undef BUILTIN_TYPE
 #undef BUILTIN_TEMPLATE

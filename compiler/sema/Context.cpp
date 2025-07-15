@@ -349,6 +349,19 @@ void Context::checkBuiltins() {
         VERIFY(prog->members.empty());
     }
 
+    // template(T: type) fn copy(from: const shared T) -> T: { }
+    {
+        auto* prog = cast<FunctionProgram>(program(builtins::copy_function.program()));
+        VERIFY(prog->parameterizes.size() == 1);
+        Program::Parameter expectedParameter { parse::words["T"], builtins::type_type, std::nullopt };
+        VERIFY(prog->parameters[0] == expectedParameter);
+
+        VERIFY(prog->functionParameters.size() == 1);
+        VERIFY(prog->functionParameters[0].name() == parse::words["from"]);
+        VERIFY(prog->functionParameters[0].type() == Constant(ConstantKind::CopyOfParameter, 0));
+        VERIFY(prog->functionParameters[0].category().kind() == VariableKind::ConstSharedReference);
+    }
+
     // cast{template_id}( template_function_id{template(T: type) fn(t: T) -> T)} )
     //   = template_id{ template(T: type) -> function_id{fn(t: T) -> T} }
 

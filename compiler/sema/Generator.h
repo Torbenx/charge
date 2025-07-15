@@ -363,7 +363,6 @@ struct Generator : Util {
     Constant makeCopyOfOpenGlobal(Constant value);
     Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
-    Call makeCall(Constant callTarget, std::vector<Expression> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
@@ -449,8 +448,8 @@ struct Generator : Util {
     }
 
     void emitExpression(SourceLocation, OwnedExpression);
-    void emitCall(SourceLocation, Call);
-    void emitImplicitCopy(SourceLocation, ImplicitCopy);
+    void emitCall(SourceLocation, Constant callTarget, std::vector<Expression> arguments);
+    void emitImplicitCopy(SourceLocation, Expression copyFrom);
     void declareLocalVariable(VariableDeclaration);
 };
 

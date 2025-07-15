@@ -84,21 +84,10 @@ Expression Program::addMemberExpression(MemberExpression e) {
     return Expression(ExpressionKind::MemberExpression, id);
 }
 
-Expression Program::addCall(Call c) {
+Expression Program::addCall(CallData c) {
     auto id = calls.size();
-    calls.push_back(CallData {
-        .resultCategory = c.resultCategory,
-        .callTarget = c.callTarget,
-        .returnType = c.returnType,
-        .arguments { c.arguments.begin(), c.arguments.end() },
-    });
+    calls.emplace_back(std::move(c));
     return Expression(ExpressionKind::Call, id);
-}
-
-Expression Program::addImplicitCopy(ImplicitCopy copy) {
-    auto id = implicitCopies.size();
-    implicitCopies.push_back(copy);
-    return Expression(ExpressionKind::ImplicitCopy, id);
 }
 
 }

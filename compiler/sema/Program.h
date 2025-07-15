@@ -175,11 +175,6 @@ struct Call {
     }
 };
 
-struct ImplicitCopy {
-    Expression copyFrom;
-    Type type;
-};
-
 struct ComputedConstantData {
     Expression value;
     Type type;
@@ -333,16 +328,10 @@ struct Program {
         return memberExpressions[e.id()];
     }
 
-    Expression addCall(Call);
+    Expression addCall(CallData);
     Call getCall(Expression e) {
         VERIFY(e.kind() == ExpressionKind::Call);
         return Call::fromData(calls.at(e.id()));
-    }
-
-    Expression addImplicitCopy(ImplicitCopy);
-    ImplicitCopy getImplicitCopy(Expression e) {
-        VERIFY(e.kind() == ExpressionKind::ImplicitCopy);
-        return implicitCopies[e.id()];
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -447,7 +436,6 @@ public:
     std::vector<ComputedConstantData> computations;
     std::vector<MemberExpression> memberExpressions;
     std::vector<CallData> calls;
-    std::vector<ImplicitCopy> implicitCopies;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
@@ -460,7 +448,7 @@ protected:
     friend struct Dumper;
     friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 304);
+static_assert(sizeof(Program) == 280);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -801,7 +789,7 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 352);
+static_assert(sizeof(ProgramUnion) == 328);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

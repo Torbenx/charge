@@ -57,18 +57,19 @@ void Generator::emitExpression(SourceLocation, OwnedExpression e) {
     expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitCall(SourceLocation location, Call call) {
+void Generator::emitCall(SourceLocation location, Constant callTarget, std::vector<Expression> arguments) {
     VERIFY(currentExpression == INVALID_EXPRESSION);
-    currentExpression = program->addCall(call);
+    auto base = asFoldBase(callTarget);
+    Type returnType = verifyType(base.program->kind() == ProgramKind::Struct ? callTarget : fold(callTarget, cast<FunctionProgram>(base.program)->returnType()));
+    currentExpression = program->addCall({ Constant(ExpressionCategory::Value), callTarget, returnType, std::move(arguments) });
     instructionScratch.emplace_back(Opcode::Call, location, Instruction::Data { .callExpression = currentExpression });
     expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitImplicitCopy(SourceLocation location, ImplicitCopy copy) {
-    VERIFY(currentExpression == INVALID_EXPRESSION);
-    currentExpression = program->addImplicitCopy(copy);
-    instructionScratch.emplace_back(Opcode::ImplicitCopy, location, Instruction::Data { .implicitCopyExpression = currentExpression });
-    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
+void Generator::emitImplicitCopy(SourceLocation location, Expression copyFrom) {
+    std::array<Constant, 1> templateArgs { resultType(copyFrom) };
+    auto callTarget = makeParameterize(builtins::copy_function.program(), templateArgs);
+    emitCall(location, callTarget, { copyFrom });
 }
 
 Constant Generator::expressionToConstant() {
@@ -337,12 +338,6 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
     VERIFY_NOT_REACHED();
 }
 
-Call Generator::makeCall(Constant callTarget, std::vector<Expression> arguments) {
-    auto base = asFoldBase(callTarget);
-    Type returnType = verifyType(base.program->kind() == ProgramKind::Struct ? callTarget : fold(callTarget, cast<FunctionProgram>(base.program)->returnType()));
-    return Call { Constant(ExpressionCategory::Value), callTarget, returnType, arguments };
-}
-
 void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
     auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Struct) {
@@ -351,7 +346,7 @@ void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
 
         VERIFY(state.isComplete());
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-        emitCall(location, makeCall(callTarget, std::move(arguments)));
+        emitCall(location, callTarget, std::move(arguments));
         return;
     }
     VERIFY_NOT_REACHED();
@@ -654,7 +649,7 @@ void Generator::generateMemberAccessExpr() {
 
     VERIFY(state.isComplete());
     Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-    emitCall(SourceLocation(), makeCall(callTarget, std::move(callArguments)));
+    emitCall(SourceLocation(), callTarget, std::move(callArguments));
 }
 
 Expression Generator::lookupSelfParameter() {
@@ -741,7 +736,7 @@ void Generator::toValueExpression(SourceLocation location) {
     default:
         break;
     }
-    emitImplicitCopy(location, ImplicitCopy { copyFrom, resultType(copyFrom) });
+    emitImplicitCopy(location, copyFrom);
 }
 
 void Generator::contextualToType(SourceLocation location) {
@@ -1184,8 +1179,6 @@ Type Generator::resultType(Expression expr) {
     }
     case ExpressionKind::Call:
         return program->getCall(expr).returnType;
-    case ExpressionKind::ImplicitCopy:
-        return program->getImplicitCopy(expr).type;
     default:
         VERIFY_NOT_REACHED();
     }

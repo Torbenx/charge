@@ -10,7 +10,6 @@ namespace sema {
     OP(BranchContinued)                    \
     OP(Discard)                            \
     OP(Deactivate)                         \
-    OP(ImplicitCopy)                       \
     OP(Initialize)                         \
     OP(BlockScope)                         \
     OP(EndScope)
@@ -32,7 +31,6 @@ struct Instruction {
 
     union Data {
         Expression callExpression;
-        Expression implicitCopyExpression;
         Expression discardValue;
         Expression deactivateTarget;
         struct {
