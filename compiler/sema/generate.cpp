@@ -1091,8 +1091,6 @@ Constant Generator::categoryOf(Expression expr) {
         return categoryOf(program->getMemberReference(expr).base);
     case ExpressionKind::Call:
         return program->getCall(expr).resultCategory;
-    case ExpressionKind::ImplicitCopy:
-        return Constant(ExpressionCategory::Value);
     default:
         VERIFY(expr.isConstant());
         return Constant(ExpressionCategory::Value);

@@ -175,9 +175,6 @@ struct Dumper {
         case ExpressionKind::Call:
             result += "call";
             break;
-        case ExpressionKind::ImplicitCopy:
-            result += "copy";
-            break;
         default:
             VERIFY_NOT_REACHED();
         }

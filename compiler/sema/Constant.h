@@ -264,7 +264,6 @@ enum class ExpressionKind : uint8_t {
     ReferenceReference,
     MemberExpression,
     Call,
-    ImplicitCopy,
 
     LazyParameterize,
 
@@ -335,7 +334,7 @@ struct Expression {
     }
 
     constexpr bool isInstructionResult() const {
-        return kind() == ExpressionKind::Call || kind() == ExpressionKind::ImplicitCopy;
+        return kind() == ExpressionKind::Call;
     }
 
     constexpr bool operator==(const Expression&) const = default;
