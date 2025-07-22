@@ -1,5 +1,6 @@
 #include <sema/Context.h>
 #include <sema/Generator.h>
+#include <sema/errors.h>
 
 #include <ranges>
 
@@ -187,13 +188,22 @@ bool Generator::resolveImplicitImplTarget() {
     auto parentImplPara = program->getParameterize(parentImplOf);
 
     auto implTarget = cast<ScopeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
-    VERIFY(implTarget.has_value());
-    VERIFY(implTarget.value().kind() == DeclarationValueKind::Program);
+    if (!implTarget.has_value()) {
+        error<errors::ImplicitImplTargetNotFound>();
+        return false;
+    }
+    if (implTarget.value().kind() != DeclarationValueKind::Program) {
+        error<errors::ImplicitImplTargetNotAProgram>();
+        return false;
+    }
     ProgramHandle implOfProgHandle = context.translate(parentImplPara.base, implTarget.value().program());
     signatureCheck(context, implOfProgHandle);
     Program* implOfProg = context.program(implOfProgHandle);
 
-    VERIFY(program->kind() == implOfProg->kind());
+    if (program->kind() != implOfProg->kind()) {
+        error<errors::ImplicitImplTargetKindMismatch>();
+        return false;
+    }
     DeductionState state(context, implOfProgHandle);
     VERIFY(implOfProg->inheritedParameterCount == parentImplPara.arguments.size());
     for (int_t i = 0; i < (int_t)implOfProg->inheritedParameterCount; i++)
@@ -209,16 +219,24 @@ bool Generator::resolveImplicitImplTarget() {
         while (implParameterIndex < (int_t)implOfProg->parameters.size() && implOfProg->parameters[implParameterIndex].implicit())
             implParameterIndex += 1;
         if (parameterIndex == (int_t)program->parameters.size()) {
-            VERIFY(implParameterIndex == (int_t)implOfProg->parameters.size());
+            if (implParameterIndex != (int_t)implOfProg->parameters.size()) {
+                error<errors::ImplicitImplTemplateParameterCountMismatch>();
+                return false;
+            }
             break;
         }
-        VERIFY(implParameterIndex < (int_t)implOfProg->parameters.size());
+        if (implParameterIndex == (int_t)implOfProg->parameters.size()) {
+            error<errors::ImplicitImplTemplateParameterCountMismatch>();
+            return false;
+        }
 
         auto parameter = program->parameters[parameterIndex];
         auto implParameter = implOfProg->parameters[implParameterIndex];
-        VERIFY(parameter.name == implParameter.name);
+        if (parameter.name != implParameter.name)
+            error<errors::ImplicitImplTemplateParameterNameMismatch>();
         bool match = staticMatch(state, implParameter.type, (Constant)parameter.type);
-        VERIFY(match);
+        if (!match)
+            error<errors::ImplicitImplTemplateParameterTypeMismatch>();
         state.explicitArgument(implParameterIndex, Constant(ConstantKind::CopyOfParameter, parameterIndex));
         // TODO: What about the initializer?
     }
@@ -244,13 +262,15 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
         // Find next explicit parameter
         while (pIndex < parameterCount && state.program->parameters[pIndex].implicit())
             pIndex += 1;
-        VERIFY(pIndex < parameterCount);
+        if (pIndex == parameterCount)
+            error<errors::ParameterizeWithTooManyArguments>();
         const auto & parameter = state.program->parameters[pIndex];
-        VERIFY(argumentNames[aIndex].empty() || parameter.name == argumentNames[aIndex]);
-
-        visitExpression();
-        initialize(conversionLocation, state, Constant(ExpressionCategory::Value), parameter.type);
-        state.explicitArgument(pIndex, expressionToConstant());
+        if (argumentNames[aIndex].empty() || parameter.name == argumentNames[aIndex]) {
+            visitExpression();
+            initialize(conversionLocation, state, Constant(ExpressionCategory::Value), parameter.type);
+            state.explicitArgument(pIndex, expressionToConstant());
+        } else
+            error<errors::ParameterizeArgumentNameMismatch>();
     }
     VERIFY(aIndex == (int_t)argumentNames.size());
     VERIFY(tok->kind() == Token::EmptyNode);
@@ -271,7 +291,8 @@ void Generator::generateParameterizeExpr() {
 
         if (baseValue.kind() == ConstantKind::Program) {
             Program* baseProg = context.program(baseValue.program());
-            VERIFY(baseProg->isTemplate());
+            if (!baseProg->isTemplate())
+                error<errors::ParameterizeBaseIsNotATemplate>();
             VERIFY(baseProg->inheritedParameterCount == 0);
             DeductionState state(context, baseValue.program());
             generate(std::move(state));
@@ -280,8 +301,11 @@ void Generator::generateParameterizeExpr() {
         if (baseValue.kind() == ConstantKind::Parameterize) {
             auto basePara = program->getParameterize(baseValue);
             Program* baseProg = context.program(basePara.base);
-            VERIFY(baseProg->isTemplate());
-            VERIFY(baseProg->inheritedParameterCount == basePara.arguments.size());
+            if (!baseProg->isTemplate())
+                error<errors::ParameterizeBaseIsNotATemplate>();
+            if (basePara.arguments.size() > baseProg->inheritedParameterCount)
+                error<errors::ParameterizeBaseIsAlreadyParameterized>();
+            VERIFY(basePara.arguments.size() == baseProg->inheritedParameterCount);
             DeductionState state(context, basePara.base);
             for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
                 state.explicitArgument(i, basePara.arguments[i]);
@@ -289,7 +313,7 @@ void Generator::generateParameterizeExpr() {
             return;
         }
     }
-    VERIFY_NOT_REACHED();
+    error<errors::ParameterizeBaseNotSupported>();
 }
 
 Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {

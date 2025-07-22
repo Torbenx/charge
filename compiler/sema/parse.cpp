@@ -1,5 +1,6 @@
 #include <sema/Context.h>
 #include <sema/Generator.h>
+#include <sema/errors.h>
 
 namespace sema {
 
@@ -199,8 +200,12 @@ Program::Parameter Generator::visitTemplateParameter() {
 
     if (name == parse::words["self_type"]) {
         // TODO: Allow default argument
+        if (tok->kind() != Token::AssignStmt)
+            error<errors::SelfTypeTemplateParameterWithExplicitType>();
         VERIFY(tok->kind() == Token::AssignStmt);
         advance();
+        if (tok->kind() == Token::ExpressionStmt)
+            error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
         VERIFY(tok->kind() == Token::ExpressionStmt);
         advance();
         return { name, builtins::type_type, std::nullopt };
@@ -221,11 +226,14 @@ void Generator::visitStaticVariableDeclaration() {
     advance();
 
     auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), false);
-    VERIFY(info.hasInitializer);
     program->setType(info.type);
-    // TODO: Constants are required to be the same when copied.
-    //       For global objects this restriction is not necessary.
-    globalProgram->setInitializer(expressionToConstant());
+    if (info.hasInitializer)
+        // TODO: Constants are required to be the same when copied.
+        //       For global objects this restriction is not necessary.
+        globalProgram->setInitializer(expressionToConstant());
+    else
+        // TODO: Open globals should not need an initializer
+        error<errors::StaticVariableDeclarationWithoutInitializer>();
 
     Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
     program->completeSignatureCheck(false, selfConstant);
@@ -262,23 +270,32 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
     auto* implProgram = cast<FunctionProgram>(program);
     auto* baseProg = cast<FunctionProgram>(state.program);
 
+    if (implProgram->functionParameters.size() != baseProg->functionParameters.size())
+        error<errors::FunctionImplFunctionParameterCountMismatch>();
     VERIFY(implProgram->functionParameters.size() == baseProg->functionParameters.size());
     for (int_t index = 0; index < (int_t)implProgram->functionParameters.size(); index++) {
         const auto& baseParameter = baseProg->functionParameters[index];
         const auto& implParameter = implProgram->functionParameters[index];
-        VERIFY(baseParameter.name() == implParameter.name());
-        VERIFY(baseParameter.kind() == implParameter.kind());
+        if (baseParameter.name() != implParameter.name())
+            error<errors::FunctionImplFunctionParameterNameMismatch>();
+        if (baseParameter.kind() != implParameter.kind())
+            error<errors::FunctionImplFunctionParameterKindMismatch>();
         if (baseParameter.kind() == VariableKind::Generic) {
             bool categoriesMatch = staticMatch(state, baseParameter.category().genericCategory(), implParameter.category().genericCategory());
-            VERIFY(categoriesMatch);
+            if (!categoriesMatch)
+                error<errors::FunctionImplFunctionParameterCategoryMismatch>();
         }
+
         bool typesMatch = staticMatch(state, baseParameter.type(), implParameter.type());
-        VERIFY(typesMatch);
+        if (!typesMatch)
+            error<errors::FunctionImplFunctionParameterTypeMismatch>();
+
         // TODO: What about the initializer?
     }
 
     bool match = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
-    VERIFY(match);
+    if (!match)
+        error<errors::FunctionImplReturnTypeMismatch>();
 
     VERIFY(state.isComplete());
     program->completeSignatureCheck(true, makeParameterize(state.programHandle, state.arguments));
@@ -291,7 +308,8 @@ void Generator::visitFunctionParametersAndBody() {
     lookupStack.push_back(LookupContext::forLocal(this));
 
     auto addFunctionParameter = [&](VariableDeclaration info) {
-        VERIFY(!info.hasInitializer);
+        if (info.hasInitializer)
+            error<errors::FunctionParameterWithDefaultArgument>();
         VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
@@ -306,8 +324,12 @@ void Generator::visitFunctionParametersAndBody() {
             VariableCategory category = visitVariableCategory();
 
             // TODO: Allow default argument?
+            if (tok->kind() != Token::AssignStmt)
+                error<errors::SelfFunctionParameterWithExplicitType>();
             VERIFY(tok->kind() == Token::AssignStmt);
             advance();
+            if (tok->kind() != Token::ExpressionStmt)
+                error<errors::SelfFunctionParameterWithDefaultArgument>();
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
 
@@ -351,7 +373,7 @@ void Generator::visitFunctionParametersAndBody() {
             program->setType(verifyType(expressionToConstant()));
         } else {
             // TODO: Implement return type deduction
-            VERIFY_NOT_REACHED();
+            error<errors::FunctionWithoutExplicitReturnType>();
         }
         VERIFY(tok->kind() == Token::FunctionBody);
         auto bodyScopeInst = emitBlockScope(tok->location());
@@ -449,7 +471,7 @@ void Generator::visitEnumDeclaration() {
 void Generator::checkEnumImplDeclaration(Constant implOf) {
     VERIFY(implOf.kind() == ConstantKind::Parameterize);
     auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Enum);
+    VERIFY(base.program->kind() == ProgramKind::Enum); // TODO: This must be handled as an error somewhere.
     // TODO: Do checks
 
     program->completeSignatureCheck(true, implOf);
@@ -496,20 +518,23 @@ void Generator::visitStatement() {
         SourceLocation location = tok->location();
         advance();
         visitExpression();
-        auto expr = takeTopExpression();
-
-        VERIFY(expr.kind() == ExpressionKind::VariableReference || expr.kind() == ExpressionKind::ParameterReference);
-        localState.setActive(expr, false);
-        emitDeactivate(location, expr);
+        if (topExpression().kind() == ExpressionKind::VariableReference || topExpression().kind() == ExpressionKind::ParameterReference) {
+            auto expr = takeTopExpression();
+            localState.setActive(expr, false);
+            emitDeactivate(location, expr);
+        } else
+            error<errors::DestoryTargetNotALocalVariable>();
     } else if (tok->kind() == Token::DiscardStmt) {
         SourceLocation location = tok->location();
         advance();
         visitExpression();
-        auto expr = takeTopExpression();
 
-        VERIFY(expr.kind() == ExpressionKind::ReferenceReference);
-        localState.setActive(expr, false);
-        emitDeactivate(location, expr);
+        if (topExpression().kind() == ExpressionKind::ReferenceReference) {
+            auto expr = takeTopExpression();
+            localState.setActive(expr, false);
+            emitDeactivate(location, expr);
+        } else
+            error<errors::DiscardTargetNotALocalReference>();
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {

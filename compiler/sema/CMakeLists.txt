@@ -6,6 +6,7 @@ target_sources(compiler
     Context.cpp
     Context.h
     dump.cpp
+    errors.h
     generate.cpp
     Generator.h
     Instruction.cpp
@@ -17,4 +18,6 @@ target_sources(compiler
     Util.cpp
     Util.h
     IdentifierTable.h
+    SimpleErrorHandler.cpp
+    SimpleErrorHandler.h
 )

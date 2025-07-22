@@ -9,6 +9,14 @@
 
 namespace sema {
 
+struct ErrorBase;
+struct Generator;
+
+struct ErrorHandler {
+    virtual void handleError(Generator&, ErrorBase&) = 0;
+    virtual ~ErrorHandler() = default;
+};
+
 inline constexpr size_t MODULE_PROGRAM_ID_ALIGNMENT = 256;
 
 struct ModuleImport {
@@ -21,7 +29,7 @@ struct ModuleImport {
     const IdentifierTable* wordTable;
     std::vector<ModuleReference> modules;
     std::span<ProgramUnion> ownPrograms;
-    std::span<const ModuleHandle> programModules;
+    std::span<const ModuleHandle> programModules; // TODO: This could be easily computed from the program id ranges
     std::span<Namespace> namespaces;
 
     ModuleReference selfReference() const { return modules.back(); }
@@ -48,6 +56,7 @@ struct Context {
     };
     std::vector<ScopeStackEntry> m_scopeStack;
     std::vector<ProgramHandle> m_implDeclarations;
+    ErrorHandler* errorHandler = nullptr;
 
     Context(std::span<const ModuleImport> imports, std::string_view source)
         : parseOutput(source) {

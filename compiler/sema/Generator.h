@@ -451,6 +451,12 @@ struct Generator : Util {
     void emitCall(SourceLocation, Constant callTarget, std::vector<Expression> arguments);
     void emitImplicitCopy(SourceLocation, Expression copyFrom);
     void declareLocalVariable(VariableDeclaration);
+
+    template<typename Error, typename... Args>
+    [[gnu::noinline]] void error(Args&&... args) {
+        Error error { {} /* ErrorBase */, std::forward<Args>(args)... };
+        context.errorHandler->handleError(*this, error);
+    }
 };
 
 }

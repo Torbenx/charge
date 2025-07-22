@@ -7,7 +7,7 @@ namespace parse {
 using ParseState = sema::Context;
 
 struct ErrorHandler {
-    virtual void invalidCharaceter() { }
+    virtual void invalidCharacter() { }
     virtual void invalidToken(LexerToken, State, ScopeKind*, ParseState&) { }
     virtual ~ErrorHandler() = default;
 };
