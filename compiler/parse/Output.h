@@ -2,76 +2,12 @@
 
 #include <PageBumpAllocator.h>
 #include <parse/parse_gen.h>
+#include <parse/Token.h>
 
 #include <utility>
 #include <vector>
 
 namespace parse {
-
-enum class TokenKind : uint8_t {
-#define TOKEN(kind, type, prec) kind,
-
-#include <parse/tokens.inc>
-
-    FirstUnaryExpr = LogicalNotExpr,
-    LastUnaryExpr = DereferenceExpr,
-};
-std::string_view nameString(TokenKind);
-inline bool isUnaryExpr(TokenKind kind) {
-    return kind >= TokenKind::FirstUnaryExpr && kind <= TokenKind::LastUnaryExpr;
-}
-
-#define ENUMERATE_SCOPE_KINDS     \
-    SCOPE(Invalid)                \
-    SCOPE(IfExpr)                 \
-    SCOPE(IfExprOrStmt)           \
-    SCOPE(CompoundStmt)           \
-    SCOPE(Paren)                  \
-    SCOPE(ParenInImplExpr)        \
-    SCOPE(Square)                 \
-    SCOPE(Brace)                  \
-    SCOPE(BraceInImplExpr)        \
-    SCOPE(LeftExpr)               \
-    SCOPE(RightExpr)              \
-    SCOPE(VariableType)           \
-    SCOPE(IfBranch)               \
-    SCOPE(ElseBranch)             \
-    SCOPE(PlainStatement)         \
-    SCOPE(Argument)               \
-    SCOPE(Parameter)              \
-    SCOPE(Namespace)              \
-    SCOPE(FunctionBody)           \
-    SCOPE(ReturnType)             \
-    SCOPE(FunctionParameters)     \
-    SCOPE(Struct)                 \
-    SCOPE(Enum)                   \
-    SCOPE(HasTypeExpr)            \
-    SCOPE(TemplateParameters)     \
-    SCOPE(StructImplExpression)   \
-    SCOPE(FunctionImplExpression) \
-    SCOPE(EnumImplExpression)     \
-    SCOPE(GenericCategoryExpression)
-
-enum class ScopeKind : uint8_t {
-#define SCOPE(kind) kind,
-    ENUMERATE_SCOPE_KINDS
-#undef SCOPE
-};
-std::string_view nameString(ScopeKind);
-
-struct TokenInfo : TaggedSourceLocation<TokenKind> {
-    uint32_t dataBits = 0;
-
-    TokenInfo(TokenKind kind, SourceLocation location, uint32_t data = 0)
-        : TaggedSourceLocation<TokenKind>(kind, location), dataBits(data) { }
-
-    TokenKind kind() const { return tag(); }
-    uint32_t data() const { return dataBits; }
-
-    void setKind(TokenKind kind) {
-        setTag(kind);
-    }
-};
 
 struct LineInfo {
     const char* begin = nullptr;
@@ -113,9 +49,9 @@ struct Output {
         lines.push_back({ source.data() });
     }
 
-    std::span<const Word> argumentNames(uint32_t callTokenData) {
-        int_t count = std::bit_cast<uint32_t>(callArguments[callTokenData]);
-        return std::span<const Word>(callArguments.data() + callTokenData + 1, count);
+    std::span<const Word> argumentNames(CallArgumentsHandle handle) {
+        int_t count = std::bit_cast<uint32_t>(callArguments[handle.offset]);
+        return std::span<const Word>(callArguments.data() + handle.offset + 1, count);
     }
 
     const char* sourcePointer(SourceLocation loc) const {

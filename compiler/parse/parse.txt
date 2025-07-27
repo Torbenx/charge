@@ -323,7 +323,7 @@ LinearState maybe_designated_argument(argumentName) then after_expression
         updateCallArgument argumentName
         next expression
     then
-        emitToken TokenKind::IdentifierExpr, argumentName
+        emitToken TokenKind::IdentifierExpr, argumentName # TODO: Wrong source location
 
 LinearState first_argument_paren() then argument
     punctuation )
@@ -751,19 +751,19 @@ LinearState after_static() then error
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::Let
-        emitToken TokenKind::LetValueDecl, this_declaration
+        emitToken TokenKind::GlobalDecl, this_declaration
         next after_simple_variable_declaration_id
 LinearState static_var_variable_declaration() then error
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::Var
-        emitToken TokenKind::VarValueDecl, this_declaration
+        emitToken TokenKind::GlobalDecl, this_declaration
         next after_simple_variable_declaration_id
 LinearState static_open_variable_declaration() then error
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::OpenLet
-        emitToken TokenKind::LetValueDecl, this_declaration
+        emitToken TokenKind::GlobalDecl, this_declaration
         next after_simple_variable_declaration_id
 
 LinearState after_declaration() then error

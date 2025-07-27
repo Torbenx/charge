@@ -9,6 +9,16 @@ namespace sema {
 struct Generator;
 struct Context;
 
+struct ErrorBase {
+    virtual ~ErrorBase() = default;
+};
+
+template<typename E>
+struct Error : ErrorBase, E {
+    Error(E e)
+        : ErrorBase(), E(std::move(e)) { }
+};
+
 struct LookupCache {
     WordTable table;
 
@@ -452,9 +462,9 @@ struct Generator : Util {
     void emitImplicitCopy(SourceLocation, Expression copyFrom);
     void declareLocalVariable(VariableDeclaration);
 
-    template<typename Error, typename... Args>
+    template<typename E, typename... Args>
     [[gnu::noinline]] void error(Args&&... args) {
-        Error error { {} /* ErrorBase */, std::forward<Args>(args)... };
+        Error<E> error({ std::forward<Args>(args)... });
         context.errorHandler->handleError(*this, error);
     }
 };

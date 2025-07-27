@@ -84,19 +84,19 @@ struct H1: {
     }
 }
 
-// expect-token LetValueDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token GlobalDecl; expect-token AssignStmt; expect-token ExpressionStmt
 static v1;
 
-// expect-token VarValueDecl; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token GlobalDecl; expect-token AssignStmt; expect-token ExpressionStmt
 static var v3;
 
-// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
+// expect-token GlobalDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token ExpressionStmt
 static w1: type;
 
-// expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token GlobalDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 static w2 = init;
 
-// expect-token LetValueDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token GlobalDecl; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 static w3: type = init;
 
 // expect-token TemplateAttribute; expect-token LetValueDecl; expect-token AssignStmt; expect-token ExpressionStmt; expect-token EmptyNode; expect-token StructDecl

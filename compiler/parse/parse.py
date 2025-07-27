@@ -955,12 +955,12 @@ def generateInstructions(case, instructions, thenHandler):
                 line("carriedEmitTokenKind = " + inst.tokenKindExpr + ";")
                 dataExpr = "0"
                 if not inst.dataExpr is None:
-                    dataExpr = inst.dataExpr + ".toUint()"
+                    dataExpr = "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")"
                 line("carriedEmitTokenData = " + dataExpr + ";")
             elif inst.dataExpr is None:
                 emitToken(inst.tokenKindExpr)
             else:
-                emitToken(inst.tokenKindExpr, inst.dataExpr + ".toUint()")
+                emitToken(inst.tokenKindExpr, "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")")
         elif type(inst) is UpdateKindInstruction:
             line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
         elif type(inst) is NextInstruction:

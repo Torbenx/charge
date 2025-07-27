@@ -7,4 +7,6 @@ target_sources(compiler
     parse_gen.cpp
     parse_gen.h
     Output.h
+    Token.cpp
+    Token.h
 )

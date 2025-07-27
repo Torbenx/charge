@@ -27,63 +27,63 @@ Expression ErrorAnalyzer::dropTopExpression() {
 void ErrorAnalyzer::analyze(ErrorBase* base) {
     using namespace errors;
 
-    if (auto* e = dynamic_cast<SelfTypeTemplateParameterWithExplicitType*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<SelfTypeTemplateParameterWithExplicitType>*>(base); e != nullptr) {
         // Recover by ignoring the type expression
         visitAndDropExpression();
     }
-    if (auto* e = dynamic_cast<SelfTypeTemplateParameterWithDefaultArgument*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<SelfTypeTemplateParameterWithDefaultArgument>*>(base); e != nullptr) {
         // Recover by ignoring the default argument
         visitAndDropExpression();
     }
 
-    if (auto* e = dynamic_cast<StaticVariableDeclarationWithoutInitializer*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<StaticVariableDeclarationWithoutInitializer>*>(base); e != nullptr) {
         // Only for global lets is the initialzer used during analysis. Recover those by making them open.
         auto* prog = cast<GlobalProgram>(g.program);
         if (prog->globalKind() == GlobalKind::Let)
             prog->m_globalKind = GlobalKind::OpenLet;
     }
 
-    if (auto* e = dynamic_cast<FunctionImplFunctionParameterCountMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplFunctionParameterCountMismatch>*>(base); e != nullptr) {
         // No recovery needed?
     }
-    if (auto* e = dynamic_cast<FunctionImplFunctionParameterNameMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplFunctionParameterNameMismatch>*>(base); e != nullptr) {
         // No recovery needed
     }
-    if (auto* e = dynamic_cast<FunctionImplFunctionParameterKindMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplFunctionParameterKindMismatch>*>(base); e != nullptr) {
         // No recovery needed
     }
-    if (auto* e = dynamic_cast<FunctionImplFunctionParameterCategoryMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplFunctionParameterCategoryMismatch>*>(base); e != nullptr) {
         // No recovery needed
     }
-    if (auto* e = dynamic_cast<FunctionImplFunctionParameterTypeMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplFunctionParameterTypeMismatch>*>(base); e != nullptr) {
         // No recovery needed
     }
-    if (auto* e = dynamic_cast<FunctionImplReturnTypeMismatch*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionImplReturnTypeMismatch>*>(base); e != nullptr) {
         // No recovery needed
     }
 
-    if (auto* e = dynamic_cast<FunctionParameterWithDefaultArgument*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionParameterWithDefaultArgument>*>(base); e != nullptr) {
         // Recover by ignoring the default argument
         dropTopExpression();
     }
-    if (auto* e = dynamic_cast<SelfFunctionParameterWithDefaultArgument*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<SelfFunctionParameterWithDefaultArgument>*>(base); e != nullptr) {
         // Recover by ignoring the default argument
         visitAndDropExpression();
     }
-    if (auto* e = dynamic_cast<SelfFunctionParameterWithExplicitType*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<SelfFunctionParameterWithExplicitType>*>(base); e != nullptr) {
         // Recover by ignoring the type expression
         visitAndDropExpression();
     }
-    if (auto* e = dynamic_cast<FunctionWithoutExplicitReturnType*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<FunctionWithoutExplicitReturnType>*>(base); e != nullptr) {
         // TODO: How to recover?
         VERIFY_NOT_REACHED();
     }
 
-    if (auto* e = dynamic_cast<DestoryTargetNotALocalVariable*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<DestoryTargetNotALocalVariable>*>(base); e != nullptr) {
         // Recover by eating the top expression. Nothing will be done in the generator.
         dropTopExpression();
     }
-    if (auto* e = dynamic_cast<DiscardTargetNotALocalReference*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<DiscardTargetNotALocalReference>*>(base); e != nullptr) {
         // Recover by eating the top expression. Nothing will be done in the generator.
         dropTopExpression();
     }

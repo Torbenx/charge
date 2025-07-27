@@ -72,7 +72,7 @@ void Generator::visitDeclaration() {
         visitStructDeclaration();
     } else if (tok->kind() == Token::StructImplDecl) {
         visitStructImplDeclaration();
-    } else if (tok->kind() == Token::VarValueDecl || tok->kind() == Token::LetValueDecl) {
+    } else if (tok->kind() == Token::GlobalDecl) {
         visitStaticVariableDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
         visitFunctionDeclaration();
@@ -128,7 +128,7 @@ VariableCategory Generator::visitVariableCategory() {
 }
 
 Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
-    Word name = Word::fromUint(tok->data());
+    Word name = tok->data1<Word>();
     SourceLocation nameLoc = tok->location();
 
     auto category = visitVariableCategory();
@@ -195,7 +195,7 @@ Program::Parameter Generator::visitTemplateParameter() {
         // report error
         VERIFY_NOT_REACHED();
     }
-    Word name = Word::fromUint(tok->data());
+    Word name = tok->data1<Word>();
     advance();
 
     if (name == parse::words["self_type"]) {
@@ -204,7 +204,7 @@ Program::Parameter Generator::visitTemplateParameter() {
             error<errors::SelfTypeTemplateParameterWithExplicitType>();
         VERIFY(tok->kind() == Token::AssignStmt);
         advance();
-        if (tok->kind() == Token::ExpressionStmt)
+        if (tok->kind() != Token::ExpressionStmt)
             error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
         VERIFY(tok->kind() == Token::ExpressionStmt);
         advance();
@@ -222,7 +222,7 @@ void Generator::visitStaticVariableDeclaration() {
     VERIFY(program->kind() == ProgramKind::Global);
     auto* globalProgram = cast<GlobalProgram>(program);
 
-    VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
+    VERIFY(tok->kind() == Token::GlobalDecl);
     advance();
 
     auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), false);
@@ -318,7 +318,7 @@ void Generator::visitFunctionParametersAndBody() {
     };
 
     if (tok->kind() != Token::EmptyNode) {
-        Word name = Word::fromUint(tok->data());
+        Word name = tok->data1<Word>();
         if (name == parse::words["self"]) {
             SourceLocation nameLoc = tok->location();
             VariableCategory category = visitVariableCategory();
@@ -432,7 +432,7 @@ void Generator::visitStructMembers() {
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
-        VERIFY(tok->data() == DeclarationValue(DeclarationValueKind::Member, i).toUint());
+        VERIFY(tok->data1<DeclarationValue>() == DeclarationValue(DeclarationValueKind::Member, i));
         advance();
 
         SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
@@ -488,7 +488,7 @@ void Generator::visitEnumValues() {
 
         setParseLocation(value.parseLocation());
         VERIFY(tok->kind() == Token::ImplicitEnumValueDecl || tok->kind() == Token::ExplicitEnumValueDecl);
-        VERIFY(tok->data() == DeclarationValue(DeclarationValueKind::EnumValue, i).toUint());
+        VERIFY(tok->data1<DeclarationValue>() == DeclarationValue(DeclarationValueKind::EnumValue, i));
         advance();
 
         // TODO: Actually set value once ints are supported
@@ -593,7 +593,7 @@ void Generator::visitPostfixExpr() {
         if (tok->kind() == Token::Parameterize) {
             generateParameterizeExpr();
         } else if (tok->kind() == Token::CallExpr) {
-            CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data()));
+            CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
             SourceLocation callLoc = tok->location();
             advance();
             generateCallExpr(callLoc, std::move(target));

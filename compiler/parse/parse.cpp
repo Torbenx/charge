@@ -102,11 +102,11 @@ static void updateCallArgument(Word* position, Word name) {
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto& outputArgs = state.parseOutput.callArguments;
-    uint32_t outputPos = outputArgs.size();
+    CallArgumentsHandle handle { (uint32_t)outputArgs.size() };
     outputArgs.push_back(position[0]);
     outputArgs.insert(outputArgs.end(), position - count, position);
     position -= count + 2;
-    state.parseOutput.tokens[position[1].toUint()].dataBits = outputPos;
+    state.parseOutput.tokens[position[1].toUint()].setData1(handle);
     return position;
 }
 
@@ -923,7 +923,7 @@ LABEL_MAYBE_UNUSED expression$identifier_case:
     }
     // emitToken TokenKind::IdentifierExpr, this_identifier
     carriedEmitTokenKind = TokenKind::IdentifierExpr;
-    carriedEmitTokenData = this_identifier.toUint();
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
     // next after_expression
     goto after_expression$with_emit;
 
@@ -2214,7 +2214,7 @@ maybe_designated_argument$no_emit:
         }
     }
     // emitToken TokenKind::IdentifierExpr, argumentName
-    emitToken(TokenKind::IdentifierExpr, tokBegin, argumentName.toUint(), state);
+    emitToken(TokenKind::IdentifierExpr, tokBegin, packData1(TokenKind::IdentifierExpr, argumentName), state);
     // then after_expression
     goto after_expression$as_then;
 
@@ -2298,7 +2298,7 @@ access_punctuation$no_emit:
         }
         // emitToken tokenKind, this_identifier
         carriedEmitTokenKind = tokenKind;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(tokenKind, this_identifier);
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -3278,7 +3278,7 @@ let_statement$no_emit:
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::LetValueDecl;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3305,7 +3305,7 @@ var_statement$no_emit:
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::VarValueDecl;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -3792,7 +3792,7 @@ parameter$as_then:
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::LetValueDecl;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -3819,7 +3819,7 @@ var_parameter$no_emit:
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         carriedEmitTokenKind = TokenKind::VarValueDecl;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -3858,7 +3858,7 @@ impl_expression$no_emit:
         }
         // emitToken TokenKind::IdentifierExpr, this_identifier
         carriedEmitTokenKind = TokenKind::IdentifierExpr;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
         // next after_impl_expression
         goto after_impl_expression$with_emit;
     }
@@ -3965,7 +3965,7 @@ impl_access_expression$no_emit:
         }
         // emitToken TokenKind::StaticAccessExpr, this_identifier
         carriedEmitTokenKind = TokenKind::StaticAccessExpr;
-        carriedEmitTokenData = this_identifier.toUint();
+        carriedEmitTokenData = packData1(TokenKind::StaticAccessExpr, this_identifier);
         // next after_impl_expression
         goto after_impl_expression$with_emit;
     }
@@ -4097,7 +4097,7 @@ namespace_declaration_id$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::NamespaceDecl, this_declaration
         carriedEmitTokenKind = TokenKind::NamespaceDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::NamespaceDecl, this_declaration);
         // next after_namespace_declaration_id
         goto after_namespace_declaration_id$with_emit;
     }
@@ -4314,7 +4314,7 @@ function_declaration_id$no_emit:
                 scopePosition = pushScope(scopePosition, ScopeKind::FunctionImplExpression);
                 // emitToken TokenKind::FunctionImplDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::FunctionImplDecl;
-                carriedEmitTokenData = this_declaration.toUint();
+                carriedEmitTokenData = packData1(TokenKind::FunctionImplDecl, this_declaration);
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4328,7 +4328,7 @@ function_declaration_id$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::FunctionDecl, this_declaration
         carriedEmitTokenKind = TokenKind::FunctionDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::FunctionDecl, this_declaration);
         // next after_function_declaration_id
         goto after_function_declaration_id$with_emit;
     }
@@ -4425,7 +4425,7 @@ struct_declaration_id$no_emit:
                 scopePosition = pushScope(scopePosition, ScopeKind::StructImplExpression);
                 // emitToken TokenKind::StructImplDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::StructImplDecl;
-                carriedEmitTokenData = this_declaration.toUint();
+                carriedEmitTokenData = packData1(TokenKind::StructImplDecl, this_declaration);
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4439,7 +4439,7 @@ struct_declaration_id$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::StructDecl, this_declaration
         carriedEmitTokenKind = TokenKind::StructDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::StructDecl, this_declaration);
         // next after_struct_declaration_id
         goto after_struct_declaration_id$with_emit;
     }
@@ -4507,7 +4507,7 @@ member_declaration$as_then:
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
                 // emitToken TokenKind::HasMemberDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
-                carriedEmitTokenData = this_declaration.toUint();
+                carriedEmitTokenData = packData1(TokenKind::HasMemberDecl, this_declaration);
                 // next expression
                 goto expression$with_emit;
             }
@@ -4566,7 +4566,7 @@ member_declaration$as_then:
         this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::MemberDecl, this_declaration
         carriedEmitTokenKind = TokenKind::MemberDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::MemberDecl, this_declaration);
         // next after_variable_declaration_id
         goto after_variable_declaration_id$with_emit;
     }
@@ -4593,7 +4593,7 @@ enum_declaration_id$no_emit:
                 scopePosition = pushScope(scopePosition, ScopeKind::EnumImplExpression);
                 // emitToken TokenKind::EnumImplDecl, this_declaration
                 carriedEmitTokenKind = TokenKind::EnumImplDecl;
-                carriedEmitTokenData = this_declaration.toUint();
+                carriedEmitTokenData = packData1(TokenKind::EnumImplDecl, this_declaration);
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4607,7 +4607,7 @@ enum_declaration_id$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::EnumDecl, this_declaration
         carriedEmitTokenKind = TokenKind::EnumDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::EnumDecl, this_declaration);
         // next after_enum_declaration_id
         goto after_enum_declaration_id$with_emit;
     }
@@ -4721,7 +4721,7 @@ enum_value_declaration$as_then:
         this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
         carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        carriedEmitTokenData = packData1(TokenKind::ImplicitEnumValueDecl, this_declaration);
         // next after_enum_value_declaration_id
         goto after_enum_value_declaration_id$with_emit;
     }
@@ -4792,9 +4792,9 @@ after_static$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::Let
         setGlobalKind(state, GlobalKind::Let);
-        // emitToken TokenKind::LetValueDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::LetValueDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        // emitToken TokenKind::GlobalDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::GlobalDecl;
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -4823,9 +4823,9 @@ static_var_variable_declaration$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::Var
         setGlobalKind(state, GlobalKind::Var);
-        // emitToken TokenKind::VarValueDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::VarValueDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        // emitToken TokenKind::GlobalDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::GlobalDecl;
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -4854,9 +4854,9 @@ static_open_variable_declaration$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::OpenLet
         setGlobalKind(state, GlobalKind::OpenLet);
-        // emitToken TokenKind::LetValueDecl, this_declaration
-        carriedEmitTokenKind = TokenKind::LetValueDecl;
-        carriedEmitTokenData = this_declaration.toUint();
+        // emitToken TokenKind::GlobalDecl, this_declaration
+        carriedEmitTokenKind = TokenKind::GlobalDecl;
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -5436,30 +5436,6 @@ exit:
 handle_parse_error:
     errorHandler->invalidToken(errorToken, parseState, scopePosition, state);
     return;
-}
-
-std::string_view nameString(TokenKind kind) {
-    switch (kind) {
-#define TOKEN(kind, type, prec) \
-    case TokenKind::kind:       \
-        return #kind;
-
-#include <parse/tokens.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-std::string_view nameString(ScopeKind kind) {
-    switch (kind) {
-#define SCOPE(kind)       \
-    case ScopeKind::kind: \
-        return #kind;
-        ENUMERATE_SCOPE_KINDS
-#undef SCOPE
-    default:
-        VERIFY_NOT_REACHED();
-    }
 }
 
 }

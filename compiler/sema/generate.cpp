@@ -249,7 +249,7 @@ bool Generator::resolveImplicitImplTarget() {
 void Generator::addParameterizeArguments(DeductionState& state, int_t firstParameterIndex) {
     VERIFY(firstParameterIndex >= state.program->inheritedParameterCount);
     VERIFY(tok->kind() == Token::Parameterize);
-    auto argumentNames = context.parseOutput.argumentNames(tok->data());
+    auto argumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
 
     int_t parameterCount = state.arguments.size();
@@ -522,7 +522,7 @@ Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span
 }
 
 void Generator::generateIdentifierExpr() {
-    Word name = Word::fromUint(tok->data());
+    Word name = tok->data1<Word>();
     if (name == parse::words["false"]) {
         emitExpression(tok->location(), builtins::false_constant);
         return;
@@ -599,7 +599,7 @@ void Generator::generateIdentifierExpr() {
 }
 
 void Generator::generateStaticAccessExpr() {
-    Word name = Word::fromUint(tok->data());
+    Word name = tok->data1<Word>();
     Constant baseValue = expressionToConstant();
     if (baseValue.kind() == ConstantKind::Namespace) {
         Namespace* ns = context.getNamespace(baseValue.nsHandle());
@@ -625,7 +625,7 @@ void Generator::generateStaticAccessExpr() {
 }
 
 void Generator::generateMemberAccessExpr() {
-    Word name = Word::fromUint(tok->data());
+    Word name = tok->data1<Word>();
     Type baseType = resultType(topExpression());
     auto result = internalLookup(baseProgram(baseType).value(), name);
     VERIFY(result.value.has_value());
@@ -666,7 +666,7 @@ void Generator::generateMemberAccessExpr() {
     }
 
     VERIFY(tok->kind() == Token::CallExpr);
-    auto callArgumentNames = context.parseOutput.argumentNames(tok->data());
+    auto callArgumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));

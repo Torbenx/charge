@@ -102,11 +102,11 @@ static void updateCallArgument(Word* position, Word name) {
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto& outputArgs = state.parseOutput.callArguments;
-    uint32_t outputPos = outputArgs.size();
+    CallArgumentsHandle handle { (uint32_t)outputArgs.size() };
     outputArgs.push_back(position[0]);
     outputArgs.insert(outputArgs.end(), position - count, position);
     position -= count + 2;
-    state.parseOutput.tokens[position[1].toUint()].dataBits = outputPos;
+    state.parseOutput.tokens[position[1].toUint()].setData1(handle);
     return position;
 }
 
@@ -301,30 +301,6 @@ exit:
 handle_parse_error:
     errorHandler->invalidToken(errorToken, parseState, scopePosition, state);
     return;
-}
-
-std::string_view nameString(TokenKind kind) {
-    switch (kind) {
-#define TOKEN(kind, type, prec) \
-    case TokenKind::kind:       \
-        return #kind;
-
-#include <parse/tokens.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-std::string_view nameString(ScopeKind kind) {
-    switch (kind) {
-#define SCOPE(kind)       \
-    case ScopeKind::kind: \
-        return #kind;
-        ENUMERATE_SCOPE_KINDS
-#undef SCOPE
-    default:
-        VERIFY_NOT_REACHED();
-    }
 }
 
 }

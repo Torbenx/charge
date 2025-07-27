@@ -1,46 +1,38 @@
 #pragma once
 
-namespace sema {
-
-struct ErrorBase {
-    virtual ~ErrorBase() = default;
-};
-
-}
-
 namespace sema::errors {
 
-struct SelfTypeTemplateParameterWithExplicitType : ErrorBase { };
-struct SelfTypeTemplateParameterWithDefaultArgument : ErrorBase { };
+struct SelfTypeTemplateParameterWithExplicitType { };
+struct SelfTypeTemplateParameterWithDefaultArgument { };
 
-struct StaticVariableDeclarationWithoutInitializer : ErrorBase { };
+struct StaticVariableDeclarationWithoutInitializer { };
 
-struct FunctionImplFunctionParameterCountMismatch : ErrorBase { };
-struct FunctionImplFunctionParameterNameMismatch : ErrorBase { };
-struct FunctionImplFunctionParameterKindMismatch : ErrorBase { };
-struct FunctionImplFunctionParameterCategoryMismatch : ErrorBase { };
-struct FunctionImplFunctionParameterTypeMismatch : ErrorBase { };
-struct FunctionImplReturnTypeMismatch : ErrorBase { };
+struct FunctionImplFunctionParameterCountMismatch { };
+struct FunctionImplFunctionParameterNameMismatch { };
+struct FunctionImplFunctionParameterKindMismatch { };
+struct FunctionImplFunctionParameterCategoryMismatch { };
+struct FunctionImplFunctionParameterTypeMismatch { };
+struct FunctionImplReturnTypeMismatch { };
 
-struct FunctionParameterWithDefaultArgument : ErrorBase { };
-struct SelfFunctionParameterWithDefaultArgument : ErrorBase { };
-struct SelfFunctionParameterWithExplicitType : ErrorBase { };
-struct FunctionWithoutExplicitReturnType : ErrorBase { };
+struct FunctionParameterWithDefaultArgument { };
+struct SelfFunctionParameterWithDefaultArgument { };
+struct SelfFunctionParameterWithExplicitType { };
+struct FunctionWithoutExplicitReturnType { };
 
-struct DestoryTargetNotALocalVariable : ErrorBase { };
-struct DiscardTargetNotALocalReference : ErrorBase { };
+struct DestoryTargetNotALocalVariable { };
+struct DiscardTargetNotALocalReference { };
 
-struct ImplicitImplTargetNotFound : ErrorBase { };
-struct ImplicitImplTargetNotAProgram : ErrorBase { };
-struct ImplicitImplTargetKindMismatch : ErrorBase { };
-struct ImplicitImplTemplateParameterCountMismatch : ErrorBase { };
-struct ImplicitImplTemplateParameterNameMismatch : ErrorBase { };
-struct ImplicitImplTemplateParameterTypeMismatch : ErrorBase { };
+struct ImplicitImplTargetNotFound { };
+struct ImplicitImplTargetNotAProgram { };
+struct ImplicitImplTargetKindMismatch { };
+struct ImplicitImplTemplateParameterCountMismatch { };
+struct ImplicitImplTemplateParameterNameMismatch { };
+struct ImplicitImplTemplateParameterTypeMismatch { };
 
-struct ParameterizeBaseIsNotATemplate : ErrorBase { };
-struct ParameterizeBaseIsAlreadyParameterized : ErrorBase { };
-struct ParameterizeBaseNotSupported : ErrorBase { };
-struct ParameterizeWithTooManyArguments : ErrorBase { };
-struct ParameterizeArgumentNameMismatch : ErrorBase { };
+struct ParameterizeBaseIsNotATemplate { };
+struct ParameterizeBaseIsAlreadyParameterized { };
+struct ParameterizeBaseNotSupported { };
+struct ParameterizeWithTooManyArguments { };
+struct ParameterizeArgumentNameMismatch { };
 
 }

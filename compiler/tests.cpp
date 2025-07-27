@@ -328,19 +328,6 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
     TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
         : context { imports, source } { }
 
-    [[noreturn]] void error(std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
-        VERIFY_NOT_REACHED();
-    }
-    void verify(bool b, std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
-        VERIFY(b);
-    }
-    void verifyNoPairs(const Command& cmd) {
-        verify(cmd.pairs.size() == 0, "", &cmd);
-    }
-    template<typename T>
-    void expect_eq(const T& left, const T& right, std::string_view = {}, const Command* = nullptr, const Pair* = nullptr) {
-        VERIFY(left == right);
-    }
     [[noreturn]] void invalidKey(const Command*, const Pair*) {
         VERIFY_NOT_REACHED();
     }
@@ -364,18 +351,18 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             auto cmd = commandQueue.pop();
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    expect_eq(pair.value, nameString(tok.kind()), "", &cmd, &pair);
+                    EXPECT_EQ(pair.value, nameString(tok.kind()));
                 // else if (pair.key == words["packed-range-begin-column"])
-                //     expect_eq<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value), "", &cmd, &pair);
+                //     EXPECT_EQ<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value));
                 else
                     invalidKey(&cmd, &pair);
             }
         } else if (commandQueue.top().command == words["expect-identifier"]) {
             auto cmd = commandQueue.pop();
-            expect_eq(tok.kind(), parse::TokenKind::IdentifierExpr);
+            EXPECT_EQ(tok.kind(), parse::TokenKind::IdentifierExpr);
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    expect_eq(pair.value, context.wordTable.view(Word::fromUint(tok.data())), "", &cmd, &pair);
+                    EXPECT_EQ(pair.value, context.wordTable.view(tok.data1<Word>()));
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -443,17 +430,12 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             }
 
             switch (command.command.toUint()) {
-            case words["expect-no-error"].toUint(): {
-                verifyNoPairs(command);
-                verify(commandQueue.empty(), "", &command);
-                break;
-            }
             case words["expect-source-position"].toUint(): {
                 for (const auto& pair : command.pairs) {
                     if (pair.key == words["line"])
-                        expect_eq<uint32_t>(whitespace.lineNumber(), parseInteger(pair.value), "", &command, &pair);
+                        EXPECT_EQ(whitespace.lineNumber(), parseInteger(pair.value));
                     else if (pair.key == words["column"])
-                        expect_eq<uint32_t>(whitespace.column(), parseInteger(pair.value), "", &command, &pair);
+                        EXPECT_EQ(whitespace.column(), parseInteger(pair.value));
                     else
                         invalidKey(&command, &pair);
                 }
@@ -486,7 +468,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
         if (word == words["expect-return-type"])
             expr->check(context, programHandle, (sema::Constant)cast<sema::FunctionProgram>(program)->returnType());
         if (word == words["expect-impl"]) {
-            verify(program->isImpl());
+            ASSERT_TRUE(program->isImpl());
             expr->check(context, programHandle, (sema::Constant)program->selfConstant());
         }
     }
