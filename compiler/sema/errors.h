@@ -10,7 +10,7 @@ struct StaticVariableDeclarationWithoutInitializer { };
 struct FunctionImplFunctionParameterCountMismatch { };
 struct FunctionImplFunctionParameterNameMismatch { };
 struct FunctionImplFunctionParameterKindMismatch { };
-struct FunctionImplFunctionParameterCategoryMismatch { };
+struct FunctionImplFunctionParameterGenericCategoryMismatch { };
 struct FunctionImplFunctionParameterTypeMismatch { };
 struct FunctionImplReturnTypeMismatch { };
 
@@ -34,5 +34,30 @@ struct ParameterizeBaseIsAlreadyParameterized { };
 struct ParameterizeBaseNotSupported { };
 struct ParameterizeWithTooManyArguments { };
 struct ParameterizeArgumentNameMismatch { };
+
+struct CallTargetIsIncompleteGlobal { };
+struct CallTargetNotSupported { };
+struct CallTargetTemplateArgumentDeductionIncomplete { };
+
+struct UnqualifiedLookupFoundMember { };
+struct UnqualifiedLookupFailed { };
+
+struct StaticLookupFailed { };
+struct StaticLookupBaseNotSupported { };
+
+struct MemberLookupFailed { };
+struct MemberLookupResultNotSupported { };
+struct MemberLookupFunctionResultNotImmediatelyCalled { };
+
+struct MemberFunctionCallTargetHasNoSelfParameter { };
+struct MemberFunctionCallSelfParameterTypeMismatch { };
+struct MemberFunctionCallTargetTemplateArgumentDeductionIncomplete { };
+
+struct SelfParameterLookupFailed { };
+struct SelfTypeTemplateParameterLookupFailed { };
+
+struct InitializeTypeMismatch { };
+struct InitializeOfReferenceWithValue { };
+struct InitializeOfReferenceIsNotReferenceDowncast { };
 
 }

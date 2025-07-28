@@ -11,7 +11,6 @@
 #include <sema/Generator.h>
 #include <vector>
 
-
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -288,7 +287,7 @@ struct ParseErrorHandler : parse::ErrorHandler {
     }
 };
 
-struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHandler {
+struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHandler, sema::ErrorHandler {
     struct Pair {
         Word key;
         std::string_view value;
@@ -315,18 +314,21 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
         bool empty() const { return queue.empty(); }
     };
 
+    struct SemanticError {
+        std::string name;
+    };
+
     static constexpr auto words = ConstWordStringTable(
-        "expect-invalid-char", "expect-unterm-comment", "expect-unterm-char-literal", "expect-invalid-char-literal",
-        "expect-no-error", "expect-token", "expect-source-position",
-        "line", "column", "packed-range-begin-column", "expect-identifier", "name",
-        "expect-type", "expect-value", "expect-return-type", "expect-impl");
+        "expect-token", "expect-source-position",
+        "line", "column", "expect-identifier",
+        "expect-type", "expect-value", "expect-return-type", "expect-impl", "expect-error");
 
     WordStringTable wordTable { words };
     sema::Context context;
     CommandQueue commandQueue;
 
     TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
-        : context { imports, source } { }
+        : context { imports, source } { context.errorHandler = this; }
 
     [[noreturn]] void invalidKey(const Command*, const Pair*) {
         VERIFY_NOT_REACHED();
@@ -352,8 +354,6 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
                     EXPECT_EQ(pair.value, nameString(tok.kind()));
-                // else if (pair.key == words["packed-range-begin-column"])
-                //     EXPECT_EQ<uint32_t>(par->sourcePosition(node->packedToken().first()).column, parseInteger(pair.value));
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -394,7 +394,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             skipWhitespace();
 
             auto word = wordTable.get(cmdStr);
-            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"] || word == words["expect-impl"]) {
+            if (word == words["expect-type"] || word == words["expect-value"] || word == words["expect-return-type"] || word == words["expect-impl"] || word == words["expect-error"]) {
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
@@ -452,15 +452,38 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             }
         }
     }
+
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
-        sema::CheckExprParser parser { context, comment };
-        auto expr = parser.parse();
         sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
         sema::ProgramHandle programHandle = context.programHandle(program);
-        sema::Generator::signatureCheck(context, programHandle);
-        fmt::println("-------------------------------");
-        program->dump(context);
+        std::string semanticError;
+        try {
+            sema::Generator::signatureCheck(context, programHandle);
+        } catch (const SemanticError& semaError) {
+            VERIFY(!semaError.name.empty());
+            semanticError = semaError.name;
+        }
 
+        if (word == words["expect-error"]) {
+            int_t i = 0;
+            for (; i < (int_t)comment.size() && isBulkIdentifierChar(comment[i]); i++) { }
+            if (semanticError.empty())
+                program->dump(context);
+            EXPECT_EQ(semanticError, comment.substr(0, i));
+            comment = comment.substr(i);
+            return;
+        }
+
+        //fmt::println("-------------------------------");
+        //program->dump(context);
+
+        if (!semanticError.empty()) {
+            fmt::println("unexpected semantic error {}", semanticError);
+            return;
+        }
+
+        sema::CheckExprParser parser { context, comment };
+        auto expr = parser.parse();
         if (word == words["expect-type"])
             expr->check(context, programHandle, (sema::Constant)cast<sema::GlobalProgram>(program)->type());
         if (word == words["expect-value"])
@@ -471,6 +494,11 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             ASSERT_TRUE(program->isImpl());
             expr->check(context, programHandle, (sema::Constant)program->selfConstant());
         }
+    }
+
+    void handleError(sema::Generator& g, sema::ErrorBase& err) override {
+        g.takeTopExpression().release();
+        throw SemanticError { err.name() };
     }
 
     Command popCommand(Word cause) {
@@ -547,6 +575,7 @@ TEST(Charge, Files) {
         if (entry.path().extension().string() != ".chrg")
             continue;
 
+        fmt::println("File: {}", entry.path().filename().string());
         auto sourceBuffer = readFile(entry.path());
 
         TestInstrumenter test(dependencies, sourceBuffer);

@@ -11,12 +11,23 @@ struct Context;
 
 struct ErrorBase {
     virtual ~ErrorBase() = default;
+
+    virtual const char* mangledName() const = 0;
+    std::string name() const;
+    virtual std::unique_ptr<ErrorBase> copy() const = 0;
 };
 
 template<typename E>
 struct Error : ErrorBase, E {
     Error(E e)
         : ErrorBase(), E(std::move(e)) { }
+
+    std::unique_ptr<ErrorBase> copy() const override {
+        return std::make_unique<Error<E>>((const E&)*this);
+    }
+    const char* mangledName() const override {
+        return typeid(E).name();
+    }
 };
 
 struct LookupCache {

@@ -6,7 +6,6 @@
 
 namespace sema {
 
-
 Generator::StashedExpression Generator::stashTopExpression() {
     resolveLazyExpressions();
     return { std::move(currentExpression), (uint32_t)expressionStack.size() };
@@ -185,9 +184,9 @@ bool Generator::resolveImplicitImplTarget() {
 
     VERIFY(try_cast<ScopeProgram>(parentProg).has_value());
     Constant parentImplOf = fold(makeParameterize(parentProgHandle, copyParameters(parentProg)), parentProg->selfConstant());
-    auto parentImplPara = program->getParameterize(parentImplOf);
+    auto parentImpl = asFoldBase(parentImplOf);
 
-    auto implTarget = cast<ScopeProgram>(context.program(parentImplPara.base))->getDeclaration(program->name());
+    auto implTarget = cast<ScopeProgram>(parentImpl.program)->getDeclaration(program->name());
     if (!implTarget.has_value()) {
         error<errors::ImplicitImplTargetNotFound>();
         return false;
@@ -196,7 +195,7 @@ bool Generator::resolveImplicitImplTarget() {
         error<errors::ImplicitImplTargetNotAProgram>();
         return false;
     }
-    ProgramHandle implOfProgHandle = context.translate(parentImplPara.base, implTarget.value().program());
+    ProgramHandle implOfProgHandle = context.translate(parentImpl.programHandle, implTarget.value().program());
     signatureCheck(context, implOfProgHandle);
     Program* implOfProg = context.program(implOfProgHandle);
 
@@ -205,9 +204,9 @@ bool Generator::resolveImplicitImplTarget() {
         return false;
     }
     DeductionState state(context, implOfProgHandle);
-    VERIFY(implOfProg->inheritedParameterCount == parentImplPara.arguments.size());
+    VERIFY(implOfProg->inheritedParameterCount == parentImpl.arguments.size());
     for (int_t i = 0; i < (int_t)implOfProg->inheritedParameterCount; i++)
-        state.explicitArgument(i, parentImplPara.arguments[i]);
+        state.explicitArgument(i, parentImpl.arguments[i]);
 
     // Match explicit parameter against each over
     int_t parameterIndex = program->inheritedParameterCount;
@@ -264,7 +263,7 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
             pIndex += 1;
         if (pIndex == parameterCount)
             error<errors::ParameterizeWithTooManyArguments>();
-        const auto & parameter = state.program->parameters[pIndex];
+        const auto& parameter = state.program->parameters[pIndex];
         if (argumentNames[aIndex].empty() || parameter.name == argumentNames[aIndex]) {
             visitExpression();
             initialize(conversionLocation, state, Constant(ExpressionCategory::Value), parameter.type);
@@ -321,7 +320,8 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
     if (isTopExpressionLazyParameterize()) {
         DeductionState state = takeLazyParameterize();
         if (state.program->kind() == ProgramKind::Global) {
-            VERIFY(state.isComplete());
+            if (!state.isComplete())
+                error<errors::CallTargetIsIncompleteGlobal>();
             baseResult = generateProgramLiteral(state.programHandle, state.arguments);
         } else {
             // VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
@@ -359,6 +359,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             return { std::move(state) };
         }
     }
+    error<errors::CallTargetNotSupported>();
     VERIFY_NOT_REACHED();
 }
 
@@ -368,7 +369,8 @@ void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
 
         auto arguments = visit<callParameters>(state.program, [this, &state](auto parameters) { return generateCallArguments(state, false, parameters); });
 
-        VERIFY(state.isComplete());
+        if (!state.isComplete())
+            error<errors::CallTargetTemplateArgumentDeductionIncomplete>();
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
         emitCall(location, callTarget, std::move(arguments));
         return;
@@ -577,7 +579,9 @@ void Generator::generateIdentifierExpr() {
                 continue;
             auto result = internalLookup(typeProg.value(), name);
             if (result.value.has_value()) {
-                VERIFY(result.value->kind() != DeclarationValueKind::Member); // Member should be looked up with .member or ::member
+                if (result.value->kind() == DeclarationValueKind::Member)
+                    // Member should be looked up with .member or ::member
+                    error<errors::UnqualifiedLookupFoundMember>();
                 emitExpression(tok->location(), generateDeclarationLiteral(std::move(result), type));
                 return;
             }
@@ -594,8 +598,7 @@ void Generator::generateIdentifierExpr() {
             VERIFY_NOT_REACHED();
         }
     }
-    fmt::println("Failed to lookup '{}'", context.wordTable.view(name));
-    VERIFY_NOT_REACHED();
+    error<errors::UnqualifiedLookupFailed>();
 }
 
 void Generator::generateStaticAccessExpr() {
@@ -610,7 +613,8 @@ void Generator::generateStaticAccessExpr() {
         FoldBase base = asFoldBase(baseValue);
         if (base.program->kind() == ProgramKind::Struct || base.program->kind() == ProgramKind::Enum) {
             auto result = internalLookup(base.programHandle, name);
-            VERIFY(result.value.has_value());
+            if (!result.value.has_value())
+                error<errors::StaticLookupFailed>();
             if (result.value->kind() == DeclarationValueKind::Member) {
                 result.extendMemberIndices();
                 auto memberPointer = generateMemberPointer(verifyType(baseValue), result.memberIndices);
@@ -621,14 +625,15 @@ void Generator::generateStaticAccessExpr() {
             return;
         }
     }
-    VERIFY_NOT_REACHED();
+    error<errors::StaticLookupBaseNotSupported>();
 }
 
 void Generator::generateMemberAccessExpr() {
     Word name = tok->data1<Word>();
     Type baseType = resultType(topExpression());
     auto result = internalLookup(baseProgram(baseType).value(), name);
-    VERIFY(result.value.has_value());
+    if (!result.value.has_value())
+        error<errors::MemberLookupFailed>();
     if (result.value->kind() == DeclarationValueKind::Member) {
         result.extendMemberIndices();
         auto memberPointer = generateMemberPointer(baseType, result.memberIndices);
@@ -639,10 +644,12 @@ void Generator::generateMemberAccessExpr() {
     }
 
     auto selfExprStash = stashTopExpression();
-    VERIFY(result.value->kind() == DeclarationValueKind::Program);
+    if (result.value->kind() != DeclarationValueKind::Program)
+        error<errors::MemberLookupResultNotSupported>();
     auto progHandle = result.value->program();
     signatureCheck(context, progHandle);
-    VERIFY(context.program(progHandle)->kind() == ProgramKind::Function);
+    if (context.program(progHandle)->kind() != ProgramKind::Function)
+        error<errors::MemberLookupResultNotSupported>();
     auto* fnProg = cast<FunctionProgram>(context.program(progHandle));
 
     DeductionState state(context, progHandle);
@@ -651,11 +658,14 @@ void Generator::generateMemberAccessExpr() {
     for (int_t i = 0; i < (int_t)fnProg->inheritedParameterCount; i++)
         state.explicitArgument(i, inheritedArguments[i]);
 
-    VERIFY(fnProg->functionParameters.size() >= 1);
+    if (fnProg->functionParameters.size() == 0)
+        error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
     const auto& firstFnParameter = fnProg->functionParameters.front();
-    VERIFY(firstFnParameter.name() == parse::words["self"]);
+    if (firstFnParameter.name() != parse::words["self"])
+        error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
     bool selfTypeMatch = staticMatch(state, firstFnParameter.type(), baseType);
-    VERIFY(selfTypeMatch);
+    if (!selfTypeMatch)
+        error<errors::MemberFunctionCallSelfParameterTypeMismatch>();
 
     advance();
     if (tok->kind() == Token::Parameterize) {
@@ -665,13 +675,15 @@ void Generator::generateMemberAccessExpr() {
         addParameterizeArguments(state, firstTemplateParameter);
     }
 
-    VERIFY(tok->kind() == Token::CallExpr);
+    if (tok->kind() != Token::CallExpr)
+        error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
     auto callArgumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));
 
-    VERIFY(state.isComplete());
+    if (!state.isComplete())
+        error<errors::MemberFunctionCallTargetTemplateArgumentDeductionIncomplete>();
     Constant callTarget = makeParameterize(state.programHandle, state.arguments);
     emitCall(SourceLocation(), callTarget, std::move(callArguments));
 }
@@ -690,7 +702,7 @@ Expression Generator::lookupSelfParameter() {
             return Expression::parameterReference(0);
         }
     }
-    fmt::println("Failed to lookup 'self'");
+    error<errors::SelfParameterLookupFailed>();
     VERIFY_NOT_REACHED();
 }
 
@@ -713,7 +725,7 @@ Type Generator::lookupSelfType() {
             continue;
         }
     }
-    fmt::println("Failed to lookup 'self_type'");
+    error<errors::SelfTypeTemplateParameterLookupFailed>();
     VERIFY_NOT_REACHED();
 }
 
@@ -784,11 +796,12 @@ void Generator::contextualToExpressionCategory(SourceLocation location) {
 void Generator::initialize(SourceLocation location, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
     auto expr = topExpression();
     bool sameType = staticMatch(state, expectedType, resultType(expr));
-    VERIFY(sameType);
+    if (!sameType)
+        error<errors::InitializeTypeMismatch>();
     auto inputCategoryConstant = categoryOf(expr);
     if (expectedCategoryConstant.kind() != ConstantKind::ExpressionCategoryLiteral) {
         bool match = staticMatch(state, expectedCategoryConstant, inputCategoryConstant);
-        VERIFY(match);
+        VERIFY(match); // The only way to get a mismatch is when both sides are literals, which is handled below.
         return;
     }
 
@@ -798,14 +811,19 @@ void Generator::initialize(SourceLocation location, DeductionState& state, Exter
     if (expectedCategory == ExpressionCategory::Value) {
         toValueExpression(location);
     } else {
-        VERIFY(inputCategory != ExpressionCategory::Value); // initializing a reference with a value requires making temporary
+        if (inputCategory == ExpressionCategory::Value)
+            // initializing a reference with a value requires making temporary
+            error<errors::InitializeOfReferenceWithValue>();
 
         if (expectedCategory != inputCategory) {
             // only down casts allowed
-            if (expectedCategory == ExpressionCategory::SharedReference || expectedCategory == ExpressionCategory::ConstUniqueReference)
-                VERIFY(inputCategory == ExpressionCategory::UniqueReference);
-            else
-                VERIFY(expectedCategory == ExpressionCategory::ConstSharedReference);
+            if (expectedCategory == ExpressionCategory::SharedReference || expectedCategory == ExpressionCategory::ConstUniqueReference) {
+                if (inputCategory != ExpressionCategory::UniqueReference)
+                    error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
+            } else {
+                if (expectedCategory != ExpressionCategory::ConstSharedReference)
+                    error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
+            }
         }
     }
 }
@@ -1003,7 +1021,7 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     Program* program = context.program(progHandle);
     if (program->status() >= ProgramStatus::SignatureChecked)
         return;
-    VERIFY(program->status() == ProgramStatus::Unchecked);
+    VERIFY(program->status() == ProgramStatus::Unchecked); // TODO: This should be an error
 
     Generator g(context, progHandle);
     g.inheriteParameters(program->parent());

@@ -1,0 +1,204 @@
+
+struct X: { }
+struct Y: { }
+
+struct SelfTypeErrors: {
+    // expect-error SelfTypeTemplateParameterWithExplicitType
+    template(self_type: type)
+    fn f1() -> X: { }
+
+    // expect-error SelfTypeTemplateParameterWithDefaultArgument
+    template(self_type = X)
+    fn f2() -> X: { }
+}
+
+// expect-error StaticVariableDeclarationWithoutInitializer
+static noInit: X;
+
+namespace FnImpl: {
+
+fn base(x: X) -> X: { }
+
+// expect-error FunctionImplFunctionParameterCountMismatch
+fn impl base(x: X, x2: X) -> X: { }
+
+// expect-error FunctionImplFunctionParameterNameMismatch
+fn impl base(x1: X) -> X: { }
+
+// expect-error FunctionImplFunctionParameterKindMismatch
+fn impl base(x: unique X) -> X: { }
+
+fn genericBase(x: <expression_category::value> X) -> X: { }
+// expect-error FunctionImplFunctionParameterGenericCategoryMismatch
+fn impl genericBase(x: <expression_category::unique_ref> X) -> X: { }
+
+// expect-error FunctionImplFunctionParameterTypeMismatch
+fn impl base(x: Y) -> X: { }
+
+// expect-error FunctionImplReturnTypeMismatch
+fn impl base(x: X) -> Y: { }
+
+}
+
+struct Fn: {
+
+// expect-error FunctionParameterWithDefaultArgument
+fn f1(x: X = X()) -> X: { }
+
+// expect-error SelfFunctionParameterWithDefaultArgument
+fn f2(self = Fn()) -> X: { }
+
+// expect-error SelfFunctionParameterWithExplicitType
+fn f3(self: Fn) -> X: { }
+
+// expect-error FunctionWithoutExplicitReturnType
+fn f4(): { }
+
+}
+
+namespace Stmt: {
+
+static var staticX = X();
+
+// expect-error DestoryTargetNotALocalVariable
+fn f1() -> X: { destroy staticX; }
+
+// expect-error DiscardTargetNotALocalReference
+fn f2() -> X: { discard staticX; }
+
+}
+
+enum ImplicitImplBase: {
+    enumValue;
+    struct Struct: { }
+
+    template(x: X) fn f1() -> X: { }
+    template(x: X) fn f2() -> X: { }
+    template(x: X) fn f3() -> X: { }
+}
+
+enum impl ImplicitImplBase: {
+
+// expect-error ImplicitImplTargetNotFound
+fn unknown() -> X: { }
+
+// expect-error ImplicitImplTargetNotAProgram
+fn enumValue() -> X: { }
+
+// expect-error ImplicitImplTargetKindMismatch
+fn Struct() -> X: { }
+
+// expect-error ImplicitImplTemplateParameterCountMismatch
+template(x: X, y: Y) fn f1() -> X: { }
+
+// expect-error ImplicitImplTemplateParameterNameMismatch
+template(y: X) fn f2() -> X: { }
+
+// expect-error ImplicitImplTemplateParameterTypeMismatch
+template(x: Y) fn f3() -> X: { }
+
+}
+
+namespace Parameterize: {
+
+struct S1: { }
+// expect-error ParameterizeBaseIsNotATemplate
+static g1 = S1{X};
+
+template(T: type) struct S2: { }
+// expect-error ParameterizeBaseIsAlreadyParameterized
+static g2 = S2{X}{X};
+
+// expect-error ParameterizeBaseNotSupported
+static g3 = X(){X};
+
+// expect-error ParameterizeWithTooManyArguments
+static g4 = S2{X, X};
+
+// expect-error ParameterizeArgumentNameMismatch
+static g5 = S2{T1 = X};
+
+}
+
+namespace CallTarget: {
+
+template(T1: type, T2: type) static r1 = X();
+// expect-error CallTargetIsIncompleteGlobal
+static g1 = r1{X}();
+
+struct S1: { }
+// expect-error CallTargetNotSupported
+static g2 = S1()();
+
+template(T: type) fn f1() -> X: { }
+// expect-error CallTargetTemplateArgumentDeductionIncomplete
+static g3 = f1();
+
+}
+
+struct Lookup: {
+
+member: X;
+// expect-error UnqualifiedLookupFoundMember
+fn f1() => member;
+
+// expect-error UnqualifiedLookupFailed
+fn f2() => unknown;
+
+// expect-error StaticLookupFailed
+fn f3() => Lookup::unknown;
+
+// expect-error StaticLookupBaseNotSupported
+fn f4() => X()::foo;
+
+// expect-error MemberLookupFailed
+fn f5(self) => .unknown;
+
+static r1 = X();
+// expect-error MemberLookupResultNotSupported
+fn f6(self) => .r1;
+
+fn fref(self) -> X: { }
+// expect-error MemberLookupFunctionResultNotImmediatelyCalled
+fn f7(self) => .fref;
+
+}
+
+struct MemberFunction: {
+
+fn fr1() -> X: { }
+// expect-error MemberFunctionCallTargetHasNoSelfParameter
+fn f1(self) => .fr1();
+
+//; expect-error MemberFunctionCallSelfParameterTypeMismatch
+//; TODO: Currently impossible?
+
+template(T: type) fn fr2(self) -> X: { }
+// expect-error MemberFunctionCallTargetTemplateArgumentDeductionIncomplete
+fn f2(self) => .fr2();
+
+}
+
+namespace SelfLookup: {
+
+// expect-error SelfParameterLookupFailed
+static g1 = self;
+
+// expect-error SelfTypeTemplateParameterLookupFailed
+static g2 = self_type;
+
+}
+
+namespace Init: {
+
+// expect-error InitializeTypeMismatch
+static g1: type = X();
+
+fn fr1(x: unique X) -> X: { }
+// expect-error InitializeOfReferenceWithValue
+fn f1() => fr1(X());
+
+// expect-error InitializeOfReferenceIsNotReferenceDowncast
+fn f2(x: shared X) => fr1(x);
+
+}

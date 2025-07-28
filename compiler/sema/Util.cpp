@@ -27,6 +27,8 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
             return compare(a.functionSignatureBaseConstant(), b.functionSignatureBaseConstant());
         case ConstantKind::BooleanLiteral:
             return a.booleanValue() <=> b.booleanValue();
+        case ConstantKind::ExpressionCategoryLiteral:
+            return a.expressionCategory() <=> b.expressionCategory();
         case ConstantKind::MemberPointer:
             return compare(program->getMemberPointer(a), program->getMemberPointer(b));
         case ConstantKind::Parameterize:
@@ -37,6 +39,14 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
             return compare(program->getRemoteComputedConstant(a), program->getRemoteComputedConstant(b));
         case ConstantKind::CopyOfParameter:
             return a.parameterIndex() <=> b.parameterIndex();
+        case ConstantKind::CopyOfParameterToReferenceCategory:
+            return a.originalExpressionCategory().parameterIndex() <=> b.originalExpressionCategory().parameterIndex();
+        case ConstantKind::CopyOfOpenGlobal$Program:
+            return compare(a.copiedGlobal().program(), b.copiedGlobal().program());
+        case ConstantKind::CopyOfOpenGlobal$Parameterize:
+            return program->compareParameterizes(a.copiedGlobal(), b.copiedGlobal());
+        case ConstantKind::EnumValue:
+            return compare(program->getEnumValue(a), program->getEnumValue(b));
         default:
             VERIFY_NOT_REACHED();
     }

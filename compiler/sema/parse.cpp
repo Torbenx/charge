@@ -283,7 +283,7 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
         if (baseParameter.kind() == VariableKind::Generic) {
             bool categoriesMatch = staticMatch(state, baseParameter.category().genericCategory(), implParameter.category().genericCategory());
             if (!categoriesMatch)
-                error<errors::FunctionImplFunctionParameterCategoryMismatch>();
+                error<errors::FunctionImplFunctionParameterGenericCategoryMismatch>();
         }
 
         bool typesMatch = staticMatch(state, baseParameter.type(), implParameter.type());
@@ -413,7 +413,6 @@ void Generator::visitStructDeclaration() {
 }
 
 void Generator::checkStructImplDeclaration(Constant implOf) {
-    VERIFY(implOf.kind() == ConstantKind::Parameterize);
     auto base = asFoldBase(implOf);
     VERIFY(base.program->kind() == ProgramKind::Struct);
     // TODO: Do checks
@@ -469,7 +468,6 @@ void Generator::visitEnumDeclaration() {
 }
 
 void Generator::checkEnumImplDeclaration(Constant implOf) {
-    VERIFY(implOf.kind() == ConstantKind::Parameterize);
     auto base = asFoldBase(implOf);
     VERIFY(base.program->kind() == ProgramKind::Enum); // TODO: This must be handled as an error somewhere.
     // TODO: Do checks
