@@ -148,19 +148,22 @@ fn f2() => unknown;
 // expect-error StaticLookupFailed
 fn f3() => Lookup::unknown;
 
-// expect-error StaticLookupBaseNotSupported
+// expect-error StaticLookupBaseExpressionNotSupported
 fn f4() => X()::foo;
 
-// expect-error MemberLookupFailed
-fn f5(self) => .unknown;
-
 static r1 = X();
+// expect-error StaticLookupBaseConstantNotSupported
+fn f5() => r1::foo;
+
+// expect-error MemberLookupFailed
+fn f6(self) => .unknown;
+
 // expect-error MemberLookupResultNotSupported
-fn f6(self) => .r1;
+fn f7(self) => .r1;
 
 fn fref(self) -> X: { }
 // expect-error MemberLookupFunctionResultNotImmediatelyCalled
-fn f7(self) => .fref;
+fn f8(self) => .fref;
 
 }
 
@@ -201,4 +204,15 @@ fn f1() => fr1(X());
 // expect-error InitializeOfReferenceIsNotReferenceDowncast
 fn f2(x: shared X) => fr1(x);
 
+}
+
+// expect-error MemberDeclarationWithoutExplicitType
+struct Member: {
+    memberWithoutType;
+}
+
+namespace ExplicitImpl: {
+static var r1 = X();
+// expect-error ExplicitImplExpressionNotSupported
+struct impl r1: { }
 }

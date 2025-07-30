@@ -294,6 +294,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
     };
     struct Command {
         Word command;
+        uint32_t lineIndex;
         std::vector<Pair> pairs = {};
     };
     struct CommandQueue {
@@ -316,6 +317,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
 
     struct SemanticError {
         std::string name;
+        sema::ProgramHandle prog;
     };
 
     static constexpr auto words = ConstWordStringTable(
@@ -353,7 +355,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             auto cmd = commandQueue.pop();
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    EXPECT_EQ(pair.value, nameString(tok.kind()));
+                    EXPECT_EQ(pair.value, nameString(tok.kind())) << "on line " << (cmd.lineIndex + 1);
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -398,7 +400,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
                 handleSemanticCommand(word, whitespace, comment);
                 return;
             }
-            Command command { word };
+            Command command { word, whitespace.lineIndex() };
             while (comment.length() > 0 && !isCommandEndChar(comment.front())) {
                 std::string_view savedComment = comment;
                 Word key = {};
@@ -456,20 +458,24 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
         sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
         sema::ProgramHandle programHandle = context.programHandle(program);
-        std::string semanticError;
+        std::optional<SemanticError> semanticError;
         try {
             sema::Generator::signatureCheck(context, programHandle);
         } catch (const SemanticError& semaError) {
-            VERIFY(!semaError.name.empty());
-            semanticError = semaError.name;
+            semanticError = semaError;
         }
 
         if (word == words["expect-error"]) {
             int_t i = 0;
             for (; i < (int_t)comment.size() && isBulkIdentifierChar(comment[i]); i++) { }
-            if (semanticError.empty())
+            auto expectedError = comment.substr(0, i);
+            if (semanticError.has_value()) {
+                EXPECT_EQ(semanticError.value().name, expectedError);
+            } else {
                 program->dump(context);
-            EXPECT_EQ(semanticError, comment.substr(0, i));
+                FAIL() << "No error occured while expecting " << expectedError << " on line " << whitespace.lineNumber();
+            }
+
             comment = comment.substr(i);
             return;
         }
@@ -477,8 +483,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
         //fmt::println("-------------------------------");
         //program->dump(context);
 
-        if (!semanticError.empty()) {
-            fmt::println("unexpected semantic error {}", semanticError);
+        if (semanticError.has_value()) {
+            FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.wordTable.view(context.program(semanticError->prog)->name());
             return;
         }
 
@@ -498,7 +504,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
 
     void handleError(sema::Generator& g, sema::ErrorBase& err) override {
         g.takeTopExpression().release();
-        throw SemanticError { err.name() };
+        throw SemanticError { err.name(), g.programHandle };
     }
 
     Command popCommand(Word cause) {

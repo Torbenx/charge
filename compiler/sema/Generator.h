@@ -281,8 +281,9 @@ struct Generator : Util {
     };
 
     using Token = parse::TokenKind;
+    using TokenInfo = parse::TokenInfo;
 
-    const parse::TokenInfo* tok = nullptr;
+    TokenInfo* tok = nullptr;
 
     std::vector<Instruction> instructionScratch;
     std::vector<ExpressionStackItem> expressionStack = { ExpressionStackItem { .endOffset = 0 } };
@@ -318,22 +319,25 @@ struct Generator : Util {
     LocalScope beginLocalScope(SourceLocation);
     void endLocalScope(LocalScope scope, SourceLocation);
 
-    void visitDeclaration();
-    void visitTemplateParameters();
-    struct VariableTypeAndInitializer {
-        Type type;
-        bool hasInitializer;
+    enum class ImplicitParameterMode : bool {
+        AddToProgram = true,
+        DeduceLocally = false,
     };
-    VariableTypeAndInitializer visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters);
-    VariableCategory visitVariableCategory();
-    struct VariableDeclaration {
-        SourceLocation location;
-        Word name;
+    struct VariableTypeAndInitializer {
         Type type;
         VariableCategory category;
         bool hasInitializer;
     };
-    VariableDeclaration visitVariableDeclaration(bool programParameters);
+    VariableCategory visitVariableTypeToken(bool isVar);
+    VariableTypeAndInitializer visitVariableTypeAndInitializer(ImplicitParameterMode parameterMode, bool isVar);
+    struct VariableDeclaration : VariableTypeAndInitializer {
+        SourceLocation location;
+        Word name;
+    };
+    VariableDeclaration visitVariableDeclaration(ImplicitParameterMode parameterMode);
+
+    void visitDeclaration();
+    void visitTemplateParameters();
     Program::Parameter visitTemplateParameter();
     void visitStaticVariableDeclaration();
     void visitFunctionImplDeclaration();
@@ -382,7 +386,6 @@ struct Generator : Util {
     Constant makeFunctionSignature(Constant value);
     Expression makeGlobalReference(Constant value);
     Constant makeCopyOfOpenGlobal(Constant value);
-    Constant expressionToConstant();
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
@@ -394,7 +397,7 @@ struct Generator : Util {
     void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
     void generateParameterizeExpr();
     CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
-    void generateCallExpr(SourceLocation location, CallTarget base);
+    void generateCallExpr(CallTarget base);
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);
     void internalLookupRecurse(InternalLookupState& state, ModuleHandle module, ScopeProgram* prog);
@@ -412,13 +415,16 @@ struct Generator : Util {
     Expression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
     Expression newImplicitParameter(Type type);
 
-    Constant copyAsConstant(Expression);
-    void toValueExpression(SourceLocation);
+    std::optional<Constant> copyAsConstant(Expression);
+    void toValueExpression(std::optional<TokenInfo*> implicitActionToken);
+    Constant expressionToConstant(std::optional<TokenInfo*> implicitActionToken);
+    Constant valueExpressionToConstant();
+    std::optional<Constant> expressionToConstantNoNewComputedConstants();
 
-    void contextualToType(SourceLocation);
-    void contextualToBool(SourceLocation);
-    void contextualToExpressionCategory(SourceLocation);
-    void initialize(SourceLocation, DeductionState&, ExternConstant expectCategory, ExternConstant expectedType);
+    void contextualToType(std::optional<TokenInfo*> implicitActionToken);
+    void contextualToBool(std::optional<TokenInfo*> implicitActionToken);
+    void contextualToExpressionCategory(std::optional<TokenInfo*> implicitActionToken);
+    void initialize(std::optional<TokenInfo*> implicitActionToken, DeductionState&, ExternConstant expectCategory, ExternConstant expectedType);
 
     struct InstructionHandle {
         uint32_t offset;
@@ -468,9 +474,9 @@ struct Generator : Util {
         return std::move(instructionScratch);
     }
 
-    void emitExpression(SourceLocation, OwnedExpression);
-    void emitCall(SourceLocation, Constant callTarget, std::vector<Expression> arguments);
-    void emitImplicitCopy(SourceLocation, Expression copyFrom);
+    void emitExpression(std::optional<TokenInfo*> token, OwnedExpression);
+    void emitCall(std::optional<TokenInfo*> token, Constant callTarget, std::vector<Expression> arguments);
+    void implicitCopy(std::optional<TokenInfo*> implicitActionToken);
     void declareLocalVariable(VariableDeclaration);
 
     template<typename E, typename... Args>

@@ -195,6 +195,12 @@ class UpdateKindInstruction:
         return "updateKind " + self.tokenKindExpr
 
 @dataclasses.dataclass
+class UpdateDataInstruction:
+    tokenDataExpr: str
+    def format(self):
+        return "updateData " + self.tokenDataExpr
+
+@dataclasses.dataclass
 class PushScopeInstruction:
     scopeKindExpr: str
     def format(self):
@@ -501,6 +507,9 @@ class Parser:
                 self.advanceLine()
             elif first == "updateKind":
                 instructions.append(UpdateKindInstruction(self.parseExpr()))
+                self.advanceLine()
+            elif first == "updateData":
+                instructions.append(UpdateDataInstruction(self.parseExpr()))
                 self.advanceLine()
             elif first == "pushScope":
                 instructions.append(PushScopeInstruction(self.parseExpr()))
@@ -963,6 +972,8 @@ def generateInstructions(case, instructions, thenHandler):
                 emitToken(inst.tokenKindExpr, "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")")
         elif type(inst) is UpdateKindInstruction:
             line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
+        elif type(inst) is UpdateDataInstruction:
+            line("state.parseOutput.tokens.back().setData1(" + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):

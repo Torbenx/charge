@@ -26,6 +26,7 @@ SwitchState expression() then error
 
     punctuation .
         tokenKind = TokenKind::MemberAccessExpr
+        emitToken TokenKind::ImplicitSelfReference
         next access_punctuation
 
     punctuation (
@@ -193,7 +194,6 @@ SwitchState after_expression() then error
         ifScope ScopeKind::VariableType
             popScope ScopeKind::VariableType
             popScope ScopeKind::Parameter
-            emitToken TokenKind::AssignStmt
             emitToken TokenKind::ExpressionStmt
             next after_parameters
         ifScope ScopeKind::ParenInImplExpr
@@ -228,11 +228,7 @@ SwitchState after_expression() then error
             popScope ScopeKind::HasTypeExpr
             emitToken TokenKind::EmptyNode
             next after_declaration
-        ifScope ScopeKind::VariableType
-            popScope ScopeKind::VariableType
-            pushScope ScopeKind::RightExpr
-            emitToken TokenKind::AssignStmt
-        popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
+        popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
         emitToken TokenKind::ExpressionStmt
         next after_statement
 
@@ -293,7 +289,6 @@ LinearState comma_after_expression() then error
             popScope ScopeKind::VariableType
             popScope ScopeKind::Parameter
             pushScope ScopeKind::Parameter
-            emitToken TokenKind::AssignStmt
             emitToken TokenKind::ExpressionStmt
             then parameter
         ifScope ScopeKind::RightExpr
@@ -430,42 +425,42 @@ LinearState else_branch() then error
 LinearState after_simple_variable_declaration_id() then after_variable_declaration_id
     punctuation :
         pushScope ScopeKind::VariableType
+        emitToken TokenKind::VariableType, sema::VariableKind::Let
         next expression
 LinearState after_variable_declaration_id() then error
     punctuation :
+        emitToken TokenKind::VariableType, sema::VariableKind::Let
         next variable_type
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt
         next expression
     punctuation ;
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next after_statement
     punctuation ,
         popScope ScopeKind::Parameter
         pushScope ScopeKind::Parameter
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next parameter
     punctuation )
         popScope ScopeKind::Parameter
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next after_parameters
 LinearState variable_type() then expression
     keyword unique
-        updateKind TokenKind::UniqueReferenceDecl
+        updateData sema::VariableKind::UniqueReference
         next after_variable_unique_modifier
     keyword shared
-        updateKind TokenKind::SharedReferenceDecl
+        updateData sema::VariableKind::SharedReference
         next after_variable_shared_modifier
     keyword const
-        updateKind TokenKind::ConstSharedReferenceDecl
+        updateData sema::VariableKind::ConstSharedReference
         next after_variable_const_modifier
     punctuation <
+        updateData sema::VariableKind::Generic
         pushScope ScopeKind::GenericCategoryExpression
-        updateKind TokenKind::GenericCategoryVariableDecl
+        emitToken TokenKind::VariableGenericCategory
         next impl_expression
     then
         pushScope ScopeKind::VariableType
@@ -475,35 +470,32 @@ LinearState after_variable_modifier() then expression
         emitToken TokenKind::AssignStmt
         next expression
     punctuation ;
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next after_statement
     punctuation ,
         popScope ScopeKind::Parameter
         pushScope ScopeKind::Parameter
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next parameter
     punctuation )
         popScope ScopeKind::Parameter
-        emitToken TokenKind::AssignStmt
         emitToken TokenKind::ExpressionStmt
         next after_parameters
     then
         pushScope ScopeKind::VariableType
 LinearState after_variable_unique_modifier() then after_variable_modifier
     keyword const
-        updateKind TokenKind::ConstUniqueReferenceDecl
+        updateData sema::VariableKind::ConstUniqueReference
         next after_variable_modifier
 LinearState after_variable_shared_modifier() then after_variable_modifier
     keyword const
-        updateKind TokenKind::ConstSharedReferenceDecl
+        updateData sema::VariableKind::ConstSharedReference
         next after_variable_modifier
 LinearState after_variable_const_modifier() then after_variable_modifier
     keyword shared
         next after_variable_modifier
     keyword unique
-        updateKind TokenKind::ConstUniqueReferenceDecl
+        updateData sema::VariableKind::ConstUniqueReference
         next after_variable_modifier
 
 # --- Parameters
@@ -708,7 +700,7 @@ LinearState member_declaration() then templated_declaration
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::Member, this_identifier
         emitToken TokenKind::MemberDecl, this_declaration
-        next after_variable_declaration_id
+        next after_simple_variable_declaration_id
 
 LinearState enum_declaration_id() then error
     identifier

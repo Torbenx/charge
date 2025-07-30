@@ -51,48 +51,27 @@ bool Generator::isTopExpressionLazyParameterize() {
     return currentExpression.kind() == ExpressionKind::LazyParameterize;
 }
 
-void Generator::emitExpression(SourceLocation, OwnedExpression e) {
+void Generator::emitExpression(std::optional<TokenInfo*> token, OwnedExpression e) {
     VERIFY(currentExpression == INVALID_EXPRESSION);
+    if (token.has_value())
+        token->setData2((Expression)e);
     currentExpression = std::move(e);
     expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
 
-void Generator::emitCall(SourceLocation location, Constant callTarget, std::vector<Expression> arguments) {
-    VERIFY(currentExpression == INVALID_EXPRESSION);
+void Generator::emitCall(std::optional<TokenInfo*> token, Constant callTarget, std::vector<Expression> arguments) {
     auto base = asFoldBase(callTarget);
     Type returnType = verifyType(base.program->kind() == ProgramKind::Struct ? callTarget : fold(callTarget, cast<FunctionProgram>(base.program)->returnType()));
-    currentExpression = program->addCall({ Constant(ExpressionCategory::Value), callTarget, returnType, std::move(arguments) });
-    instructionScratch.emplace_back(Opcode::Call, location, Instruction::Data { .callExpression = currentExpression });
-    expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
+    OwnedExpression callExpression = program->addCall({ Constant(ExpressionCategory::Value), callTarget, returnType, std::move(arguments) });
+    SourceLocation location = token.has_value() ? token->location() : SourceLocation();
+    instructionScratch.emplace_back(Opcode::Call, location, Instruction::Data { .callExpression = callExpression });
+    emitExpression(token, std::move(callExpression));
 }
 
-void Generator::emitImplicitCopy(SourceLocation location, Expression copyFrom) {
-    std::array<Constant, 1> templateArgs { resultType(copyFrom) };
+void Generator::implicitCopy(std::optional<TokenInfo*> implicitActionToken) {
+    std::array<Constant, 1> templateArgs { resultType(topExpression()) };
     auto callTarget = makeParameterize(builtins::copy_function.program(), templateArgs);
-    emitCall(location, callTarget, { copyFrom });
-}
-
-Constant Generator::expressionToConstant() {
-    VERIFY(!expressionStack.empty());
-    toValueExpression(SourceLocation());
-
-    if (topExpression().isConstant())
-        return takeTopExpression().constant();
-
-    VERIFY(expressionStack.size() >= 2);
-    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
-    VERIFY(std::prev(expressionStack.end(), 2)->endOffset < instructionScratch.size()); // expect a non-zero number of instructions
-    auto newEnd = instructionScratch.begin() + std::prev(expressionStack.end(), 2)->endOffset;
-
-    OwnedExpression input = std::move(currentExpression);
-    Type type = resultType(input);
-    Constant result = program->addComputedConstant(context, { input.release(), type, { newEnd, instructionScratch.end() } });
-
-    instructionScratch.erase(newEnd, instructionScratch.end());
-    expressionStack.pop_back();
-    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
-
-    return result;
+    emitCall(implicitActionToken, callTarget, { takeTopExpression() });
 }
 
 Constant Generator::makeTemplateSignature(Constant templateProg) {
@@ -255,7 +234,7 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
     int_t pIndex = firstParameterIndex;
     int_t aIndex = 0;
     for (; tok->kind() == Token::CallArgument; aIndex++, pIndex++) {
-        SourceLocation conversionLocation = tok->location();
+        TokenInfo* callArgumentToken = tok;
         advance();
 
         // Find next explicit parameter
@@ -266,8 +245,8 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
         const auto& parameter = state.program->parameters[pIndex];
         if (argumentNames[aIndex].empty() || parameter.name == argumentNames[aIndex]) {
             visitExpression();
-            initialize(conversionLocation, state, Constant(ExpressionCategory::Value), parameter.type);
-            state.explicitArgument(pIndex, expressionToConstant());
+            initialize(callArgumentToken, state, Constant(ExpressionCategory::Value), parameter.type);
+            state.explicitArgument(pIndex, expressionToConstant(callArgumentToken));
         } else
             error<errors::ParameterizeArgumentNameMismatch>();
     }
@@ -363,7 +342,11 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
+void Generator::generateCallExpr(CallTarget target) {
+    VERIFY(tok->kind() == Token::CallExpr);
+    TokenInfo* callToken = tok;
+    advance();
+
     auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Struct) {
 
@@ -372,7 +355,7 @@ void Generator::generateCallExpr(SourceLocation location, CallTarget target) {
         if (!state.isComplete())
             error<errors::CallTargetTemplateArgumentDeductionIncomplete>();
         Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-        emitCall(location, callTarget, std::move(arguments));
+        emitCall(callToken, callTarget, std::move(arguments));
         return;
     }
     VERIFY_NOT_REACHED();
@@ -388,17 +371,17 @@ std::vector<Expression> Generator::generateCallArguments(DeductionState& state, 
     if (withSelfArgument) {
         VERIFY(argumentIndex < parameterCount);
         CallParameter parameter = parameters[argumentIndex];
-        initialize(SourceLocation(), state, parameter.expectedInitializerCategory, parameter.type);
+        initialize(std::nullopt, state, parameter.expectedInitializerCategory, parameter.type);
         arguments[argumentIndex] = takeTopExpression().release();
         argumentIndex += 1;
     }
     while (tok->kind() == Token::CallArgument) {
         VERIFY(argumentIndex < parameterCount);
-        CallParameter parameter = parameters[argumentIndex];
-        SourceLocation conversionLocation = tok->location();
+        TokenInfo* callArgumentToken = tok;
         advance();
         visitExpression();
-        initialize(conversionLocation, state, parameter.expectedInitializerCategory, parameter.type);
+        CallParameter parameter = parameters[argumentIndex];
+        initialize(callArgumentToken, state, parameter.expectedInitializerCategory, parameter.type);
         arguments[argumentIndex] = takeTopExpression().release();
         argumentIndex += 1;
     }
@@ -526,19 +509,19 @@ Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span
 void Generator::generateIdentifierExpr() {
     Word name = tok->data1<Word>();
     if (name == parse::words["false"]) {
-        emitExpression(tok->location(), builtins::false_constant);
+        emitExpression(tok, builtins::false_constant);
         return;
     }
     if (name == parse::words["true"]) {
-        emitExpression(tok->location(), builtins::true_constant);
+        emitExpression(tok, builtins::true_constant);
         return;
     }
     if (name == parse::words["self"]) {
-        emitExpression(tok->location(), lookupSelfParameter());
+        emitExpression(tok, lookupSelfParameter());
         return;
     }
     if (name == parse::words["self_type"]) {
-        emitExpression(tok->location(), lookupSelfType());
+        emitExpression(tok, lookupSelfType());
         return;
     }
     for (auto lookupCtx : std::views::reverse(lookupStack)) {
@@ -546,7 +529,7 @@ void Generator::generateIdentifierExpr() {
         case LookupContext::Kind::Namespace: {
             auto result = lookupCtx.getNamespace()->getDeclaration(name);
             if (result.has_value()) {
-                emitExpression(tok->location(), generateDeclarationLiteral(result.value(), std::nullopt));
+                emitExpression(tok, generateDeclarationLiteral(result.value(), std::nullopt));
                 return;
             }
             continue;
@@ -555,7 +538,7 @@ void Generator::generateIdentifierExpr() {
             Program* prog = lookupCtx.getTemplateParameters();
             for (int_t i = prog->inheritedParameterCount; i < (int_t)prog->parameters.size(); i++) {
                 if (prog->parameters[i].name == name) {
-                    emitExpression(tok->location(), Expression::templateParameterReference(i));
+                    emitExpression(tok, Expression::templateParameterReference(i));
                     return;
                 }
             }
@@ -566,7 +549,7 @@ void Generator::generateIdentifierExpr() {
             for (auto entry : g.localLookupEntries) {
                 if (entry.name == name) {
                     VERIFY(&g == this);
-                    emitExpression(tok->location(), entry.data);
+                    emitExpression(tok, entry.data);
                     return;
                 }
             }
@@ -582,13 +565,13 @@ void Generator::generateIdentifierExpr() {
                 if (result.value->kind() == DeclarationValueKind::Member)
                     // Member should be looked up with .member or ::member
                     error<errors::UnqualifiedLookupFoundMember>();
-                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result), type));
+                emitExpression(tok, generateDeclarationLiteral(std::move(result), type));
                 return;
             }
             auto base = asFoldBase(type);
             for (int_t i = base.program->inheritedParameterCount; i < (int_t)base.program->parameters.size(); i++) {
                 if (base.program->parameters[i].name == name) {
-                    emitExpression(tok->location(), Expression::templateParameterReference(i));
+                    emitExpression(tok, Expression::templateParameterReference(i));
                     return;
                 }
             }
@@ -603,10 +586,14 @@ void Generator::generateIdentifierExpr() {
 
 void Generator::generateStaticAccessExpr() {
     Word name = tok->data1<Word>();
-    Constant baseValue = expressionToConstant();
+    auto maybeBaseValue = expressionToConstantNoNewComputedConstants();
+    if (!maybeBaseValue.has_value())
+        error<errors::StaticLookupBaseExpressionNotSupported>();
+
+    Constant baseValue = maybeBaseValue.value();
     if (baseValue.kind() == ConstantKind::Namespace) {
         Namespace* ns = context.getNamespace(baseValue.nsHandle());
-        emitExpression(tok->location(), generateDeclarationLiteral(ns->getDeclaration(name).value(), std::nullopt));
+        emitExpression(tok, generateDeclarationLiteral(ns->getDeclaration(name).value(), std::nullopt));
         return;
     }
     if (baseValue.kind() == ConstantKind::Program || baseValue.kind() == ConstantKind::Parameterize) {
@@ -618,28 +605,31 @@ void Generator::generateStaticAccessExpr() {
             if (result.value->kind() == DeclarationValueKind::Member) {
                 result.extendMemberIndices();
                 auto memberPointer = generateMemberPointer(verifyType(baseValue), result.memberIndices);
-                emitExpression(tok->location(), program->addMemberPointer(context, memberPointer));
+                emitExpression(tok, program->addMemberPointer(context, memberPointer));
             } else {
-                emitExpression(tok->location(), generateDeclarationLiteral(std::move(result), verifyType(baseValue)));
+                emitExpression(tok, generateDeclarationLiteral(std::move(result), verifyType(baseValue)));
             }
             return;
         }
     }
-    error<errors::StaticLookupBaseNotSupported>();
+    error<errors::StaticLookupBaseConstantNotSupported>();
+    VERIFY_NOT_REACHED();
 }
 
 void Generator::generateMemberAccessExpr() {
-    Word name = tok->data1<Word>();
+    VERIFY(tok->kind() == Token::MemberAccessExpr);
+    TokenInfo* memberAccessToken = tok;
+    advance();
+
     Type baseType = resultType(topExpression());
-    auto result = internalLookup(baseProgram(baseType).value(), name);
+    auto result = internalLookup(baseProgram(baseType).value(), memberAccessToken->data1<Word>());
     if (!result.value.has_value())
         error<errors::MemberLookupFailed>();
     if (result.value->kind() == DeclarationValueKind::Member) {
         result.extendMemberIndices();
         auto memberPointer = generateMemberPointer(baseType, result.memberIndices);
         auto memberExpr = program->addMemberExpression({ takeTopExpression(), program->addMemberPointer(context, memberPointer) });
-        emitExpression(tok->location(), memberExpr);
-        advance();
+        emitExpression(memberAccessToken, memberExpr);
         return;
     }
 
@@ -667,7 +657,6 @@ void Generator::generateMemberAccessExpr() {
     if (!selfTypeMatch)
         error<errors::MemberFunctionCallSelfParameterTypeMismatch>();
 
-    advance();
     if (tok->kind() == Token::Parameterize) {
         int_t firstTemplateParameter = fnProg->inheritedParameterCount;
         if (fnProg->isTemplate() && fnProg->parameters[fnProg->inheritedParameterCount].name == parse::words["self_type"])
@@ -677,6 +666,7 @@ void Generator::generateMemberAccessExpr() {
 
     if (tok->kind() != Token::CallExpr)
         error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
+    TokenInfo* callToken = tok;
     auto callArgumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
@@ -685,7 +675,7 @@ void Generator::generateMemberAccessExpr() {
     if (!state.isComplete())
         error<errors::MemberFunctionCallTargetTemplateArgumentDeductionIncomplete>();
     Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-    emitCall(SourceLocation(), callTarget, std::move(callArguments));
+    emitCall(callToken, callTarget, std::move(callArguments));
 }
 
 Expression Generator::lookupSelfParameter() {
@@ -729,7 +719,7 @@ Type Generator::lookupSelfType() {
     VERIFY_NOT_REACHED();
 }
 
-Constant Generator::copyAsConstant(Expression expr) {
+std::optional<Constant> Generator::copyAsConstant(Expression expr) {
     switch (expr.kind()) {
     case ExpressionKind::TemplateParameterReference:
         return expr.copyTemplateParameter();
@@ -737,63 +727,91 @@ Constant Generator::copyAsConstant(Expression expr) {
     case ExpressionKind::GlobalReference$Parameterize: {
         FoldBase base = asFoldBase(expr.referencedGlobal());
         VERIFY(base.program->kind() == ProgramKind::Global);
-        return fold(base, cast<GlobalProgram>(base.program)->initializer());
+        auto* globalProg = cast<GlobalProgram>(base.program);
+        if (globalProg->globalKind() == GlobalKind::Let) {
+            return fold(base, cast<GlobalProgram>(base.program)->initializer());
+        } else if (globalProg->globalKind() == GlobalKind::OpenLet) {
+            return makeCopyOfOpenGlobal(base.value);
+        } else {
+            return std::nullopt;
+        }
     }
     default:
-        VERIFY_NOT_REACHED();
+        return std::nullopt;
     }
 }
 
-void Generator::toValueExpression(SourceLocation location) {
+void Generator::toValueExpression(std::optional<TokenInfo*> implicitActionToken) {
     auto inCategory = categoryOf(topExpression());
     VERIFY(inCategory.kind() == ConstantKind::ExpressionCategoryLiteral); // TODO: Make this generic
     if (inCategory == Constant(ExpressionCategory::Value))
         return;
 
-    auto copyFrom = takeTopExpression();
-    switch (copyFrom.kind()) {
-    case ExpressionKind::GlobalReference$Program:
-    case ExpressionKind::GlobalReference$Parameterize: {
-        FoldBase base = asFoldBase(copyFrom.referencedGlobal());
-        VERIFY(base.program->kind() == ProgramKind::Global);
-        auto* globalProg = cast<GlobalProgram>(base.program);
-        if (globalProg->globalKind() == GlobalKind::Let) {
-            emitExpression(location, fold(base, globalProg->initializer()));
-            return;
-        } else if (globalProg->globalKind() == GlobalKind::OpenLet) {
-            emitExpression(location, makeCopyOfOpenGlobal(base.value));
-            return;
-        }
-        break;
+    if (auto constantCopy = copyAsConstant(topExpression()); constantCopy.has_value()) {
+        takeTopExpression();
+        emitExpression(implicitActionToken, constantCopy.value());
+    } else {
+        implicitCopy(implicitActionToken);
     }
-    case ExpressionKind::TemplateParameterReference:
-        emitExpression(location, copyFrom.copyTemplateParameter());
-        return;
-    default:
-        break;
+}
+
+Constant Generator::expressionToConstant(std::optional<TokenInfo*> implicitActionToken) {
+    VERIFY(!expressionStack.empty());
+    toValueExpression(implicitActionToken);
+    return valueExpressionToConstant();
+}
+
+Constant Generator::valueExpressionToConstant() {
+    if (topExpression().isConstant())
+        return takeTopExpression().constant();
+    VERIFY(categoryOf(topExpression()) == Constant(ExpressionCategory::Value));
+
+    VERIFY(expressionStack.size() >= 2);
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
+    VERIFY(std::prev(expressionStack.end(), 2)->endOffset < instructionScratch.size()); // expect a non-zero number of instructions
+    auto newEnd = instructionScratch.begin() + std::prev(expressionStack.end(), 2)->endOffset;
+
+    OwnedExpression input = std::move(currentExpression);
+    Type type = resultType(input);
+    Constant result = program->addComputedConstant(context, { input.release(), type, { newEnd, instructionScratch.end() } });
+
+    instructionScratch.erase(newEnd, instructionScratch.end());
+    expressionStack.pop_back();
+    VERIFY(expressionStack.back().endOffset == instructionScratch.size());
+
+    return result;
+}
+
+std::optional<Constant> Generator::expressionToConstantNoNewComputedConstants() {
+    if (topExpression().isConstant())
+        return takeTopExpression().constant();
+
+    if (auto constantCopy = copyAsConstant(topExpression()); constantCopy.has_value()) {
+        takeTopExpression();
+        return constantCopy.value();
     }
-    emitImplicitCopy(location, copyFrom);
+    return std::nullopt;
 }
 
-void Generator::contextualToType(SourceLocation location) {
+void Generator::contextualToType(std::optional<TokenInfo*> implicitActionToken) {
     // We can get away with this state because parameter-side value is so simple
     DeductionState state(program, context.thisModule(), programHandle, 0);
-    initialize(location, state, Constant(ExpressionCategory::Value), builtins::type_type);
+    initialize(implicitActionToken, state, Constant(ExpressionCategory::Value), builtins::type_type);
 }
 
-void Generator::contextualToBool(SourceLocation location) {
+void Generator::contextualToBool(std::optional<TokenInfo*> implicitActionToken) {
     // We can get away with this state because parameter-side value is so simple
     DeductionState state(program, context.thisModule(), programHandle, 0);
-    initialize(location, state, Constant(ExpressionCategory::Value), builtins::bool_type);
+    initialize(implicitActionToken, state, Constant(ExpressionCategory::Value), builtins::bool_type);
 }
 
-void Generator::contextualToExpressionCategory(SourceLocation location) {
+void Generator::contextualToExpressionCategory(std::optional<TokenInfo*> implicitActionToken) {
     // We can get away with this state because parameter-side value is so simple
     DeductionState state(program, context.thisModule(), programHandle, 0);
-    initialize(location, state, Constant(ExpressionCategory::Value), builtins::expression_category_type);
+    initialize(implicitActionToken, state, Constant(ExpressionCategory::Value), builtins::expression_category_type);
 }
 
-void Generator::initialize(SourceLocation location, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
+void Generator::initialize(std::optional<TokenInfo*> implicitActionToken, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
     auto expr = topExpression();
     bool sameType = staticMatch(state, expectedType, resultType(expr));
     if (!sameType)
@@ -809,7 +827,7 @@ void Generator::initialize(SourceLocation location, DeductionState& state, Exter
     auto inputCategory = inputCategoryConstant.expressionCategory();
     auto expectedCategory = Constant(expectedCategoryConstant).expressionCategory();
     if (expectedCategory == ExpressionCategory::Value) {
-        toValueExpression(location);
+        toValueExpression(implicitActionToken);
     } else {
         if (inputCategory == ExpressionCategory::Value)
             // initializing a reference with a value requires making temporary

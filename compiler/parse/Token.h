@@ -106,10 +106,30 @@ inline constexpr std::array<DataTableEntry, (size_t)TokenKind::COUNT> tokenDataT
 #include <parse/tokens.inc>
 };
 
+template<typename T>
+constexpr uint32_t packData(T data) {
+    if constexpr (sizeof(T) == 1)
+        return std::bit_cast<uint8_t>(data);
+    else if constexpr (sizeof(T) == 2)
+        return std::bit_cast<uint16_t>(data);
+    else
+        return std::bit_cast<uint32_t>(data);
+}
+
+template<typename T>
+constexpr T unpackData(uint32_t bits) {
+    if constexpr (sizeof(T) == 1)
+        return std::bit_cast<T>((uint8_t)bits);
+    else if constexpr (sizeof(T) == 2)
+        return std::bit_cast<T>((uint16_t)bits);
+    else
+        return std::bit_cast<T>(bits);
+}
+
 template<typename T1>
-uint32_t packData1(TokenKind tokenKind, T1 data1) {
+constexpr uint32_t packData1(TokenKind tokenKind, T1 data1) {
     VERIFY(tokenDataTable[(size_t)tokenKind].data1Kind == DataTypeTrait<T1>::kind);
-    return std::bit_cast<uint32_t>(data1);
+    return packData<T1>(data1);
 }
 
 // ---------------------------- TokenInfo ----------------------------
@@ -127,25 +147,25 @@ struct TokenInfo : TaggedSourceLocation<TokenKind> {
     template<typename T1>
     T1 data1() const {
         VERIFY(tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind);
-        return std::bit_cast<T1>(data1Bits);
+        return unpackData<T1>(data1Bits);
     }
 
     template<typename T2>
     T2 data2() const {
         VERIFY(tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind);
-        return std::bit_cast<T2>(data2Bits);
+        return unpackData<T2>(data2Bits);
     }
 
     template<typename T1>
     void setData1(T1 data1) {
         VERIFY(tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind);
-        data1Bits = std::bit_cast<uint32_t>(data1);
+        data1Bits = packData<T1>(data1);
     }
 
     template<typename T2>
     void setData2(T2 data2) {
         VERIFY(tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind);
-        data2Bits = std::bit_cast<uint32_t>(data2);
+        data2Bits = packData<T2>(data2);
     }
 
     void setKind(TokenKind kind) {

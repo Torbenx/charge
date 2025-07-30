@@ -587,8 +587,11 @@ expression$as_then:
         tokEnd += 1;
         // tokenKind = TokenKind::MemberAccessExpr
         tokenKind = TokenKind::MemberAccessExpr;
+        // emitToken TokenKind::ImplicitSelfReference
+        carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
+        carriedEmitTokenData = 0;
         // next access_punctuation
-        goto access_punctuation$no_emit;
+        goto access_punctuation$with_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -1105,8 +1108,6 @@ after_expression$as_then:
                 }
                 scopePosition = result;
             }
-            // emitToken TokenKind::AssignStmt
-            emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
             // emitToken TokenKind::ExpressionStmt
             carriedEmitTokenKind = TokenKind::ExpressionStmt;
             carriedEmitTokenData = 0;
@@ -1404,25 +1405,9 @@ after_expression$as_then:
             // next after_declaration
             goto after_declaration$with_emit;
         }
-        // ifScope ScopeKind::VariableType
-        if (scopePosition[0] == ScopeKind::VariableType) {
-            // popScope ScopeKind::VariableType
-            {
-                auto result = popScope(scopePosition, ScopeKind::VariableType);
-                if (result == nullptr) {
-                    errorToken = LexerToken::SemiColon;
-                    goto handle_parse_error;
-                }
-                scopePosition = result;
-            }
-            // pushScope ScopeKind::RightExpr
-            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-            // emitToken TokenKind::AssignStmt
-            emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
-        }
-        // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr
+        // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
         {
-            auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr);
+            auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType);
             if (result == nullptr) {
                 errorToken = LexerToken::SemiColon;
                 goto handle_parse_error;
@@ -1962,8 +1947,6 @@ comma_after_expression$no_emit:
                 }
                 // pushScope ScopeKind::Parameter
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-                // emitToken TokenKind::AssignStmt
-                emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
                 // emitToken TokenKind::ExpressionStmt
                 emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
                 // then parameter
@@ -2036,8 +2019,6 @@ comma_after_expression$no_emit:
             }
             // pushScope ScopeKind::Parameter
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-            // emitToken TokenKind::AssignStmt
-            emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
             // emitToken TokenKind::ExpressionStmt
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
@@ -2106,8 +2087,6 @@ comma_after_expression$no_emit:
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
         // then parameter
@@ -2279,6 +2258,8 @@ first_argument_brace$no_emit:
     goto argument$as_then;
 
     // LinearState access_punctuation
+access_punctuation$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 access_punctuation$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -2774,8 +2755,11 @@ statement$as_then:
         // -> expression
         // tokenKind = TokenKind::MemberAccessExpr
         tokenKind = TokenKind::MemberAccessExpr;
+        // emitToken TokenKind::ImplicitSelfReference
+        carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
+        carriedEmitTokenData = 0;
         // next access_punctuation
-        goto access_punctuation$no_emit;
+        goto access_punctuation$with_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -3370,8 +3354,11 @@ after_simple_variable_declaration_id$no_emit:
             tokEnd += 1;
             // pushScope ScopeKind::VariableType
             scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // emitToken TokenKind::VariableType, sema::VariableKind::Let
+            carriedEmitTokenKind = TokenKind::VariableType;
+            carriedEmitTokenData = packData1(TokenKind::VariableType, sema::VariableKind::Let);
             // next expression
-            goto expression$no_emit;
+            goto expression$with_emit;
         }
     }
     // then after_variable_declaration_id
@@ -3389,8 +3376,11 @@ after_variable_declaration_id$as_then:
         char next = tokEnd[1];
         if (next != ':') {
             tokEnd += 1;
+            // emitToken TokenKind::VariableType, sema::VariableKind::Let
+            carriedEmitTokenKind = TokenKind::VariableType;
+            carriedEmitTokenData = packData1(TokenKind::VariableType, sema::VariableKind::Let);
             // next variable_type
-            goto variable_type$no_emit;
+            goto variable_type$with_emit;
         }
     }
     if (std::string_view(tokEnd, 1) == "="sv) {
@@ -3408,8 +3398,6 @@ after_variable_declaration_id$as_then:
     }
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3429,8 +3417,6 @@ after_variable_declaration_id$as_then:
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3448,8 +3434,6 @@ after_variable_declaration_id$as_then:
             }
             scopePosition = result;
         }
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3460,6 +3444,8 @@ after_variable_declaration_id$as_then:
     goto error$as_then;
 
     // LinearState variable_type
+variable_type$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 variable_type$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3468,12 +3454,15 @@ variable_type$no_emit:
         char next = tokEnd[1];
         if (next != '<' && next != '=') {
             tokEnd += 1;
+            // updateData sema::VariableKind::Generic
+            state.parseOutput.tokens.back().setData1(sema::VariableKind::Generic);
             // pushScope ScopeKind::GenericCategoryExpression
             scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
-            // updateKind TokenKind::GenericCategoryVariableDecl
-            state.parseOutput.tokens.back().setKind(TokenKind::GenericCategoryVariableDecl);
+            // emitToken TokenKind::VariableGenericCategory
+            carriedEmitTokenKind = TokenKind::VariableGenericCategory;
+            carriedEmitTokenData = 0;
             // next impl_expression
-            goto impl_expression$no_emit;
+            goto impl_expression$with_emit;
         }
     }
     if (isWordFirstCharacter(tokEnd[0])) {
@@ -3485,20 +3474,20 @@ variable_type$no_emit:
         if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
-                // updateKind TokenKind::UniqueReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::UniqueReferenceDecl);
+                // updateData sema::VariableKind::UniqueReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::UniqueReference);
                 // next after_variable_unique_modifier
                 goto after_variable_unique_modifier$no_emit;
             }
             if (this_identifier == words["shared"]) {
-                // updateKind TokenKind::SharedReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::SharedReferenceDecl);
+                // updateData sema::VariableKind::SharedReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::SharedReference);
                 // next after_variable_shared_modifier
                 goto after_variable_shared_modifier$no_emit;
             }
             if (this_identifier == words["const"]) {
-                // updateKind TokenKind::ConstSharedReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::ConstSharedReferenceDecl);
+                // updateData sema::VariableKind::ConstSharedReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
                 // next after_variable_const_modifier
                 goto after_variable_const_modifier$no_emit;
             }
@@ -3541,8 +3530,6 @@ after_variable_modifier$as_then:
     }
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3562,8 +3549,6 @@ after_variable_modifier$as_then:
         }
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3581,8 +3566,6 @@ after_variable_modifier$as_then:
             }
             scopePosition = result;
         }
-        // emitToken TokenKind::AssignStmt
-        emitToken(TokenKind::AssignStmt, tokBegin, 0, state);
         // emitToken TokenKind::ExpressionStmt
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
@@ -3608,8 +3591,8 @@ after_variable_unique_modifier$no_emit:
         if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
-                // updateKind TokenKind::ConstUniqueReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::ConstUniqueReferenceDecl);
+                // updateData sema::VariableKind::ConstUniqueReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3645,8 +3628,8 @@ after_variable_shared_modifier$no_emit:
         if (sema::isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
-                // updateKind TokenKind::ConstSharedReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::ConstSharedReferenceDecl);
+                // updateData sema::VariableKind::ConstSharedReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3686,8 +3669,8 @@ after_variable_const_modifier$no_emit:
                 goto after_variable_modifier$no_emit;
             }
             if (this_identifier == words["unique"]) {
-                // updateKind TokenKind::ConstUniqueReferenceDecl
-                state.parseOutput.tokens.back().setKind(TokenKind::ConstUniqueReferenceDecl);
+                // updateData sema::VariableKind::ConstUniqueReference
+                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -4567,8 +4550,8 @@ member_declaration$as_then:
         // emitToken TokenKind::MemberDecl, this_declaration
         carriedEmitTokenKind = TokenKind::MemberDecl;
         carriedEmitTokenData = packData1(TokenKind::MemberDecl, this_declaration);
-        // next after_variable_declaration_id
-        goto after_variable_declaration_id$with_emit;
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
     }
     // then templated_declaration
     goto templated_declaration$as_then;

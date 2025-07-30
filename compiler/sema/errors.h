@@ -43,7 +43,8 @@ struct UnqualifiedLookupFoundMember { };
 struct UnqualifiedLookupFailed { };
 
 struct StaticLookupFailed { };
-struct StaticLookupBaseNotSupported { };
+struct StaticLookupBaseConstantNotSupported { };
+struct StaticLookupBaseExpressionNotSupported { };
 
 struct MemberLookupFailed { };
 struct MemberLookupResultNotSupported { };
@@ -59,5 +60,9 @@ struct SelfTypeTemplateParameterLookupFailed { };
 struct InitializeTypeMismatch { };
 struct InitializeOfReferenceWithValue { };
 struct InitializeOfReferenceIsNotReferenceDowncast { };
+
+struct MemberDeclarationWithoutExplicitType { };
+
+struct ExplicitImplExpressionNotSupported { };
 
 }

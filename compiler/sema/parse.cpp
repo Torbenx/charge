@@ -102,119 +102,129 @@ void Generator::visitTemplateParameters() {
     advance();
 }
 
-VariableCategory Generator::visitVariableCategory() {
-    Token tokKind = tok->kind();
-    advance();
-    switch (tokKind) {
-    case Token::LetValueDecl:
-        return VariableKind::Let;
-    case Token::VarValueDecl:
-        return VariableKind::Var;
-    case Token::UniqueReferenceDecl:
-        return VariableKind::UniqueReference;
-    case Token::SharedReferenceDecl:
-        return VariableKind::SharedReference;
-    case Token::ConstUniqueReferenceDecl:
-        return VariableKind::ConstUniqueReference;
-    case Token::ConstSharedReferenceDecl:
-        return VariableKind::ConstSharedReference;
-    case Token::GenericCategoryVariableDecl:
-        visitExpression();
-        contextualToExpressionCategory(SourceLocation());
-        return VariableCategory(expressionToConstant());
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-Generator::VariableDeclaration Generator::visitVariableDeclaration(bool programParameters) {
+Generator::VariableDeclaration Generator::visitVariableDeclaration(ImplicitParameterMode parameterMode) {
+    VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
+    bool isVar = tok->kind() == Token::VarValueDecl;
     Word name = tok->data1<Word>();
     SourceLocation nameLoc = tok->location();
-
-    auto category = visitVariableCategory();
-
-    auto info = visitVariableTypeAndInitializer(category.initializerCategory(), programParameters);
-    return { nameLoc, name, info.type, category, info.hasInitializer };
-}
-
-Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer(Constant expectedCategory, bool programParameters) {
-    std::optional<Type> variableType;
-    VERIFY(parameterTypes.size() == program->parameters.size()); // TODO: visitVariableExpressionCategory() may have already added parameters
-    if (tok->kind() != Token::AssignStmt) {
-        // parse type
-        wildcardMeaning = WildcardMeaning::ImplicitTemplate;
-        SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':', but there is currently no token for that
-        visitExpression();
-        contextualToType(conversionLocation);
-        variableType = verifyType(expressionToConstant());
-        wildcardMeaning = WildcardMeaning::Error;
-    } else {
-        variableType = verifyType(newImplicitParameter(builtins::type_type).copyTemplateParameter());
-    }
-    Type type = variableType.value();
-
-    VERIFY(tok->kind() == Token::AssignStmt);
-    SourceLocation assignLocation = tok->location();
     advance();
 
-    bool hasInitializer = false;
-    if (tok->kind() != Token::ExpressionStmt) {
-        if (parameterTypes.size() != program->parameters.size() && programParameters) {
-            // 'type' contains implicitly created parameters.
-            // Converting the initializer to 'type' can never happend without deducing them.
-            VERIFY_NOT_REACHED();
-        }
-        visitExpression();
+    auto info = visitVariableTypeAndInitializer(parameterMode, isVar);
+    return { info, nameLoc, name };
+}
 
-        DeductionState state(context, programHandle, parameterTypes.size());
-        state.copyParameters(program->parameters.size());
-        initialize(assignLocation, state, expectedCategory, type);
-        VERIFY(state.isComplete());
-        // TODO: Verify that no computed constant in 'type' contains newly created implicit parameters
-        type = verifyType(fold(state.toFoldBase(builtins::self_constant), type));
+VariableCategory Generator::visitVariableTypeToken(bool isVar) {
+    VERIFY(tok->kind() == Token::VariableType);
 
-        hasInitializer = true;
+    VariableKind kind = tok->data1<VariableKind>();
+    advance();
+    if (isVar) {
+        VERIFY(kind == VariableKind::Let); // Dummy value
+        return VariableKind::Var;
     }
+
+    if (kind != VariableKind::Generic)
+        return kind;
+
+    VERIFY(tok->kind() == Token::VariableGenericCategory);
+    TokenInfo* genericCategoryToken = tok;
+    advance();
+    visitExpression();
+    contextualToExpressionCategory(genericCategoryToken);
+    return VariableCategory(expressionToConstant(genericCategoryToken));
+}
+
+Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer(ImplicitParameterMode parameterMode, bool isVar) {
+    std::optional<Type> variableType;
+    VERIFY(parameterTypes.size() == program->parameters.size()); // TODO: visitVariableExpressionCategory() may have already added parameters
+
+    VariableCategory category(isVar ? VariableKind::Var : VariableKind::Let);
+    if (tok->kind() == Token::VariableType) {
+        TokenInfo* typeToken = tok;
+        category = visitVariableTypeToken(isVar);
+
+        if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt) {
+            // parse type
+            wildcardMeaning = WildcardMeaning::ImplicitTemplate;
+            visitExpression();
+            contextualToType(typeToken);
+            variableType = verifyType(expressionToConstant(typeToken));
+            wildcardMeaning = WildcardMeaning::Error;
+        }
+    }
+
+    if (!variableType.has_value())
+        variableType = verifyType(newImplicitParameter(builtins::type_type).copyTemplateParameter());
+    Type type = variableType.value();
+
+    if (tok->kind() == Token::ExpressionStmt) {
+        advance();
+
+        bool createdImplicitParameters = parameterTypes.size() != program->parameters.size();
+        if (createdImplicitParameters) {
+            if (parameterMode == ImplicitParameterMode::DeduceLocally) {
+                VERIFY_NOT_REACHED(); // New parameter cannot be deduced. TODO: This should be an error.
+            } else {
+                // add implicit parameters to program
+                while (program->parameters.size() < parameterTypes.size()) {
+                    int_t parameterIndex = program->parameters.size();
+                    program->parameters.push_back({ Word(), parameterTypes[parameterIndex], std::nullopt });
+                }
+            }
+        }
+        return { type, category, false };
+    }
+
+    VERIFY(tok->kind() == Token::AssignStmt);
+    TokenInfo* assignToken = tok;
+    advance();
+    visitExpression();
     VERIFY(tok->kind() == Token::ExpressionStmt);
     advance();
 
-    if (programParameters) {
+    DeductionState state(context, programHandle, parameterTypes.size());
+    state.copyParameters(program->parameters.size());
+    initialize(assignToken, state, category.initializerCategory(), type);
+    if (!state.isComplete())
+        VERIFY_NOT_REACHED(); // TODO: This should be an error.
+    // TODO: Verify that no computed constant in 'type' contains newly created implicit parameters
+
+    if (parameterMode == ImplicitParameterMode::AddToProgram) {
         // add implicit parameters to program
-        while (program->parameters.size() < parameterTypes.size())
-            program->parameters.push_back({ Word(), parameterTypes[program->parameters.size()], std::nullopt });
+        while (program->parameters.size() < parameterTypes.size()) {
+            int_t parameterIndex = program->parameters.size();
+            program->parameters.push_back({ Word(), parameterTypes[parameterIndex], state.arguments[parameterIndex] });
+        }
     } else {
+        type = verifyType(fold(state.toFoldBase(builtins::self_constant), type));
         // remove introduced parameters
         parameterTypes.erase(parameterTypes.begin() + program->parameters.size(), parameterTypes.end());
     }
 
-    return { type, hasInitializer };
+    return { type, category, true };
 }
 
 Program::Parameter Generator::visitTemplateParameter() {
-    if (tok->kind() != Token::LetValueDecl) {
-        // report error
-        VERIFY_NOT_REACHED();
-    }
+    VERIFY(tok->kind() == Token::LetValueDecl);
     Word name = tok->data1<Word>();
     advance();
 
     if (name == parse::words["self_type"]) {
         // TODO: Allow default argument
-        if (tok->kind() != Token::AssignStmt)
+        if (tok->kind() == Token::VariableType)
             error<errors::SelfTypeTemplateParameterWithExplicitType>();
-        VERIFY(tok->kind() == Token::AssignStmt);
-        advance();
-        if (tok->kind() != Token::ExpressionStmt)
+        if (tok->kind() == Token::AssignStmt)
             error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
         VERIFY(tok->kind() == Token::ExpressionStmt);
         advance();
         return { name, builtins::type_type, std::nullopt };
     }
 
-    auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), true);
+    auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::AddToProgram, false);
+    VERIFY(info.category.kind() == VariableKind::Let);
     std::optional<Constant> initializer;
     if (info.hasInitializer)
-        initializer = expressionToConstant();
+        initializer = valueExpressionToConstant();
     return { name, info.type, initializer };
 }
 
@@ -225,12 +235,13 @@ void Generator::visitStaticVariableDeclaration() {
     VERIFY(tok->kind() == Token::GlobalDecl);
     advance();
 
-    auto info = visitVariableTypeAndInitializer(Constant(ExpressionCategory::Value), false);
+    auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::DeduceLocally, false);
+    VERIFY(info.category.kind() == VariableKind::Let);
     program->setType(info.type);
     if (info.hasInitializer)
         // TODO: Constants are required to be the same when copied.
         //       For global objects this restriction is not necessary.
-        globalProgram->setInitializer(expressionToConstant());
+        globalProgram->setInitializer(valueExpressionToConstant());
     else
         // TODO: Open globals should not need an initializer
         error<errors::StaticVariableDeclarationWithoutInitializer>();
@@ -243,11 +254,14 @@ void Generator::visitFunctionImplDeclaration() {
     VERIFY(tok->kind() == Token::FunctionImplDecl);
     advance();
     visitExpression();
-    Constant implOf = expressionToConstant();
+    auto implOf = expressionToConstantNoNewComputedConstants();
 
     visitFunctionParametersAndBody();
 
-    checkFunctionImplDeclaration(DeductionState::fromFoldBase(asFoldBase(implOf)));
+    if (implOf.has_value())
+        checkFunctionImplDeclaration(DeductionState::fromFoldBase(asFoldBase(implOf.value())));
+    else
+        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitFunctionDeclaration() {
@@ -321,24 +335,28 @@ void Generator::visitFunctionParametersAndBody() {
         Word name = tok->data1<Word>();
         if (name == parse::words["self"]) {
             SourceLocation nameLoc = tok->location();
-            VariableCategory category = visitVariableCategory();
+            bool isVar = tok->kind() == Token::VarValueDecl;
+            advance();
+            VariableCategory category(isVar ? VariableKind::Var : VariableKind::Let);
+            if (tok->kind() == Token::VariableType) {
+                visitVariableTypeToken(isVar);
+
+                if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt)
+                    error<errors::SelfFunctionParameterWithExplicitType>();
+            }
 
             // TODO: Allow default argument?
-            if (tok->kind() != Token::AssignStmt)
-                error<errors::SelfFunctionParameterWithExplicitType>();
-            VERIFY(tok->kind() == Token::AssignStmt);
-            advance();
-            if (tok->kind() != Token::ExpressionStmt)
+            if (tok->kind() == Token::AssignStmt)
                 error<errors::SelfFunctionParameterWithDefaultArgument>();
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
 
-            addFunctionParameter({ nameLoc, name, lookupSelfType(), category, false });
+            addFunctionParameter({ { lookupSelfType(), category, false }, nameLoc, name });
         }
     }
 
     while (tok->kind() != Token::EmptyNode) {
-        addFunctionParameter(visitVariableDeclaration(true));
+        addFunctionParameter(visitVariableDeclaration(ImplicitParameterMode::AddToProgram));
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -347,9 +365,9 @@ void Generator::visitFunctionParametersAndBody() {
     VERIFY(expressionStack.front().endOffset == 0);
     VERIFY(instructionScratch.empty());
     if (tok->kind() == Token::BodyExpr) {
-        SourceLocation arrowLoc = tok->location();
-        auto bodyScopeInst = emitBlockScope(arrowLoc);
-        auto body = beginLocalScope(arrowLoc);
+        TokenInfo* arrowToken = tok;
+        auto bodyScopeInst = emitBlockScope(arrowToken->location());
+        auto body = beginLocalScope(arrowToken->location());
         advance();
 
         visitExpression();
@@ -357,20 +375,20 @@ void Generator::visitFunctionParametersAndBody() {
         SourceLocation endLoc = tok->location();
         advance();
 
-        toValueExpression(arrowLoc);
+        toValueExpression(arrowToken);
         program->setType(resultType(topExpression()));
-        emitInitialize(arrowLoc, Expression::returnValueReference(fnProgram), takeTopExpression());
+        emitInitialize(arrowToken->location(), Expression::returnValueReference(fnProgram), takeTopExpression());
 
         endLocalScope(body, endLoc);
         emitScopeEnd(endLoc, bodyScopeInst);
         fnProgram->setBody(takeInstructions());
     } else {
         if (tok->kind() == Token::ReturnType) {
-            SourceLocation conversionLocation = tok->location();
+            TokenInfo* arrowToken = tok;
             advance();
             visitExpression();
-            contextualToType(conversionLocation);
-            program->setType(verifyType(expressionToConstant()));
+            contextualToType(arrowToken);
+            program->setType(verifyType(expressionToConstant(arrowToken)));
         } else {
             // TODO: Implement return type deduction
             error<errors::FunctionWithoutExplicitReturnType>();
@@ -392,11 +410,14 @@ void Generator::visitStructImplDeclaration() {
     VERIFY(tok->kind() == Token::StructImplDecl);
     advance();
     visitExpression();
-    Constant implOf = expressionToConstant();
+    auto implOf = expressionToConstantNoNewComputedConstants();
 
     visitStructMembers();
 
-    checkStructImplDeclaration(implOf);
+    if (implOf.has_value())
+        checkStructImplDeclaration(implOf.value());
+    else
+        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitStructDeclaration() {
@@ -405,7 +426,7 @@ void Generator::visitStructDeclaration() {
     visitStructMembers();
 
     if (resolveImplicitImplTarget()) {
-        checkStructImplDeclaration(expressionToConstant());
+        checkStructImplDeclaration(valueExpressionToConstant());
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
@@ -432,12 +453,22 @@ void Generator::visitStructMembers() {
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
         VERIFY(tok->data1<DeclarationValue>() == DeclarationValue(DeclarationValueKind::Member, i));
+        TokenInfo* memberToken = tok;
         advance();
 
-        SourceLocation conversionLocation = tok->location(); // TODO: Should be the ':' for member declrations
+        TokenInfo* implicitActionToken = nullptr;
+        if (member.isHas()) {
+            implicitActionToken = memberToken;
+        } else {
+            if (tok->kind() != Token::VariableType)
+                error<errors::MemberDeclarationWithoutExplicitType>();
+            VERIFY(tok->data1<VariableKind>() == VariableKind::Let);
+            implicitActionToken = tok;
+            advance();
+        }
         visitExpression();
-        contextualToType(conversionLocation);
-        member.setType(verifyType(expressionToConstant()));
+        contextualToType(implicitActionToken);
+        member.setType(verifyType(expressionToConstant(implicitActionToken)));
     }
 
     tok = savedTok;
@@ -447,11 +478,14 @@ void Generator::visitEnumImplDeclaration() {
     VERIFY(tok->kind() == Token::EnumImplDecl);
     advance();
     visitExpression();
-    Constant implOf = expressionToConstant();
+    auto implOf = expressionToConstantNoNewComputedConstants();
 
     visitEnumValues();
 
-    checkEnumImplDeclaration(implOf);
+    if (implOf.has_value())
+        checkEnumImplDeclaration(implOf.value());
+    else
+        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitEnumDeclaration() {
@@ -460,7 +494,7 @@ void Generator::visitEnumDeclaration() {
     visitEnumValues();
 
     if (resolveImplicitImplTarget()) {
-        checkEnumImplDeclaration(expressionToConstant());
+        checkEnumImplDeclaration(valueExpressionToConstant());
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
@@ -508,10 +542,8 @@ void Generator::visitStatement() {
         endLocalScope(scope, tok->location());
         emitScopeEnd(tok->location(), blockScopeInst);
         advance();
-    } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl
-        || tok->kind() == Token::UniqueReferenceDecl || tok->kind() == Token::ConstUniqueReferenceDecl
-        || tok->kind() == Token::SharedReferenceDecl || tok->kind() == Token::ConstSharedReferenceDecl) {
-        declareLocalVariable(visitVariableDeclaration(false));
+    } else if (tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl) {
+        declareLocalVariable(visitVariableDeclaration(ImplicitParameterMode::DeduceLocally));
     } else if (tok->kind() == Token::DestroyStmt) {
         SourceLocation location = tok->location();
         advance();
@@ -536,14 +568,13 @@ void Generator::visitStatement() {
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
-            SourceLocation ifLoc = tok->location();
-
+            TokenInfo* ifToken = tok;
             advance();
-            contextualToBool(ifLoc);
+            contextualToBool(ifToken);
 
-            auto lastBranchInst = emitBranch(ifLoc, takeTopExpression());
+            auto lastBranchInst = emitBranch(ifToken->location(), takeTopExpression());
 
-            auto ifScope = beginLocalScope(ifLoc);
+            auto ifScope = beginLocalScope(ifToken->location());
             visitStatement();
             endLocalScope(ifScope, SourceLocation());
 
@@ -592,9 +623,7 @@ void Generator::visitPostfixExpr() {
             generateParameterizeExpr();
         } else if (tok->kind() == Token::CallExpr) {
             CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
-            SourceLocation callLoc = tok->location();
-            advance();
-            generateCallExpr(callLoc, std::move(target));
+            generateCallExpr(std::move(target));
         } else if (tok->kind() == Token::StaticAccessExpr) {
             generateStaticAccessExpr();
             advance();
@@ -610,8 +639,9 @@ void Generator::visitPrimaryExpr() {
     if (tok->kind() == Token::IdentifierExpr) {
         generateIdentifierExpr();
         advance();
-    } else if (tok->kind() == Token::MemberAccessExpr) {
-        emitExpression(tok->location(), lookupSelfParameter()); // TODO: Location should be the '.' not the identifier
+    } else if (tok->kind() == Token::ImplicitSelfReference) {
+        emitExpression(tok, lookupSelfParameter());
+        advance();
         generateMemberAccessExpr();
     } else {
         VERIFY_NOT_REACHED();

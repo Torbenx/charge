@@ -22,6 +22,16 @@ enum class ExpressionCategory : uint8_t {
     ConstSharedReference,
 };
 
+enum class VariableKind : uint8_t {
+    Let,
+    Var,
+    UniqueReference,
+    ConstUniqueReference,
+    SharedReference,
+    ConstSharedReference,
+    Generic,
+};
+
 struct Constant;
 struct FunctionProgram;
 

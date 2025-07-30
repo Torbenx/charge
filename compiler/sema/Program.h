@@ -492,15 +492,6 @@ concept CallableProgram = requires(P* program, int_t index) {
     { callParameters<P>::get(program)[index] } -> std::same_as<CallParameter>;
 };
 
-enum class VariableKind : uint8_t {
-    Let,
-    Var,
-    UniqueReference,
-    ConstUniqueReference,
-    SharedReference,
-    ConstSharedReference,
-    Generic,
-};
 struct VariableCategory {
 private:
     Constant m_data;

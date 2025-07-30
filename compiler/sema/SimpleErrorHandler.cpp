@@ -37,7 +37,7 @@ Expression ErrorAnalyzer::visitAndDropExpression() {
 }
 
 Expression ErrorAnalyzer::dropTopExpression() {
-    g.expressionToConstant(); // Required to drop instructions
+    g.expressionToConstant(std::nullopt); // Required to drop instructions
     return g.takeTopExpression();
 }
 
@@ -85,6 +85,8 @@ void ErrorAnalyzer::analyze(ErrorBase* base) {
     }
     if (auto* e = dynamic_cast<Error<SelfFunctionParameterWithDefaultArgument>*>(base); e != nullptr) {
         // Recover by ignoring the default argument
+        VERIFY(g.tok->kind() == Token::AssignStmt);
+        g.advance();
         visitAndDropExpression();
     }
     if (auto* e = dynamic_cast<Error<SelfFunctionParameterWithExplicitType>*>(base); e != nullptr) {
@@ -171,7 +173,11 @@ void ErrorAnalyzer::analyze(ErrorBase* base) {
         // Fatal error
         VERIFY_NOT_REACHED();
     }
-    if (auto* e = dynamic_cast<Error<StaticLookupBaseNotSupported>*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<StaticLookupBaseExpressionNotSupported>*>(base); e != nullptr) {
+        // Fatal error
+        VERIFY_NOT_REACHED();
+    }
+    if (auto* e = dynamic_cast<Error<StaticLookupBaseConstantNotSupported>*>(base); e != nullptr) {
         // Fatal error
         VERIFY_NOT_REACHED();
     }
@@ -220,6 +226,16 @@ void ErrorAnalyzer::analyze(ErrorBase* base) {
         VERIFY_NOT_REACHED();
     }
     if (auto* e = dynamic_cast<Error<InitializeOfReferenceIsNotReferenceDowncast>*>(base); e != nullptr) {
+        // Fatal error
+        VERIFY_NOT_REACHED();
+    }
+
+    if (auto* e = dynamic_cast<Error<MemberDeclarationWithoutExplicitType>*>(base); e != nullptr) {
+        // Fatal error
+        VERIFY_NOT_REACHED();
+    }
+
+    if (auto* e = dynamic_cast<Error<ExplicitImplExpressionNotSupported>*>(base); e != nullptr) {
         // Fatal error
         VERIFY_NOT_REACHED();
     }
