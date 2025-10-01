@@ -1,27 +1,25 @@
 #pragma once
 
+#include <ReverseMemberPointer.h>
+#include <check/PartialOrdering.h>
 #include <check/StandardEquality.h>
 
 namespace check {
 
-/*struct MemoryLocations;
-
-struct MemoryLocationEquality : StandardEquality {
-    MemoryLocations* kindTheory();
-    void onNewVariable(Solver&, int_t eqId) override;
-    void watch(Solver&, Value, Value) override;
-    bool isDisequalityWatched(Solver&, Value, Value) override;
-
-    BooleanVariables glueVariables;
-};
-
 struct MemoryLocationLoadInfo {
-    EquatableValueTheory::EqualityInfo equalityInfo;
+    StandardEquality::EqualityInfo declarationEqualityInfo;
+    StandardEquality::EqualityInfo memberExpressionEqualityInfo;
     Type type;
 };
 
-struct MemoryLocationLoads : MemoryLocationTheory, private LoadSet<MemoryLocationLoads, MemoryLocationLoadInfo> {
-    using MemoryLocationTheory::MemoryLocationTheory;
+struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, MemoryLocationLoadInfo> {
+    MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation value) override {
+        return { (uint32_t)declarations.theoryId(), value.valueId };
+    }
+
+    MemberExpression memberExpression(Solver&, MemoryLocation value) override {
+        return { (uint32_t)memberExpressions.theoryId(), value.valueId };
+    }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -30,10 +28,6 @@ struct MemoryLocationLoads : MemoryLocationTheory, private LoadSet<MemoryLocatio
 
     uint64_t labelOfValue(Solver&, Value v) override {
         return baseLabel + (uint64_t)LoadSet::label(v.valueId);
-    }
-
-    EqualityInfo& equalityInfo(Solver&, Value v) override {
-        return LoadSet::at(v.valueId).equalityInfo;
     }
 
     Type typeAtLocation(Solver&, MemoryLocation loc) override {
@@ -51,61 +45,101 @@ struct MemoryLocationLoads : MemoryLocationTheory, private LoadSet<MemoryLocatio
     }
 
 private:
-    uint64_t baseLabel = 0;
+    using EqualityInfo = StandardEquality::EqualityInfo;
 
     MemoryLocationLoadInfo makeData(Solver& solver, uint32_t newId, MemoryLocation loc, CodePosition) {
         Type type = solver.typeAtLocation(loc);
         std::optional<Type> pointeeType = solver.theoryFor(type).dereferencedType(solver, type);
-        return { EqualityInfo({ (uint32_t)theoryId(), newId }), pointeeType.value() };
+        return {
+            .declarationEqualityInfo = EqualityInfo({ (uint32_t)declarations.theoryId(), newId }),
+            .memberExpressionEqualityInfo = EqualityInfo({ (uint32_t)memberExpressions.theoryId(), newId }),
+            .type = pointeeType.value(),
+        };
     }
 
-    friend LoadSet;
-};
+    struct Declarations : MemoryDeclarationTheory {
+        MemoryLocationLoads* theory() {
+            return ReverseMemberPointer<&MemoryLocationLoads::declarations>::reverse(this);
+        }
+        LoadSet* loads() { return theory(); }
 
-struct DerivedMemoryLocations : MemoryLocationTheory {
-    struct Info {
-        EqualityInfo equalityInfo;
-        MemoryLocation base;
-        MemberExpression member;
+        uint64_t labelOfValue(Solver& solver, Value value) {
+            return baseLabel + (uint64_t)loads()->label(value.valueId);
+        }
+        std::string formatValue(Solver& solver, Value value) {
+            auto [loc, pos] = loads()->loadAt(value.valueId);
+            return "declaration(" + solver.formatLoad(loc, pos) + ")";
+        }
+
+        void enumerateValues(Solver&, std::function<void(Value)> f) {
+            for (int_t i = 0; i < loads()->size(); i++)
+                f(Value { (uint32_t)theoryId(), (uint32_t)i });
+        }
+
+        EqualityInfo& equalityInfo(Solver&, Value value) override {
+            return loads()->at(value.valueId).declarationEqualityInfo;
+        }
+
+        std::optional<DeclarationInfo> declarationInfo(Solver&, MemoryDeclaration) override { return std::nullopt; }
+
+        uint64_t baseLabel = 0;
     };
 
-    Info& infoFor(MemoryLocation location) { return infos[location.valueId]; }
+    struct MemberExpressions : MemberExpressionTheory {
+        MemoryLocationLoads* theory() {
+            return ReverseMemberPointer<&MemoryLocationLoads::memberExpressions>::reverse(this);
+        }
+        LoadSet* loads() { return theory(); }
 
-    uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+        uint64_t labelOfValue(Solver& solver, Value value) {
+            return baseLabel + (uint64_t)loads()->label(value.valueId);
+        }
+        std::string formatValue(Solver& solver, Value value) {
+            auto [loc, pos] = loads()->loadAt(value.valueId);
+            return "memberexpr(" + solver.formatLoad(loc, pos) + ")";
+        }
 
-    Type typeAtLocation(Solver& solver, MemoryLocation location) override {
-        return solver.memberType(infoFor(location).member);
-    }
+        void enumerateValues(Solver&, std::function<void(Value)> f) {
+            for (int_t i = 0; i < loads()->size(); i++)
+                f(Value { (uint32_t)theoryId(), (uint32_t)i });
+        }
 
-    EqualityInfo& equalityInfo(Solver&, Value value) override {
-        return infoFor({ value }).equalityInfo;
-    }
+        EqualityInfo& equalityInfo(Solver&, Value value) override {
+            return loads()->at(value.valueId).memberExpressionEqualityInfo;
+        }
 
-    std::string formatValue(Solver& solver, Value value) override {
-        auto& info = infoFor({ value });
-        return solver.formatValue(info.base) + "." + solver.formatValue(info.member);
-    }
+        Type memberType(Solver&, MemberExpression value) override {
+            return loads()->at(value.valueId).type;
+        }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < (int_t)infos.size(); i++)
-            f({ (uint32_t)theoryId(), (uint32_t)i });
-    }
+        uint64_t baseLabel = 0;
+    };
 
-private:
-    std::vector<Info> infos;
+    uint64_t baseLabel = 0;
+    Declarations declarations;
+    MemberExpressions memberExpressions;
 };
 
 struct MemoryLocations : ValueKindTheory {
-    struct NormalRepresentation {
-        MemoryLocation base; //!< Either a load or base location
-        std::span<const MemberExpression> expr; //!< Atomic member expressions
-    };
 
-    std::string formatValueKind(Solver&, ValueKind) override {
-        return "memory_location";
+    static PartialOrderingsSet possibleOrderings(Solver& solver, MemoryLocation a, MemoryLocation b) {
+        MemoryLocationTheory& ta = solver.theoryFor(a);
+        MemoryLocationTheory& tb = solver.theoryFor(b);
+        if (solver.declarationInfo(ta.memoryDeclaration(solver, a)).has_value() && solver.declarationInfo(tb.memoryDeclaration(solver, b)).has_value()) {
+            return PartialOrderingsSet::unordered();
+        }
+
+        // The location type is considered since it is the same as the member type.
+        return solver.possibleOrderings(ta.memberExpression(solver, a), tb.memberExpression(solver, b));
     }
 
-    BooleanValue equality(Solver&, Value a, Value b) override;
+    std::string formatValueKind(Solver&, ValueKind) override {
+        return "memory-location";
+    }
+
+    BooleanValue equality(Solver& solver, Value a, Value b) override {
+        return m_ordering.equality(solver, a, b);
+    }
 
     BooleanValue disequality(Solver& solver, Value a, Value b) override {
         return solver.negate(equality(solver, a, b));
@@ -115,97 +149,15 @@ struct MemoryLocations : ValueKindTheory {
         return m_loads.defineLoad(solver, location, position);
     }
 
-    NormalRepresentation normalRepresentation(Solver&, MemoryLocation);
-    MemoryLocation fromNormalRepresentation(Solver&, NormalRepresentation);
-
-    MemoryLocationEquality m_equality;
-    MemoryLocationLoads m_loads;
-    DerivedMemoryLocations m_derived;
-};
-
-struct ContainsRelation {
-    Type parent;
-    Type member;
-};
-
-struct TypeSet {
-    TypeSet(std::initializer_list<Type>);
-    TypeSet unionWith(const TypeSet& other);
-    bool contains(Type type) const;
-    bool insert(Type type);
-    Type* begin();
-    Type* end();
-};
-
-struct TypeInfo {
-    std::vector<ContainsRelation> watches;
-    TypeSet members;
-};
-
-struct TypeContainsRelation : SimpleBooleanTheory, ReasonTheory {
-
-    TypeContainsRelation(Solver& solver)
-        : SimpleBooleanTheory(solver), ReasonTheory(solver, false) { }
-
-    static Reason makeReason(ContainsRelation relation);
-    static ContainsRelation reasonRelation(const Reason& reason);
-
-    void propagateFalseAssignment(Solver& solver, BooleanValue literal) override {
-        if (isPositive(literal))
-            return;
-
-        auto [parent, member] = relation(variableId(literal));
-        auto& parentInfo = infoFor(solver, parent);
-        auto& memberInfo = infoFor(solver, member);
-
-        auto updateNewMember = [this, &solver, &parentInfo](Type newMember) {
-            auto& info = infoFor(solver, newMember);
-            for (auto watch : parentInfo.watches) {
-                if (watch.member == newMember) {
-                    // !(A contains B) !(B contains C) (A contains C)
-                    solver.assignTrue(positiveLiteral(relationId(solver, watch)), makeReason(watch));
-                } else {
-                    info.watches.push_back(watch);
-                }
-            }
-        };
-
-        if (parentInfo.members.insert(member)) {
-            updateNewMember(member);
-
-            auto newMembers = parentInfo.members.unionWith(memberInfo.members);
-            for (Type newMember : newMembers)
-                updateNewMember(newMember);
-
-            positiveTrace.push_back({ { parent, member }, std::move(newMembers) });
+private:
+    struct Ordering : PartialOrderingTheory {
+        PartialOrderingsSet possibleOrderings(Solver& solver, Value a, Value b) override {
+            return MemoryLocations::possibleOrderings(solver, MemoryLocation { a }, MemoryLocation { b });
         }
-    }
-
-    bool testReason(Solver& solver, const Reason& reason) override {
-        auto [parent, member] = reasonRelation(reason);
-        return infoFor(solver, parent).members.contains(member);
-    }
-
-    ClauseAndIndex reasonToClause(Solver& solver, const Reason& reason) override {
-        auto [parent, member] = reasonRelation(reason);
-
-
-    }
-
-    int_t relationId(Solver&, ContainsRelation);
-    static TypeInfo& infoFor(Solver&, Type);
-    ContainsRelation relation(int_t relationId);
-
-    struct PositiveTraceEntry {
-        ContainsRelation relation;
-        TypeSet newMembers;
     };
 
-    std::vector<PositiveTraceEntry> positiveTrace;
+    MemoryLocationLoads m_loads;
+    Ordering m_ordering;
 };
-
-struct Types : ValueKindTheory {
-    StandardEquality m_equality;
-};*/
 
 }

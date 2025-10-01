@@ -208,36 +208,7 @@ TEST(Check, SatProblems) {
     EXPECT_EQ(count, 80);
 }
 
-struct TestEquality : StandardEquality {
-    using StandardEquality::StandardEquality;
-
-    BooleanValue equality(Solver& solver, Value a, Value b) {
-        if (a == b)
-            return builtins::true_literal;
-
-        return positiveLiteral(equalityVariable(solver, a, b));
-    }
-
-    BooleanValue disequality(Solver& solver, Value a, Value b) {
-        if (a == b)
-            return builtins::false_literal;
-
-        return negativeLiteral(equalityVariable(solver, a, b));
-    }
-
-    int_t equalityVariable(Solver& solver, Value a, Value b) {
-        int_t varId = m_equalities.get(solver, a, b);
-        if (varId == variableCount())
-            newVariable(solver);
-        return varId;
-    }
-
-    Link equalityLink(int_t varId) override { return m_equalities.at(varId); }
-    int_t lookupEqualityVariable(Solver& solver, Value a, Value b) override { return m_equalities.get(solver, a, b); }
-    uint32_t labelOfVariable(Solver&, int_t varId) override { return m_equalities.label(varId); }
-
-    SymmetricBinaryRelation<> m_equalities;
-};
+using TestEquality = BasicEquality;
 
 struct TestValueTheory : EquatableValueTheory {
     TestValueTheory(Solver& solver)

@@ -1,7 +1,5 @@
 #include <check/PartialOrdering.h>
 
-#include <gtest/gtest.h>
-
 namespace check {
 
 // ---------------------------- Unordered ---------------------------
@@ -69,11 +67,26 @@ OrientedPair PartialOrderingTheory::Equality::equalityLink(int_t eqId) {
 }
 
 int_t PartialOrderingTheory::Equality::lookupEqualityVariable(Solver& solver, Value a, Value b) {
-    return variableId(theory()->literal(solver, theory()->order(solver, a, b), std::partial_ordering::equivalent));
+    return variableId(theory()->equality(solver, a, b));
 }
 
 uint32_t PartialOrderingTheory::Equality::labelOfVariable(Solver&, int_t varId) {
     return theory()->labelAt(m_handles[varId]);
+}
+
+void PartialOrderingTheory::Equality::propagateAssignment(Solver& solver, BooleanValue literal) {
+    StandardEquality::propagateAssignment(solver, literal);
+    theory()->propagateAssignment(solver, m_handles[variableId(literal)], std::partial_ordering::equivalent, isPositive(literal));
+}
+
+void PartialOrderingTheory::Equality::unapplyAssignment(Solver& solver, BooleanValue literal) {
+    StandardEquality::unapplyAssignment(solver, literal);
+    theory()->unapplyAssignment(solver, m_handles[variableId(literal)], std::partial_ordering::equivalent, isPositive(literal));
+}
+
+void PartialOrderingTheory::Equality::reapplyAssignment(Solver& solver, BooleanValue literal) {
+    StandardEquality::reapplyAssignment(solver, literal);
+    theory()->reapplyAssignment(solver, m_handles[variableId(literal)], std::partial_ordering::equivalent, isPositive(literal));
 }
 
 // -------------------------- OrderingSets --------------------------
@@ -144,6 +157,22 @@ PartialOrderingTheory::OrderingHandle PartialOrderingTheory::order(Solver& solve
 
 BooleanValue PartialOrderingTheory::literal(Solver& solver, OrderingHandle handle, std::partial_ordering ordering) {
     return m_sets.getOrCreateOrderingLiteral(solver, handle, ordering);
+}
+
+BooleanValue PartialOrderingTheory::equality(Solver& solver, Value a, Value b) {
+    return m_sets.getOrCreateOrderingLiteral(solver, order(solver, a, b), std::partial_ordering::equivalent);
+}
+
+BooleanValue PartialOrderingTheory::less(Solver& solver, Value a, Value b) {
+    return m_sets.getOrCreateOrderingLiteral(solver, order(solver, a, b), std::partial_ordering::less);
+}
+
+BooleanValue PartialOrderingTheory::greater(Solver& solver, Value a, Value b) {
+    return m_sets.getOrCreateOrderingLiteral(solver, order(solver, a, b), std::partial_ordering::greater);
+}
+
+BooleanValue PartialOrderingTheory::unordered(Solver& solver, Value a, Value b) {
+    return m_sets.getOrCreateOrderingLiteral(solver, order(solver, a, b), std::partial_ordering::unordered);
 }
 
 void PartialOrderingTheory::propagateAssignment(Solver& solver, InternalHandle handle, std::partial_ordering ordering, bool active) {

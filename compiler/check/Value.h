@@ -12,9 +12,10 @@ inline constexpr int_t ENTRY_BLOCKS_THEORY_ID = 0;
 
 enum class ValueKind : uint8_t {
     Boolean,
+    MemoryDeclaration,
     Type,
-    MemoryLocation,
     MemberExpression,
+    MemoryLocation,
 };
 
 //! A value
@@ -53,6 +54,8 @@ struct MemoryLocation : Value { };
 In this context a member can be either a member of a composite type or an element of an array.
 */
 struct MemberExpression : Value { };
+
+struct MemoryDeclaration : Value { };
 
 struct Type : Value { };
 

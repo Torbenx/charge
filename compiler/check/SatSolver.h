@@ -4,12 +4,17 @@
 #include <check/CodeBlockTheory.h>
 #include <check/EqualityTheory.h>
 #include <check/LoadSet.h>
+#include <check/PartialOrderingsSet.h>
 #include <check/Reason.h>
 #include <check/SymmetricBinaryRelation.h>
 
 #include <bit>
 
 namespace check {
+
+struct Types;
+struct MemberExpressions;
+struct MemoryLocations;
 
 struct Solver {
     using Literal = BooleanValue;
@@ -102,9 +107,19 @@ struct Solver {
         return theoryFor(location).typeAtLocation(*this, location);
     }
 
+    MemoryDeclaration memoryDeclaration(MemoryLocation location) {
+        return theoryFor(location).memoryDeclaration(*this, location);
+    }
+
+    MemberExpression memberExpression(MemoryLocation location) {
+        return theoryFor(location).memberExpression(*this, location);
+    }
+
     std::optional<ValueKind> loadedKind(MemoryLocation location) {
         return loadedKind(typeAtLocation(location));
     }
+
+    PartialOrderingsSet possibleOrderings(MemoryLocation a, MemoryLocation b);
 
     // MemberExpressionTheory
     MemberExpressionTheory& theoryFor(MemberExpression value) {
@@ -115,6 +130,17 @@ struct Solver {
         return theoryFor(expr).memberType(*this, expr);
     }
 
+    PartialOrderingsSet possibleOrderings(MemberExpression a, MemberExpression b);
+
+    // MemoryDeclarationTheory
+    MemoryDeclarationTheory& theoryFor(MemoryDeclaration value) {
+        return static_cast<MemoryDeclarationTheory&>(*valueTheories[value.theoryId]);
+    }
+
+    std::optional<MemoryDeclarationTheory::DeclarationInfo> declarationInfo(MemoryDeclaration value) {
+        return theoryFor(value).declarationInfo(*this, value);
+    }
+
     // TypeTheory
     TypeTheory& theoryFor(Type value) {
         return static_cast<TypeTheory&>(*valueTheories[value.theoryId]);
@@ -123,6 +149,8 @@ struct Solver {
     std::optional<ValueKind> loadedKind(Type type) {
         return theoryFor(type).scalarKind(*this, type);
     }
+
+    PartialOrderingsSet possibleOrderings(Type a, Type b);
 
     // ReasonTheory
     ReasonTheory& theoryFor(const Reason& reason) {
@@ -448,6 +476,20 @@ private:
         BooleanLoads m_loads;
     };
 
+    struct MemoryDeclarationEquality;
+
+    struct MemoryDeclarations : ValueKindTheory {
+        MemoryDeclarations(Solver& solver, uint64_t equalityBaseLabel);
+        ~MemoryDeclarations();
+
+        BooleanValue equality(Solver&, Value, Value) override;
+        BooleanValue disequality(Solver&, Value, Value) override;
+        Value defineLoad(Solver&, MemoryLocation, CodePosition) override;
+        std::string formatValueKind(Solver&, ValueKind) override;
+
+        std::unique_ptr<MemoryDeclarationEquality> m_equality;
+    };
+
     struct EntryBlocks : CodeBlockTheory {
         using CodeBlockTheory::CodeBlockTheory;
         uint64_t labelOfBlock(Solver&, BlockId) override;
@@ -589,6 +631,10 @@ private:
     InternalVariables internalVariables;
     Clauses clauses;
     Booleans booleans;
+    MemoryDeclarations memoryDeclarations;
+    std::unique_ptr<Types> types;
+    std::unique_ptr<MemberExpressions> memberExpressions;
+    std::unique_ptr<MemoryLocations> memoryLocations;
     EntryBlocks entryBlocks;
     Implication implication;
     UnitReasons unitReasons;

@@ -64,19 +64,39 @@ struct BooleanTheory : ValueTheory {
     virtual void unapplyAssignment(Solver&, BooleanValue) = 0;
 };
 
-struct MemoryLocationTheory : EquatableValueTheory {
-    MemoryLocationTheory(Solver& solver)
-        : EquatableValueTheory(solver, ValueKind::MemoryLocation) { }
-
-    virtual Type typeAtLocation(Solver&, MemoryLocation) = 0;
-    // virtual std::optional<CodePosition> declarationPosition() = 0;
-};
-
 struct MemberExpressionTheory : EquatableValueTheory {
     MemberExpressionTheory(Solver& solver)
         : EquatableValueTheory(solver, ValueKind::MemberExpression) { }
 
     virtual Type memberType(Solver&, MemberExpression) = 0;
+};
+
+struct MemoryDeclarationTheory : EquatableValueTheory {
+    struct DeclarationInfo {
+        Type type;
+        CodePosition position;
+    };
+
+    MemoryDeclarationTheory(Solver& solver)
+        : EquatableValueTheory(solver, ValueKind::MemoryDeclaration) { }
+
+    //! Returns info for an object declration
+    /*!
+    For concrete declarations this should return a value and for unknows/variables this should
+    return an empty optional. If this returns a value for two values the values are always
+    disequal.
+    */
+    virtual std::optional<DeclarationInfo> declarationInfo(Solver&, MemoryDeclaration) = 0;
+};
+
+struct MemoryLocationTheory : ValueTheory {
+    MemoryLocationTheory(Solver& solver)
+        : ValueTheory(solver, ValueKind::MemoryLocation) { }
+
+    virtual Type typeAtLocation(Solver&, MemoryLocation) = 0;
+
+    virtual MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation) = 0;
+    virtual MemberExpression memberExpression(Solver&, MemoryLocation) = 0;
 };
 
 struct TypeTheory : EquatableValueTheory {
@@ -86,7 +106,9 @@ struct TypeTheory : EquatableValueTheory {
     //! Return the scalar value kind to use for a value of the given type
     virtual std::optional<ValueKind> scalarKind(Solver&, Type) = 0;
 
-    // virtual std::optional<Type> dereferencedType(Solver&, Type) = 0;
+    virtual std::optional<Type> dereferencedType(Solver&, Type) = 0;
+    virtual std::optional<Type> memberExpressionMemberType(Solver&, Type) = 0;
+    virtual std::optional<Type> memberExpressionBaseType(Solver&, Type) = 0;
 };
 
 struct ValueKindTheory {

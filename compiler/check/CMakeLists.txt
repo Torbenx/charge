@@ -9,10 +9,12 @@ target_sources(compiler
     EqualityTheory.h
     LiteralInfo.h
     LoadSet.h
+    MemberExpressions.h
     MemoryLocations.cpp
     MemoryLocations.h
-    #PartialOrdering.cpp
+    PartialOrdering.cpp
     PartialOrdering.h
+    PartialOrderingsSet.h
     Phis.cpp
     Phis.h
     Reason.h
@@ -30,6 +32,7 @@ target_sources(compiler
     StoreBlocks.h
     SymmetricBinaryRelation.h
     TopologicalOrder.h
+    Types.h
     Value.h
     ValueTheory.h
 )

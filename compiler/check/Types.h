@@ -1,11 +1,90 @@
 #pragma once
 
 #include <types.h>
-#include <check/Value.h>
+#include <check/ValueTheory.h>
+#include <check/PartialOrdering.h>
+#include <check/LoadSet.h>
 
 namespace check {
 
-struct ConcreteTypeHandle {
+struct TypeLoadInfo {
+    StandardEquality::EqualityInfo equalityInfo;
+};
+
+struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
+
+    Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
+        auto id = LoadSet::get(solver, loc, pos);
+        return Value { (uint32_t)theoryId(), id };
+    }
+
+    uint64_t labelOfValue(Solver&, Value v) override {
+        return baseLabel + (uint64_t)LoadSet::label(v.valueId);
+    }
+
+    std::string formatValue(Solver& solver, Value v) override {
+        auto [loc, pos] = LoadSet::loadAt(v.valueId);
+        return solver.formatLoad(loc, pos);
+    }
+
+    void enumerateValues(Solver&, std::function<void(Value)> f) override {
+        for (int_t i = 0; i < LoadSet::size(); i++)
+            f(Value { (uint32_t)theoryId(), (uint32_t)i });
+    }
+
+    EqualityInfo& equalityInfo(Solver&, Value v) override {
+        return LoadSet::at(v.valueId).equalityInfo;
+    }
+
+    std::optional<ValueKind> scalarKind(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> dereferencedType(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> memberExpressionMemberType(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> memberExpressionBaseType(Solver&, Type) override { return std::nullopt; }
+
+private:
+    TypeLoadInfo makeData(Solver& solver, uint32_t newId, MemoryLocation loc, CodePosition) {
+        Type type = solver.typeAtLocation(loc);
+        return {
+            .equalityInfo = EqualityInfo({ (uint32_t)theoryId(), newId }),
+        };
+    }
+
+    uint64_t baseLabel = 0;
+};
+
+struct Types : ValueKindTheory {
+    static PartialOrderingsSet possibleOrderings(Solver&, Type a, Type b) {
+        return PartialOrderingsSet::all();
+    }
+
+    std::string formatValueKind(Solver&, ValueKind) override {
+        return "type";
+    }
+
+    BooleanValue equality(Solver& solver, Value a, Value b) override {
+        return m_ordering.equality(solver, a, b);
+    }
+
+    BooleanValue disequality(Solver& solver, Value a, Value b) override {
+        return solver.negate(equality(solver, a, b));
+    }
+
+    Value defineLoad(Solver& solver, MemoryLocation location, CodePosition position) override {
+        return m_loads.defineLoad(solver, location, position);
+    }
+
+private:
+    struct Ordering : PartialOrderingTheory {
+        PartialOrderingsSet possibleOrderings(Solver& solver, Value a, Value b) override {
+            return Types::possibleOrderings(solver, Type { a }, Type { b });
+        }
+    };
+
+    TypeLoads m_loads;
+    Ordering m_ordering;
+};
+
+/*struct ConcreteTypeHandle {
     uint32_t id;
 };
 
@@ -49,6 +128,6 @@ struct ConcreteType {
 struct GenericType {
     std::vector<Type> m_directMemberTypes;
     std::vector<Type> m_directHasMemberTypes;
-};
+};*/
 
 }

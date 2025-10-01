@@ -1,4 +1,8 @@
 #include <check/SatSolver.h>
+#include <check/StandardEquality.h>
+#include <check/Types.h>
+#include <check/MemberExpressions.h>
+#include <check/MemoryLocations.h>
 
 namespace check {
 
@@ -279,6 +283,39 @@ Value Solver::Booleans::defineLoad(Solver& solver, MemoryLocation location, Code
 
 std::string Solver::Booleans::formatValueKind(Solver&, ValueKind) { return "bool"; }
 
+// -------------------- MemoryDeclarationEquality -------------------
+
+struct Solver::MemoryDeclarationEquality : BasicEquality {
+    using BasicEquality::BasicEquality;
+
+    bool isUnitDisequal(Solver& solver, Value a, Value b) override {
+        return solver.declarationInfo((MemoryDeclaration)a).has_value()
+            && solver.declarationInfo((MemoryDeclaration)b).has_value();
+    }
+};
+
+// ----------------------- MemoryDeclarations -----------------------
+
+Solver::MemoryDeclarations::MemoryDeclarations(Solver& solver, uint64_t equalityBaseLabel)
+    : m_equality(std::make_unique<MemoryDeclarationEquality>(solver, equalityBaseLabel)) { }
+
+Solver::MemoryDeclarations::~MemoryDeclarations() = default;
+
+BooleanValue Solver::MemoryDeclarations::equality(Solver& solver, Value a, Value b) {
+    return m_equality->equality(solver, a, b);
+}
+
+BooleanValue Solver::MemoryDeclarations::disequality(Solver& solver, Value a, Value b) {
+    return m_equality->disequality(solver, a, b);
+}
+
+Value Solver::MemoryDeclarations::defineLoad(Solver&, MemoryLocation, CodePosition) {
+    VERIFY_NOT_REACHED();
+}
+
+std::string Solver::MemoryDeclarations::formatValueKind(Solver&, ValueKind) { return "memory-declaration"; }
+
+
 // --------------------------- EntryBlocks --------------------------
 
 uint64_t Solver::EntryBlocks::labelOfBlock(Solver&, BlockId) { return 0; }
@@ -307,6 +344,10 @@ Solver::Solver()
     : internalVariables(*this, 0)
     , clauses(*this)
     , booleans(*this, 2000, 3000) // TODO: Hard coded constants
+    , memoryDeclarations(*this, 4000)
+    , types(std::make_unique<Types>(*this))
+    , memberExpressions(std::make_unique<MemberExpressions>(*this))
+    , memoryLocations(std::make_unique<MemoryLocations>(*this))
     , entryBlocks(*this)
     , implication(*this)
     , unitReasons(*this) {
@@ -318,8 +359,24 @@ Solver::Solver()
         addClause({ builtins::true_literal });
     }
     {
-        VERIFY((size_t)ValueKind::Boolean == kindTheories.size());
+        VERIFY(kindTheories.size() == (size_t)ValueKind::Boolean);
         kindTheories.push_back(&booleans);
+    }
+    {
+        VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryDeclaration);
+        kindTheories.push_back(&memoryDeclarations);
+    }
+    {
+        VERIFY(kindTheories.size() == (size_t)ValueKind::Type);
+        kindTheories.push_back(types.get());
+    }
+    {
+        VERIFY(kindTheories.size() == (size_t)ValueKind::MemberExpression);
+        kindTheories.push_back(memberExpressions.get());
+    }
+    {
+        VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryLocation);
+        kindTheories.push_back(memoryLocations.get());
     }
     {
         VERIFY(entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
