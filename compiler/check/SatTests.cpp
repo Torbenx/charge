@@ -699,6 +699,9 @@ struct BooleanTypes : TypeTheory {
     uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
     EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+    std::optional<Type> dereferencedType(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> memberExpressionMemberType(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> memberExpressionBaseType(Solver&, Type) override { return std::nullopt; }
 
     Type type() { return { (uint32_t)theoryId(), 0 }; }
 };
@@ -709,9 +712,10 @@ struct BooleanMemoryLocations : MemoryLocationTheory {
     uint64_t labelOfValue(Solver&, Value v) override { return 1000 + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return "loc" + std::to_string(v.valueId); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
-    EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     Type typeAtLocation(Solver&, MemoryLocation) override { return types.type(); }
 
+    MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation) override { }
+    MemberExpression memberExpression(Solver&, MemoryLocation) override { }
     MemoryLocation newLocation() { return { (uint32_t)theoryId(), (uint32_t)(locationCount++) }; }
 
     int_t locationCount = 0;

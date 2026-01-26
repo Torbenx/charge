@@ -68,6 +68,8 @@ struct MemberExpressionTheory : EquatableValueTheory {
     MemberExpressionTheory(Solver& solver)
         : EquatableValueTheory(solver, ValueKind::MemberExpression) { }
 
+    // Note: We don't have baseType() function because that would require introducing
+    //       a type variable for each memory location without a known declaration.
     virtual Type memberType(Solver&, MemberExpression) = 0;
 };
 
@@ -80,7 +82,7 @@ struct MemoryDeclarationTheory : EquatableValueTheory {
     MemoryDeclarationTheory(Solver& solver)
         : EquatableValueTheory(solver, ValueKind::MemoryDeclaration) { }
 
-    //! Returns info for an object declration
+    //! Returns info for an object declaration
     /*!
     For concrete declarations this should return a value and for unknows/variables this should
     return an empty optional. If this returns a value for two values the values are always

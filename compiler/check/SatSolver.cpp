@@ -251,11 +251,11 @@ uint32_t Solver::BooleanLoads::labelOfVariable(Solver&, int_t varId) {
 }
 
 void Solver::BooleanLoads::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
-    clause.push_back(solver.negate(solver.blockActiveLiteral(loadAt(varId).position.block)));
+    collectLoadInactiveReasons(solver, varId, clause);
 }
 
 bool Solver::BooleanLoads::isVariableActive(Solver& solver, int_t varId) {
-    return solver.assignedTrue(solver.blockActiveLiteral(loadAt(varId).position.block));
+    return isLoadActive(solver, varId);
 }
 
 BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
@@ -337,6 +337,20 @@ BooleanValue Solver::EntryBlocks::blockActiveLiteral(Solver&, BlockId) {
 std::string Solver::EntryBlocks::formatBlockName(Solver&, BlockId) { return "entry"; }
 
 std::string Solver::EntryBlocks::formatCodePosition(Solver&, CodePosition) { return "entry"; }
+
+// ----------------------------- Helpers ----------------------------
+
+PartialOrderingsSet Solver::possibleOrderings(Type a, Type b) {
+    return Types::possibleOrderings(*this, a, b);
+}
+
+PartialOrderingsSet Solver::possibleOrderings(MemberExpression a, MemberExpression b) {
+    return MemberExpressions::possibleOrderings(*this, a, b);
+}
+
+PartialOrderingsSet Solver::possibleOrderings(MemoryLocation a, MemoryLocation b) {
+    return MemoryLocations::possibleOrderings(*this, a, b);
+}
 
 // ----------------------------- Solver -----------------------------
 

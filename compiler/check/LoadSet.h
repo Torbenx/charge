@@ -34,6 +34,17 @@ public:
     using Base::label;
     using Base::size;
 
+    void collectLoadInactiveReasons(Solver& solver, uint32_t index, std::vector<BooleanValue>& clause) {
+        auto [loc, pos] = loadAt(index);
+        solver.collectInactiveReasons(loc, clause);
+        clause.push_back(solver.negate(solver.blockActiveLiteral(pos.block)));
+    }
+
+    bool isLoadActive(Solver& solver, uint32_t index) {
+        auto [loc, pos] = loadAt(index);
+        return solver.isActive(loc) && solver.assignedTrue(solver.blockActiveLiteral(pos.block));
+    }
+
 private:
     Impl* impl() { return static_cast<Impl*>(this); }
 

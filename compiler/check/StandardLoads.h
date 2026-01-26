@@ -2,15 +2,24 @@
 
 #include <check/LoadSet.h>
 #include <check/SatSolver.h>
+#include <check/EqualityInfo.h>
 
 namespace check {
 
 struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, EquatableValueTheory::EqualityInfo> {
     using EquatableValueTheory::EquatableValueTheory;
 
-    Value load(Solver& solver, MemoryLocation loc, CodePosition pos) {
+    Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
         return Value { (uint32_t)theoryId(), id };
+    }
+
+    void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
+        LoadSet::collectLoadInactiveReasons(solver, v.valueId, clause);
+    }
+
+    bool isValueActive(Solver& solver, Value v) override {
+        return LoadSet::isLoadActive(solver, v.valueId);
     }
 
     uint64_t labelOfValue(Solver&, Value v) override {

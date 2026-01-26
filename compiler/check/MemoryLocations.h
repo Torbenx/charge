@@ -9,7 +9,7 @@ namespace check {
 struct MemoryLocationLoadInfo {
     StandardEquality::EqualityInfo declarationEqualityInfo;
     StandardEquality::EqualityInfo memberExpressionEqualityInfo;
-    Type type;
+    Type typeAtLocation;
 };
 
 struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, MemoryLocationLoadInfo> {
@@ -26,12 +26,20 @@ struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, 
         return Value { (uint32_t)theoryId(), id };
     }
 
+    void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
+        collectLoadInactiveReasons(solver, v.valueId, clause);
+    }
+
+    bool isValueActive(Solver& solver, Value v) override {
+        return isLoadActive(solver, v.valueId);
+    }
+
     uint64_t labelOfValue(Solver&, Value v) override {
         return baseLabel + (uint64_t)LoadSet::label(v.valueId);
     }
 
     Type typeAtLocation(Solver&, MemoryLocation loc) override {
-        return LoadSet::at(loc.valueId).type;
+        return LoadSet::at(loc.valueId).typeAtLocation;
     }
 
     std::string formatValue(Solver& solver, Value v) override {
@@ -53,7 +61,7 @@ private:
         return {
             .declarationEqualityInfo = EqualityInfo({ (uint32_t)declarations.theoryId(), newId }),
             .memberExpressionEqualityInfo = EqualityInfo({ (uint32_t)memberExpressions.theoryId(), newId }),
-            .type = pointeeType.value(),
+            .typeAtLocation = pointeeType.value(),
         };
     }
 
@@ -109,7 +117,7 @@ private:
         }
 
         Type memberType(Solver&, MemberExpression value) override {
-            return loads()->at(value.valueId).type;
+            return loads()->at(value.valueId).typeAtLocation;
         }
 
         uint64_t baseLabel = 0;
@@ -129,7 +137,7 @@ struct MemoryLocations : ValueKindTheory {
             return PartialOrderingsSet::unordered();
         }
 
-        // The location type is considered since it is the same as the member type.
+        // This automatically consideres the location type since it is the same as the member type.
         return solver.possibleOrderings(ta.memberExpression(solver, a), tb.memberExpression(solver, b));
     }
 

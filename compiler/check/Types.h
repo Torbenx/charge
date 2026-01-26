@@ -18,6 +18,14 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
         return Value { (uint32_t)theoryId(), id };
     }
 
+    void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
+        collectLoadInactiveReasons(solver, v.valueId, clause);
+    }
+
+    bool isValueActive(Solver& solver, Value v) override {
+        return isLoadActive(solver, v.valueId);
+    }
+
     uint64_t labelOfValue(Solver&, Value v) override {
         return baseLabel + (uint64_t)LoadSet::label(v.valueId);
     }

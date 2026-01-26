@@ -23,18 +23,36 @@ Value StoreBlocks::loadAtEndOfBlock(Solver& solver, MemoryLocation location, Blo
     return loadAtPosition(solver, location, { block, (uint32_t)(get(block).stores.size() - 1) });
 }
 
-Value StoreBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition position) {
-    Block& block = get(position.block);
+Value StoreBlocks::loadAtPosition(Solver& solver, MemoryLocation location, CodePosition initialPosition) {
+    BlockId blockId = initialPosition.block;
+    Block& block = get(blockId);
 
-    for (int_t storeIndex = position.position; storeIndex >= 0; storeIndex--) {
-        Store& store = block.stores[position.position];
+    for (int_t storeIndex = initialPosition.position; storeIndex >= 0; storeIndex--) {
+        Store& store = block.stores[storeIndex];
 
-        if (solver.loadedKind(store.location) != solver.loadedKind(location))
-            continue;
+        // TODO: Should the case where of locations are equal handled in possibleOrderings() and equality()?
         if (store.location == location)
             return store.value;
+        auto orderings = solver.possibleOrderings(store.location, location);
+        // Both types should be primitives and thus not contain other types
+        VERIFY(!orderings.test(std::partial_ordering::less));
+        VERIFY(!orderings.test(std::partial_ordering::greater));
+        if (orderings.count() == 1) {
+            if (orderings.test(std::partial_ordering::equivalent))
+                return store.value;
+            else
+                continue;
+        }
 
-        BooleanValue b = solver.equality(location, store.location);
+        CodePosition currentPosition = { blockId, (uint32_t)storeIndex };
+        Value currentValue = solver.defineLoad(location, currentPosition);
+        Value previousValue = storeIndex > 0
+            ? loadAtPosition(solver, location, { blockId, uint32_t(storeIndex - 1) }) // Awkward recursive call
+            : solver.loadAtEndOfBlock(location, block.parent);
+        BooleanValue condition = solver.equality(store.location, location);
+        solver.addClause({ solver.negate(condition), solver.equality(currentValue, store.value) });
+        solver.addClause({ condition, solver.equality(currentValue, previousValue) });
+        return currentValue;
     }
 
     return solver.loadAtEndOfBlock(location, block.parent);
