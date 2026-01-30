@@ -65,12 +65,18 @@ struct BooleanTheory : ValueTheory {
 };
 
 struct MemberExpressionTheory : EquatableValueTheory {
+    struct LiteralInfo {
+        Type baseType;
+    };
+
     MemberExpressionTheory(Solver& solver)
         : EquatableValueTheory(solver, ValueKind::MemberExpression) { }
 
     // Note: We don't have baseType() function because that would require introducing
     //       a type variable for each memory location without a known declaration.
     virtual Type memberType(Solver&, MemberExpression) = 0;
+
+    virtual std::optional<LiteralInfo> literalInfo(Solver&, MemberExpression) = 0;
 };
 
 struct MemoryDeclarationTheory : EquatableValueTheory {
@@ -118,6 +124,7 @@ struct ValueKindTheory {
     virtual BooleanValue equality(Solver&, Value, Value) = 0;
     virtual BooleanValue disequality(Solver&, Value, Value) = 0;
     virtual Value defineLoad(Solver&, MemoryLocation, CodePosition) = 0;
+    virtual ~ValueKindTheory() { }
 };
 
 }

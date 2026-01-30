@@ -4,6 +4,7 @@
 #include <check/EqualityTheory.h>
 #include <check/Phis.h>
 #include <check/SatSolver.h>
+#include <check/SimpleVariables.h>
 #include <check/StandardEquality.h>
 #include <check/StandardLoads.h>
 #include <check/StoreBlocks.h>
@@ -692,43 +693,45 @@ TEST(Check, OneOf) {
     EXPECT_TRUE(solver.hasConflicts());
 }
 
-struct BooleanTypes : TypeTheory {
+struct TestTypes : TypeTheory {
     using TypeTheory::TypeTheory;
-    std::optional<ValueKind> scalarKind(Solver&, Type) override { return ValueKind::Boolean; }
-    std::string formatValue(Solver&, Value) override { return "bool"; }
+    std::optional<ValueKind> scalarKind(Solver&, Type v) override {
+        if (v == boolType())
+            return ValueKind::Boolean;
+        if (v == ptrToBoolType())
+            return ValueKind::MemoryLocation;
+        VERIFY_NOT_REACHED();
+    }
+    std::string formatValue(Solver&, Value v) override {
+        if (v == boolType())
+            return "bool";
+        if (v == ptrToBoolType())
+            return "ptr{bool}";
+        VERIFY_NOT_REACHED();
+    }
     uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
     EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
-    std::optional<Type> dereferencedType(Solver&, Type) override { return std::nullopt; }
+    std::optional<Type> dereferencedType(Solver&, Type type) override {
+        if (type == ptrToBoolType())
+            return boolType();
+        return std::nullopt;
+    }
     std::optional<Type> memberExpressionMemberType(Solver&, Type) override { return std::nullopt; }
     std::optional<Type> memberExpressionBaseType(Solver&, Type) override { return std::nullopt; }
 
-    Type type() { return { (uint32_t)theoryId(), 0 }; }
-};
-
-struct BooleanMemoryLocations : MemoryLocationTheory {
-    BooleanMemoryLocations(Solver& solver)
-        : MemoryLocationTheory(solver), types(solver) { }
-    uint64_t labelOfValue(Solver&, Value v) override { return 1000 + v.valueId; }
-    std::string formatValue(Solver&, Value v) override { return "loc" + std::to_string(v.valueId); }
-    void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
-    Type typeAtLocation(Solver&, MemoryLocation) override { return types.type(); }
-
-    MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation) override { }
-    MemberExpression memberExpression(Solver&, MemoryLocation) override { }
-    MemoryLocation newLocation() { return { (uint32_t)theoryId(), (uint32_t)(locationCount++) }; }
-
-    int_t locationCount = 0;
-    BooleanTypes types;
+    Type boolType() { return { (uint32_t)theoryId(), 0 }; }
+    Type ptrToBoolType() { return { (uint32_t)theoryId(), 1 }; }
 };
 
 TEST(Check, Code) {
     Solver solver;
     StoreBlocks stores(solver);
-    Phis phis(solver, 2000);
-    BooleanMemoryLocations locations(solver);
+    Phis phis(solver, 20000);
+    SimpleVariables variables(solver, 30000);
+    TestTypes types(solver);
     solver.propagate();
-    auto loc = locations.newLocation();
+    auto loc = variables.declareVariable(solver, types.boolType(), { builtins::entry_block, 0 });
 
     BooleanValue initialLoad = (BooleanValue)solver.loadAtEndOfBlock(loc, builtins::entry_block);
 
@@ -764,15 +767,17 @@ TEST(Check, Code) {
 TEST(Check, DISABLED_Declaration) {
     Solver solver;
     StoreBlocks stores(solver);
-    Phis phis(solver, 2000);
-    BooleanMemoryLocations locations(solver);
+    Phis phis(solver, 20000);
+    TestTypes types(solver);
+    SimpleVariables variables(solver, 30000);
     solver.propagate();
 
     BlockId s = stores.newBlock(solver, 1, builtins::entry_block);
-    MemoryLocation ptrLoc = locations.newLocation();
+    MemoryLocation ptrLoc = variables.declareVariable(solver, types.ptrToBoolType(), { s, 0 });
 
-    MemoryLocation boolLoc = locations.newLocation();
+    MemoryLocation boolLoc = variables.declareVariable(solver, types.boolType(), { s, 0 });
     stores.appendStore(solver, s, boolLoc, builtins::true_literal);
+    stores.appendStore(solver, s, ptrLoc, boolLoc);
 
     stores.appendStore(solver, s, MemoryLocation { solver.loadAtEndOfBlock(ptrLoc, s) }, builtins::false_literal);
 

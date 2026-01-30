@@ -36,7 +36,7 @@ void PartialOrderingTheory::Unordered::reapplyAssignment(Solver& solver, Boolean
 }
 
 uint32_t PartialOrderingTheory::Unordered::labelOfVariable(Solver&, int_t varId) {
-    VERIFY_NOT_REACHED();
+    return theory()->labelAt(m_handles[varId]);
 }
 
 bool PartialOrderingTheory::Unordered::isVariableActive(Solver& solver, int_t varId) {
@@ -44,7 +44,7 @@ bool PartialOrderingTheory::Unordered::isVariableActive(Solver& solver, int_t va
 }
 
 void PartialOrderingTheory::Unordered::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
-    theory()->collectInactiveReasons(solver, m_handles[varId], clause);
+    theory()->collectOrderingInactiveReasons(solver, m_handles[varId], clause);
 }
 
 // ---------------------------- Equality ----------------------------
@@ -72,6 +72,16 @@ int_t PartialOrderingTheory::Equality::lookupEqualityVariable(Solver& solver, Va
 
 uint32_t PartialOrderingTheory::Equality::labelOfVariable(Solver&, int_t varId) {
     return theory()->labelAt(m_handles[varId]);
+}
+
+bool PartialOrderingTheory::Equality::isVariableActive(Solver& solver, int_t varId) {
+    // Overwrite base implementation so it can be customized
+    return theory()->isOrderingActive(solver, m_handles[varId]);
+}
+
+void PartialOrderingTheory::Equality::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {
+    // Overwrite base implementation so it can be customized
+    theory()->collectOrderingInactiveReasons(solver, m_handles[varId], clause);
 }
 
 void PartialOrderingTheory::Equality::propagateAssignment(Solver& solver, BooleanValue literal) {
@@ -124,6 +134,8 @@ BooleanValue PartialOrderingTheory::OrderingSets::makeElement(Solver& solver, in
     } else if (ordering == std::partial_ordering::equivalent) {
         return theory()->m_equality.newLiteral(solver, handle);
     } else {
+        // TODO: Implement strict literals
+        VERIFY_NOT_REACHED();
     }
 }
 
@@ -185,15 +197,23 @@ void PartialOrderingTheory::unapplyAssignment(Solver& solver, InternalHandle han
 
 void PartialOrderingTheory::reapplyAssignment(Solver&, InternalHandle, std::partial_ordering, bool) { }
 
-bool PartialOrderingTheory::isOrderingActive(Solver& solver, InternalHandle handle) {
-    auto [a, b] = linkAt(handle);
+bool PartialOrderingTheory::isOrderingActive(Solver& solver, Value a, Value b) {
     return solver.isActive(a) && solver.isActive(b);
 }
 
-void PartialOrderingTheory::collectInactiveReasons(Solver& solver, InternalHandle handle, std::vector<BooleanValue>& clause) {
-    auto [a, b] = linkAt(handle);
+void PartialOrderingTheory::collectOrderingInactiveReasons(Solver& solver, Value a, Value b, std::vector<BooleanValue>& clause) {
     solver.collectInactiveReasons(a, clause);
     solver.collectInactiveReasons(b, clause);
+}
+
+bool PartialOrderingTheory::isOrderingActive(Solver& solver, InternalHandle handle) {
+    auto [a, b] = linkAt(handle);
+    return isOrderingActive(solver, a, b);
+}
+
+void PartialOrderingTheory::collectOrderingInactiveReasons(Solver& solver, InternalHandle handle, std::vector<BooleanValue>& clause) {
+    auto [a, b] = linkAt(handle);
+    collectOrderingInactiveReasons(solver, a, b, clause);
 }
 
 }

@@ -26,6 +26,7 @@ struct Solver {
     using Conflict = SubTraceEntry;
 
     Solver();
+    ~Solver();
 
     ValueTheory& getTheoryById(int_t id) {
         return *valueTheories[id];
@@ -129,6 +130,12 @@ struct Solver {
     Type memberType(MemberExpression expr) {
         return theoryFor(expr).memberType(*this, expr);
     }
+
+    std::optional<MemberExpressionTheory::LiteralInfo> literalInfo(MemberExpression expr) {
+        return theoryFor(expr).literalInfo(*this, expr);
+    }
+
+    MemberExpressions& memberExpressions();
 
     PartialOrderingsSet possibleOrderings(MemberExpression a, MemberExpression b);
 
@@ -629,13 +636,13 @@ private:
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 
     InternalVariables internalVariables;
-    Clauses clauses;
-    Booleans booleans;
-    MemoryDeclarations memoryDeclarations;
-    std::unique_ptr<Types> types;
-    std::unique_ptr<MemberExpressions> memberExpressions;
-    std::unique_ptr<MemoryLocations> memoryLocations;
-    EntryBlocks entryBlocks;
+    Clauses m_clauses;
+    Booleans m_booleans;
+    MemoryDeclarations m_memoryDeclarations;
+    std::unique_ptr<Types> m_types;
+    std::unique_ptr<MemberExpressions> m_memberExpressions;
+    std::unique_ptr<MemoryLocations> m_memoryLocations;
+    EntryBlocks m_entryBlocks;
     Implication implication;
     UnitReasons unitReasons;
 };

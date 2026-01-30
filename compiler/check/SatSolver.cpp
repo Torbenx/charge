@@ -344,6 +344,10 @@ PartialOrderingsSet Solver::possibleOrderings(Type a, Type b) {
     return Types::possibleOrderings(*this, a, b);
 }
 
+MemberExpressions& Solver::memberExpressions() {
+    return *m_memberExpressions;
+}
+
 PartialOrderingsSet Solver::possibleOrderings(MemberExpression a, MemberExpression b) {
     return MemberExpressions::possibleOrderings(*this, a, b);
 }
@@ -356,13 +360,13 @@ PartialOrderingsSet Solver::possibleOrderings(MemoryLocation a, MemoryLocation b
 
 Solver::Solver()
     : internalVariables(*this, 0)
-    , clauses(*this)
-    , booleans(*this, 2000, 3000) // TODO: Hard coded constants
-    , memoryDeclarations(*this, 4000)
-    , types(std::make_unique<Types>(*this))
-    , memberExpressions(std::make_unique<MemberExpressions>(*this))
-    , memoryLocations(std::make_unique<MemoryLocations>(*this))
-    , entryBlocks(*this)
+    , m_clauses(*this)
+    , m_booleans(*this, 2000, 3000) // TODO: Hard coded constants
+    , m_memoryDeclarations(*this, 4000)
+    , m_types(std::make_unique<Types>(*this, 5000))
+    , m_memberExpressions(std::make_unique<MemberExpressions>(*this, 6000, 7000, 8000))
+    , m_memoryLocations(std::make_unique<MemoryLocations>(*this, 9000, 10000, 11000, 12000))
+    , m_entryBlocks(*this)
     , implication(*this)
     , unitReasons(*this) {
     {
@@ -374,28 +378,30 @@ Solver::Solver()
     }
     {
         VERIFY(kindTheories.size() == (size_t)ValueKind::Boolean);
-        kindTheories.push_back(&booleans);
+        kindTheories.push_back(&m_booleans);
     }
     {
         VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryDeclaration);
-        kindTheories.push_back(&memoryDeclarations);
+        kindTheories.push_back(&m_memoryDeclarations);
     }
     {
         VERIFY(kindTheories.size() == (size_t)ValueKind::Type);
-        kindTheories.push_back(types.get());
+        kindTheories.push_back(m_types.get());
     }
     {
         VERIFY(kindTheories.size() == (size_t)ValueKind::MemberExpression);
-        kindTheories.push_back(memberExpressions.get());
+        kindTheories.push_back(m_memberExpressions.get());
     }
     {
         VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryLocation);
-        kindTheories.push_back(memoryLocations.get());
+        kindTheories.push_back(m_memoryLocations.get());
     }
     {
-        VERIFY(entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
+        VERIFY(m_entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
     }
 }
+
+Solver::~Solver() = default;
 
 std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
     int_t varId = internalVariables.newVariable(*this);
@@ -439,7 +445,7 @@ void Solver::addClause(std::vector<Literal> clause) {
 
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
     if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
-        clauses.addClause(*this, std::move(clause));
+        m_clauses.addClause(*this, std::move(clause));
         return;
     }
     // clause.size <= (MAX_CLAUSE_SIZE - extraClauses) + extraClauses * (MAX_CLAUSE_SIZE - 1)
@@ -471,12 +477,12 @@ void Solver::addClause(std::vector<Literal> clause) {
         take(extraClause, MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
         // fmt::print("extra: "); dumpClause(extraClause);
-        clauses.addClause(*this, std::move(extraClause));
+        m_clauses.addClause(*this, std::move(extraClause));
     }
 
     VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
     // fmt::print("primary: "); dumpClause(primaryClause);
-    clauses.addClause(*this, std::move(primaryClause));
+    m_clauses.addClause(*this, std::move(primaryClause));
 
     VERIFY(takenCount == (int_t)clause.size());
 }
@@ -526,7 +532,7 @@ bool Solver::propagate() {
         removeFirstPropagation();
 
         literalTheory.propagateAssignment(*this, literal);
-        clauses.propagateAssignment(*this, literal);
+        m_clauses.propagateAssignment(*this, literal);
 
         if (!conflicts.empty())
             return false;
@@ -535,7 +541,7 @@ bool Solver::propagate() {
 }
 
 void Solver::dumpClause(int_t clauseIndex) {
-    dumpClause(clauses.clauses[clauseIndex]);
+    dumpClause(m_clauses.clauses[clauseIndex]);
 }
 void Solver::dumpClause(std::span<const Literal> clause) {
     for (auto lit : clause)
@@ -742,7 +748,7 @@ void Solver::backtrack(int_t targetLevel) {
                 subTrace.push_back({ entry.literal, entry.reason });
                 if (assignedTrue(entry.literal)) {
                     theory.unapplyAssignment(*this, entry.literal);
-                    clauses.unapplyAssignment(*this, entry.literal);
+                    m_clauses.unapplyAssignment(*this, entry.literal);
                     queuePropagation(entry.literal);
                 }
             }
@@ -763,7 +769,7 @@ void Solver::backtrack(int_t targetLevel) {
             if (info.firstReason.value() == position) {
                 if (assignedTrue(entry.literal)) {
                     theory.reapplyAssignment(*this, entry.literal);
-                    clauses.reapplyAssignment(*this, entry.literal);
+                    m_clauses.reapplyAssignment(*this, entry.literal);
                 }
             }
             *(entry.prevReason.has_value() ? &at(*entry.prevReason).nextReason : &info.firstReason) = writePosition;
@@ -848,7 +854,7 @@ void Solver::checkInvariances() {
         VERIFY(current == lastPropagation.value());
     }
 
-    clauses.checkInvariances(*this);
+    m_clauses.checkInvariances(*this);
 }
 
 void Solver::Clauses::checkInvariances(Solver& solver) {
@@ -888,7 +894,7 @@ void Solver::Clauses::checkInvariances(Solver& solver) {
 }
 
 bool Solver::checkAssignment() {
-    for (const auto& clause : clauses.clauses) {
+    for (const auto& clause : m_clauses.clauses) {
         bool foundTrue = false;
         std::optional<Literal> unassignedInternal;
         for (Literal lit : clause) {

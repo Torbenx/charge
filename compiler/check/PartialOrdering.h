@@ -40,6 +40,10 @@ struct PartialOrderingTheory {
 protected:
     virtual PartialOrderingsSet possibleOrderings(Solver&, Value, Value) { return PartialOrderingsSet::all(); }
 
+    // The default implementation checks that both values are active. Derived implementations should do at least the same.
+    virtual bool isOrderingActive(Solver&, Value, Value);
+    virtual void collectOrderingInactiveReasons(Solver&, Value, Value, std::vector<BooleanValue>& clause);
+
 private:
     struct Entry {
         std::array<std::optional<BooleanValue>, 4> literals = {};
@@ -80,6 +84,8 @@ private:
         Link equalityLink(int_t eqId) override;
         int_t lookupEqualityVariable(Solver&, Value, Value) override;
         uint32_t labelOfVariable(Solver&, int_t varId) override;
+        void collectVariableInactiveReasons(Solver&, int_t varId, std::vector<BooleanValue>& clause) override;
+        bool isVariableActive(Solver&, int_t varId) override;
         void propagateAssignment(Solver&, BooleanValue) override;
         void unapplyAssignment(Solver&, BooleanValue) override;
         void reapplyAssignment(Solver&, BooleanValue) override;
@@ -109,7 +115,7 @@ private:
     void reapplyAssignment(Solver&, InternalHandle, std::partial_ordering, bool);
 
     bool isOrderingActive(Solver&, InternalHandle);
-    void collectInactiveReasons(Solver&, InternalHandle, std::vector<BooleanValue>& clause);
+    void collectOrderingInactiveReasons(Solver&, InternalHandle, std::vector<BooleanValue>& clause);
 
     Entry& entryAt(InternalHandle handle) { return m_entries.at(handle.id()); }
     uint32_t labelAt(InternalHandle handle) { return m_entries.label(handle.id()); }

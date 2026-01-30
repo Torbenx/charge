@@ -8,6 +8,7 @@ target_sources(compiler
     EqualityTheory.cpp
     EqualityTheory.h
     LiteralInfo.h
+    LoadSet.cpp
     LoadSet.h
     MemberExpressions.h
     MemoryLocations.cpp
@@ -25,6 +26,8 @@ target_sources(compiler
     Sets.h
     SimpleBooleanTheory.cpp
     SimpleBooleanTheory.h
+    SimpleVariables.cpp
+    SimpleVariables.h
     StandardEquality.cpp
     StandardEquality.h
     StandardLoads.h

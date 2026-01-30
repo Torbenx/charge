@@ -1,5 +1,6 @@
 #pragma once
 
+#include <FlatTreeSet.h>
 #include <check/Value.h>
 
 namespace check {
@@ -15,6 +16,9 @@ namespace LoadSetDetail {
     struct Data<void> {
         Load load;
     };
+
+    void collectLoadInactiveReasons(Solver&, const Load&, std::vector<BooleanValue>& clause);
+    bool isLoadActive(Solver&, const Load&);
 }
 
 template<typename Impl, typename T>
@@ -27,7 +31,7 @@ public:
     uint32_t get(Solver& solver, MemoryLocation loc, CodePosition pos) {
         return Base::get(solver, loc, pos);
     }
-    Load loadAt(uint32_t index) { return Base::at(index).load; }
+    const Load& loadAt(uint32_t index) { return Base::at(index).load; }
     auto& at(uint32_t index)
         requires(!std::is_void_v<T>)
     { return Base::at(index).data; }
@@ -35,17 +39,16 @@ public:
     using Base::size;
 
     void collectLoadInactiveReasons(Solver& solver, uint32_t index, std::vector<BooleanValue>& clause) {
-        auto [loc, pos] = loadAt(index);
-        solver.collectInactiveReasons(loc, clause);
-        clause.push_back(solver.negate(solver.blockActiveLiteral(pos.block)));
+        LoadSetDetail::collectLoadInactiveReasons(solver, loadAt(index), clause);
     }
 
     bool isLoadActive(Solver& solver, uint32_t index) {
-        auto [loc, pos] = loadAt(index);
-        return solver.isActive(loc) && solver.assignedTrue(solver.blockActiveLiteral(pos.block));
+        return LoadSetDetail::isLoadActive(solver, loadAt(index));
     }
 
 private:
+    friend Base;
+
     Impl* impl() { return static_cast<Impl*>(this); }
 
     std::strong_ordering compare(std::same_as<Solver> auto& solver, MemoryLocation loc, CodePosition pos, const Data& data) {
@@ -61,8 +64,6 @@ private:
             return Base::makeNode(label, Data { .load = { loc, pos }, .data = impl()->makeData(solver, nextHandle, loc, pos) });
         }
     }
-
-    friend Base;
 };
 
 }

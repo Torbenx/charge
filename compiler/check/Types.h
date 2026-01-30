@@ -12,6 +12,7 @@ struct TypeLoadInfo {
 };
 
 struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
+    using TypeTheory::TypeTheory;
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -50,8 +51,9 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
     std::optional<Type> memberExpressionBaseType(Solver&, Type) override { return std::nullopt; }
 
 private:
-    TypeLoadInfo makeData(Solver& solver, uint32_t newId, MemoryLocation loc, CodePosition) {
-        Type type = solver.typeAtLocation(loc);
+    friend LoadSet;
+
+    TypeLoadInfo makeData(Solver&, uint32_t newId, MemoryLocation, CodePosition) {
         return {
             .equalityInfo = EqualityInfo({ (uint32_t)theoryId(), newId }),
         };
@@ -61,9 +63,12 @@ private:
 };
 
 struct Types : ValueKindTheory {
-    static PartialOrderingsSet possibleOrderings(Solver&, Type a, Type b) {
+    static PartialOrderingsSet possibleOrderings(Solver&, Type, Type) {
         return PartialOrderingsSet::all();
     }
+
+    Types(Solver& solver, uint64_t orderingBaseLabel)
+    : m_loads(solver), m_ordering(solver, orderingBaseLabel) { }
 
     std::string formatValueKind(Solver&, ValueKind) override {
         return "type";
@@ -83,6 +88,8 @@ struct Types : ValueKindTheory {
 
 private:
     struct Ordering : PartialOrderingTheory {
+        using PartialOrderingTheory::PartialOrderingTheory;
+
         PartialOrderingsSet possibleOrderings(Solver& solver, Value a, Value b) override {
             return Types::possibleOrderings(solver, Type { a }, Type { b });
         }
