@@ -6,8 +6,8 @@
 
 namespace check {
 
-StandardEquality::StandardEquality(Solver& solver, uint64_t baseLabel)
-    : EqualityTheory(solver, baseLabel), ReasonTheory(solver, true) { }
+StandardEquality::StandardEquality(Solver& solver)
+    : EqualityTheory(solver), ReasonTheory(solver, true) { }
 
 namespace {
     using flat_set = std::vector<uint32_t>;

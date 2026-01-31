@@ -5,8 +5,11 @@
 namespace check {
 
 struct SimpleBooleanTheory : BooleanTheory {
-    SimpleBooleanTheory(Solver& solver, uint64_t baseLabel)
-        : BooleanTheory(solver), baseLabel(baseLabel) { }
+    SimpleBooleanTheory(Solver& solver)
+        : BooleanTheory(solver)
+        // Note: Labels don't actually matter for bools since they are not used by equality
+        //       so we can pass any ValueCategory here.
+        , baseLabel(solver, ValueCategory::Expression) { }
 
     BooleanValue negate(Solver&, BooleanValue lit) override {
         return negate(lit);
@@ -89,7 +92,7 @@ struct SimpleBooleanTheory : BooleanTheory {
 private:
     std::vector<LiteralInfo> infos;
     int_t find = 0;
-    uint64_t baseLabel = 0;
+    ValueBaseLabel baseLabel;
 };
 
 }

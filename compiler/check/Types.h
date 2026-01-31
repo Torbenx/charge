@@ -12,7 +12,8 @@ struct TypeLoadInfo {
 };
 
 struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
-    using TypeTheory::TypeTheory;
+    TypeLoads(Solver& solver)
+        : TypeTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -28,7 +29,7 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
     }
 
     uint64_t labelOfValue(Solver&, Value v) override {
-        return baseLabel + (uint64_t)LoadSet::label(v.valueId);
+        return baseLabel + LoadSet::label(v.valueId);
     }
 
     std::string formatValue(Solver& solver, Value v) override {
@@ -59,7 +60,7 @@ private:
         };
     }
 
-    uint64_t baseLabel = 0;
+    ValueBaseLabel baseLabel;
 };
 
 struct Types : ValueKindTheory {
@@ -67,8 +68,8 @@ struct Types : ValueKindTheory {
         return PartialOrderingsSet::all();
     }
 
-    Types(Solver& solver, uint64_t orderingBaseLabel)
-    : m_loads(solver), m_ordering(solver, orderingBaseLabel) { }
+    Types(Solver& solver)
+    : m_loads(solver), m_ordering(solver) { }
 
     std::string formatValueKind(Solver&, ValueKind) override {
         return "type";

@@ -5,8 +5,8 @@
 namespace check {
 
 struct BooleanVariables : SimpleBooleanTheory {
-    BooleanVariables(Solver& solver, uint64_t baseLabel)
-        : SimpleBooleanTheory(solver, baseLabel) { }
+    BooleanVariables(Solver& solver)
+        : SimpleBooleanTheory(solver) { }
 
     std::string formatPositiveLiteral(Solver&, int_t varId) override {
         return std::to_string(varId);

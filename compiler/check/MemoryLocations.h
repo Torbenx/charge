@@ -13,11 +13,11 @@ struct MemoryLocationLoadInfo {
 };
 
 struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, MemoryLocationLoadInfo> {
-    MemoryLocationLoads(Solver& solver, uint64_t locationsBaseLabel, uint64_t declarationsBaseLabel, uint64_t memberExpressionsBaseLabel)
+    MemoryLocationLoads(Solver& solver)
         : MemoryLocationTheory(solver)
-        , baseLabel(locationsBaseLabel)
-        , declarations(solver, declarationsBaseLabel)
-        , memberExpressions(solver, memberExpressionsBaseLabel) { }
+        , baseLabel(solver, ValueCategory::Load)
+        , declarations(solver)
+        , memberExpressions(solver) { }
 
     MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation value) override {
         return { (uint32_t)declarations.theoryId(), value.valueId };
@@ -74,8 +74,8 @@ private:
     }
 
     struct Declarations : MemoryDeclarationTheory {
-        Declarations(Solver& solver, uint64_t baseLabel)
-            : MemoryDeclarationTheory(solver), baseLabel(baseLabel) { }
+        Declarations(Solver& solver)
+            : MemoryDeclarationTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
         MemoryLocationLoads* theory() {
             return ReverseMemberPointer<&MemoryLocationLoads::declarations>::reverse(this);
@@ -101,12 +101,12 @@ private:
 
         std::optional<DeclarationInfo> declarationInfo(Solver&, MemoryDeclaration) override { return std::nullopt; }
 
-        uint64_t baseLabel;
+        ValueBaseLabel baseLabel;
     };
 
     struct MemberExpressions : MemberExpressionTheory {
-        MemberExpressions(Solver& solver, uint64_t baseLabel)
-            : MemberExpressionTheory(solver), baseLabel(baseLabel) { }
+        MemberExpressions(Solver& solver)
+            : MemberExpressionTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
         MemoryLocationLoads* theory() {
             return ReverseMemberPointer<&MemoryLocationLoads::memberExpressions>::reverse(this);
@@ -136,22 +136,18 @@ private:
 
         std::optional<LiteralInfo> literalInfo(Solver&, MemberExpression) override { return std::nullopt; }
 
-        uint64_t baseLabel = 0;
+        ValueBaseLabel baseLabel;
     };
 
-    uint64_t baseLabel = 0;
+    ValueBaseLabel baseLabel;
     Declarations declarations;
     MemberExpressions memberExpressions;
 };
 
 struct MemoryLocations : ValueKindTheory {
 
-    MemoryLocations(
-        Solver& solver,
-        uint64_t loadLocationsBaseLabel, uint64_t loadDeclarationsBaseLabel, uint64_t loadMemberExpressionsBaseLabel,
-        uint64_t orderingBaseLabel)
-        : m_loads(solver, loadLocationsBaseLabel, loadDeclarationsBaseLabel, loadMemberExpressionsBaseLabel)
-        , m_ordering(solver, orderingBaseLabel) { }
+    MemoryLocations(Solver& solver)
+        : m_loads(solver), m_ordering(solver) { }
 
     static PartialOrderingsSet possibleOrderings(Solver& solver, MemoryLocation a, MemoryLocation b) {
         MemoryLocationTheory& ta = solver.theoryFor(a);

@@ -5,8 +5,8 @@
 namespace check {
 
 struct SimpleVariables : MemoryLocationTheory {
-    SimpleVariables(Solver& solver, uint64_t baseLabel)
-        : MemoryLocationTheory(solver), baseLabel(baseLabel), declarations(solver, baseLabel + 1000) { }
+    SimpleVariables(Solver& solver)
+        : MemoryLocationTheory(solver), baseLabel(solver, ValueCategory::Literal), declarations(solver) { }
 
     MemoryLocation declareVariable(Solver& solver, Type type, CodePosition position);
 
@@ -50,8 +50,8 @@ private:
     };
 
     struct Declarations : MemoryDeclarationTheory {
-        Declarations(Solver& solver, uint64_t baseLabel)
-            : MemoryDeclarationTheory(solver), baseLabel(baseLabel) { }
+        Declarations(Solver& solver)
+            : MemoryDeclarationTheory(solver), baseLabel(solver, ValueCategory::Literal) { }
 
         SimpleVariables* theory() {
             return ReverseMemberPointer<&SimpleVariables::declarations>::reverse(this);
@@ -88,11 +88,11 @@ private:
                 f(Value { (uint32_t)theoryId(), (uint32_t)i });
         }
 
-        uint64_t baseLabel;
+        ValueBaseLabel baseLabel;
     };
 
     std::vector<VariableInfo> variables;
-    uint64_t baseLabel;
+    ValueBaseLabel baseLabel;
     Declarations declarations;
 };
 

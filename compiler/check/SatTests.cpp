@@ -103,7 +103,7 @@ namespace {
     std::optional<std::vector<bool>> check(const Parser& parser) {
         // setup
         Solver solver;
-        BooleanVariables theory(solver, 0);
+        BooleanVariables theory(solver);
 
         // generate
         VERIFY(theory.newVariable(solver) == 0);
@@ -213,7 +213,7 @@ using TestEquality = BasicEquality;
 
 struct TestValueTheory : EquatableValueTheory {
     TestValueTheory(Solver& solver)
-        : EquatableValueTheory(solver, (ValueKind)-1), equality(solver, 1000) { }
+        : EquatableValueTheory(solver, (ValueKind)-1), equality(solver), baseLabel(solver, ValueCategory::Load) { }
 
     uint64_t labelOfValue(Solver&, Value v) override { return baseLabel + v.valueId; }
     std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
@@ -235,9 +235,9 @@ struct TestValueTheory : EquatableValueTheory {
         return equality.reasonToClause(solver, eq, equality.equalityReason());
     }
 
-    uint64_t baseLabel = 0;
     TestEquality equality;
     std::vector<EqualityInfo> infos;
+    ValueBaseLabel baseLabel;
 };
 
 TEST(Check, EqualityTreePath1) {
@@ -428,7 +428,7 @@ TEST(Check, EqualityPropagation1) {
 TEST(Check, EqualityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver, 0);
+    BooleanVariables bools(solver);
     BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -444,7 +444,7 @@ TEST(Check, EqualityPropagation2) {
 TEST(Check, DisequalityPropagation1) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver, 0);
+    BooleanVariables bools(solver);
     BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -459,7 +459,7 @@ TEST(Check, DisequalityPropagation1) {
 TEST(Check, DisequalityPropagation2) {
     Solver solver;
     TestValueTheory values(solver);
-    BooleanVariables bools(solver, 0);
+    BooleanVariables bools(solver);
     BooleanValue c = bools.positiveLiteral(bools.newVariable(solver));
     Value s = values.newValue();
     Value t1 = values.newValue();
@@ -613,7 +613,7 @@ TEST(Check, DisequalityCleanedUpInParents) {
 
 struct TestBlockTheory : CodeBlockTheory, BooleanVariables {
     TestBlockTheory(Solver& solver)
-        : CodeBlockTheory(solver), BooleanVariables(solver, 5000) { }
+        : CodeBlockTheory(solver), BooleanVariables(solver) { }
 
     BlockId newBlock(Solver& solver) {
         int_t id = variableCount();
@@ -650,8 +650,8 @@ struct TestBlockTheory : CodeBlockTheory, BooleanVariables {
 
 TEST(Check, OneOf) {
     Solver solver;
-    Phis theory(solver, 1000);
-    BooleanVariables bools(solver, 0);
+    Phis theory(solver);
+    BooleanVariables bools(solver);
     TestBlockTheory blocks(solver);
 
     solver.propagate();
@@ -694,7 +694,8 @@ TEST(Check, OneOf) {
 }
 
 struct TestTypes : TypeTheory {
-    using TypeTheory::TypeTheory;
+    TestTypes(Solver& solver)
+        : TypeTheory(solver), baseLabel(solver, ValueCategory::Literal) { }
     std::optional<ValueKind> scalarKind(Solver&, Type v) override {
         if (v == boolType())
             return ValueKind::Boolean;
@@ -709,7 +710,7 @@ struct TestTypes : TypeTheory {
             return "ptr{bool}";
         VERIFY_NOT_REACHED();
     }
-    uint64_t labelOfValue(Solver&, Value) override { VERIFY_NOT_REACHED(); }
+    uint64_t labelOfValue(Solver&, Value v) override { return baseLabel + v.valueId; }
     void enumerateValues(Solver&, std::function<void(Value)>) override { VERIFY_NOT_REACHED(); }
     EqualityInfo& equalityInfo(Solver&, Value) override { VERIFY_NOT_REACHED(); }
     std::optional<Type> dereferencedType(Solver&, Type type) override {
@@ -722,13 +723,15 @@ struct TestTypes : TypeTheory {
 
     Type boolType() { return { (uint32_t)theoryId(), 0 }; }
     Type ptrToBoolType() { return { (uint32_t)theoryId(), 1 }; }
+
+    ValueBaseLabel baseLabel;
 };
 
 TEST(Check, Code) {
     Solver solver;
     StoreBlocks stores(solver);
-    Phis phis(solver, 20000);
-    SimpleVariables variables(solver, 30000);
+    Phis phis(solver);
+    SimpleVariables variables(solver);
     TestTypes types(solver);
     solver.propagate();
     auto loc = variables.declareVariable(solver, types.boolType(), { builtins::entry_block, 0 });
@@ -767,9 +770,9 @@ TEST(Check, Code) {
 TEST(Check, DISABLED_Declaration) {
     Solver solver;
     StoreBlocks stores(solver);
-    Phis phis(solver, 20000);
+    Phis phis(solver);
     TestTypes types(solver);
-    SimpleVariables variables(solver, 30000);
+    SimpleVariables variables(solver);
     solver.propagate();
 
     BlockId s = stores.newBlock(solver, 1, builtins::entry_block);

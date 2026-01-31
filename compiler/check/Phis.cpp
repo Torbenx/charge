@@ -52,9 +52,9 @@ uint32_t Phis::LocationCache::makeNode(Solver& solver, MemoryLocation location, 
     return Base::makeNode(label, std::make_pair(location, CachedValues { load, std::move(equalityCache) }));
 }
 
-Phis::Phis(Solver& solver, uint64_t baseLabel)
+Phis::Phis(Solver& solver)
     : CodeBlockTheory(solver)
-    , links(solver, baseLabel) { }
+    , links(solver) { }
 
 BlockId Phis::newPhi(Solver& solver, uint32_t label, std::vector<BlockId> parents) {
     BlockId block = blockFromId(blocks.size());

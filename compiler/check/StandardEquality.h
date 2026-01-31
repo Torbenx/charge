@@ -9,7 +9,7 @@ namespace check {
 struct StandardEquality : EqualityTheory, ReasonTheory {
     using EqualityInfo = EquatableValueTheory::EqualityInfo;
 
-    StandardEquality(Solver&, uint64_t baseLabel);
+    StandardEquality(Solver&);
 
     void propagateAssignment(Solver&, BooleanValue) override;
     void reapplyAssignment(Solver&, BooleanValue) override;

@@ -9,6 +9,7 @@
 #include <check/SymmetricBinaryRelation.h>
 
 #include <bit>
+#include <map>
 
 namespace check {
 
@@ -471,8 +472,8 @@ private:
     };
 
     struct Booleans : ValueKindTheory {
-        Booleans(Solver& solver, uint64_t equalityBaseLabel, uint64_t loadsBaseLabel)
-            : m_equality(solver, equalityBaseLabel), m_loads(solver, loadsBaseLabel) { }
+        Booleans(Solver& solver)
+            : m_equality(solver), m_loads(solver) { }
 
         BooleanValue equality(Solver&, Value, Value) override;
         BooleanValue disequality(Solver&, Value, Value) override;
@@ -486,7 +487,7 @@ private:
     struct MemoryDeclarationEquality;
 
     struct MemoryDeclarations : ValueKindTheory {
-        MemoryDeclarations(Solver& solver, uint64_t equalityBaseLabel);
+        MemoryDeclarations(Solver& solver);
         ~MemoryDeclarations();
 
         BooleanValue equality(Solver&, Value, Value) override;
@@ -599,6 +600,9 @@ private:
     */
     int_t attachTheory(CodeBlockTheory& theory);
 
+    friend ValueBaseLabel;
+    void attachBaseLabel(ValueBaseLabel& label, ValueCategory category);
+
     //! Scratch space to hold a temporary clause
     /*!
     This is useful for reason theories that lazily generate clauses.
@@ -627,6 +631,16 @@ private:
 
     //! Positions of the decisions in the trace
     std::vector<TracePosition> decisions;
+
+    struct BaseLabelOrderingKey {
+        ValueCategory category;
+        uint16_t constructionIndex;
+
+        std::strong_ordering operator<=>(const BaseLabelOrderingKey&) const = default;
+        bool operator==(const BaseLabelOrderingKey&) const = default;
+    };
+    std::map<BaseLabelOrderingKey, ValueBaseLabel*> baseLabels;
+    uint16_t baseLabelCounter = 0;
 
     std::vector<ValueKindTheory*> kindTheories;
     std::vector<ValueTheory*> valueTheories;

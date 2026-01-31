@@ -6,6 +6,23 @@ namespace check {
 
 struct Solver;
 
+enum class ValueCategory : uint8_t {
+    Literal,
+    Expression,
+    Load,
+};
+
+struct ValueBaseLabel {
+    ValueBaseLabel(Solver& solver, ValueCategory category);
+    ValueBaseLabel(const ValueBaseLabel&) = delete;
+    ValueBaseLabel(ValueBaseLabel&&) = delete;
+
+    uint64_t makeLabel(uint64_t localValueLabel) const { return baseLabel + localValueLabel; }
+    uint64_t operator+(uint64_t localValueLabel) const { return makeLabel(localValueLabel); }
+
+    uint64_t baseLabel = 0;
+};
+
 struct ValueTheory {
     ValueTheory(Solver& solver, ValueKind valuesKind);
     virtual ~ValueTheory() = default;

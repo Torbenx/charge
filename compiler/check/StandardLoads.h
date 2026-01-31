@@ -7,7 +7,8 @@
 namespace check {
 
 struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, EquatableValueTheory::EqualityInfo> {
-    using EquatableValueTheory::EquatableValueTheory;
+    StandardLoads(Solver& solver, ValueKind valuesKind)
+        : EquatableValueTheory(solver, valuesKind), baseLabel(solver, ValueCategory::Load) { }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -41,7 +42,7 @@ struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, Equa
     }
 
 private:
-    uint64_t baseLabel = 0;
+    ValueBaseLabel baseLabel;
 
     EqualityInfo makeData(Solver&, uint32_t newId, MemoryLocation, CodePosition) {
         return EqualityInfo({ (uint32_t)theoryId(), newId });

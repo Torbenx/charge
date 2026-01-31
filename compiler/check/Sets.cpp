@@ -131,8 +131,8 @@ ReasonTheory::ClauseAndIndex SetTheory::reasonToClause(Solver& solver, BooleanVa
 
 // --------------------------- DynamicSets --------------------------
 
-DynamicSets::DynamicSets(Solver& solver, uint64_t baseLabel)
-    : SimpleBooleanTheory(solver, baseLabel), SetTheory(solver) { }
+DynamicSets::DynamicSets(Solver& solver)
+    : SimpleBooleanTheory(solver), SetTheory(solver) { }
 
 std::string DynamicSets::formatPositiveLiteral(Solver& solver, int_t varId) {
     const auto& info = variables[varId];

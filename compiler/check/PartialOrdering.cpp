@@ -141,10 +141,10 @@ BooleanValue PartialOrderingTheory::OrderingSets::makeElement(Solver& solver, in
 
 // ---------------------- PartialOrderingTheory ---------------------
 
-PartialOrderingTheory::PartialOrderingTheory(Solver& solver, uint64_t baseLabel)
+PartialOrderingTheory::PartialOrderingTheory(Solver& solver)
     : m_sets(solver)
-    , m_equality(solver, baseLabel + 100)
-    , m_unordered(solver, baseLabel + 200) { }
+    , m_equality(solver)
+    , m_unordered(solver) { }
 
 PartialOrderingTheory::OrderingHandle PartialOrderingTheory::order(Solver& solver, Value a, Value b) {
     // Must be compatible with OrientedPair::orient()

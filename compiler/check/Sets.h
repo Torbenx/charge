@@ -59,7 +59,7 @@ private:
 };
 
 struct DynamicSets : SimpleBooleanTheory, SetTheory {
-    DynamicSets(Solver&, uint64_t baseLabel);
+    DynamicSets(Solver&);
 
     BooleanValue elementActiveLiteral(Solver& solver, int_t setId, int_t index) {
         return getOrCreateElementLiteral(solver, setId, index);

@@ -13,7 +13,7 @@ namespace check {
 struct Solver;
 
 struct Phis : CodeBlockTheory {
-    Phis(Solver&, uint64_t baseLabel);
+    Phis(Solver&);
 
     BlockId newPhi(Solver& solver, uint32_t label, std::vector<BlockId> parents);
 
@@ -44,8 +44,8 @@ private:
     };
 
     struct Links : DynamicSets {
-        Links(Solver& solver, uint64_t baseLabel)
-            : DynamicSets(solver, baseLabel) { }
+        Links(Solver& solver)
+            : DynamicSets(solver) { }
         Phis* phis();
         std::string formatElement(Solver&, int_t setId, int_t index) override;
         uint32_t labelOfElement(Solver&, int_t setId, int_t index) override;

@@ -13,8 +13,8 @@ struct MemberExpressionLoadInfo {
 
 struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionLoads, MemberExpressionLoadInfo> {
 
-    MemberExpressionLoads(Solver& solver, uint64_t baseLabel)
-    : MemberExpressionTheory(solver), baseLabel(baseLabel) { }
+    MemberExpressionLoads(Solver& solver)
+    : MemberExpressionTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -30,7 +30,7 @@ struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionL
     }
 
     uint64_t labelOfValue(Solver&, Value v) override {
-        return baseLabel + (uint64_t)LoadSet::label(v.valueId);
+        return baseLabel + LoadSet::label(v.valueId);
     }
 
     std::string formatValue(Solver& solver, Value v) override {
@@ -65,7 +65,7 @@ private:
         };
     }
 
-    uint64_t baseLabel = 0;
+    ValueBaseLabel baseLabel;
 };
 
 struct MemberExpressionLiteralData : MemberExpressionTheory::LiteralInfo {
@@ -74,8 +74,8 @@ struct MemberExpressionLiteralData : MemberExpressionTheory::LiteralInfo {
 
 struct MemberExpressionLiterals : MemberExpressionTheory, private FlatTreeSetDetail::Base<MemberExpressionLiterals, MemberExpressionLiteralData> {
 
-    MemberExpressionLiterals(Solver& solver, uint64_t baseLabel)
-        : MemberExpressionTheory(solver), baseLabel(baseLabel) { }
+    MemberExpressionLiterals(Solver& solver)
+        : MemberExpressionTheory(solver), baseLabel(solver, ValueCategory::Literal) { }
 
     MemberExpression identity(Solver& solver, Type type) {
         uint32_t id = Base::get(solver, type);
@@ -127,7 +127,7 @@ private:
         return Base::makeNode(label, { LiteralInfo { baseType }, EqualityInfo(newExpr) });
     }
 
-    uint64_t baseLabel;
+    ValueBaseLabel baseLabel;
 };
 
 struct MemberExpressions : ValueKindTheory {
@@ -143,8 +143,8 @@ struct MemberExpressions : ValueKindTheory {
         return solver.possibleOrderings(solver.memberType(a), solver.memberType(b));
     }
 
-    MemberExpressions(Solver& solver, uint64_t loadBaseLabel, uint64_t literalsBaseLabel, uint64_t orderingBaseLabel)
-    : m_loads(solver, loadBaseLabel), m_literals(solver, literalsBaseLabel), m_ordering(solver, orderingBaseLabel) { }
+    MemberExpressions(Solver& solver)
+    : m_loads(solver), m_literals(solver), m_ordering(solver) { }
 
     MemberExpressionLiterals& literals() { return m_literals; }
 
@@ -166,8 +166,8 @@ struct MemberExpressions : ValueKindTheory {
 
 private:
     struct Ordering : PartialOrderingTheory {
-        Ordering(Solver& solver, uint64_t baseLabel)
-        : PartialOrderingTheory(solver, baseLabel) { }
+        Ordering(Solver& solver)
+        : PartialOrderingTheory(solver) { }
 
         PartialOrderingsSet possibleOrderings(Solver& solver, Value a, Value b) override {
             return MemberExpressions::possibleOrderings(solver, MemberExpression { a }, MemberExpression { b });

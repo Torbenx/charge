@@ -1,8 +1,8 @@
+#include <check/MemberExpressions.h>
+#include <check/MemoryLocations.h>
 #include <check/SatSolver.h>
 #include <check/StandardEquality.h>
 #include <check/Types.h>
-#include <check/MemberExpressions.h>
-#include <check/MemoryLocations.h>
 
 namespace check {
 
@@ -39,6 +39,22 @@ OrientedPair OrientedPair::orient(Solver& solver, Value a, Value b) {
     if (solver.compare(a, b) > 0)
         std::swap(a, b);
     return { a, b };
+}
+
+ValueBaseLabel::ValueBaseLabel(Solver& solver, ValueCategory category) {
+    solver.attachBaseLabel(*this, category);
+}
+
+void Solver::attachBaseLabel(ValueBaseLabel& label, ValueCategory category) {
+    uint16_t counter = ++baseLabelCounter;
+    baseLabels.emplace(BaseLabelOrderingKey { category, counter }, &label);
+    // Relabel all base labels.
+    static constexpr uint64_t INCREMENT = (uint64_t)1 << 48;
+    uint64_t value = INCREMENT;
+    for (auto [key, baseLabel] : baseLabels) {
+        baseLabel->baseLabel = value;
+        value += INCREMENT;
+    }
 }
 
 // ----------------------------- Clauses ----------------------------
@@ -296,8 +312,8 @@ struct Solver::MemoryDeclarationEquality : BasicEquality {
 
 // ----------------------- MemoryDeclarations -----------------------
 
-Solver::MemoryDeclarations::MemoryDeclarations(Solver& solver, uint64_t equalityBaseLabel)
-    : m_equality(std::make_unique<MemoryDeclarationEquality>(solver, equalityBaseLabel)) { }
+Solver::MemoryDeclarations::MemoryDeclarations(Solver& solver)
+    : m_equality(std::make_unique<MemoryDeclarationEquality>(solver)) { }
 
 Solver::MemoryDeclarations::~MemoryDeclarations() = default;
 
@@ -314,7 +330,6 @@ Value Solver::MemoryDeclarations::defineLoad(Solver&, MemoryLocation, CodePositi
 }
 
 std::string Solver::MemoryDeclarations::formatValueKind(Solver&, ValueKind) { return "memory-declaration"; }
-
 
 // --------------------------- EntryBlocks --------------------------
 
@@ -359,13 +374,13 @@ PartialOrderingsSet Solver::possibleOrderings(MemoryLocation a, MemoryLocation b
 // ----------------------------- Solver -----------------------------
 
 Solver::Solver()
-    : internalVariables(*this, 0)
+    : internalVariables(*this)
     , m_clauses(*this)
-    , m_booleans(*this, 2000, 3000) // TODO: Hard coded constants
-    , m_memoryDeclarations(*this, 4000)
-    , m_types(std::make_unique<Types>(*this, 5000))
-    , m_memberExpressions(std::make_unique<MemberExpressions>(*this, 6000, 7000, 8000))
-    , m_memoryLocations(std::make_unique<MemoryLocations>(*this, 9000, 10000, 11000, 12000))
+    , m_booleans(*this)
+    , m_memoryDeclarations(*this)
+    , m_types(std::make_unique<Types>(*this))
+    , m_memberExpressions(std::make_unique<MemberExpressions>(*this))
+    , m_memoryLocations(std::make_unique<MemoryLocations>(*this))
     , m_entryBlocks(*this)
     , implication(*this)
     , unitReasons(*this) {
