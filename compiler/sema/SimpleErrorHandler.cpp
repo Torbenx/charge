@@ -146,11 +146,11 @@ void ErrorAnalyzer::analyze(ErrorBase* base) {
         // Fatal error
         VERIFY_NOT_REACHED();
     }
-
-    if (auto* e = dynamic_cast<Error<CallTargetIsIncompleteGlobal>*>(base); e != nullptr) {
+    if (auto* e = dynamic_cast<Error<ParameterizeOfGlobalIncomplete>*>(base); e != nullptr) {
         // Fatal error
         VERIFY_NOT_REACHED();
     }
+
     if (auto* e = dynamic_cast<Error<CallTargetNotSupported>*>(base); e != nullptr) {
         // Fatal error
         VERIFY_NOT_REACHED();

@@ -269,11 +269,8 @@ void Generator::visitFunctionDeclaration() {
     advance();
     visitFunctionParametersAndBody();
 
-    if (resolveImplicitImplTarget()) {
-        auto parameterNamesRange = std::views::transform(cast<FunctionProgram>(program)->functionParameters, [](const FunctionProgram::Parameter& param) { return param.name(); });
-        std::vector<Word> parameterNames { parameterNamesRange.begin(), parameterNamesRange.end() };
-        auto [state] = resolveCallTarget(parameterNames);
-        checkFunctionImplDeclaration(std::move(state));
+    if (auto state = resolveImplicitImplTarget(); state.has_value()) {
+        checkFunctionImplDeclaration(std::move(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
@@ -425,8 +422,8 @@ void Generator::visitStructDeclaration() {
     advance();
     visitStructMembers();
 
-    if (resolveImplicitImplTarget()) {
-        checkStructImplDeclaration(valueExpressionToConstant());
+    if (auto state = resolveImplicitImplTarget(); state.has_value()) {
+        checkStructImplDeclaration(makeParameterize(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
@@ -493,8 +490,8 @@ void Generator::visitEnumDeclaration() {
     advance();
     visitEnumValues();
 
-    if (resolveImplicitImplTarget()) {
-        checkEnumImplDeclaration(valueExpressionToConstant());
+    if (auto state = resolveImplicitImplTarget(); state.has_value()) {
+        checkEnumImplDeclaration(makeParameterize(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
         program->completeSignatureCheck(false, selfConstant);
@@ -617,25 +614,7 @@ void Generator::visitUnaryExpr() {
 }
 
 void Generator::visitPostfixExpr() {
-    visitPrimaryExpr();
-    for (;;) {
-        if (tok->kind() == Token::Parameterize) {
-            generateParameterizeExpr();
-        } else if (tok->kind() == Token::CallExpr) {
-            CallTarget target = resolveCallTarget(context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
-            generateCallExpr(std::move(target));
-        } else if (tok->kind() == Token::StaticAccessExpr) {
-            generateStaticAccessExpr();
-            advance();
-        } else if (tok->kind() == Token::MemberAccessExpr) {
-            generateMemberAccessExpr();
-        } else {
-            break;
-        }
-    }
-}
-
-void Generator::visitPrimaryExpr() {
+    // Visit primary expression
     if (tok->kind() == Token::IdentifierExpr) {
         generateIdentifierExpr();
         advance();
@@ -646,6 +625,37 @@ void Generator::visitPrimaryExpr() {
     } else {
         VERIFY_NOT_REACHED();
     }
+
+    // Visit postfixes
+    std::optional<DeductionState> deductionState;
+    auto resolveDeductionState = [this, &deductionState]() {
+        if (deductionState.has_value()) {
+            emitExpression({}, makeParameterize(deductionState.value()));
+            deductionState.reset();
+        }
+    };
+    for (;;) {
+        if (tok->kind() == Token::Parameterize) {
+            resolveDeductionState();
+            deductionState = generateParameterizeExpr();
+        } else if (tok->kind() == Token::CallExpr) {
+            if (!deductionState.has_value()) {
+                deductionState = resolveCallTarget(context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
+            }
+            generateCallExpr(std::move(deductionState.value()));
+            deductionState.reset();
+        } else if (tok->kind() == Token::StaticAccessExpr) {
+            resolveDeductionState();
+            generateStaticAccessExpr();
+            advance();
+        } else if (tok->kind() == Token::MemberAccessExpr) {
+            resolveDeductionState();
+            generateMemberAccessExpr();
+        } else {
+            break;
+        }
+    }
+    resolveDeductionState();
 }
 
 }

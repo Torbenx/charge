@@ -7,7 +7,6 @@
 namespace sema {
 
 Generator::StashedExpression Generator::stashTopExpression() {
-    resolveLazyExpressions();
     return { std::move(currentExpression), (uint32_t)expressionStack.size() };
 }
 
@@ -17,38 +16,14 @@ void Generator::unstashTopExpression(StashedExpression e) {
     currentExpression = std::move(e.expr);
 }
 
-void Generator::resolveLazyExpressions() {
-    if (currentExpression.kind() == ExpressionKind::LazyParameterize) {
-        VERIFY(lazyParameterizeState.has_value());
-        VERIFY(lazyParameterizeState.value().isComplete());
-        currentExpression = generateProgramLiteral(lazyParameterizeState.value().programHandle, lazyParameterizeState.value().arguments);
-        lazyParameterizeState.reset();
-    }
-}
-
 Expression Generator::topExpression() {
-    resolveLazyExpressions();
     return currentExpression;
 }
 
 OwnedExpression Generator::takeTopExpression() {
     VERIFY(!expressionStack.empty());
     expressionStack.pop_back();
-    resolveLazyExpressions();
     return std::move(currentExpression);
-}
-
-DeductionState Generator::takeLazyParameterize() {
-    VERIFY(currentExpression.kind() == ExpressionKind::LazyParameterize);
-    VERIFY(lazyParameterizeState.has_value());
-    DeductionState result = std::move(lazyParameterizeState.value());
-    lazyParameterizeState.reset();
-    currentExpression = INVALID_EXPRESSION;
-    return result;
-}
-
-bool Generator::isTopExpressionLazyParameterize() {
-    return currentExpression.kind() == ExpressionKind::LazyParameterize;
 }
 
 void Generator::emitExpression(std::optional<TokenInfo*> token, OwnedExpression e) {
@@ -116,6 +91,11 @@ Type Generator::makeTemplateIdFor(Constant templateProg) {
     return verifyType(program->addParameterize(context, { builtins::template_id_template.program(), arguments }));
 }
 
+Constant Generator::makeParameterize(const DeductionState& state) {
+    VERIFY(state.isComplete());
+    return makeParameterize(state.programHandle, state.arguments);
+}
+
 Constant Generator::makeParameterize(ProgramHandle base, std::span<const Constant> arguments) {
     Program* baseProg = context.program(base);
     VERIFY(arguments.size() == baseProg->inheritedParameterCount || arguments.size() == baseProg->parameters.size());
@@ -153,13 +133,13 @@ Constant Generator::inheriteParameters(DeclarationValue parent) {
     return parentValue;
 }
 
-bool Generator::resolveImplicitImplTarget() {
+std::optional<DeductionState> Generator::resolveImplicitImplTarget() {
     if (program->parent().kind() != DeclarationValueKind::Program)
-        return false;
+        return std::nullopt;
     ProgramHandle parentProgHandle = program->parent().program();
     Program* parentProg = context.program(parentProgHandle);
     if (!parentProg->isImpl())
-        return false;
+        return std::nullopt;
 
     VERIFY(try_cast<ScopeProgram>(parentProg).has_value());
     Constant parentImplOf = fold(makeParameterize(parentProgHandle, copyParameters(parentProg)), parentProg->selfConstant());
@@ -168,11 +148,11 @@ bool Generator::resolveImplicitImplTarget() {
     auto implTarget = cast<ScopeProgram>(parentImpl.program)->getDeclaration(program->name());
     if (!implTarget.has_value()) {
         error<errors::ImplicitImplTargetNotFound>();
-        return false;
+        return std::nullopt;
     }
     if (implTarget.value().kind() != DeclarationValueKind::Program) {
         error<errors::ImplicitImplTargetNotAProgram>();
-        return false;
+        return std::nullopt;
     }
     ProgramHandle implOfProgHandle = context.translate(parentImpl.programHandle, implTarget.value().program());
     signatureCheck(context, implOfProgHandle);
@@ -180,7 +160,7 @@ bool Generator::resolveImplicitImplTarget() {
 
     if (program->kind() != implOfProg->kind()) {
         error<errors::ImplicitImplTargetKindMismatch>();
-        return false;
+        return std::nullopt;
     }
     DeductionState state(context, implOfProgHandle);
     VERIFY(implOfProg->inheritedParameterCount == parentImpl.arguments.size());
@@ -199,13 +179,13 @@ bool Generator::resolveImplicitImplTarget() {
         if (parameterIndex == (int_t)program->parameters.size()) {
             if (implParameterIndex != (int_t)implOfProg->parameters.size()) {
                 error<errors::ImplicitImplTemplateParameterCountMismatch>();
-                return false;
+                return std::nullopt;
             }
             break;
         }
         if (implParameterIndex == (int_t)implOfProg->parameters.size()) {
             error<errors::ImplicitImplTemplateParameterCountMismatch>();
-            return false;
+            return std::nullopt;
         }
 
         auto parameter = program->parameters[parameterIndex];
@@ -219,9 +199,7 @@ bool Generator::resolveImplicitImplTarget() {
         // TODO: What about the initializer?
     }
 
-    lazyParameterizeState = std::move(state);
-    emitExpression({}, Expression(ExpressionKind::LazyParameterize, 0));
-    return true;
+    return state;
 }
 
 void Generator::addParameterizeArguments(DeductionState& state, int_t firstParameterIndex) {
@@ -255,26 +233,19 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
     advance();
 }
 
-void Generator::generateParameterizeExpr() {
+std::optional<DeductionState> Generator::generateParameterizeExpr() {
+    std::optional<DeductionState> stateOpt;
     Expression baseResult = topExpression();
     if (baseResult.isConstant()) {
         Constant baseValue = baseResult.constant();
         takeTopExpression();
-
-        auto generate = [this](DeductionState state) {
-            addParameterizeArguments(state, state.program->inheritedParameterCount);
-            lazyParameterizeState = std::move(state);
-            emitExpression({}, Expression(ExpressionKind::LazyParameterize, 0));
-        };
 
         if (baseValue.kind() == ConstantKind::Program) {
             Program* baseProg = context.program(baseValue.program());
             if (!baseProg->isTemplate())
                 error<errors::ParameterizeBaseIsNotATemplate>();
             VERIFY(baseProg->inheritedParameterCount == 0);
-            DeductionState state(context, baseValue.program());
-            generate(std::move(state));
-            return;
+            stateOpt.emplace(context, baseValue.program());
         }
         if (baseValue.kind() == ConstantKind::Parameterize) {
             auto basePara = program->getParameterize(baseValue);
@@ -284,37 +255,41 @@ void Generator::generateParameterizeExpr() {
             if (basePara.arguments.size() > baseProg->inheritedParameterCount)
                 error<errors::ParameterizeBaseIsAlreadyParameterized>();
             VERIFY(basePara.arguments.size() == baseProg->inheritedParameterCount);
-            DeductionState state(context, basePara.base);
+            stateOpt.emplace(context, basePara.base);
             for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
-                state.explicitArgument(i, basePara.arguments[i]);
-            generate(std::move(state));
-            return;
+                stateOpt->explicitArgument(i, basePara.arguments[i]);
         }
     }
-    error<errors::ParameterizeBaseNotSupported>();
+    if (!stateOpt.has_value()) {
+        error<errors::ParameterizeBaseNotSupported>();
+        VERIFY_NOT_REACHED();
+    }
+
+    auto& state = *stateOpt;
+    addParameterizeArguments(state, state.program->inheritedParameterCount);
+
+    if (state.program->kind() == ProgramKind::Global) {
+        if (!state.isComplete()) {
+            error<errors::ParameterizeOfGlobalIncomplete>();
+        }
+        emitExpression({}, makeGlobalReference(makeParameterize(state)));
+        stateOpt.reset();
+    }
+    return stateOpt;
 }
 
-Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumentNames) {
-    Expression baseResult = INVALID_EXPRESSION;
-    if (isTopExpressionLazyParameterize()) {
-        DeductionState state = takeLazyParameterize();
-        if (state.program->kind() == ProgramKind::Global) {
-            if (!state.isComplete())
-                error<errors::CallTargetIsIncompleteGlobal>();
-            baseResult = generateProgramLiteral(state.programHandle, state.arguments);
-        } else {
-            // VERIFY(cast<CallableProgram>(state.program)->runtimeParameters.size() == argumentNames.size());
-            return { std::move(state) };
-        }
-    } else
-        baseResult = topExpression();
+DeductionState Generator::resolveCallTarget(std::span<const Word> argumentNames) {
+    Expression baseResult = topExpression();
 
-    // Ugly special case
+    // Resolve function aliases
     if (baseResult.kind() == ExpressionKind::GlobalReference$Program || baseResult.kind() == ExpressionKind::GlobalReference$Parameterize) {
         const auto base = asFoldBase(baseResult.referencedGlobal());
         auto* globalProg = cast<GlobalProgram>(base.program);
-        if (globalProg->globalKind() == GlobalKind::Let)
-            baseResult = fold(base, globalProg->initializer());
+        if (globalProg->globalKind() == GlobalKind::Let) {
+            auto globalType = fold(base, globalProg->type());
+            if (baseProgram(globalType) == builtins::function_id_template.program())
+                baseResult = fold(base, globalProg->initializer());
+        }
     }
 
     if (baseResult.isConstant()) {
@@ -325,7 +300,7 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             DeductionState state(context, baseValue.program(), baseProg->parameters.size());
             state.copyParameters(baseProg->inheritedParameterCount);
             takeTopExpression();
-            return { std::move(state) };
+            return state;
         } else if (baseValue.kind() == ConstantKind::Parameterize) {
             auto param = program->getParameterize(baseValue);
             Program* baseProg = context.program(param.base);
@@ -335,19 +310,18 @@ Generator::CallTarget Generator::resolveCallTarget(std::span<const Word> argumen
             for (int_t i = 0; i < (int_t)param.arguments.size(); i++)
                 state.explicitArgument(i, param.arguments[i]);
             takeTopExpression();
-            return { std::move(state) };
+            return state;
         }
     }
     error<errors::CallTargetNotSupported>();
     VERIFY_NOT_REACHED();
 }
 
-void Generator::generateCallExpr(CallTarget target) {
+void Generator::generateCallExpr(DeductionState state) {
     VERIFY(tok->kind() == Token::CallExpr);
     TokenInfo* callToken = tok;
     advance();
 
-    auto& state = target.state;
     if (state.program->kind() == ProgramKind::Function || state.program->kind() == ProgramKind::Struct) {
 
         auto arguments = visit<callParameters>(state.program, [this, &state](auto parameters) { return generateCallArguments(state, false, parameters); });

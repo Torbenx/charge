@@ -118,13 +118,13 @@ static g4 = S2{X, X};
 // expect-error ParameterizeArgumentNameMismatch
 static g5 = S2{T1 = X};
 
+template(T1: type, T2: type) static r1 = X();
+// expect-error ParameterizeOfGlobalIncomplete
+static g6 = r1{X};
+
 }
 
 namespace CallTarget: {
-
-template(T1: type, T2: type) static r1 = X();
-// expect-error CallTargetIsIncompleteGlobal
-static g1 = r1{X}();
 
 struct S1: { }
 // expect-error CallTargetNotSupported

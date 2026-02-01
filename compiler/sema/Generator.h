@@ -233,10 +233,6 @@ struct Generator : Util {
         }
     };
 
-    struct CallTarget {
-        DeductionState state;
-    };
-
     struct LocalState {
         std::vector<bool> parameterActiveMask;
         std::vector<bool> variableActiveMask;
@@ -296,7 +292,6 @@ struct Generator : Util {
     WildcardMeaning wildcardMeaning = WildcardMeaning::Error;
     uint32_t localScopeDepth = 0;
     OwnedExpression currentExpression = OwnedExpression(INVALID_EXPRESSION);
-    std::optional<DeductionState> lazyParameterizeState;
 
     Generator(Context& context, ProgramHandle handle);
 
@@ -310,11 +305,8 @@ struct Generator : Util {
     };
     StashedExpression stashTopExpression();
     void unstashTopExpression(StashedExpression);
-    void resolveLazyExpressions();
     Expression topExpression();
     OwnedExpression takeTopExpression();
-    DeductionState takeLazyParameterize();
-    bool isTopExpressionLazyParameterize();
 
     LocalScope beginLocalScope(SourceLocation);
     void endLocalScope(LocalScope scope, SourceLocation);
@@ -358,7 +350,6 @@ struct Generator : Util {
     void visitBinaryExpr();
     void visitUnaryExpr();
     void visitPostfixExpr();
-    void visitPrimaryExpr();
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
 
@@ -386,18 +377,19 @@ struct Generator : Util {
     Constant makeFunctionSignature(Constant value);
     Expression makeGlobalReference(Constant value);
     Constant makeCopyOfOpenGlobal(Constant value);
+    Constant makeParameterize(const DeductionState& state);
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
-    bool resolveImplicitImplTarget();
+    std::optional<DeductionState> resolveImplicitImplTarget();
     Expression generateDeclarationLiteral(InternalLookupResult internalResult, Type parent);
     Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
-    void generateParameterizeExpr();
-    CallTarget resolveCallTarget(std::span<const Word> arugmentNames);
-    void generateCallExpr(CallTarget base);
+    std::optional<DeductionState> generateParameterizeExpr();
+    DeductionState resolveCallTarget(std::span<const Word> arugmentNames);
+    void generateCallExpr(DeductionState base);
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);
     void internalLookupRecurse(InternalLookupState& state, ModuleHandle module, ScopeProgram* prog);
