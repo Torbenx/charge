@@ -56,6 +56,13 @@ fn f4(): { }
 
 }
 
+namespace OpenReturnType: {
+
+// expect-error OpenReturnTypeOnNonTemplateFunction
+fn f1() -> return_type: { }
+
+}
+
 namespace Stmt: {
 
 static var staticX = X();

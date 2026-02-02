@@ -91,6 +91,8 @@ enum class ConstantKind : uint8_t {
     CopyOfParameterToReferenceCategory,
     CopyOfOpenGlobal$Program,
     CopyOfOpenGlobal$Parameterize, // non-dependent
+    OpenReturnType$Self,
+    OpenReturnType$Parameterize, // non-dependent
 
     Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
@@ -146,6 +148,13 @@ struct Constant {
         if (kind() == ConstantKind::CopyOfOpenGlobal$Program)
             return Constant(ConstantKind::Program, id());
         if (kind() == ConstantKind::CopyOfOpenGlobal$Parameterize)
+            return Constant(ConstantKind::Parameterize, id());
+        VERIFY_NOT_REACHED();
+    }
+    constexpr Constant returnTypeOf() const {
+        if (kind() == ConstantKind::OpenReturnType$Self)
+            return Constant(ConstantKind::Self, id());
+        if (kind() == ConstantKind::OpenReturnType$Parameterize)
             return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }

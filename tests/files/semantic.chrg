@@ -403,3 +403,8 @@ fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCa
 // expect-return-type X
 template(c: expression_category)
 fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }
+
+template(T: type)
+fn openReturnType() -> return_type: { }
+// expect-type @openReturnType(openReturnType{X})
+static examineOpenReturnType = openReturnType{X}();

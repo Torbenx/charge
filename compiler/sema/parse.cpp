@@ -383,9 +383,17 @@ void Generator::visitFunctionParametersAndBody() {
         if (tok->kind() == Token::ReturnType) {
             TokenInfo* arrowToken = tok;
             advance();
-            visitExpression();
-            contextualToType(arrowToken);
-            program->setType(verifyType(expressionToConstant(arrowToken)));
+            if (tok->kind() == Token::IdentifierExpr && tok->data1<Word>() == parse::words["return_type"]) {
+                advance();
+                VERIFY(tok->kind() == Token::FunctionBody);
+                if (!program->isTemplate())
+                    error<errors::OpenReturnTypeOnNonTemplateFunction>();
+                program->setType(makeOpenReturnType(builtins::self_constant));
+            } else {
+                visitExpression();
+                contextualToType(arrowToken);
+                program->setType(verifyType(expressionToConstant(arrowToken)));
+            }
         } else {
             // TODO: Implement return type deduction
             error<errors::FunctionWithoutExplicitReturnType>();

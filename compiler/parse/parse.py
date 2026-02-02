@@ -62,6 +62,7 @@ regularIdentifiers = [
     "function_signature",
     "member_ptr",
     "member_type",
+    "return_type",
     "parent_type",
     "pointee_type",
     "ptr",

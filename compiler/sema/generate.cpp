@@ -86,6 +86,14 @@ Constant Generator::makeCopyOfOpenGlobal(Constant value) {
     VERIFY_NOT_REACHED();
 }
 
+Type Generator::makeOpenReturnType(Constant value) {
+    if (value.kind() == ConstantKind::Self)
+        return Type(ConstantKind::OpenReturnType$Self, value.id());
+    if (value.kind() == ConstantKind::Parameterize)
+        return Type(ConstantKind::OpenReturnType$Parameterize, value.id());
+    VERIFY_NOT_REACHED();
+}
+
 Type Generator::makeTemplateIdFor(Constant templateProg) {
     std::array arguments { makeTemplateSignature(templateProg) };
     return verifyType(program->addParameterize(context, { builtins::template_id_template.program(), arguments }));
@@ -873,6 +881,8 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
         || aValue.kind() == ConstantKind::Computed || aValue.kind() == ConstantKind::RemoteComputed
         || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || pValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
         || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Program || aValue.kind() == ConstantKind::CopyOfOpenGlobal$Parameterize
+        || pValue.kind() == ConstantKind::OpenReturnType$Self || pValue.kind() == ConstantKind::OpenReturnType$Parameterize
+        || aValue.kind() == ConstantKind::OpenReturnType$Self || aValue.kind() == ConstantKind::OpenReturnType$Parameterize
         || pValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
         || aValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
         || aValue.kind() == ConstantKind::CopyOfParameter) {
@@ -963,6 +973,9 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     case ConstantKind::CopyOfOpenGlobal$Program:
     case ConstantKind::CopyOfOpenGlobal$Parameterize:
         return makeCopyOfOpenGlobal(fold(base, Constant(v).copiedGlobal()));
+    case ConstantKind::OpenReturnType$Self:
+    case ConstantKind::OpenReturnType$Parameterize:
+        return makeOpenReturnType(fold(base, Constant(v).returnTypeOf()));
     case ConstantKind::Namespace:
         return (Constant)context.translate(base.module, Constant(v).nsHandle());
     case ConstantKind::TemplateSignature$Program:
@@ -1168,6 +1181,9 @@ Type Generator::typeOf(Constant value) {
         auto base = asFoldBase(value.copiedGlobal());
         return verifyType(fold(base, cast<GlobalProgram>(base.program)->type()));
     }
+    case ConstantKind::OpenReturnType$Self:
+    case ConstantKind::OpenReturnType$Parameterize:
+        return builtins::type_type;
     case ConstantKind::Parameterize: {
         auto para = program->getParameterize(value);
         Program* baseProg = context.program(para.base);

@@ -377,6 +377,7 @@ struct Generator : Util {
     Constant makeFunctionSignature(Constant value);
     Expression makeGlobalReference(Constant value);
     Constant makeCopyOfOpenGlobal(Constant value);
+    Type makeOpenReturnType(Constant value);
     Constant makeParameterize(const DeductionState& state);
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
     Type typeOfNonDependentProgram(Constant value);

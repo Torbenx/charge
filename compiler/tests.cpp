@@ -177,6 +177,17 @@ struct EnumValueExpr : CheckExpr {
     }
 };
 
+struct OpenReturnTypeExpr : CheckExpr {
+    std::unique_ptr<CheckExpr> fnExpr;
+
+    OpenReturnTypeExpr(std::unique_ptr<CheckExpr> fnExpr)
+        : fnExpr(std::move(fnExpr)) { }
+
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
+        fnExpr->check(ctx, progHandle, value.returnTypeOf());
+    }
+};
+
 struct CheckExprParser {
     Context& context;
     std::string_view& buffer;
@@ -252,6 +263,12 @@ struct CheckExprParser {
                 auto valueName = readId();
                 consume(")");
                 return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.wordTable.get(valueName));
+            }
+            if (id == "openReturnType") {
+                consume("(");
+                auto fnExpr = parse();
+                consume(")");
+                return std::make_unique<OpenReturnTypeExpr>(std::move(fnExpr));
             }
         }
 
@@ -480,8 +497,8 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             return;
         }
 
-        //fmt::println("-------------------------------");
-        //program->dump(context);
+        fmt::println("-------------------------------");
+        program->dump(context);
 
         if (semanticError.has_value()) {
             FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.wordTable.view(context.program(semanticError->prog)->name());

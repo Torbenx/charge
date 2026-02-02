@@ -18,6 +18,7 @@ struct FunctionParameterWithDefaultArgument { };
 struct SelfFunctionParameterWithDefaultArgument { };
 struct SelfFunctionParameterWithExplicitType { };
 struct FunctionWithoutExplicitReturnType { };
+struct OpenReturnTypeOnNonTemplateFunction { };
 
 struct DestoryTargetNotALocalVariable { };
 struct DiscardTargetNotALocalReference { };

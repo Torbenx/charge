@@ -45,6 +45,8 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
             return compare(a.copiedGlobal().program(), b.copiedGlobal().program());
         case ConstantKind::CopyOfOpenGlobal$Parameterize:
             return program->compareParameterizes(a.copiedGlobal(), b.copiedGlobal());
+        case ConstantKind::OpenReturnType$Parameterize:
+            return program->compareParameterizes(a.returnTypeOf(), b.returnTypeOf());
         case ConstantKind::EnumValue:
             return compare(program->getEnumValue(a), program->getEnumValue(b));
         default:

@@ -48,6 +48,7 @@ inline constexpr ConstWordStringTable words {
     wordInIdRange("function_signature", 2, Word::MAX_ID + 1),
     wordInIdRange("member_ptr", 2, Word::MAX_ID + 1),
     wordInIdRange("member_type", 2, Word::MAX_ID + 1),
+    wordInIdRange("return_type", 2, Word::MAX_ID + 1),
     wordInIdRange("parent_type", 2, Word::MAX_ID + 1),
     wordInIdRange("pointee_type", 2, Word::MAX_ID + 1),
     wordInIdRange("ptr", 2, Word::MAX_ID + 1),

@@ -135,6 +135,9 @@ struct Dumper {
         case ConstantKind::CopyOfOpenGlobal$Program:
         case ConstantKind::CopyOfOpenGlobal$Parameterize:
             return formatConstant(v.copiedGlobal());
+        case ConstantKind::OpenReturnType$Self:
+        case ConstantKind::OpenReturnType$Parameterize:
+            return formatConstant(v.returnTypeOf()) + "::return_type";
         case ConstantKind::CopyOfParameterToReferenceCategory:
             return "toReferenceCategory(" + formatConstant(v.originalExpressionCategory()) + ")";
         default:
