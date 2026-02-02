@@ -28,8 +28,6 @@ BUILTIN_TEMPLATE(template_id)
 BUILTIN_TYPE(function_signature)
 BUILTIN_TEMPLATE(function_id)
 
-BUILTIN_TEMPLATE(ptr)
-
 BUILTIN_TEMPLATE(member_ptr)
 
 BUILTIN_FUNCTION(copy)

@@ -24,9 +24,6 @@ struct function_signature: { }
 template(sig: function_signature)
 struct function_id: { }
 
-template(pointee_type: type)
-struct ptr: { }
-
 template(parent_type: type, member_type: type)
 struct member_ptr: { }
 

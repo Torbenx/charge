@@ -329,15 +329,6 @@ void Context::checkBuiltins() {
         VERIFY(prog->members.empty());
     }
 
-    // template(pointee_type: type) struct ptr: { }
-    {
-        auto* prog = cast<StructProgram>(program(builtins::ptr_template.program()));
-        VERIFY(prog->parameters.size() == 1);
-        Program::Parameter expectedParameter { parse::words["pointee_type"], builtins::type_type, std::nullopt };
-        VERIFY(prog->parameters[0] == expectedParameter);
-        VERIFY(prog->members.empty());
-    }
-
     // template(parent_type: type, member_type: type) struct member_ptr: { }
     {
         auto* prog = cast<StructProgram>(program(builtins::member_ptr_template.program()));
