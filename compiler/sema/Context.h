@@ -1,11 +1,12 @@
 #pragma once
 
 #include <WordTranslationTable.h>
-#include <sema/IdentifierTable.h>
 #include <parse/Output.h>
+#include <sema/IdentifierTable.h>
 #include <sema/Program.h>
 #include <sema/Scope.h>
 
+#include <ranges>
 
 namespace sema {
 
@@ -49,13 +50,13 @@ struct Context {
     std::vector<ModuleHandle> programModules;
     PageBumpAllocator<ProgramUnion> programStorage;
     PageBumpAllocator<Namespace> namespaces;
+    PageBumpAllocator<std::vector<ProgramHandle>> implTable;
     std::vector<ModuleState> modules;
     struct ScopeStackEntry {
         DeclarationValue value;
         std::optional<Scope*> scope;
     };
     std::vector<ScopeStackEntry> m_scopeStack;
-    std::vector<ProgramHandle> m_implDeclarations;
     ErrorHandler* errorHandler = nullptr;
 
     Context(std::span<const ModuleImport> imports, std::string_view source)
@@ -64,6 +65,8 @@ struct Context {
     }
     void initialize(std::span<const ModuleImport>);
     ModuleImport exportModule();
+
+    void completeSignatureCheck(ProgramHandle progHandle, bool isImpl, Constant selfConstant);
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
@@ -79,6 +82,12 @@ struct Context {
 
     ModuleHandle thisModule() const { return { static_cast<uint16_t>(modules.size() - 1) }; }
     bool isBuiltinModule() const { return modules.size() == 1; }
+    auto programsInModule(ModuleHandle module) {
+        auto& state = modules[module.id()];
+        return std::views::iota(state.programIdBegin, state.programIdEnd)
+            | std::views::transform([](uint32_t id) { return ProgramHandle(id); });
+    }
+    std::span<const ProgramHandle> implsOf(ProgramHandle handle) { return implTable[handle.id()]; }
 
     ProgramHandle newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location);
     Program* program(ProgramHandle handle) {

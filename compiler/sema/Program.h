@@ -369,7 +369,7 @@ struct Program {
         return parse::TokenHandle { parseLocationOrSelfConstant };
     }
 
-    void completeSignatureCheck(bool isImpl, Constant selfConstant) {
+    void markSignatureCheckComplete(bool isImpl, Constant selfConstant) {
         VERIFY(status() == ProgramStatus::SignatureCheckInProgress);
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureChecked);

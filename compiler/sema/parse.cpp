@@ -74,6 +74,8 @@ void Generator::visitDeclaration() {
         visitStructImplDeclaration();
     } else if (tok->kind() == Token::GlobalDecl) {
         visitStaticVariableDeclaration();
+    } else if (tok->kind() == Token::GlobalImplDecl) {
+        visitStaticVariableImplDeclaration();
     } else if (tok->kind() == Token::FunctionDecl) {
         visitFunctionDeclaration();
     } else if (tok->kind() == Token::FunctionImplDecl) {
@@ -228,6 +230,33 @@ Program::Parameter Generator::visitTemplateParameter() {
     return { name, info.type, initializer };
 }
 
+void Generator::visitStaticVariableImplDeclaration() {
+    VERIFY(program->kind() == ProgramKind::Global);
+    auto* globalProgram = cast<GlobalProgram>(program);
+
+    VERIFY(tok->kind() == Token::GlobalImplDecl);
+    advance();
+
+    visitExpression();
+    Expression implOfRef = takeTopExpression();
+    Constant implOf = implOfRef.referencedGlobal();
+    VERIFY(tok->kind() == Token::ExpressionStmt);
+    advance();
+
+    auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::DeduceLocally, false);
+    VERIFY(info.category.kind() == VariableKind::Let);
+    program->setType(info.type);
+    if (info.hasInitializer)
+        // TODO: Constants are required to be the same when copied.
+        //       For global objects this restriction is not necessary.
+        globalProgram->setInitializer(valueExpressionToConstant());
+    else
+        // TODO: Open globals should not need an initializer
+        error<errors::StaticVariableDeclarationWithoutInitializer>();
+
+    checkStaticVariableImplDeclaration(implOf);
+}
+
 void Generator::visitStaticVariableDeclaration() {
     VERIFY(program->kind() == ProgramKind::Global);
     auto* globalProgram = cast<GlobalProgram>(program);
@@ -246,20 +275,49 @@ void Generator::visitStaticVariableDeclaration() {
         // TODO: Open globals should not need an initializer
         error<errors::StaticVariableDeclarationWithoutInitializer>();
 
-    Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
-    program->completeSignatureCheck(false, selfConstant);
+    if (auto state = resolveImplicitImplTarget(); state.has_value()) {
+        checkStaticVariableImplDeclaration(makeParameterize(state.value()));
+    } else {
+        Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
+        context.completeSignatureCheck(programHandle, false, selfConstant);
+    }
+}
+
+void Generator::checkStaticVariableImplDeclaration(Constant implOf) {
+    auto base = asFoldBase(implOf);
+    fmt::println("checkStaticVariableImplDeclaration: {}", context.wordTable.view(base.program->name()));
+    VERIFY(base.program->kind() == ProgramKind::Global);
+    auto* baseProg = cast<GlobalProgram>(base.program);
+    auto* implProg = cast<GlobalProgram>(program);
+
+    if (baseProg->globalKind() != GlobalKind::OpenLet)
+        error<errors::GlobalImplTargetNotOpen>();
+
+    auto state = DeductionState::fromFoldBase(base);
+    if (!staticMatch(state, baseProg->type(), (Constant)implProg->type()))
+        error<errors::GlobalImplTypeMismatch>();
+
+    context.completeSignatureCheck(programHandle, true, implOf);
 }
 
 void Generator::visitFunctionImplDeclaration() {
     VERIFY(tok->kind() == Token::FunctionImplDecl);
     advance();
-    visitExpression();
-    auto implOf = expressionToConstantNoNewComputedConstants();
+    auto state = processPostfixExpr();
+    if (!state.has_value()) {
+        auto implOf = expressionToConstantNoNewComputedConstants();
+        if (implOf.has_value()) {
+            if (auto base = tryAsFoldBase(implOf.value()); base.has_value())
+                state = DeductionState::fromFoldBase(base.value());
+            else if (auto stateOpt = tryBeginParameterize(implOf.value()); stateOpt.has_value())
+                state = stateOpt;
+        }
+    }
 
     visitFunctionParametersAndBody();
 
-    if (implOf.has_value())
-        checkFunctionImplDeclaration(DeductionState::fromFoldBase(asFoldBase(implOf.value())));
+    if (state.has_value())
+        checkFunctionImplDeclaration(state.value());
     else
         error<errors::ExplicitImplExpressionNotSupported>();
 }
@@ -273,7 +331,7 @@ void Generator::visitFunctionDeclaration() {
         checkFunctionImplDeclaration(std::move(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
-        program->completeSignatureCheck(false, selfConstant);
+        context.completeSignatureCheck(programHandle, false, selfConstant);
     }
 }
 
@@ -309,7 +367,7 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
         error<errors::FunctionImplReturnTypeMismatch>();
 
     VERIFY(state.isComplete());
-    program->completeSignatureCheck(true, makeParameterize(state.programHandle, state.arguments));
+    context.completeSignatureCheck(programHandle, true, makeParameterize(state.programHandle, state.arguments));
 }
 
 void Generator::visitFunctionParametersAndBody() {
@@ -434,7 +492,7 @@ void Generator::visitStructDeclaration() {
         checkStructImplDeclaration(makeParameterize(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
-        program->completeSignatureCheck(false, selfConstant);
+        context.completeSignatureCheck(programHandle, false, selfConstant);
     }
 }
 
@@ -443,7 +501,7 @@ void Generator::checkStructImplDeclaration(Constant implOf) {
     VERIFY(base.program->kind() == ProgramKind::Struct);
     // TODO: Do checks
 
-    program->completeSignatureCheck(true, implOf);
+    context.completeSignatureCheck(programHandle, true, implOf);
 }
 
 void Generator::visitStructMembers() {
@@ -502,7 +560,7 @@ void Generator::visitEnumDeclaration() {
         checkEnumImplDeclaration(makeParameterize(state.value()));
     } else {
         Constant selfConstant = makeParameterize(programHandle, copyParameters(program));
-        program->completeSignatureCheck(false, selfConstant);
+        context.completeSignatureCheck(programHandle, false, selfConstant);
     }
 }
 
@@ -511,7 +569,7 @@ void Generator::checkEnumImplDeclaration(Constant implOf) {
     VERIFY(base.program->kind() == ProgramKind::Enum); // TODO: This must be handled as an error somewhere.
     // TODO: Do checks
 
-    program->completeSignatureCheck(true, implOf);
+    context.completeSignatureCheck(programHandle, true, implOf);
 }
 
 void Generator::visitEnumValues() {
@@ -611,17 +669,37 @@ void Generator::visitBinaryExpr() {
     visitUnaryExpr();
 }
 
+namespace {
+    ProgramHandle getUnaryFunction(parse::TokenKind kind) {
+        switch (kind) {
+        case parse::TokenKind::LogicalNotExpr:
+            return builtins::logical_not_function.program();
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+}
+
 void Generator::visitUnaryExpr() {
     if (parse::isUnaryExpr(tok->kind())) {
+        TokenInfo* unaryToken = tok;
         advance();
         visitUnaryExpr();
-        // resolve and create call expression
+        std::array<Constant, 1> templateArgs { resultType(topExpression()) };
+        Constant target = makeParameterize(getUnaryFunction(unaryToken->kind()), templateArgs);
+        emitCall(unaryToken, target, { takeTopExpression().release() });
     } else {
         visitPostfixExpr();
     }
 }
 
 void Generator::visitPostfixExpr() {
+    auto deductionState = processPostfixExpr();
+    if (deductionState.has_value())
+        emitExpression({}, makeParameterize(deductionState.value()));
+}
+
+std::optional<DeductionState> Generator::processPostfixExpr() {
     // Visit primary expression
     if (tok->kind() == Token::IdentifierExpr) {
         generateIdentifierExpr();
@@ -663,7 +741,7 @@ void Generator::visitPostfixExpr() {
             break;
         }
     }
-    resolveDeductionState();
+    return deductionState;
 }
 
 }

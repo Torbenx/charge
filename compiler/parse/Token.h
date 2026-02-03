@@ -54,6 +54,7 @@ inline bool isUnaryExpr(TokenKind kind) {
     SCOPE(StructImplExpression)   \
     SCOPE(FunctionImplExpression) \
     SCOPE(EnumImplExpression)     \
+    SCOPE(GlobalImplExpression)   \
     SCOPE(GenericCategoryExpression)
 
 enum class ScopeKind : uint8_t {

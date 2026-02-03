@@ -63,6 +63,18 @@ fn f1() -> return_type: { }
 
 }
 
+namespace GlobalImpl: {
+
+template(T: type) static var g1: type = T;
+// expect-error GlobalImplTargetNotOpen
+static impl g1{X}: type = bool;
+
+template(T: type) static open g2: type = T;
+// expect-error GlobalImplTypeMismatch
+static impl g2{X}: bool = true;
+
+}
+
 namespace Stmt: {
 
 static var staticX = X();

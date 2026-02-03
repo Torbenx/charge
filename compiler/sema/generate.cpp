@@ -46,7 +46,7 @@ void Generator::emitCall(std::optional<TokenInfo*> token, Constant callTarget, s
 void Generator::implicitCopy(std::optional<TokenInfo*> implicitActionToken) {
     std::array<Constant, 1> templateArgs { resultType(topExpression()) };
     auto callTarget = makeParameterize(builtins::copy_function.program(), templateArgs);
-    emitCall(implicitActionToken, callTarget, { takeTopExpression() });
+    emitCall(implicitActionToken, callTarget, { takeTopExpression().release() });
 }
 
 Constant Generator::makeTemplateSignature(Constant templateProg) {
@@ -78,7 +78,28 @@ Expression Generator::makeGlobalReference(Constant value) {
     VERIFY_NOT_REACHED();
 }
 
+std::optional<Constant> Generator::findImplForOpenProgram(Constant value) {
+    auto baseProg = baseProgram(value).value();
+    std::optional<Constant> implMatch;
+    for (auto implProg : context.implsOf(baseProg)) {
+        DeductionState state(context, implProg);
+        if (staticMatch(state, state.program->selfConstant(), value)) {
+            if (state.isComplete() && state.equalities.size() == 0) {
+                VERIFY(!implMatch.has_value());
+                implMatch = makeParameterize(state);
+            }
+        }
+    }
+
+    return implMatch;
+}
+
 Constant Generator::makeCopyOfOpenGlobal(Constant value) {
+    if (auto impl = findImplForOpenProgram(value); impl.has_value()) {
+        auto base = asFoldBase(impl.value());
+        return fold(base, cast<GlobalProgram>(base.program)->initializer());
+    }
+
     if (value.kind() == ConstantKind::Program)
         return Constant(ConstantKind::CopyOfOpenGlobal$Program, value.id());
     if (value.kind() == ConstantKind::Parameterize)
@@ -87,10 +108,16 @@ Constant Generator::makeCopyOfOpenGlobal(Constant value) {
 }
 
 Type Generator::makeOpenReturnType(Constant value) {
+
     if (value.kind() == ConstantKind::Self)
         return Type(ConstantKind::OpenReturnType$Self, value.id());
-    if (value.kind() == ConstantKind::Parameterize)
+    if (value.kind() == ConstantKind::Parameterize) {
+        if (auto impl = findImplForOpenProgram(value); impl.has_value()) {
+            auto base = asFoldBase(impl.value());
+            return verifyType(fold(base, cast<FunctionProgram>(base.program)->returnType()));
+        }
         return Type(ConstantKind::OpenReturnType$Parameterize, value.id());
+    }
     VERIFY_NOT_REACHED();
 }
 
@@ -241,32 +268,36 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
     advance();
 }
 
+std::optional<DeductionState> Generator::tryBeginParameterize(Constant baseValue) {
+    std::optional<DeductionState> stateOpt;
+    if (baseValue.kind() == ConstantKind::Program) {
+        Program* baseProg = context.program(baseValue.program());
+        if (!baseProg->isTemplate())
+            error<errors::ParameterizeBaseIsNotATemplate>();
+        VERIFY(baseProg->inheritedParameterCount == 0);
+        stateOpt.emplace(context, baseValue.program());
+    }
+    if (baseValue.kind() == ConstantKind::Parameterize) {
+        auto basePara = program->getParameterize(baseValue);
+        Program* baseProg = context.program(basePara.base);
+        if (!baseProg->isTemplate())
+            error<errors::ParameterizeBaseIsNotATemplate>();
+        if (basePara.arguments.size() > baseProg->inheritedParameterCount)
+            error<errors::ParameterizeBaseIsAlreadyParameterized>();
+        VERIFY(basePara.arguments.size() == baseProg->inheritedParameterCount);
+        stateOpt.emplace(context, basePara.base);
+        for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
+            stateOpt->explicitArgument(i, basePara.arguments[i]);
+    }
+    return stateOpt;
+}
+
 std::optional<DeductionState> Generator::generateParameterizeExpr() {
     std::optional<DeductionState> stateOpt;
     Expression baseResult = topExpression();
     if (baseResult.isConstant()) {
-        Constant baseValue = baseResult.constant();
+        stateOpt = tryBeginParameterize(baseResult.constant());
         takeTopExpression();
-
-        if (baseValue.kind() == ConstantKind::Program) {
-            Program* baseProg = context.program(baseValue.program());
-            if (!baseProg->isTemplate())
-                error<errors::ParameterizeBaseIsNotATemplate>();
-            VERIFY(baseProg->inheritedParameterCount == 0);
-            stateOpt.emplace(context, baseValue.program());
-        }
-        if (baseValue.kind() == ConstantKind::Parameterize) {
-            auto basePara = program->getParameterize(baseValue);
-            Program* baseProg = context.program(basePara.base);
-            if (!baseProg->isTemplate())
-                error<errors::ParameterizeBaseIsNotATemplate>();
-            if (basePara.arguments.size() > baseProg->inheritedParameterCount)
-                error<errors::ParameterizeBaseIsAlreadyParameterized>();
-            VERIFY(basePara.arguments.size() == baseProg->inheritedParameterCount);
-            stateOpt.emplace(context, basePara.base);
-            for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
-                stateOpt->explicitArgument(i, basePara.arguments[i]);
-        }
     }
     if (!stateOpt.has_value()) {
         error<errors::ParameterizeBaseNotSupported>();

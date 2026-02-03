@@ -60,6 +60,7 @@ regularIdentifiers = [
     "from",
     "function_id",
     "function_signature",
+    "logical_not",
     "member_ptr",
     "member_type",
     "return_type",

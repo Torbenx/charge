@@ -253,7 +253,7 @@ static sema::DeclarationValue commitDeclaration(Word name, const char* currentPo
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum);
+    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
     return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 

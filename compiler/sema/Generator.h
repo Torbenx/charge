@@ -331,7 +331,9 @@ struct Generator : Util {
     void visitDeclaration();
     void visitTemplateParameters();
     Program::Parameter visitTemplateParameter();
+    void visitStaticVariableImplDeclaration();
     void visitStaticVariableDeclaration();
+    void checkStaticVariableImplDeclaration(Constant implOf);
     void visitFunctionImplDeclaration();
     void visitFunctionDeclaration();
     void checkFunctionImplDeclaration(DeductionState state);
@@ -350,6 +352,7 @@ struct Generator : Util {
     void visitBinaryExpr();
     void visitUnaryExpr();
     void visitPostfixExpr();
+    std::optional<DeductionState> processPostfixExpr();
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
 
@@ -376,6 +379,7 @@ struct Generator : Util {
     Type makeTemplateIdFor(Constant templateProg);
     Constant makeFunctionSignature(Constant value);
     Expression makeGlobalReference(Constant value);
+    std::optional<Constant> findImplForOpenProgram(Constant value);
     Constant makeCopyOfOpenGlobal(Constant value);
     Type makeOpenReturnType(Constant value);
     Constant makeParameterize(const DeductionState& state);
@@ -388,6 +392,7 @@ struct Generator : Util {
     Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
+    std::optional<DeductionState> tryBeginParameterize(Constant base);
     std::optional<DeductionState> generateParameterizeExpr();
     DeductionState resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(DeductionState base);

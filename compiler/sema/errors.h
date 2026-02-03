@@ -14,6 +14,9 @@ struct FunctionImplFunctionParameterGenericCategoryMismatch { };
 struct FunctionImplFunctionParameterTypeMismatch { };
 struct FunctionImplReturnTypeMismatch { };
 
+struct GlobalImplTargetNotOpen { };
+struct GlobalImplTypeMismatch { };
+
 struct FunctionParameterWithDefaultArgument { };
 struct SelfFunctionParameterWithDefaultArgument { };
 struct SelfFunctionParameterWithExplicitType { };

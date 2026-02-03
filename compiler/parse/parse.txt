@@ -558,6 +558,10 @@ LinearState after_impl_expression() then error
         ifScope ScopeKind::EnumImplExpression
             popScope ScopeKind::EnumImplExpression
             then after_enum_declaration_id
+        ifScope ScopeKind::GlobalImplExpression
+            popScope ScopeKind::GlobalImplExpression
+            emitToken TokenKind::ExpressionStmt
+            next after_simple_variable_declaration_id
 
 LinearState impl_access_expression() then error
     identifier
@@ -740,6 +744,11 @@ LinearState after_static() then error
         next static_var_variable_declaration
     keyword open
         next static_open_variable_declaration
+    keyword impl
+        commitImplDeclaration DeclarationKind::StaticVariable
+        pushScope ScopeKind::GlobalImplExpression
+        emitToken TokenKind::GlobalImplDecl, this_declaration
+        next impl_expression
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::Let

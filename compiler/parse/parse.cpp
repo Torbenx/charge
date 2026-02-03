@@ -253,7 +253,7 @@ static sema::DeclarationValue commitDeclaration(Word name, const char* currentPo
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum);
+    static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
     return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
 }
 
@@ -3925,6 +3925,22 @@ after_impl_expression$no_emit:
         // then after_enum_declaration_id
         goto after_enum_declaration_id$as_then;
     }
+    // ifScope ScopeKind::GlobalImplExpression
+    if (scopePosition[0] == ScopeKind::GlobalImplExpression) {
+        // popScope ScopeKind::GlobalImplExpression
+        {
+            auto result = popScope(scopePosition, ScopeKind::GlobalImplExpression);
+            if (result == nullptr) {
+                goto error$as_then;
+            }
+            scopePosition = result;
+        }
+        // emitToken TokenKind::ExpressionStmt
+        carriedEmitTokenKind = TokenKind::ExpressionStmt;
+        carriedEmitTokenData = 0;
+        // next after_simple_variable_declaration_id
+        goto after_simple_variable_declaration_id$with_emit;
+    }
     // then error
     goto error$as_then;
 
@@ -4760,6 +4776,17 @@ after_static$no_emit:
             if (this_identifier == words["var"]) {
                 // next static_var_variable_declaration
                 goto static_var_variable_declaration$no_emit;
+            }
+            if (this_identifier == words["impl"]) {
+                // commitImplDeclaration DeclarationKind::StaticVariable
+                this_declaration = commitImplDeclaration<DeclarationKind::StaticVariable>(tokBegin, declarationBegin, state);
+                // pushScope ScopeKind::GlobalImplExpression
+                scopePosition = pushScope(scopePosition, ScopeKind::GlobalImplExpression);
+                // emitToken TokenKind::GlobalImplDecl, this_declaration
+                carriedEmitTokenKind = TokenKind::GlobalImplDecl;
+                carriedEmitTokenData = packData1(TokenKind::GlobalImplDecl, this_declaration);
+                // next impl_expression
+                goto impl_expression$with_emit;
             }
             // -> error
             goto error$keyword_check;

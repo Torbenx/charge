@@ -58,9 +58,21 @@ struct PageBumpAllocator {
         offsetBytes = 0;
     }
 
+    void growTo(int_t newSize, T t) {
+        VERIFY(newSize >= size());
+        uint32_t oldOffsetBytes = offsetBytes;
+        offsetBytes = newSize * sizeof(T);
+        VERIFY(offsetBytes < capacityBytes);
+        static constexpr size_t MASK = ~(allocdetail::COMMIT_GRANULARITY - 1);
+        for (uint32_t offset = (oldOffsetBytes & MASK) + allocdetail::COMMIT_GRANULARITY; offset <= offsetBytes; offset += allocdetail::COMMIT_GRANULARITY) {
+            allocdetail::commitMemory(ptrFromBytes(offset));
+        }
+        std::uninitialized_fill(ptrFromBytes(oldOffsetBytes), ptrFromBytes(offsetBytes), t);
+    }
+
     ~PageBumpAllocator() {
         std::destroy_n(data(), size());
-        allocdetail::releaseMemory(data(), capacity() * sizeof(T));
+        allocdetail::releaseMemory(data(), capacityBytes);
     }
 
 private:

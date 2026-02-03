@@ -177,6 +177,17 @@ struct EnumValueExpr : CheckExpr {
     }
 };
 
+struct CopyOfOpenGlobalExpr : CheckExpr {
+    std::unique_ptr<CheckExpr> globalExpr;
+
+    CopyOfOpenGlobalExpr(std::unique_ptr<CheckExpr> globalExpr)
+        : globalExpr(std::move(globalExpr)) { }
+
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
+        globalExpr->check(ctx, progHandle, value.copiedGlobal());
+    }
+};
+
 struct OpenReturnTypeExpr : CheckExpr {
     std::unique_ptr<CheckExpr> fnExpr;
 
@@ -263,6 +274,12 @@ struct CheckExprParser {
                 auto valueName = readId();
                 consume(")");
                 return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.wordTable.get(valueName));
+            }
+            if (id == "copyOfOpenGlobal") {
+                consume("(");
+                auto globalExpr = parse();
+                consume(")");
+                return std::make_unique<CopyOfOpenGlobalExpr>(std::move(globalExpr));
             }
             if (id == "openReturnType") {
                 consume("(");
@@ -565,10 +582,8 @@ TEST(Charge, BuiltinModule) {
     sema::Context context({}, sourceBuffer);
     ParseErrorHandler errorHandler;
     parse::parseImpl(sourceBuffer.data(), context, &errorHandler);
-    for (int_t builtinId = 0; builtinId < (int_t)sema::BuiltinId::COUNT; builtinId++) {
-        auto builtin = static_cast<sema::BuiltinId>(builtinId);
-        sema::Generator::signatureCheck(context, builtin);
-    }
+    for (auto prog : context.programsInModule(context.thisModule()))
+        sema::Generator::signatureCheck(context, prog);
 
     context.checkBuiltins();
 }
@@ -583,10 +598,8 @@ TEST(Charge, Files) {
     {
         ParseErrorHandler errorHandler;
         parse::parseImpl(builtinModuleSrc.data(), builtinContext, &errorHandler);
-        for (int_t builtinId = 0; builtinId < (int_t)sema::BuiltinId::COUNT; builtinId++) {
-            auto builtin = static_cast<sema::BuiltinId>(builtinId);
-            sema::Generator::signatureCheck(builtinContext, builtin);
-        }
+        for (auto prog : builtinContext.programsInModule(builtinContext.thisModule()))
+            sema::Generator::signatureCheck(builtinContext, prog);
         builtinContext.checkBuiltins();
     }
     auto builtinExport = builtinContext.exportModule();

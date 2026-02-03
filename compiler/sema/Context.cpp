@@ -1,4 +1,5 @@
 #include <sema/Context.h>
+#include <sema/Generator.h>
 
 namespace sema {
 
@@ -42,6 +43,19 @@ void Context::initialize(std::span<const ModuleImport> imports) {
             output.programIdOffsets[i] = beginDiff / MODULE_PROGRAM_ID_ALIGNMENT;
         }
 
+        // Impls
+        implTable.growTo(output.programIdEnd, {});
+        for (uint32_t progIndex = 0; progIndex < input.ownPrograms.size(); progIndex++) {
+            ProgramHandle progHandle { output.programIdBegin + progIndex };
+            auto& prog = input.ownPrograms[progIndex].get();
+            if (prog.isImpl()) {
+                auto externImplProg = prog.baseProgram(prog.selfConstant());
+                VERIFY(externImplProg.has_value());
+                ProgramHandle localImplProg = translate(moduleHandle, externImplProg.value());
+                implTable[localImplProg.id()].push_back(progHandle);
+            }
+        }
+
         // Namespaces
         for (const Namespace& inNamespace : input.namespaces) {
             NamespaceHandle outHandle;
@@ -71,7 +85,7 @@ void Context::initialize(std::span<const ModuleImport> imports) {
                 ProgramHandle outProg = translate(moduleHandle, inDecl.program());
                 Word outDeclName = inputToOutputWords.get(inDeclName);
                 auto outResult = outNamespace.getDeclaration(outDeclName);
-                // Programs form this module should be new, all others should already exist
+                // Programs from this module should be new, all others should already exist
                 if (outResult.has_value()) {
                     VERIFY(outResult.value().kind() == DeclarationValueKind::Program);
                     VERIFY(outResult.value().program() == outProg);
@@ -92,8 +106,9 @@ void Context::initialize(std::span<const ModuleImport> imports) {
     thisOutput.programIdBegin = programModules.size() * MODULE_PROGRAM_ID_ALIGNMENT;
     thisOutput.programIdEnd = thisOutput.programIdBegin;
     thisOutput.programStorage = programStorage.data() - thisOutput.programIdBegin;
+    implTable.growTo(thisOutput.programIdBegin, {});
 
-    // Reserve solts for builtin programs
+    // Reserve slots for builtin programs
     if (isBuiltinModule()) {
         static_assert((size_t)BuiltinId::COUNT <= MODULE_PROGRAM_ID_ALIGNMENT);
         VERIFY(programModules.size() == 0);
@@ -102,8 +117,10 @@ void Context::initialize(std::span<const ModuleImport> imports) {
         VERIFY(thisOutput.programIdEnd == 0);
         programModules.push_back(thisModule());
         thisOutput.programIdOffsets.push_back(0);
-        for (int_t builtinId = 0; builtinId < (int_t)BuiltinId::COUNT; builtinId++)
+        for (int_t builtinId = 0; builtinId < (int_t)BuiltinId::COUNT; builtinId++) {
             programStorage.allocate();
+            implTable.push_back({});
+        }
         thisOutput.programIdEnd = (uint32_t)BuiltinId::COUNT;
     }
 }
@@ -127,6 +144,16 @@ ModuleImport Context::exportModule() {
     };
 }
 
+void Context::completeSignatureCheck(ProgramHandle progHandle, bool isImpl, Constant selfConstant) {
+    auto* prog = program(progHandle);
+    prog->markSignatureCheckComplete(isImpl, selfConstant);
+    if (isImpl) {
+        auto implOf = prog->baseProgram(selfConstant);
+        VERIFY(implOf.has_value());
+        implTable[implOf.value().id()].push_back(progHandle);
+    }
+}
+
 DeclarationValue Context::pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
     ProgramHandle progHandle = newProgram(kind, name, parseLocation, m_scopeStack.back().value, location);
 
@@ -145,7 +172,6 @@ DeclarationValue Context::pushStaticScope(ProgramKind kind, Word name, parse::To
 
 DeclarationValue Context::pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location) {
     ProgramHandle progHandle = newProgram(kind, Word(), parseLocation, m_scopeStack.back().value, location);
-    m_implDeclarations.push_back(progHandle);
 
     auto scopeProg = try_cast<ScopeProgram>(program(progHandle));
     if (scopeProg.has_value()) {
@@ -209,6 +235,7 @@ namespace {
 ProgramHandle Context::newProgram(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location) {
     auto& state = modules.back();
     VERIFY(programStorage.size() == state.programIdEnd - state.programIdBegin);
+    VERIFY(implTable.size() == state.programIdEnd);
 
     if (isBuiltinModule() && rawParent == globalNamespace()) {
         auto builtinHandle = getBuiltin(name);
@@ -221,6 +248,7 @@ ProgramHandle Context::newProgram(ProgramKind kind, Word name, parse::TokenHandl
     state.programIdEnd += 1;
     auto* prog = programStorage.allocate();
     std::construct_at(prog, kind, name, parseLocation, rawParent, location);
+    implTable.push_back({});
 
     VERIFY(programModules.size() == state.programIdOffsets.size());
     if (result.id() / MODULE_PROGRAM_ID_ALIGNMENT >= (size_t)programModules.size()) {

@@ -404,7 +404,24 @@ fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCa
 template(c: expression_category)
 fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }
 
+template(T: type) static open openGlobalImplTest: bool = false;
+// expect-value @enumValue(bool, true) ;; Note: Required because impl not processed automatically
+static impl openGlobalImplTest{X}: bool = true;
+// expect-value @enumValue(bool, true)
+static examineOpenGlobalImpl1 = openGlobalImplTest{X};
+// expect-value @copyOfOpenGlobal(openGlobalImplTest{A})
+static examineOpenGlobalImpl2 = openGlobalImplTest{A};
+
 template(T: type)
 fn openReturnType() -> return_type: { }
 // expect-type @openReturnType(openReturnType{X})
 static examineOpenReturnType = openReturnType{X}();
+
+// expect-type bool
+static examineLogicalNotExplicit = logical_not(true);
+
+// expect-type bool
+static examineLogicalNotOperator = !true;
+
+// expect-type bool
+static examineLogicalNotFun = !!true;
