@@ -1,0 +1,10 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "SetupExtension",
+            "dependsOrder": "sequence",
+            "dependsOn": ["CMake: build", "npm: compile - vscode"]
+        }
+    ]
+}

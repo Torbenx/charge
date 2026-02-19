@@ -1,15 +1,31 @@
 #include <WordStringTable.h>
+#include <log.h>
+
+#include <parse/parse_impl.h>
+#include <sema/Generator.h>
+
+#include <server/Server.h>
+
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <gtest/gtest.h>
 #include <iostream>
 #include <list>
-#include <log.h>
-#include <parse/parse_impl.h>
 #include <ranges>
-#include <sema/Generator.h>
 #include <vector>
+
+int main(int argc, char** argv) {
+    if (argc >= 2 && std::string_view(argv[1]) == std::string_view("--server")) {
+        server::Server s;
+        s.run();
+        return 0;
+    }
+
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')

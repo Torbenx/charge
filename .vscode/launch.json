@@ -9,9 +9,13 @@
             "name": "Extension",
             "type": "extensionHost",
             "request": "launch",
+            "preLaunchTask": "SetupExtension",
             "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}"
-            ]
+                "--extensionDevelopmentPath=${workspaceFolder}/vscode"
+            ],
+            "env": {
+                "charge_output_directory": "${command:cmake.buildDirectory}"
+            }
         }
     ]
 }
