@@ -9,8 +9,8 @@ namespace server::lsp {
 struct IncomingMessage {
     JSON_OBJECT
     json::RawStringView JSON_MEMBER(jsonrpc) = "2.0";
-    json::IntOrRawStringView JSON_MEMBER(id);
-    json::RawStringView JSON_MEMBER(method);
+    std::optional<json::IntOrRawStringView> JSON_MEMBER(id);
+    std::string JSON_MEMBER(method);
     std::optional<json::RawDataView> JSON_MEMBER(params);
 };
 
@@ -54,8 +54,8 @@ struct ResponseMessage {
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 struct Position {
     JSON_OBJECT
-    uint32_t JSON_MEMBER(line);
-    uint32_t JSON_MEMBER(character);
+    int32_t JSON_MEMBER(line);
+    int32_t JSON_MEMBER(character);
 };
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range

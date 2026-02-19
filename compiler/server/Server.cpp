@@ -64,7 +64,12 @@ struct Hover : Server::Method {
         return ServerCaps {};
     }
 
-    void handleRequest(Server& server) {
+    void handleRequest(Server& server, RequestHandle handle, const Params& params) {
+        server.info("Hover params: {}", json::format(params));
+        HoverResult result;
+        result.contents.kind = lsp::MarkupKind::Markdown;
+        result.contents.value = "Some dummy text";
+        server.completeRequest(handle, result);
     }
 
     bool m_useMarkdown = false;
@@ -87,17 +92,38 @@ struct Tuples<MethodCollection<Ms...>> {
 using ClientCapsTuple = Tuples<Methods>::ClientCaps;
 using ServerCapsTuple = Tuples<Methods>::ServerCaps;
 
+template<typename M>
+concept MethodIsRequest = requires { typename M::Result; };
+template<typename M>
+concept MethodHasParams = requires { typename M::Params; };
+template<typename M>
+void forwardHandleMessage(Server::Method& method, Server& server, RequestHandle handle, json::RawDataView params) {
+    if constexpr (MethodIsRequest<M>) {
+        VERIFY(handle.valid());
+        if constexpr (MethodHasParams<M>)
+            static_cast<M&>(method).handleRequest(server, handle, json::parse<typename M::Params>(params));
+        else
+            static_cast<M&>(method).handleRequest(server, handle);
+    } else {
+        if constexpr (MethodHasParams<M>)
+            static_cast<M&>(method).handleNotification(server, json::parse<typename M::Params>(params));
+        else
+            static_cast<M&>(method).handleNotification(server);
+    }
+}
 template<typename... Ms>
 constexpr auto collectMethodInfos(MethodCollection<Ms...>) {
     std::array<Server::MethodInfo, sizeof...(Ms)> result;
     int_t index = 0;
-    ((result[index++] = { Ms::method, [](Server::Method& method, Server& server) { static_cast<Ms&>(method).handleRequest(server); } }), ...);
+    ((result[index++] = { Ms::method, forwardHandleMessage<Ms> }), ...);
     return result;
 }
+static constexpr auto METHOD_INFOS = collectMethodInfos(Methods());
+static constexpr auto HASH_SOLUTION = json::object_detail::findSolution(json::object_detail::toDataVectors(METHOD_INFOS));
 
-template<json::object_detail::Solution sol, typename M>
+template<typename M>
 void initializeMethod(Server& server, ServerCapsTuple& serverCapsTuple, const ClientCapsTuple& clientCapsTuple) {
-    static constexpr auto tableIndex = json::object_detail::staticEvaluateHash<sol>(M::method);
+    static constexpr auto tableIndex = json::object_detail::staticEvaluateHash<HASH_SOLUTION>(M::method);
     const auto& clientCaps = clientCapsTuple.get<M::clientCapName>();
     if (clientCaps.has_value()) {
         auto method = std::make_unique<M>();
@@ -110,36 +136,28 @@ void initializeMethod(Server& server, ServerCapsTuple& serverCapsTuple, const Cl
     }
 }
 
-template<json::object_detail::Solution sol, typename... Ms>
+template<typename... Ms>
 void initializeMethods(Server& server, ServerCapsTuple& serverCaps, const ClientCapsTuple& clientCaps, MethodCollection<Ms...>) {
-    ((initializeMethod<sol, Ms>(server, serverCaps, clientCaps)), ...);
+    ((initializeMethod<Ms>(server, serverCaps, clientCaps)), ...);
 }
 
-void Server::initialize(const lsp::InitializeParams& initParams) {
-    using namespace json::object_detail;
-    static constexpr auto methodInfos = collectMethodInfos(Methods());
-    static constexpr Solution solution = findSolution(toDataVectors(methodInfos));
-    static constexpr auto jumpTable = buildJumpTable<solution.primeModulo>(solution, methodInfos);
+void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initParams) {
+    static constexpr auto jumpTableBase = json::object_detail::buildJumpTable<HASH_SOLUTION.primeModulo>(HASH_SOLUTION, METHOD_INFOS);
 
     ClientCapsTuple clientCaps;
     ServerCapsTuple serverCaps;
     if (initParams.capabilities.textDocument.has_value())
         clientCaps = json::parse<ClientCapsTuple>(initParams.capabilities.textDocument.value());
 
-    m_jumpTable.assign(jumpTable.begin(), jumpTable.end());
-    initializeMethods<solution>(*this, serverCaps, clientCaps, Methods());
+    m_jumpTable.assign(jumpTableBase.begin(), jumpTableBase.end());
+    initializeMethods(*this, serverCaps, clientCaps, Methods());
 
     std::string serverCapsFmt = json::format(serverCaps);
     lsp::InitializeResult result;
     result.capabilities.data = serverCapsFmt;
-    std::string resultFmt = json::format(result);
-    lsp::ResponseMessage response;
-    response.result = json::RawDataView(resultFmt);
-    response.id.value = json::IntOrRawStringView(0);
-    std::string responseFmt = json::format(response);
+    completeRequest(handle, result);
 
-    std::cout << "Content-Length: " << responseFmt.size() << "\r\n\r\n";
-    std::cout.write(responseFmt.data(), responseFmt.size());
+    m_initialized = true;
 
     // Currently interesting server features are:
     // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
@@ -154,11 +172,54 @@ void Server::initialize(const lsp::InitializeParams& initParams) {
     // - semanticTokens         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
 }
 
+void Server::dispatchMessage(const MethodInfo& method, std::string messageData, lsp::IncomingMessage message) {
+    RequestHandle handle;
+    if (message.id.has_value()) {
+        handle.value = m_openRequests.size();
+        m_openRequests.push_back({ .requestData = std::move(messageData), .requestId = message.id.value() });
+    }
+    method.dispatchFunc(*method.methodImpl, *this, handle, message.params.value_or(json::RawDataView()));
+}
+
+void Server::completeRequestRaw(RequestHandle handle, json::RawDataView result) {
+    lsp::ResponseMessage response;
+    response.result = result;
+    response.id.value = m_openRequests[handle.value].requestId;
+    std::string responseFmt = json::format(response);
+    std::cout << "Content-Length: " << responseFmt.size() << "\r\n\r\n";
+    std::cout.write(responseFmt.data(), responseFmt.size());
+}
+
 void Server::handleMessage(std::string data) {
+    static constexpr MethodInfo INIT_METHOD = {
+        "initialize", [](Method&, Server& server, RequestHandle handle, json::RawDataView params) {
+            VERIFY(handle.valid());
+            server.initialize(handle, json::parse<lsp::InitializeParams>(params));
+        }
+    };
+
     auto message = json::parse<lsp::IncomingMessage>(data);
-    info("Received message id {} with method {}", message.id.getInt(), message.method.data);
-    if (message.method.data == "initialize" && message.params.has_value()) {
-        initialize(json::parse<lsp::InitializeParams>(message.params.value()));
+
+    if (message.id.has_value()) {
+        info("Received request with id {} and method {}", json::format(message.id.value()), message.method);
+    } else {
+        info("Received notification with method {}", message.method);
+    }
+
+    if (!m_initialized) {
+        if (message.method == INIT_METHOD.name) {
+            dispatchMessage(INIT_METHOD, std::move(data), std::move(message));
+        } else if (message.method == "exit") {
+            VERIFY_NOT_REACHED(); // TODO: Support exit
+        } else {
+            VERIFY_NOT_REACHED(); // TODO respond with error
+        }
+        return;
+    }
+
+    const MethodInfo& method = m_jumpTable[json::object_detail::staticEvaluateHash<HASH_SOLUTION>(message.method)];
+    if (method.name == message.method) {
+        dispatchMessage(method, std::move(data), std::move(message));
     }
 }
 

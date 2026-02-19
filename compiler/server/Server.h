@@ -8,21 +8,29 @@ namespace server {
 struct Server;
 
 struct RequestHandle {
-    uint32_t value;
+    uint32_t value = std::numeric_limits<uint32_t>::max();
+
+    constexpr bool valid() const { return value != std::numeric_limits<uint32_t>::max(); }
 };
 
 struct Server {
     struct Method {
         virtual ~Method() = default;
     };
-    using DispatchFunction = void (*)(Method&, Server&);
+    using DispatchFunction = void (*)(Method&, Server&, RequestHandle, json::RawDataView);
     struct MethodInfo {
         std::string_view name = {};
         DispatchFunction dispatchFunc = nullptr;
         Server::Method* methodImpl = nullptr;
     };
 
-    void initialize(const lsp::InitializeParams& initParams);
+    void dispatchMessage(const MethodInfo& method, std::string messageData, lsp::IncomingMessage message);
+    template<typename T>
+    void completeRequest(RequestHandle handle, const T& result) {
+        completeRequestRaw(handle, { json::format(result) });
+    }
+    void completeRequestRaw(RequestHandle handle, json::RawDataView result);
+    void initialize(RequestHandle handle, const lsp::InitializeParams& initParams);
     void run();
     void handleMessage(std::string msg);
 
@@ -39,7 +47,14 @@ struct Server {
         std::cerr << "Info: " << fmt::format(fmtstr, std::forward<Args>(args)...) << '\n';
     }
 
+    struct RequestInfo {
+        std::string requestData; // Must be kept alive for string views
+        json::IntOrRawStringView requestId;
+    };
+
+    bool m_initialized = false;
     std::vector<MethodInfo> m_jumpTable;
+    std::vector<RequestInfo> m_openRequests;
     std::vector<std::unique_ptr<Method>> m_methods;
 };
 
