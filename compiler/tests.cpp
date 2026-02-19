@@ -321,18 +321,18 @@ struct CheckExprParser {
 
 struct ParseErrorHandler : parse::ErrorHandler {
     void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
-        fmt::println("");
-        fmt::println(
+        println("");
+        println(
             "Invalid token '{}' for state '{}' and scope '{}' on line {}",
             parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.parseOutput.lines.size());
-        fmt::println("scopes:");
+        println("scopes:");
         for (;;) {
-            fmt::println("  {}", parse::nameString(*scopes));
+            println("  {}", parse::nameString(*scopes));
             if (*scopes == parse::ScopeKind::Invalid)
                 break;
             scopes -= 1;
         }
-        fmt::println("");
+        println("");
         VERIFY_NOT_REACHED();
     }
 };
@@ -397,7 +397,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
     }
 
     void visitToken(parse::TokenInfo tok) {
-        // fmt::println("L{}: {}", tok.lineNumber(), nameString(tok.kind()));
+        // println("L{}: {}", tok.lineNumber(), nameString(tok.kind()));
 
         if (commandQueue.empty())
             return;
@@ -530,7 +530,7 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
             return;
         }
 
-        fmt::println("-------------------------------");
+        println("-------------------------------");
         program->dump(context);
 
         if (semanticError.has_value()) {
@@ -559,12 +559,12 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
 
     Command popCommand(Word cause) {
         if (commandQueue.empty()) {
-            fmt::println("got error '{}' without pending command", wordTable.view(cause));
+            println("got error '{}' without pending command", wordTable.view(cause));
             VERIFY_NOT_REACHED();
         }
         Command cmd = commandQueue.pop();
         if (cmd.command != cause) {
-            fmt::println("got error '{}' but pending command is '{}'", wordTable.view(cause), wordTable.view(cmd.command));
+            println("got error '{}' but pending command is '{}'", wordTable.view(cause), wordTable.view(cmd.command));
             VERIFY_NOT_REACHED();
         }
         return cmd;
@@ -627,7 +627,7 @@ TEST(Charge, Files) {
         if (entry.path().extension().string() != ".chrg")
             continue;
 
-        fmt::println("File: {}", entry.path().filename().string());
+        println("File: {}", entry.path().filename().string());
         auto sourceBuffer = readFile(entry.path());
 
         TestInstrumenter test(dependencies, sourceBuffer);

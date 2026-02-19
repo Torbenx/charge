@@ -691,7 +691,7 @@ def emitCarriedToken():
 
 def rememberState(state):
     if generateStateDebug:
-        line("fmt::println(\"" + state.name + ": {}\", *tokEnd);")
+        line("println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def collectPossibleThenStatesFromInstructions(instructions, result):
@@ -819,7 +819,7 @@ def recurse(state, check, func):
             generateCaseBody(thenCase, lambda target: recurse(findState(target), check, func))
         line("// -> " + state.thenState)
         if generateStateDebug:
-            line("fmt::println(\" -> " + state.thenState + "\");")
+            line("println(\" -> " + state.thenState + "\");")
         state = findState(state.thenState)
 
 def generateState(state):
@@ -941,7 +941,7 @@ def generateLinearState(state):
     thenCase = state.thenCase()
     def generateThenJump(target):
         if generateStateDebug:
-            line("fmt::println(\" -> " + target + "\");")
+            line("println(\" -> " + target + "\");")
         line("goto " + target + "$as_then;")
     if not thenCase is None:
         generateCaseBody(thenCase, lambda target: generateThenJump(target))

@@ -285,7 +285,7 @@ void Generator::visitStaticVariableDeclaration() {
 
 void Generator::checkStaticVariableImplDeclaration(Constant implOf) {
     auto base = asFoldBase(implOf);
-    fmt::println("checkStaticVariableImplDeclaration: {}", context.wordTable.view(base.program->name()));
+    println("checkStaticVariableImplDeclaration: {}", context.wordTable.view(base.program->name()));
     VERIFY(base.program->kind() == ProgramKind::Global);
     auto* baseProg = cast<GlobalProgram>(base.program);
     auto* implProg = cast<GlobalProgram>(program);

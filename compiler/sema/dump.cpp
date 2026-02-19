@@ -322,7 +322,7 @@ void Dumper::dumpProgram(ProgramHandle progHandle) {
 void Program::dump(Context& context) {
     Dumper dumper { context };
     dumper.dumpProgram(context.programHandle(this));
-    std::cout << dumper.output;
+    print("{}", dumper.output);
 }
 
 }

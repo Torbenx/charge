@@ -10,7 +10,7 @@ namespace {
             s += ", ";
         s += std::to_string(i);
     }
-    fmt::println("{}", s);
+    println("{}", s);
 }
 }
 

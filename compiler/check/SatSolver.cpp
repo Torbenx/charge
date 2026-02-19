@@ -101,7 +101,7 @@ void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) 
         int popcnt = std::popcount(clauseMask);
 
         // solver.dumpClause(solver.clauses[inst.clauseIndex]);
-        // fmt::println("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
+        // println("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
 
         // VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
         clauseMask &= ~literalMask(inst.literalIndex);
@@ -468,8 +468,8 @@ void Solver::addClause(std::vector<Literal> clause) {
     // -> extraClauses >= floor( (clause.size - MAX_CLAUSE_SIZE + MAX_CLAUSE_SIZE - 3) / (MAX_CLAUSE_SIZE - 2)
     int_t extraClauses = ((int_t)clause.size() - 3) / (MAX_CLAUSE_SIZE - 2);
 
-    // fmt::println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
-    // fmt::print("clause: "); dumpClause(clause);
+    // println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
+    // print("clause: "); dumpClause(clause);
 
     int_t takenCount = 0;
     auto take = [&](std::vector<Literal>& into, int_t n) {
@@ -491,12 +491,12 @@ void Solver::addClause(std::vector<Literal> clause) {
         extraClause.push_back(negLit);
         take(extraClause, MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
-        // fmt::print("extra: "); dumpClause(extraClause);
+        // print("extra: "); dumpClause(extraClause);
         m_clauses.addClause(*this, std::move(extraClause));
     }
 
     VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
-    // fmt::print("primary: "); dumpClause(primaryClause);
+    // print("primary: "); dumpClause(primaryClause);
     m_clauses.addClause(*this, std::move(primaryClause));
 
     VERIFY(takenCount == (int_t)clause.size());
@@ -514,9 +514,9 @@ void Solver::decideTrue(Literal literal) {
 void Solver::assignTrue(Literal trueLit, Reason reason) {
     auto& theory = theoryFor(trueLit);
     /*if (reason.isDecision()) {
-        fmt::println("deciding {}", theory.formatValue(*this, trueLit));
+        println("deciding {}", theory.formatValue(*this, trueLit));
     } else {
-        fmt::print("assigning {}, reason: ", theory.formatValue(*this, trueLit));
+        print("assigning {}, reason: ", theory.formatValue(*this, trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
 
@@ -543,7 +543,7 @@ bool Solver::propagate() {
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
         auto& literalTheory = theoryFor(literal);
-        // fmt::println("propagating {}", literalTheory.formatValue(*this, literal));
+        // println("propagating {}", literalTheory.formatValue(*this, literal));
         removeFirstPropagation();
 
         literalTheory.propagateAssignment(*this, literal);
@@ -560,8 +560,8 @@ void Solver::dumpClause(int_t clauseIndex) {
 }
 void Solver::dumpClause(std::span<const Literal> clause) {
     for (auto lit : clause)
-        std::cout << formatValue(lit) << " ";
-    std::cout << '\n';
+        print("{} ", formatValue(lit));
+    println("");
 }
 
 bool Solver::tryLearn(Conflict conflict) {
@@ -639,7 +639,7 @@ bool Solver::tryLearn(Conflict conflict) {
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 newClause.push_back(negate(entry.literal));
-                // fmt::print("learning: "); dumpClause(newClause);
+                // print("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
             }
@@ -829,20 +829,19 @@ void Solver::checkInvariances() {
         TracePosition pos = info.firstReason.value();
         VERIFY(!at(pos).prevReason.has_value());
         VERIFY(at(pos).literal == lit);
-        // std::cout << format(lit) << " (" << info.firstReason.index << " .. " << info.lastReason.index << ")" << ": ";
-        // std::cout << pos.index;
+        // print("{} ({} .. {}): {}", formatValue(lit), info.firstReason->index, info.lastReason->index, pos.index);
 
         while (at(pos).nextReason.has_value()) {
             TracePosition newPos = at(pos).nextReason.value();
             VERIFY(newPos > pos);
-            // std::cout << " -> " << newPos.index;
+            // print(" -> {}", newPos.index);
             VERIFY(at(newPos).literal == lit);
             VERIFY(at(newPos).prevReason.has_value());
             VERIFY(at(newPos).prevReason.value() == pos);
             pos = newPos;
         }
         VERIFY(pos == info.lastReason.value());
-        // std::cout << '\n';
+        // println("");
     };
     for (auto& theory : valueTheories) {
         auto* bTheory = dynamic_cast<BooleanTheory*>(theory);
