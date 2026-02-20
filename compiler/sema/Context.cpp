@@ -23,7 +23,7 @@ void Context::initialize(std::span<const ModuleImport> imports) {
         WordTranslationTable inputToOutputWords;
         WordTranslationTable outputToInputWords;
         input.wordTable->forEachWord([this, &inputToOutputWords, &outputToInputWords](Word inputWord, std::string_view string) {
-            Word outputWord = wordTable.getWithHash(string, inputWord.hash());
+            Word outputWord = tokenBuffer.wordTable.getWithHash(string, inputWord.hash());
             inputToOutputWords.insert(inputWord, outputWord);
             outputToInputWords.insert(outputWord, inputWord);
         });
@@ -136,7 +136,7 @@ ModuleImport Context::exportModule() {
         };
     }
     return {
-        .wordTable = &wordTable,
+        .wordTable = &tokenBuffer.wordTable,
         .modules = std::move(references),
         .ownPrograms = programStorage,
         .programModules = programModules,

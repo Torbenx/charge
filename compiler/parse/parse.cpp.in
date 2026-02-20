@@ -172,7 +172,7 @@ struct WordAndPosition {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
-    Word word = state.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    Word word = state.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
 
@@ -261,7 +261,7 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // println("commitDeclaration {}", state.wordTable.view(name));
+    // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
@@ -280,7 +280,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 }
 
 static void endDeclaration(ParseState& state) {
-    // println("endDeclaration {}", state.wordTable.view(state.currentScope()->name()));
+    // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
     state.popScope();
 }
 

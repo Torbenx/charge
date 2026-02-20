@@ -757,7 +757,7 @@ def collectKeywordCases(state):
 def generateWordCase(state):
     readWord()
     # Keywords
-    line("if (sema::isKeyword(this_identifier)) {")
+    line("if (isKeyword(this_identifier)) {")
     with indent():
         if state.keywordCases():
             labelLine("LABEL_MAYBE_UNUSED " + state.name + "$keyword_check:")
@@ -774,7 +774,7 @@ def generateWordCase(state):
 
     labelLine("LABEL_MAYBE_UNUSED " + state.name + "$identifier_case:")
     # Special identifiers
-    line("if (sema::isSpecialIdentifier(this_identifier)) {")
+    line("if (isSpecialIdentifier(this_identifier)) {")
     with indent():
         s = state
         seenIdentifierState = None

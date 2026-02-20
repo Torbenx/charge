@@ -1,8 +1,9 @@
 #pragma once
 
 #include <PageBumpAllocator.h>
-#include <parse/parse_gen.h>
+#include <parse/IdentifierTable.h>
 #include <parse/Token.h>
+#include <parse/parse_gen.h>
 
 #include <utility>
 #include <vector>
@@ -35,6 +36,7 @@ struct TokenBuffer {
     PageBumpAllocator<TokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
+    IdentifierTable wordTable { words };
     std::vector<Word> callArguments;
     std::string_view source;
     TokenBuffer(std::string_view source)

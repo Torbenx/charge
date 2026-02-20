@@ -61,8 +61,10 @@ std::strong_ordering Util::compare(ProgramHandle a, ProgramHandle b) {
 
 std::strong_ordering Util::compare(NamespaceHandle a, NamespaceHandle b) {
     // TODO: This both slow and not very nice since it does not consider nesting
-    ModuleHandle m = context.moduleOf(programHandle);
-    auto nameOrdering = context.wordTable.view(context.getNamespace(context.translate(m, a))->name) <=> context.wordTable.view(context.getNamespace(context.translate(m, b))->name);
+    auto getName = [this, m = context.moduleOf(programHandle)](NamespaceHandle nsHandle) {
+        return context.tokenBuffer.wordTable.view(context.getNamespace(context.translate(m, nsHandle))->name);
+    };
+    auto nameOrdering = getName(a) <=> getName(b);
     if (nameOrdering != 0)
         return nameOrdering;
 

@@ -243,7 +243,7 @@ struct CheckExprParser {
     NestedName readNestedName() {
         NestedName result;
         for (;;) {
-            result.parts.push_back(context.wordTable.get(readId()));
+            result.parts.push_back(context.tokenBuffer.wordTable.get(readId()));
             if (!buffer.starts_with("::"))
                 break;
             consume("::");
@@ -289,7 +289,7 @@ struct CheckExprParser {
                 consume(",");
                 auto valueName = readId();
                 consume(")");
-                return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.wordTable.get(valueName));
+                return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.tokenBuffer.wordTable.get(valueName));
             }
             if (id == "copyOfOpenGlobal") {
                 consume("(");
@@ -414,7 +414,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
             EXPECT_EQ(tok.kind(), parse::TokenKind::IdentifierExpr);
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    EXPECT_EQ(pair.value, context.wordTable.view(tok.data1<Word>()));
+                    EXPECT_EQ(pair.value, context.tokenBuffer.wordTable.view(tok.data1<Word>()));
                 else
                     invalidKey(&cmd, &pair);
             }
@@ -534,7 +534,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
         program->dump(context);
 
         if (semanticError.has_value()) {
-            FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.wordTable.view(context.program(semanticError->prog)->name());
+            FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.tokenBuffer.wordTable.view(context.program(semanticError->prog)->name());
             return;
         }
 

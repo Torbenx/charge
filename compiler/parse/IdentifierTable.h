@@ -2,7 +2,7 @@
 
 #include <WordStringTable.h>
 
-namespace sema {
+namespace parse {
 
 inline constexpr size_t KEYWORD_WORD_ID = 0;
 inline constexpr size_t SPECIAL_IDENTIFIER_WORD_ID = 1;

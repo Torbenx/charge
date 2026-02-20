@@ -172,7 +172,7 @@ struct WordAndPosition {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
-    Word word = state.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    Word word = state.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
 
@@ -261,7 +261,7 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // println("commitDeclaration {}", state.wordTable.view(name));
+    // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
         return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
@@ -280,7 +280,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 }
 
 static void endDeclaration(ParseState& state) {
-    // println("endDeclaration {}", state.wordTable.view(state.currentScope()->name()));
+    // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
     state.popScope();
 }
 
@@ -942,7 +942,7 @@ expression$word_case_entry:
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (sema::isKeyword(this_identifier)) {
+    if (isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED expression$keyword_check:
         if (this_identifier == words["if"]) {
             // pushScope ScopeKind::IfExpr
@@ -954,7 +954,7 @@ expression$word_case_entry:
         goto error$keyword_check;
     }
 LABEL_MAYBE_UNUSED expression$identifier_case:
-    if (sema::isSpecialIdentifier(this_identifier)) {
+    if (isSpecialIdentifier(this_identifier)) {
     }
     // emitToken TokenKind::IdentifierExpr, this_identifier
     checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
@@ -1897,12 +1897,12 @@ after_expression$word_case_entry:
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (sema::isKeyword(this_identifier)) {
+    if (isKeyword(this_identifier)) {
         // -> error
         goto error$keyword_check;
     }
 LABEL_MAYBE_UNUSED after_expression$identifier_case:
-    if (sema::isSpecialIdentifier(this_identifier)) {
+    if (isSpecialIdentifier(this_identifier)) {
     }
     // -> error
     goto error$identifier_case;
@@ -1998,7 +1998,7 @@ comma_after_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED comma_after_expression$keyword_check:
             if (this_identifier == words["else"]) {
                 // next comma_else
@@ -2077,7 +2077,7 @@ comma_after_expression$no_emit:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED comma_after_expression$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // ifScope ScopeKind::Parameter
         if (scopePosition[0] == ScopeKind::Parameter) {
@@ -2254,12 +2254,12 @@ check_designated_argument$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> expression
             goto expression$keyword_check;
         }
     LABEL_MAYBE_UNUSED check_designated_argument$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // argumentName = this_identifier
         argumentName = this_identifier;
@@ -2371,12 +2371,12 @@ access_punctuation$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED access_punctuation$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken tokenKind, this_identifier
         checkLexToken(tokenKind, LexerToken::Identifier);
@@ -2424,7 +2424,7 @@ after_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_statement$keyword_check:
             if (this_identifier == words["else"]) {
                 // popScope ScopeKind::IfBranch
@@ -2515,7 +2515,7 @@ after_statement$no_emit:
             goto statement$keyword_check;
         }
     LABEL_MAYBE_UNUSED after_statement$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // ifScope ScopeKind::FunctionBody
         if (scopePosition[0] == ScopeKind::FunctionBody) {
@@ -3298,7 +3298,7 @@ statement$word_case_entry:
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (sema::isKeyword(this_identifier)) {
+    if (isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED statement$keyword_check:
         if (this_identifier == words["if"]) {
             // pushScope ScopeKind::LeftExpr
@@ -3352,7 +3352,7 @@ statement$word_case_entry:
         goto expression$keyword_check;
     }
 LABEL_MAYBE_UNUSED statement$identifier_case:
-    if (sema::isSpecialIdentifier(this_identifier)) {
+    if (isSpecialIdentifier(this_identifier)) {
     }
     // pushScope ScopeKind::LeftExpr
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3370,12 +3370,12 @@ let_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED let_statement$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
@@ -3398,12 +3398,12 @@ var_statement$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED var_statement$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
@@ -3599,7 +3599,7 @@ variable_type$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::UniqueReference
@@ -3625,7 +3625,7 @@ variable_type$no_emit:
             goto expression$keyword_check;
         }
     LABEL_MAYBE_UNUSED variable_type$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -3720,7 +3720,7 @@ after_variable_unique_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
@@ -3735,7 +3735,7 @@ after_variable_unique_modifier$no_emit:
             goto expression$keyword_check;
         }
     LABEL_MAYBE_UNUSED after_variable_unique_modifier$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
@@ -3757,7 +3757,7 @@ after_variable_shared_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
@@ -3772,7 +3772,7 @@ after_variable_shared_modifier$no_emit:
             goto expression$keyword_check;
         }
     LABEL_MAYBE_UNUSED after_variable_shared_modifier$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
@@ -3794,7 +3794,7 @@ after_variable_const_modifier$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_variable_const_modifier$keyword_check:
             if (this_identifier == words["shared"]) {
                 // next after_variable_modifier
@@ -3813,7 +3813,7 @@ after_variable_const_modifier$no_emit:
             goto expression$keyword_check;
         }
     LABEL_MAYBE_UNUSED after_variable_const_modifier$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
@@ -3892,7 +3892,7 @@ parameter$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED parameter$keyword_check:
             if (this_identifier == words["var"]) {
                 // next var_parameter
@@ -3902,7 +3902,7 @@ parameter$as_then:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED parameter$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
         checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
@@ -3925,12 +3925,12 @@ var_parameter$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED var_parameter$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
         checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
@@ -3966,12 +3966,12 @@ impl_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED impl_expression$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::IdentifierExpr, this_identifier
         checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
@@ -4091,12 +4091,12 @@ impl_access_expression$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED impl_access_expression$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::StaticAccessExpr, this_identifier
         checkLexToken(TokenKind::StaticAccessExpr, LexerToken::Identifier);
@@ -4144,12 +4144,12 @@ namespace_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
     LABEL_MAYBE_UNUSED namespace_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["namespace"]) {
                 // next namespace_declaration_id
                 goto namespace_declaration_id$no_emit;
@@ -4226,12 +4226,12 @@ namespace_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED namespace_declaration_id$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // rememberDeclarationBegin
         declarationBegin = state.tokenBuffer.currentToken();
@@ -4288,7 +4288,7 @@ templated_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED templated_declaration$keyword_check:
             if (this_identifier == words["static"]) {
                 // rememberDeclarationBegin
@@ -4301,7 +4301,7 @@ templated_declaration$as_then:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED templated_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.tokenBuffer.currentToken();
@@ -4372,7 +4372,7 @@ templated_declaration_with_attributes$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED templated_declaration_with_attributes$keyword_check:
             if (this_identifier == words["static"]) {
                 // next after_static
@@ -4382,7 +4382,7 @@ templated_declaration_with_attributes$as_then:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED templated_declaration_with_attributes$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
@@ -4459,7 +4459,7 @@ function_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED function_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Function
@@ -4477,7 +4477,7 @@ function_declaration_id$no_emit:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED function_declaration_id$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Function, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
@@ -4563,7 +4563,7 @@ struct_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED struct_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Struct
@@ -4581,7 +4581,7 @@ struct_declaration_id$no_emit:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED struct_declaration_id$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Struct, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
@@ -4641,12 +4641,12 @@ member_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
     LABEL_MAYBE_UNUSED member_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["has"]) {
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
@@ -4741,7 +4741,7 @@ enum_declaration_id$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED enum_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Enum
@@ -4759,7 +4759,7 @@ enum_declaration_id$no_emit:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED enum_declaration_id$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Enum, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
@@ -4819,12 +4819,12 @@ enum_value_declaration$as_then:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> templated_declaration
             goto templated_declaration$keyword_check;
         }
     LABEL_MAYBE_UNUSED enum_value_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
@@ -4941,7 +4941,7 @@ after_static$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
         LABEL_MAYBE_UNUSED after_static$keyword_check:
             if (this_identifier == words["var"]) {
                 // next static_var_variable_declaration
@@ -4963,7 +4963,7 @@ after_static$no_emit:
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED after_static$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["open"]) {
                 // next static_open_variable_declaration
                 goto static_open_variable_declaration$no_emit;
@@ -4994,12 +4994,12 @@ static_var_variable_declaration$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED static_var_variable_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
@@ -5026,12 +5026,12 @@ static_open_variable_declaration$no_emit:
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
-        if (sema::isKeyword(this_identifier)) {
+        if (isKeyword(this_identifier)) {
             // -> error
             goto error$keyword_check;
         }
     LABEL_MAYBE_UNUSED static_open_variable_declaration$identifier_case:
-        if (sema::isSpecialIdentifier(this_identifier)) {
+        if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
@@ -5493,7 +5493,7 @@ error$word_case_entry:
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
-    if (sema::isKeyword(this_identifier)) {
+    if (isKeyword(this_identifier)) {
     LABEL_MAYBE_UNUSED error$keyword_check:
         if (this_identifier == words["assert"]) {
             // error
@@ -5603,7 +5603,7 @@ error$word_case_entry:
         VERIFY_NOT_REACHED();
     }
 LABEL_MAYBE_UNUSED error$identifier_case:
-    if (sema::isSpecialIdentifier(this_identifier)) {
+    if (isSpecialIdentifier(this_identifier)) {
     }
     // error
     errorToken = LexerToken::Identifier;

@@ -2,7 +2,6 @@
 
 #include <WordTranslationTable.h>
 #include <parse/TokenBuffer.h>
-#include <sema/IdentifierTable.h>
 #include <sema/Program.h>
 #include <sema/Scope.h>
 
@@ -27,7 +26,7 @@ struct ModuleImport {
         uint32_t programIdEnd;
     };
 
-    const IdentifierTable* wordTable;
+    const parse::IdentifierTable* wordTable;
     std::vector<ModuleReference> modules;
     std::span<ProgramUnion> ownPrograms;
     std::span<const ModuleHandle> programModules; // TODO: This could be easily computed from the program id ranges
@@ -46,7 +45,6 @@ struct Context {
     };
 
     parse::TokenBuffer tokenBuffer;
-    IdentifierTable wordTable { parse::words };
     std::vector<ModuleHandle> programModules;
     PageBumpAllocator<ProgramUnion> programStorage;
     PageBumpAllocator<Namespace> namespaces;

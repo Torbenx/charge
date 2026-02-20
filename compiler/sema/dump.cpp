@@ -50,7 +50,7 @@ struct Dumper {
         if (prog->isImpl())
             name = "(impl " + formatConstant(progHandle, (Constant)prog->selfConstant()) + ")";
         else
-            name = context.wordTable.view(prog->name());
+            name = context.tokenBuffer.wordTable.view(prog->name());
         auto parent = context.translate(progHandle, prog->parent());
         if (parent.kind() == DeclarationValueKind::Program)
             return formatProgram(parent.program()) + "::" + name;
@@ -65,10 +65,10 @@ struct Dumper {
         Namespace* ns = context.getNamespace(Constant(nsHandle).nsHandle());
         if (ns->name.empty())
             return {};
-        std::string name(context.wordTable.view(ns->name));
+        std::string name(context.tokenBuffer.wordTable.view(ns->name));
         ns = context.getNamespace(ns->parent.value());
         while (!ns->name.empty()) {
-            name = std::string(context.wordTable.view(ns->name)) + "::" + name;
+            name = std::string(context.tokenBuffer.wordTable.view(ns->name)) + "::" + name;
             ns = context.getNamespace(ns->parent.value());
         }
         return name;
@@ -195,7 +195,7 @@ struct Dumper {
             if (member.isHas())
                 result += "(has " + formatConstant(progHandle, link.memberType) + ")";
             else
-                result += context.wordTable.view(member.name());
+                result += context.tokenBuffer.wordTable.view(member.name());
         }
         return result;
     }
@@ -308,7 +308,7 @@ void Dumper::dumpProgram(ProgramHandle progHandle) {
         case ConstantKind::EnumValue: {
             auto enumValue = program->getEnumValue(value);
             auto* enumProg = cast<EnumProgram>(context.program(program->baseProgram(enumValue.enumType).value()));
-            line << formatConstant((Constant)enumValue.enumType) << "::" << context.wordTable.view(enumProg->values[enumValue.valueIndex].name());
+            line << formatConstant((Constant)enumValue.enumType) << "::" << context.tokenBuffer.wordTable.view(enumProg->values[enumValue.valueIndex].name());
             break;
         }
         default:
