@@ -240,7 +240,7 @@ std::optional<DeductionState> Generator::resolveImplicitImplTarget() {
 void Generator::addParameterizeArguments(DeductionState& state, int_t firstParameterIndex) {
     VERIFY(firstParameterIndex >= state.program->inheritedParameterCount);
     VERIFY(tok->kind() == Token::Parameterize);
-    auto argumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
+    auto argumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
 
     int_t parameterCount = state.arguments.size();
@@ -680,7 +680,7 @@ void Generator::generateMemberAccessExpr() {
     if (tok->kind() != Token::CallExpr)
         error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
     TokenInfo* callToken = tok;
-    auto callArgumentNames = context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>());
+    auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));

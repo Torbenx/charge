@@ -122,34 +122,31 @@ static void updateCallArgument(Word* position, Word name) {
 
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
-    auto& outputArgs = state.parseOutput.callArguments;
-    CallArgumentsHandle handle { (uint32_t)outputArgs.size() };
-    outputArgs.push_back(position[0]);
-    outputArgs.insert(outputArgs.end(), position - count, position);
+    auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.parseOutput.tokens[position[1].toUint()].setData1(handle);
+    state.tokenBuffer.tokens[position[1].toUint()].setData1(handle);
     return position;
 }
 
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
     return {
         0u,
-        (uint32_t)state.parseOutput.lines.size() - 1,
-        (uint32_t)(position - state.parseOutput.lines.back().begin)
+        (uint32_t)state.tokenBuffer.lines.size() - 1,
+        (uint32_t)(position - state.tokenBuffer.lines.back().begin)
     };
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
 NO_INLINE static void discardLastToken(ParseState& state) {
-    state.parseOutput.tokens.pop_back();
+    state.tokenBuffer.tokens.pop_back();
 }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
-    uint32_t tokenIndex = state.parseOutput.tokens.size();
-    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
+    uint32_t tokenIndex = state.tokenBuffer.tokens.size();
+    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
 
     auto index = ArgumentBuffer::toIndex(argPos);
     VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -160,7 +157,7 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
 }
 
 NO_INLINE static void markLineBegin(const char* position, ParseState& state) {
-    state.parseOutput.lines.push_back({ position });
+    state.tokenBuffer.lines.push_back({ position });
 }
 
 struct WordAndPosition {
@@ -210,7 +207,7 @@ struct WordAndPosition {
 };
 
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
-    state.parseOutput.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+    state.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
 }
 
 [[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
@@ -3437,8 +3434,8 @@ after_return$no_emit:
             scopePosition = result;
         }
         // updateKind TokenKind::EmptyReturnStmt
-        checkTokenUpdate(state.parseOutput.tokens.back().kind(), TokenKind::EmptyReturnStmt);
-        state.parseOutput.tokens.back().setKind(TokenKind::EmptyReturnStmt);
+        checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), TokenKind::EmptyReturnStmt);
+        state.tokenBuffer.tokens.back().setKind(TokenKind::EmptyReturnStmt);
         // next after_statement
         goto after_statement$no_emit;
     }
@@ -3585,7 +3582,7 @@ variable_type$no_emit:
         if (next != '<' && next != '=') {
             tokEnd += 1;
             // updateData sema::VariableKind::Generic
-            state.parseOutput.tokens.back().setData1(sema::VariableKind::Generic);
+            state.tokenBuffer.tokens.back().setData1(sema::VariableKind::Generic);
             // pushScope ScopeKind::GenericCategoryExpression
             scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
             // emitToken TokenKind::VariableGenericCategory
@@ -3606,19 +3603,19 @@ variable_type$no_emit:
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::UniqueReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::UniqueReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::UniqueReference);
                 // next after_variable_unique_modifier
                 goto after_variable_unique_modifier$no_emit;
             }
             if (this_identifier == words["shared"]) {
                 // updateData sema::VariableKind::SharedReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::SharedReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::SharedReference);
                 // next after_variable_shared_modifier
                 goto after_variable_shared_modifier$no_emit;
             }
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
                 // next after_variable_const_modifier
                 goto after_variable_const_modifier$no_emit;
             }
@@ -3727,7 +3724,7 @@ after_variable_unique_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3764,7 +3761,7 @@ after_variable_shared_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3805,7 +3802,7 @@ after_variable_const_modifier$no_emit:
             }
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.parseOutput.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
+                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -4160,7 +4157,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4171,7 +4168,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4182,7 +4179,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4193,21 +4190,21 @@ namespace_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
@@ -4237,7 +4234,7 @@ namespace_declaration_id$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // rememberDeclarationBegin
-        declarationBegin = state.parseOutput.currentToken();
+        declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Namespace, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::NamespaceDecl, this_declaration
@@ -4295,7 +4292,7 @@ templated_declaration$as_then:
         LABEL_MAYBE_UNUSED templated_declaration$keyword_check:
             if (this_identifier == words["static"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next after_static
                 goto after_static$no_emit;
             }
@@ -4307,7 +4304,7 @@ templated_declaration$as_then:
         if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4317,7 +4314,7 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["incomplete"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4327,7 +4324,7 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["virtual"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4337,19 +4334,19 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["fn"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
@@ -4654,7 +4651,7 @@ member_declaration$as_then:
                 // pushScope ScopeKind::HasTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // commitDeclaration DeclarationKind::HasMember
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
                 // emitToken TokenKind::HasMemberDecl, this_declaration
@@ -4667,7 +4664,7 @@ member_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4678,7 +4675,7 @@ member_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4689,7 +4686,7 @@ member_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4700,27 +4697,27 @@ member_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
         }
         // rememberDeclarationBegin
-        declarationBegin = state.parseOutput.currentToken();
+        declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Member, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::MemberDecl, this_declaration
@@ -4831,7 +4828,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4842,7 +4839,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4853,7 +4850,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4864,27 +4861,27 @@ enum_value_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.parseOutput.currentToken();
+                declarationBegin = state.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
         }
         // rememberDeclarationBegin
-        declarationBegin = state.parseOutput.currentToken();
+        declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::EnumValue, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
@@ -4909,8 +4906,8 @@ after_enum_value_declaration_id$no_emit:
         if (next != '=' && next != '>') {
             tokEnd += 1;
             // updateKind TokenKind::ExplicitEnumValueDecl
-            checkTokenUpdate(state.parseOutput.tokens.back().kind(), TokenKind::ExplicitEnumValueDecl);
-            state.parseOutput.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
+            checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), TokenKind::ExplicitEnumValueDecl);
+            state.tokenBuffer.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AssignStmt

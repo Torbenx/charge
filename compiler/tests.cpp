@@ -324,7 +324,7 @@ struct ParseErrorHandler : parse::ErrorHandler {
         println("");
         println(
             "Invalid token '{}' for state '{}' and scope '{}' on line {}",
-            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.parseOutput.lines.size());
+            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.tokenBuffer.lines.size());
         println("scopes:");
         for (;;) {
             println("  {}", parse::nameString(*scopes));
@@ -337,7 +337,7 @@ struct ParseErrorHandler : parse::ErrorHandler {
     }
 };
 
-struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHandler, sema::ErrorHandler {
+struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErrorHandler, sema::ErrorHandler {
     struct Pair {
         Word key;
         std::string_view value;
@@ -388,10 +388,10 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
 
     void visitWhitespace(parse::WhitespaceInfo info) {
         if (info.tag() == parse::WhitespaceKind::LineComment) {
-            handleComment(info, context.parseOutput.whitespaceSpelling(info).substr(2));
+            handleComment(info, context.tokenBuffer.whitespaceSpelling(info).substr(2));
         }
         if (info.tag() == parse::WhitespaceKind::BlockComment) {
-            auto spelling = context.parseOutput.whitespaceSpelling(info);
+            auto spelling = context.tokenBuffer.whitespaceSpelling(info);
             handleComment(info, spelling.substr(2, spelling.length() - 4));
         }
     }
@@ -422,10 +422,10 @@ struct TestInstrumenter : parse::OutputVisitor<TestInstrumenter>, ParseErrorHand
     }
 
     void runTest() {
-        parse::parseImpl(context.parseOutput.source.data(), context, this);
+        parse::parseImpl(context.tokenBuffer.source.data(), context, this);
         VERIFY(context.m_scopeStack.size() == 1);
 
-        visit(context.parseOutput);
+        visit(context.tokenBuffer);
     }
 
     void handleComment(parse::WhitespaceInfo whitespace, std::string_view comment) {
@@ -644,7 +644,7 @@ TEST(Charge, DISABLED_Benchmark) {
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
-        parse::parseImpl(context.parseOutput.source.data(), context, nullptr);
+        parse::parseImpl(context.tokenBuffer.source.data(), context, nullptr);
         VERIFY(context.m_scopeStack.size() == 1);
     }
 }

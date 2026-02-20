@@ -1,4 +1,4 @@
-#include <parse/Output.h>
+#include <parse/TokenBuffer.h>
 
 namespace parse {
 

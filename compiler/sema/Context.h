@@ -1,7 +1,7 @@
 #pragma once
 
 #include <WordTranslationTable.h>
-#include <parse/Output.h>
+#include <parse/TokenBuffer.h>
 #include <sema/IdentifierTable.h>
 #include <sema/Program.h>
 #include <sema/Scope.h>
@@ -45,7 +45,7 @@ struct Context {
         std::vector<NamespaceHandle> namespaces;
     };
 
-    parse::Output parseOutput;
+    parse::TokenBuffer tokenBuffer;
     IdentifierTable wordTable { parse::words };
     std::vector<ModuleHandle> programModules;
     PageBumpAllocator<ProgramUnion> programStorage;
@@ -60,7 +60,7 @@ struct Context {
     ErrorHandler* errorHandler = nullptr;
 
     Context(std::span<const ModuleImport> imports, std::string_view source)
-        : parseOutput(source) {
+        : tokenBuffer(source) {
         initialize(imports);
     }
     void initialize(std::span<const ModuleImport>);

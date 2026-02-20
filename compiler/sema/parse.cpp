@@ -8,7 +8,7 @@ Generator::Generator(Context& context, ProgramHandle handle)
     : Util(context, handle) { }
 
 void Generator::setParseLocation(parse::TokenHandle parseLocation) {
-    tok = context.parseOutput.tokens.data() + parseLocation.id();
+    tok = context.tokenBuffer.tokenPtr(parseLocation);
 }
 
 void Generator::clearParseLocation() {
@@ -285,7 +285,6 @@ void Generator::visitStaticVariableDeclaration() {
 
 void Generator::checkStaticVariableImplDeclaration(Constant implOf) {
     auto base = asFoldBase(implOf);
-    println("checkStaticVariableImplDeclaration: {}", context.wordTable.view(base.program->name()));
     VERIFY(base.program->kind() == ProgramKind::Global);
     auto* baseProg = cast<GlobalProgram>(base.program);
     auto* implProg = cast<GlobalProgram>(program);
@@ -726,7 +725,7 @@ std::optional<DeductionState> Generator::processPostfixExpr() {
             deductionState = generateParameterizeExpr();
         } else if (tok->kind() == Token::CallExpr) {
             if (!deductionState.has_value()) {
-                deductionState = resolveCallTarget(context.parseOutput.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
+                deductionState = resolveCallTarget(context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
             }
             generateCallExpr(std::move(deductionState.value()));
             deductionState.reset();

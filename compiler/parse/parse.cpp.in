@@ -122,34 +122,31 @@ static void updateCallArgument(Word* position, Word name) {
 
 NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
-    auto& outputArgs = state.parseOutput.callArguments;
-    CallArgumentsHandle handle { (uint32_t)outputArgs.size() };
-    outputArgs.push_back(position[0]);
-    outputArgs.insert(outputArgs.end(), position - count, position);
+    auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.parseOutput.tokens[position[1].toUint()].setData1(handle);
+    state.tokenBuffer.tokens[position[1].toUint()].setData1(handle);
     return position;
 }
 
 static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
     return {
         0u,
-        (uint32_t)state.parseOutput.lines.size() - 1,
-        (uint32_t)(position - state.parseOutput.lines.back().begin)
+        (uint32_t)state.tokenBuffer.lines.size() - 1,
+        (uint32_t)(position - state.tokenBuffer.lines.back().begin)
     };
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
 }
 
 NO_INLINE static void discardLastToken(ParseState& state) {
-    state.parseOutput.tokens.pop_back();
+    state.tokenBuffer.tokens.pop_back();
 }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
-    uint32_t tokenIndex = state.parseOutput.tokens.size();
-    state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
+    uint32_t tokenIndex = state.tokenBuffer.tokens.size();
+    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
 
     auto index = ArgumentBuffer::toIndex(argPos);
     VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -160,7 +157,7 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
 }
 
 NO_INLINE static void markLineBegin(const char* position, ParseState& state) {
-    state.parseOutput.lines.push_back({ position });
+    state.tokenBuffer.lines.push_back({ position });
 }
 
 struct WordAndPosition {
@@ -210,7 +207,7 @@ struct WordAndPosition {
 };
 
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
-    state.parseOutput.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+    state.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
 }
 
 [[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {

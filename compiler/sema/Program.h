@@ -1,7 +1,7 @@
 #pragma once
 
 #include <FlatTreeSet.h>
-#include <parse/Output.h>
+#include <parse/TokenBuffer.h>
 #include <sema/Instruction.h>
 #include <sema/Scope.h>
 

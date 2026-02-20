@@ -31,13 +31,13 @@ struct TokenHandle {
     auto operator<=>(const TokenHandle&) const = default;
 };
 
-struct Output {
+struct TokenBuffer {
     PageBumpAllocator<TokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
     std::vector<Word> callArguments;
     std::string_view source;
-    Output(std::string_view source)
+    TokenBuffer(std::string_view source)
         : source(source) {
         reset();
     }
@@ -47,6 +47,16 @@ struct Output {
         lines.clear();
         whitespace.clear();
         lines.push_back({ source.data() });
+    }
+
+    TokenInfo& token(TokenHandle handle) { return tokens[handle.id()]; }
+    TokenInfo* tokenPtr(TokenHandle handle) { return &tokens[handle.id()]; }
+
+    CallArgumentsHandle addCallArguments(std::span<const Word> arguments) {
+        CallArgumentsHandle handle { (uint32_t)callArguments.size() };
+        callArguments.push_back(Word::fromUint(arguments.size()));
+        callArguments.insert(callArguments.end(), arguments.begin(), arguments.end());
+        return handle;
     }
 
     std::span<const Word> argumentNames(CallArgumentsHandle handle) {
@@ -78,12 +88,12 @@ struct Output {
 };
 
 template<typename Impl>
-struct OutputVisitor {
+struct MergedTokenVisitor {
     Impl* impl() { return static_cast<Impl*>(this); }
 
-    void visit(const Output& output) {
-        auto tokenIt = output.tokens.begin();
-        auto whitespaceIt = output.whitespace.begin();
+    void visit(const TokenBuffer& buffer) {
+        auto tokenIt = buffer.tokens.begin();
+        auto whitespaceIt = buffer.whitespace.begin();
         for (;;) {
             auto result = *tokenIt <=> *whitespaceIt;
             if (result < 0) {
@@ -93,7 +103,7 @@ struct OutputVisitor {
                 impl()->visitWhitespace(*whitespaceIt);
                 whitespaceIt += 1;
             } else {
-                VERIFY(tokenIt + 1 == output.tokens.end() && whitespaceIt + 1 == output.whitespace.end());
+                VERIFY(tokenIt + 1 == buffer.tokens.end() && whitespaceIt + 1 == buffer.whitespace.end());
                 break;
             }
         }

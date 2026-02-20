@@ -986,12 +986,12 @@ def generateInstructions(case, instructions, thenHandler):
                 emitToken(inst.tokenKindExpr, "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")")
         elif type(inst) is UpdateKindInstruction:
             if generateLexTokenChecks:
-                line("checkTokenUpdate(state.parseOutput.tokens.back().kind(), " + inst.tokenKindExpr + ");")
-            line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
+                line("checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), " + inst.tokenKindExpr + ");")
+            line("state.tokenBuffer.tokens.back().setKind(" + inst.tokenKindExpr + ");")
         elif type(inst) is DiscardLastTokenInstruction:
             line("discardLastToken(state);")
         elif type(inst) is UpdateDataInstruction:
-            line("state.parseOutput.tokens.back().setData1(" + inst.tokenDataExpr + ");")
+            line("state.tokenBuffer.tokens.back().setData1(" + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
@@ -1041,7 +1041,7 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is CommitImplDeclarationInstruction:
             line("this_declaration = commitImplDeclaration<" + inst.declKindExpr + ">(tokBegin, declarationBegin, state);")
         elif type(inst) is RememberDeclarationBeginInstruction:
-            line("declarationBegin = state.parseOutput.currentToken();")
+            line("declarationBegin = state.tokenBuffer.currentToken();")
         elif type(inst) is EndDeclarationInstruction:
             line("endDeclaration(state);")
         elif type(inst) is EmitCallTokenInstruction:
@@ -1201,7 +1201,7 @@ with open(currentDir / "parse_gen.h", "w") as f:
 # generate .cpp
 generatedLines = []
 outputIndentation = 0
-lineNoIndent("#include <parse/Output.h>")
+lineNoIndent("#include <parse/TokenBuffer.h>")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
