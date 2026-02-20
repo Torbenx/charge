@@ -68,8 +68,8 @@ inline constexpr ConstWordStringTable words {
 enum class LexerToken : uint8_t {
     LeftParen, // (
     RightParen, // )
-    LeftSqure, // [
-    RightSqure, // ]
+    LeftSquare, // [
+    RightSquare, // ]
     LeftBrace, // {
     RightBrace, // }
     Exclaim, // !
@@ -136,9 +136,20 @@ enum class LexerToken : uint8_t {
     Unique, // unique
     Var, // var
     While, // while
+    Enum, // enum
+    Fn, // fn
+    Has, // has
+    Incomplete, // incomplete
+    Namespace, // namespace
+    Open, // open
+    Struct, // struct
+    Template, // template
+    Trait, // trait
+    Virtual, // virtual
     Identifier,
     Literal,
-    EOS
+    EOS,
+    Invalid = 255
 };
 std::string_view nameString(LexerToken);
 

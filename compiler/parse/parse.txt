@@ -312,13 +312,13 @@ LinearState argument() then check_designated_argument
 LinearState check_designated_argument() then expression
     identifier
         argumentName = this_identifier
+        emitToken TokenKind::IdentifierExpr, this_identifier
         next maybe_designated_argument
 LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation =
         updateCallArgument argumentName
+        discardLastToken
         next expression
-    then
-        emitToken TokenKind::IdentifierExpr, argumentName # TODO: Wrong source location
 
 LinearState first_argument_paren() then argument
     punctuation )
@@ -596,6 +596,7 @@ LinearState namespace_declaration_body() then error
 LinearState templated_declaration() then no_declaration
     keyword template
         rememberDeclarationBegin
+        emitToken TokenKind::TemplateAttribute
         next after_template
     keyword incomplete
         rememberDeclarationBegin
@@ -619,6 +620,7 @@ LinearState templated_declaration() then no_declaration
         next after_static
 LinearState templated_declaration_with_attributes() then error
     keyword template
+        emitToken TokenKind::TemplateAttribute
         next after_template
     keyword incomplete
         emitToken TokenKind::IncompleteAttribute
@@ -638,7 +640,6 @@ LinearState templated_declaration_with_attributes() then error
 LinearState after_template() then error
     punctuation (
         pushScope ScopeKind::TemplateParameters
-        emitToken TokenKind::TemplateAttribute
         next first_parameter
 LinearState after_template_parameters() then templated_declaration_with_attributes
 
@@ -666,11 +667,6 @@ LinearState after_function_parameters() then error
         emitToken TokenKind::ReturnType
         next expression
     punctuation =>
-        pushScope ScopeKind::FunctionBody
-        pushScope ScopeKind::RightExpr
-        emitToken TokenKind::BodyExpr
-        next expression
-    punctuation <=>
         pushScope ScopeKind::FunctionBody
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::BodyExpr

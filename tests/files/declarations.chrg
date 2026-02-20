@@ -53,9 +53,6 @@ fn f6() -> type: { }
 // expect-token FunctionDecl; expect-token EmptyNode; expect-token BodyExpr; expect-token IdentifierExpr; expect-token ExpressionStmt;
 fn g1() => value;
 
-// expect-token FunctionDecl; expect-token EmptyNode; expect-token BodyExpr; expect-token IdentifierExpr; expect-token ExpressionStmt;
-fn g2() <=> value;
-
 // expect-token StructDecl
 struct S1: { }
 

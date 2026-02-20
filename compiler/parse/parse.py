@@ -85,7 +85,7 @@ punctuationAlphabet = "".join(sorted({p[0] for p in punctuations}))
 
 def punctuationCppName(punc):
     characterNames = {
-        '(': "LeftParen", ')': "RightParen", '[': "LeftSqure", ']': "RightSqure", '{': "LeftBrace", '}': "RightBrace",
+        '(': "LeftParen", ')': "RightParen", '[': "LeftSquare", ']': "RightSquare", '{': "LeftBrace", '}': "RightBrace",
         '!': "Exclaim", '~': "Tilde", '+': "Plus", '-': "Minus", '*': "Star",
         '&': "Amp", '^': "Hat", '|': "Vert", '/': "Slash", '%': "Percent", '<': "Less", '>': "Greater",
         '=': "Equal", ',': "Comma", '.': "Point", ';': "SemiColon", ':': "Colon"
@@ -195,6 +195,11 @@ class UpdateKindInstruction:
     tokenKindExpr: str
     def format(self):
         return "updateKind " + self.tokenKindExpr
+
+@dataclasses.dataclass
+class DiscardLastTokenInstruction:
+    def format(self):
+        return "discardLastToken"
 
 @dataclasses.dataclass
 class UpdateDataInstruction:
@@ -510,6 +515,9 @@ class Parser:
             elif first == "updateKind":
                 instructions.append(UpdateKindInstruction(self.parseExpr()))
                 self.advanceLine()
+            elif first == "discardLastToken":
+                instructions.append(DiscardLastTokenInstruction())
+                self.advanceLine()
             elif first == "updateData":
                 instructions.append(UpdateDataInstruction(self.parseExpr()))
                 self.advanceLine()
@@ -592,6 +600,7 @@ outputIndentation = 1
 generatedLines = []
 
 generateStateDebug = False
+generateLexTokenChecks = True
 
 def line(line: str = ""):
     generatedLines.append('    ' * outputIndentation + line)
@@ -962,6 +971,9 @@ def generateInstructions(case, instructions, thenHandler):
     for inst in instructions:
         line("// " + inst.format())
         if type(inst) is EmitTokenInstruction:
+            if generateLexTokenChecks:
+                lexToken = "Invalid" if type(case) is ThenCase else case.cppName()
+                line("checkLexToken(" + inst.tokenKindExpr + ", LexerToken::" + lexToken + ");")
             if inst.delayed:
                 line("carriedEmitTokenKind = " + inst.tokenKindExpr + ";")
                 dataExpr = "0"
@@ -973,7 +985,11 @@ def generateInstructions(case, instructions, thenHandler):
             else:
                 emitToken(inst.tokenKindExpr, "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")")
         elif type(inst) is UpdateKindInstruction:
+            if generateLexTokenChecks:
+                line("checkTokenUpdate(state.parseOutput.tokens.back().kind(), " + inst.tokenKindExpr + ");")
             line("state.parseOutput.tokens.back().setKind(" + inst.tokenKindExpr + ");")
+        elif type(inst) is DiscardLastTokenInstruction:
+            line("discardLastToken(state);")
         elif type(inst) is UpdateDataInstruction:
             line("state.parseOutput.tokens.back().setData1(" + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
@@ -1157,11 +1173,12 @@ line("enum class LexerToken : uint8_t {")
 with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + ", // " + punc)
-    for keyword in keywords:
+    for keyword in keywords + specialIdentifiers:
         line(keywordCppName(keyword) + ", // " + keyword)
     line(identifierCppName() + ",")
     line(literalCppName() + ",")
-    line("EOS")
+    line("EOS,")
+    line("Invalid = 255")
 line("};")
 line("std::string_view nameString(LexerToken);")
 lineNoIndent()
@@ -1196,7 +1213,7 @@ with indent():
         line("case LexerToken::" + punctuationCppName(punc) + ":")
         with indent():
             line("return \"" + punctuationCppName(punc) + "\";")
-    for keyword in keywords:
+    for keyword in keywords + specialIdentifiers:
         line("case LexerToken::" + keywordCppName(keyword) + ":")
         with indent():
             line("return \"" + keywordCppName(keyword) + "\";")
@@ -1209,6 +1226,9 @@ with indent():
     line("case LexerToken::EOS:")
     with indent():
         line("return \"EOS\";")
+    line("case LexerToken::Invalid:")
+    with indent():
+        line("return \"Invalid\";")
     line("default:")
     with indent():
         line("VERIFY_NOT_REACHED();")

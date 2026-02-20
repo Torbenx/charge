@@ -53,6 +53,12 @@ struct PageBumpAllocator {
         std::construct_at(target, t);
     }
 
+    void pop_back() {
+        VERIFY(size() > 0);
+        std::destroy_at(std::prev(end()));
+        offsetBytes -= sizeof(T);
+    }
+
     void clear() {
         std::destroy_n(data(), size());
         offsetBytes = 0;

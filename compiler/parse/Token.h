@@ -2,6 +2,7 @@
 
 #include <WordTable.h>
 #include <sema/Constant.h>
+#include <parse/parse_gen.h>
 #include <types.h>
 
 #include <array>
@@ -11,7 +12,7 @@ namespace parse {
 // ---------------------------- TokenKind ---------------------------
 
 enum class TokenKind : uint8_t {
-#define TOKEN(kind, data1, data2) kind,
+#define TOKEN(kind, lexToken, data1, data2) kind,
 #include <parse/tokens.inc>
 
     COUNT,
@@ -19,6 +20,7 @@ enum class TokenKind : uint8_t {
     LastUnaryExpr = DereferenceExpr,
 };
 std::string_view nameString(TokenKind);
+LexerToken lexerToken(TokenKind);
 inline bool isUnaryExpr(TokenKind kind) {
     return kind >= TokenKind::FirstUnaryExpr && kind <= TokenKind::LastUnaryExpr;
 }
@@ -102,7 +104,7 @@ struct DataTableEntry {
     DataKind data2Kind : 4;
 };
 static_assert(sizeof(DataTableEntry) == 1);
-#define TOKEN(kind, data1, data2) DataTableEntry { DataKind::data1, DataKind::data2 },
+#define TOKEN(kind, lexToken, data1, data2) DataTableEntry { DataKind::data1, DataKind::data2 },
 inline constexpr std::array<DataTableEntry, (size_t)TokenKind::COUNT> tokenDataTable {
 #include <parse/tokens.inc>
 };

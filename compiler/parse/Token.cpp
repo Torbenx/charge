@@ -16,7 +16,7 @@ std::string_view nameString(DataKind kind) {
 
 std::string_view nameString(TokenKind kind) {
     switch (kind) {
-#define TOKEN(kind, data1, data2) \
+#define TOKEN(kind, lexToken, data1, data2) \
     case TokenKind::kind:       \
         return #kind;
 

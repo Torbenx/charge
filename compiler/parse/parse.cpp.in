@@ -1,4 +1,5 @@
 #include <WordTable.h>
+#include <parse/parse_gen.h>
 #include <parse/parse_impl.h>
 #include <utility>
 
@@ -23,6 +24,26 @@ enum class DeclarationKind : uint8_t {
 };
 
 namespace parse {
+
+LexerToken lexerToken(TokenKind semToken) {
+#define TOKEN(kind, lexToken, data1, data) \
+    case TokenKind::kind:                  \
+        return LexerToken::lexToken;
+
+    switch (semToken) {
+#include <parse/tokens.inc>
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
+    auto expected = lexerToken(semToken);
+    VERIFY(expected == LexerToken::Invalid || lexToken == expected);
+}
+static void checkTokenUpdate(TokenKind oldKind, TokenKind newKind) {
+    VERIFY(lexerToken(oldKind) == lexerToken(newKind));
+}
 
 static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -120,6 +141,10 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+}
+
+NO_INLINE static void discardLastToken(ParseState& state) {
+    state.parseOutput.tokens.pop_back();
 }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {

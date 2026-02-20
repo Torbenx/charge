@@ -65,6 +65,16 @@ struct Output {
     TokenHandle currentToken() const {
         return { (uint32_t)tokens.size() };
     }
+
+    std::optional<TokenInfo*> findToken(SourceLocation location) {
+        auto compare = [](const TokenInfo& token, SourceLocation location) {
+            return token.location() < location;
+        };
+        auto it = std::lower_bound(tokens.begin(), tokens.end(), location, compare);
+        if (it == tokens.begin())
+            return it;
+        return std::prev(it);
+    }
 };
 
 template<typename Impl>

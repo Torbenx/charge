@@ -1,4 +1,5 @@
 #include <WordTable.h>
+#include <parse/parse_gen.h>
 #include <parse/parse_impl.h>
 #include <utility>
 
@@ -23,6 +24,26 @@ enum class DeclarationKind : uint8_t {
 };
 
 namespace parse {
+
+LexerToken lexerToken(TokenKind semToken) {
+#define TOKEN(kind, lexToken, data1, data) \
+    case TokenKind::kind:                  \
+        return LexerToken::lexToken;
+
+    switch (semToken) {
+#include <parse/tokens.inc>
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
+    auto expected = lexerToken(semToken);
+    VERIFY(expected == LexerToken::Invalid || lexToken == expected);
+}
+static void checkTokenUpdate(TokenKind oldKind, TokenKind newKind) {
+    VERIFY(lexerToken(oldKind) == lexerToken(newKind));
+}
 
 static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -120,6 +141,10 @@ static SourceLocation locationInCurrentLine(const char* position, ParseState& st
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
     state.parseOutput.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+}
+
+NO_INLINE static void discardLastToken(ParseState& state) {
+    state.parseOutput.tokens.pop_back();
 }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
@@ -441,6 +466,7 @@ expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::LogicalNotExpr
+        checkLexToken(TokenKind::LogicalNotExpr, LexerToken::Exclaim);
         carriedEmitTokenKind = TokenKind::LogicalNotExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -516,6 +542,7 @@ expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::DereferenceExpr
+        checkLexToken(TokenKind::DereferenceExpr, LexerToken::Star);
         carriedEmitTokenKind = TokenKind::DereferenceExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -526,6 +553,7 @@ expression$as_then:
         if (next == '+') {
             tokEnd += 2;
             // emitToken TokenKind::PreIncrementExpr
+            checkLexToken(TokenKind::PreIncrementExpr, LexerToken::PlusPlus);
             carriedEmitTokenKind = TokenKind::PreIncrementExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -540,6 +568,7 @@ expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::PlusExpr
+        checkLexToken(TokenKind::PlusExpr, LexerToken::Plus);
         carriedEmitTokenKind = TokenKind::PlusExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -557,6 +586,7 @@ expression$as_then:
         if (next == '-') {
             tokEnd += 2;
             // emitToken TokenKind::PreDecrementExpr
+            checkLexToken(TokenKind::PreDecrementExpr, LexerToken::MinusMinus);
             carriedEmitTokenKind = TokenKind::PreDecrementExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -578,6 +608,7 @@ expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::NegateExpr
+        checkLexToken(TokenKind::NegateExpr, LexerToken::Minus);
         carriedEmitTokenKind = TokenKind::NegateExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -588,6 +619,7 @@ expression$as_then:
         // tokenKind = TokenKind::MemberAccessExpr
         tokenKind = TokenKind::MemberAccessExpr;
         // emitToken TokenKind::ImplicitSelfReference
+        checkLexToken(TokenKind::ImplicitSelfReference, LexerToken::Point);
         carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
         carriedEmitTokenData = 0;
         // next access_punctuation
@@ -737,14 +769,14 @@ expression$as_then:
         tokEnd += 1;
         // -> error
         // error
-        errorToken = LexerToken::LeftSqure;
+        errorToken = LexerToken::LeftSquare;
         goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // -> error
         // error
-        errorToken = LexerToken::RightSqure;
+        errorToken = LexerToken::RightSquare;
         goto handle_parse_error;
     }
     case '^': {
@@ -809,6 +841,7 @@ expression$as_then:
     case '~': {
         tokEnd += 1;
         // emitToken TokenKind::BitwiseNotExpr
+        checkLexToken(TokenKind::BitwiseNotExpr, LexerToken::Tilde);
         carriedEmitTokenKind = TokenKind::BitwiseNotExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -828,6 +861,7 @@ expression$as_then:
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // emitToken TokenKind::LiteralExpr
+        checkLexToken(TokenKind::LiteralExpr, LexerToken::Literal);
         carriedEmitTokenKind = TokenKind::LiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -838,6 +872,7 @@ expression$as_then:
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
         // emitToken TokenKind::LiteralExpr
+        checkLexToken(TokenKind::LiteralExpr, LexerToken::Literal);
         carriedEmitTokenKind = TokenKind::LiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -925,6 +960,7 @@ LABEL_MAYBE_UNUSED expression$identifier_case:
     if (sema::isSpecialIdentifier(this_identifier)) {
     }
     // emitToken TokenKind::IdentifierExpr, this_identifier
+    checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
     carriedEmitTokenKind = TokenKind::IdentifierExpr;
     carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
     // next after_expression
@@ -958,6 +994,7 @@ after_expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareNotEqualExpr
+            checkLexToken(TokenKind::CompareNotEqualExpr, LexerToken::ExclaimEqual);
             carriedEmitTokenKind = TokenKind::CompareNotEqualExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -985,6 +1022,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::RemainderUpdateStmt
+            checkLexToken(TokenKind::RemainderUpdateStmt, LexerToken::PercentEqual);
             carriedEmitTokenKind = TokenKind::RemainderUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -992,6 +1030,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::RemainderExpr
+        checkLexToken(TokenKind::RemainderExpr, LexerToken::Percent);
         carriedEmitTokenKind = TokenKind::RemainderExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1015,6 +1054,7 @@ after_expression$as_then:
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
                 // emitToken TokenKind::LogicalAndUpdateStmt
+                checkLexToken(TokenKind::LogicalAndUpdateStmt, LexerToken::AmpAmpEqual);
                 carriedEmitTokenKind = TokenKind::LogicalAndUpdateStmt;
                 carriedEmitTokenData = 0;
                 // next expression
@@ -1022,6 +1062,7 @@ after_expression$as_then:
             }
             tokEnd += 2;
             // emitToken TokenKind::LogicalAndExpr
+            checkLexToken(TokenKind::LogicalAndExpr, LexerToken::AmpAmp);
             carriedEmitTokenKind = TokenKind::LogicalAndExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1041,6 +1082,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::BitwiseAndUpdateStmt
+            checkLexToken(TokenKind::BitwiseAndUpdateStmt, LexerToken::AmpEqual);
             carriedEmitTokenKind = TokenKind::BitwiseAndUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1048,6 +1090,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::BitwiseAndExpr
+        checkLexToken(TokenKind::BitwiseAndExpr, LexerToken::Amp);
         carriedEmitTokenKind = TokenKind::BitwiseAndExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1083,6 +1126,7 @@ after_expression$as_then:
                 scopePosition = result;
             }
             // emitToken TokenKind::ExpressionStmt
+            checkLexToken(TokenKind::ExpressionStmt, LexerToken::RightParen);
             carriedEmitTokenKind = TokenKind::ExpressionStmt;
             carriedEmitTokenData = 0;
             // next after_parameters
@@ -1109,6 +1153,7 @@ after_expression$as_then:
                 scopePosition = result;
             }
             // emitToken TokenKind::ExpressionStmt
+            checkLexToken(TokenKind::ExpressionStmt, LexerToken::RightParen);
             carriedEmitTokenKind = TokenKind::ExpressionStmt;
             carriedEmitTokenData = 0;
             // next after_parameters
@@ -1126,6 +1171,7 @@ after_expression$as_then:
                 scopePosition = result;
             }
             // emitToken TokenKind::EmptyNode
+            checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
             carriedEmitTokenKind = TokenKind::EmptyNode;
             carriedEmitTokenData = 0;
             // next after_impl_expression
@@ -1143,6 +1189,7 @@ after_expression$as_then:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1164,6 +1211,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::MultiplyUpdateStmt
+            checkLexToken(TokenKind::MultiplyUpdateStmt, LexerToken::StarEqual);
             carriedEmitTokenKind = TokenKind::MultiplyUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1171,6 +1219,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::MultiplyExpr
+        checkLexToken(TokenKind::MultiplyExpr, LexerToken::Star);
         carriedEmitTokenKind = TokenKind::MultiplyExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1181,6 +1230,7 @@ after_expression$as_then:
         if (next == '+') {
             tokEnd += 2;
             // emitToken TokenKind::PostIncrementExpr
+            checkLexToken(TokenKind::PostIncrementExpr, LexerToken::PlusPlus);
             carriedEmitTokenKind = TokenKind::PostIncrementExpr;
             carriedEmitTokenData = 0;
             // next after_expression
@@ -1200,6 +1250,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AdditionUpdateStmt
+            checkLexToken(TokenKind::AdditionUpdateStmt, LexerToken::PlusEqual);
             carriedEmitTokenKind = TokenKind::AdditionUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1207,6 +1258,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::AdditionExpr
+        checkLexToken(TokenKind::AdditionExpr, LexerToken::Plus);
         carriedEmitTokenKind = TokenKind::AdditionExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1222,6 +1274,7 @@ after_expression$as_then:
         if (next == '-') {
             tokEnd += 2;
             // emitToken TokenKind::PostDecrementExpr
+            checkLexToken(TokenKind::PostDecrementExpr, LexerToken::MinusMinus);
             carriedEmitTokenKind = TokenKind::PostDecrementExpr;
             carriedEmitTokenData = 0;
             // next after_expression
@@ -1241,6 +1294,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::SubtractionUpdateStmt
+            checkLexToken(TokenKind::SubtractionUpdateStmt, LexerToken::MinusEqual);
             carriedEmitTokenKind = TokenKind::SubtractionUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1255,6 +1309,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::SubtractionExpr
+        checkLexToken(TokenKind::SubtractionExpr, LexerToken::Minus);
         carriedEmitTokenKind = TokenKind::SubtractionExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1296,6 +1351,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::DivideUpdateStmt
+            checkLexToken(TokenKind::DivideUpdateStmt, LexerToken::SlashEqual);
             carriedEmitTokenKind = TokenKind::DivideUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1303,6 +1359,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::DivideExpr
+        checkLexToken(TokenKind::DivideExpr, LexerToken::Slash);
         carriedEmitTokenKind = TokenKind::DivideExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1346,6 +1403,7 @@ after_expression$as_then:
             // pushScope ScopeKind::FunctionBody
             scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
             // emitToken TokenKind::FunctionBody
+            checkLexToken(TokenKind::FunctionBody, LexerToken::Colon);
             carriedEmitTokenKind = TokenKind::FunctionBody;
             carriedEmitTokenData = 0;
             // next single_or_compound_statement
@@ -1381,6 +1439,7 @@ after_expression$as_then:
         // pushScope ScopeKind::IfBranch
         scopePosition = pushScope(scopePosition, ScopeKind::IfBranch);
         // emitToken TokenKind::IfStmt
+        checkLexToken(TokenKind::IfStmt, LexerToken::Colon);
         carriedEmitTokenKind = TokenKind::IfStmt;
         carriedEmitTokenData = 0;
         // next single_or_compound_statement
@@ -1400,6 +1459,7 @@ after_expression$as_then:
                 scopePosition = result;
             }
             // emitToken TokenKind::EmptyNode
+            checkLexToken(TokenKind::EmptyNode, LexerToken::SemiColon);
             carriedEmitTokenKind = TokenKind::EmptyNode;
             carriedEmitTokenData = 0;
             // next after_declaration
@@ -1415,6 +1475,7 @@ after_expression$as_then:
             scopePosition = result;
         }
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::SemiColon);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_statement
@@ -1438,6 +1499,7 @@ after_expression$as_then:
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
                 // emitToken TokenKind::ShiftLeftUpdateStmt
+                checkLexToken(TokenKind::ShiftLeftUpdateStmt, LexerToken::LessLessEqual);
                 carriedEmitTokenKind = TokenKind::ShiftLeftUpdateStmt;
                 carriedEmitTokenData = 0;
                 // next expression
@@ -1445,6 +1507,7 @@ after_expression$as_then:
             }
             tokEnd += 2;
             // emitToken TokenKind::ShiftLeftExpr
+            checkLexToken(TokenKind::ShiftLeftExpr, LexerToken::LessLess);
             carriedEmitTokenKind = TokenKind::ShiftLeftExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1461,6 +1524,7 @@ after_expression$as_then:
             }
             tokEnd += 2;
             // emitToken TokenKind::CompareLessEqualExpr
+            checkLexToken(TokenKind::CompareLessEqualExpr, LexerToken::LessEqual);
             carriedEmitTokenKind = TokenKind::CompareLessEqualExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1468,6 +1532,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::CompareLessExpr
+        checkLexToken(TokenKind::CompareLessExpr, LexerToken::Less);
         carriedEmitTokenKind = TokenKind::CompareLessExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1478,6 +1543,7 @@ after_expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareEqualExpr
+            checkLexToken(TokenKind::CompareEqualExpr, LexerToken::EqualEqual);
             carriedEmitTokenKind = TokenKind::CompareEqualExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1495,6 +1561,7 @@ after_expression$as_then:
                 scopePosition = result;
             }
             // emitToken TokenKind::IfExpr
+            checkLexToken(TokenKind::IfExpr, LexerToken::EqualGreater);
             carriedEmitTokenKind = TokenKind::IfExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1513,6 +1580,7 @@ after_expression$as_then:
         // pushScope ScopeKind::RightExpr
         scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
         // emitToken TokenKind::AssignStmt
+        checkLexToken(TokenKind::AssignStmt, LexerToken::Equal);
         carriedEmitTokenKind = TokenKind::AssignStmt;
         carriedEmitTokenData = 0;
         // next expression
@@ -1523,6 +1591,7 @@ after_expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareGreaterEqualExpr
+            checkLexToken(TokenKind::CompareGreaterEqualExpr, LexerToken::GreaterEqual);
             carriedEmitTokenKind = TokenKind::CompareGreaterEqualExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1544,6 +1613,7 @@ after_expression$as_then:
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
                 // emitToken TokenKind::ShiftRightUpdateStmt
+                checkLexToken(TokenKind::ShiftRightUpdateStmt, LexerToken::GreaterGreaterEqual);
                 carriedEmitTokenKind = TokenKind::ShiftRightUpdateStmt;
                 carriedEmitTokenData = 0;
                 // next expression
@@ -1551,6 +1621,7 @@ after_expression$as_then:
             }
             tokEnd += 2;
             // emitToken TokenKind::ShiftRightExpr
+            checkLexToken(TokenKind::ShiftRightExpr, LexerToken::GreaterGreater);
             carriedEmitTokenKind = TokenKind::ShiftRightExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1558,6 +1629,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::CompareGreaterExpr
+        checkLexToken(TokenKind::CompareGreaterExpr, LexerToken::Greater);
         carriedEmitTokenKind = TokenKind::CompareGreaterExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1576,7 +1648,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = LexerToken::RightSqure;
+                errorToken = LexerToken::RightSquare;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -1584,6 +1656,7 @@ after_expression$as_then:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1605,6 +1678,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::BitwiseXorUpdateStmt
+            checkLexToken(TokenKind::BitwiseXorUpdateStmt, LexerToken::HatEqual);
             carriedEmitTokenKind = TokenKind::BitwiseXorUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1612,6 +1686,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::BitwiseXorExpr
+        checkLexToken(TokenKind::BitwiseXorExpr, LexerToken::Hat);
         carriedEmitTokenKind = TokenKind::BitwiseXorExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1640,6 +1715,7 @@ after_expression$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::BitwiseOrUpdateStmt
+            checkLexToken(TokenKind::BitwiseOrUpdateStmt, LexerToken::VertEqual);
             carriedEmitTokenKind = TokenKind::BitwiseOrUpdateStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -1661,6 +1737,7 @@ after_expression$as_then:
                 // pushScope ScopeKind::RightExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
                 // emitToken TokenKind::LogicalOrUpdateStmt
+                checkLexToken(TokenKind::LogicalOrUpdateStmt, LexerToken::VertVertEqual);
                 carriedEmitTokenKind = TokenKind::LogicalOrUpdateStmt;
                 carriedEmitTokenData = 0;
                 // next expression
@@ -1668,6 +1745,7 @@ after_expression$as_then:
             }
             tokEnd += 2;
             // emitToken TokenKind::LogicalOrExpr
+            checkLexToken(TokenKind::LogicalOrExpr, LexerToken::VertVert);
             carriedEmitTokenKind = TokenKind::LogicalOrExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -1675,6 +1753,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // emitToken TokenKind::BitwiseOrExpr
+        checkLexToken(TokenKind::BitwiseOrExpr, LexerToken::Vert);
         carriedEmitTokenKind = TokenKind::BitwiseOrExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -1696,6 +1775,7 @@ after_expression$as_then:
             // endCall
             argumentPosition = endCall(argumentPosition, state);
             // emitToken TokenKind::EmptyNode
+            checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
             carriedEmitTokenKind = TokenKind::EmptyNode;
             carriedEmitTokenData = 0;
             // next after_impl_expression
@@ -1713,6 +1793,7 @@ after_expression$as_then:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1848,6 +1929,7 @@ comma_after_expression$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1859,7 +1941,7 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = LexerToken::RightSqure;
+                errorToken = LexerToken::RightSquare;
                 goto handle_parse_error;
             }
             scopePosition = result;
@@ -1867,6 +1949,7 @@ comma_after_expression$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1888,6 +1971,7 @@ comma_after_expression$no_emit:
             // endCall
             argumentPosition = endCall(argumentPosition, state);
             // emitToken TokenKind::EmptyNode
+            checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
             carriedEmitTokenKind = TokenKind::EmptyNode;
             carriedEmitTokenData = 0;
             // next after_impl_expression
@@ -1905,6 +1989,7 @@ comma_after_expression$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -1948,6 +2033,7 @@ comma_after_expression$no_emit:
                 // pushScope ScopeKind::Parameter
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
                 // emitToken TokenKind::ExpressionStmt
+                checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
                 emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
                 // then parameter
                 goto parameter$keyword_check;
@@ -1973,6 +2059,7 @@ comma_after_expression$no_emit:
                 // pushScope ScopeKind::Parameter
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
                 // emitToken TokenKind::ExpressionStmt
+                checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
                 emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
                 // then parameter
                 goto parameter$keyword_check;
@@ -1983,6 +2070,7 @@ comma_after_expression$no_emit:
                 // callArgument
                 argumentPosition = addCallArgument(argumentPosition, Word());
                 // emitToken TokenKind::CallArgument
+                checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
                 emitToken(TokenKind::CallArgument, tokBegin, 0, state);
                 // -> check_designated_argument
                 // -> expression
@@ -2020,6 +2108,7 @@ comma_after_expression$no_emit:
             // pushScope ScopeKind::Parameter
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
             // emitToken TokenKind::ExpressionStmt
+            checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
             goto parameter$identifier_case;
@@ -2045,6 +2134,7 @@ comma_after_expression$no_emit:
             // pushScope ScopeKind::Parameter
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
             // emitToken TokenKind::ExpressionStmt
+            checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
             emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
             // then parameter
             goto parameter$identifier_case;
@@ -2055,6 +2145,7 @@ comma_after_expression$no_emit:
             // callArgument
             argumentPosition = addCallArgument(argumentPosition, Word());
             // emitToken TokenKind::CallArgument
+            checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
             emitToken(TokenKind::CallArgument, tokBegin, 0, state);
             // -> check_designated_argument
             goto check_designated_argument$identifier_case;
@@ -2088,6 +2179,7 @@ comma_after_expression$no_emit:
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
         emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
         // then parameter
         goto parameter$as_then;
@@ -2113,6 +2205,7 @@ comma_after_expression$no_emit:
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
         emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
         // then parameter
         goto parameter$as_then;
@@ -2133,6 +2226,7 @@ comma_else$no_emit:
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
         // emitToken TokenKind::CommaElseExpr
+        checkLexToken(TokenKind::CommaElseExpr, LexerToken::EqualGreater);
         carriedEmitTokenKind = TokenKind::CommaElseExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -2150,6 +2244,7 @@ argument$as_then:
     // callArgument
     argumentPosition = addCallArgument(argumentPosition, Word());
     // emitToken TokenKind::CallArgument
+    checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
     emitToken(TokenKind::CallArgument, tokBegin, 0, state);
     // then check_designated_argument
     goto check_designated_argument$as_then;
@@ -2171,13 +2266,19 @@ check_designated_argument$as_then:
         }
         // argumentName = this_identifier
         argumentName = this_identifier;
+        // emitToken TokenKind::IdentifierExpr, this_identifier
+        checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
         // next maybe_designated_argument
-        goto maybe_designated_argument$no_emit;
+        goto maybe_designated_argument$with_emit;
     }
     // then expression
     goto expression$as_then;
 
     // LinearState maybe_designated_argument
+maybe_designated_argument$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 maybe_designated_argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -2188,12 +2289,12 @@ maybe_designated_argument$no_emit:
             tokEnd += 1;
             // callArgument argumentName
             updateCallArgument(argumentPosition, argumentName);
+            // discardLastToken
+            discardLastToken(state);
             // next expression
             goto expression$no_emit;
         }
     }
-    // emitToken TokenKind::IdentifierExpr, argumentName
-    emitToken(TokenKind::IdentifierExpr, tokBegin, packData1(TokenKind::IdentifierExpr, argumentName), state);
     // then after_expression
     goto after_expression$as_then;
 
@@ -2207,6 +2308,7 @@ first_argument_paren$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -2227,6 +2329,7 @@ first_argument_square$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -2247,6 +2350,7 @@ first_argument_brace$no_emit:
         // endCall
         argumentPosition = endCall(argumentPosition, state);
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -2278,6 +2382,7 @@ access_punctuation$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken tokenKind, this_identifier
+        checkLexToken(tokenKind, LexerToken::Identifier);
         carriedEmitTokenKind = tokenKind;
         carriedEmitTokenData = packData1(tokenKind, this_identifier);
         // next after_expression
@@ -2300,6 +2405,7 @@ single_or_compound_statement$no_emit:
         // pushScope ScopeKind::PlainStatement
         scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
         // emitToken TokenKind::CompoundStmt
+        checkLexToken(TokenKind::CompoundStmt, LexerToken::LeftBrace);
         carriedEmitTokenKind = TokenKind::CompoundStmt;
         carriedEmitTokenData = 0;
         // next statement
@@ -2552,6 +2658,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::LogicalNotExpr
+        checkLexToken(TokenKind::LogicalNotExpr, LexerToken::Exclaim);
         carriedEmitTokenKind = TokenKind::LogicalNotExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -2657,6 +2764,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::DereferenceExpr
+        checkLexToken(TokenKind::DereferenceExpr, LexerToken::Star);
         carriedEmitTokenKind = TokenKind::DereferenceExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -2670,6 +2778,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // emitToken TokenKind::PreIncrementExpr
+            checkLexToken(TokenKind::PreIncrementExpr, LexerToken::PlusPlus);
             carriedEmitTokenKind = TokenKind::PreIncrementExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -2690,6 +2799,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::PlusExpr
+        checkLexToken(TokenKind::PlusExpr, LexerToken::Plus);
         carriedEmitTokenKind = TokenKind::PlusExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -2713,6 +2823,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // emitToken TokenKind::PreDecrementExpr
+            checkLexToken(TokenKind::PreDecrementExpr, LexerToken::MinusMinus);
             carriedEmitTokenKind = TokenKind::PreDecrementExpr;
             carriedEmitTokenData = 0;
             // next expression
@@ -2743,6 +2854,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::NegateExpr
+        checkLexToken(TokenKind::NegateExpr, LexerToken::Minus);
         carriedEmitTokenKind = TokenKind::NegateExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -2756,6 +2868,7 @@ statement$as_then:
         // tokenKind = TokenKind::MemberAccessExpr
         tokenKind = TokenKind::MemberAccessExpr;
         // emitToken TokenKind::ImplicitSelfReference
+        checkLexToken(TokenKind::ImplicitSelfReference, LexerToken::Point);
         carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
         carriedEmitTokenData = 0;
         // next access_punctuation
@@ -2959,7 +3072,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = LexerToken::LeftSqure;
+        errorToken = LexerToken::LeftSquare;
         goto handle_parse_error;
     }
     case ']': {
@@ -2969,7 +3082,7 @@ statement$as_then:
         // -> expression
         // -> error
         // error
-        errorToken = LexerToken::RightSqure;
+        errorToken = LexerToken::RightSquare;
         goto handle_parse_error;
     }
     case '^': {
@@ -3066,6 +3179,7 @@ statement$as_then:
             scopePosition = result;
         }
         // emitToken TokenKind::EmptyNode
+        checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
         carriedEmitTokenData = 0;
         // next after_statement
@@ -3077,6 +3191,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::BitwiseNotExpr
+        checkLexToken(TokenKind::BitwiseNotExpr, LexerToken::Tilde);
         carriedEmitTokenKind = TokenKind::BitwiseNotExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -3099,6 +3214,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::LiteralExpr
+        checkLexToken(TokenKind::LiteralExpr, LexerToken::Literal);
         carriedEmitTokenKind = TokenKind::LiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -3112,6 +3228,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitToken TokenKind::LiteralExpr
+        checkLexToken(TokenKind::LiteralExpr, LexerToken::Literal);
         carriedEmitTokenKind = TokenKind::LiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
@@ -3206,6 +3323,7 @@ statement$word_case_entry:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::ReturnStmt
+            checkLexToken(TokenKind::ReturnStmt, LexerToken::Return);
             carriedEmitTokenKind = TokenKind::ReturnStmt;
             carriedEmitTokenData = 0;
             // next after_return
@@ -3215,6 +3333,7 @@ statement$word_case_entry:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::DestroyStmt
+            checkLexToken(TokenKind::DestroyStmt, LexerToken::Destroy);
             carriedEmitTokenKind = TokenKind::DestroyStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -3224,6 +3343,7 @@ statement$word_case_entry:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::DiscardStmt
+            checkLexToken(TokenKind::DiscardStmt, LexerToken::Discard);
             carriedEmitTokenKind = TokenKind::DiscardStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -3261,6 +3381,7 @@ let_statement$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
+        checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
         // next after_variable_declaration_id
@@ -3288,6 +3409,7 @@ var_statement$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
+        checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
         // next after_simple_variable_declaration_id
@@ -3315,6 +3437,7 @@ after_return$no_emit:
             scopePosition = result;
         }
         // updateKind TokenKind::EmptyReturnStmt
+        checkTokenUpdate(state.parseOutput.tokens.back().kind(), TokenKind::EmptyReturnStmt);
         state.parseOutput.tokens.back().setKind(TokenKind::EmptyReturnStmt);
         // next after_statement
         goto after_statement$no_emit;
@@ -3332,6 +3455,7 @@ else_branch$no_emit:
         if (next != ':') {
             tokEnd += 1;
             // emitToken TokenKind::ElseStmt
+            checkLexToken(TokenKind::ElseStmt, LexerToken::Colon);
             carriedEmitTokenKind = TokenKind::ElseStmt;
             carriedEmitTokenData = 0;
             // next single_or_compound_statement
@@ -3355,6 +3479,7 @@ after_simple_variable_declaration_id$no_emit:
             // pushScope ScopeKind::VariableType
             scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
             // emitToken TokenKind::VariableType, sema::VariableKind::Let
+            checkLexToken(TokenKind::VariableType, LexerToken::Colon);
             carriedEmitTokenKind = TokenKind::VariableType;
             carriedEmitTokenData = packData1(TokenKind::VariableType, sema::VariableKind::Let);
             // next expression
@@ -3377,6 +3502,7 @@ after_variable_declaration_id$as_then:
         if (next != ':') {
             tokEnd += 1;
             // emitToken TokenKind::VariableType, sema::VariableKind::Let
+            checkLexToken(TokenKind::VariableType, LexerToken::Colon);
             carriedEmitTokenKind = TokenKind::VariableType;
             carriedEmitTokenData = packData1(TokenKind::VariableType, sema::VariableKind::Let);
             // next variable_type
@@ -3390,6 +3516,7 @@ after_variable_declaration_id$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AssignStmt
+            checkLexToken(TokenKind::AssignStmt, LexerToken::Equal);
             carriedEmitTokenKind = TokenKind::AssignStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -3399,6 +3526,7 @@ after_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::SemiColon);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_statement
@@ -3418,6 +3546,7 @@ after_variable_declaration_id$as_then:
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::Comma);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next parameter
@@ -3435,6 +3564,7 @@ after_variable_declaration_id$as_then:
             scopePosition = result;
         }
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_parameters
@@ -3459,6 +3589,7 @@ variable_type$no_emit:
             // pushScope ScopeKind::GenericCategoryExpression
             scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
             // emitToken TokenKind::VariableGenericCategory
+            checkLexToken(TokenKind::VariableGenericCategory, LexerToken::Less);
             carriedEmitTokenKind = TokenKind::VariableGenericCategory;
             carriedEmitTokenData = 0;
             // next impl_expression
@@ -3522,6 +3653,7 @@ after_variable_modifier$as_then:
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AssignStmt
+            checkLexToken(TokenKind::AssignStmt, LexerToken::Equal);
             carriedEmitTokenKind = TokenKind::AssignStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -3531,6 +3663,7 @@ after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::SemiColon);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_statement
@@ -3550,6 +3683,7 @@ after_variable_modifier$as_then:
         // pushScope ScopeKind::Parameter
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::Comma);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next parameter
@@ -3567,6 +3701,7 @@ after_variable_modifier$as_then:
             scopePosition = result;
         }
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_parameters
@@ -3700,6 +3835,7 @@ after_parameters$no_emit:
     tokBegin = tokEnd;
     parseState = State::AfterParameters;
     // emitToken TokenKind::EmptyNode
+    checkLexToken(TokenKind::EmptyNode, LexerToken::Invalid);
     emitToken(TokenKind::EmptyNode, tokBegin, 0, state);
     // ifScope ScopeKind::FunctionParameters
     if (scopePosition[0] == ScopeKind::FunctionParameters) {
@@ -3731,8 +3867,6 @@ after_parameters$no_emit:
     goto error$as_then;
 
     // LinearState first_parameter
-first_parameter$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 first_parameter$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -3774,6 +3908,7 @@ parameter$as_then:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::LetValueDecl, this_identifier
+        checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
         // next after_variable_declaration_id
@@ -3801,6 +3936,7 @@ var_parameter$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::VarValueDecl, this_identifier
+        checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
         // next after_simple_variable_declaration_id
@@ -3821,6 +3957,7 @@ impl_expression$no_emit:
         // pushScope ScopeKind::ParenInImplExpr
         scopePosition = pushScope(scopePosition, ScopeKind::ParenInImplExpr);
         // emitToken TokenKind::ParenthesizedExpr
+        checkLexToken(TokenKind::ParenthesizedExpr, LexerToken::LeftParen);
         carriedEmitTokenKind = TokenKind::ParenthesizedExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -3840,6 +3977,7 @@ impl_expression$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::IdentifierExpr, this_identifier
+        checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::IdentifierExpr;
         carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
         // next after_impl_expression
@@ -3936,6 +4074,7 @@ after_impl_expression$no_emit:
             scopePosition = result;
         }
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_simple_variable_declaration_id
@@ -3963,6 +4102,7 @@ impl_access_expression$no_emit:
         if (sema::isSpecialIdentifier(this_identifier)) {
         }
         // emitToken TokenKind::StaticAccessExpr, this_identifier
+        checkLexToken(TokenKind::StaticAccessExpr, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::StaticAccessExpr;
         carriedEmitTokenData = packData1(TokenKind::StaticAccessExpr, this_identifier);
         // next after_impl_expression
@@ -4021,14 +4161,19 @@ namespace_declaration$as_then:
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::TemplateAttribute
+                checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
                 // next after_template
-                goto after_template$no_emit;
+                goto after_template$with_emit;
             }
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
+                checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4039,6 +4184,7 @@ namespace_declaration$as_then:
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::VirtualAttribute
+                checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4095,6 +4241,7 @@ namespace_declaration_id$no_emit:
         // commitDeclaration DeclarationKind::Namespace, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::NamespaceDecl, this_declaration
+        checkLexToken(TokenKind::NamespaceDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::NamespaceDecl;
         carriedEmitTokenData = packData1(TokenKind::NamespaceDecl, this_declaration);
         // next after_namespace_declaration_id
@@ -4161,13 +4308,18 @@ templated_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::TemplateAttribute
+                checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
                 // next after_template
-                goto after_template$no_emit;
+                goto after_template$with_emit;
             }
             if (this_identifier == words["incomplete"]) {
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
+                checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4177,6 +4329,7 @@ templated_declaration$as_then:
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::VirtualAttribute
+                checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4234,11 +4387,16 @@ templated_declaration_with_attributes$as_then:
     LABEL_MAYBE_UNUSED templated_declaration_with_attributes$identifier_case:
         if (sema::isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
+                // emitToken TokenKind::TemplateAttribute
+                checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
                 // next after_template
-                goto after_template$no_emit;
+                goto after_template$with_emit;
             }
             if (this_identifier == words["incomplete"]) {
                 // emitToken TokenKind::IncompleteAttribute
+                checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4246,6 +4404,7 @@ templated_declaration_with_attributes$as_then:
             }
             if (this_identifier == words["virtual"]) {
                 // emitToken TokenKind::VirtualAttribute
+                checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4271,6 +4430,8 @@ templated_declaration_with_attributes$as_then:
     goto error$as_then;
 
     // LinearState after_template
+after_template$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 after_template$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
@@ -4279,11 +4440,8 @@ after_template$no_emit:
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
         scopePosition = pushScope(scopePosition, ScopeKind::TemplateParameters);
-        // emitToken TokenKind::TemplateAttribute
-        carriedEmitTokenKind = TokenKind::TemplateAttribute;
-        carriedEmitTokenData = 0;
         // next first_parameter
-        goto first_parameter$with_emit;
+        goto first_parameter$no_emit;
     }
     // then error
     goto error$as_then;
@@ -4312,6 +4470,7 @@ function_declaration_id$no_emit:
                 // pushScope ScopeKind::FunctionImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::FunctionImplExpression);
                 // emitToken TokenKind::FunctionImplDecl, this_declaration
+                checkLexToken(TokenKind::FunctionImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::FunctionImplDecl;
                 carriedEmitTokenData = packData1(TokenKind::FunctionImplDecl, this_declaration);
                 // next impl_expression
@@ -4326,6 +4485,7 @@ function_declaration_id$no_emit:
         // commitDeclaration DeclarationKind::Function, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::FunctionDecl, this_declaration
+        checkLexToken(TokenKind::FunctionDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::FunctionDecl;
         carriedEmitTokenData = packData1(TokenKind::FunctionDecl, this_declaration);
         // next after_function_declaration_id
@@ -4361,6 +4521,7 @@ after_function_parameters$as_then:
             // pushScope ScopeKind::FunctionBody
             scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
             // emitToken TokenKind::FunctionBody
+            checkLexToken(TokenKind::FunctionBody, LexerToken::Colon);
             carriedEmitTokenKind = TokenKind::FunctionBody;
             carriedEmitTokenData = 0;
             // next single_or_compound_statement
@@ -4372,6 +4533,7 @@ after_function_parameters$as_then:
         // pushScope ScopeKind::ReturnType
         scopePosition = pushScope(scopePosition, ScopeKind::ReturnType);
         // emitToken TokenKind::ReturnType
+        checkLexToken(TokenKind::ReturnType, LexerToken::MinusGreater);
         carriedEmitTokenKind = TokenKind::ReturnType;
         carriedEmitTokenData = 0;
         // next expression
@@ -4384,18 +4546,7 @@ after_function_parameters$as_then:
         // pushScope ScopeKind::RightExpr
         scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
         // emitToken TokenKind::BodyExpr
-        carriedEmitTokenKind = TokenKind::BodyExpr;
-        carriedEmitTokenData = 0;
-        // next expression
-        goto expression$with_emit;
-    }
-    if (std::string_view(tokEnd, 3) == "<=>"sv) {
-        tokEnd += 3;
-        // pushScope ScopeKind::FunctionBody
-        scopePosition = pushScope(scopePosition, ScopeKind::FunctionBody);
-        // pushScope ScopeKind::RightExpr
-        scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
-        // emitToken TokenKind::BodyExpr
+        checkLexToken(TokenKind::BodyExpr, LexerToken::EqualGreater);
         carriedEmitTokenKind = TokenKind::BodyExpr;
         carriedEmitTokenData = 0;
         // next expression
@@ -4423,6 +4574,7 @@ struct_declaration_id$no_emit:
                 // pushScope ScopeKind::StructImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::StructImplExpression);
                 // emitToken TokenKind::StructImplDecl, this_declaration
+                checkLexToken(TokenKind::StructImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::StructImplDecl;
                 carriedEmitTokenData = packData1(TokenKind::StructImplDecl, this_declaration);
                 // next impl_expression
@@ -4437,6 +4589,7 @@ struct_declaration_id$no_emit:
         // commitDeclaration DeclarationKind::Struct, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::StructDecl, this_declaration
+        checkLexToken(TokenKind::StructDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::StructDecl;
         carriedEmitTokenData = packData1(TokenKind::StructDecl, this_declaration);
         // next after_struct_declaration_id
@@ -4505,6 +4658,7 @@ member_declaration$as_then:
                 // commitDeclaration DeclarationKind::HasMember
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
                 // emitToken TokenKind::HasMemberDecl, this_declaration
+                checkLexToken(TokenKind::HasMemberDecl, LexerToken::Has);
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
                 carriedEmitTokenData = packData1(TokenKind::HasMemberDecl, this_declaration);
                 // next expression
@@ -4514,14 +4668,19 @@ member_declaration$as_then:
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::TemplateAttribute
+                checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
                 // next after_template
-                goto after_template$no_emit;
+                goto after_template$with_emit;
             }
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
+                checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4532,6 +4691,7 @@ member_declaration$as_then:
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::VirtualAttribute
+                checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4564,6 +4724,7 @@ member_declaration$as_then:
         // commitDeclaration DeclarationKind::Member, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::MemberDecl, this_declaration
+        checkLexToken(TokenKind::MemberDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::MemberDecl;
         carriedEmitTokenData = packData1(TokenKind::MemberDecl, this_declaration);
         // next after_simple_variable_declaration_id
@@ -4591,6 +4752,7 @@ enum_declaration_id$no_emit:
                 // pushScope ScopeKind::EnumImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::EnumImplExpression);
                 // emitToken TokenKind::EnumImplDecl, this_declaration
+                checkLexToken(TokenKind::EnumImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::EnumImplDecl;
                 carriedEmitTokenData = packData1(TokenKind::EnumImplDecl, this_declaration);
                 // next impl_expression
@@ -4605,6 +4767,7 @@ enum_declaration_id$no_emit:
         // commitDeclaration DeclarationKind::Enum, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::EnumDecl, this_declaration
+        checkLexToken(TokenKind::EnumDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::EnumDecl;
         carriedEmitTokenData = packData1(TokenKind::EnumDecl, this_declaration);
         // next after_enum_declaration_id
@@ -4669,14 +4832,19 @@ enum_value_declaration$as_then:
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
+                // emitToken TokenKind::TemplateAttribute
+                checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
                 // next after_template
-                goto after_template$no_emit;
+                goto after_template$with_emit;
             }
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
+                checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4687,6 +4855,7 @@ enum_value_declaration$as_then:
                 // rememberDeclarationBegin
                 declarationBegin = state.parseOutput.currentToken();
                 // emitToken TokenKind::VirtualAttribute
+                checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
                 carriedEmitTokenData = 0;
                 // next templated_declaration_with_attributes
@@ -4719,6 +4888,7 @@ enum_value_declaration$as_then:
         // commitDeclaration DeclarationKind::EnumValue, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+        checkLexToken(TokenKind::ImplicitEnumValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
         carriedEmitTokenData = packData1(TokenKind::ImplicitEnumValueDecl, this_declaration);
         // next after_enum_value_declaration_id
@@ -4739,10 +4909,12 @@ after_enum_value_declaration_id$no_emit:
         if (next != '=' && next != '>') {
             tokEnd += 1;
             // updateKind TokenKind::ExplicitEnumValueDecl
+            checkTokenUpdate(state.parseOutput.tokens.back().kind(), TokenKind::ExplicitEnumValueDecl);
             state.parseOutput.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AssignStmt
+            checkLexToken(TokenKind::AssignStmt, LexerToken::Equal);
             carriedEmitTokenKind = TokenKind::AssignStmt;
             carriedEmitTokenData = 0;
             // next expression
@@ -4752,6 +4924,7 @@ after_enum_value_declaration_id$no_emit:
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // emitToken TokenKind::ExpressionStmt
+        checkLexToken(TokenKind::ExpressionStmt, LexerToken::SemiColon);
         carriedEmitTokenKind = TokenKind::ExpressionStmt;
         carriedEmitTokenData = 0;
         // next after_declaration
@@ -4783,6 +4956,7 @@ after_static$no_emit:
                 // pushScope ScopeKind::GlobalImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::GlobalImplExpression);
                 // emitToken TokenKind::GlobalImplDecl, this_declaration
+                checkLexToken(TokenKind::GlobalImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::GlobalImplDecl;
                 carriedEmitTokenData = packData1(TokenKind::GlobalImplDecl, this_declaration);
                 // next impl_expression
@@ -4803,6 +4977,7 @@ after_static$no_emit:
         // setGlobalKind GlobalKind::Let
         setGlobalKind(state, GlobalKind::Let);
         // emitToken TokenKind::GlobalDecl, this_declaration
+        checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
         carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
@@ -4834,6 +5009,7 @@ static_var_variable_declaration$no_emit:
         // setGlobalKind GlobalKind::Var
         setGlobalKind(state, GlobalKind::Var);
         // emitToken TokenKind::GlobalDecl, this_declaration
+        checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
         carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
@@ -4865,6 +5041,7 @@ static_open_variable_declaration$no_emit:
         // setGlobalKind GlobalKind::OpenLet
         setGlobalKind(state, GlobalKind::OpenLet);
         // emitToken TokenKind::GlobalDecl, this_declaration
+        checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
         carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
         // next after_simple_variable_declaration_id
@@ -5161,13 +5338,13 @@ error$as_then:
     case '[': {
         tokEnd += 1;
         // error
-        errorToken = LexerToken::LeftSqure;
+        errorToken = LexerToken::LeftSquare;
         goto handle_parse_error;
     }
     case ']': {
         tokEnd += 1;
         // error
-        errorToken = LexerToken::RightSqure;
+        errorToken = LexerToken::RightSquare;
         goto handle_parse_error;
     }
     case '^': {

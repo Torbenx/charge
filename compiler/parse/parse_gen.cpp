@@ -8,10 +8,10 @@ std::string_view nameString(LexerToken token) {
         return "LeftParen";
     case LexerToken::RightParen:
         return "RightParen";
-    case LexerToken::LeftSqure:
-        return "LeftSqure";
-    case LexerToken::RightSqure:
-        return "RightSqure";
+    case LexerToken::LeftSquare:
+        return "LeftSquare";
+    case LexerToken::RightSquare:
+        return "RightSquare";
     case LexerToken::LeftBrace:
         return "LeftBrace";
     case LexerToken::RightBrace:
@@ -144,12 +144,34 @@ std::string_view nameString(LexerToken token) {
         return "Var";
     case LexerToken::While:
         return "While";
+    case LexerToken::Enum:
+        return "Enum";
+    case LexerToken::Fn:
+        return "Fn";
+    case LexerToken::Has:
+        return "Has";
+    case LexerToken::Incomplete:
+        return "Incomplete";
+    case LexerToken::Namespace:
+        return "Namespace";
+    case LexerToken::Open:
+        return "Open";
+    case LexerToken::Struct:
+        return "Struct";
+    case LexerToken::Template:
+        return "Template";
+    case LexerToken::Trait:
+        return "Trait";
+    case LexerToken::Virtual:
+        return "Virtual";
     case LexerToken::Identifier:
         return "Identifier";
     case LexerToken::Literal:
         return "Literal";
     case LexerToken::EOS:
         return "EOS";
+    case LexerToken::Invalid:
+        return "Invalid";
     default:
         VERIFY_NOT_REACHED();
     }
