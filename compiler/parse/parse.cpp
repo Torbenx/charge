@@ -956,7 +956,7 @@ expression$word_case_entry:
 LABEL_MAYBE_UNUSED expression$identifier_case:
     if (isSpecialIdentifier(this_identifier)) {
     }
-    // emitToken TokenKind::IdentifierExpr, this_identifier
+    // emitToken TokenKind::IdentifierExpr
     checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
     carriedEmitTokenKind = TokenKind::IdentifierExpr;
     carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
@@ -2263,7 +2263,7 @@ check_designated_argument$as_then:
         }
         // argumentName = this_identifier
         argumentName = this_identifier;
-        // emitToken TokenKind::IdentifierExpr, this_identifier
+        // emitToken TokenKind::IdentifierExpr
         checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::IdentifierExpr;
         carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
@@ -2378,7 +2378,7 @@ access_punctuation$no_emit:
     LABEL_MAYBE_UNUSED access_punctuation$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken tokenKind, this_identifier
+        // emitToken tokenKind
         checkLexToken(tokenKind, LexerToken::Identifier);
         carriedEmitTokenKind = tokenKind;
         carriedEmitTokenData = packData1(tokenKind, this_identifier);
@@ -3377,7 +3377,7 @@ let_statement$no_emit:
     LABEL_MAYBE_UNUSED let_statement$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::LetValueDecl, this_identifier
+        // emitToken TokenKind::LetValueDecl
         checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
@@ -3405,7 +3405,7 @@ var_statement$no_emit:
     LABEL_MAYBE_UNUSED var_statement$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::VarValueDecl, this_identifier
+        // emitToken TokenKind::VarValueDecl
         checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
@@ -3904,7 +3904,7 @@ parameter$as_then:
     LABEL_MAYBE_UNUSED parameter$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::LetValueDecl, this_identifier
+        // emitToken TokenKind::LetValueDecl
         checkLexToken(TokenKind::LetValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::LetValueDecl;
         carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
@@ -3932,7 +3932,7 @@ var_parameter$no_emit:
     LABEL_MAYBE_UNUSED var_parameter$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::VarValueDecl, this_identifier
+        // emitToken TokenKind::VarValueDecl
         checkLexToken(TokenKind::VarValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::VarValueDecl;
         carriedEmitTokenData = packData1(TokenKind::VarValueDecl, this_identifier);
@@ -3973,7 +3973,7 @@ impl_expression$no_emit:
     LABEL_MAYBE_UNUSED impl_expression$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::IdentifierExpr, this_identifier
+        // emitToken TokenKind::IdentifierExpr
         checkLexToken(TokenKind::IdentifierExpr, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::IdentifierExpr;
         carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
@@ -4098,7 +4098,7 @@ impl_access_expression$no_emit:
     LABEL_MAYBE_UNUSED impl_access_expression$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken TokenKind::StaticAccessExpr, this_identifier
+        // emitToken TokenKind::StaticAccessExpr
         checkLexToken(TokenKind::StaticAccessExpr, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::StaticAccessExpr;
         carriedEmitTokenData = packData1(TokenKind::StaticAccessExpr, this_identifier);
@@ -4237,10 +4237,10 @@ namespace_declaration_id$no_emit:
         declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Namespace, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::NamespaceDecl, this_declaration
+        // emitToken TokenKind::NamespaceDecl
         checkLexToken(TokenKind::NamespaceDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::NamespaceDecl;
-        carriedEmitTokenData = packData1(TokenKind::NamespaceDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::NamespaceDecl, this_identifier);
         // next after_namespace_declaration_id
         goto after_namespace_declaration_id$with_emit;
     }
@@ -4466,10 +4466,10 @@ function_declaration_id$no_emit:
                 this_declaration = commitImplDeclaration<DeclarationKind::Function>(tokBegin, declarationBegin, state);
                 // pushScope ScopeKind::FunctionImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::FunctionImplExpression);
-                // emitToken TokenKind::FunctionImplDecl, this_declaration
+                // emitToken TokenKind::FunctionImplDecl
                 checkLexToken(TokenKind::FunctionImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::FunctionImplDecl;
-                carriedEmitTokenData = packData1(TokenKind::FunctionImplDecl, this_declaration);
+                carriedEmitTokenData = 0;
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4481,10 +4481,10 @@ function_declaration_id$no_emit:
         }
         // commitDeclaration DeclarationKind::Function, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::FunctionDecl, this_declaration
+        // emitToken TokenKind::FunctionDecl
         checkLexToken(TokenKind::FunctionDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::FunctionDecl;
-        carriedEmitTokenData = packData1(TokenKind::FunctionDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::FunctionDecl, this_identifier);
         // next after_function_declaration_id
         goto after_function_declaration_id$with_emit;
     }
@@ -4570,10 +4570,10 @@ struct_declaration_id$no_emit:
                 this_declaration = commitImplDeclaration<DeclarationKind::Struct>(tokBegin, declarationBegin, state);
                 // pushScope ScopeKind::StructImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::StructImplExpression);
-                // emitToken TokenKind::StructImplDecl, this_declaration
+                // emitToken TokenKind::StructImplDecl
                 checkLexToken(TokenKind::StructImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::StructImplDecl;
-                carriedEmitTokenData = packData1(TokenKind::StructImplDecl, this_declaration);
+                carriedEmitTokenData = 0;
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4585,10 +4585,10 @@ struct_declaration_id$no_emit:
         }
         // commitDeclaration DeclarationKind::Struct, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::StructDecl, this_declaration
+        // emitToken TokenKind::StructDecl
         checkLexToken(TokenKind::StructDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::StructDecl;
-        carriedEmitTokenData = packData1(TokenKind::StructDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::StructDecl, this_identifier);
         // next after_struct_declaration_id
         goto after_struct_declaration_id$with_emit;
     }
@@ -4654,10 +4654,10 @@ member_declaration$as_then:
                 declarationBegin = state.tokenBuffer.currentToken();
                 // commitDeclaration DeclarationKind::HasMember
                 this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
-                // emitToken TokenKind::HasMemberDecl, this_declaration
+                // emitToken TokenKind::HasMemberDecl
                 checkLexToken(TokenKind::HasMemberDecl, LexerToken::Has);
                 carriedEmitTokenKind = TokenKind::HasMemberDecl;
-                carriedEmitTokenData = packData1(TokenKind::HasMemberDecl, this_declaration);
+                carriedEmitTokenData = 0;
                 // next expression
                 goto expression$with_emit;
             }
@@ -4720,10 +4720,10 @@ member_declaration$as_then:
         declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Member, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::MemberDecl, this_declaration
+        // emitToken TokenKind::MemberDecl
         checkLexToken(TokenKind::MemberDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::MemberDecl;
-        carriedEmitTokenData = packData1(TokenKind::MemberDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::MemberDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -4748,10 +4748,10 @@ enum_declaration_id$no_emit:
                 this_declaration = commitImplDeclaration<DeclarationKind::Enum>(tokBegin, declarationBegin, state);
                 // pushScope ScopeKind::EnumImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::EnumImplExpression);
-                // emitToken TokenKind::EnumImplDecl, this_declaration
+                // emitToken TokenKind::EnumImplDecl
                 checkLexToken(TokenKind::EnumImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::EnumImplDecl;
-                carriedEmitTokenData = packData1(TokenKind::EnumImplDecl, this_declaration);
+                carriedEmitTokenData = 0;
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4763,10 +4763,10 @@ enum_declaration_id$no_emit:
         }
         // commitDeclaration DeclarationKind::Enum, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::EnumDecl, this_declaration
+        // emitToken TokenKind::EnumDecl
         checkLexToken(TokenKind::EnumDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::EnumDecl;
-        carriedEmitTokenData = packData1(TokenKind::EnumDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::EnumDecl, this_identifier);
         // next after_enum_declaration_id
         goto after_enum_declaration_id$with_emit;
     }
@@ -4884,10 +4884,10 @@ enum_value_declaration$as_then:
         declarationBegin = state.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::EnumValue, this_identifier
         this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
-        // emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+        // emitToken TokenKind::ImplicitEnumValueDecl
         checkLexToken(TokenKind::ImplicitEnumValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
-        carriedEmitTokenData = packData1(TokenKind::ImplicitEnumValueDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::ImplicitEnumValueDecl, this_identifier);
         // next after_enum_value_declaration_id
         goto after_enum_value_declaration_id$with_emit;
     }
@@ -4952,10 +4952,10 @@ after_static$no_emit:
                 this_declaration = commitImplDeclaration<DeclarationKind::StaticVariable>(tokBegin, declarationBegin, state);
                 // pushScope ScopeKind::GlobalImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::GlobalImplExpression);
-                // emitToken TokenKind::GlobalImplDecl, this_declaration
+                // emitToken TokenKind::GlobalImplDecl
                 checkLexToken(TokenKind::GlobalImplDecl, LexerToken::Impl);
                 carriedEmitTokenKind = TokenKind::GlobalImplDecl;
-                carriedEmitTokenData = packData1(TokenKind::GlobalImplDecl, this_declaration);
+                carriedEmitTokenData = 0;
                 // next impl_expression
                 goto impl_expression$with_emit;
             }
@@ -4973,10 +4973,10 @@ after_static$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::Let
         setGlobalKind(state, GlobalKind::Let);
-        // emitToken TokenKind::GlobalDecl, this_declaration
+        // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
-        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -5005,10 +5005,10 @@ static_var_variable_declaration$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::Var
         setGlobalKind(state, GlobalKind::Var);
-        // emitToken TokenKind::GlobalDecl, this_declaration
+        // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
-        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }
@@ -5037,10 +5037,10 @@ static_open_variable_declaration$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
         // setGlobalKind GlobalKind::OpenLet
         setGlobalKind(state, GlobalKind::OpenLet);
-        // emitToken TokenKind::GlobalDecl, this_declaration
+        // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
-        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_declaration);
+        carriedEmitTokenData = packData1(TokenKind::GlobalDecl, this_identifier);
         // next after_simple_variable_declaration_id
         goto after_simple_variable_declaration_id$with_emit;
     }

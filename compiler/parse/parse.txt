@@ -38,7 +38,7 @@ SwitchState expression() then error
         next expression
 
     identifier
-        emitToken TokenKind::IdentifierExpr, this_identifier
+        emitToken TokenKind::IdentifierExpr
         next after_expression
     literal
         emitToken TokenKind::LiteralExpr
@@ -312,7 +312,7 @@ LinearState argument() then check_designated_argument
 LinearState check_designated_argument() then expression
     identifier
         argumentName = this_identifier
-        emitToken TokenKind::IdentifierExpr, this_identifier
+        emitToken TokenKind::IdentifierExpr
         next maybe_designated_argument
 LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation =
@@ -344,7 +344,7 @@ LinearState first_argument_brace() then argument
 
 LinearState access_punctuation(tokenKind) then error
     identifier
-        emitToken tokenKind, this_identifier
+        emitToken tokenKind
         next after_expression
 
 # --- Statements
@@ -402,11 +402,11 @@ SwitchState statement() then expression
 
 LinearState let_statement() then error
     identifier
-        emitToken TokenKind::LetValueDecl, this_identifier
+        emitToken TokenKind::LetValueDecl
         next after_variable_declaration_id
 LinearState var_statement() then error
     identifier
-        emitToken TokenKind::VarValueDecl, this_identifier
+        emitToken TokenKind::VarValueDecl
         next after_simple_variable_declaration_id
 
 LinearState after_return() then expression
@@ -518,20 +518,20 @@ LinearState first_parameter() then parameter
 
 LinearState parameter() then error
     identifier
-        emitToken TokenKind::LetValueDecl, this_identifier
+        emitToken TokenKind::LetValueDecl
         next after_variable_declaration_id
     keyword var
         next var_parameter
 LinearState var_parameter() then error
     identifier
-        emitToken TokenKind::VarValueDecl, this_identifier
+        emitToken TokenKind::VarValueDecl
         next after_simple_variable_declaration_id
 
 # --- Impl expression
 
 LinearState impl_expression() then error
     identifier
-        emitToken TokenKind::IdentifierExpr, this_identifier
+        emitToken TokenKind::IdentifierExpr
         next after_impl_expression
     punctuation (
         pushScope ScopeKind::ParenInImplExpr
@@ -565,7 +565,7 @@ LinearState after_impl_expression() then error
 
 LinearState impl_access_expression() then error
     identifier
-        emitToken TokenKind::StaticAccessExpr, this_identifier
+        emitToken TokenKind::StaticAccessExpr
         next after_impl_expression
 
 # --- Declarations
@@ -583,7 +583,7 @@ LinearState namespace_declaration_id() then error
     identifier
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::Namespace, this_identifier
-        emitToken TokenKind::NamespaceDecl, this_declaration
+        emitToken TokenKind::NamespaceDecl
         next after_namespace_declaration_id
 LinearState after_namespace_declaration_id() then error
     punctuation :
@@ -646,12 +646,12 @@ LinearState after_template_parameters() then templated_declaration_with_attribut
 LinearState function_declaration_id() then error
     identifier
         commitDeclaration DeclarationKind::Function, this_identifier
-        emitToken TokenKind::FunctionDecl, this_declaration
+        emitToken TokenKind::FunctionDecl
         next after_function_declaration_id
     keyword impl
         commitImplDeclaration DeclarationKind::Function
         pushScope ScopeKind::FunctionImplExpression
-        emitToken TokenKind::FunctionImplDecl, this_declaration
+        emitToken TokenKind::FunctionImplDecl
         next impl_expression
 LinearState after_function_declaration_id() then error
     punctuation (
@@ -675,12 +675,12 @@ LinearState after_function_parameters() then error
 LinearState struct_declaration_id() then error
     identifier
         commitDeclaration DeclarationKind::Struct, this_identifier
-        emitToken TokenKind::StructDecl, this_declaration
+        emitToken TokenKind::StructDecl
         next after_struct_declaration_id
     keyword impl
         commitImplDeclaration DeclarationKind::Struct
         pushScope ScopeKind::StructImplExpression
-        emitToken TokenKind::StructImplDecl, this_declaration
+        emitToken TokenKind::StructImplDecl
         next impl_expression
 LinearState after_struct_declaration_id() then error
     punctuation :
@@ -694,23 +694,23 @@ LinearState member_declaration() then templated_declaration
         pushScope ScopeKind::HasTypeExpr
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::HasMember
-        emitToken TokenKind::HasMemberDecl, this_declaration
+        emitToken TokenKind::HasMemberDecl
         next expression
     identifier
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::Member, this_identifier
-        emitToken TokenKind::MemberDecl, this_declaration
+        emitToken TokenKind::MemberDecl
         next after_simple_variable_declaration_id
 
 LinearState enum_declaration_id() then error
     identifier
         commitDeclaration DeclarationKind::Enum, this_identifier
-        emitToken TokenKind::EnumDecl, this_declaration
+        emitToken TokenKind::EnumDecl
         next after_enum_declaration_id
     keyword impl
         commitImplDeclaration DeclarationKind::Enum
         pushScope ScopeKind::EnumImplExpression
-        emitToken TokenKind::EnumImplDecl, this_declaration
+        emitToken TokenKind::EnumImplDecl
         next impl_expression
 LinearState after_enum_declaration_id() then error
     punctuation :
@@ -723,7 +723,7 @@ LinearState enum_value_declaration() then templated_declaration
     identifier
         rememberDeclarationBegin
         commitDeclaration DeclarationKind::EnumValue, this_identifier
-        emitToken TokenKind::ImplicitEnumValueDecl, this_declaration
+        emitToken TokenKind::ImplicitEnumValueDecl
         next after_enum_value_declaration_id
 LinearState after_enum_value_declaration_id() then error
     punctuation =
@@ -743,24 +743,24 @@ LinearState after_static() then error
     keyword impl
         commitImplDeclaration DeclarationKind::StaticVariable
         pushScope ScopeKind::GlobalImplExpression
-        emitToken TokenKind::GlobalImplDecl, this_declaration
+        emitToken TokenKind::GlobalImplDecl
         next impl_expression
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::Let
-        emitToken TokenKind::GlobalDecl, this_declaration
+        emitToken TokenKind::GlobalDecl
         next after_simple_variable_declaration_id
 LinearState static_var_variable_declaration() then error
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::Var
-        emitToken TokenKind::GlobalDecl, this_declaration
+        emitToken TokenKind::GlobalDecl
         next after_simple_variable_declaration_id
 LinearState static_open_variable_declaration() then error
     identifier
         commitDeclaration DeclarationKind::StaticVariable, this_identifier
         setGlobalKind GlobalKind::OpenLet
-        emitToken TokenKind::GlobalDecl, this_declaration
+        emitToken TokenKind::GlobalDecl
         next after_simple_variable_declaration_id
 
 LinearState after_declaration() then error

@@ -974,16 +974,17 @@ def generateInstructions(case, instructions, thenHandler):
             if generateLexTokenChecks:
                 lexToken = "Invalid" if type(case) is ThenCase else case.cppName()
                 line("checkLexToken(" + inst.tokenKindExpr + ", LexerToken::" + lexToken + ");")
+            dataExpr = "0"
+            if type(case) is IdentifierCase:
+                assert inst.dataExpr is None
+                dataExpr = "packData1(" + inst.tokenKindExpr + ", this_identifier)"
+            elif not inst.dataExpr is None:
+                dataExpr = "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")"
             if inst.delayed:
                 line("carriedEmitTokenKind = " + inst.tokenKindExpr + ";")
-                dataExpr = "0"
-                if not inst.dataExpr is None:
-                    dataExpr = "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")"
                 line("carriedEmitTokenData = " + dataExpr + ";")
-            elif inst.dataExpr is None:
-                emitToken(inst.tokenKindExpr)
             else:
-                emitToken(inst.tokenKindExpr, "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")")
+                emitToken(inst.tokenKindExpr, dataExpr)
         elif type(inst) is UpdateKindInstruction:
             if generateLexTokenChecks:
                 line("checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), " + inst.tokenKindExpr + ");")

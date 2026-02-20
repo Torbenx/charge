@@ -514,7 +514,6 @@ void Generator::visitStructMembers() {
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
-        VERIFY(tok->data1<DeclarationValue>() == DeclarationValue(DeclarationValueKind::Member, i));
         TokenInfo* memberToken = tok;
         advance();
 
@@ -582,7 +581,6 @@ void Generator::visitEnumValues() {
 
         setParseLocation(value.parseLocation());
         VERIFY(tok->kind() == Token::ImplicitEnumValueDecl || tok->kind() == Token::ExplicitEnumValueDecl);
-        VERIFY(tok->data1<DeclarationValue>() == DeclarationValue(DeclarationValueKind::EnumValue, i));
         advance();
 
         // TODO: Actually set value once ints are supported
