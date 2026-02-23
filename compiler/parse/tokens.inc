@@ -6,11 +6,16 @@
 #define DATAKIND(type, name)
 #endif
 
+#ifndef MARKER
+#define MARKER(name)
+#endif
+
 DATAKIND(void, None)
 DATAKIND(Word, Word)
 DATAKIND(CallArgumentsHandle, CallArguments)
 DATAKIND(sema::Expression, Expression)
 DATAKIND(sema::VariableKind, VariableKind)
+DATAKIND(uint32_t, DeclIndex)
 
 TOKEN(FunctionBody, Colon, None, None)
 TOKEN(ReturnType, MinusGreater, None, Expression)
@@ -34,6 +39,7 @@ TOKEN(IndexExpr, LeftSquare, CallArguments, Expression)
 TOKEN(Parameterize, LeftBrace, CallArguments, Expression)
 TOKEN(MemberAccessExpr, Identifier, Word, Expression)
 
+MARKER(UnaryExprsBegin)
 TOKEN(LogicalNotExpr, Exclaim, None, Expression)
 TOKEN(BitwiseNotExpr, Tilde, None, Expression)
 TOKEN(PreIncrementExpr, PlusPlus, None, Expression)
@@ -41,6 +47,7 @@ TOKEN(PreDecrementExpr, MinusMinus, None, Expression)
 TOKEN(PlusExpr, Plus, None, Expression)
 TOKEN(NegateExpr, Minus, None, Expression)
 TOKEN(DereferenceExpr, Star, None, Expression)
+MARKER(UnaryExprsEnd)
 
 TOKEN(AdditionExpr, Plus, None, Expression)
 TOKEN(SubtractionExpr, Minus, None, Expression)
@@ -92,6 +99,7 @@ TOKEN(DiscardStmt, Discard, None, None)
 TOKEN(EmptyReturnStmt, Return, None, None)
 
 // ------ declarations ------
+MARKER(StaticDeclsBegin)
 TOKEN(NamespaceDecl, Identifier, Word, None)
 TOKEN(FunctionDecl, Identifier, Word, None)
 TOKEN(FunctionImplDecl, Impl, None, None)
@@ -99,15 +107,25 @@ TOKEN(StructDecl, Identifier, Word, None)
 TOKEN(StructImplDecl, Impl, None, None)
 TOKEN(EnumDecl, Identifier, Word, None)
 TOKEN(EnumImplDecl, Impl, None, None)
-TOKEN(ImplicitEnumValueDecl, Identifier, Word, None)
-TOKEN(ExplicitEnumValueDecl, Identifier, Word, None)
-TOKEN(MemberDecl, Identifier, Word, None)
-TOKEN(HasMemberDecl, Has, None, Expression)
 TOKEN(GlobalDecl, Identifier, Word, None)
 TOKEN(GlobalImplDecl, Impl, None, None)
+MARKER(StaticDeclsEnd)
 
+MARKER(EnumValueDeclsBegin)
+TOKEN(ImplicitEnumValueDecl, Identifier, Word, DeclIndex)
+TOKEN(ExplicitEnumValueDecl, Identifier, Word, DeclIndex)
+MARKER(EnumValueDeclsEnd)
+
+MARKER(MemberDeclsBegin)
+TOKEN(MemberDecl, Identifier, Word, DeclIndex)
+TOKEN(HasMemberDecl, Has, DeclIndex, Expression)
+MARKER(MemberDeclsEnd)
+
+MARKER(VariableDeclsBegin)
 TOKEN(VarValueDecl, Identifier, Word, None)
 TOKEN(LetValueDecl, Identifier, Word, None)
+MARKER(VariableDeclsEnd)
+
 TOKEN(VariableType, Colon, VariableKind, Expression)
 TOKEN(VariableGenericCategory, Less, None, Expression)
 
@@ -115,5 +133,6 @@ TOKEN(TemplateAttribute, Template, None, None)
 TOKEN(IncompleteAttribute, Incomplete, None, None)
 TOKEN(VirtualAttribute, Virtual, None, None)
 
+#undef MARKER
 #undef TOKEN
 #undef DATAKIND

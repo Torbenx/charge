@@ -51,8 +51,15 @@ struct TokenBuffer {
         lines.push_back({ source.data() });
     }
 
+    TokenHandle toHandle(const TokenInfo* ptr) const {
+        int_t index = ptr - tokens.begin();
+        VERIFY(index >= 0 && index < tokens.size());
+        return { (uint32_t)index };
+    }
     TokenInfo& token(TokenHandle handle) { return tokens[handle.id()]; }
     TokenInfo* tokenPtr(TokenHandle handle) { return &tokens[handle.id()]; }
+    const TokenInfo& token(TokenHandle handle) const { return tokens[handle.id()]; }
+    const TokenInfo* tokenPtr(TokenHandle handle) const { return &tokens[handle.id()]; }
 
     CallArgumentsHandle addCallArguments(std::span<const Word> arguments) {
         CallArgumentsHandle handle { (uint32_t)callArguments.size() };
@@ -70,6 +77,16 @@ struct TokenBuffer {
         return lines[loc.lineIndex()].begin + loc.offsetInLine();
     }
 
+    std::string_view tokenSpelling(TokenInfo info) const {
+        LexerToken lexToken = lexerToken(info.kind());
+        // TODO: Support literals
+        if (lexToken == LexerToken::Identifier) {
+            return wordTable.view(info.data1<Word>());
+        } else {
+            return fixedSpelling(lexToken);
+        }
+    }
+
     std::string_view whitespaceSpelling(WhitespaceInfo info) const {
         return std::string_view(sourcePointer(info.location()), info.length);
     }
@@ -78,14 +95,30 @@ struct TokenBuffer {
         return { (uint32_t)tokens.size() };
     }
 
-    std::optional<TokenInfo*> findToken(SourceLocation location) {
-        auto compare = [](const TokenInfo& token, SourceLocation location) {
-            return token.location() < location;
-        };
-        auto it = std::lower_bound(tokens.begin(), tokens.end(), location, compare);
-        if (it == tokens.begin())
-            return it;
-        return std::prev(it);
+    //! Finds the last token starts at or before \p location
+    std::optional<TokenHandle> findPrecedingToken(SourceLocation location) const {
+        auto nextTokenIt = std::upper_bound(tokens.begin(), tokens.end(), location);
+        if (nextTokenIt == tokens.begin())
+            return std::nullopt;
+        auto it = std::prev(nextTokenIt);
+        VERIFY(it->location() <= location);
+        return toHandle(it);
+    }
+
+    //! Finds the token containing \p location (if any)
+    std::optional<TokenHandle> findContainingToken(SourceLocation location) const {
+        auto handle = findPrecedingToken(location);
+        if (!handle.has_value())
+            return std::nullopt;
+        TokenInfo candidate = token(handle.value());
+        if (candidate.lineIndex() != location.lineIndex())
+            return std::nullopt;
+        VERIFY(location.offsetInLine() >= candidate.offsetInLine());
+        auto candidateEnd = candidate.offsetInLine() + tokenSpelling(candidate).length();
+        if (location.offsetInLine() < candidateEnd)
+            return handle;
+        else
+            return std::nullopt;
     }
 };
 

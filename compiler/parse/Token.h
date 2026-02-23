@@ -13,16 +13,27 @@ namespace parse {
 
 enum class TokenKind : uint8_t {
 #define TOKEN(kind, lexToken, data1, data2) kind,
+#define MARKER(name) name, _##name##reset = name - 1,
 #include <parse/tokens.inc>
 
     COUNT,
-    FirstUnaryExpr = LogicalNotExpr,
-    LastUnaryExpr = DereferenceExpr,
 };
 std::string_view nameString(TokenKind);
 LexerToken lexerToken(TokenKind);
 inline bool isUnaryExpr(TokenKind kind) {
-    return kind >= TokenKind::FirstUnaryExpr && kind <= TokenKind::LastUnaryExpr;
+    return kind >= TokenKind::UnaryExprsBegin && kind < TokenKind::UnaryExprsEnd;
+}
+inline bool isStaticDecl(TokenKind kind) {
+    return kind >= TokenKind::StaticDeclsBegin && kind < TokenKind::StaticDeclsEnd;
+}
+inline bool isEnumValueDecl(TokenKind kind) {
+    return kind >= TokenKind::EnumValueDeclsBegin && kind < TokenKind::EnumValueDeclsEnd;
+}
+inline bool isMemberDecl(TokenKind kind) {
+    return kind >= TokenKind::MemberDeclsBegin && kind < TokenKind::MemberDeclsEnd;
+}
+inline bool isVariableDecl(TokenKind kind) {
+    return kind >= TokenKind::VariableDeclsBegin && kind < TokenKind::VariableDeclsEnd;
 }
 
 // ---------------------------- ScopeKind ---------------------------
@@ -148,26 +159,36 @@ struct TokenInfo : TaggedSourceLocation<TokenKind> {
     TokenKind kind() const { return tag(); }
 
     template<typename T1>
+    bool hasData1() const {
+        return tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind;
+    }
+
+    template<typename T2>
+    bool hasData2() const {
+        return tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind;
+    }
+
+    template<typename T1>
     T1 data1() const {
-        VERIFY(tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind);
+        VERIFY(hasData1<T1>());
         return unpackData<T1>(data1Bits);
     }
 
     template<typename T2>
     T2 data2() const {
-        VERIFY(tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind);
+        VERIFY(hasData2<T2>());
         return unpackData<T2>(data2Bits);
     }
 
     template<typename T1>
     void setData1(T1 data1) {
-        VERIFY(tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind);
+        VERIFY(hasData1<T1>());
         data1Bits = packData<T1>(data1);
     }
 
     template<typename T2>
     void setData2(T2 data2) {
-        VERIFY(tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind);
+        VERIFY(hasData2<T2>());
         data2Bits = packData<T2>(data2);
     }
 

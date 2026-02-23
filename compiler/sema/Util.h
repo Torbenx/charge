@@ -7,6 +7,10 @@ namespace sema {
 struct Util {
     Util(Context& context, ProgramHandle handle);
 
+    std::optional<ProgramHandle> baseProgram(Constant value) {
+        return program->baseProgram(value);
+    }
+
     std::strong_ordering compare(Constant, Constant);
     std::strong_ordering compare(ProgramHandle, ProgramHandle);
     std::strong_ordering compare(NamespaceHandle, NamespaceHandle);

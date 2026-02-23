@@ -1,18 +1,53 @@
 #include <server/Server.h>
 
+#include <parse/parse_impl.h>
+#include <sema/Formatter.h>
+#include <sema/Generator.h>
 #include <server/json_objects.h>
 #include <server/json_tuple.h>
 
+#include <filesystem>
+#include <fstream>
+
+#ifdef WIN32
 #include <fcntl.h>
 #include <io.h>
+#endif
 
 namespace server {
 
+std::filesystem::path uriToPath(std::string_view uri) {
+    static constexpr std::string_view prefix = "file:///";
+    VERIFY(uri.starts_with(prefix)); // TODO: Should not verify on user data
+    return uri_decode(uri.substr(prefix.length()));
+}
+
+std::string pathToUri(const std::filesystem::path& path) {
+    return "file:///" + uri_encode(path.string());
+}
+
+std::string readFile(const std::filesystem::path& file) {
+    std::ifstream stream;
+    stream.open(file, std::ios::binary);
+    VERIFY(stream.good()); // TODO: Should not verify on user data
+    stream.seekg(0, std::ios::end);
+    int_t length = stream.tellg();
+    VERIFY(length >= 0); // TODO: Should not verify on user data
+    std::string sourceBuffer;
+    sourceBuffer.resize(length + 2);
+    stream.seekg(0, std::ios::beg);
+    stream.read(sourceBuffer.data(), length);
+    stream.close();
+    VERIFY(stream.good()); // TODO: Should not verify on user data
+
+    return sourceBuffer;
+}
+
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
 struct Hover : Server::Method {
-    static constexpr json::FixedString clientCapName = "hover";
-    static constexpr json::FixedString serverCapName = "hoverProvider";
-    static constexpr json::FixedString method = "textDocument/hover";
+    static constexpr FixedString clientCapName = "hover";
+    static constexpr FixedString serverCapName = "hoverProvider";
+    static constexpr FixedString method = "textDocument/hover";
 
     // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#hoverClientCapabilities
     struct ClientCaps {
@@ -58,18 +93,107 @@ struct Hover : Server::Method {
             server.error("Hover disabled because no valid content format was found");
             return std::nullopt;
         }
-        server.info("Hover initialized to use {}", m_useMarkdown ? "markdown" : "plaintext");
 
         // Successful initialize
         return ServerCaps {};
     }
 
-    void handleRequest(Server& server, RequestHandle handle, const Params& params) {
-        server.info("Hover params: {}", json::format(params));
+    struct VariableInfo {
+        Word name;
+        sema::Constant type;
+        sema::VariableCategory category;
+    };
+
+    std::variant<std::monostate, sema::Constant, VariableInfo> extractStaticInfo(sema::Util& util, sema::Expression e) {
+        println("Extraction {} {}", std::to_underlying(e.kind()), e.id());
+        if (e.isConstant())
+            return e.constant();
+
+        switch (e.kind()) {
+        case sema::ExpressionKind::Call:
+            return util.program->getCall(e).callTarget;
+        case sema::ExpressionKind::GlobalReference$Program:
+        case sema::ExpressionKind::GlobalReference$Parameterize:
+            return e.referencedGlobal();
+        case sema::ExpressionKind::TemplateParameterReference: {
+            const auto& p = util.program->parameters[e.templateParameterIndex()];
+            if (p.implicit())
+                return {}; // How did we even get here?
+            return VariableInfo {
+                .name = p.name,
+                .type = sema::Constant(p.type),
+                .category = sema::VariableKind::Let
+            };
+        }
+        case sema::ExpressionKind::ParameterReference: {
+            auto* fnProg = sema::cast<sema::FunctionProgram>(util.program);
+            const auto& p = fnProg->functionParameters[e.parameterIndex()];
+            return VariableInfo { .name = p.name(), .type = p.type(), .category = p.category() };
+        }
+        case sema::ExpressionKind::ReferenceReference:
+        case sema::ExpressionKind::VariableReference:
+            // TODO: No access to metadata :(
+            return {};
+        case sema::ExpressionKind::MemberExpression:
+            return util.program->getMemberExpression(e).memberPointer;
+        default:
+            return {};
+        }
+    }
+
+    Result doRequest(Server& server, const Params& params) {
+        auto& context = server.acquireContext(params.textDocument.path());
+        auto location = server.positionToLocation(context, params.position);
+        auto tokHandle = context.tokenBuffer.findContainingToken(location);
+        if (!tokHandle.has_value())
+            return {};
+
+        auto maybeProg = context.lastDeclarationAtOrBefore(location);
+        if (!maybeProg.has_value())
+            return {};
+        sema::Util util(context, maybeProg.value());
+        VERIFY(util.program->declarationLocation() < location); // TODO: A range check would be better
+
+        sema::Formatter formatter { util };
+        auto token = context.tokenBuffer.token(tokHandle.value());
+        if (token.hasData2<sema::Expression>()) {
+            auto staticInfo = extractStaticInfo(util, token.data2<sema::Expression>());
+            if (std::holds_alternative<sema::Constant>(staticInfo)) {
+                sema::Constant c = std::get<sema::Constant>(staticInfo);
+                if (!formatter.formatAsDeclaration(c))
+                    formatter.formatConstant(c);
+            } else if (std::holds_alternative<VariableInfo>(staticInfo)) {
+                auto [name, type, category] = std::get<VariableInfo>(staticInfo);
+                formatter.formatVariableDeclaration(name, type, category);
+            }
+        } else if (parse::isStaticDecl(token.kind())) {
+            formatter.formatAsDeclaration(sema::Constant(util.program->selfConstant()));
+        } else if (parse::isEnumValueDecl(token.kind())) {
+            auto valueIndex = token.data2<uint32_t>();
+            formatter.formatEnumValueDeclaration(sema::Constant(util.program->selfConstant()), valueIndex);
+        } else if (parse::isMemberDecl(token.kind())) {
+            auto memberIndex = token.kind() == parse::TokenKind::HasMemberDecl ? token.data1<uint32_t>() : token.data2<uint32_t>();
+            formatter.formatMemberDeclaration(sema::Constant(util.program->selfConstant()), memberIndex);
+        } else if (parse::isVariableDecl(token.kind())) {
+            // TODO: No access to metadata :(
+        }
+
+        if (formatter.output.empty())
+            return {};
+
         HoverResult result;
-        result.contents.kind = lsp::MarkupKind::Markdown;
-        result.contents.value = "Some dummy text";
-        server.completeRequest(handle, result);
+        if (m_useMarkdown) {
+            result.contents.kind = lsp::MarkupKind::Markdown;
+            result.contents.value = fmt::format("```charge\n{}\n```", formatter.output);
+        } else {
+            result.contents.kind = lsp::MarkupKind::PlainText;
+            result.contents.value = std::move(formatter.output);
+        }
+        return { result };
+    }
+
+    void handleRequest(Server& server, RequestHandle handle, const Params& params) {
+        server.completeRequest(handle, doRequest(server, params));
     }
 
     bool m_useMarkdown = false;
@@ -141,6 +265,10 @@ void initializeMethods(Server& server, ServerCapsTuple& serverCaps, const Client
     ((initializeMethod<Ms>(server, serverCaps, clientCaps)), ...);
 }
 
+static void parseModule(Server& server, sema::Context& context) {
+    parse::parseImpl(context.tokenBuffer.source.data(), context, &server.parseErrorHandler);
+}
+
 void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initParams) {
     static constexpr auto jumpTableBase = json::object_detail::buildJumpTable<HASH_SOLUTION.primeModulo>(HASH_SOLUTION, METHOD_INFOS);
 
@@ -158,6 +286,8 @@ void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initP
     completeRequest(handle, result);
 
     m_initialized = true;
+
+    acquireBuiltinContext().checkBuiltins();
 
     // Currently interesting server features are:
     // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
@@ -178,7 +308,18 @@ void Server::dispatchMessage(const MethodInfo& method, std::string messageData, 
         handle.value = m_openRequests.size();
         m_openRequests.push_back({ .requestData = std::move(messageData), .requestId = message.id.value() });
     }
-    method.dispatchFunc(*method.methodImpl, *this, handle, message.params.value_or(json::RawDataView()));
+    try {
+        method.dispatchFunc(*method.methodImpl, *this, handle, message.params.value_or(json::RawDataView()));
+    } catch (...) {
+        if (message.id.has_value()) {
+            lsp::ResponseMessage response;
+            response.id.value = message.id;
+            response.error = lsp::ResponseError { .code = lsp::ErrorCode::InternalError, .message = "" };
+            std::string responseFmt = json::format(response);
+            std::cout << "Content-Length: " << responseFmt.size() << "\r\n\r\n";
+            std::cout.write(responseFmt.data(), responseFmt.size());
+        }
+    }
 }
 
 void Server::completeRequestRaw(RequestHandle handle, json::RawDataView result) {
@@ -241,8 +382,10 @@ HeaderInfo parseHeader(std::span<const std::string> lines) {
 }
 
 void Server::run() {
+#ifdef WIN32
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
+#endif
 
     std::string buffer;
     std::vector<std::string> headerLines;
@@ -275,6 +418,36 @@ void Server::run() {
             }
         }
     }
+}
+
+sema::Context& Server::acquireContext(const path& file, std::span<const sema::ModuleImport> imports) {
+    auto it = m_moduleCache.find(file);
+    if (it == m_moduleCache.end()) {
+        auto [newIt, isNew] = m_moduleCache.emplace(file, ModuleInfo { readFile(file), nullptr });
+        VERIFY(isNew);
+        it = newIt;
+
+        it->second.context = std::make_unique<sema::Context>(imports, it->second.sourceData);
+        auto& context = *it->second.context;
+        parseModule(*this, context);
+        for (auto progHandle : context.programsInModule(context.thisModule()))
+            sema::Generator::signatureCheck(context, progHandle);
+    }
+    return *it->second.context;
+}
+
+sema::Context& Server::acquireContext(const path& file) {
+    std::array imports { acquireBuiltinContext().exportModule() };
+    return acquireContext(file, imports);
+}
+
+sema::Context& Server::acquireBuiltinContext() {
+    return acquireContext(path(COMPILER_TEST_DIR) / "builtins.chrg", {});
+}
+
+SourceLocation Server::positionToLocation(sema::Context&, lsp::Position pos) {
+    // TODO: Implement utf16 to utf8 offset conversion
+    return SourceLocation(0, pos.line, pos.character);
 }
 
 }

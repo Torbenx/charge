@@ -4,18 +4,6 @@
 
 namespace json {
 
-template<int_t N>
-struct FixedString {
-    std::array<char, N + 1> storage;
-    constexpr FixedString(const char (&str)[N + 1]) {
-        std::copy_n(str, N + 1, storage.begin());
-        VERIFY(str[N] == '\0');
-    }
-    constexpr operator std::string_view() const { return { storage.begin(), N }; }
-};
-template<int_t N>
-FixedString(const char (&)[N]) -> FixedString<N - 1>;
-
 template<typename... Ts>
 struct Types { };
 template<FixedString... Ns>

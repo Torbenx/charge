@@ -128,7 +128,7 @@ struct MemberPointer {
     iterator begin() const { return iterator(m_data.begin() + 1); }
     iterator end() const { return iterator(m_data.end()); }
 
-    Link operator[](int_t index) const { return *iterator(m_data.begin() + 2 * index); }
+    Link operator[](int_t index) const { return *iterator(m_data.begin() + 2 * index + 1); }
 };
 static_assert(std::bidirectional_iterator<MemberPointer::iterator>);
 
@@ -323,7 +323,7 @@ struct Program {
     }
 
     Expression addMemberExpression(MemberExpression);
-    MemberExpression getMemberReference(Expression e) {
+    MemberExpression getMemberExpression(Expression e) {
         VERIFY(e.kind() == ExpressionKind::MemberExpression);
         return memberExpressions[e.id()];
     }
@@ -461,13 +461,16 @@ struct GlobalProgram : Program {
     GlobalProgram(Word name, parse::TokenHandle parseLocation, DeclarationValue rawParent, SourceLocation location)
         : Program(ProgramKind::Global, name, parseLocation, rawParent, location) { }
 
-    void setInitializer(Constant value) {
-        VERIFY(m_subClassData == INVALID_SUBCLASS_DATA);
-        m_subClassData = value.toUint();
+    bool hasInitializer() const {
+        return m_subClassData != INVALID_SUBCLASS_DATA;
     }
 
+    void setInitializer(Constant value) {
+        VERIFY(!hasInitializer());
+        m_subClassData = value.toUint();
+    }
     ExternConstant initializer() const {
-        VERIFY(m_subClassData != INVALID_SUBCLASS_DATA);
+        VERIFY(hasInitializer());
         return Constant::fromUint(m_subClassData);
     }
     ExternConstant type() const { return m_type.value(); }

@@ -67,6 +67,46 @@ RawStringView Parser::consumeStringRaw() {
     return { std::string_view { begin, end } };
 }
 
+std::string Parser::consumeString() {
+    consume('"');
+    std::string out;
+    for (; *position != '"'; ++position) {
+        char c = *position;
+        if (c == '\\') {
+            position += 1;
+            char control = *position;
+            if (control == '\\') {
+                out.push_back('\\');
+            } else if (control == '"') {
+                out.push_back('"');
+            } else if (control == 'n') {
+                out.push_back('\n');
+            } else if (control == 'r') {
+                out.push_back('\r');
+            } else if (control == 't') {
+                out.push_back('\t');
+            } else if (control == '/') {
+                out.push_back('/');
+            } else if (control == 'b') {
+                out.push_back('\b');
+            } else if (control == 'f') {
+                out.push_back('\f');
+            } else if (control == 'u') {
+                // TODO: Needs bounds check
+                uint16_t val = hex_value16({ { position[1], position[2], position[3], position[4] } });
+                position += 4;
+                VERIFY(val < 128); // TODO: Support encoding as utf-8
+                out.push_back(val);
+            }
+        } else {
+            out.push_back(c);
+        }
+    }
+    consume('"');
+    skipWhitespace();
+    return out;
+}
+
 RawDataView Parser::consumeValueRaw() {
     const char* begin = position;
     switch (*position) {
@@ -121,6 +161,31 @@ RawDataView Parser::consumeValueRaw() {
 
 void Formatter::formatInteger(int32_t value) {
     output += std::to_string(value);
+}
+
+void Formatter::formatString(std::string_view in) {
+    output.push_back('"');
+    for (char c : in) {
+        if (c < ' ') {
+            if (c == '\n') {
+                output += "\\n";
+            } else if (c == '\r') {
+                output += "\\r";
+            } else if (c == '\t') {
+                output += "\\t";
+            } else {
+                output += "\\u00";
+                output += hex_string8(c);
+            }
+        } else if (c == '"') {
+            output += "\\\"";
+        } else if (c == '\\') {
+            output += "\\\\";
+        } else {
+            output.push_back(c);
+        }
+    }
+    output.push_back('"');
 }
 
 }

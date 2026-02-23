@@ -268,24 +268,24 @@ NamespaceHandle Context::newNamespace(Word name, std::optional<NamespaceHandle> 
     return result;
 }
 
-std::optional<Program*> Context::firstDeclarationAfter(SourceLocation location) {
-    auto compare = [](ProgramUnion& prog, SourceLocation location) {
-        return prog.get().declarationLocation() < location;
+std::optional<ProgramHandle> Context::firstDeclarationAfter(SourceLocation location) {
+    auto compare = [](SourceLocation location, ProgramUnion& prog) {
+        return location < prog.get().declarationLocation();
     };
-    auto it = std::lower_bound(programStorage.begin(), programStorage.end(), location, compare);
+    auto it = std::upper_bound(programStorage.begin(), programStorage.end(), location, compare);
     if (it == programStorage.end())
         return std::nullopt;
-    return &it->get();
+    return ownProgramHandle(&it->get());
 }
 
-std::optional<Program*> Context::lastDeclarationBefore(SourceLocation location) {
-    auto compare = [](ProgramUnion& prog, SourceLocation location) {
-        return prog.get().declarationLocation() < location;
+std::optional<ProgramHandle> Context::lastDeclarationAtOrBefore(SourceLocation location) {
+    auto compare = [](SourceLocation location, ProgramUnion& prog) {
+        return location < prog.get().declarationLocation();
     };
-    auto it = std::lower_bound(programStorage.begin(), programStorage.end(), location, compare);
+    auto it = std::upper_bound(programStorage.begin(), programStorage.end(), location, compare);
     if (it == programStorage.begin())
         return std::nullopt;
-    return &std::prev(it)->get();
+    return ownProgramHandle(&std::prev(it)->get());
 }
 
 void Context::checkBuiltins() {

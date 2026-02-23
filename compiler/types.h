@@ -27,6 +27,32 @@ constexpr size_t alignmentCeil(size_t in, size_t alignment) {
     return (in + alignment - 1) & ~(alignment - 1);
 }
 
+template<int_t N>
+struct FixedString {
+    std::array<char, N + 1> storage;
+    constexpr FixedString(const char (&str)[N + 1]) {
+        std::copy_n(str, N + 1, storage.begin());
+        VERIFY(str[N] == '\0');
+    }
+    constexpr FixedString(std::array<char, N> str) {
+        std::copy_n(str, N, storage.begin());
+        storage.back() = '\0';
+    }
+    constexpr operator std::string_view() const { return { storage.begin(), N }; }
+    constexpr const char& operator[](int_t index) const { return storage[index]; }
+};
+template<int_t N>
+FixedString(const char (&)[N]) -> FixedString<N - 1>;
+
+uint8_t hex_value4(char);
+uint8_t hex_value8(FixedString<2>);
+uint16_t hex_value16(FixedString<4>);
+char hex_string4(uint8_t);
+FixedString<2> hex_string8(uint8_t);
+FixedString<4> hex_string16(uint16_t);
+std::string uri_encode(std::string_view);
+std::string uri_decode(std::string_view);
+
 template<typename T>
 struct optional_traits;
 
@@ -157,17 +183,6 @@ struct optional_traits<T*> {
     static constexpr T* empty_value = nullptr;
 };
 
-template<typename T>
-struct id {
-    T* ptr;
-    constexpr id(T* ptr)
-        : ptr(ptr) { VERIFY(ptr != nullptr); }
-    constexpr T& operator*() const { return *ptr; }
-    constexpr T* operator->() const { return ptr; }
-    constexpr operator T*() const { return ptr; }
-    operator uintptr_t() const { return ptr; }
-};
-
 template<typename Source, typename Target>
 struct relative_pointer {
     using relative_offset_type = int32_t;
@@ -257,9 +272,19 @@ template<typename T1, typename T2>
 auto operator<=>(TaggedSourceLocation<T1> left, TaggedSourceLocation<T2> right) {
     return (std::bit_cast<uint64_t>(left) >> 8) <=> (std::bit_cast<uint64_t>(right) >> 8);
 }
-
+template<typename T>
+auto operator<=>(TaggedSourceLocation<T> left, SourceLocation right) {
+    return (std::bit_cast<uint64_t>(left) >> 8) <=> (std::bit_cast<uint64_t>(right) >> 8);
+}
+template<typename T>
+auto operator<=>(SourceLocation left, TaggedSourceLocation<T> right) {
+    return (std::bit_cast<uint64_t>(left) >> 8) <=> (std::bit_cast<uint64_t>(right) >> 8);
+}
 inline auto operator<=>(SourceLocation left, SourceLocation right) {
     return (std::bit_cast<uint64_t>(left) >> 8) <=> (std::bit_cast<uint64_t>(right) >> 8);
+}
+inline bool operator==(SourceLocation left, SourceLocation right) {
+    return (std::bit_cast<uint64_t>(left) >> 8) == (std::bit_cast<uint64_t>(right) >> 8);
 }
 
 template<typename T>

@@ -7,6 +7,8 @@ target_sources(compiler
     Context.h
     dump.cpp
     errors.h
+    Formatter.cpp
+    Formatter.h
     generate.cpp
     Generator.h
     Instruction.cpp

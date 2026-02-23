@@ -26,6 +26,10 @@ struct PageBumpAllocator {
     const T* begin() const { return m_begin; }
     T* end() { return ptrFromBytes(offsetBytes); }
     const T* end() const { return ptrFromBytes(offsetBytes); }
+    auto rbegin() { return std::reverse_iterator(end()); }
+    auto rbegin() const { return std::reverse_iterator(end()); }
+    auto rend() { return std::reverse_iterator(begin()); }
+    auto rend() const { return std::reverse_iterator(begin()); }
     T* data() { return m_begin; }
     const T* data() const { return m_begin; }
     T& front() { return *m_begin; }
@@ -35,6 +39,7 @@ struct PageBumpAllocator {
     T& operator[](int_t index) { return m_begin[index]; }
     const T& operator[](int_t index) const { return m_begin[index]; }
     int_t size() const { return offsetBytes / sizeof(T); }
+    bool empty() const { return offsetBytes == 0; }
     int_t capacity() const { return capacityBytes / sizeof(T); }
     operator std::span<T>() {  return { data(), (size_t)size() }; }
     operator std::span<const T>() const {  return { data(), (size_t)size() }; }

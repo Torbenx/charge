@@ -171,7 +171,7 @@ struct Dumper {
             result += "ref";
             break;
         case ExpressionKind::MemberExpression: {
-            auto memberExpr = program->getMemberReference(e);
+            auto memberExpr = program->getMemberExpression(e);
             return formatExpression(memberExpr.base)
                 + "." + formatMember(programHandle, program->getMemberPointer(memberExpr.memberPointer));
         }
@@ -321,7 +321,7 @@ void Dumper::dumpProgram(ProgramHandle progHandle) {
 
 void Program::dump(Context& context) {
     Dumper dumper { context };
-    dumper.dumpProgram(context.programHandle(this));
+    dumper.dumpProgram(context.ownProgramHandle(this));
     print("{}", dumper.output);
 }
 

@@ -155,8 +155,9 @@ Constant Generator::inheriteParameters(DeclarationValue parent) {
     int_t parameterCount = parentProg->parameters.size();
     VERIFY(parameterCount > 0);
     std::vector<Constant> parentArguments(parameterCount, INVALID_CONSTANT);
-    for (int_t i = 0; i < parameterCount; i++)
-        parentArguments[i] = addInheritedParameter((Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter();
+    for (int_t i = 0; i < parameterCount; i++) {
+        parentArguments[i] = addInheritedParameter(parentProg->parameters[i].name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter();
+    }
 
     Constant parentValue = program->addParameterize(context, { parentHandle, parentArguments });
     FoldBase base = asFoldBase(parentValue);
@@ -859,17 +860,6 @@ void Generator::initialize(std::optional<TokenInfo*> implicitActionToken, Deduct
     }
 }
 
-std::optional<ProgramHandle> Generator::baseProgram(Constant value) {
-    if (value.kind() == ConstantKind::Program) {
-        return value.program();
-    } else if (value.kind() == ConstantKind::Parameterize) {
-        auto para = program->getParameterize(value);
-        return para.base;
-    } else {
-        return std::nullopt;
-    }
-}
-
 FoldBase Generator::asFoldBase(Constant base) {
     return tryAsFoldBase(base).value();
 }
@@ -1166,7 +1156,7 @@ Constant Generator::categoryOf(Expression expr) {
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].category;
     case ExpressionKind::MemberExpression:
-        return categoryOf(program->getMemberReference(expr).base);
+        return categoryOf(program->getMemberExpression(expr).base);
     case ExpressionKind::Call:
         return program->getCall(expr).resultCategory;
     default:
@@ -1253,7 +1243,7 @@ Type Generator::resultType(Expression expr) {
     case ExpressionKind::ReferenceReference:
         return localReferences[expr.referenceIndex()].type;
     case ExpressionKind::MemberExpression: {
-        auto memberExpr = program->getMemberReference(expr);
+        auto memberExpr = program->getMemberExpression(expr);
         return memberType(memberExpr.memberPointer);
     }
     case ExpressionKind::Call:
@@ -1325,10 +1315,10 @@ Expression Generator::newImplicitParameter(Type type) {
     return Expression::templateParameterReference(parameterIndex);
 }
 
-Expression Generator::addInheritedParameter(Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addInheritedParameter(Word name, Type type, std::optional<Constant> defaultValue) {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
     program->inheritedParameterCount += 1;
-    return addParameter(Word(), type, defaultValue);
+    return addParameter(name, type, defaultValue);
 }
 
 }

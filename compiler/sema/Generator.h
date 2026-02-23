@@ -356,7 +356,6 @@ struct Generator : Util {
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
 
-    std::optional<ProgramHandle> baseProgram(Constant value);
     FoldBase asFoldBase(Constant value);
     std::optional<FoldBase> tryAsFoldBase(Constant value);
     Constant fold(Constant base, ExternConstant v);
@@ -410,7 +409,7 @@ struct Generator : Util {
 
     Expression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
     Expression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    Expression addInheritedParameter(Type type, std::optional<Constant> defaultValue);
+    Expression addInheritedParameter(Word name, Type type, std::optional<Constant> defaultValue);
     Expression newImplicitParameter(Type type);
 
     std::optional<Constant> copyAsConstant(Expression);

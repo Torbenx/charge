@@ -24,6 +24,7 @@
 #define JSON_MEMBER(name) JSON_MEMBER_IMPL(name, __COUNTER__)
 
 namespace json {
+struct Null {};
 template<typename T>
 struct Nullable {
     std::optional<T> value;
@@ -217,13 +218,11 @@ struct Impl<RawStringView> {
 template<>
 struct Impl<std::string> {
     static std::string parse(Parser& parser) {
-        // TODO: Implement unescaping
-        return std::string(parser.consumeStringRaw().data);
+        return parser.consumeString();
     }
 
     static void format(Formatter& formatter, std::string_view data) {
-        // TODO: Implement escaping
-        formatter.emitRawString(data);
+        formatter.formatString(data);
     }
 };
 
@@ -283,6 +282,17 @@ struct Impl<std::optional<T>> {
         Impl<T>::format(formatter, opt.value());
     }
     static bool shouldFormatMember(const std::optional<T>& opt) { return opt.has_value(); }
+};
+
+template<>
+struct Impl<Null> {
+    static Null parse(Parser& parser) {
+        VERIFY(parser.tryConsumeNull());
+        return {};
+    }
+    static void format(Formatter& formatter, Null) {
+        formatter.formatNull();
+    }
 };
 
 template<typename T>

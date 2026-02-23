@@ -102,7 +102,7 @@ struct Context {
     ProgramHandle translate(ProgramHandle base, ProgramHandle program) {
         return translate(moduleOf(base), program);
     }
-    ProgramHandle programHandle(Program* prog) {
+    ProgramHandle ownProgramHandle(Program* prog) {
         auto& state = modules.back();
         int_t id = reinterpret_cast<ProgramUnion*>(prog) - state.programStorage;
         VERIFY(id >= (int_t)state.programIdBegin && id < (int_t)state.programIdEnd);
@@ -136,8 +136,8 @@ struct Context {
         return translate(moduleOf(base), value);
     }
 
-    std::optional<Program*> firstDeclarationAfter(SourceLocation location);
-    std::optional<Program*> lastDeclarationBefore(SourceLocation location);
+    std::optional<ProgramHandle> firstDeclarationAfter(SourceLocation location);
+    std::optional<ProgramHandle> lastDeclarationAtOrBefore(SourceLocation location);
 
     void checkBuiltins();
 };

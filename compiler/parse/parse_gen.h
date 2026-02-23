@@ -152,6 +152,7 @@ enum class LexerToken : uint8_t {
     Invalid = 255
 };
 std::string_view nameString(LexerToken);
+std::string_view fixedSpelling(LexerToken);
 
 enum class State {
     Expression,

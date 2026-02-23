@@ -393,7 +393,7 @@ void Generator::visitFunctionParametersAndBody() {
             advance();
             VariableCategory category(isVar ? VariableKind::Var : VariableKind::Let);
             if (tok->kind() == Token::VariableType) {
-                visitVariableTypeToken(isVar);
+                category = visitVariableTypeToken(isVar);
 
                 if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt)
                     error<errors::SelfFunctionParameterWithExplicitType>();
@@ -514,6 +514,10 @@ void Generator::visitStructMembers() {
 
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
+        if (member.isHas())
+            tok->setData1<uint32_t>(i);
+        else
+            tok->setData2<uint32_t>(i);
         TokenInfo* memberToken = tok;
         advance();
 
@@ -581,6 +585,7 @@ void Generator::visitEnumValues() {
 
         setParseLocation(value.parseLocation());
         VERIFY(tok->kind() == Token::ImplicitEnumValueDecl || tok->kind() == Token::ExplicitEnumValueDecl);
+        tok->setData2<uint32_t>(i);
         advance();
 
         // TODO: Actually set value once ints are supported

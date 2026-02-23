@@ -47,18 +47,18 @@ std::strong_ordering EnumValueSet::compare(Context& context, ProgramHandle progr
 
 Constant Program::addParameterize(Context& context, Parameterize para) {
     VERIFY(!para.arguments.empty());
-    auto id = parameterizes.get(context, context.programHandle(this), para);
+    auto id = parameterizes.get(context, context.ownProgramHandle(this), para);
     return Constant(ConstantKind::Parameterize, id);
 }
 
 Constant Program::addRemoteComputedConstant(Context& context, RemoteComputation expr) {
     VERIFY(expr.computation.kind() == ConstantKind::Computed);
-    auto id = remoteComputations.get(context, context.programHandle(this), expr);
+    auto id = remoteComputations.get(context, context.ownProgramHandle(this), expr);
     return Constant(ConstantKind::RemoteComputed, id);
 }
 
 Constant Program::addMemberPointer(Context& context, MemberPointer ptr) {
-    auto id = memberPointers.get(context, context.programHandle(this), ptr);
+    auto id = memberPointers.get(context, context.ownProgramHandle(this), ptr);
     return Constant(ConstantKind::MemberPointer, id);
 }
 
@@ -68,7 +68,7 @@ Constant Program::addEnumValue(Context& context, EnumValue value) {
         return Constant(ConstantKind::constant_kind, value.valueIndex);
 #include <sema/builtins.inc>
 
-    auto id = enumValues.get(context, context.programHandle(this), value);
+    auto id = enumValues.get(context, context.ownProgramHandle(this), value);
     return Constant(ConstantKind::EnumValue, id);
 }
 

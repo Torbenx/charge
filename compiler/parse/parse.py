@@ -1182,6 +1182,7 @@ with indent():
     line("Invalid = 255")
 line("};")
 line("std::string_view nameString(LexerToken);")
+line("std::string_view fixedSpelling(LexerToken);")
 lineNoIndent()
 
 line("enum class State {")
@@ -1233,6 +1234,24 @@ with indent():
     line("default:")
     with indent():
         line("VERIFY_NOT_REACHED();")
+    line("}")
+line("}")
+lineNoIndent()
+
+line("std::string_view fixedSpelling(LexerToken token) {")
+with indent():
+    line("switch(token) {")
+    for punc in punctuationTokens:
+        line("case LexerToken::" + punctuationCppName(punc) + ":")
+        with indent():
+            line("return \"" + punc + "\";")
+    for keyword in keywords + specialIdentifiers:
+        line("case LexerToken::" + keywordCppName(keyword) + ":")
+        with indent():
+            line("return \"" + keyword + "\";")
+    line("default:")
+    with indent():
+        line("return {};")
     line("}")
 line("}")
 lineNoIndent()

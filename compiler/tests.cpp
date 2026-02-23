@@ -319,23 +319,7 @@ struct CheckExprParser {
 
 }
 
-struct ParseErrorHandler : parse::ErrorHandler {
-    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
-        println("");
-        println(
-            "Invalid token '{}' for state '{}' and scope '{}' on line {}",
-            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.tokenBuffer.lines.size());
-        println("scopes:");
-        for (;;) {
-            println("  {}", parse::nameString(*scopes));
-            if (*scopes == parse::ScopeKind::Invalid)
-                break;
-            scopes -= 1;
-        }
-        println("");
-        VERIFY_NOT_REACHED();
-    }
-};
+using ParseErrorHandler = server::BasicParseErrorHandler;
 
 struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErrorHandler, sema::ErrorHandler {
     struct Pair {
@@ -506,8 +490,8 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
     }
 
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
-        sema::Program* program = context.firstDeclarationAfter(whitespace.location()).value();
-        sema::ProgramHandle programHandle = context.programHandle(program);
+        sema::ProgramHandle programHandle = context.firstDeclarationAfter(whitespace.location()).value();
+        sema::Program* program = context.program(programHandle);
         std::optional<SemanticError> semanticError;
         try {
             sema::Generator::signatureCheck(context, programHandle);
@@ -571,29 +555,12 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
     }
 };
 
-std::string readFile(std::filesystem::path file) {
-    std::ifstream stream;
-    stream.open(file, std::ios::binary);
-    VERIFY(stream.good());
-    stream.seekg(0, std::ios::end);
-    int_t length = stream.tellg();
-    VERIFY(length >= 0);
-    std::string sourceBuffer;
-    sourceBuffer.resize(length + 2);
-    stream.seekg(0, std::ios::beg);
-    stream.read(sourceBuffer.data(), length);
-    stream.close();
-    VERIFY(stream.good());
-
-    return sourceBuffer;
-}
-
 TEST(Charge, BuiltinModule) {
     namespace fs = std::filesystem;
     fs::path testDir { COMPILER_TEST_DIR };
     auto builtinModule = testDir / "builtins.chrg";
     EXPECT_TRUE(fs::is_regular_file(builtinModule));
-    auto sourceBuffer = readFile(builtinModule);
+    auto sourceBuffer = server::readFile(builtinModule);
 
     sema::Context context({}, sourceBuffer);
     ParseErrorHandler errorHandler;
@@ -609,7 +576,7 @@ TEST(Charge, Files) {
     fs::path testDir { COMPILER_TEST_DIR };
 
     auto builtinModule = testDir / "builtins.chrg";
-    auto builtinModuleSrc = readFile(builtinModule);
+    auto builtinModuleSrc = server::readFile(builtinModule);
     sema::Context builtinContext({}, builtinModuleSrc);
     {
         ParseErrorHandler errorHandler;
@@ -628,10 +595,28 @@ TEST(Charge, Files) {
             continue;
 
         println("File: {}", entry.path().filename().string());
-        auto sourceBuffer = readFile(entry.path());
+        auto sourceBuffer = server::readFile(entry.path());
 
         TestInstrumenter test(dependencies, sourceBuffer);
         test.runTest();
+    }
+}
+
+TEST(Charge, TokenSpelling) {
+    std::filesystem::path testDir { COMPILER_TEST_DIR };
+    for (auto fileName : { "files/declarations.chrg", "files/expressions.chrg" }) {
+        auto filePath = testDir / fileName;
+        auto fileSource = server::readFile(filePath);
+        // No module dependency need since no semantic analysis will be done
+        sema::Context context({}, fileSource);
+        ParseErrorHandler errorHandler;
+        parse::parseImpl(context.tokenBuffer.source.data(), context, &errorHandler);
+
+        for (const auto& token : context.tokenBuffer.tokens) {
+            std::string_view computedSpelling = context.tokenBuffer.tokenSpelling(token);
+            std::string_view sourceSpelling = { context.tokenBuffer.sourcePointer(token.location()), computedSpelling.length() };
+            EXPECT_EQ(computedSpelling, sourceSpelling);
+        }
     }
 }
 
@@ -640,7 +625,7 @@ TEST(Charge, DISABLED_Benchmark) {
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
     ASSERT_TRUE(fs::is_regular_file(file));
 
-    auto sourceBuffer = readFile(file);
+    auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);

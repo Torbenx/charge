@@ -19,6 +19,7 @@ add_executable(compiler
     PageBumpAllocator.h
     ReverseMemberPointer.h
     tests.cpp
+    types.cpp
     types.h
     windows_allocdetail.cpp
     WordStringTable.h

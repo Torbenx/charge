@@ -2,6 +2,15 @@
 
 #include <server/json.h>
 
+#include <filesystem>
+
+namespace server {
+
+std::filesystem::path uriToPath(std::string_view uri);
+std::string pathToUri(const std::filesystem::path& file);
+
+}
+
 namespace server::lsp {
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage
@@ -78,6 +87,8 @@ struct TextDocumentItem {
 struct TextDocumentIdentifier {
     JSON_OBJECT
     std::string JSON_MEMBER(uri);
+
+    std::filesystem::path path() const { return uriToPath(uri); }
 };
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#versionedTextDocumentIdentifier
@@ -191,9 +202,6 @@ struct InitializeParams {
         } else if (rootUri.has_value()) {
             if (rootUri.value().value.has_value())
                 return { WorkspaceFolder { .uri = rootUri.value().value.value(), .name = {} } };
-        } else if (rootPath.has_value()) {
-            if (rootPath.value().value.has_value())
-                return { WorkspaceFolder { .uri = "file://" + rootPath.value().value.value(), .name = {} } };
         }
         return {};
     }
