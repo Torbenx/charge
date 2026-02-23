@@ -398,7 +398,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
             EXPECT_EQ(tok.kind(), parse::TokenKind::IdentifierExpr);
             for (const auto& pair : cmd.pairs) {
                 if (pair.key == Word())
-                    EXPECT_EQ(pair.value, context.tokenBuffer.wordTable.view(tok.data1<Word>()));
+                    EXPECT_EQ(pair.value, context.tokenBuffer.wordTable.view(tok.data1<parse::DataKind::Word>()));
                 else
                     invalidKey(&cmd, &pair);
             }

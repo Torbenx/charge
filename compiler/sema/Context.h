@@ -68,7 +68,12 @@ struct Context {
 
     std::optional<Scope*> currentScope() { return m_scopeStack.back().scope; }
     Program* currentProgram() { return program(m_scopeStack.back().value.program()); }
-    void popScope() { m_scopeStack.pop_back(); }
+    void popScope(parse::TokenHandle endLocation) {
+        if (m_scopeStack.back().value.kind() == DeclarationValueKind::Program) {
+            currentProgram()->tokenRangeEnd = endLocation;
+        }
+        m_scopeStack.pop_back();
+    }
     void pushScope(DeclarationValue value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
     void pushEmptyScope(DeclarationValue value) { m_scopeStack.push_back({ value, std::nullopt }); }
 
@@ -136,8 +141,9 @@ struct Context {
         return translate(moduleOf(base), value);
     }
 
-    std::optional<ProgramHandle> firstDeclarationAfter(SourceLocation location);
-    std::optional<ProgramHandle> lastDeclarationAtOrBefore(SourceLocation location);
+    std::optional<ProgramHandle> containingProgram(parse::TokenHandle);
+    std::optional<ProgramHandle> firstDeclarationAfter(SourceLocation);
+    std::optional<ProgramHandle> lastDeclarationAtOrBefore(SourceLocation);
 
     void checkBuiltins();
 };

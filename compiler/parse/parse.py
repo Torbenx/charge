@@ -992,7 +992,7 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is DiscardLastTokenInstruction:
             line("discardLastToken(state);")
         elif type(inst) is UpdateDataInstruction:
-            line("state.tokenBuffer.tokens.back().setData1(" + inst.tokenDataExpr + ");")
+            line("state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):

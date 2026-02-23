@@ -16,6 +16,8 @@
 
 namespace server {
 
+// ----------------------------- Helpers ----------------------------
+
 std::filesystem::path uriToPath(std::string_view uri) {
     static constexpr std::string_view prefix = "file:///";
     VERIFY(uri.starts_with(prefix)); // TODO: Should not verify on user data
@@ -42,6 +44,8 @@ std::string readFile(const std::filesystem::path& file) {
 
     return sourceBuffer;
 }
+
+// ------------------------------ Hover -----------------------------
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
 struct Hover : Server::Method {
@@ -147,32 +151,38 @@ struct Hover : Server::Method {
         auto tokHandle = context.tokenBuffer.findContainingToken(location);
         if (!tokHandle.has_value())
             return {};
+        auto token = context.tokenBuffer.token(tokHandle.value());
 
-        auto maybeProg = context.lastDeclarationAtOrBefore(location);
+        auto maybeProg = context.containingProgram(tokHandle.value());
         if (!maybeProg.has_value())
-            return {};
+            return {}; // TODO: A program is not required for formatting namespace declarations
         sema::Util util(context, maybeProg.value());
-        VERIFY(util.program->declarationLocation() < location); // TODO: A range check would be better
 
         sema::Formatter formatter { util };
-        auto token = context.tokenBuffer.token(tokHandle.value());
-        if (token.hasData2<sema::Expression>()) {
-            auto staticInfo = extractStaticInfo(util, token.data2<sema::Expression>());
-            if (std::holds_alternative<sema::Constant>(staticInfo)) {
-                sema::Constant c = std::get<sema::Constant>(staticInfo);
-                if (!formatter.formatAsDeclaration(c))
-                    formatter.formatConstant(c);
-            } else if (std::holds_alternative<VariableInfo>(staticInfo)) {
-                auto [name, type, category] = std::get<VariableInfo>(staticInfo);
-                formatter.formatVariableDeclaration(name, type, category);
+        if (token.hasData2(parse::DataKind::Expression)) {
+            auto expr = token.data2<parse::DataKind::Expression>();
+            if (expr.has_value()) {
+                auto staticInfo = extractStaticInfo(util, expr.value());
+                if (std::holds_alternative<sema::Constant>(staticInfo)) {
+                    sema::Constant c = std::get<sema::Constant>(staticInfo);
+                    if (!formatter.formatAsDeclaration(c))
+                        formatter.formatConstant(c);
+                } else if (std::holds_alternative<VariableInfo>(staticInfo)) {
+                    auto [name, type, category] = std::get<VariableInfo>(staticInfo);
+                    formatter.formatVariableDeclaration(name, type, category);
+                }
             }
-        } else if (parse::isStaticDecl(token.kind())) {
+        } else if (token.kind() == parse::TokenKind::NamespaceDecl) {
+            // TODO: No access to metadata :(
+        } else if (parse::isProgramDecl(token.kind())) {
             formatter.formatAsDeclaration(sema::Constant(util.program->selfConstant()));
         } else if (parse::isEnumValueDecl(token.kind())) {
-            auto valueIndex = token.data2<uint32_t>();
+            auto valueIndex = token.data2<parse::DataKind::DeclIndex>();
             formatter.formatEnumValueDeclaration(sema::Constant(util.program->selfConstant()), valueIndex);
         } else if (parse::isMemberDecl(token.kind())) {
-            auto memberIndex = token.kind() == parse::TokenKind::HasMemberDecl ? token.data1<uint32_t>() : token.data2<uint32_t>();
+            auto memberIndex = token.kind() == parse::TokenKind::HasMemberDecl
+                ? token.data1<parse::DataKind::DeclIndex>()
+                : token.data2<parse::DataKind::DeclIndex>();
             formatter.formatMemberDeclaration(sema::Constant(util.program->selfConstant()), memberIndex);
         } else if (parse::isVariableDecl(token.kind())) {
             // TODO: No access to metadata :(
@@ -198,6 +208,8 @@ struct Hover : Server::Method {
 
     bool m_useMarkdown = false;
 };
+
+// --------------------------- Initialize ---------------------------
 
 template<typename... Ms>
 struct MethodCollection { };
@@ -265,10 +277,6 @@ void initializeMethods(Server& server, ServerCapsTuple& serverCaps, const Client
     ((initializeMethod<Ms>(server, serverCaps, clientCaps)), ...);
 }
 
-static void parseModule(Server& server, sema::Context& context) {
-    parse::parseImpl(context.tokenBuffer.source.data(), context, &server.parseErrorHandler);
-}
-
 void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initParams) {
     static constexpr auto jumpTableBase = json::object_detail::buildJumpTable<HASH_SOLUTION.primeModulo>(HASH_SOLUTION, METHOD_INFOS);
 
@@ -289,18 +297,20 @@ void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initP
 
     acquireBuiltinContext().checkBuiltins();
 
-    // Currently interesting server features are:
-    // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
+    // Currently interesting server features are (in order of ease of implementation):
     // - hover:                 https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
-    // - signatureHelp:         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_signatureHelp
     // - declaration:           https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_declaration
     // - definition:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
     // - typeDefinition (same as definition?): https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_typeDefinition
+    // - semanticTokens         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
     // - implementation:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_implementation
+    // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
+    // - signatureHelp:         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_signatureHelp
     // - publishDiagnostics:    https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics
     // - diagnostic:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_pullDiagnostics
-    // - semanticTokens         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
 }
+
+// ------------------------ Message Handling ------------------------
 
 void Server::dispatchMessage(const MethodInfo& method, std::string messageData, lsp::IncomingMessage message) {
     RequestHandle handle;
@@ -420,6 +430,8 @@ void Server::run() {
     }
 }
 
+// ------------------------- Sema utilities -------------------------
+
 sema::Context& Server::acquireContext(const path& file, std::span<const sema::ModuleImport> imports) {
     auto it = m_moduleCache.find(file);
     if (it == m_moduleCache.end()) {
@@ -429,7 +441,7 @@ sema::Context& Server::acquireContext(const path& file, std::span<const sema::Mo
 
         it->second.context = std::make_unique<sema::Context>(imports, it->second.sourceData);
         auto& context = *it->second.context;
-        parseModule(*this, context);
+        parse::parseImpl(context.tokenBuffer.source.data(), context, &parseErrorHandler);
         for (auto progHandle : context.programsInModule(context.thisModule()))
             sema::Generator::signatureCheck(context, progHandle);
     }

@@ -268,6 +268,17 @@ NamespaceHandle Context::newNamespace(Word name, std::optional<NamespaceHandle> 
     return result;
 }
 
+std::optional<ProgramHandle> Context::containingProgram(parse::TokenHandle tok) {
+    auto it = std::partition_point(programStorage.begin(), programStorage.end(), [tok] (ProgramUnion& prog) {
+        return prog.get().tokenRangeEnd <= tok;
+    });
+    if (it == programStorage.end())
+        return std::nullopt;
+    if (!it->get().tokenRange().contains(tok))
+        return std::nullopt;
+    return ownProgramHandle(&it->get());
+}
+
 std::optional<ProgramHandle> Context::firstDeclarationAfter(SourceLocation location) {
     auto compare = [](SourceLocation location, ProgramUnion& prog) {
         return location < prog.get().declarationLocation();

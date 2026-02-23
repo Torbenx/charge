@@ -29,7 +29,7 @@ OwnedExpression Generator::takeTopExpression() {
 void Generator::emitExpression(std::optional<TokenInfo*> token, OwnedExpression e) {
     VERIFY(currentExpression == INVALID_EXPRESSION);
     if (token.has_value())
-        token->setData2((Expression)e);
+        token->setData2<parse::DataKind::Expression>(e);
     currentExpression = std::move(e);
     expressionStack.push_back({ .endOffset = (uint32_t)instructionScratch.size() });
 }
@@ -241,7 +241,7 @@ std::optional<DeductionState> Generator::resolveImplicitImplTarget() {
 void Generator::addParameterizeArguments(DeductionState& state, int_t firstParameterIndex) {
     VERIFY(firstParameterIndex >= state.program->inheritedParameterCount);
     VERIFY(tok->kind() == Token::Parameterize);
-    auto argumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>());
+    auto argumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>());
     advance();
 
     int_t parameterCount = state.arguments.size();
@@ -521,7 +521,7 @@ Expression Generator::generateProgramLiteral(ProgramHandle progHandle, std::span
 }
 
 void Generator::generateIdentifierExpr() {
-    Word name = tok->data1<Word>();
+    Word name = tok->data1<parse::DataKind::Word>();
     if (name == parse::words["false"]) {
         emitExpression(tok, builtins::false_constant);
         return;
@@ -599,7 +599,7 @@ void Generator::generateIdentifierExpr() {
 }
 
 void Generator::generateStaticAccessExpr() {
-    Word name = tok->data1<Word>();
+    Word name = tok->data1<parse::DataKind::Word>();
     auto maybeBaseValue = expressionToConstantNoNewComputedConstants();
     if (!maybeBaseValue.has_value())
         error<errors::StaticLookupBaseExpressionNotSupported>();
@@ -636,7 +636,8 @@ void Generator::generateMemberAccessExpr() {
     advance();
 
     Type baseType = resultType(topExpression());
-    auto result = internalLookup(baseProgram(baseType).value(), memberAccessToken->data1<Word>());
+    Word name = memberAccessToken->data1<parse::DataKind::Word>();
+    auto result = internalLookup(baseProgram(baseType).value(), name);
     if (!result.value.has_value())
         error<errors::MemberLookupFailed>();
     if (result.value->kind() == DeclarationValueKind::Member) {
@@ -681,7 +682,7 @@ void Generator::generateMemberAccessExpr() {
     if (tok->kind() != Token::CallExpr)
         error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
     TokenInfo* callToken = tok;
-    auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>());
+    auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));

@@ -124,7 +124,7 @@ NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.tokenBuffer.tokens[position[1].toUint()].setData1(handle);
+    state.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
     return position;
 }
 
@@ -281,7 +281,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 
 static void endDeclaration(ParseState& state) {
     // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
-    state.popScope();
+    state.popScope(state.tokenBuffer.currentToken());
 }
 
 using GlobalKind = sema::GlobalKind;
@@ -3582,7 +3582,7 @@ variable_type$no_emit:
         if (next != '<' && next != '=') {
             tokEnd += 1;
             // updateData sema::VariableKind::Generic
-            state.tokenBuffer.tokens.back().setData1(sema::VariableKind::Generic);
+            state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::Generic);
             // pushScope ScopeKind::GenericCategoryExpression
             scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
             // emitToken TokenKind::VariableGenericCategory
@@ -3603,19 +3603,19 @@ variable_type$no_emit:
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::UniqueReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::UniqueReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::UniqueReference);
                 // next after_variable_unique_modifier
                 goto after_variable_unique_modifier$no_emit;
             }
             if (this_identifier == words["shared"]) {
                 // updateData sema::VariableKind::SharedReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::SharedReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::SharedReference);
                 // next after_variable_shared_modifier
                 goto after_variable_shared_modifier$no_emit;
             }
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
                 // next after_variable_const_modifier
                 goto after_variable_const_modifier$no_emit;
             }
@@ -3724,7 +3724,7 @@ after_variable_unique_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3761,7 +3761,7 @@ after_variable_shared_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstSharedReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3802,7 +3802,7 @@ after_variable_const_modifier$no_emit:
             }
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.tokenBuffer.tokens.back().setData1(sema::VariableKind::ConstUniqueReference);
+                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }

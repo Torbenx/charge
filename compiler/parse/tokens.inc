@@ -13,7 +13,7 @@
 DATAKIND(void, None)
 DATAKIND(Word, Word)
 DATAKIND(CallArgumentsHandle, CallArguments)
-DATAKIND(sema::Expression, Expression)
+DATAKIND(std::optional<sema::Expression>, Expression)
 DATAKIND(sema::VariableKind, VariableKind)
 DATAKIND(uint32_t, DeclIndex)
 
@@ -99,8 +99,8 @@ TOKEN(DiscardStmt, Discard, None, None)
 TOKEN(EmptyReturnStmt, Return, None, None)
 
 // ------ declarations ------
-MARKER(StaticDeclsBegin)
 TOKEN(NamespaceDecl, Identifier, Word, None)
+MARKER(ProgramDeclsBegin)
 TOKEN(FunctionDecl, Identifier, Word, None)
 TOKEN(FunctionImplDecl, Impl, None, None)
 TOKEN(StructDecl, Identifier, Word, None)
@@ -109,7 +109,7 @@ TOKEN(EnumDecl, Identifier, Word, None)
 TOKEN(EnumImplDecl, Impl, None, None)
 TOKEN(GlobalDecl, Identifier, Word, None)
 TOKEN(GlobalImplDecl, Impl, None, None)
-MARKER(StaticDeclsEnd)
+MARKER(ProgramDeclsEnd)
 
 MARKER(EnumValueDeclsBegin)
 TOKEN(ImplicitEnumValueDecl, Identifier, Word, DeclIndex)

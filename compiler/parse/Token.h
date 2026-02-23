@@ -23,8 +23,8 @@ LexerToken lexerToken(TokenKind);
 inline bool isUnaryExpr(TokenKind kind) {
     return kind >= TokenKind::UnaryExprsBegin && kind < TokenKind::UnaryExprsEnd;
 }
-inline bool isStaticDecl(TokenKind kind) {
-    return kind >= TokenKind::StaticDeclsBegin && kind < TokenKind::StaticDeclsEnd;
+inline bool isProgramDecl(TokenKind kind) {
+    return kind >= TokenKind::ProgramDeclsBegin && kind < TokenKind::ProgramDeclsEnd;
 }
 inline bool isEnumValueDecl(TokenKind kind) {
     return kind >= TokenKind::EnumValueDeclsBegin && kind < TokenKind::EnumValueDeclsEnd;
@@ -158,38 +158,36 @@ struct TokenInfo : TaggedSourceLocation<TokenKind> {
 
     TokenKind kind() const { return tag(); }
 
-    template<typename T1>
-    bool hasData1() const {
-        return tokenDataTable[(size_t)kind()].data1Kind == DataTypeTrait<T1>::kind;
+    bool hasData1(DataKind dKind) const {
+        return tokenDataTable[(size_t)kind()].data1Kind == dKind;
     }
 
-    template<typename T2>
-    bool hasData2() const {
-        return tokenDataTable[(size_t)kind()].data2Kind == DataTypeTrait<T2>::kind;
+    bool hasData2(DataKind dKind) const {
+        return tokenDataTable[(size_t)kind()].data2Kind == dKind;
     }
 
-    template<typename T1>
-    T1 data1() const {
-        VERIFY(hasData1<T1>());
-        return unpackData<T1>(data1Bits);
+    template<DataKind dKind>
+    auto data1() const {
+        VERIFY(hasData1(dKind));
+        return unpackData<data_t<dKind>>(data1Bits);
     }
 
-    template<typename T2>
-    T2 data2() const {
-        VERIFY(hasData2<T2>());
-        return unpackData<T2>(data2Bits);
+    template<DataKind dKind>
+    auto data2() const {
+        VERIFY(hasData2(dKind));
+        return unpackData<data_t<dKind>>(data2Bits);
     }
 
-    template<typename T1>
-    void setData1(T1 data1) {
-        VERIFY(hasData1<T1>());
-        data1Bits = packData<T1>(data1);
+    template<DataKind dKind>
+    void setData1(data_t<dKind> data1) {
+        VERIFY(hasData1(dKind));
+        data1Bits = packData(data1);
     }
 
-    template<typename T2>
-    void setData2(T2 data2) {
-        VERIFY(hasData2<T2>());
-        data2Bits = packData<T2>(data2);
+    template<DataKind dKind>
+    void setData2(data_t<dKind> data2) {
+        VERIFY(hasData2(dKind));
+        data2Bits = packData(data2);
     }
 
     void setKind(TokenKind kind) {

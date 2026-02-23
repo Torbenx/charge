@@ -277,8 +277,8 @@ struct Program {
     Program(ProgramKind kind, Word name, parse::TokenHandle parseLocation, DeclarationValue parent, SourceLocation location)
         : m_fields(Fields(kind), location)
         , m_name(name)
-        , m_parent(parent)
-        , parseLocationOrSelfConstant(parseLocation.id()) { }
+        , tokenRangeBegin(parseLocation)
+        , m_parent(parent) { }
 
     Constant addComputedConstant(Context&, ComputedConstant);
     Constant addParameterize(Context& context, Parameterize parameterize);
@@ -348,6 +348,7 @@ struct Program {
     Word name() const { return m_name; }
     ProgramStatus status() const { return m_fields.tag().status(); }
     ProgramKind kind() const { return m_fields.tag().kind(); }
+    parse::TokenRange tokenRange() const { return { tokenRangeBegin, tokenRangeEnd }; }
     bool isDependent() const {
         return !parameters.empty();
     }
@@ -366,7 +367,7 @@ struct Program {
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureCheckInProgress);
         m_fields.setTag(tag);
-        return parse::TokenHandle { parseLocationOrSelfConstant };
+        return tokenRangeBegin;
     }
 
     void markSignatureCheckComplete(bool isImpl, Constant selfConstant) {
@@ -375,12 +376,12 @@ struct Program {
         tag.setStatus(ProgramStatus::SignatureChecked);
         tag.setImpl(isImpl);
         m_fields.setTag(tag);
-        parseLocationOrSelfConstant = selfConstant.toUint();
+        m_selfConstant = selfConstant;
     }
 
     ExternConstant selfConstant() const {
         VERIFY(status() == ProgramStatus::SignatureChecked);
-        return Constant::fromUint(parseLocationOrSelfConstant);
+        return m_selfConstant.value();
     }
 
     std::optional<ProgramHandle> baseProgram(ExternConstant value) {
@@ -426,6 +427,8 @@ public:
     TaggedSourceLocation<Fields> m_fields;
     uint32_t inheritedParameterCount = 0;
     Word m_name;
+    parse::TokenHandle tokenRangeBegin;
+    parse::TokenHandle tokenRangeEnd;
 
     std::vector<Parameter> parameters;
     std::vector<Instruction> instructions;
@@ -443,12 +446,11 @@ protected:
     std::optional<ExternConstant> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
     DeclarationValue m_parent;
-    uint32_t parseLocationOrSelfConstant;
+    std::optional<ExternConstant> m_selfConstant;
 
     friend struct Dumper;
-    friend Context; // set translation buffers
 };
-static_assert(sizeof(Program) == 280);
+static_assert(sizeof(Program) == 288);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -783,7 +785,7 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 328);
+static_assert(sizeof(ProgramUnion) == 336);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

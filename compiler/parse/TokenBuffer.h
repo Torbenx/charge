@@ -30,6 +30,14 @@ struct TokenHandle {
     constexpr uint32_t id() const { return m_id; }
 
     auto operator<=>(const TokenHandle&) const = default;
+    bool operator==(const TokenHandle&) const = default;
+};
+
+struct TokenRange {
+    TokenHandle begin;
+    TokenHandle end;
+
+    bool contains(TokenHandle tok) const { return begin <= tok && tok < end; }
 };
 
 struct TokenBuffer {
@@ -81,7 +89,7 @@ struct TokenBuffer {
         LexerToken lexToken = lexerToken(info.kind());
         // TODO: Support literals
         if (lexToken == LexerToken::Identifier) {
-            return wordTable.view(info.data1<Word>());
+            return wordTable.view(info.data1<DataKind::Word>());
         } else {
             return fixedSpelling(lexToken);
         }

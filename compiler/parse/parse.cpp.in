@@ -124,7 +124,7 @@ NO_INLINE static Word* endCall(Word* position, ParseState& state) {
     uint32_t count = position[0].toUint();
     auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.tokenBuffer.tokens[position[1].toUint()].setData1(handle);
+    state.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
     return position;
 }
 
@@ -281,7 +281,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 
 static void endDeclaration(ParseState& state) {
     // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
-    state.popScope();
+    state.popScope(state.tokenBuffer.currentToken());
 }
 
 using GlobalKind = sema::GlobalKind;

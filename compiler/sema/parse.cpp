@@ -107,7 +107,7 @@ void Generator::visitTemplateParameters() {
 Generator::VariableDeclaration Generator::visitVariableDeclaration(ImplicitParameterMode parameterMode) {
     VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
     bool isVar = tok->kind() == Token::VarValueDecl;
-    Word name = tok->data1<Word>();
+    Word name = tok->data1<parse::DataKind::Word>();
     SourceLocation nameLoc = tok->location();
     advance();
 
@@ -118,7 +118,7 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(ImplicitParam
 VariableCategory Generator::visitVariableTypeToken(bool isVar) {
     VERIFY(tok->kind() == Token::VariableType);
 
-    VariableKind kind = tok->data1<VariableKind>();
+    VariableKind kind = tok->data1<parse::DataKind::VariableKind>();
     advance();
     if (isVar) {
         VERIFY(kind == VariableKind::Let); // Dummy value
@@ -208,7 +208,7 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
 
 Program::Parameter Generator::visitTemplateParameter() {
     VERIFY(tok->kind() == Token::LetValueDecl);
-    Word name = tok->data1<Word>();
+    Word name = tok->data1<parse::DataKind::Word>();
     advance();
 
     if (name == parse::words["self_type"]) {
@@ -386,7 +386,7 @@ void Generator::visitFunctionParametersAndBody() {
     };
 
     if (tok->kind() != Token::EmptyNode) {
-        Word name = tok->data1<Word>();
+        Word name = tok->data1<parse::DataKind::Word>();
         if (name == parse::words["self"]) {
             SourceLocation nameLoc = tok->location();
             bool isVar = tok->kind() == Token::VarValueDecl;
@@ -440,7 +440,7 @@ void Generator::visitFunctionParametersAndBody() {
         if (tok->kind() == Token::ReturnType) {
             TokenInfo* arrowToken = tok;
             advance();
-            if (tok->kind() == Token::IdentifierExpr && tok->data1<Word>() == parse::words["return_type"]) {
+            if (tok->kind() == Token::IdentifierExpr && tok->data1<parse::DataKind::Word>() == parse::words["return_type"]) {
                 advance();
                 VERIFY(tok->kind() == Token::FunctionBody);
                 if (!program->isTemplate())
@@ -515,9 +515,9 @@ void Generator::visitStructMembers() {
         setParseLocation(member.parseLocation());
         VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
         if (member.isHas())
-            tok->setData1<uint32_t>(i);
+            tok->setData1<parse::DataKind::DeclIndex>(i);
         else
-            tok->setData2<uint32_t>(i);
+            tok->setData2<parse::DataKind::DeclIndex>(i);
         TokenInfo* memberToken = tok;
         advance();
 
@@ -527,7 +527,7 @@ void Generator::visitStructMembers() {
         } else {
             if (tok->kind() != Token::VariableType)
                 error<errors::MemberDeclarationWithoutExplicitType>();
-            VERIFY(tok->data1<VariableKind>() == VariableKind::Let);
+            VERIFY(tok->data1<parse::DataKind::VariableKind>() == VariableKind::Let);
             implicitActionToken = tok;
             advance();
         }
@@ -585,7 +585,7 @@ void Generator::visitEnumValues() {
 
         setParseLocation(value.parseLocation());
         VERIFY(tok->kind() == Token::ImplicitEnumValueDecl || tok->kind() == Token::ExplicitEnumValueDecl);
-        tok->setData2<uint32_t>(i);
+        tok->setData2<parse::DataKind::DeclIndex>(i);
         advance();
 
         // TODO: Actually set value once ints are supported
@@ -728,7 +728,7 @@ std::optional<DeductionState> Generator::processPostfixExpr() {
             deductionState = generateParameterizeExpr();
         } else if (tok->kind() == Token::CallExpr) {
             if (!deductionState.has_value()) {
-                deductionState = resolveCallTarget(context.tokenBuffer.argumentNames(tok->data1<parse::CallArgumentsHandle>()));
+                deductionState = resolveCallTarget(context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>()));
             }
             generateCallExpr(std::move(deductionState.value()));
             deductionState.reset();

@@ -64,12 +64,14 @@ struct NamespaceHandle {
 
 inline constexpr int_t CONSTANT_KIND_BITS = 8;
 inline constexpr uint32_t MAX_CONSTANT_ID = (1u << (32 - CONSTANT_KIND_BITS)) - 1u;
-inline constexpr uint32_t INVALID_CONSTANT_KIND_INDEX = (1u << CONSTANT_KIND_BITS) - 1u;
+inline constexpr uint32_t MAX_CONSTANT_KIND_INDEX = (1u << CONSTANT_KIND_BITS) - 1u;
 
 enum class ConstantKind : uint8_t {
     // The ordering in this enum determines the ordering of constants
     // This ordering needs to be defined between aritatry constants to make some data strutures work,
     // but it is most important between constants of the same type where it used to orient equalities.
+
+    Invalid,
 
     Program, // either not dependent or a template
     Namespace,
@@ -93,8 +95,6 @@ enum class ConstantKind : uint8_t {
     CopyOfOpenGlobal$Parameterize, // non-dependent
     OpenReturnType$Self,
     OpenReturnType$Parameterize, // non-dependent
-
-    Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 struct Constant {
     constexpr Constant(ConstantKind kind, uint32_t id)
@@ -194,7 +194,7 @@ struct Constant {
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
-inline constexpr Constant INVALID_CONSTANT = { ConstantKind::Invalid, MAX_CONSTANT_ID };
+inline constexpr Constant INVALID_CONSTANT = { ConstantKind::Invalid, 0 };
 
 struct Type : Constant {
     static Type fromUint(uint32_t x) { return Type(Constant::fromUint(x)); }
@@ -220,12 +220,12 @@ private:
 };
 
 enum class DeclarationValueKind : uint8_t {
+    Invalid,
+
     Program,
     Namespace,
     Member,
     EnumValue,
-
-    Invalid = INVALID_CONSTANT_KIND_INDEX
 };
 
 struct DeclarationValue {
@@ -270,7 +270,7 @@ private:
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
-inline constexpr DeclarationValue INVALID_DECLARATION_VALUE = { DeclarationValueKind::Invalid, MAX_CONSTANT_ID };
+inline constexpr DeclarationValue INVALID_DECLARATION_VALUE = { DeclarationValueKind::Invalid, 0 };
 
 enum class ExpressionKind : uint8_t {
     FirstNonConstantKind = 128,
@@ -283,8 +283,6 @@ enum class ExpressionKind : uint8_t {
     ReferenceReference,
     MemberExpression,
     Call,
-
-    Invalid = INVALID_CONSTANT_KIND_INDEX,
 };
 
 struct Expression {
@@ -305,7 +303,7 @@ struct Expression {
     constexpr Expression(ExpressionKind kind, uint32_t id)
         : idBits(id), kindBits(std::to_underlying(kind)) { }
     constexpr Expression(Constant constant)
-        : Expression(std::bit_cast<Expression>(constant)) { }
+        : idBits(constant.idBits), kindBits(constant.kindBits) { }
 
     constexpr ExpressionKind kind() const { return (ExpressionKind)kindBits; }
     constexpr int_t id() const { return idBits; }
@@ -360,7 +358,7 @@ struct Expression {
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
 
-inline constexpr Expression INVALID_EXPRESSION = { ExpressionKind::Invalid, MAX_CONSTANT_ID };
+inline constexpr Expression INVALID_EXPRESSION = Expression(INVALID_CONSTANT);
 
 struct OwnedExpression : Expression {
     using Expression::Expression;
