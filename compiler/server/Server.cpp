@@ -147,7 +147,7 @@ struct Hover : Server::Method {
 
     Result doRequest(Server& server, const Params& params) {
         auto& context = server.acquireContext(params.textDocument.path());
-        auto location = server.positionToLocation(context, params.position);
+        auto location = server.fromLSP(context, params.position);
         auto tokHandle = context.tokenBuffer.findContainingToken(location);
         if (!tokHandle.has_value())
             return {};
@@ -209,11 +209,78 @@ struct Hover : Server::Method {
     bool m_useMarkdown = false;
 };
 
+// ----------------------- Document Management ----------------------
+
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_didOpen
+struct DidOpen : Server::Method {
+    static constexpr FixedString method = "textDocument/didOpen";
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didOpenTextDocumentParams
+    struct Params {
+        JSON_OBJECT
+        lsp::TextDocumentItem JSON_MEMBER(textDocument);
+    };
+
+    void handleNotification(Server& server, Params params) {
+        server.clientOpenedFile(params.textDocument.path(), std::move(params.textDocument.text));
+    }
+};
+
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_didChange
+struct DidChange : Server::Method {
+    static constexpr FixedString method = "textDocument/didChange";
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentContentChangeEvent
+    struct ChangeEvent {
+        JSON_OBJECT
+        std::optional<lsp::Range> JSON_MEMBER(range);
+        std::string JSON_MEMBER(text);
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
+    struct Params {
+        JSON_OBJECT
+        lsp::VersionedTextDocumentIdentifier JSON_MEMBER(textDocument);
+        std::vector<ChangeEvent> JSON_MEMBER(contentChanges);
+    };
+
+    void handleNotification(Server& server, Params params) {
+        if (params.contentChanges.size() != 1 || params.contentChanges.front().range.has_value()) {
+            // Incremental updates not supported
+            return;
+        }
+        server.clientChangedFile(params.textDocument.path(), std::move(params.contentChanges.front().text));
+    }
+};
+
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_didClose
+struct DidClose : Server::Method {
+    static constexpr FixedString method = "textDocument/didClose";
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didCloseTextDocumentParams
+    struct Params {
+        JSON_OBJECT
+        lsp::TextDocumentIdentifier JSON_MEMBER(textDocument);
+    };
+
+    void handleNotification(Server&, Params) { }
+};
+
 // --------------------------- Initialize ---------------------------
 
 template<typename... Ms>
 struct MethodCollection { };
-using Methods = MethodCollection<Hover>;
+template<typename C1, typename C2>
+struct MergeMethods;
+template<typename... Ms1, typename... Ms2>
+struct MergeMethods<MethodCollection<Ms1...>, MethodCollection<Ms2...>> {
+    using type = MethodCollection<Ms1..., Ms2...>;
+};
+//! Methods that don't have client/server caps and an initialize function
+using CoreMethods = MethodCollection<DidOpen, DidChange, DidClose>;
+//! Language features that can be optionally supported by the server
+using ConfigurableMethods = MethodCollection<Hover>;
+using AllMethods = MergeMethods<CoreMethods, ConfigurableMethods>::type;
 
 template<typename>
 struct Tuples;
@@ -225,13 +292,18 @@ struct Tuples<MethodCollection<Ms...>> {
     using ServerNs = json::Names<"textDocumentSync", Ms::serverCapName...>;
     using ServerCaps = json::Tuple<ServerTs, ServerNs>;
 };
-using ClientCapsTuple = Tuples<Methods>::ClientCaps;
-using ServerCapsTuple = Tuples<Methods>::ServerCaps;
+using ClientCapsTuple = Tuples<ConfigurableMethods>::ClientCaps;
+using ServerCapsTuple = Tuples<ConfigurableMethods>::ServerCaps;
 
 template<typename M>
 concept MethodIsRequest = requires { typename M::Result; };
 template<typename M>
 concept MethodHasParams = requires { typename M::Params; };
+template<typename M>
+concept ConfigurableMethod = requires {
+    typename M::ClientCaps;
+    typename M::ServerCaps;
+};
 template<typename M>
 void forwardHandleMessage(Server::Method& method, Server& server, RequestHandle handle, json::RawDataView params) {
     if constexpr (MethodIsRequest<M>) {
@@ -254,21 +326,27 @@ constexpr auto collectMethodInfos(MethodCollection<Ms...>) {
     ((result[index++] = { Ms::method, forwardHandleMessage<Ms> }), ...);
     return result;
 }
-static constexpr auto METHOD_INFOS = collectMethodInfos(Methods());
+static constexpr auto METHOD_INFOS = collectMethodInfos(AllMethods());
 static constexpr auto HASH_SOLUTION = json::object_detail::findSolution(json::object_detail::toDataVectors(METHOD_INFOS));
 
 template<typename M>
 void initializeMethod(Server& server, ServerCapsTuple& serverCapsTuple, const ClientCapsTuple& clientCapsTuple) {
     static constexpr auto tableIndex = json::object_detail::staticEvaluateHash<HASH_SOLUTION>(M::method);
-    const auto& clientCaps = clientCapsTuple.get<M::clientCapName>();
-    if (clientCaps.has_value()) {
-        auto method = std::make_unique<M>();
-        auto serverCaps = method->initialize(server, clientCaps.value());
-        if (serverCaps.has_value()) {
-            server.m_jumpTable[tableIndex].methodImpl = method.get();
-            server.m_methods.emplace_back(std::move(method));
-            serverCapsTuple.get<M::serverCapName>() = std::move(serverCaps);
+    if constexpr (ConfigurableMethod<M>) {
+        const auto& clientCaps = clientCapsTuple.get<M::clientCapName>();
+        if (clientCaps.has_value()) {
+            auto method = std::make_unique<M>();
+            auto serverCaps = method->initialize(server, clientCaps.value());
+            if (serverCaps.has_value()) {
+                server.m_jumpTable[tableIndex].methodImpl = method.get();
+                server.m_methods.emplace_back(std::move(method));
+                serverCapsTuple.get<M::serverCapName>() = std::move(serverCaps);
+            }
         }
+    } else {
+        auto method = std::make_unique<M>();
+        server.m_jumpTable[tableIndex].methodImpl = method.get();
+        server.m_methods.emplace_back(std::move(method));
     }
 }
 
@@ -286,7 +364,10 @@ void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initP
         clientCaps = json::parse<ClientCapsTuple>(initParams.capabilities.textDocument.value());
 
     m_jumpTable.assign(jumpTableBase.begin(), jumpTableBase.end());
-    initializeMethods(*this, serverCaps, clientCaps, Methods());
+    initializeMethods(*this, serverCaps, clientCaps, AllMethods());
+
+    auto& syncOptions = serverCaps.get<"textDocumentSync">();
+    syncOptions = lsp::TextDocumentSyncOptions { .openClose = true, .change = lsp::TextDocumentSyncKind::Full };
 
     std::string serverCapsFmt = json::format(serverCaps);
     lsp::InitializeResult result;
@@ -430,22 +511,75 @@ void Server::run() {
     }
 }
 
-// ------------------------- Sema utilities -------------------------
+// ------------------------- File utilities -------------------------
+
+Server::FileInfo& Server::fileInfo(const path& filePath) {
+    auto it = m_fileCache.find(filePath);
+    if (it == m_fileCache.end())
+        it = m_fileCache.emplace(filePath).first;
+    return const_cast<FileInfo&>(*it);
+}
+
+void Server::updateSource(FileInfo& info) {
+    if (info.openInClient)
+        return;
+
+    auto writeTime = lastWriteTime(info.filePath);
+    if (!writeTime.has_value()) {
+        // File may not exist anymore, keep the last version of it around
+        return;
+    }
+
+    if (info.lastWriteTime.has_value() && info.lastWriteTime.value() == writeTime.value()) {
+        // File wasn't written to
+        return;
+    }
+
+    info.setSource(readFile(info.filePath));
+    info.lastWriteTime = writeTime;
+}
+
+void Server::clientOpenedFile(const path& filePath, std::string fullSource) {
+    auto& info = fileInfo(filePath);
+    info.openInClient = true;
+    info.lastWriteTime = std::nullopt;
+    info.setSource(std::move(fullSource));
+}
+
+void Server::clientChangedFile(const path& filePath, std::string fullSource) {
+    auto& info = fileInfo(filePath);
+    if (!info.openInClient)
+        return;
+    info.setSource(std::move(fullSource));
+}
+
+void Server::clientClosedFile(const path& filePath) {
+    auto& info = fileInfo(filePath);
+    if (!info.openInClient)
+        return;
+
+    info.openInClient = false;
+    VERIFY(!info.lastWriteTime.has_value());
+    updateSource(info);
+}
+
+void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> imports) {
+    if (info.context != nullptr)
+        return;
+
+    info.context = std::make_unique<sema::Context>(imports, info.sourceData);
+    auto& context = *info.context;
+    context.errorHandler = &semaErrorHandler;
+    parse::parseImpl(context.tokenBuffer.source.data(), context, &parseErrorHandler);
+    for (auto progHandle : context.programsInModule(context.thisModule()))
+        sema::Generator::signatureCheck(context, progHandle);
+}
 
 sema::Context& Server::acquireContext(const path& file, std::span<const sema::ModuleImport> imports) {
-    auto it = m_moduleCache.find(file);
-    if (it == m_moduleCache.end()) {
-        auto [newIt, isNew] = m_moduleCache.emplace(file, ModuleInfo { readFile(file), nullptr });
-        VERIFY(isNew);
-        it = newIt;
-
-        it->second.context = std::make_unique<sema::Context>(imports, it->second.sourceData);
-        auto& context = *it->second.context;
-        parse::parseImpl(context.tokenBuffer.source.data(), context, &parseErrorHandler);
-        for (auto progHandle : context.programsInModule(context.thisModule()))
-            sema::Generator::signatureCheck(context, progHandle);
-    }
-    return *it->second.context;
+    FileInfo& info = fileInfo(file);
+    updateSource(info);
+    ensureContext(info, imports);
+    return *info.context;
 }
 
 sema::Context& Server::acquireContext(const path& file) {
@@ -457,7 +591,7 @@ sema::Context& Server::acquireBuiltinContext() {
     return acquireContext(path(COMPILER_TEST_DIR) / "builtins.chrg", {});
 }
 
-SourceLocation Server::positionToLocation(sema::Context&, lsp::Position pos) {
+SourceLocation Server::fromLSP(sema::Context&, lsp::Position pos) {
     // TODO: Implement utf16 to utf8 offset conversion
     return SourceLocation(0, pos.line, pos.character);
 }

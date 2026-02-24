@@ -3,11 +3,30 @@
 #include <parse/parse_gen.h>
 #include <parse/parse_impl.h>
 #include <sema/Context.h>
+#include <sema/SimpleErrorHandler.h>
 #include <server/LanguageServerProtocol.h>
 
 #include <filesystem>
+#include <unordered_set>
 
 namespace server {
+
+using path = std::filesystem::path;
+using file_time = std::filesystem::file_time_type;
+
+}
+
+template<>
+struct optional_traits<server::file_time> {
+    static constexpr auto empty_value = server::file_time::min();
+};
+
+namespace server {
+
+inline std::optional<file_time> lastWriteTime(const path& filePath) {
+    std::error_code code;
+    return std::filesystem::last_write_time(filePath, code);
+}
 
 struct RequestHandle {
     uint32_t value = std::numeric_limits<uint32_t>::max();
@@ -15,7 +34,6 @@ struct RequestHandle {
     constexpr bool valid() const { return value != std::numeric_limits<uint32_t>::max(); }
 };
 
-using path = std::filesystem::path;
 std::string readFile(const path& file);
 
 struct BasicParseErrorHandler : parse::ErrorHandler {
@@ -64,7 +82,7 @@ struct Server {
     sema::Context& acquireContext(const path& file, std::span<const sema::ModuleImport> imports);
     sema::Context& acquireBuiltinContext();
     sema::Context& acquireContext(const path& file);
-    SourceLocation positionToLocation(sema::Context&, lsp::Position);
+    SourceLocation fromLSP(sema::Context&, lsp::Position);
 
     template<typename... Args>
     void error(fmt::format_string<Args...> fmtstr, Args&&... args) {
@@ -84,17 +102,59 @@ struct Server {
         json::IntOrRawStringView requestId;
     };
 
-    struct ModuleInfo {
+    struct FileInfo {
+        const path filePath;
+        // TODO: SSO could bite us here because we rely on pointer stability of the source data.
         std::string sourceData;
         std::unique_ptr<sema::Context> context;
+        bool openInClient = false;
+        std::optional<file_time> lastWriteTime;
+
+        FileInfo(const path& filePath)
+            : filePath(filePath) { }
+
+        void setSource(std::string newSourceData) {
+            if (sourceData != newSourceData) {
+                sourceData = std::move(newSourceData);
+                context.reset();
+            }
+        }
     };
+    struct FileInfoHash {
+        using is_transparent = void;
+
+        size_t operator()(const FileInfo& info) const {
+            return std::hash<path>()(info.filePath);
+        }
+        size_t operator()(const path& filePath) const {
+            return std::hash<path>()(filePath);
+        }
+    };
+    struct FileInfoEqual {
+        using is_transparent = void;
+
+        bool operator()(const FileInfo& l, const FileInfo& r) const {
+            return l.filePath == r.filePath;
+        }
+        bool operator()(const path& filePath, const FileInfo& info) const {
+            return filePath == info.filePath;
+        }
+    };
+
+    FileInfo& fileInfo(const path& filePath);
+    void updateSource(FileInfo& info);
+    void clientOpenedFile(const path& filePath, std::string fullSource);
+    void clientChangedFile(const path& filePath, std::string fullSource);
+    void clientClosedFile(const path& filePath);
+    void ensureContext(FileInfo& info, std::span<const sema::ModuleImport> imports);
 
     bool m_initialized = false;
     std::vector<MethodInfo> m_jumpTable;
     std::vector<RequestInfo> m_openRequests;
     std::vector<std::unique_ptr<Method>> m_methods;
-    std::unordered_map<path, ModuleInfo> m_moduleCache;
+    std::unordered_set<FileInfo, FileInfoHash, FileInfoEqual> m_fileCache;
     BasicParseErrorHandler parseErrorHandler;
+    sema::SimpleErrorHandler semaErrorHandler;
 };
 
 }

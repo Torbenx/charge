@@ -81,6 +81,8 @@ struct TextDocumentItem {
     std::string JSON_MEMBER(languageId);
     int32_t JSON_MEMBER(version);
     std::string JSON_MEMBER(text);
+
+    std::filesystem::path path() const { return uriToPath(uri); }
 };
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentIdentifier
@@ -96,6 +98,8 @@ struct VersionedTextDocumentIdentifier {
     JSON_OBJECT
     std::string JSON_MEMBER(uri);
     int32_t JSON_MEMBER(version);
+
+    std::filesystem::path path() const { return uriToPath(uri); }
 };
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#optionalVersionedTextDocumentIdentifier
