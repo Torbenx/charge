@@ -55,6 +55,7 @@ struct BasicParseErrorHandler : parse::ErrorHandler {
 };
 
 struct Server {
+
     struct Method {
         virtual ~Method() = default;
     };
@@ -65,8 +66,6 @@ struct Server {
         Server::Method* methodImpl = nullptr;
     };
 
-    using FmtIt = std::back_insert_iterator<std::string>;
-
     void initialize(RequestHandle handle, const lsp::InitializeParams& initParams);
 
     void dispatchMessage(const MethodInfo& method, std::string messageData, lsp::IncomingMessage message);
@@ -76,8 +75,10 @@ struct Server {
     }
     void completeRequestRaw(RequestHandle handle, json::RawDataView result);
 
-    void run();
+    bool shouldExit() const { return false; }
+    void receiverChacacter(char c);
     void handleMessage(std::string msg);
+    void writeMessage(std::string_view msg);
 
     sema::Context& acquireContext(const path& file, std::span<const sema::ModuleImport> imports);
     sema::Context& acquireBuiltinContext();
@@ -98,7 +99,12 @@ struct Server {
     }
 
     struct RequestInfo {
-        std::string requestData; // Must be kept alive for string views
+        //! The data of the original message
+        /*!
+        Must be kept alive for string views.
+        TODO: SSO could bite us here because we rely on pointer stability.
+        */
+        std::string requestData;
         json::IntOrRawStringView requestId;
     };
 
@@ -155,6 +161,11 @@ struct Server {
     std::unordered_set<FileInfo, FileInfoHash, FileInfoEqual> m_fileCache;
     BasicParseErrorHandler parseErrorHandler;
     sema::SimpleErrorHandler semaErrorHandler;
+
+    int_t remainingContentSize = 0;
+    std::string inputBuffer;
+    std::vector<std::string> parsedHeaderLines;
+    std::string outputBuffer;
 };
 
 }

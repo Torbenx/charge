@@ -9,11 +9,6 @@
 #include <filesystem>
 #include <fstream>
 
-#ifdef WIN32
-#include <fcntl.h>
-#include <io.h>
-#endif
-
 namespace server {
 
 // ----------------------------- Helpers ----------------------------
@@ -36,7 +31,7 @@ std::string readFile(const std::filesystem::path& file) {
     int_t length = stream.tellg();
     VERIFY(length >= 0); // TODO: Should not verify on user data
     std::string sourceBuffer;
-    sourceBuffer.resize(length + 2);
+    sourceBuffer.resize(length);
     stream.seekg(0, std::ios::beg);
     stream.read(sourceBuffer.data(), length);
     stream.close();
@@ -109,7 +104,6 @@ struct Hover : Server::Method {
     };
 
     std::variant<std::monostate, sema::Constant, VariableInfo> extractStaticInfo(sema::Util& util, sema::Expression e) {
-        println("Extraction {} {}", std::to_underlying(e.kind()), e.id());
         if (e.isConstant())
             return e.constant();
 
@@ -383,7 +377,8 @@ void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initP
     // - declaration:           https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_declaration
     // - definition:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
     // - typeDefinition (same as definition?): https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_typeDefinition
-    // - semanticTokens         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
+    // - semanticTokens:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
+    // - highlights:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
     // - implementation:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_implementation
     // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
     // - signatureHelp:         https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_signatureHelp
@@ -407,8 +402,7 @@ void Server::dispatchMessage(const MethodInfo& method, std::string messageData, 
             response.id.value = message.id;
             response.error = lsp::ResponseError { .code = lsp::ErrorCode::InternalError, .message = "" };
             std::string responseFmt = json::format(response);
-            std::cout << "Content-Length: " << responseFmt.size() << "\r\n\r\n";
-            std::cout.write(responseFmt.data(), responseFmt.size());
+            writeMessage(responseFmt);
         }
     }
 }
@@ -418,8 +412,7 @@ void Server::completeRequestRaw(RequestHandle handle, json::RawDataView result) 
     response.result = result;
     response.id.value = m_openRequests[handle.value].requestId;
     std::string responseFmt = json::format(response);
-    std::cout << "Content-Length: " << responseFmt.size() << "\r\n\r\n";
-    std::cout.write(responseFmt.data(), responseFmt.size());
+    writeMessage(responseFmt);
 }
 
 void Server::handleMessage(std::string data) {
@@ -455,6 +448,13 @@ void Server::handleMessage(std::string data) {
     }
 }
 
+void Server::writeMessage(std::string_view msg) {
+    outputBuffer += "Content-Length: ";
+    outputBuffer += std::to_string(msg.size());
+    outputBuffer += "\r\n\r\n";
+    outputBuffer += msg;
+}
+
 struct HeaderInfo {
     int_t contentLength = 0;
 };
@@ -472,40 +472,29 @@ HeaderInfo parseHeader(std::span<const std::string> lines) {
     return result;
 }
 
-void Server::run() {
-#ifdef WIN32
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
-
-    std::string buffer;
-    std::vector<std::string> headerLines;
-    for (;;) {
-        auto val = std::cin.get();
-        if (std::cin.fail()) {
-            std::cerr << "Reading stdin failed\n";
-            break;
+void Server::receiverChacacter(char val) {
+    inputBuffer.push_back(val);
+    if (remainingContentSize > 0) {
+        remainingContentSize -= 1;
+        if (remainingContentSize == 0) {
+            handleMessage(inputBuffer);
+            inputBuffer.clear();
         }
+    } else {
         VERIFY(val > 0 && val < 128);
-        buffer.push_back(val);
-        if (buffer.back() == '\n') {
-            VERIFY(buffer.size() > 1);
-            VERIFY(buffer[buffer.size() - 2] == '\r');
-            buffer.resize(buffer.size() - 2);
-            if (buffer.empty()) {
+        if (inputBuffer.back() == '\n') {
+            VERIFY(inputBuffer.size() > 1);
+            VERIFY(inputBuffer[inputBuffer.size() - 2] == '\r');
+            inputBuffer.resize(inputBuffer.size() - 2);
+            if (inputBuffer.empty()) {
                 // Header complete
-                auto info = parseHeader(headerLines);
-                std::string data;
-                data.resize(info.contentLength);
-                std::cin.read(data.data(), data.size());
-                if (std::cin.fail()) {
-                    std::cerr << "Reading stdin failed\n";
-                    break;
-                }
-                handleMessage(std::move(data));
+                HeaderInfo info = parseHeader(parsedHeaderLines);
+                VERIFY(info.contentLength > 0);
+                remainingContentSize = info.contentLength;
+                parsedHeaderLines.clear();
             } else {
-                headerLines.push_back(buffer);
-                buffer.clear();
+                parsedHeaderLines.push_back(inputBuffer);
+                inputBuffer.clear();
             }
         }
     }

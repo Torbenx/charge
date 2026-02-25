@@ -270,13 +270,19 @@ NamespaceHandle Context::newNamespace(Word name, std::optional<NamespaceHandle> 
 
 std::optional<ProgramHandle> Context::containingProgram(parse::TokenHandle tok) {
     auto it = std::partition_point(programStorage.begin(), programStorage.end(), [tok] (ProgramUnion& prog) {
-        return prog.get().tokenRangeEnd <= tok;
+        return prog.get().tokenRangeBegin <= tok;
     });
-    if (it == programStorage.end())
+    if (it == programStorage.begin())
         return std::nullopt;
-    if (!it->get().tokenRange().contains(tok))
-        return std::nullopt;
-    return ownProgramHandle(&it->get());
+    VERIFY(it == programStorage.end() || it->get().tokenRangeBegin > tok);
+    VERIFY(std::prev(it)->get().tokenRangeBegin <= tok);
+    Program* prog = &std::prev(it)->get();
+    while (!prog->tokenRange().contains(tok)) {
+        if (prog->parent().kind() != DeclarationValueKind::Program)
+            return std::nullopt;
+        prog = program(prog->parent().program());
+    }
+    return ownProgramHandle(prog);
 }
 
 std::optional<ProgramHandle> Context::firstDeclarationAfter(SourceLocation location) {

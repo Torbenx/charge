@@ -310,6 +310,9 @@ struct Impl<T> {
 
         T result {};
         parser.consume('{');
+        if (parser.tryConsume('}'))
+            return result;
+
         for (;;) {
             std::string_view name = parser.consumeStringRaw().data;
             parser.consume(':');

@@ -307,7 +307,7 @@ bool Formatter::formatAsDeclaration(Constant c) {
             formatAs(progHandle, [&] {
                 output += ": ";
                 formatConstant(Constant(globalProg->type()));
-                if (globalProg->hasInitializer()) {
+                if (globalProg->globalKind() != GlobalKind::OpenLet && globalProg->hasInitializer()) {
                     output += " = ";
                     formatConstant(Constant(globalProg->initializer()));
                 }

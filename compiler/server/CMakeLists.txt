@@ -6,6 +6,7 @@ target_sources(compiler
     json.cpp
     json.h
     LanguageServerProtocol.h
+    tests.cpp
     Server.cpp
     Server.h
 )

@@ -140,15 +140,14 @@ constexpr bool shouldFormatMember(const T& t) {
 }
 
 template<typename T>
-inline T parse(RawDataView data) {
-    Parser parser(data.data.data()); // TODO: Use string_view for parsing
+T parse(std::string_view data) {
+    Parser parser(data.data()); // TODO: Use string_view for parsing
     return Impl<T>::parse(parser);
 }
 
 template<typename T>
-inline T parse(std::string_view data) {
-    Parser parser(data.data()); // TODO: Use string_view for parsing
-    return Impl<T>::parse(parser);
+T parse(RawDataView data) {
+    return parse<T>(data.data);
 }
 
 template<typename T>

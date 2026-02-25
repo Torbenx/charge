@@ -1,0 +1,22 @@
+{
+    "processId": 1234,
+    "capabilities": {
+        "general": {
+            "positionEncodings": [
+                "utf-16"
+            ],
+            "markdown": {}
+        },
+        "workspace": {
+            "workspaceFolders": true
+        },
+        "textDocument": {
+            "hover": {
+                "contentFormat": [
+                    "markdown",
+                    "plaintext"
+                ]
+            }
+        }
+    }
+}

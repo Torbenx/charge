@@ -16,10 +16,31 @@
 #include <ranges>
 #include <vector>
 
+#ifdef WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string_view(argv[1]) == std::string_view("--server")) {
+#ifdef WIN32
+            _setmode(_fileno(stdin), _O_BINARY);
+            _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
         server::Server s;
-        s.run();
+        while (!s.shouldExit()) {
+            auto val = std::cin.get();
+            if (std::cin.fail()) {
+                println("Reading stdin failed");
+                break;
+            }
+            s.receiverChacacter(val);
+            if (!s.outputBuffer.empty()) {
+                std::cout.write(s.outputBuffer.data(), s.outputBuffer.size());
+                s.outputBuffer.clear();
+            }
+        }
         return 0;
     }
 
@@ -514,8 +535,8 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
             return;
         }
 
-        println("-------------------------------");
-        program->dump(context);
+        //println("-------------------------------");
+        //program->dump(context);
 
         if (semanticError.has_value()) {
             FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.tokenBuffer.wordTable.view(context.program(semanticError->prog)->name());

@@ -46,7 +46,8 @@ int32_t Parser::consumeInteger() {
 }
 
 RawStringView Parser::consumeStringRaw() {
-    consume('"');
+    VERIFY(*position == '"');
+    position += 1;
     const char* begin = position;
     for (;;) {
         if (*position == '"') {
@@ -68,7 +69,8 @@ RawStringView Parser::consumeStringRaw() {
 }
 
 std::string Parser::consumeString() {
-    consume('"');
+    VERIFY(*position == '"');
+    position += 1;
     std::string out;
     for (; *position != '"'; ++position) {
         char c = *position;
