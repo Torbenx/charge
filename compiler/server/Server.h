@@ -2,10 +2,9 @@
 
 #include <parse/parse_gen.h>
 #include <parse/parse_impl.h>
-#include <sema/Context.h>
 #include <sema/SimpleErrorHandler.h>
-#include <sema/Util.h>
 #include <server/LanguageServerProtocol.h>
+#include <server/SemaContext.h>
 
 #include <filesystem>
 #include <unordered_set>
@@ -81,14 +80,11 @@ struct Server {
     void handleMessage(std::string msg);
     void writeMessage(std::string_view msg);
 
-    sema::Context& acquireContext(const path& file, std::span<const sema::ModuleImport> imports);
-    sema::Context& acquireBuiltinContext();
-    sema::Context& acquireContext(const path& file);
+    SemaContext& acquireContext(const path& file, std::span<const sema::ModuleImport> imports);
+    SemaContext& acquireBuiltinContext();
+    SemaContext& acquireContext(const path& file);
     SourceLocation fromLSP(sema::Context&, lsp::Position);
     lsp::Position toLSP(sema::Context&, SourceLocation);
-    sema::Util utilFor(sema::Context&, parse::TokenHandle tokHandle);
-    template<typename F>
-    void forEachToken(sema::Context&, F&&);
 
     template<typename... Args>
     void error(fmt::format_string<Args...> fmtstr, Args&&... args) {
@@ -117,7 +113,7 @@ struct Server {
         const path filePath;
         // TODO: SSO could bite us here because we rely on pointer stability of the source data.
         std::string sourceData;
-        std::unique_ptr<sema::Context> context;
+        std::unique_ptr<SemaContext> context;
         bool openInClient = false;
         std::optional<file_time> lastWriteTime;
 

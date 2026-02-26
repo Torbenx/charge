@@ -1,12 +1,20 @@
 
 target_sources(compiler
     PRIVATE
+    GoToDeclaration.cpp
+    GoToDeclaration.h
+    Hover.cpp
+    Hover.h
     json_objects.h
     json_tuple.h
     json.cpp
     json.h
     LanguageServerProtocol.h
-    tests.cpp
+    SemaContext.cpp
+    SemaContext.h
+    SemanticTokens.cpp
+    SemanticTokens.h
     Server.cpp
     Server.h
+    tests.cpp
 )
