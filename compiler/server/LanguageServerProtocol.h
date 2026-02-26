@@ -248,4 +248,11 @@ struct MarkupContent {
     std::string JSON_MEMBER(value);
 };
 
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentPositionParams
+struct TextDocumentPositionParams {
+    JSON_OBJECT
+    TextDocumentIdentifier JSON_MEMBER(textDocument);
+    Position JSON_MEMBER(position);
+};
+
 }

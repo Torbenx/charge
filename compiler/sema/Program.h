@@ -266,11 +266,11 @@ struct ConstantIdRange {
 
 struct Program {
     struct Parameter {
+        SourceLocation location;
         Word name;
         ExternConstant type;
         std::optional<Constant> defaultValue;
 
-        bool operator==(const Parameter&) const = default;
         bool implicit() const { return name.empty(); }
     };
 

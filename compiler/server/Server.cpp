@@ -6,6 +6,7 @@
 #include <server/json_objects.h>
 #include <server/json_tuple.h>
 
+#include <bitset>
 #include <filesystem>
 #include <fstream>
 
@@ -60,11 +61,7 @@ struct Hover : Server::Method {
     };
 
     // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#hoverParams
-    struct Params {
-        JSON_OBJECT
-        lsp::TextDocumentIdentifier JSON_MEMBER(textDocument);
-        lsp::Position JSON_MEMBER(position);
-    };
+    using Params = lsp::TextDocumentPositionParams;
 
     // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#hover
     struct HoverResult {
@@ -146,11 +143,7 @@ struct Hover : Server::Method {
         if (!tokHandle.has_value())
             return {};
         auto token = context.tokenBuffer.token(tokHandle.value());
-
-        auto maybeProg = context.containingProgram(tokHandle.value());
-        if (!maybeProg.has_value())
-            return {}; // TODO: A program is not required for formatting namespace declarations
-        sema::Util util(context, maybeProg.value());
+        sema::Util util = server.utilFor(context, tokHandle.value());
 
         sema::Formatter formatter { util };
         if (token.hasData2(parse::DataKind::Expression)) {
@@ -201,6 +194,375 @@ struct Hover : Server::Method {
     }
 
     bool m_useMarkdown = false;
+};
+
+enum class LocalDeclarationKind : uint8_t {
+    TemplateParameter,
+    FunctionParameter,
+    Variable,
+    Reference,
+};
+struct LocalDeclaration {
+    LocalDeclarationKind kind;
+    uint32_t id;
+};
+struct MemberDeclaration {
+    sema::ProgramHandle structProgram;
+    uint32_t memberIndex;
+};
+struct EnumValueDeclaration {
+    sema::ProgramHandle enumProgram;
+    uint32_t valueIndex;
+};
+using DeclarationInfo = std::variant<std::monostate, sema::NamespaceHandle, sema::ProgramHandle, MemberDeclaration, EnumValueDeclaration, LocalDeclaration>;
+
+DeclarationInfo extractDeclarationInfo(sema::Util& util, const parse::TokenInfo& token) {
+    if (token.kind() == parse::TokenKind::NamespaceDecl)
+        // TODO: No access to metadata :(
+        return {};
+    if (parse::isProgramDecl(token.kind()))
+        return util.programHandle;
+    if (token.kind() == parse::TokenKind::MemberDecl)
+        return MemberDeclaration { util.programHandle, token.data2<parse::DataKind::DeclIndex>() };
+    if (parse::isEnumValueDecl(token.kind()))
+        return EnumValueDeclaration { util.programHandle, token.data2<parse::DataKind::DeclIndex>() };
+    if (parse::isVariableDecl(token.kind()))
+        // TODO: No access to metadata :(
+        return {};
+
+    if (!parse::isExpression(token.kind()))
+        return {};
+    if (parse::lexerToken(token.kind()) != parse::LexerToken::Identifier)
+        return {};
+    auto maybeExpr = token.data2<parse::DataKind::Expression>();
+    if (!maybeExpr.has_value())
+        return {};
+
+    // There are 3 semantic expression tokens for identifier tokens:
+    // IdentifierExpr, StaticAccessExpr and MemberAccessExpr
+    // The possible expression data for each of them are:
+    // IdentifierExpr  : Namespace, Program, Parameterize, GlobalReference, EnumValue,
+    //                   TemplateParameterReference, VariableReference, ParameterReference, ReferenceReference
+    // StaticAccessExpr: Namespace, Program, Parameterize, GlobalReference, MemberPointer, EnumValue
+    // MemberAccessExpr: Program, Parameterize, MemberExpression
+    sema::Expression e = maybeExpr.value();
+    if (!e.isConstant()) {
+        switch (e.kind()) {
+        case sema::ExpressionKind::MemberExpression:
+            e = util.program->getMemberExpression(e).memberPointer;
+            break;
+        case sema::ExpressionKind::GlobalReference$Program:
+        case sema::ExpressionKind::GlobalReference$Parameterize:
+            e = e.referencedGlobal();
+            break;
+        case sema::ExpressionKind::TemplateParameterReference:
+            return LocalDeclaration(LocalDeclarationKind::TemplateParameter, e.templateParameterIndex());
+        case sema::ExpressionKind::ParameterReference:
+            return LocalDeclaration(LocalDeclarationKind::FunctionParameter, e.parameterIndex());
+        case sema::ExpressionKind::VariableReference:
+        case sema::ExpressionKind::ReferenceReference:
+            // TODO: No access to metadata :(
+            return {};
+        default:
+            return {};
+        }
+    }
+    VERIFY(e.isConstant());
+    sema::Constant c = e.constant();
+    if (c.isEnumValueLiteral()) {
+        auto enumValue = util.program->getEnumValue(c);
+        return EnumValueDeclaration { util.baseProgram(sema::Constant(enumValue.enumType)).value(), enumValue.valueIndex };
+    }
+    switch (c.kind()) {
+    case sema::ConstantKind::Namespace:
+        return c.nsHandle();
+    case sema::ConstantKind::Program:
+        return c.program();
+    case sema::ConstantKind::Parameterize:
+        return util.program->getParameterize(c).base;
+    case sema::ConstantKind::MemberPointer: {
+        auto pointer = util.program->getMemberPointer(c);
+        if (pointer.isIdentity())
+            return {};
+        auto lastLink = pointer[pointer.linkCount() - 1];
+        return MemberDeclaration { util.baseProgram(lastLink.parentType).value(), lastLink.memberIndex };
+    }
+    default:
+        return {};
+    }
+}
+
+std::optional<SourceLocation> getDeclarationLocation(sema::Util& util, const DeclarationInfo& info) {
+    return std::visit([&]<typename T>(T v) -> std::optional<SourceLocation> {
+        if constexpr (std::is_same_v<T, sema::NamespaceHandle>) {
+            return std::nullopt;
+        } else if constexpr (std::is_same_v<T, sema::ProgramHandle>) {
+            return util.context.program(v)->declarationLocation();
+        } else if constexpr (std::is_same_v<T, MemberDeclaration>) {
+            return sema::cast<sema::StructProgram>(util.context.program(v.structProgram))->members[v.memberIndex].location();
+        } else if constexpr (std::is_same_v<T, EnumValueDeclaration>) {
+            return sema::cast<sema::EnumProgram>(util.context.program(v.enumProgram))->values[v.valueIndex].location();
+        } else if constexpr (std::is_same_v<T, LocalDeclaration>) {
+            if (v.kind == LocalDeclarationKind::TemplateParameter) {
+                return util.program->parameters[v.id].location;
+            } else if (v.kind == LocalDeclarationKind::FunctionParameter) {
+                return sema::cast<sema::FunctionProgram>(util.program)->functionParameters[v.id].location();
+            }
+            return std::nullopt;
+        } else {
+            return std::nullopt;
+        }
+    },
+        info);
+}
+
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_declaration
+struct GoToDeclaration : Server::Method {
+    static constexpr FixedString method = "textDocument/declaration";
+    static constexpr FixedString clientCapName = "declaration";
+    static constexpr FixedString serverCapName = "declarationProvider";
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#declarationClientCapabilities
+    struct ClientCaps {
+        JSON_OBJECT
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#declarationOptions
+    struct ServerCaps {
+        JSON_OBJECT
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#declarationParams
+    using Params = lsp::TextDocumentPositionParams;
+
+    using Result = json::Nullable<lsp::Location>;
+
+    std::optional<ServerCaps> initialize(Server&, const ClientCaps&) { return ServerCaps(); }
+
+    Result doRequest(Server& server, const Params& params) {
+        auto& context = server.acquireContext(params.textDocument.path());
+        auto location = server.fromLSP(context, params.position);
+        auto tokHandle = context.tokenBuffer.findContainingToken(location);
+        if (!tokHandle.has_value())
+            return {};
+        auto token = context.tokenBuffer.token(tokHandle.value());
+        auto util = server.utilFor(context, tokHandle.value());
+
+        auto declInfo = extractDeclarationInfo(util, token);
+        auto maybeLoc = getDeclarationLocation(util, declInfo);
+        if (!maybeLoc.has_value())
+            return {};
+
+        {
+            SourceLocation location = maybeLoc.value();
+            auto tokHandle = context.tokenBuffer.findContainingToken(location);
+            VERIFY(tokHandle.has_value());
+            int_t length = context.tokenBuffer.tokenSpelling(context.tokenBuffer.token(tokHandle.value())).length();
+            lsp::Position pos = server.toLSP(context, location);
+            lsp::Range range { pos, lsp::Position { .line = pos.line, .character = int32_t(pos.character + length) } };
+            return { lsp::Location {
+                .uri = params.textDocument.uri,
+                .range = range,
+            } };
+        }
+    }
+
+    void handleRequest(Server& server, RequestHandle handle, const Params& params) {
+        server.completeRequest(handle, doRequest(server, params));
+    }
+};
+
+struct SemanticTokens : Server::Method {
+    static constexpr FixedString method = "textDocument/semanticTokens/full";
+    static constexpr FixedString clientCapName = "semanticTokens";
+    static constexpr FixedString serverCapName = "semanticTokensProvider";
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensLegend
+    struct Legend {
+        JSON_OBJECT
+        std::vector<std::string> JSON_MEMBER(tokenTypes);
+        std::vector<std::string> JSON_MEMBER(tokenModifiers);
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
+    struct ClientCaps {
+        JSON_OBJECT
+        std::vector<std::string> JSON_MEMBER(tokenTypes);
+        std::vector<std::string> JSON_MEMBER(tokenModifiers);
+        std::vector<std::string> JSON_MEMBER(formats);
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensOptions
+    struct ServerCaps {
+        JSON_OBJECT
+        Legend JSON_MEMBER(legend);
+        std::optional<bool> JSON_MEMBER(range);
+        std::optional<bool> JSON_MEMBER(full);
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensParams
+    struct Params {
+        JSON_OBJECT
+        lsp::TextDocumentIdentifier JSON_MEMBER(textDocument);
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokens
+    struct Tokens {
+        JSON_OBJECT
+        std::vector<int32_t> JSON_MEMBER(data);
+    };
+
+    using Result = json::Nullable<Tokens>;
+
+    enum class Token : uint8_t {
+        Namespace,
+        Type,
+        Enum,
+        Struct,
+        TypeParameter,
+        Parameter,
+        Variable,
+        EnumMember,
+        Function,
+
+        COUNT
+    };
+
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokenTypes
+    static std::string_view lspName(Token t) {
+        switch (t) {
+        case Token::Namespace:
+            return "namespace";
+        case Token::Type:
+            return "type";
+        case Token::Enum:
+            return "enum";
+        case Token::Struct:
+            return "struct";
+        case Token::TypeParameter:
+            return "typeParameter";
+        case Token::Parameter:
+            return "parameter";
+        case Token::Variable:
+            return "variable";
+        case Token::EnumMember:
+            return "enumMember";
+        case Token::Function:
+            return "function";
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    std::optional<ServerCaps> initialize(Server&, const ClientCaps& clientCaps) {
+        if (!std::ranges::contains(clientCaps.formats, std::string_view("relative")))
+            return std::nullopt;
+
+        std::vector<std::string> typeLegend;
+        for (int_t i = 0; i < (int_t)Token::COUNT; i++) {
+            auto name = lspName((Token)i);
+            if (std::ranges::contains(clientCaps.tokenTypes, name)) {
+                m_enableMask.set(i, true);
+                typeLegend.emplace_back(name);
+            } else {
+                typeLegend.push_back({});
+            }
+        }
+        std::vector<std::string> modLegend;
+        m_hasStaticMod = std::ranges::contains(clientCaps.tokenModifiers, std::string_view("static"));
+        if (m_hasStaticMod) {
+            modLegend.push_back("static");
+        }
+
+        if (!enabled(Token::Enum))
+            m_enumToken = Token::Type;
+        if (!enabled(Token::Struct))
+            m_structToken = Token::Type;
+        if (!enabled(Token::TypeParameter))
+            m_typeParameterToken = Token::Parameter;
+
+        if (m_enableMask.none())
+            return std::nullopt;
+
+        return ServerCaps {
+            .legend = { .tokenTypes = std::move(typeLegend), .tokenModifiers = std::move(modLegend) },
+            .range = false,
+            .full = true
+        };
+    }
+
+    Result doRequest(Server& server, const Params& params) {
+        sema::Context& context = server.acquireContext(params.textDocument.path());
+        lsp::Position prevPos { .line = 0, .character = 0 };
+        std::vector<int32_t> output;
+        server.forEachToken(context, [&](sema::Util util, parse::TokenHandle tokHandle) {
+            auto token = context.tokenBuffer.token(tokHandle);
+            auto declInfo = extractDeclarationInfo(util, token);
+            struct Out {
+                Token tok = Token::COUNT;
+                bool staticMod = false;
+            };
+            auto out = std::visit([&]<typename T>(T v) -> Out {
+                if constexpr (std::is_same_v<T, sema::NamespaceHandle>) {
+                    return { Token::Namespace, true };
+                } else if constexpr (std::is_same_v<T, sema::ProgramHandle>) {
+                    switch (context.program(v)->kind()) {
+                    case sema::ProgramKind::Enum:
+                        return { m_enumToken, true };
+                    case sema::ProgramKind::Function:
+                        return { Token::Function, true };
+                    case sema::ProgramKind::Global:
+                        return { Token::Variable, true };
+                    case sema::ProgramKind::Struct:
+                        return { m_structToken, true };
+                    default:
+                        VERIFY_NOT_REACHED();
+                    }
+                } else if constexpr (std::is_same_v<T, MemberDeclaration>) {
+                    return { Token::Variable, false };
+                } else if constexpr (std::is_same_v<T, EnumValueDeclaration>) {
+                    return { Token::EnumMember, true };
+                } else if constexpr (std::is_same_v<T, LocalDeclaration>) {
+                    if (v.kind == LocalDeclarationKind::TemplateParameter) {
+                        return { Token::Parameter, true };
+                    } else if (v.kind == LocalDeclarationKind::FunctionParameter) {
+                        return { Token::Parameter, false };
+                    }
+                }
+                return Out();
+            },
+                declInfo);
+            if (out.tok == Token::COUNT)
+                return;
+            lsp::Position pos = server.toLSP(context, token.location());
+            int_t lineDiff = (int_t)pos.line - (int_t)prevPos.line;
+            int_t offsetDiff = (int_t)pos.character - (lineDiff != 0 ? 0 : prevPos.character);
+            prevPos = pos;
+            VERIFY(lineDiff >= 0);
+            VERIFY(offsetDiff >= 0);
+
+            output.push_back(lineDiff);
+            output.push_back(offsetDiff);
+            output.push_back(context.tokenBuffer.tokenSpelling(token).length());
+            output.push_back(std::to_underlying(out.tok));
+            output.push_back(m_hasStaticMod && out.staticMod ? 1 : 0);
+        });
+        if (output.empty())
+            return {};
+        return { Tokens { .data = std::move(output) } };
+    }
+
+    void handleRequest(Server& server, RequestHandle handle, const Params& params) {
+        server.completeRequest(handle, doRequest(server, params));
+    }
+
+    bool enabled(Token t) const { return m_enableMask[std::to_underlying(t)]; }
+
+    std::bitset<std::to_underlying(Token::COUNT)> m_enableMask;
+    Token m_enumToken = Token::Enum;
+    Token m_structToken = Token::Struct;
+    Token m_typeParameterToken = Token::TypeParameter;
+    bool m_hasStaticMod = false;
 };
 
 // ----------------------- Document Management ----------------------
@@ -273,7 +635,7 @@ struct MergeMethods<MethodCollection<Ms1...>, MethodCollection<Ms2...>> {
 //! Methods that don't have client/server caps and an initialize function
 using CoreMethods = MethodCollection<DidOpen, DidChange, DidClose>;
 //! Language features that can be optionally supported by the server
-using ConfigurableMethods = MethodCollection<Hover>;
+using ConfigurableMethods = MethodCollection<Hover, GoToDeclaration, SemanticTokens>;
 using AllMethods = MergeMethods<CoreMethods, ConfigurableMethods>::type;
 
 template<typename>
@@ -375,9 +737,7 @@ void Server::initialize(RequestHandle handle, const lsp::InitializeParams& initP
     // Currently interesting server features are (in order of ease of implementation):
     // - hover:                 https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
     // - declaration:           https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_declaration
-    // - definition:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
-    // - typeDefinition (same as definition?): https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_typeDefinition
-    // - semanticTokens:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokensClientCapabilities
+    // - semanticTokens:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_semanticTokens
     // - highlights:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
     // - implementation:        https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_implementation
     // - completion:            https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
@@ -481,7 +841,7 @@ void Server::receiverChacacter(char val) {
             inputBuffer.clear();
         }
     } else {
-        VERIFY(val > 0 && val < 128);
+        VERIFY(val > 0);
         if (inputBuffer.back() == '\n') {
             VERIFY(inputBuffer.size() > 1);
             VERIFY(inputBuffer[inputBuffer.size() - 2] == '\r');
@@ -552,6 +912,10 @@ void Server::clientClosedFile(const path& filePath) {
     updateSource(info);
 }
 
+static sema::ProgramHandle scratchProgram(sema::Context& context) {
+    return context.programsInModule(context.thisModule()).back();
+}
+
 void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> imports) {
     if (info.context != nullptr)
         return;
@@ -562,6 +926,8 @@ void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> i
     parse::parseImpl(context.tokenBuffer.source.data(), context, &parseErrorHandler);
     for (auto progHandle : context.programsInModule(context.thisModule()))
         sema::Generator::signatureCheck(context, progHandle);
+    auto scratchProg = context.newProgram(sema::ProgramKind::Struct, Word(), parse::TokenHandle(), context.globalNamespace(), SourceLocation());
+    VERIFY(scratchProgram(context) == scratchProg);
 }
 
 sema::Context& Server::acquireContext(const path& file, std::span<const sema::ModuleImport> imports) {
@@ -580,9 +946,28 @@ sema::Context& Server::acquireBuiltinContext() {
     return acquireContext(path(COMPILER_TEST_DIR) / "builtins.chrg", {});
 }
 
+sema::Util Server::utilFor(sema::Context& context, parse::TokenHandle tokHandle) {
+    auto progHandle = context.containingProgram(tokHandle).value_or(scratchProgram(context));
+    return sema::Util(context, progHandle);
+}
+
+template<typename F>
+void Server::forEachToken(sema::Context& context, F&& f) {
+    for (int_t i = 0; i < context.tokenBuffer.tokens.size(); i++) {
+        // TODO: This is not a very effecient implementation
+        parse::TokenHandle tokHandle { (uint32_t)i };
+        f(utilFor(context, tokHandle), tokHandle);
+    }
+}
+
 SourceLocation Server::fromLSP(sema::Context&, lsp::Position pos) {
     // TODO: Implement utf16 to utf8 offset conversion
     return SourceLocation(0, pos.line, pos.character);
+}
+
+lsp::Position Server::toLSP(sema::Context&, SourceLocation loc) {
+    // TODO: Implement utf16 to utf8 offset conversion
+    return lsp::Position { .line = int32_t(loc.lineIndex()), .character = int32_t(loc.offsetInLine()) };
 }
 
 }

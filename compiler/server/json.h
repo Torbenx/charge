@@ -10,7 +10,7 @@
     struct _json_ref_data; \
     static constexpr int_t _json_base_counter = __COUNTER__;
 
-#define JSON_MEMBER_IMPL(memberName, counter)                                                       \
+#define _json_member_impl(memberName, counter)                                                       \
     static _json_##memberName##_stub();                                                             \
     template<>                                                                                      \
     struct _json_ref_data<counter - _json_base_counter> {                                           \
@@ -21,7 +21,7 @@
     };                                                                                              \
     decltype(_json_##memberName##_stub()) memberName
 
-#define JSON_MEMBER(name) JSON_MEMBER_IMPL(name, __COUNTER__)
+#define JSON_MEMBER(name) _json_member_impl(name, __COUNTER__)
 
 namespace json {
 struct Null {};

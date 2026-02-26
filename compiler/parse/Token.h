@@ -20,6 +20,9 @@ enum class TokenKind : uint8_t {
 };
 std::string_view nameString(TokenKind);
 LexerToken lexerToken(TokenKind);
+inline bool isExpression(TokenKind kind) {
+    return kind >= TokenKind::ExpressionsBegin && kind < TokenKind::ExpressionsEnd;
+}
 inline bool isUnaryExpr(TokenKind kind) {
     return kind >= TokenKind::UnaryExprsBegin && kind < TokenKind::UnaryExprsEnd;
 }

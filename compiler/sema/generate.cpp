@@ -156,7 +156,8 @@ Constant Generator::inheriteParameters(DeclarationValue parent) {
     VERIFY(parameterCount > 0);
     std::vector<Constant> parentArguments(parameterCount, INVALID_CONSTANT);
     for (int_t i = 0; i < parameterCount; i++) {
-        parentArguments[i] = addInheritedParameter(parentProg->parameters[i].name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter();
+        const auto& parentParameter = parentProg->parameters[i];
+        parentArguments[i] = addInheritedParameter(parentParameter.location, parentParameter.name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter();
     }
 
     Constant parentValue = program->addParameterize(context, { parentHandle, parentArguments });
@@ -690,6 +691,7 @@ void Generator::generateMemberAccessExpr() {
     if (!state.isComplete())
         error<errors::MemberFunctionCallTargetTemplateArgumentDeductionIncomplete>();
     Constant callTarget = makeParameterize(state.programHandle, state.arguments);
+    memberAccessToken->setData2<parse::DataKind::Expression>(Expression(callTarget));
     emitCall(callToken, callTarget, std::move(callArguments));
 }
 
@@ -1298,16 +1300,16 @@ Type Generator::verifyType(Constant value) {
     }
 }
 
-Expression Generator::addParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue) {
     VERIFY(parameterTypes.size() == program->parameters.size());
     uint32_t parameterIndex = program->parameters.size();
     parameterTypes.push_back(type);
-    program->parameters.push_back({ name, type, defaultValue });
+    program->parameters.push_back({ location, name, type, defaultValue });
     return Expression::templateParameterReference(parameterIndex);
 }
 
-Expression Generator::addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue) {
-    return addParameter(name, type, defaultValue);
+Expression Generator::addExplicitParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue) {
+    return addParameter(location, name, type, defaultValue);
 }
 
 Expression Generator::newImplicitParameter(Type type) {
@@ -1316,10 +1318,10 @@ Expression Generator::newImplicitParameter(Type type) {
     return Expression::templateParameterReference(parameterIndex);
 }
 
-Expression Generator::addInheritedParameter(Word name, Type type, std::optional<Constant> defaultValue) {
+Expression Generator::addInheritedParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue) {
     VERIFY(program->parameters.size() == program->inheritedParameterCount);
     program->inheritedParameterCount += 1;
-    return addParameter(name, type, defaultValue);
+    return addParameter(location, name, type, defaultValue);
 }
 
 }

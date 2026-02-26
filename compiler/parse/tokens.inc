@@ -25,6 +25,7 @@ TOKEN(EmptyNode, Invalid, None, None)
 TOKEN(EOS, EOS, None, None)
 
 // ------ expressions ------
+MARKER(ExpressionsBegin)
 TOKEN(LiteralExpr, Literal, None, None)
 TOKEN(IdentifierExpr, Identifier, Word, Expression)
 TOKEN(ParenthesizedExpr, LeftParen, CallArguments, Expression)
@@ -72,6 +73,7 @@ TOKEN(CompareGreaterEqualExpr, GreaterEqual, None, None)
 TOKEN(IfExpr, EqualGreater, None, None)
 TOKEN(CommaElseExpr, EqualGreater, None, None)
 TOKEN(CallArgument, Invalid, None, Expression)
+MARKER(ExpressionsEnd)
 
 
 // ------ statements ------

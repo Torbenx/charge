@@ -349,8 +349,9 @@ void Context::checkBuiltins() {
     {
         auto* prog = cast<StructProgram>(program(builtins::function_id_template.program()));
         VERIFY(prog->parameters.size() == 1);
-        Program::Parameter expectedParameter { parse::words["sig"], builtins::function_signature_type, std::nullopt };
-        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->parameters[0].name == parse::words["sig"]);
+        VERIFY(prog->parameters[0].type == builtins::function_signature_type);
+        VERIFY(!prog->parameters[0].defaultValue.has_value());
         VERIFY(prog->members.empty());
     }
 
@@ -369,8 +370,9 @@ void Context::checkBuiltins() {
     {
         auto* prog = cast<StructProgram>(program(builtins::template_id_template.program()));
         VERIFY(prog->parameters.size() == 1);
-        Program::Parameter expectedParameter { parse::words["sig"], builtins::template_signature_type, std::nullopt };
-        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->parameters[0].name == parse::words["sig"]);
+        VERIFY(prog->parameters[0].type == builtins::template_signature_type);
+        VERIFY(!prog->parameters[0].defaultValue.has_value());
         VERIFY(prog->members.empty());
     }
 
@@ -378,10 +380,12 @@ void Context::checkBuiltins() {
     {
         auto* prog = cast<StructProgram>(program(builtins::member_ptr_template.program()));
         VERIFY(prog->parameters.size() == 2);
-        Program::Parameter firstParameter { parse::words["parent_type"], builtins::type_type, std::nullopt };
-        Program::Parameter secondParameter { parse::words["member_type"], builtins::type_type, std::nullopt };
-        VERIFY(prog->parameters[0] == firstParameter);
-        VERIFY(prog->parameters[1] == secondParameter);
+        VERIFY(prog->parameters[0].name == parse::words["parent_type"]);
+        VERIFY(prog->parameters[0].type == builtins::type_type);
+        VERIFY(!prog->parameters[0].defaultValue.has_value());
+        VERIFY(prog->parameters[1].name == parse::words["member_type"]);
+        VERIFY(prog->parameters[1].type == builtins::type_type);
+        VERIFY(!prog->parameters[1].defaultValue.has_value());
         VERIFY(prog->members.empty());
     }
 
@@ -389,8 +393,9 @@ void Context::checkBuiltins() {
     {
         auto* prog = cast<FunctionProgram>(program(builtins::copy_function.program()));
         VERIFY(prog->parameterizes.size() == 1);
-        Program::Parameter expectedParameter { parse::words["T"], builtins::type_type, std::nullopt };
-        VERIFY(prog->parameters[0] == expectedParameter);
+        VERIFY(prog->parameters[0].name == parse::words["T"]);
+        VERIFY(prog->parameters[0].type == builtins::type_type);
+        VERIFY(!prog->parameters[0].defaultValue.has_value());
 
         VERIFY(prog->functionParameters.size() == 1);
         VERIFY(prog->functionParameters[0].name() == parse::words["from"]);

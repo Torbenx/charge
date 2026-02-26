@@ -5,7 +5,7 @@
 namespace json::object_detail {
 
 template<typename T, int_t I>
-using RefData = typename T::template _json_ref_data<I - T::_json_base_counter>;
+using RefData = typename T::template _json_ref_data<I>;
 
 template<typename T>
 concept RefObject = T::_json_base_counter >= 0;
@@ -130,7 +130,7 @@ struct Solution {
 };
 
 constexpr std::optional<Solution> findSolution(const std::vector<std::vector<uint8_t>>& dataVectors, int_t p) {
-    auto bits = std::min<size_t>(8, std::bit_ceil<size_t>(p - 1));
+    auto bits = std::min<size_t>(8, std::bit_width<size_t>(p - 1));
     uint8_t bitsMask = ((size_t)1 << bits) - 1u;
     int_t inputCount = dataVectors.front().size();
     if (inputCount > p)
@@ -182,7 +182,7 @@ constexpr Solution findSolution(const std::vector<std::vector<uint8_t>>& dataVec
     if (inputCount <= 1)
         return Solution { 1, 0, 0, {} };
 
-    for (int_t p : { 2, 3, 5, 7, 11 }) {
+    for (int_t p : { 2, 3, 5, 7, 11, 13, 17 }) {
         auto sol = findSolution(dataVectors, p);
         if (sol.has_value())
             return sol.value();
@@ -246,9 +246,13 @@ consteval auto collectMemberInfos() {
 constexpr auto toDataVectors(const auto& members) {
     std::vector<std::vector<uint8_t>> result;
     result.emplace_back();
+    if (members.empty())
+        return result;
+
     for (const auto& member : members)
         result.back().push_back(member.name.length());
-    for (int_t i = 0; i < 10; i++) {
+    int_t maxLength = std::ranges::max(result.back());
+    for (int_t i = 0; i < maxLength; i++) {
         result.emplace_back();
         for (const auto& member : members)
             result.back().push_back(i < (int_t)member.name.length() ? member.name[i] : 0);

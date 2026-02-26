@@ -4,6 +4,7 @@
 #include <parse/parse_impl.h>
 #include <sema/Context.h>
 #include <sema/SimpleErrorHandler.h>
+#include <sema/Util.h>
 #include <server/LanguageServerProtocol.h>
 
 #include <filesystem>
@@ -84,6 +85,10 @@ struct Server {
     sema::Context& acquireBuiltinContext();
     sema::Context& acquireContext(const path& file);
     SourceLocation fromLSP(sema::Context&, lsp::Position);
+    lsp::Position toLSP(sema::Context&, SourceLocation);
+    sema::Util utilFor(sema::Context&, parse::TokenHandle tokHandle);
+    template<typename F>
+    void forEachToken(sema::Context&, F&&);
 
     template<typename... Args>
     void error(fmt::format_string<Args...> fmtstr, Args&&... args) {

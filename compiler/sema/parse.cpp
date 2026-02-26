@@ -8,6 +8,7 @@ Generator::Generator(Context& context, ProgramHandle handle)
     : Util(context, handle) { }
 
 void Generator::setParseLocation(parse::TokenHandle parseLocation) {
+    VERIFY(parseLocation != parse::TokenHandle());
     tok = context.tokenBuffer.tokenPtr(parseLocation);
 }
 
@@ -170,7 +171,7 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
                 // add implicit parameters to program
                 while (program->parameters.size() < parameterTypes.size()) {
                     int_t parameterIndex = program->parameters.size();
-                    program->parameters.push_back({ Word(), parameterTypes[parameterIndex], std::nullopt });
+                    program->parameters.push_back({ SourceLocation(), Word(), parameterTypes[parameterIndex], std::nullopt });
                 }
             }
         }
@@ -195,7 +196,7 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
         // add implicit parameters to program
         while (program->parameters.size() < parameterTypes.size()) {
             int_t parameterIndex = program->parameters.size();
-            program->parameters.push_back({ Word(), parameterTypes[parameterIndex], state.arguments[parameterIndex] });
+            program->parameters.push_back({ SourceLocation(), Word(), parameterTypes[parameterIndex], state.arguments[parameterIndex] });
         }
     } else {
         type = verifyType(fold(state.toFoldBase(builtins::self_constant), type));
@@ -209,6 +210,7 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
 Program::Parameter Generator::visitTemplateParameter() {
     VERIFY(tok->kind() == Token::LetValueDecl);
     Word name = tok->data1<parse::DataKind::Word>();
+    SourceLocation location = tok->location();
     advance();
 
     if (name == parse::words["self_type"]) {
@@ -219,7 +221,7 @@ Program::Parameter Generator::visitTemplateParameter() {
             error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
         VERIFY(tok->kind() == Token::ExpressionStmt);
         advance();
-        return { name, builtins::type_type, std::nullopt };
+        return { location, name, builtins::type_type, std::nullopt };
     }
 
     auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::AddToProgram, false);
@@ -227,7 +229,7 @@ Program::Parameter Generator::visitTemplateParameter() {
     std::optional<Constant> initializer;
     if (info.hasInitializer)
         initializer = valueExpressionToConstant();
-    return { name, info.type, initializer };
+    return { location, name, info.type, initializer };
 }
 
 void Generator::visitStaticVariableImplDeclaration() {

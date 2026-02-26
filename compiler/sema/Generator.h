@@ -407,9 +407,9 @@ struct Generator : Util {
 
     Constant inheriteParameters(DeclarationValue parent);
 
-    Expression addParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    Expression addExplicitParameter(Word name, Type type, std::optional<Constant> defaultValue);
-    Expression addInheritedParameter(Word name, Type type, std::optional<Constant> defaultValue);
+    Expression addParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue);
+    Expression addExplicitParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue);
+    Expression addInheritedParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue);
     Expression newImplicitParameter(Type type);
 
     std::optional<Constant> copyAsConstant(Expression);
