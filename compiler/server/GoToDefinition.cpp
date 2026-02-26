@@ -1,15 +1,15 @@
-#include <server/GoToDeclaration.h>
+#include <server/GoToDefinition.h>
 
 #include <server/json_objects.h>
 
 namespace server {
 
-std::optional<GoToDeclaration::ServerCaps> GoToDeclaration::initialize(Server&, const ClientCaps&) { return ServerCaps(); }
+std::optional<GoToDefinition::ServerCaps> GoToDefinition::initialize(Server&, const ClientCaps&) { return ServerCaps(); }
 
-GoToDeclaration::Result GoToDeclaration::doRequest(Server& server, const Params& params) {
+GoToDefinition::Result GoToDefinition::doRequest(Server& server, const Params& params) {
     auto& context = server.acquireContext(params.textDocument.path());
     auto location = server.fromLSP(context, params.position);
-    auto tokHandle = context.tokenBuffer.findContainingToken(location);
+    auto tokHandle = context.containingIdentifier(location);
     if (!tokHandle.has_value())
         return {};
     auto token = context.tokenBuffer.token(tokHandle.value());
@@ -22,7 +22,7 @@ GoToDeclaration::Result GoToDeclaration::doRequest(Server& server, const Params&
 
     {
         SourceLocation location = maybeLoc.value();
-        auto tokHandle = context.tokenBuffer.findContainingToken(location);
+        auto tokHandle = context.tokenBuffer.findPrecedingToken(location);
         VERIFY(tokHandle.has_value());
         int_t length = context.tokenBuffer.tokenSpelling(context.tokenBuffer.token(tokHandle.value())).length();
         lsp::Position pos = server.toLSP(context, location);
@@ -34,7 +34,7 @@ GoToDeclaration::Result GoToDeclaration::doRequest(Server& server, const Params&
     }
 }
 
-void GoToDeclaration::handleRequest(Server& server, RequestHandle handle, const Params& params) {
+void GoToDefinition::handleRequest(Server& server, RequestHandle handle, const Params& params) {
     server.completeRequest(handle, doRequest(server, params));
 }
 

@@ -113,20 +113,25 @@ struct TokenBuffer {
         return toHandle(it);
     }
 
-    //! Finds the token containing \p location (if any)
-    std::optional<TokenHandle> findContainingToken(SourceLocation location) const {
-        auto handle = findPrecedingToken(location);
-        if (!handle.has_value())
-            return std::nullopt;
-        TokenInfo candidate = token(handle.value());
-        if (candidate.lineIndex() != location.lineIndex())
-            return std::nullopt;
-        VERIFY(location.offsetInLine() >= candidate.offsetInLine());
-        auto candidateEnd = candidate.offsetInLine() + tokenSpelling(candidate).length();
-        if (location.offsetInLine() < candidateEnd)
-            return handle;
-        else
-            return std::nullopt;
+    //! Finds the tokens containing \p location
+    /*!
+    There may be 0, 1 or 2 tokens containing a given location.
+    Annotation tokens (with 0 length) are never included.
+    */
+    std::vector<TokenHandle> findContainingTokens(SourceLocation location) const {
+        auto nextIt = std::upper_bound(tokens.begin(), tokens.end(), location);
+        std::vector<TokenHandle> result;
+        for (;nextIt != tokens.begin() && *std::prev(nextIt) <= location; --nextIt) {
+            auto it = std::prev(nextIt);
+            if (it->lineIndex() != location.lineIndex())
+                continue;
+            int_t length = tokenSpelling(*it).length();
+            if (length == 0)
+                continue;
+            if ((int_t)it->offsetInLine() + length >= (int_t)location.offsetInLine())
+                result.push_back(toHandle(it));
+        }
+        return result;
     }
 };
 

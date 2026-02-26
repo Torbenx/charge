@@ -113,6 +113,14 @@ void SemaContext::signatureCheckAll() {
     m_scratchProgram = newProgram(ProgramKind::Struct, Word(), parse::TokenHandle(), globalNamespace(), SourceLocation());
 }
 
+std::optional<parse::TokenHandle> SemaContext::containingIdentifier(SourceLocation location) {
+    for (auto handle : tokenBuffer.findContainingTokens(location)) {
+        if (parse::lexerToken(tokenBuffer.token(handle).kind()) == parse::LexerToken::Identifier)
+            return handle;
+    }
+    return std::nullopt;
+}
+
 void SemaContext::forEachTokenImpl(void* data, void (*f)(void*, SemaUtil&, parse::TokenHandle)) {
     for (int_t i = 0; i < tokenBuffer.tokens.size(); i++) {
         // TODO: This is not a very effecient implementation

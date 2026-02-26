@@ -14,14 +14,20 @@ enum class LocalDeclarationKind : uint8_t {
 struct LocalDeclaration {
     LocalDeclarationKind kind;
     uint32_t id;
+
+    bool operator==(const LocalDeclaration&) const = default;
 };
 struct MemberDeclaration {
     sema::ProgramHandle structProgram;
     uint32_t memberIndex;
+
+    bool operator==(const MemberDeclaration&) const = default;
 };
 struct EnumValueDeclaration {
     sema::ProgramHandle enumProgram;
     uint32_t valueIndex;
+
+    bool operator==(const EnumValueDeclaration&) const = default;
 };
 using DeclarationInfo = std::variant<std::monostate, sema::NamespaceHandle, sema::ProgramHandle, MemberDeclaration, EnumValueDeclaration, LocalDeclaration>;
 
@@ -36,13 +42,18 @@ struct SemaContext : sema::Context {
     using Context::Context;
 
     void signatureCheckAll();
+
     sema::ProgramHandle scratchProgram() const {
         VERIFY(m_scratchProgram.has_value());
         return m_scratchProgram.value();
     }
+
     SemaUtil utilFor(parse::TokenHandle tokHandle) {
         return { *this, containingProgram(tokHandle).value_or(scratchProgram()) };
     }
+
+    std::optional<parse::TokenHandle> containingIdentifier(SourceLocation);
+
     template<typename F>
     void forEachToken(F&& f) {
         forEachTokenImpl(&f, [](void* fPtr, SemaUtil& util, parse::TokenHandle tokHandle) {

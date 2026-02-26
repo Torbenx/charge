@@ -73,7 +73,7 @@ std::optional<Hover::ServerCaps> Hover::initialize(Server& server, const ClientC
 Hover::Result Hover::doRequest(Server& server, const Params& params) {
     auto& context = server.acquireContext(params.textDocument.path());
     auto location = server.fromLSP(context, params.position);
-    auto tokHandle = context.tokenBuffer.findContainingToken(location);
+    auto tokHandle = context.containingIdentifier(location);
     if (!tokHandle.has_value())
         return {};
     auto token = context.tokenBuffer.token(tokHandle.value());

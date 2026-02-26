@@ -1,7 +1,8 @@
 #include <server/Server.h>
 
-#include <server/GoToDeclaration.h>
+#include <server/GoToDefinition.h>
 #include <server/Hover.h>
+#include <server/SemanticHighlight.h>
 #include <server/SemanticTokens.h>
 
 #include <parse/parse_impl.h>
@@ -112,7 +113,7 @@ struct MergeMethods<MethodCollection<Ms1...>, MethodCollection<Ms2...>> {
 //! Methods that don't have client/server caps and an initialize function
 using CoreMethods = MethodCollection<DidOpen, DidChange, DidClose>;
 //! Language features that can be optionally supported by the server
-using ConfigurableMethods = MethodCollection<Hover, GoToDeclaration, SemanticTokens>;
+using ConfigurableMethods = MethodCollection<Hover, GoToDefinition, SemanticTokens, SemanticHighlight>;
 using AllMethods = MergeMethods<CoreMethods, ConfigurableMethods>::type;
 
 template<typename>
@@ -270,7 +271,6 @@ void Server::handleMessage(std::string data) {
 
     if (!m_initialized) {
         if (message.method == INIT_METHOD.name) {
-            info("Init params: {}", message.params.value().data);
             dispatchMessage(INIT_METHOD, std::move(data), std::move(message));
         } else if (message.method == "exit") {
             VERIFY_NOT_REACHED(); // TODO: Support exit
