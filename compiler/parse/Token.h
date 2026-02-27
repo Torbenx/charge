@@ -149,6 +149,12 @@ constexpr uint32_t packData1(TokenKind tokenKind, T1 data1) {
     return packData<T1>(data1);
 }
 
+template<typename T2>
+constexpr uint32_t packData2(TokenKind tokenKind, T2 data2) {
+    VERIFY(tokenDataTable[(size_t)tokenKind].data2Kind == DataTypeTrait<T2>::kind);
+    return packData<T2>(data2);
+}
+
 // ---------------------------- TokenInfo ----------------------------
 
 struct TokenInfo : TaggedSourceLocation<TokenKind> {

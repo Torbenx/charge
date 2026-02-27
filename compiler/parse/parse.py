@@ -208,6 +208,12 @@ class UpdateDataInstruction:
         return "updateData " + self.tokenDataExpr
 
 @dataclasses.dataclass
+class UpdateSecondaryDataInstruction:
+    tokenDataExpr: str
+    def format(self):
+        return "updateSecondaryData " + self.tokenDataExpr
+
+@dataclasses.dataclass
 class PushScopeInstruction:
     scopeKindExpr: str
     def format(self):
@@ -520,6 +526,9 @@ class Parser:
                 self.advanceLine()
             elif first == "updateData":
                 instructions.append(UpdateDataInstruction(self.parseExpr()))
+                self.advanceLine()
+            elif first == "updateSecondaryData":
+                instructions.append(UpdateSecondaryDataInstruction(self.parseExpr()))
                 self.advanceLine()
             elif first == "pushScope":
                 instructions.append(PushScopeInstruction(self.parseExpr()))
@@ -993,6 +1002,8 @@ def generateInstructions(case, instructions, thenHandler):
             line("discardLastToken(state);")
         elif type(inst) is UpdateDataInstruction:
             line("state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
+        elif type(inst) is UpdateSecondaryDataInstruction:
+            line("state.tokenBuffer.tokens.back().data2Bits = packData2(state.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):

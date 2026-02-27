@@ -94,7 +94,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
             }
         }
     } else if (token.kind() == parse::TokenKind::NamespaceDecl) {
-        // TODO: No access to metadata :(
+        formatter.formatAsDeclaration(sema::Constant(token.data2<parse::DataKind::DeclarationValue>().nsHandle()));
     } else if (parse::isProgramDecl(token.kind())) {
         formatter.formatAsDeclaration(sema::Constant(util.program->selfConstant()));
     } else if (parse::isEnumValueDecl(token.kind())) {

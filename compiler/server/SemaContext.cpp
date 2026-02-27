@@ -11,8 +11,7 @@ DeclarationInfo SemaUtil::extractDeclarationInfo(const parse::TokenInfo& token) 
         return {};
 
     if (token.kind() == parse::TokenKind::NamespaceDecl)
-        // TODO: No access to metadata :(
-        return {};
+        return token.data2<parse::DataKind::DeclarationValue>().nsHandle();
     if (parse::isProgramDecl(token.kind()))
         return programHandle;
     if (token.kind() == parse::TokenKind::MemberDecl)

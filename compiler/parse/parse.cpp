@@ -4239,17 +4239,16 @@ namespace_declaration_id$no_emit:
         this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
         // emitToken TokenKind::NamespaceDecl
         checkLexToken(TokenKind::NamespaceDecl, LexerToken::Identifier);
-        carriedEmitTokenKind = TokenKind::NamespaceDecl;
-        carriedEmitTokenData = packData1(TokenKind::NamespaceDecl, this_identifier);
+        emitToken(TokenKind::NamespaceDecl, tokBegin, packData1(TokenKind::NamespaceDecl, this_identifier), state);
+        // updateSecondaryData this_declaration
+        state.tokenBuffer.tokens.back().data2Bits = packData2(state.tokenBuffer.tokens.back().kind(), this_declaration);
         // next after_namespace_declaration_id
-        goto after_namespace_declaration_id$with_emit;
+        goto after_namespace_declaration_id$no_emit;
     }
     // then error
     goto error$as_then;
 
     // LinearState after_namespace_declaration_id
-after_namespace_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
 after_namespace_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
