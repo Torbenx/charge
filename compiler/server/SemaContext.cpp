@@ -21,15 +21,6 @@ DeclarationInfo SemaUtil::extractDeclarationInfo(const parse::TokenInfo& token) 
         return MemberDeclaration { programHandle, token.data2<parse::DataKind::DeclIndex>() };
     if (parse::isEnumValueDecl(token.kind()))
         return EnumValueDeclaration { programHandle, token.data2<parse::DataKind::DeclIndex>() };
-    if (parse::isVariableDecl(token.kind()))
-        // TODO: No access to metadata :(
-        return {};
-
-    if (!parse::isExpression(token.kind()))
-        return {};
-    auto maybeExpr = token.data2<parse::DataKind::Expression>();
-    if (!maybeExpr.has_value())
-        return {};
 
     // There are 3 semantic expression tokens for identifier tokens:
     // IdentifierExpr, StaticAccessExpr and MemberAccessExpr
@@ -38,6 +29,11 @@ DeclarationInfo SemaUtil::extractDeclarationInfo(const parse::TokenInfo& token) 
     //                   TemplateParameterReference, VariableReference, ParameterReference, ReferenceReference
     // StaticAccessExpr: Namespace, Program, Parameterize, GlobalReference, MemberPointer, EnumValue
     // MemberAccessExpr: Program, Parameterize, MemberExpression
+    if (!parse::isExpression(token.kind()) && !parse::isVariableDecl(token.kind()))
+        return {};
+    auto maybeExpr = token.data2<parse::DataKind::Expression>();
+    if (!maybeExpr.has_value())
+        return {};
     Expression e = maybeExpr.value();
     if (!e.isConstant()) {
         switch (e.kind()) {

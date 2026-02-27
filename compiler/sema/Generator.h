@@ -323,14 +323,13 @@ struct Generator : Util {
     VariableCategory visitVariableTypeToken(bool isVar);
     VariableTypeAndInitializer visitVariableTypeAndInitializer(ImplicitParameterMode parameterMode, bool isVar);
     struct VariableDeclaration : VariableTypeAndInitializer {
-        SourceLocation location;
+        TokenInfo* declaringToken = nullptr;
         Word name;
     };
     VariableDeclaration visitVariableDeclaration(ImplicitParameterMode parameterMode);
 
     void visitDeclaration();
     void visitTemplateParameters();
-    Program::Parameter visitTemplateParameter();
     void visitStaticVariableImplDeclaration();
     void visitStaticVariableDeclaration();
     void checkStaticVariableImplDeclaration(Constant implOf);

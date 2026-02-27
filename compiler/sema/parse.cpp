@@ -59,10 +59,12 @@ void Generator::declareLocalVariable(VariableDeclaration decl) {
     int_t index = localVariables.size();
     localVariables.push_back({ decl.type });
     localState.variableActiveMask.push_back(decl.hasInitializer);
-    localLookupEntries.push_back({ decl.name, Expression::variableReference(index) });
+    Expression refExpr = Expression::variableReference(index);
+    localLookupEntries.push_back({ decl.name, refExpr });
+    decl.declaringToken->setData2<parse::DataKind::Expression>(refExpr);
 
     if (decl.hasInitializer)
-        emitInitialize(decl.location, Expression::variableReference(index), takeTopExpression());
+        emitInitialize(decl.declaringToken->location(), Expression::variableReference(index), takeTopExpression());
 }
 
 void Generator::visitDeclaration() {
@@ -95,11 +97,31 @@ void Generator::visitTemplateParameters() {
     lookupStack.push_back(LookupContext::forTemplateParameters(program));
     advance();
     while (tok->kind() != Token::EmptyNode) {
-        Program::Parameter explicitParameter = visitTemplateParameter();
-        VERIFY(!explicitParameter.name.empty());
+        VERIFY(tok->kind() == Token::LetValueDecl);
+        Word name = tok->data1<parse::DataKind::Word>();
+        TokenInfo* declaringToken = tok;
+        advance();
 
-        program->parameters.push_back(explicitParameter);
-        parameterTypes.push_back(verifyType((Constant)explicitParameter.type));
+        Type type = Type(INVALID_CONSTANT);
+        std::optional<Constant> defaultValue;
+        if (name == parse::words["self_type"]) {
+            // TODO: Allow default argument
+            if (tok->kind() == Token::VariableType)
+                error<errors::SelfTypeTemplateParameterWithExplicitType>();
+            if (tok->kind() == Token::AssignStmt)
+                error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
+            VERIFY(tok->kind() == Token::ExpressionStmt);
+            advance();
+            type = builtins::type_type;
+        } else {
+            auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::AddToProgram, false);
+            VERIFY(info.category.kind() == VariableKind::Let);
+            type = info.type;
+            if (info.hasInitializer)
+                defaultValue = valueExpressionToConstant();
+        }
+        Expression refExpr = addExplicitParameter(declaringToken->location(), name, type, defaultValue);
+        declaringToken->setData2<parse::DataKind::Expression>(refExpr);
     }
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
@@ -109,11 +131,11 @@ Generator::VariableDeclaration Generator::visitVariableDeclaration(ImplicitParam
     VERIFY(tok->kind() == Token::LetValueDecl || tok->kind() == Token::VarValueDecl);
     bool isVar = tok->kind() == Token::VarValueDecl;
     Word name = tok->data1<parse::DataKind::Word>();
-    SourceLocation nameLoc = tok->location();
+    TokenInfo* declToken = tok;
     advance();
 
     auto info = visitVariableTypeAndInitializer(parameterMode, isVar);
-    return { info, nameLoc, name };
+    return { info, declToken, name };
 }
 
 VariableCategory Generator::visitVariableTypeToken(bool isVar) {
@@ -205,31 +227,6 @@ Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer
     }
 
     return { type, category, true };
-}
-
-Program::Parameter Generator::visitTemplateParameter() {
-    VERIFY(tok->kind() == Token::LetValueDecl);
-    Word name = tok->data1<parse::DataKind::Word>();
-    SourceLocation location = tok->location();
-    advance();
-
-    if (name == parse::words["self_type"]) {
-        // TODO: Allow default argument
-        if (tok->kind() == Token::VariableType)
-            error<errors::SelfTypeTemplateParameterWithExplicitType>();
-        if (tok->kind() == Token::AssignStmt)
-            error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
-        VERIFY(tok->kind() == Token::ExpressionStmt);
-        advance();
-        return { location, name, builtins::type_type, std::nullopt };
-    }
-
-    auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::AddToProgram, false);
-    VERIFY(info.category.kind() == VariableKind::Let);
-    std::optional<Constant> initializer;
-    if (info.hasInitializer)
-        initializer = valueExpressionToConstant();
-    return { location, name, info.type, initializer };
 }
 
 void Generator::visitStaticVariableImplDeclaration() {
@@ -383,14 +380,16 @@ void Generator::visitFunctionParametersAndBody() {
         VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
-        localLookupEntries.push_back({ info.name, Expression::parameterReference(parameterIndex) });
-        fnProgram->functionParameters.push_back({ info.location, info.name, info.type, info.category });
+        Expression refExpr = Expression::parameterReference(parameterIndex);
+        localLookupEntries.push_back({ info.name, refExpr });
+        info.declaringToken->setData2<parse::DataKind::Expression>(refExpr);
+        fnProgram->functionParameters.push_back({ info.declaringToken->location(), info.name, info.type, info.category });
     };
 
     if (tok->kind() != Token::EmptyNode) {
         Word name = tok->data1<parse::DataKind::Word>();
         if (name == parse::words["self"]) {
-            SourceLocation nameLoc = tok->location();
+            TokenInfo* declToken = tok;
             bool isVar = tok->kind() == Token::VarValueDecl;
             advance();
             VariableCategory category(isVar ? VariableKind::Var : VariableKind::Let);
@@ -407,7 +406,7 @@ void Generator::visitFunctionParametersAndBody() {
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
 
-            addFunctionParameter({ { lookupSelfType(), category, false }, nameLoc, name });
+            addFunctionParameter({ { lookupSelfType(), category, false }, declToken, name });
         }
     }
 

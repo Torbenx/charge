@@ -80,7 +80,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
     auto util = context.utilFor(tokHandle.value());
 
     sema::Formatter formatter { util };
-    if (token.hasData2(parse::DataKind::Expression)) {
+    if (parse::isExpression(token.kind()) || parse::isVariableDecl(token.kind())) {
         auto expr = token.data2<parse::DataKind::Expression>();
         if (expr.has_value()) {
             auto staticInfo = extractStaticInfo(util, expr.value());
@@ -106,7 +106,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
             : token.data2<parse::DataKind::DeclIndex>();
         formatter.formatMemberDeclaration(sema::Constant(util.program->selfConstant()), memberIndex);
     } else if (parse::isVariableDecl(token.kind())) {
-        // TODO: No access to metadata :(
+        token.data2<parse::DataKind::Expression>();
     }
 
     if (formatter.output.empty())
