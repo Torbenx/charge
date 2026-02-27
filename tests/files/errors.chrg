@@ -164,6 +164,9 @@ fn f1() => member;
 // expect-error UnqualifiedLookupFailed
 fn f2() => unknown;
 
+//; TODO: expect-error UnqualifiedLookupFailed
+fn f2x() -> X: { { let x = X; } x; }
+
 // expect-error StaticLookupFailed
 fn f3() => Lookup::unknown;
 

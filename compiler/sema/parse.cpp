@@ -28,6 +28,7 @@ Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
 }
 
 void Generator::endLocalScope(LocalScope scope, SourceLocation location) {
+    // TODO: Variables should be removed from localLookupEntries as well
     VERIFY(scope.localScopeDepth == localScopeDepth);
     localScopeDepth -= 1;
 

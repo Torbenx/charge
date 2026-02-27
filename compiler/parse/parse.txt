@@ -350,11 +350,6 @@ LinearState access_punctuation(tokenKind) then error
 # --- Statements
 
 LinearState single_or_compound_statement() then statement
-    punctuation {
-        pushScope ScopeKind::CompoundStmt
-        pushScope ScopeKind::PlainStatement
-        emitToken TokenKind::CompoundStmt
-        next statement
 
 LinearState after_statement() then statement
     keyword else
@@ -371,6 +366,11 @@ LinearState after_statement() then statement
         pushScope ScopeKind::PlainStatement
 
 SwitchState statement() then expression
+    punctuation {
+        pushScope ScopeKind::CompoundStmt
+        pushScope ScopeKind::PlainStatement
+        emitToken TokenKind::CompoundStmt
+        next statement
     keyword if
         pushScope ScopeKind::LeftExpr  # required if this turns out to be an expression
         pushScope ScopeKind::IfExprOrStmt

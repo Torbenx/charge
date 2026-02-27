@@ -97,6 +97,8 @@ a{
 /* expect-token IdentifierExpr; expect-token LogicalAndUpdateStmt; expect-token IdentifierExpr */ a &&= b;
 /* expect-token IdentifierExpr; expect-token LogicalOrUpdateStmt; expect-token IdentifierExpr */ a ||= b;
 
+/* expect-token CompoundStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode */ { a; }
+
 //; test comma-else in arguments
 // expect-token ParenthesizedExpr;
 // expect-token CallArgument; expect-token IdentifierExpr; expect-token CommaElseExpr; expect-token IdentifierExpr

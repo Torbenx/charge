@@ -2395,19 +2395,6 @@ single_or_compound_statement$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::SingleOrCompoundStatement;
-    if (std::string_view(tokEnd, 1) == "{"sv) {
-        tokEnd += 1;
-        // pushScope ScopeKind::CompoundStmt
-        scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
-        // pushScope ScopeKind::PlainStatement
-        scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
-        // emitToken TokenKind::CompoundStmt
-        checkLexToken(TokenKind::CompoundStmt, LexerToken::LeftBrace);
-        carriedEmitTokenKind = TokenKind::CompoundStmt;
-        carriedEmitTokenData = 0;
-        // next statement
-        goto statement$with_emit;
-    }
     // then statement
     goto statement$as_then;
 
@@ -3105,13 +3092,16 @@ statement$as_then:
     }
     case '{': {
         tokEnd += 1;
-        // pushScope ScopeKind::LeftExpr
-        scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
-        // -> expression
-        // -> error
-        // error
-        errorToken = LexerToken::LeftBrace;
-        goto handle_parse_error;
+        // pushScope ScopeKind::CompoundStmt
+        scopePosition = pushScope(scopePosition, ScopeKind::CompoundStmt);
+        // pushScope ScopeKind::PlainStatement
+        scopePosition = pushScope(scopePosition, ScopeKind::PlainStatement);
+        // emitToken TokenKind::CompoundStmt
+        checkLexToken(TokenKind::CompoundStmt, LexerToken::LeftBrace);
+        carriedEmitTokenKind = TokenKind::CompoundStmt;
+        carriedEmitTokenData = 0;
+        // next statement
+        goto statement$with_emit;
     }
     case '|': {
         char next = tokEnd[1];
