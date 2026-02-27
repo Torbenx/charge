@@ -82,13 +82,14 @@ SemanticTokens::Result SemanticTokens::doRequest(Server& server, const Params& p
             if constexpr (std::is_same_v<T, sema::NamespaceHandle>) {
                 return { Token::Namespace, true };
             } else if constexpr (std::is_same_v<T, sema::ProgramHandle>) {
-                switch (context.program(v)->kind()) {
+                auto* prog = context.program(v);
+                switch (prog->kind()) {
                 case sema::ProgramKind::Enum:
                     return { m_enumToken, true };
                 case sema::ProgramKind::Function:
                     return { Token::Function, true };
                 case sema::ProgramKind::Global:
-                    return { Token::Variable, true };
+                    return { cast<sema::GlobalProgram>(prog)->type() == sema::builtins::type_type ? Token::Type : Token::Variable, true };
                 case sema::ProgramKind::Struct:
                     return { m_structToken, true };
                 default:

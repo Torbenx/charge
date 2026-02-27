@@ -6,6 +6,7 @@
 
 namespace server {
 
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_semanticTokens
 struct SemanticTokens : Server::Method {
     static constexpr FixedString method = "textDocument/semanticTokens/full";
     static constexpr FixedString clientCapName = "semanticTokens";
