@@ -31,6 +31,10 @@ struct TokenHandle {
 
     auto operator<=>(const TokenHandle&) const = default;
     bool operator==(const TokenHandle&) const = default;
+    TokenHandle& operator++() {
+        m_id += 1;
+        return *this;
+    }
 };
 
 struct TokenRange {
@@ -121,7 +125,7 @@ struct TokenBuffer {
     std::vector<TokenHandle> findContainingTokens(SourceLocation location) const {
         auto nextIt = std::upper_bound(tokens.begin(), tokens.end(), location);
         std::vector<TokenHandle> result;
-        for (;nextIt != tokens.begin() && *std::prev(nextIt) <= location; --nextIt) {
+        for (; nextIt != tokens.begin() && *std::prev(nextIt) <= location; --nextIt) {
             auto it = std::prev(nextIt);
             if (it->lineIndex() != location.lineIndex())
                 continue;

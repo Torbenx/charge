@@ -1,6 +1,9 @@
 #include <server/SemaContext.h>
 
 #include <sema/Generator.h>
+#include <server/Server.h>
+
+#include <gtest/gtest.h>
 
 using namespace sema;
 
@@ -117,7 +120,14 @@ std::optional<SourceLocation> SemaUtil::declarationLocation(const DeclarationInf
 void SemaContext::signatureCheckAll() {
     for (auto handle : programsInModule(thisModule()))
         Generator::signatureCheck(*this, handle);
-    m_scratchProgram = newProgram(ProgramKind::Struct, Word(), parse::TokenHandle(), globalNamespace(), SourceLocation());
+    makeScratchProgram();
+}
+
+void SemaContext::makeScratchProgram() {
+    VERIFY(tokenBuffer.tokens.back().kind() == parse::TokenKind::EOS);
+    parse::TokenHandle endHandle { uint32_t(tokenBuffer.tokens.size()) };
+    m_scratchProgram = newProgram(ProgramKind::Struct, Word(), endHandle, globalNamespace(), SourceLocation());
+    program(m_scratchProgram.value())->tokenRangeEnd = endHandle;
 }
 
 std::optional<parse::TokenHandle> SemaContext::containingIdentifier(SourceLocation location) {
@@ -128,12 +138,54 @@ std::optional<parse::TokenHandle> SemaContext::containingIdentifier(SourceLocati
     return std::nullopt;
 }
 
-void SemaContext::forEachTokenImpl(void* data, void (*f)(void*, SemaUtil&, parse::TokenHandle)) {
-    for (int_t i = 0; i < tokenBuffer.tokens.size(); i++) {
-        // TODO: This is not a very effecient implementation
-        parse::TokenHandle tokHandle { (uint32_t)i };
-        auto util = utilFor(tokHandle);
-        f(data, util, tokHandle);
+void SemaContext::forEachTokenImpl(const void* data, void (*f)(const void*, SemaUtil&, parse::TokenHandle)) {
+    ProgramUnion* scratch = modules.back().programStorage + m_scratchProgram.value().id();
+    ProgramUnion* cur = scratch;
+    ProgramUnion* next = programStorage.begin();
+    parse::TokenHandle tok { 0 };
+    std::vector<ProgramUnion*> stack;
+    for (;;) {
+        SemaUtil util { *this, ProgramHandle(cur - modules.back().programStorage) };
+        if (next->get().tokenRangeBegin < cur->get().tokenRangeEnd) {
+            VERIFY(next->get().tokenRangeEnd <= cur->get().tokenRangeEnd);
+            auto nextBegin = next->get().tokenRangeBegin;
+            for (; tok < nextBegin; ++tok)
+                f(data, util, tok);
+
+            stack.push_back(cur);
+            cur = next;
+            next += 1;
+            VERIFY(tok == cur->get().tokenRangeBegin);
+        } else {
+            auto rangeEnd = cur->get().tokenRangeEnd;
+            for (; tok < rangeEnd; ++tok)
+                f(data, util, tok);
+
+            while (tok == cur->get().tokenRangeEnd) {
+                cur = stack.back();
+                stack.pop_back();
+            }
+            VERIFY(cur == scratch || cur->get().tokenRange().contains(tok));
+        }
+        if (next == scratch && cur == scratch)
+            break;
+    }
+    VERIFY((int_t)tok.id() == tokenBuffer.tokens.size() - 1);
+}
+
+TEST(Server, ForEachToken) {
+    std::filesystem::path testDir { COMPILER_TEST_DIR };
+    for (auto fileName : { "files/declarations.chrg", "files/expressions.chrg" }) {
+        auto filePath = testDir / fileName;
+        auto fileSource = readFile(filePath);
+        // No module dependency need since no semantic analysis will be done
+        SemaContext context({}, fileSource);
+        BasicParseErrorHandler errorHandler;
+        parse::parseImpl(context.tokenBuffer.source.data(), context, &errorHandler);
+        context.makeScratchProgram();
+        context.forEachToken([&](SemaUtil& util, parse::TokenHandle handle) {
+            EXPECT_EQ(context.utilFor(handle).programHandle, util.programHandle);
+        });
     }
 }
 

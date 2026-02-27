@@ -43,6 +43,7 @@ struct SemaContext : sema::Context {
     using Context::Context;
 
     void signatureCheckAll();
+    void makeScratchProgram();
 
     sema::ProgramHandle scratchProgram() const {
         VERIFY(m_scratchProgram.has_value());
@@ -56,16 +57,16 @@ struct SemaContext : sema::Context {
     std::optional<parse::TokenHandle> containingIdentifier(SourceLocation);
 
     template<typename F>
-    void forEachToken(F&& f) {
-        forEachTokenImpl(&f, [](void* fPtr, SemaUtil& util, parse::TokenHandle tokHandle) {
-            (*static_cast<F*>(fPtr))(util, tokHandle);
+    void forEachToken(const F& f) {
+        forEachTokenImpl(&f, [](const void* fPtr, SemaUtil& util, parse::TokenHandle tokHandle) {
+            (*static_cast<const F*>(fPtr))(util, tokHandle);
         });
     }
 
 private:
     std::optional<sema::ProgramHandle> m_scratchProgram;
 
-    void forEachTokenImpl(void* data, void (*)(void*, SemaUtil&, parse::TokenHandle));
+    void forEachTokenImpl(const void* data, void (*)(const void*, SemaUtil&, parse::TokenHandle));
 };
 
 }
