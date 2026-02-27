@@ -45,10 +45,18 @@ DeclarationInfo SemaUtil::extractDeclarationInfo(const parse::TokenInfo& token) 
         case ExpressionKind::GlobalReference$Parameterize:
             e = e.referencedGlobal();
             break;
-        case ExpressionKind::TemplateParameterReference:
-            return LocalDeclaration(LocalDeclarationKind::TemplateParameter, e.templateParameterIndex());
+        case ExpressionKind::TemplateParameterReference: {
+            ProgramHandle progHandle = programHandle;
+            Program* prog = program;
+            while (e.templateParameterIndex() < (int_t)prog->inheritedParameterCount) {
+                VERIFY(prog->parent().kind() == DeclarationValueKind::Program);
+                progHandle = prog->parent().program();
+                prog = context.program(progHandle);
+            }
+            return LocalDeclaration(LocalDeclarationKind::TemplateParameter, e.templateParameterIndex(), progHandle);
+        }
         case ExpressionKind::ParameterReference:
-            return LocalDeclaration(LocalDeclarationKind::FunctionParameter, e.parameterIndex());
+            return LocalDeclaration(LocalDeclarationKind::FunctionParameter, e.parameterIndex(), programHandle);
         case ExpressionKind::VariableReference:
         case ExpressionKind::ReferenceReference:
             // TODO: No access to metadata :(

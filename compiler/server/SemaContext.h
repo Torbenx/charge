@@ -14,6 +14,7 @@ enum class LocalDeclarationKind : uint8_t {
 struct LocalDeclaration {
     LocalDeclarationKind kind;
     uint32_t id;
+    sema::ProgramHandle declaringProgram;
 
     bool operator==(const LocalDeclaration&) const = default;
 };
