@@ -31,6 +31,8 @@ struct ValueTheory {
     ValueTheory& operator=(const ValueTheory&) = delete;
     ValueTheory& operator=(ValueTheory&&) = delete;
 
+    virtual Value newValue(Solver&);
+
     virtual uint64_t labelOfValue(Solver&, Value) = 0;
     virtual std::string formatValue(Solver&, Value) = 0;
 
@@ -40,32 +42,24 @@ struct ValueTheory {
     //! Must be return true if and only if all literals added by collectValueInactiveReasons for the value are false
     virtual bool isValueActive(Solver&, Value) { return true; }
 
-    virtual void enumerateValues(Solver&, std::function<void(Value)> visitor) = 0;
-
     int_t theoryId() const { return m_theoryId; }
     ValueKind valuesKind() const { return m_valuesKind; }
 
 private:
-    uint8_t m_theoryId;
     ValueKind m_valuesKind;
-};
-
-struct EquatableValueTheory : ValueTheory {
-    struct EqualityInfo;
-
-    using ValueTheory::ValueTheory;
-
-    virtual EqualityInfo& equalityInfo(Solver&, Value) = 0;
+    uint8_t m_theoryId;
 };
 
 struct BooleanTheory : ValueTheory {
-    struct LiteralInfo;
-
     BooleanTheory(Solver& solver)
         : ValueTheory(solver, ValueKind::Boolean) { }
 
-    virtual BooleanValue negate(Solver&, BooleanValue) = 0;
-    virtual LiteralInfo& literalInfo(Solver&, BooleanValue) = 0;
+    virtual BooleanValue newBoolean(Solver& solver) {
+        BooleanValue b(newValue(solver));
+        newValue(solver);
+        return b;
+    }
+
     virtual void propagateAssignment(Solver&, BooleanValue) = 0;
 
     //! Reapply an assignment that was reverted during ReasonTheory::backtrack()
@@ -81,13 +75,17 @@ struct BooleanTheory : ValueTheory {
     virtual void unapplyAssignment(Solver&, BooleanValue) = 0;
 };
 
-struct MemberExpressionTheory : EquatableValueTheory {
+struct MemberExpressionTheory : ValueTheory {
     struct LiteralInfo {
         Type baseType;
     };
 
     MemberExpressionTheory(Solver& solver)
-        : EquatableValueTheory(solver, ValueKind::MemberExpression) { }
+        : ValueTheory(solver, ValueKind::MemberExpression) { }
+
+    MemberExpression newMemberExpression(Solver& solver) {
+        return MemberExpression(newValue(solver));
+    }
 
     // Note: We don't have baseType() function because that would require introducing
     //       a type variable for each memory location without a known declaration.
@@ -96,14 +94,18 @@ struct MemberExpressionTheory : EquatableValueTheory {
     virtual std::optional<LiteralInfo> literalInfo(Solver&, MemberExpression) = 0;
 };
 
-struct MemoryDeclarationTheory : EquatableValueTheory {
+struct MemoryDeclarationTheory : ValueTheory {
     struct DeclarationInfo {
         Type type;
         CodePosition position;
     };
 
     MemoryDeclarationTheory(Solver& solver)
-        : EquatableValueTheory(solver, ValueKind::MemoryDeclaration) { }
+        : ValueTheory(solver, ValueKind::MemoryDeclaration) { }
+
+    MemoryDeclaration newMemoryDeclaration(Solver& solver) {
+        return MemoryDeclaration(newValue(solver));
+    }
 
     //! Returns info for an object declaration
     /*!
@@ -118,15 +120,23 @@ struct MemoryLocationTheory : ValueTheory {
     MemoryLocationTheory(Solver& solver)
         : ValueTheory(solver, ValueKind::MemoryLocation) { }
 
+    MemoryLocation newMemoryLocation(Solver& solver) {
+        return MemoryLocation(newValue(solver));
+    }
+
     virtual Type typeAtLocation(Solver&, MemoryLocation) = 0;
 
     virtual MemoryDeclaration memoryDeclaration(Solver&, MemoryLocation) = 0;
     virtual MemberExpression memberExpression(Solver&, MemoryLocation) = 0;
 };
 
-struct TypeTheory : EquatableValueTheory {
+struct TypeTheory : ValueTheory {
     TypeTheory(Solver& solver)
-        : EquatableValueTheory(solver, ValueKind::Type) { }
+        : ValueTheory(solver, ValueKind::Type) { }
+
+    Type newType(Solver& solver) {
+        return Type(newValue(solver));
+    }
 
     //! Return the scalar value kind to use for a value of the given type
     virtual std::optional<ValueKind> scalarKind(Solver&, Type) = 0;
@@ -137,9 +147,9 @@ struct TypeTheory : EquatableValueTheory {
 };
 
 struct ValueKindTheory {
+    ValueKindTheory(Solver&, ValueKind);
     virtual std::string formatValueKind(Solver&, ValueKind) = 0;
     virtual BooleanValue equality(Solver&, Value, Value) = 0;
-    virtual BooleanValue disequality(Solver&, Value, Value) = 0;
     virtual Value defineLoad(Solver&, MemoryLocation, CodePosition) = 0;
     virtual ~ValueKindTheory() { }
 };

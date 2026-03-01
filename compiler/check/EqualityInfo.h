@@ -4,7 +4,7 @@
 
 namespace check {
 
-struct EquatableValueTheory::EqualityInfo {
+struct EqualityInfo {
     struct TreeNode {
         Value value;
         uint32_t subTreeSize = 1;

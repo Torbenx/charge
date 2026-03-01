@@ -7,8 +7,6 @@
 namespace check {
 
 struct MemoryLocationLoadInfo {
-    StandardEquality::EqualityInfo declarationEqualityInfo;
-    StandardEquality::EqualityInfo memberExpressionEqualityInfo;
     Type typeAtLocation;
 };
 
@@ -53,24 +51,13 @@ struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, 
         return solver.formatLoad(loc, pos);
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < LoadSet::size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
 private:
     friend LoadSet;
 
-    using EqualityInfo = StandardEquality::EqualityInfo;
-
-    MemoryLocationLoadInfo makeData(Solver& solver, uint32_t newId, MemoryLocation loc, CodePosition) {
+    MemoryLocationLoadInfo makeData(Solver& solver, [[maybe_unused]] uint32_t newId, MemoryLocation loc, CodePosition) {
         Type type = solver.typeAtLocation(loc);
         std::optional<Type> pointeeType = solver.theoryFor(type).dereferencedType(solver, type);
-        return {
-            .declarationEqualityInfo = EqualityInfo({ (uint32_t)declarations.theoryId(), newId }),
-            .memberExpressionEqualityInfo = EqualityInfo({ (uint32_t)memberExpressions.theoryId(), newId }),
-            .typeAtLocation = pointeeType.value(),
-        };
+        return { .typeAtLocation = pointeeType.value() };
     }
 
     struct Declarations : MemoryDeclarationTheory {
@@ -88,15 +75,6 @@ private:
         std::string formatValue(Solver& solver, Value value) override {
             auto [loc, pos] = loads()->loadAt(value.valueId);
             return "declaration(" + solver.formatLoad(loc, pos) + ")";
-        }
-
-        void enumerateValues(Solver&, std::function<void(Value)> f) override {
-            for (int_t i = 0; i < loads()->size(); i++)
-                f(Value { (uint32_t)theoryId(), (uint32_t)i });
-        }
-
-        EqualityInfo& equalityInfo(Solver&, Value value) override {
-            return loads()->at(value.valueId).declarationEqualityInfo;
         }
 
         std::optional<DeclarationInfo> declarationInfo(Solver&, MemoryDeclaration) override { return std::nullopt; }
@@ -121,15 +99,6 @@ private:
             return "memberexpr(" + solver.formatLoad(loc, pos) + ")";
         }
 
-        void enumerateValues(Solver&, std::function<void(Value)> f) override {
-            for (int_t i = 0; i < loads()->size(); i++)
-                f(Value { (uint32_t)theoryId(), (uint32_t)i });
-        }
-
-        EqualityInfo& equalityInfo(Solver&, Value value) override {
-            return loads()->at(value.valueId).memberExpressionEqualityInfo;
-        }
-
         Type memberType(Solver&, MemberExpression value) override {
             return loads()->at(value.valueId).typeAtLocation;
         }
@@ -147,7 +116,7 @@ private:
 struct MemoryLocations : ValueKindTheory {
 
     MemoryLocations(Solver& solver)
-        : m_loads(solver), m_ordering(solver) { }
+        : ValueKindTheory(solver, ValueKind::MemoryLocation), m_loads(solver), m_ordering(solver, ValueKind::MemoryLocation) { }
 
     static PartialOrderingsSet possibleOrderings(Solver& solver, MemoryLocation a, MemoryLocation b) {
         MemoryLocationTheory& ta = solver.theoryFor(a);
@@ -166,10 +135,6 @@ struct MemoryLocations : ValueKindTheory {
 
     BooleanValue equality(Solver& solver, Value a, Value b) override {
         return m_ordering.equality(solver, a, b);
-    }
-
-    BooleanValue disequality(Solver& solver, Value a, Value b) override {
-        return solver.negate(equality(solver, a, b));
     }
 
     Value defineLoad(Solver& solver, MemoryLocation location, CodePosition position) override {

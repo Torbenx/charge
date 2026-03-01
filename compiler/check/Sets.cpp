@@ -155,7 +155,7 @@ int_t DynamicSets::newSet(Solver&, int_t setSize) {
     return setId;
 }
 BooleanValue DynamicSets::makeElement(Solver& solver, int_t setId, int_t index) {
-    VERIFY((int_t)variables.size() == variableCount());
+    VERIFY((int_t)variables.size() == variableCount(solver));
     int_t varId = newVariable(solver);
     variables.push_back({ (uint32_t)setId, (uint32_t)index });
     return positiveLiteral(varId);

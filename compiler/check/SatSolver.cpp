@@ -4,15 +4,176 @@
 #include <check/StandardEquality.h>
 #include <check/Types.h>
 
+#include <utility>
+
 namespace check {
 
+std::byte* Solver::allocateAndFillData(int_t theoryId, const ValueTheoryInfo& theoryInfo, const CommonDataInfo& dataInfo) {
+    if (theoryInfo.dataCapacity == 0)
+        return nullptr;
+
+    VERIFY(theoryInfo.valueCount <= theoryInfo.dataCapacity);
+    std::allocator<std::byte> alloc;
+    std::byte* result = alloc.allocate((size_t)dataInfo.elementSize * (size_t)theoryInfo.dataCapacity);
+    for (int_t i = 0; i < (int_t)theoryInfo.valueCount; i++) {
+        dataInfo.initFunction(result + i * dataInfo.elementSize, Value { (uint32_t)theoryId, (uint32_t)i });
+    }
+    return result;
+}
+
+void Solver::moveData(std::byte*& data, const CommonDataInfo& dataInfo, int_t oldCapacity, int_t newCapacity) {
+    std::allocator<std::byte> alloc;
+    std::byte* newData = alloc.allocate((size_t)newCapacity * (size_t)dataInfo.elementSize);
+    if (oldCapacity == 0) {
+        VERIFY(data == nullptr);
+    } else {
+        size_t oldByteCount = (size_t)oldCapacity * (size_t)dataInfo.elementSize;
+        std::copy_n(data, oldByteCount, newData);
+        alloc.deallocate(data, oldByteCount);
+    }
+    data = newData;
+}
+
+void Solver::deallocateAndDestroyData(std::byte*& data, const ValueTheoryInfo& theoryInfo, const CommonDataInfo& dataInfo) {
+    if (theoryInfo.dataCapacity == 0) {
+        VERIFY(data == nullptr);
+        return;
+    }
+    for (int_t i = 0; i < (int_t)theoryInfo.valueCount; i++) {
+        dataInfo.destroyFunction(data + i * dataInfo.elementSize);
+    }
+    std::allocator<std::byte> alloc;
+    alloc.deallocate(data, (size_t)theoryInfo.dataCapacity * (size_t)dataInfo.elementSize);
+    data = nullptr;
+}
+
+TheoryDataBase::TheoryDataBase(Solver& solver, ValueTheory& theory, int_t elementSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    solver.registerTheoryData(*this, theory.theoryId(), elementSize, initFunction, destroyFunction);
+}
+
+void Solver::registerTheoryData(TheoryDataBase& data, int_t theoryId, int_t elementSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    auto& info = valueTheories[theoryId];
+    auto& dataInfo = info.datas.emplace_back(CommonDataInfo { elementSize, initFunction, destroyFunction }, &data);
+    VERIFY(data.m_pointer == nullptr);
+    dataInfo.pointer = allocateAndFillData(theoryId, info, dataInfo);
+    data.m_pointer = dataInfo.pointer;
+}
+
+KindDataBase::KindDataBase(Solver& solver, ValueKind kind, int_t elementSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    solver.registerKindData(*this, kind, elementSize, initFunction, destroyFunction);
+}
+
+void Solver::registerKindData(KindDataBase& data, ValueKind kind, int_t elementSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    auto& info = kindTheories[std::to_underlying(kind)];
+    auto& dataInfo = info.datas.emplace_back(CommonDataInfo { elementSize, initFunction, destroyFunction }, &data);
+    VERIFY(data.m_table == nullptr);
+    VERIFY(theoryTableCapacity > 0);
+    std::allocator<std::byte*> alloc;
+    dataInfo.table = alloc.allocate(theoryTableCapacity);
+    std::uninitialized_fill_n(dataInfo.table, theoryTableCapacity, nullptr);
+    for (int_t i = 0; i < (int_t)valueTheories.size(); i++) {
+        const auto& theoryInfo = valueTheories[i];
+        if (theoryInfo.theory->valuesKind() == kind) {
+            dataInfo.table[i] = allocateAndFillData(i, theoryInfo, dataInfo);
+        }
+    }
+    data.m_table = dataInfo.table;
+}
+
+Value ValueTheory::newValue(Solver& solver) {
+    return solver.handleNewValue(theoryId());
+}
+
+Value Solver::handleNewValue(int_t theoryId) {
+    auto& theoryInfo = valueTheories[theoryId];
+    int_t valueId = theoryInfo.valueCount++;
+    Value resultValue { (uint32_t)theoryId, (uint32_t)valueId };
+    if (theoryInfo.valueCount > theoryInfo.dataCapacity) {
+        int_t oldCapacity = theoryInfo.dataCapacity;
+        int_t newCapacity = std::max<int_t>(oldCapacity * 2, 4);
+        theoryInfo.dataCapacity = newCapacity;
+        for (auto& dataInfo : theoryInfo.datas) {
+            moveData(dataInfo.pointer, dataInfo, oldCapacity, newCapacity);
+            dataInfo.base->m_pointer = dataInfo.pointer;
+        }
+        auto& kindInfo = kindTheories[std::to_underlying(theoryInfo.theory->valuesKind())];
+        for (auto& dataInfo : kindInfo.datas) {
+            moveData(dataInfo.table[theoryId], dataInfo, oldCapacity, newCapacity);
+        }
+    }
+    for (auto& dataInfo : theoryInfo.datas) {
+        dataInfo.initFunction(dataInfo.pointer + valueId * dataInfo.elementSize, resultValue);
+    }
+    auto& kindInfo = kindTheories[std::to_underlying(theoryInfo.theory->valuesKind())];
+    for (auto& dataInfo : kindInfo.datas) {
+        dataInfo.initFunction(dataInfo.table[theoryId] + valueId * dataInfo.elementSize, resultValue);
+    }
+    return resultValue;
+}
+
 ValueTheory::ValueTheory(Solver& solver, ValueKind kind)
-    : m_theoryId(solver.attachTheory(*this)), m_valuesKind(kind) { }
+    : m_valuesKind(kind), m_theoryId(solver.attachTheory(*this)) { }
 
 int_t Solver::attachTheory(ValueTheory& theory) {
+    VERIFY((int_t)theory.valuesKind() < (int_t)kindTheories.size());
+    VERIFY(kindTheories[(int_t)theory.valuesKind()].theory != nullptr);
+
     int_t id = valueTheories.size();
-    valueTheories.push_back(&theory);
+    valueTheories.push_back({ &theory });
+    if ((int_t)valueTheories.size() > theoryTableCapacity) {
+        int_t oldCapacity = theoryTableCapacity;
+        theoryTableCapacity *= 2;
+        for (auto& kindInfo : kindTheories) {
+            for (auto& dataInfo : kindInfo.datas) {
+                // The new theory starts out with 0 values so a nullptr entry for it is fine
+                std::allocator<std::byte*> alloc;
+                std::byte** newTable = alloc.allocate(theoryTableCapacity);
+                std::copy_n(dataInfo.table, oldCapacity, newTable);
+                std::uninitialized_fill_n(newTable + oldCapacity, theoryTableCapacity - oldCapacity, nullptr);
+                alloc.deallocate(dataInfo.table, oldCapacity);
+                dataInfo.table = newTable;
+                dataInfo.base->m_table = newTable;
+            }
+        }
+    }
     return id;
+}
+
+Solver::~Solver() {
+    // Note: We must access the Theory/KindDataBase since they may already be deallocated.
+    for (auto& theoryInfo : valueTheories) {
+        if (theoryInfo.dataCapacity == 0)
+            continue;
+        for (auto& dataInfo : theoryInfo.datas) {
+            VERIFY(dataInfo.pointer != nullptr);
+            deallocateAndDestroyData(dataInfo.pointer, theoryInfo, dataInfo);
+        }
+    }
+    for (auto& kindInfo : kindTheories) {
+        for (auto& dataInfo : kindInfo.datas) {
+            for (int_t i = 0; i < (int_t)valueTheories.size(); i++) {
+                if (dataInfo.table[i] != nullptr) {
+                    deallocateAndDestroyData(dataInfo.table[i], valueTheories[i], dataInfo);
+                }
+            }
+            std::allocator<std::byte*> alloc;
+            alloc.deallocate(dataInfo.table, theoryTableCapacity);
+            dataInfo.table = nullptr;
+        }
+    }
+}
+
+ValueKindTheory::ValueKindTheory(Solver& solver, ValueKind kind) {
+    solver.attachTheory(*this, kind);
+}
+
+void Solver::attachTheory(ValueKindTheory& theory, ValueKind kind) {
+    int_t kindId = (int_t)kind;
+    if (kindId >= (int_t)kindTheories.size())
+        kindTheories.resize(kindId + 1);
+
+    VERIFY(kindTheories[kindId].theory == nullptr);
+    kindTheories[kindId].theory = &theory;
 }
 
 ReasonTheory::ReasonTheory(Solver& solver, bool propagating)
@@ -90,8 +251,7 @@ void Solver::Clauses::backtrack(Solver&) { }
 void Solver::Clauses::reapplyAssignment(Solver&, BooleanValue) { }
 
 void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
-    auto& literalTheory = solver.theoryFor(literal);
-    const auto& info = literalTheory.literalInfo(solver, literalTheory.negate(solver, literal));
+    const auto& info = solver.infoFor(!literal);
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
@@ -124,8 +284,7 @@ void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) 
 }
 
 void Solver::Clauses::unapplyAssignment(Solver& solver, BooleanValue literal) {
-    auto& literalTheory = solver.theoryFor(literal);
-    const auto& info = literalTheory.literalInfo(solver, literalTheory.negate(solver, literal));
+    const auto& info = solver.infoFor(!literal);
     for (auto inst : info.instances) {
         auto& clauseMask = clauseMasks[inst.clauseIndex];
         auto mask = literalMask(inst.literalIndex);
@@ -215,7 +374,7 @@ BooleanValue Solver::BooleanEquality::disequality(Solver& solver, Value va, Valu
 int_t Solver::BooleanEquality::equalityVariable(Solver& solver, Value a, Value b) {
     Link link = Link::orient(solver, a, b);
     int_t varId = m_equalities.get(solver, link);
-    if (varId == variableCount()) {
+    if (varId == variableCount(solver)) {
         newVariable(solver);
 
         /*
@@ -279,7 +438,7 @@ BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation loc
 }
 
 void Solver::BooleanLoads::makeData(Solver& solver, uint32_t newHandle, MemoryLocation, CodePosition) {
-    VERIFY((int_t)newHandle == variableCount());
+    VERIFY((int_t)newHandle == variableCount(solver));
     newVariable(solver);
 }
 
@@ -287,10 +446,6 @@ void Solver::BooleanLoads::makeData(Solver& solver, uint32_t newHandle, MemoryLo
 
 BooleanValue Solver::Booleans::equality(Solver& solver, Value a, Value b) {
     return m_equality.equality(solver, a, b);
-}
-
-BooleanValue Solver::Booleans::disequality(Solver& solver, Value a, Value b) {
-    return m_equality.disequality(solver, a, b);
 }
 
 Value Solver::Booleans::defineLoad(Solver& solver, MemoryLocation location, CodePosition position) {
@@ -302,7 +457,8 @@ std::string Solver::Booleans::formatValueKind(Solver&, ValueKind) { return "bool
 // -------------------- MemoryDeclarationEquality -------------------
 
 struct Solver::MemoryDeclarationEquality : BasicEquality {
-    using BasicEquality::BasicEquality;
+    MemoryDeclarationEquality(Solver& solver)
+        : BasicEquality(solver, ValueKind::MemoryDeclaration) { }
 
     bool isUnitDisequal(Solver& solver, Value a, Value b) override {
         return solver.declarationInfo((MemoryDeclaration)a).has_value()
@@ -313,16 +469,13 @@ struct Solver::MemoryDeclarationEquality : BasicEquality {
 // ----------------------- MemoryDeclarations -----------------------
 
 Solver::MemoryDeclarations::MemoryDeclarations(Solver& solver)
-    : m_equality(std::make_unique<MemoryDeclarationEquality>(solver)) { }
+    : ValueKindTheory(solver, ValueKind::MemoryDeclaration)
+    , m_equality(std::make_unique<MemoryDeclarationEquality>(solver)) { }
 
 Solver::MemoryDeclarations::~MemoryDeclarations() = default;
 
 BooleanValue Solver::MemoryDeclarations::equality(Solver& solver, Value a, Value b) {
     return m_equality->equality(solver, a, b);
-}
-
-BooleanValue Solver::MemoryDeclarations::disequality(Solver& solver, Value a, Value b) {
-    return m_equality->disequality(solver, a, b);
 }
 
 Value Solver::MemoryDeclarations::defineLoad(Solver&, MemoryLocation, CodePosition) {
@@ -374,16 +527,17 @@ PartialOrderingsSet Solver::possibleOrderings(MemoryLocation a, MemoryLocation b
 // ----------------------------- Solver -----------------------------
 
 Solver::Solver()
-    : internalVariables(*this)
-    , m_clauses(*this)
-    , m_booleans(*this)
+    : m_booleans(*this)
+    , internalVariables(*this)
     , m_memoryDeclarations(*this)
     , m_types(std::make_unique<Types>(*this))
     , m_memberExpressions(std::make_unique<MemberExpressions>(*this))
     , m_memoryLocations(std::make_unique<MemoryLocations>(*this))
+    , m_clauses(*this)
     , m_entryBlocks(*this)
     , implication(*this)
-    , unitReasons(*this) {
+    , unitReasons(*this)
+    , literalInfos(*this, ValueKind::Boolean) {
     {
         VERIFY(internalVariables.theoryId() == SOLVER_INTERNAL_VARS_THEORY_ID);
         int_t id = internalVariables.newVariable(*this);
@@ -392,31 +546,9 @@ Solver::Solver()
         addClause({ builtins::true_literal });
     }
     {
-        VERIFY(kindTheories.size() == (size_t)ValueKind::Boolean);
-        kindTheories.push_back(&m_booleans);
-    }
-    {
-        VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryDeclaration);
-        kindTheories.push_back(&m_memoryDeclarations);
-    }
-    {
-        VERIFY(kindTheories.size() == (size_t)ValueKind::Type);
-        kindTheories.push_back(m_types.get());
-    }
-    {
-        VERIFY(kindTheories.size() == (size_t)ValueKind::MemberExpression);
-        kindTheories.push_back(m_memberExpressions.get());
-    }
-    {
-        VERIFY(kindTheories.size() == (size_t)ValueKind::MemoryLocation);
-        kindTheories.push_back(m_memoryLocations.get());
-    }
-    {
         VERIFY(m_entryBlocks.theoryId() == ENTRY_BLOCKS_THEORY_ID);
     }
 }
-
-Solver::~Solver() = default;
 
 std::pair<BooleanValue, BooleanValue> Solver::makeBooleanPair() {
     int_t varId = internalVariables.newVariable(*this);
@@ -512,15 +644,14 @@ void Solver::decideTrue(Literal literal) {
 }
 
 void Solver::assignTrue(Literal trueLit, Reason reason) {
-    auto& theory = theoryFor(trueLit);
     /*if (reason.isDecision()) {
-        println("deciding {}", theory.formatValue(*this, trueLit));
+        println("deciding {}", formatValue(trueLit));
     } else {
-        print("assigning {}, reason: ", theory.formatValue(*this, trueLit));
+        print("assigning {}, reason: ", formatValue(trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
 
-    auto& info = theory.literalInfo(*this, trueLit);
+    auto& info = infoFor(trueLit);
     TracePosition tracePos(trace.size());
     trace.push_back({ trueLit, reason, info.lastReason, std::nullopt });
     if (info.lastReason.has_value())
@@ -532,7 +663,7 @@ void Solver::assignTrue(Literal trueLit, Reason reason) {
         queuePropagation(trueLit);
     }
 
-    if (theory.literalInfo(*this, theory.negate(*this, trueLit)).tentativelyTrue()) {
+    if (infoFor(!trueLit).tentativelyTrue()) {
         conflicts.push_back({ trueLit, reason });
     }
 }
@@ -591,9 +722,8 @@ bool Solver::tryLearn(Conflict conflict) {
     {
         auto [conflictClause, conflictLiteralIndex] = theoryFor(conflict.reason).reasonToClause(*this, conflict.literal, conflict.reason);
         for (Literal falseLit : conflictClause) {
-            auto& theory = theoryFor(falseLit);
-            Literal trueLit = theory.negate(*this, falseLit);
-            auto& info = theory.literalInfo(*this, trueLit);
+            Literal trueLit = !falseLit;
+            auto& info = infoFor(trueLit);
 
             VERIFY(wasTrue(trueLit));
 
@@ -752,7 +882,7 @@ void Solver::backtrack(int_t targetLevel) {
     for (; position < traceEnd; position++) {
         const TraceEntry entry = at(position);
         auto& theory = theoryFor(entry.literal);
-        auto& info = theory.literalInfo(*this, entry.literal);
+        auto& info = infoFor(entry.literal);
         VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
 
         bool revert = entry.reason.isDecision() || !testReason(entry.literal, entry.reason);
@@ -800,8 +930,7 @@ void Solver::backtrack(int_t targetLevel) {
 }
 
 std::vector<Reason> Solver::collectReasons(Literal trueLit) {
-    auto& theory = theoryFor(trueLit);
-    const auto& info = theory.literalInfo(*this, trueLit);
+    const auto& info = infoFor(trueLit);
     VERIFY(info.tentativelyTrue());
 
     VERIFY(info.firstReason.has_value());
@@ -844,9 +973,12 @@ void Solver::checkInvariances() {
         // println("");
     };
     for (auto& theory : valueTheories) {
-        auto* bTheory = dynamic_cast<BooleanTheory*>(theory);
-        if (bTheory != nullptr)
-            bTheory->enumerateValues(*this, checkLiteral);
+        auto* bTheory = dynamic_cast<BooleanTheory*>(theory.theory);
+        if (bTheory != nullptr) {
+            for (int_t valueId = 0; valueId < valueCount(*bTheory); valueId++) {
+                checkLiteral(Value { (uint32_t)bTheory->theoryId(), (uint32_t)valueId });
+            }
+        }
     }
 
     // check decisions
@@ -912,12 +1044,11 @@ bool Solver::checkAssignment() {
         bool foundTrue = false;
         std::optional<Literal> unassignedInternal;
         for (Literal lit : clause) {
-            auto& theory = theoryFor(lit);
-            if (theory.literalInfo(*this, lit).tentativelyTrue()) {
+            if (infoFor(lit).tentativelyTrue()) {
                 foundTrue = true;
                 break;
             }
-            if (lit.theoryId == internalVariables.theoryId() && !theory.literalInfo(*this, theory.negate(*this, lit)).tentativelyTrue())
+            if (lit.theoryId == internalVariables.theoryId() && !infoFor(!lit).tentativelyTrue())
                 unassignedInternal = lit;
         }
         if (!foundTrue) {

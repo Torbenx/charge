@@ -4,6 +4,7 @@ target_sources(compiler
     PRIVATE
     BooleanVariables.h
     CodeBlockTheory.h
+    DataManagement.h
     EqualityInfo.h
     EqualityTheory.cpp
     EqualityTheory.h

@@ -38,15 +38,9 @@ struct SimpleVariables : MemoryLocationTheory {
         return "var" + std::to_string(v.valueId);
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < (int_t)variables.size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
 private:
     struct VariableInfo : MemoryDeclarationTheory::DeclarationInfo {
         MemberExpression identityExpressionForType;
-        EquatableValueTheory::EqualityInfo declarationEqualityInfo;
     };
 
     struct Declarations : MemoryDeclarationTheory {
@@ -69,10 +63,6 @@ private:
             return "var" + std::to_string(v.valueId) + ".decl";
         }
 
-        EqualityInfo& equalityInfo(Solver&, Value v) override {
-            return theory()->variables[v.valueId].declarationEqualityInfo;
-        }
-
         void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
             // This is fine since the theory id of 'v' is not used
             return theory()->collectValueInactiveReasons(solver, v, clause);
@@ -81,11 +71,6 @@ private:
         bool isValueActive(Solver& solver, Value v) override {
             // This is fine since the theory id of 'v' is not used
             return theory()->isValueActive(solver, v);
-        }
-
-        void enumerateValues(Solver&, std::function<void(Value)> f) override {
-            for (int_t i = 0; i < (int_t)theory()->variables.size(); i++)
-                f(Value { (uint32_t)theoryId(), (uint32_t)i });
         }
 
         ValueBaseLabel baseLabel;

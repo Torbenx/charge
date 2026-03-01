@@ -63,7 +63,7 @@ struct optional_traits<check::TracePosition> {
 
 namespace check {
 
-struct BooleanTheory::LiteralInfo {
+struct LiteralInfo {
     std::optional<TracePosition> firstReason;
     std::optional<TracePosition> lastReason;
 

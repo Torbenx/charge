@@ -11,19 +11,11 @@ struct SimpleBooleanTheory : BooleanTheory {
         //       so we can pass any ValueCategory here.
         , baseLabel(solver, ValueCategory::Expression) { }
 
-    BooleanValue negate(Solver&, BooleanValue lit) override {
-        return negate(lit);
-    }
-    BooleanValue negate(BooleanValue lit) {
-        return { lit.theoryId, lit.valueId ^ 1u };
-    }
-    LiteralInfo& literalInfo(Solver&, BooleanValue lit) override {
-        return literalInfo(lit);
-    }
-    LiteralInfo& literalInfo(BooleanValue lit) { return infos[lit.valueId]; }
-
     bool assignedPositive(Solver&, int_t varId);
     bool assignedNegative(Solver&, int_t varId);
+
+    int_t variableCount(Solver& solver);
+    int_t newVariable(Solver& solver) { return variableId(newBoolean(solver)); }
 
     virtual std::string formatPositiveLiteral(Solver&, int_t varId) = 0;
     virtual std::string formatNegativeLiteral(Solver&, int_t varId) = 0;
@@ -52,45 +44,15 @@ struct SimpleBooleanTheory : BooleanTheory {
         return isVariableActive(solver, variableId({ v }));
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = find; i < variableCount(); i++) {
-            f(positiveLiteral(i));
-            f(negativeLiteral(i));
-        }
-    }
-
-    virtual int_t newVariable(Solver&) {
-        int_t id = variableCount();
-        infos.resize(infos.size() + 2);
-        return id;
-    }
-
-    std::optional<int_t> findUnassignedVariable() {
-        for (int_t i = find; i < variableCount(); i++) {
-            if (literalInfo(positiveLiteral(i)).tentativelyTrue() || literalInfo(negativeLiteral(i)).tentativelyTrue())
-                continue;
-            find = i;
-            return i;
-        }
-        for (int_t i = 0; i < find; i++) {
-            if (literalInfo(positiveLiteral(i)).tentativelyTrue() || literalInfo(negativeLiteral(i)).tentativelyTrue())
-                continue;
-            find = i;
-            return i;
-        }
-        return std::nullopt;
-    }
+    std::optional<int_t> findUnassignedVariable(Solver&);
 
     int_t variableId(BooleanValue v) const { return v.valueId >> 1; }
     bool isPositive(BooleanValue v) const { return (v.valueId & 1u) == 0u; }
-
-    int_t variableCount() const { return infos.size() >> 1; }
 
     BooleanValue positiveLiteral(int_t varId) const { return { (uint32_t)theoryId(), (uint32_t)varId * 2u }; }
     BooleanValue negativeLiteral(int_t varId) const { return { (uint32_t)theoryId(), (uint32_t)varId * 2u + 1u }; }
 
 private:
-    std::vector<LiteralInfo> infos;
     int_t find = 0;
     ValueBaseLabel baseLabel;
 };

@@ -65,7 +65,7 @@ struct DynamicSets : SimpleBooleanTheory, SetTheory {
         return getOrCreateElementLiteral(solver, setId, index);
     }
     BooleanValue elementInactiveLiteral(Solver& solver, int_t setId, int_t index) {
-        return negate(solver, getOrCreateElementLiteral(solver, setId, index));
+        return !getOrCreateElementLiteral(solver, setId, index);
     }
 
     int_t newSet(Solver&, int_t setSize);

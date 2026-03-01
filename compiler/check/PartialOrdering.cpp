@@ -9,7 +9,7 @@ PartialOrderingTheory* PartialOrderingTheory::Unordered::theory() {
 }
 
 BooleanValue PartialOrderingTheory::Unordered::newLiteral(Solver& solver, InternalHandle handle) {
-    VERIFY((int_t)m_handles.size() == variableCount());
+    VERIFY((int_t)m_handles.size() == variableCount(solver));
     m_handles.push_back(handle);
     return positiveLiteral(newVariable(solver));
 }
@@ -54,7 +54,7 @@ PartialOrderingTheory* PartialOrderingTheory::Equality::theory() {
 }
 
 BooleanValue PartialOrderingTheory::Equality::newLiteral(Solver& solver, InternalHandle handle) {
-    VERIFY((int_t)m_handles.size() == variableCount());
+    VERIFY((int_t)m_handles.size() == variableCount(solver));
     m_handles.push_back(handle);
     return positiveLiteral(newVariable(solver));
 }
@@ -141,9 +141,9 @@ BooleanValue PartialOrderingTheory::OrderingSets::makeElement(Solver& solver, in
 
 // ---------------------- PartialOrderingTheory ---------------------
 
-PartialOrderingTheory::PartialOrderingTheory(Solver& solver)
+PartialOrderingTheory::PartialOrderingTheory(Solver& solver, ValueKind kind)
     : m_sets(solver)
-    , m_equality(solver)
+    , m_equality(solver, kind)
     , m_unordered(solver) { }
 
 PartialOrderingTheory::OrderingHandle PartialOrderingTheory::order(Solver& solver, Value a, Value b) {

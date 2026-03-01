@@ -6,8 +6,8 @@
 
 namespace check {
 
-StandardEquality::StandardEquality(Solver& solver)
-    : EqualityTheory(solver), ReasonTheory(solver, true) { }
+StandardEquality::StandardEquality(Solver& solver, ValueKind kind)
+    : EqualityTheory(solver), ReasonTheory(solver, true), equalityInfos(solver, kind) { }
 
 namespace {
     using flat_set = std::vector<uint32_t>;
@@ -210,7 +210,7 @@ void StandardEquality::applyDisequal(Solver& solver, int_t diseqId, bool propaga
     if (isUnitDisequal(solver, sourceRoot, targetRoot))
         return;
 
-    auto addDisequality = [&solver, diseqId](Value parent) {
+    auto addDisequality = [this, &solver, diseqId](Value parent) {
         auto& disequalities = infoFor(solver, parent).disequalities;
         auto it = std::lower_bound(disequalities.begin(), disequalities.end(), diseqId);
         disequalities.insert(it, diseqId);
@@ -313,8 +313,8 @@ bool StandardEquality::testReason(Solver& solver, BooleanValue assignedLiteral, 
     return connected(solver, impliedA, originalA) && connected(solver, impliedB, originalB);
 }
 
-int_t StandardEquality::newVariable(Solver& solver) {
-    int_t eqId = SimpleBooleanTheory::newVariable(solver);
+BooleanValue StandardEquality::newBoolean(Solver& solver) {
+    int_t eqId = variableId(SimpleBooleanTheory::newBoolean(solver));
 
     auto [source, target] = equalityLink(eqId);
     addEdge(solver, source, target, eqId);
@@ -336,7 +336,7 @@ int_t StandardEquality::newVariable(Solver& solver) {
         }
     }
 
-    return eqId;
+    return positiveLiteral(eqId);
 }
 
 void StandardEquality::addEdge(Solver& solver, Value value, Value otherValue, int_t eqId) {
@@ -345,7 +345,7 @@ void StandardEquality::addEdge(Solver& solver, Value value, Value otherValue, in
     int_t edgeInsertPos = valueInfo.edgesOffset;
     EqualityInfo::Edge edge { .otherValue = otherValue, .eqId = (uint32_t)eqId };
 
-    forEachParentOf(solver, value, [&solver, edgeInsertPos, edge](Value parent) {
+    forEachParentOf(solver, value, [this, &solver, edgeInsertPos, edge](Value parent) {
         auto& info = infoFor(solver, parent);
         info.edges.insert(info.edges.begin() + (edgeInsertPos - info.edgesOffset), edge);
     });
@@ -513,7 +513,7 @@ void StandardEquality::backtrack(Solver& solver) {
         disequalityTrace.pop_back();
         auto [source, target] = equalityLink(diseqId);
 
-        auto removeDisequality = [&solver, diseqId](Value parent) {
+        auto removeDisequality = [this, &solver, diseqId](Value parent) {
             auto& disequalities = infoFor(solver, parent).disequalities;
             auto it = std::lower_bound(disequalities.begin(), disequalities.end(), diseqId);
             VERIFY(it != disequalities.end());
@@ -527,7 +527,7 @@ void StandardEquality::backtrack(Solver& solver) {
 }
 
 void StandardEquality::checkInvariances(Solver& solver) {
-    auto checkValue = [&solver](Value value) {
+    auto checkValue = [this, &solver](Value value) {
         const auto& info = infoFor(solver, value);
         const auto& rootInfo = infoFor(solver, info.root);
         if (info.treeOffset == -1) {
@@ -546,7 +546,7 @@ void StandardEquality::checkInvariances(Solver& solver) {
             }
         }
     };
-    for (int_t eqId = 0; eqId < variableCount(); eqId++) {
+    for (int_t eqId = 0; eqId < variableCount(solver); eqId++) {
         auto [source, target] = equalityLink(eqId);
         checkValue(source);
         checkValue(target);

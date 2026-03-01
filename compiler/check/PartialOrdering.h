@@ -28,7 +28,7 @@ struct PartialOrderingTheory {
         InternalHandle internalHandle() const { return { id() }; }
     };
 
-    PartialOrderingTheory(Solver& solver);
+    PartialOrderingTheory(Solver& solver, ValueKind);
 
     OrderingHandle order(Solver&, Value a, Value b);
     BooleanValue literal(Solver&, OrderingHandle, std::partial_ordering);

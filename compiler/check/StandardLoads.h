@@ -2,13 +2,12 @@
 
 #include <check/LoadSet.h>
 #include <check/SatSolver.h>
-#include <check/EqualityInfo.h>
 
 namespace check {
 
-struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, EquatableValueTheory::EqualityInfo> {
+struct StandardLoads : ValueTheory, private LoadSet<StandardLoads, void> {
     StandardLoads(Solver& solver, ValueKind valuesKind)
-        : EquatableValueTheory(solver, valuesKind), baseLabel(solver, ValueCategory::Load) { }
+        : ValueTheory(solver, valuesKind), baseLabel(solver, ValueCategory::Load) { }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -27,26 +26,15 @@ struct StandardLoads : EquatableValueTheory, private LoadSet<StandardLoads, Equa
         return baseLabel + (uint64_t)LoadSet::label(v.valueId);
     }
 
-    EqualityInfo& equalityInfo(Solver&, Value v) override {
-        return LoadSet::at(v.valueId);
-    }
-
     std::string formatValue(Solver& solver, Value v) override {
         auto [loc, pos] = LoadSet::loadAt(v.valueId);
         return solver.formatLoad(loc, pos);
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < LoadSet::size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
 private:
     ValueBaseLabel baseLabel;
 
-    EqualityInfo makeData(Solver&, uint32_t newId, MemoryLocation, CodePosition) {
-        return EqualityInfo({ (uint32_t)theoryId(), newId });
-    }
+    void makeData(Solver&, uint32_t, MemoryLocation, CodePosition) { }
 
     friend LoadSet;
 };

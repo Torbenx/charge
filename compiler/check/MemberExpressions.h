@@ -7,14 +7,13 @@
 namespace check {
 
 struct MemberExpressionLoadInfo {
-    StandardEquality::EqualityInfo equalityInfo;
     Type memberType;
 };
 
 struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionLoads, MemberExpressionLoadInfo> {
 
     MemberExpressionLoads(Solver& solver)
-    : MemberExpressionTheory(solver), baseLabel(solver, ValueCategory::Load) { }
+        : MemberExpressionTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
     Value defineLoad(Solver& solver, MemoryLocation loc, CodePosition pos) {
         auto id = LoadSet::get(solver, loc, pos);
@@ -38,15 +37,6 @@ struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionL
         return solver.formatLoad(loc, pos);
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < LoadSet::size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
-    EqualityInfo& equalityInfo(Solver&, Value v) override {
-        return LoadSet::at(v.valueId).equalityInfo;
-    }
-
     Type memberType(Solver&, MemberExpression expr) override {
         return LoadSet::at(expr.valueId).memberType;
     }
@@ -56,21 +46,16 @@ struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionL
 private:
     friend LoadSet;
 
-    MemberExpressionLoadInfo makeData(Solver& solver, uint32_t newId, MemoryLocation loc, CodePosition) {
+    MemberExpressionLoadInfo makeData(Solver& solver, [[maybe_unused]] uint32_t newId, MemoryLocation loc, CodePosition) {
         Type type = solver.typeAtLocation(loc);
         std::optional<Type> memberType = solver.theoryFor(type).memberExpressionMemberType(solver, type);
-        return {
-            .equalityInfo = EqualityInfo({ (uint32_t)theoryId(), newId }),
-            .memberType = memberType.value(),
-        };
+        return { .memberType = memberType.value() };
     }
 
     ValueBaseLabel baseLabel;
 };
 
-struct MemberExpressionLiteralData : MemberExpressionTheory::LiteralInfo {
-    MemberExpressionTheory::EqualityInfo equalityInfo;
-};
+struct MemberExpressionLiteralData : MemberExpressionTheory::LiteralInfo { };
 
 struct MemberExpressionLiterals : MemberExpressionTheory, private FlatTreeSetDetail::Base<MemberExpressionLiterals, MemberExpressionLiteralData> {
 
@@ -98,15 +83,6 @@ struct MemberExpressionLiterals : MemberExpressionTheory, private FlatTreeSetDet
         return "self{" + solver.formatValue(at(v.valueId).baseType) + "}";
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < Base::size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
-    EqualityInfo& equalityInfo(Solver&, Value v) override {
-        return at(v.valueId).equalityInfo;
-    }
-
     Type memberType(Solver&, MemberExpression expr) override {
         return at(expr.valueId).baseType; // Note: Currently only the indentity literal is supported
     }
@@ -123,8 +99,7 @@ private:
     }
 
     uint32_t makeNode(Solver&, Type baseType, TreeLabel label) {
-        MemberExpression newExpr { (uint32_t)theoryId(), (uint32_t)Base::nextNodeHandle() };
-        return Base::makeNode(label, { LiteralInfo { baseType }, EqualityInfo(newExpr) });
+        return Base::makeNode(label, { LiteralInfo { baseType } });
     }
 
     ValueBaseLabel baseLabel;
@@ -144,7 +119,7 @@ struct MemberExpressions : ValueKindTheory {
     }
 
     MemberExpressions(Solver& solver)
-    : m_loads(solver), m_literals(solver), m_ordering(solver) { }
+        : ValueKindTheory(solver, ValueKind::MemberExpression), m_loads(solver), m_literals(solver), m_ordering(solver) { }
 
     MemberExpressionLiterals& literals() { return m_literals; }
 
@@ -156,10 +131,6 @@ struct MemberExpressions : ValueKindTheory {
         return m_ordering.equality(solver, a, b);
     }
 
-    BooleanValue disequality(Solver& solver, Value a, Value b) override {
-        return solver.negate(equality(solver, a, b));
-    }
-
     Value defineLoad(Solver& solver, MemoryLocation location, CodePosition position) override {
         return m_loads.defineLoad(solver, location, position);
     }
@@ -167,7 +138,7 @@ struct MemberExpressions : ValueKindTheory {
 private:
     struct Ordering : PartialOrderingTheory {
         Ordering(Solver& solver)
-        : PartialOrderingTheory(solver) { }
+            : PartialOrderingTheory(solver, ValueKind::MemberExpression) { }
 
         PartialOrderingsSet possibleOrderings(Solver& solver, Value a, Value b) override {
             return MemberExpressions::possibleOrderings(solver, MemberExpression { a }, MemberExpression { b });
@@ -191,7 +162,7 @@ private:
             PartialOrderingTheory::collectOrderingInactiveReasons(solver, a, b, clause);
             if (auto aLiteral = solver.literalInfo(a); aLiteral.has_value()) {
                 if (auto bLiteral = solver.literalInfo(b); bLiteral.has_value()) {
-                    clause.push_back(solver.disequality(aLiteral->baseType, bLiteral->baseType));
+                    clause.push_back(!solver.equality(aLiteral->baseType, bLiteral->baseType));
                 }
             }
         }

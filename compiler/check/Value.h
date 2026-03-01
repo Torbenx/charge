@@ -6,7 +6,7 @@ namespace check {
 
 struct Solver;
 
-inline constexpr int_t SOLVER_INTERNAL_VARS_THEORY_ID = 0;
+inline constexpr int_t SOLVER_INTERNAL_VARS_THEORY_ID = 2;
 
 inline constexpr int_t ENTRY_BLOCKS_THEORY_ID = 0;
 
@@ -41,10 +41,15 @@ struct OrientedPair {
 //! A boolean value
 /*!
 In the literature on boolean satisfiability this would be called a literal.
-For each literal X there exist the complementary literal NOT X. These will always belong to the same theory.
-\see BooleanTheory::negate()
+For each literal X there exist the complementary literal NOT X.
 */
-struct BooleanValue : Value { };
+struct BooleanValue : Value {
+    BooleanValue negated() const {
+        return BooleanValue(Value { .theoryId = theoryId, .valueId = valueId ^ 1u });
+    }
+
+    BooleanValue operator!() const { return negated(); }
+};
 
 //! A memory location value
 struct MemoryLocation : Value { };

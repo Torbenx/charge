@@ -2,6 +2,7 @@
 
 #include <check/BooleanVariables.h>
 #include <check/CodeBlockTheory.h>
+#include <check/DataManagement.h>
 #include <check/EqualityTheory.h>
 #include <check/LoadSet.h>
 #include <check/PartialOrderingsSet.h>
@@ -30,24 +31,18 @@ struct Solver {
     ~Solver();
 
     ValueTheory& getTheoryById(int_t id) {
-        return *valueTheories[id];
+        return *valueTheories[id].theory;
     }
 
     // ValueKindTheory
     ValueKindTheory& theoryFor(ValueKind kind) {
-        return *kindTheories[(int_t)kind];
+        return *kindTheories[(int_t)kind].theory;
     }
 
     Literal equality(Value a, Value b) {
         ValueKind kind = kindOf(a);
         VERIFY(kind == kindOf(b));
         return theoryFor(kind).equality(*this, a, b);
-    }
-
-    Literal disequality(Value a, Value b) {
-        ValueKind kind = kindOf(a);
-        VERIFY(kind == kindOf(b));
-        return theoryFor(kind).disequality(*this, a, b);
     }
 
     Value defineLoad(MemoryLocation location, CodePosition position) {
@@ -58,7 +53,11 @@ struct Solver {
 
     // ValueTheory
     ValueTheory& theoryFor(Value value) {
-        return *valueTheories[value.theoryId];
+        return *valueTheories[value.theoryId].theory;
+    }
+
+    int_t valueCount(ValueTheory& theory) {
+        return valueTheories[theory.theoryId()].valueCount;
     }
 
     std::string formatValue(Value value) {
@@ -85,24 +84,24 @@ struct Solver {
 
     // BooleanTheory
     BooleanTheory& theoryFor(BooleanValue value) {
-        return static_cast<BooleanTheory&>(*valueTheories[value.theoryId]);
+        return static_cast<BooleanTheory&>(theoryFor((Value)value));
     }
 
-    BooleanTheory::LiteralInfo& infoFor(BooleanValue literal) {
-        return theoryFor(literal).literalInfo(*this, literal);
+    LiteralInfo& infoFor(BooleanValue literal) {
+        return literalInfos[literal];
     }
 
     Literal negate(Literal lit) {
-        return theoryFor(lit).negate(*this, lit);
+        return lit.negated();
     }
 
     bool tentativelyTrue(Literal lit) {
-        return theoryFor(lit).literalInfo(*this, lit).tentativelyTrue();
+        return infoFor(lit).tentativelyTrue();
     }
 
     // MemoryLocationTheory
     MemoryLocationTheory& theoryFor(MemoryLocation value) {
-        return static_cast<MemoryLocationTheory&>(*valueTheories[value.theoryId]);
+        return static_cast<MemoryLocationTheory&>(theoryFor((Value)value));
     }
 
     Type typeAtLocation(MemoryLocation location) {
@@ -125,7 +124,7 @@ struct Solver {
 
     // MemberExpressionTheory
     MemberExpressionTheory& theoryFor(MemberExpression value) {
-        return static_cast<MemberExpressionTheory&>(*valueTheories[value.theoryId]);
+        return static_cast<MemberExpressionTheory&>(theoryFor((Value)value));
     }
 
     Type memberType(MemberExpression expr) {
@@ -142,7 +141,7 @@ struct Solver {
 
     // MemoryDeclarationTheory
     MemoryDeclarationTheory& theoryFor(MemoryDeclaration value) {
-        return static_cast<MemoryDeclarationTheory&>(*valueTheories[value.theoryId]);
+        return static_cast<MemoryDeclarationTheory&>(theoryFor((Value)value));
     }
 
     std::optional<MemoryDeclarationTheory::DeclarationInfo> declarationInfo(MemoryDeclaration value) {
@@ -151,7 +150,7 @@ struct Solver {
 
     // TypeTheory
     TypeTheory& theoryFor(Type value) {
-        return static_cast<TypeTheory&>(*valueTheories[value.theoryId]);
+        return static_cast<TypeTheory&>(theoryFor((Value)value));
     }
 
     std::optional<ValueKind> loadedKind(Type type) {
@@ -473,10 +472,9 @@ private:
 
     struct Booleans : ValueKindTheory {
         Booleans(Solver& solver)
-            : m_equality(solver), m_loads(solver) { }
+            : ValueKindTheory(solver, ValueKind::Boolean), m_equality(solver), m_loads(solver) { }
 
         BooleanValue equality(Solver&, Value, Value) override;
-        BooleanValue disequality(Solver&, Value, Value) override;
         Value defineLoad(Solver&, MemoryLocation, CodePosition) override;
         std::string formatValueKind(Solver&, ValueKind) override;
 
@@ -491,7 +489,6 @@ private:
         ~MemoryDeclarations();
 
         BooleanValue equality(Solver&, Value, Value) override;
-        BooleanValue disequality(Solver&, Value, Value) override;
         Value defineLoad(Solver&, MemoryLocation, CodePosition) override;
         std::string formatValueKind(Solver&, ValueKind) override;
 
@@ -554,6 +551,36 @@ private:
         void backtrack(Solver&) override { }
     };
 
+    struct CommonDataInfo {
+        CommonDataInfo(int_t elementSize, DataInitializeFunction i, DataDestroyFunction d)
+            : elementSize(elementSize), initFunction(i), destroyFunction(d) { }
+        uint32_t elementSize = 0;
+        DataInitializeFunction initFunction = nullptr;
+        DataDestroyFunction destroyFunction = nullptr;
+    };
+
+    struct TheoryDataInfo : CommonDataInfo {
+        TheoryDataBase* base = nullptr;
+        std::byte* pointer = nullptr;
+    };
+
+    struct KindDataInfo : CommonDataInfo {
+        KindDataBase* base = nullptr;
+        std::byte** table = nullptr;
+    };
+
+    struct ValueTheoryInfo {
+        ValueTheory* theory = nullptr;
+        uint32_t valueCount = 0;
+        uint32_t dataCapacity = 0;
+        std::vector<TheoryDataInfo> datas = {};
+    };
+
+    struct ValueKindTheoryInfo {
+        ValueKindTheory* theory = nullptr;
+        std::vector<KindDataInfo> datas = {};
+    };
+
     //! An entry in the trace
     /*!
     Each entry represent a reason for a literal to false. The different reasons for a given literal
@@ -575,6 +602,9 @@ private:
 
     //! Collect all reason for \p trueLit to be true
     std::vector<Reason> collectReasons(Literal trueLit);
+
+    friend ValueKindTheory;
+    void attachTheory(ValueKindTheory&, ValueKind);
 
     friend ValueTheory;
     //! Attch a new theory to the solver
@@ -602,6 +632,19 @@ private:
 
     friend ValueBaseLabel;
     void attachBaseLabel(ValueBaseLabel& label, ValueCategory category);
+
+    friend TheoryDataBase;
+    void registerTheoryData(TheoryDataBase&, int_t theoryId, int_t elementSize, DataInitializeFunction, DataDestroyFunction);
+
+    friend KindDataBase;
+    void registerKindData(KindDataBase&, ValueKind kind, int_t elementSize, DataInitializeFunction, DataDestroyFunction);
+
+    friend ValueTheory;
+    Value handleNewValue(int_t theoryId);
+
+    static std::byte* allocateAndFillData(int_t theoryId, const ValueTheoryInfo&, const CommonDataInfo&);
+    static void deallocateAndDestroyData(std::byte*& data, const ValueTheoryInfo&, const CommonDataInfo&);
+    static void moveData(std::byte*& data, const CommonDataInfo&, int_t oldCapacity, int_t newCapacity);
 
     //! Scratch space to hold a temporary clause
     /*!
@@ -642,23 +685,26 @@ private:
     std::map<BaseLabelOrderingKey, ValueBaseLabel*> baseLabels;
     uint16_t baseLabelCounter = 0;
 
-    std::vector<ValueKindTheory*> kindTheories;
-    std::vector<ValueTheory*> valueTheories;
+    std::vector<ValueKindTheoryInfo> kindTheories;
+    std::vector<ValueTheoryInfo> valueTheories;
+    int_t theoryTableCapacity = 2;
     std::vector<ReasonTheory*> reasonTheories;
     std::vector<CodeBlockTheory*> blockTheories;
 
     // --- These variables must be initialized last since their constructors modify the theory arrays ---
 
-    InternalVariables internalVariables;
-    Clauses m_clauses;
     Booleans m_booleans;
+    InternalVariables internalVariables;
     MemoryDeclarations m_memoryDeclarations;
     std::unique_ptr<Types> m_types;
     std::unique_ptr<MemberExpressions> m_memberExpressions;
     std::unique_ptr<MemoryLocations> m_memoryLocations;
+    Clauses m_clauses;
     EntryBlocks m_entryBlocks;
     Implication implication;
     UnitReasons unitReasons;
+
+    KindData<LiteralInfo> literalInfos;
 };
 
 }

@@ -6,11 +6,9 @@ namespace check {
 MemoryLocation SimpleVariables::declareVariable(Solver& solver, Type type, CodePosition position) {
     uint32_t id = variables.size();
     MemoryLocation location { (uint32_t)theoryId(), id };
-    MemoryDeclaration declaration { (uint32_t)declarations.theoryId(), id };
     variables.push_back(VariableInfo {
         MemoryDeclarationTheory::DeclarationInfo { type, position },
         solver.memberExpressions().literals().identity(solver, type),
-        EquatableValueTheory::EqualityInfo(declaration),
     });
     return location;
 }

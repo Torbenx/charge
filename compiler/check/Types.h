@@ -7,11 +7,7 @@
 
 namespace check {
 
-struct TypeLoadInfo {
-    StandardEquality::EqualityInfo equalityInfo;
-};
-
-struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
+struct TypeLoads : TypeTheory, LoadSet<TypeLoads, void> {
     TypeLoads(Solver& solver)
         : TypeTheory(solver), baseLabel(solver, ValueCategory::Load) { }
 
@@ -37,15 +33,6 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
         return solver.formatLoad(loc, pos);
     }
 
-    void enumerateValues(Solver&, std::function<void(Value)> f) override {
-        for (int_t i = 0; i < LoadSet::size(); i++)
-            f(Value { (uint32_t)theoryId(), (uint32_t)i });
-    }
-
-    EqualityInfo& equalityInfo(Solver&, Value v) override {
-        return LoadSet::at(v.valueId).equalityInfo;
-    }
-
     std::optional<ValueKind> scalarKind(Solver&, Type) override { return std::nullopt; }
     std::optional<Type> dereferencedType(Solver&, Type) override { return std::nullopt; }
     std::optional<Type> memberExpressionMemberType(Solver&, Type) override { return std::nullopt; }
@@ -54,11 +41,7 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, TypeLoadInfo> {
 private:
     friend LoadSet;
 
-    TypeLoadInfo makeData(Solver&, uint32_t newId, MemoryLocation, CodePosition) {
-        return {
-            .equalityInfo = EqualityInfo({ (uint32_t)theoryId(), newId }),
-        };
-    }
+    void makeData(Solver&, [[maybe_unused]] uint32_t newId, MemoryLocation, CodePosition) { }
 
     ValueBaseLabel baseLabel;
 };
@@ -69,7 +52,7 @@ struct Types : ValueKindTheory {
     }
 
     Types(Solver& solver)
-    : m_loads(solver), m_ordering(solver) { }
+    : ValueKindTheory(solver, ValueKind::Type), m_loads(solver), m_ordering(solver, ValueKind::Type) { }
 
     std::string formatValueKind(Solver&, ValueKind) override {
         return "type";
@@ -77,10 +60,6 @@ struct Types : ValueKindTheory {
 
     BooleanValue equality(Solver& solver, Value a, Value b) override {
         return m_ordering.equality(solver, a, b);
-    }
-
-    BooleanValue disequality(Solver& solver, Value a, Value b) override {
-        return solver.negate(equality(solver, a, b));
     }
 
     Value defineLoad(Solver& solver, MemoryLocation location, CodePosition position) override {

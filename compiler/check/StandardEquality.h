@@ -7,9 +7,7 @@
 namespace check {
 
 struct StandardEquality : EqualityTheory, ReasonTheory {
-    using EqualityInfo = EquatableValueTheory::EqualityInfo;
-
-    StandardEquality(Solver&);
+    StandardEquality(Solver&, ValueKind);
 
     void propagateAssignment(Solver&, BooleanValue) override;
     void reapplyAssignment(Solver&, BooleanValue) override;
@@ -29,12 +27,12 @@ struct StandardEquality : EqualityTheory, ReasonTheory {
     void newDecisionLevel(Solver&) override;
     void backtrack(Solver&) override;
 
-    static void forEachParentOf(Solver&, Value value, auto&& callback);
-    static void forEachEqualValue(Solver&, Value value, auto&& callback);
+    void forEachParentOf(Solver&, Value value, auto&& callback);
+    void forEachEqualValue(Solver&, Value value, auto&& callback);
 
     void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
 
-    int_t newVariable(Solver&) override;
+    BooleanValue newBoolean(Solver&) override;
 
 protected:
     /*! \brief Return whether \p a and \p b are always disequal
@@ -48,7 +46,7 @@ protected:
     virtual int_t lookupEqualityVariable(Solver&, Value, Value) = 0;
 
 private:
-    static void addEdge(Solver&, Value value, Value otherValue, int_t eqId);
+    void addEdge(Solver&, Value value, Value otherValue, int_t eqId);
 
     void assignEqual(Solver&, int_t eqId);
     void assignDisequal(Solver&, int_t eqId, int_t diseqId);
@@ -59,12 +57,13 @@ private:
     void applyEqual(Solver& solver, int_t eqId, bool propagate);
     void applyDisequal(Solver& solver, int_t eqId, bool propagate);
 
-    static bool connected(Solver& solver, Value a, Value b) {
+    bool connected(Solver& solver, Value a, Value b) {
         return infoFor(solver, a).root == infoFor(solver, b).root;
     }
 
-    static EqualityInfo& infoFor(Solver& solver, Value v) {
-        return static_cast<EquatableValueTheory&>(solver.theoryFor(v)).equalityInfo(solver, v);
+    EqualityInfo& infoFor(Solver&, Value v) {
+        // TODO: Solver& parameter can be removed
+        return equalityInfos[v];
     }
 
     struct EqualityTraceEntry {
@@ -75,6 +74,8 @@ private:
     struct DisequalityTraceEntry {
         uint32_t diseqId;
     };
+
+    KindData<EqualityInfo> equalityInfos;
 
     std::vector<EqualityTraceEntry> equalityTrace;
     std::vector<DisequalityTraceEntry> disequalityTrace;
@@ -137,8 +138,8 @@ struct BasicEquality : StandardEquality {
 
     int_t equalityVariable(Solver& solver, Value a, Value b) {
         int_t varId = m_equalities.get(solver, a, b);
-        if (varId == variableCount())
-            newVariable(solver);
+        if (varId == variableCount(solver))
+            VERIFY(varId == newVariable(solver));
         return varId;
     }
 
