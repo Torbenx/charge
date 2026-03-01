@@ -5,10 +5,8 @@ target_sources(compiler
     BooleanVariables.h
     CodeBlockTheory.h
     DataManagement.h
-    EqualityInfo.h
     EqualityTheory.cpp
     EqualityTheory.h
-    LiteralInfo.h
     LoadSet.cpp
     LoadSet.h
     MemberExpressions.h

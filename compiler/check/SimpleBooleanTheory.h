@@ -1,6 +1,6 @@
 #pragma once
 
-#include <check/LiteralInfo.h>
+#include <check/ValueTheory.h>
 
 namespace check {
 

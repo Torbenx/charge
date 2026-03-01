@@ -221,7 +221,7 @@ void Solver::attachBaseLabel(ValueBaseLabel& label, ValueCategory category) {
 // ----------------------------- Clauses ----------------------------
 
 Solver::Clauses::Clauses(Solver& solver)
-    : ReasonTheory(solver, true) { }
+    : ReasonTheory(solver, true), instances(solver, ValueKind::Boolean) { }
 
 Reason Solver::Clauses::makeReason(int_t clauseIndex, int_t literalIndex) {
     return { .reasonTheory = (uint32_t)theoryId(), .data0 = (uint32_t)literalIndex, .data1 = (uint32_t)clauseIndex };
@@ -238,7 +238,7 @@ ReasonTheory::ClauseAndIndex Solver::Clauses::reasonToClause(Solver&, BooleanVal
     return { clauses[clauseIndex], literalIndex };
 }
 
-LiteralInstance Solver::Clauses::asInstance(const Reason& reason) {
+Solver::Clauses::LiteralInstance Solver::Clauses::asInstance(const Reason& reason) {
     int_t clauseIndex = reason.data1;
     int_t literalIndex = reason.data0;
     return { (uint32_t)literalIndex, (uint32_t)clauseIndex };
@@ -251,11 +251,10 @@ void Solver::Clauses::backtrack(Solver&) { }
 void Solver::Clauses::reapplyAssignment(Solver&, BooleanValue) { }
 
 void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
-    const auto& info = solver.infoFor(!literal);
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
-    for (auto inst : info.instances) {
+    for (auto inst : instances[!literal]) {
         clause_mask_t& clauseMask = clauseMasks[inst.clauseIndex];
         // Perform the popcount before we clear the bit so the operations can be executed in parallel
         int popcnt = std::popcount(clauseMask);
@@ -284,8 +283,7 @@ void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) 
 }
 
 void Solver::Clauses::unapplyAssignment(Solver& solver, BooleanValue literal) {
-    const auto& info = solver.infoFor(!literal);
-    for (auto inst : info.instances) {
+    for (auto inst : instances[!literal]) {
         auto& clauseMask = clauseMasks[inst.clauseIndex];
         auto mask = literalMask(inst.literalIndex);
         clauseMask |= mask;
@@ -301,7 +299,7 @@ void Solver::Clauses::addClause(Solver& solver, std::vector<Literal> clause) {
     for (int_t index = 0; index < (int_t)clause.size(); index++) {
         LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
         Literal lit = clause[index];
-        solver.infoFor(lit).instances.push_back(inst);
+        instances[lit].push_back(inst);
         if (!solver.assignedFalse(lit))
             mask |= literalMask(index);
     }
@@ -590,15 +588,15 @@ void Solver::addClause(std::vector<Literal> clause) {
         return;
     }
 
-    VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
-    if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
+    VERIFY((int_t)clause.size() <= Clauses::MAX_CLAUSE_SIZE * (Clauses::MAX_CLAUSE_SIZE - 1));
+    if ((int_t)clause.size() <= Clauses::MAX_CLAUSE_SIZE) {
         m_clauses.addClause(*this, std::move(clause));
         return;
     }
     // clause.size <= (MAX_CLAUSE_SIZE - extraClauses) + extraClauses * (MAX_CLAUSE_SIZE - 1)
     // -> extraClauses >= (clause.size - MAX_CLAUSE_SIZE) / (MAX_CLAUSE_SIZE - 2)
     // -> extraClauses >= floor( (clause.size - MAX_CLAUSE_SIZE + MAX_CLAUSE_SIZE - 3) / (MAX_CLAUSE_SIZE - 2)
-    int_t extraClauses = ((int_t)clause.size() - 3) / (MAX_CLAUSE_SIZE - 2);
+    int_t extraClauses = ((int_t)clause.size() - 3) / (Clauses::MAX_CLAUSE_SIZE - 2);
 
     // println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
     // print("clause: "); dumpClause(clause);
@@ -612,22 +610,22 @@ void Solver::addClause(std::vector<Literal> clause) {
     };
 
     std::vector<Literal> primaryClause;
-    primaryClause.reserve(MAX_CLAUSE_SIZE);
-    take(primaryClause, MAX_CLAUSE_SIZE - extraClauses);
+    primaryClause.reserve(Clauses::MAX_CLAUSE_SIZE);
+    take(primaryClause, Clauses::MAX_CLAUSE_SIZE - extraClauses);
 
     for (int_t i = 0; i < extraClauses; i++) {
         std::vector<Literal> extraClause;
-        extraClause.reserve(MAX_CLAUSE_SIZE);
+        extraClause.reserve(Clauses::MAX_CLAUSE_SIZE);
         auto [posLit, negLit] = makeBooleanPair();
         primaryClause.push_back(posLit);
         extraClause.push_back(negLit);
-        take(extraClause, MAX_CLAUSE_SIZE - 1);
+        take(extraClause, Clauses::MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
         // print("extra: "); dumpClause(extraClause);
         m_clauses.addClause(*this, std::move(extraClause));
     }
 
-    VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
+    VERIFY(primaryClause.size() == Clauses::MAX_CLAUSE_SIZE);
     // print("primary: "); dumpClause(primaryClause);
     m_clauses.addClause(*this, std::move(primaryClause));
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <check/LiteralInfo.h>
 #include <check/SimpleBooleanTheory.h>
 
 #include <FlatTreeSet.h>
