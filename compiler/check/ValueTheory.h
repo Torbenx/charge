@@ -42,6 +42,8 @@ struct ValueTheory {
     //! Must be return true if and only if all literals added by collectValueInactiveReasons for the value are false
     virtual bool isValueActive(Solver&, Value) { return true; }
 
+    virtual std::optional<Load> loadInfo(Solver&, Value) { return std::nullopt; }
+
     int_t theoryId() const { return m_theoryId; }
     ValueKind valuesKind() const { return m_valuesKind; }
 

@@ -16,6 +16,10 @@ struct TypeLoads : TypeTheory, LoadSet<TypeLoads, void> {
         return Value { (uint32_t)theoryId(), id };
     }
 
+    std::optional<Load> loadInfo(Solver&, Value v) override {
+        return LoadSet::loadAt(v.valueId);
+    }
+
     void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
         collectLoadInactiveReasons(solver, v.valueId, clause);
     }

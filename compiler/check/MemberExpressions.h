@@ -20,6 +20,10 @@ struct MemberExpressionLoads : MemberExpressionTheory, LoadSet<MemberExpressionL
         return Value { (uint32_t)theoryId(), id };
     }
 
+    std::optional<Load> loadInfo(Solver&, Value v) override {
+        return LoadSet::loadAt(v.valueId);
+    }
+
     void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
         return collectLoadInactiveReasons(solver, v.valueId, clause);
     }

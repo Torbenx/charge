@@ -435,6 +435,10 @@ BooleanValue Solver::BooleanLoads::defineLoad(Solver& solver, MemoryLocation loc
     return positiveLiteral(get(solver, location, position));
 }
 
+std::optional<Load> Solver::BooleanLoads::loadInfo(Solver&, Value v) {
+    return LoadSet::loadAt(v.valueId);
+}
+
 void Solver::BooleanLoads::makeData(Solver& solver, uint32_t newHandle, MemoryLocation, CodePosition) {
     VERIFY((int_t)newHandle == variableCount(solver));
     newVariable(solver);

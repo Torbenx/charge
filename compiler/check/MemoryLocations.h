@@ -30,6 +30,10 @@ struct MemoryLocationLoads : MemoryLocationTheory, LoadSet<MemoryLocationLoads, 
         return Value { (uint32_t)theoryId(), id };
     }
 
+    std::optional<Load> loadInfo(Solver&, Value v) override {
+        return LoadSet::loadAt(v.valueId);
+    }
+
     void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
         collectLoadInactiveReasons(solver, v.valueId, clause);
     }
@@ -121,9 +125,18 @@ struct MemoryLocations : ValueKindTheory {
     static PartialOrderingsSet possibleOrderings(Solver& solver, MemoryLocation a, MemoryLocation b) {
         MemoryLocationTheory& ta = solver.theoryFor(a);
         MemoryLocationTheory& tb = solver.theoryFor(b);
-        if (solver.declarationInfo(ta.memoryDeclaration(solver, a)).has_value() && solver.declarationInfo(tb.memoryDeclaration(solver, b)).has_value()) {
+        auto aDecl = solver.declarationInfo(ta.memoryDeclaration(solver, a));
+        auto bDecl = solver.declarationInfo(tb.memoryDeclaration(solver, b));
+        auto aLoad = ta.loadInfo(solver, a);
+        auto bLoad = tb.loadInfo(solver, b);
+        // 2 distinct declarations are always distinct
+        if (aDecl.has_value() && bDecl.has_value())
             return PartialOrderingsSet::unordered();
-        }
+        // Loaction cannot be loaded before its declared
+        if (aDecl.has_value() && bLoad.has_value() && solver.compare(bLoad->position, aDecl->position) < 0)
+            return PartialOrderingsSet::unordered();
+        if (bDecl.has_value() && aLoad.has_value() && solver.compare(aLoad->position, bDecl->position) < 0)
+            return PartialOrderingsSet::unordered();
 
         // This automatically consideres the location type since it is the same as the member type.
         return solver.possibleOrderings(ta.memberExpression(solver, a), tb.memberExpression(solver, b));

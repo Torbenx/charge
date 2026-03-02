@@ -127,6 +127,10 @@ struct Solver {
         return theoryFor(value).valuesKind();
     }
 
+    std::optional<Load> loadInfo(Value value) {
+        return theoryFor(value).loadInfo(*this, value);
+    }
+
     void collectInactiveReasons(Value value, std::vector<BooleanValue>& clause) {
         theoryFor(value).collectValueInactiveReasons(*this, value, clause);
     }
@@ -254,10 +258,11 @@ struct Solver {
     }
 
     std::strong_ordering compare(Load a, Load b) {
-        auto locOrdering = compare(a.location, b.location);
-        if (locOrdering != 0)
-            return locOrdering;
-        return compare(a.position, b.position);
+        // Earlier loads must be smaller for the transitivity of MemoryLocations::possibleOrderings()
+        auto posOrdering = compare(a.position, b.position);
+        if (posOrdering != 0)
+            return posOrdering;
+        return compare(a.location, b.location);
     }
 
     std::string formatBlockName(BlockId block) {
@@ -541,6 +546,7 @@ private:
         void collectVariableInactiveReasons(Solver&, int_t, std::vector<BooleanValue>&) override;
         bool isVariableActive(Solver&, int_t) override;
         BooleanValue defineLoad(Solver&, MemoryLocation, CodePosition);
+        std::optional<Load> loadInfo(Solver&, Value) override;
         void makeData(Solver&, uint32_t newHandle, MemoryLocation, CodePosition);
     };
 

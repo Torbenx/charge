@@ -14,6 +14,10 @@ struct StandardLoads : ValueTheory, private LoadSet<StandardLoads, void> {
         return Value { (uint32_t)theoryId(), id };
     }
 
+    std::optional<Load> loadInfo(Solver&, Value v) override {
+        return LoadSet::loadAt(v.valueId);
+    }
+
     void collectValueInactiveReasons(Solver& solver, Value v, std::vector<BooleanValue>& clause) override {
         LoadSet::collectLoadInactiveReasons(solver, v.valueId, clause);
     }
