@@ -14,8 +14,6 @@ import {
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-	// The server is implemented in node
-
 	const outputDir = process.env["charge_output_directory"];
 	if (outputDir == undefined) {
 		console.error("output directory unknown");

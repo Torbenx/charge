@@ -20,14 +20,8 @@
     "grammars": [{
       "language": "charge",
       "scopeName": "source.charge",
-      "path": "./syntaxes/charge.tmLanguage.json"
-    }],
-    "commands": [
-			{
-				"command": "extension.startTask",
-				"title": "Show Progress"
-			}
-		]
+      "path": "./charge.tmLanguage.json"
+    }]
   },
   "scripts": {
 		"vscode:prepublish": "npm run compile",
