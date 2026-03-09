@@ -341,9 +341,18 @@ void Server::receiverChacacter(char val) {
 // ------------------------- File utilities -------------------------
 
 Server::FileInfo& Server::fileInfo(const path& filePath) {
-    auto it = m_fileCache.find(filePath);
+    auto canon = filePath.lexically_normal();
+    #ifdef WIN32
+    auto copy = canon.native();
+    for (auto& c : copy) {
+        if (c >= 'A' && c <= 'Z')
+            c += ' ';
+    }
+    canon = copy;
+    #endif
+    auto it = m_fileCache.find(canon);
     if (it == m_fileCache.end())
-        it = m_fileCache.emplace(filePath).first;
+        it = m_fileCache.emplace(canon).first;
     return const_cast<FileInfo&>(*it);
 }
 
