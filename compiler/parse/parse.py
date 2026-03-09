@@ -38,7 +38,7 @@ keywords = [
 specialIdentifiers = [
     "enum",
     "fn",
-    "has",
+    "base",
     "incomplete",
     "namespace",
     "open",

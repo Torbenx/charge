@@ -18,7 +18,7 @@ enum class DeclarationKind : uint8_t {
     StaticVariable,
     Function,
     Member,
-    HasMember,
+    BaseMember,
     Enum,
     EnumValue,
 };
@@ -262,8 +262,8 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
-        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
+        return state.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
         return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {

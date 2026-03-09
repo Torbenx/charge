@@ -515,8 +515,8 @@ void Generator::visitStructMembers() {
         VERIFY(!member.isChecked());
 
         setParseLocation(member.parseLocation());
-        VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::HasMemberDecl);
-        if (member.isHas())
+        VERIFY(tok->kind() == Token::MemberDecl || tok->kind() == Token::BaseMemberDecl);
+        if (member.isBase())
             tok->setData1<parse::DataKind::DeclIndex>(i);
         else
             tok->setData2<parse::DataKind::DeclIndex>(i);
@@ -524,7 +524,7 @@ void Generator::visitStructMembers() {
         advance();
 
         TokenInfo* implicitActionToken = nullptr;
-        if (member.isHas()) {
+        if (member.isBase()) {
             implicitActionToken = memberToken;
         } else {
             if (tok->kind() != Token::VariableType)

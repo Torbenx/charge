@@ -1,9 +1,10 @@
 #pragma once
 
 #include <WordTable.h>
-#include <sema/Constant.h>
 #include <parse/parse_gen.h>
+#include <sema/Constant.h>
 #include <types.h>
+
 
 #include <array>
 
@@ -65,7 +66,7 @@ inline bool isVariableDecl(TokenKind kind) {
     SCOPE(FunctionParameters)     \
     SCOPE(Struct)                 \
     SCOPE(Enum)                   \
-    SCOPE(HasTypeExpr)            \
+    SCOPE(BaseTypeExpr)           \
     SCOPE(TemplateParameters)     \
     SCOPE(StructImplExpression)   \
     SCOPE(FunctionImplExpression) \

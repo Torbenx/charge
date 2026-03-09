@@ -3,75 +3,76 @@ template(T: type)
 struct refcell: {
 
     struct unique_ref: {
-        invariant(cell: shared): {
-            prove cell.shared_refcount == INVALID_REFCOUNT;
-        }
-        invariant(self: unique, cell: shared): {
-            prove !cell.target.referenced();
+        fn get(self: unique) -> unique[self] T: {
+            intern .cell:
+                return *.cell.target;
         }
 
-        fn get(self: unique) -> (r: unique T): {
-            r = *cell.target;
-            reference unique self with r;
+        fn impl destroy_behavior(self: unique): {
+            intern .cell:
+                .cell.shared_refcount = 0;
         }
 
-        impl fn destroy_behavior(self: unique, cell: shared): {
-            cell.shared_refcount = 0;
-        }
-
-        parameter cell: shared refcell{T};
+        base borrow_tracker;
+        context cell: shared refcell{T};
     }
 
     struct shared_ref: {
-        invariant(cell: shared): {
-            prove cell.shared_refcount > 0 && cell.shared_refcount < INVALID_REFCOUNT;
-
-            prove !cell.target.uniquely_referenced();
+        fn get(self: unique) -> shared[unique self] T: {
+            return *.cell.target;
         }
 
-        invariant(self: unique, cell: shared): {
-            prove cell.target.shared_reference_count() < cell.shared_refcount;
-        }
-
-        fn get(self: unique, cell: shared) -> (r: shared T): {
-            r = *cell.target;
-            reference unique self with r;
-        }
-
-        impl fn destroy_behavior(self: unique, cell: shared): {
-            cell.shared_refcount -= 1;
-            if cell.shared_refcount == 0: {
-                prove cell.target.shared_reference_count() == 0;
-                prove !cell.target.referenced();
+        fn impl destroy_behavior(self: unique): {
+            intern .cell:
+                .cell.shared_refcount -= 1;
+            if .cell.shared_refcount == 0: {
+                prove .cell.target.shared_reference_count() == 0;
+                prove !.cell.target.referenced();
             }
         }
 
-        parameter cell: shared refcell{T};
+        base borrow_tracker;
+        context cell: shared refcell{T};
     }
 
-    invariant(self: shared): {
+    invariant: {
         if .shared_refcount == 0: {
             prove !.target.referenced();
-        } elif .shared_refcount < INVALID_REFCOUNT: {
+            prove .unique_refs.empty();
+            prove .shared_refs.empty();
+        } elif .shared_refcount == INVALID_REFCOUNT: {
+            prove .unique_refs.size() == 1;
+            prove .shared_refs.empty();
+            let r: const = .unique_refs.front();
+            if !r.uniquely_borrowed():
+                prove !.target.referenced();
+        } else: {
+            prove 0 < .shared_refcount < INVALID_REFCOUNT;
             prove !.target.uniquely_referenced();
-            prove .target.shared_reference_count() <= .shared_refcount;
+            prove .unique_refs.empty();
+            prove .shared_refs.size() == .shared_refcount;
+            let activeBorrows = count_if(.shared_refs, fn(r: const) => !r.uniquely_borrowed());
+            prove .target.shared_reference_count() <= activeBorrows;
         }
     }
 
-    fn unique_borrow(self: shared) -> unique_ref: {
+    fn unique_borrow(intern self: shared) -> unique_ref: {
         assert .shared_refcount == 0;
         .shared_refcount = INVALID_REFCOUNT;
-        return unique_ref(self);
+        return unique_ref(cell: self);
     }
 
-    fn shared_borrow(self: shared) -> shared_ref: {
+    fn shared_borrow(intern self: shared) -> shared_ref: {
         assert .shared_refcount < INVALID_REFCOUNT;
         .shared_refcount += 1;
         assert .shared_refcount < INVALID_REFCOUNT;
-        return shared_ref(self);
+        return shared_ref(cell: self);
     }
 
     static INVALID_REFCOUNT: bits = numeric_limits<bits>::max();
+
+    intern unique_refs: reverse_context{unique_ref};
+    intern shared_refs: reverse_context{shared_ref};
 
     intern target: inline_storage{T};
     intern shared_refcount: bits = 0;

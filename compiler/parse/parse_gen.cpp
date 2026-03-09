@@ -148,8 +148,8 @@ std::string_view nameString(LexerToken token) {
         return "Enum";
     case LexerToken::Fn:
         return "Fn";
-    case LexerToken::Has:
-        return "Has";
+    case LexerToken::Base:
+        return "Base";
     case LexerToken::Incomplete:
         return "Incomplete";
     case LexerToken::Namespace:
@@ -323,8 +323,8 @@ std::string_view fixedSpelling(LexerToken token) {
         return "enum";
     case LexerToken::Fn:
         return "fn";
-    case LexerToken::Has:
-        return "has";
+    case LexerToken::Base:
+        return "base";
     case LexerToken::Incomplete:
         return "incomplete";
     case LexerToken::Namespace:

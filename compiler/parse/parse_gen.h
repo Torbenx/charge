@@ -28,7 +28,7 @@ inline constexpr ConstWordStringTable words {
     wordInIdRange("while", 0, 1),
     wordInIdRange("enum", 1, 2),
     wordInIdRange("fn", 1, 2),
-    wordInIdRange("has", 1, 2),
+    wordInIdRange("base", 1, 2),
     wordInIdRange("incomplete", 1, 2),
     wordInIdRange("namespace", 1, 2),
     wordInIdRange("open", 1, 2),
@@ -138,7 +138,7 @@ enum class LexerToken : uint8_t {
     While, // while
     Enum, // enum
     Fn, // fn
-    Has, // has
+    Base, // base
     Incomplete, // incomplete
     Namespace, // namespace
     Open, // open

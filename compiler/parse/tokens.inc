@@ -121,7 +121,7 @@ MARKER(EnumValueDeclsEnd)
 
 MARKER(MemberDeclsBegin)
 TOKEN(MemberDecl, Identifier, Word, DeclIndex)
-TOKEN(HasMemberDecl, Has, DeclIndex, Expression)
+TOKEN(BaseMemberDecl, Base, DeclIndex, Expression)
 MARKER(MemberDeclsEnd)
 
 MARKER(VariableDeclsBegin)

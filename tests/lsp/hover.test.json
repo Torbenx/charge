@@ -100,7 +100,7 @@
             "result": {
                 "contents": {
                     "kind": "markdown",
-                    "value": "```charge\nstatic let A{v = v}::x: _ = v\n```"
+                    "value": "```charge\nstatic let A{v: v}::x: _ = v\n```"
                 }
             }
         },

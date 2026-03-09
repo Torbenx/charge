@@ -121,7 +121,7 @@ struct CallMe: { t: type; }
 // expect-type CallMe
 static callConstructor = CallMe(X);
 
-struct CallMe2: { has type; }
+struct CallMe2: { base type; }
 // expect-type CallMe2
 static callConstructor2 = CallMe2(X);
 
@@ -131,7 +131,7 @@ static callConstructorT = CallMeT(X());
 
 struct Base: { static MyX: type = X; }
 struct Derived: {
-    has Base;
+    base Base;
     // expect-value X
     static MyXinDerived = MyX;
 }
@@ -142,7 +142,7 @@ static DerivedMyX = Derived::MyX;
 
 template(T: type) struct Wrapped: { }
 template(T: type) struct BaseT: { static TofBase = T; }
-template(T: type) struct DerivedT: { static TofDerived = T; has BaseT{Wrapped{T}}; }
+template(T: type) struct DerivedT: { static TofDerived = T; base BaseT{Wrapped{T}}; }
 // expect-value X
 static testTofDerived = DerivedT{X}::TofDerived;
 // expect-value Wrapped{X}
@@ -154,7 +154,7 @@ fn accessMember(w: shared WithMember) => w.member;
 // expect-type member_ptr{WithMember, X}
 static memberPointer = WithMember::member;
 
-struct DerivedWithMember: { has WithMember; }
+struct DerivedWithMember: { base WithMember; }
 // expect-return-type X
 fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
 // expect-type member_ptr{DerivedWithMember, X}
@@ -307,7 +307,7 @@ enum E1: {
 static examineEnumValue = E1::val;
 
 struct DeriveFromEnum: {
-    has E1;
+    base E1;
 }
 // expect-type E1
 // expect-value @enumValue(E1, val)
@@ -360,7 +360,7 @@ struct TestSelfCalls: {
 }
 
 struct DerivedSelfCalls: {
-    has TestSelfCalls;
+    base TestSelfCalls;
 
     // expect-return-type TestSelfCalls::ComplexResult{DerivedSelfCalls, X, bool}
     fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);

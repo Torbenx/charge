@@ -101,7 +101,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
         auto valueIndex = token.data2<parse::DataKind::DeclIndex>();
         formatter.formatEnumValueDeclaration(sema::Constant(util.program->selfConstant()), valueIndex);
     } else if (parse::isMemberDecl(token.kind())) {
-        auto memberIndex = token.kind() == parse::TokenKind::HasMemberDecl
+        auto memberIndex = token.kind() == parse::TokenKind::BaseMemberDecl
             ? token.data1<parse::DataKind::DeclIndex>()
             : token.data2<parse::DataKind::DeclIndex>();
         formatter.formatMemberDeclaration(sema::Constant(util.program->selfConstant()), memberIndex);

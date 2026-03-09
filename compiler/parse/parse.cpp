@@ -18,7 +18,7 @@ enum class DeclarationKind : uint8_t {
     StaticVariable,
     Function,
     Member,
-    HasMember,
+    BaseMember,
     Enum,
     EnumValue,
 };
@@ -262,8 +262,8 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
     // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
-    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::HasMember) {
-        return state.pushMemberScope(kind == DeclarationKind::HasMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+    if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
+        return state.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
         return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
     } else if constexpr (kind == DeclarationKind::Namespace) {
@@ -1372,11 +1372,11 @@ after_expression$as_then:
             goto access_punctuation$no_emit;
         }
         tokEnd += 1;
-        // ifScope ScopeKind::HasTypeExpr
-        if (scopePosition[0] == ScopeKind::HasTypeExpr) {
-            // popScope ScopeKind::HasTypeExpr
+        // ifScope ScopeKind::BaseTypeExpr
+        if (scopePosition[0] == ScopeKind::BaseTypeExpr) {
+            // popScope ScopeKind::BaseTypeExpr
             {
-                auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
+                auto result = popScope(scopePosition, ScopeKind::BaseTypeExpr);
                 if (result == nullptr) {
                     errorToken = LexerToken::Colon;
                     goto handle_parse_error;
@@ -1444,11 +1444,11 @@ after_expression$as_then:
     }
     case ';': {
         tokEnd += 1;
-        // ifScope ScopeKind::HasTypeExpr
-        if (scopePosition[0] == ScopeKind::HasTypeExpr) {
-            // popScope ScopeKind::HasTypeExpr
+        // ifScope ScopeKind::BaseTypeExpr
+        if (scopePosition[0] == ScopeKind::BaseTypeExpr) {
+            // popScope ScopeKind::BaseTypeExpr
             {
-                auto result = popScope(scopePosition, ScopeKind::HasTypeExpr);
+                auto result = popScope(scopePosition, ScopeKind::BaseTypeExpr);
                 if (result == nullptr) {
                     errorToken = LexerToken::SemiColon;
                     goto handle_parse_error;
@@ -2280,9 +2280,9 @@ maybe_designated_argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, state);
     tokBegin = tokEnd;
     parseState = State::MaybeDesignatedArgument;
-    if (std::string_view(tokEnd, 1) == "="sv) {
+    if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
-        if (next != '=' && next != '>') {
+        if (next != ':') {
             tokEnd += 1;
             // callArgument argumentName
             updateCallArgument(argumentPosition, argumentName);
@@ -4636,16 +4636,16 @@ member_declaration$as_then:
         }
     LABEL_MAYBE_UNUSED member_declaration$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
-            if (this_identifier == words["has"]) {
-                // pushScope ScopeKind::HasTypeExpr
-                scopePosition = pushScope(scopePosition, ScopeKind::HasTypeExpr);
+            if (this_identifier == words["base"]) {
+                // pushScope ScopeKind::BaseTypeExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::BaseTypeExpr);
                 // rememberDeclarationBegin
                 declarationBegin = state.tokenBuffer.currentToken();
-                // commitDeclaration DeclarationKind::HasMember
-                this_declaration = commitDeclaration<DeclarationKind::HasMember>(Word(), tokBegin, declarationBegin, state);
-                // emitToken TokenKind::HasMemberDecl
-                checkLexToken(TokenKind::HasMemberDecl, LexerToken::Has);
-                carriedEmitTokenKind = TokenKind::HasMemberDecl;
+                // commitDeclaration DeclarationKind::BaseMember
+                this_declaration = commitDeclaration<DeclarationKind::BaseMember>(Word(), tokBegin, declarationBegin, state);
+                // emitToken TokenKind::BaseMemberDecl
+                checkLexToken(TokenKind::BaseMemberDecl, LexerToken::Base);
+                carriedEmitTokenKind = TokenKind::BaseMemberDecl;
                 carriedEmitTokenData = 0;
                 // next expression
                 goto expression$with_emit;

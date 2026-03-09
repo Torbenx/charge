@@ -196,13 +196,13 @@ DeclarationValue Context::pushNamespaceScope(Word name) {
     return (DeclarationValue)nsHandle;
 }
 
-DeclarationValue Context::pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
+DeclarationValue Context::pushMemberScope(bool isBase, Word name, parse::TokenHandle parseLocation, SourceLocation location) {
     std::optional<Scope*> scope = currentScope();
     VERIFY(scope.has_value());
     StructProgram* program = static_cast<StructProgram*>(scope.value());
     VERIFY(program->kind() == ProgramKind::Struct);
     int_t id = program->members.size();
-    program->members.emplace_back(location, isHas, name, parseLocation);
+    program->members.emplace_back(location, isBase, name, parseLocation);
     pushEmptyScope(INVALID_DECLARATION_VALUE); // TODO: Avoid this
     return DeclarationValue(DeclarationValueKind::Member, id);
 }

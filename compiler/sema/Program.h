@@ -585,7 +585,7 @@ struct StructProgram : ScopeProgram {
     struct Member {
     private:
         struct Fields {
-            bool hasBit : 1;
+            bool baseBit : 1;
             bool checkedBit : 1;
         };
         TaggedSourceLocation<Fields> m_fields;
@@ -596,8 +596,8 @@ struct StructProgram : ScopeProgram {
         } u;
 
     public:
-        Member(SourceLocation location, bool isHas, Word name, parse::TokenHandle parseLocation)
-            : m_fields(Fields { .hasBit = isHas, .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
+        Member(SourceLocation location, bool isBase, Word name, parse::TokenHandle parseLocation)
+            : m_fields(Fields { .baseBit = isBase, .checkedBit = false }, location), m_name(name), u { .parseLocation = parseLocation } { }
 
         void setType(Type type) {
             VERIFY(!isChecked());
@@ -607,7 +607,7 @@ struct StructProgram : ScopeProgram {
             u.type = type;
         }
 
-        bool isHas() const { return m_fields.tag().hasBit; }
+        bool isBase() const { return m_fields.tag().baseBit; }
         bool isChecked() const { return m_fields.tag().checkedBit; }
         SourceLocation location() const { return m_fields.location(); }
         ExternConstant type() const {

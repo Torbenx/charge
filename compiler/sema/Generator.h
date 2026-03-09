@@ -237,7 +237,6 @@ struct Generator : Util {
         std::vector<bool> parameterActiveMask;
         std::vector<bool> variableActiveMask;
         std::vector<bool> referenceActiveMask;
-        // FlatSet<> trueHas;
 
         void setActive(Expression ref, bool newState) {
             switch (ref.kind()) {

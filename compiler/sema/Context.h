@@ -80,7 +80,7 @@ struct Context {
     DeclarationValue pushStaticScope(ProgramKind kind, Word name, parse::TokenHandle parseLocation, SourceLocation location);
     DeclarationValue pushStaticImplScope(ProgramKind kind, parse::TokenHandle parseLocation, SourceLocation location);
     DeclarationValue pushNamespaceScope(Word name);
-    DeclarationValue pushMemberScope(bool isHas, Word name, parse::TokenHandle parseLocation, SourceLocation location);
+    DeclarationValue pushMemberScope(bool isBase, Word name, parse::TokenHandle parseLocation, SourceLocation location);
     DeclarationValue pushEnumValueScope(Word name, parse::TokenHandle parseLocation, SourceLocation location);
 
     ModuleHandle thisModule() const { return { static_cast<uint16_t>(modules.size() - 1) }; }

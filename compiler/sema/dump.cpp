@@ -192,8 +192,8 @@ struct Dumper {
                 result += ".";
             auto* parentProg = cast<StructProgram>(context.program(context.program(progHandle)->baseProgram(link.parentType).value()));
             const auto& member = parentProg->members[link.memberIndex];
-            if (member.isHas())
-                result += "(has " + formatConstant(progHandle, link.memberType) + ")";
+            if (member.isBase())
+                result += "(base " + formatConstant(progHandle, link.memberType) + ")";
             else
                 result += context.tokenBuffer.wordTable.view(member.name());
         }

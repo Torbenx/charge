@@ -224,8 +224,8 @@ SwitchState after_expression() then error
         next comma_after_expression
 
     punctuation ;
-        ifScope ScopeKind::HasTypeExpr
-            popScope ScopeKind::HasTypeExpr
+        ifScope ScopeKind::BaseTypeExpr
+            popScope ScopeKind::BaseTypeExpr
             emitToken TokenKind::EmptyNode
             next after_declaration
         popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
@@ -237,8 +237,8 @@ SwitchState after_expression() then error
         emitToken TokenKind::IfExpr
         next expression
     punctuation :
-        ifScope ScopeKind::HasTypeExpr
-            popScope ScopeKind::HasTypeExpr
+        ifScope ScopeKind::BaseTypeExpr
+            popScope ScopeKind::BaseTypeExpr
             next struct_declaration_body
         ifScope ScopeKind::ReturnType
             popScope ScopeKind::ReturnType
@@ -315,7 +315,7 @@ LinearState check_designated_argument() then expression
         emitToken TokenKind::IdentifierExpr
         next maybe_designated_argument
 LinearState maybe_designated_argument(argumentName) then after_expression
-    punctuation =
+    punctuation :
         updateCallArgument argumentName
         discardLastToken
         next expression
@@ -691,11 +691,11 @@ LinearState struct_declaration_body() then error
         pushScope ScopeKind::Struct
         next member_declaration
 LinearState member_declaration() then templated_declaration
-    keyword has
-        pushScope ScopeKind::HasTypeExpr
+    keyword base
+        pushScope ScopeKind::BaseTypeExpr
         rememberDeclarationBegin
-        commitDeclaration DeclarationKind::HasMember
-        emitToken TokenKind::HasMemberDecl
+        commitDeclaration DeclarationKind::BaseMember
+        emitToken TokenKind::BaseMemberDecl
         next expression
     identifier
         rememberDeclarationBegin

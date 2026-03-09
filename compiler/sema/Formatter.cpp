@@ -59,7 +59,7 @@ void Formatter::formatCompleteProgram(ProgramHandle progHandle, std::span<const 
         Word name = prog->parameters[i].name;
         if (!name.empty()) {
             formatWord(name);
-            output += " = ";
+            output += ": ";
         }
         formatConstant(arguments[i]);
     }
@@ -100,8 +100,8 @@ void Formatter::formatConstant(Constant c) {
                 auto* structProg = cast<StructProgram>(context.program(progHandle));
                 const auto& member = structProg->members[link.memberIndex];
                 output += "::";
-                if (member.isHas()) {
-                    output += "has ";
+                if (member.isBase()) {
+                    output += "base ";
                     formatAs(progHandle, [&] { formatConstant(Constant(member.type())); });
                 } else {
                     formatWord(member.name());
@@ -196,8 +196,8 @@ void Formatter::formatMemberDeclaration(Constant structType, int_t memberIndex) 
     formatConstant(structType);
     output += "::";
     formatAs(progHandle, [&] {
-        if (member.isHas()) {
-            output += "has ";
+        if (member.isBase()) {
+            output += "base ";
             formatConstant(Constant(member.type()));
         } else {
             formatWord(member.name());
@@ -228,7 +228,7 @@ bool Formatter::formatAsDeclaration(Constant c) {
         if (!pointer.isIdentity()) {
             const auto lastLink = pointer[pointer.linkCount() - 1];
             auto* structProg = cast<StructProgram>(context.program(baseProgram(lastLink.parentType).value()));
-            if (!structProg->members[lastLink.memberIndex].isHas()) {
+            if (!structProg->members[lastLink.memberIndex].isBase()) {
                 output += ": ";
                 formatConstant(pointer.memberType());
             }

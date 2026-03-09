@@ -135,7 +135,7 @@ static g3 = X(){X};
 static g4 = S2{X, X};
 
 // expect-error ParameterizeArgumentNameMismatch
-static g5 = S2{T1 = X};
+static g5 = S2{T1: X};
 
 template(T1: type, T2: type) static r1 = X();
 // expect-error ParameterizeOfGlobalIncomplete

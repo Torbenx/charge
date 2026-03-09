@@ -455,7 +455,7 @@ void Generator::internalLookupRecurse(InternalLookupState& state, ModuleHandle m
             return;
         }
 
-        if (!member.isHas())
+        if (!member.isBase())
             continue;
         auto memberProg = structProg->baseProgram(member.type());
         if (!memberProg.has_value())
