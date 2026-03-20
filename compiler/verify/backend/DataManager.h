@@ -9,20 +9,29 @@ namespace verify::backend {
 struct DataManager {
     struct CommonDataInfo {
         CommonDataInfo(int_t elementSize, int_t groupSize, DataInitializeFunction i, DataDestroyFunction d)
-            : elementSize(elementSize), groupSize(groupSize), initFunction(i), destroyFunction(d) { }
+            : elementSize(elementSize), initFunction(i), destroyFunction(d) {
+            VERIFY(std::has_single_bit<size_t>(groupSize));
+            groupSizeLog2 = std::bit_width<size_t>(groupSize - 1);
+        }
         uint32_t elementSize = 0;
-        uint32_t groupSize = 0;
+        uint32_t groupSizeLog2 = 0;
         DataInitializeFunction initFunction = nullptr;
         DataDestroyFunction destroyFunction = nullptr;
 
         size_t requiredBytes(int_t valueCapacity) const {
-            return ((size_t)valueCapacity / (size_t)groupSize) * (size_t)elementSize;
+            return ((size_t)valueCapacity >> groupSizeLog2) * (size_t)elementSize;
         }
         int_t elementCount(int_t valueCount) const {
-            return valueCount / (int_t)groupSize;
+            return valueCount >> groupSizeLog2;
         }
         Value elementValue(TheoryId theory, int_t elementIdx) const {
-            return Value(theory, elementIdx * groupSize);
+            return Value(theory, elementIdx << groupSizeLog2);
+        }
+        int_t elementFor(uint32_t valueId) const {
+            return valueId >> groupSizeLog2;
+        }
+        bool needsNewValue(uint32_t valueId) const {
+            return (((1u << groupSizeLog2) - 1u) & valueId) == 0;
         }
     };
 

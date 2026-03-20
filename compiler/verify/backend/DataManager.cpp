@@ -44,9 +44,8 @@ void deallocateAndDestroyData(std::byte*& data, const DataManager::TheoryInfo& t
 }
 
 void initValue(std::byte* data, const DataManager::CommonDataInfo& dataInfo, Value value) {
-    if (value.id() % dataInfo.groupSize == 0) {
-        int_t elementIdx = value.id() / dataInfo.groupSize;
-        dataInfo.initFunction(data + elementIdx * dataInfo.elementSize, value);
+    if (dataInfo.needsNewValue(value.id())) {
+        dataInfo.initFunction(data + dataInfo.elementFor(value.id()) * dataInfo.elementSize, value);
     }
 }
 
