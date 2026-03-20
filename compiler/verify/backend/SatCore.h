@@ -79,7 +79,7 @@ struct SatCore {
         void unapplyAssignment(Literal);
         void reapplyAssignment(Literal);
 
-        void learnClause(std::span<const Literal>);
+        void learnClause(std::vector<BooleanValue>);
     };
 
     ClauseBuilder beginClause() {
@@ -110,17 +110,12 @@ struct SatCore {
     */
     int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
 
-    //! Returns true if \p lit is assigned true and this assignment was propagated to the clause masks
-    bool assignedTrue(Literal lit) {
-        const auto& info = infoFor(lit);
-        if (!info.tentativelyTrue())
-            return false;
-        return lit != firstPropagation && !info.prevPropagation.has_value();
-    }
+    //! Returns true if \p lit is assigned true and this assignment was propagated to the theories
+    bool assignedTrue(Literal lit);
 
-    bool assignedFalse(Literal lit) {
-        return assignedTrue(!lit);
-    }
+    bool alwaysTrue(Literal lit);
+
+    bool assignedFalse(Literal lit) { return assignedTrue(!lit); }
 
     //! Decide that the given \p literal is true
     void decideTrue(Literal literal);

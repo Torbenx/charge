@@ -2,6 +2,7 @@
 #define REASON(name, data, fullyPropagating)
 #endif
 
+REASON(Always, EmptyReasonData, true)
 REASON(Decision, DecisionData, false)
 REASON(Clause, LiteralInstance, true)
 

@@ -30,7 +30,7 @@ struct Clauses {
     void unapplyAssignment(Solver&, BooleanValue);
     LiteralInstance asInstance(const Reason& reason);
 
-    void addClause(Solver&, std::span<const BooleanValue> clause);
+    void addClause(Solver&, std::vector<BooleanValue> clause);
     void addClauseInternal(Solver&, std::vector<BooleanValue> clause);
 
     //! Check if all clauses are satisfied by the current assignment

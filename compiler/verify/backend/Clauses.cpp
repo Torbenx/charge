@@ -59,19 +59,10 @@ void Clauses::unapplyAssignment(Solver& solver, BooleanValue literal) {
     }
 }
 
-void Clauses::addClause(Solver& solver, std::span<const BooleanValue> clause) {
-    /* TODO:
-    if (simplifyClause(clause))
-        return;
-
-    if (clause.size() == 1) {
-        unitAssignTrue(clause[0]);
-        return;
-    }*/
-
+void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
     if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
-        addClauseInternal(solver, { clause.begin(), clause.end() });
+        addClauseInternal(solver, std::move(clause));
         return;
     }
     // clause.size <= (MAX_CLAUSE_SIZE - extraClauses) + extraClauses * (MAX_CLAUSE_SIZE - 1)

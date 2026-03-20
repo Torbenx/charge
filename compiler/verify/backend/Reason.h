@@ -140,4 +140,6 @@ Reason makeReason(const reason_data_t<kind>& data) {
     }
 }
 
+struct EmptyReasonData { };
+
 }

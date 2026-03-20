@@ -32,6 +32,9 @@ void Solver::decideTrue(BooleanValue literal) {
 void Solver::assignTrue(BooleanValue trueLit, const Reason& reason) {
     impl().sat.assignTrue(trueLit, reason);
 }
+bool Solver::alwaysTrue(BooleanValue value) {
+    return impl().sat.alwaysTrue(value);
+}
 
 // ------------------------ SatCore callbacks -----------------------
 
@@ -46,6 +49,8 @@ void SatCore::Interface::onBacktrack() {
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
     auto& impl = static_cast<SolverImpl&>(*this);
     switch (reason.kind()) {
+    case ReasonKind::Always:
+        return true;
     case ReasonKind::Clause:
         return impl.clauses.testReason(impl, lit, reason);
     default:
@@ -56,6 +61,11 @@ bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
 ClauseAndIndex SatCore::Interface::reasonToClause(Literal lit, const Reason& reason) {
     auto& impl = static_cast<SolverImpl&>(*this);
     switch (reason.kind()) {
+    case ReasonKind::Always: {
+        auto& clause = impl.scratchClause();
+        clause.push_back(lit);
+        return { clause, 0 };
+    }
     case ReasonKind::Clause:
         return impl.clauses.reasonToClause(impl, lit, reason);
     default:
@@ -77,9 +87,41 @@ void SatCore::Interface::reapplyAssignment(Literal) {
     auto& impl = static_cast<SolverImpl&>(*this);
 }
 
-void SatCore::Interface::learnClause(std::span<const Literal> clause) {
+void SatCore::Interface::learnClause(std::vector<BooleanValue> clause) {
     auto& impl = static_cast<SolverImpl&>(*this);
-    impl.clauses.addClause(impl, { clause.begin(), clause.end() });
+    impl.addClause(std::move(clause));
+}
+
+// ------------------------ Clauses forwards ------------------------
+
+static bool simplifyClause(Solver& solver, std::vector<BooleanValue>& clause) {
+    bool alwaysTrue = false;
+    auto newEnd = std::partition(clause.begin(), clause.end(), [&](BooleanValue lit) {
+        if (solver.alwaysTrue(lit))
+            alwaysTrue = true;
+        return !solver.alwaysFalse(lit);
+    });
+    if (alwaysTrue)
+        return true;
+
+    // The clause can end up empty when all literals are false due to unit clauses.
+    // In that case the problem is always unsatisfiable, but the clause must kept to determine that.
+    if (newEnd != clause.begin())
+        clause.erase(newEnd, clause.end());
+
+    return false;
+}
+
+void Solver::addClause(std::vector<BooleanValue> clause) {
+    if (simplifyClause(*this, clause))
+        return;
+
+    if (clause.size() == 1) {
+        assignTrue(clause[0], makeReason<ReasonKind::Always>({}));
+        return;
+    }
+
+    impl().clauses.addClause(*this, clause);
 }
 
 // -------------------------- Data forwards -------------------------

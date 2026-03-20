@@ -61,6 +61,23 @@ void SatCore::removePropagation(Literal lit) {
     info.nextPropagation = std::nullopt;
 }
 
+bool SatCore::assignedTrue(Literal lit) {
+    const auto& info = infoFor(lit);
+    if (!info.tentativelyTrue())
+        return false;
+    return lit != firstPropagation && !info.prevPropagation.has_value();
+}
+
+bool SatCore::alwaysTrue(Literal lit) {
+    if (!assignedTrue(lit))
+        return false;
+
+    const auto& info = infoFor(lit);
+    VERIFY(info.lastReason.has_value());
+    const Reason& lastReason = at(info.lastReason.value()).reason;
+    return lastReason.kind() == ReasonKind::Always;
+}
+
 void SatCore::decideTrue(Literal literal) {
     VERIFY(!firstPropagation.has_value());
     VERIFY(!infoFor(!literal).tentativelyTrue());
@@ -79,9 +96,13 @@ void SatCore::assignTrue(Literal trueLit, const Reason& reason) {
 
     auto& info = infoFor(trueLit);
     TracePosition tracePos(trace.size());
+    if (info.lastReason.has_value()) {
+        auto& entry = at(*info.lastReason);
+        if (entry.reason.kind() == ReasonKind::Always)
+            return;
+        entry.nextReason = tracePos;
+    }
     trace.push_back({ trueLit, reason, info.lastReason, std::nullopt });
-    if (info.lastReason.has_value())
-        at(*info.lastReason).nextReason = tracePos;
     info.lastReason = tracePos;
 
     if (!info.firstReason.has_value()) {
@@ -179,7 +200,8 @@ bool SatCore::tryLearn(Conflict conflict) {
             if (!seenSinglePropagatingReason) {
                 addToClause(newClause, !entry.literal);
                 // print("learning: "); dumpClause(newClause);
-                interface().learnClause(endClause(newClause));
+                auto span = endClause(newClause);
+                interface().learnClause({ span.begin(), span.end() });
                 VERIFY(conflicts.empty());
             }
 

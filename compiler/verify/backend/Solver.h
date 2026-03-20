@@ -18,14 +18,25 @@ struct Solver {
     void decideTrue(BooleanValue literal);
     void assignTrue(BooleanValue trueLit, const Reason& reason);
 
+    bool alwaysTrue(BooleanValue);
+    bool alwaysFalse(BooleanValue v) { return alwaysTrue(!v); }
+    void addClause(std::vector<BooleanValue> clause);
+
     int_t valueCount(TheoryId);
     int_t booleanCount(TheoryId);
 
     BooleanValue newAuxBoolean(std::string name);
 
+    std::vector<BooleanValue>& scratchClause() {
+        m_scratchClause.clear();
+        return m_scratchClause;
+    }
+
 private:
     friend SolverImpl;
     Solver();
+
+    std::vector<BooleanValue> m_scratchClause;
 };
 
 }
