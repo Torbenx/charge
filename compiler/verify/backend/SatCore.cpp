@@ -307,7 +307,7 @@ void SatCore::backtrack(int_t targetLevel) {
         auto& info = infoFor(entry.literal);
         VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
 
-        bool revert = entry.reason.isDecision() || !interface().testReason(entry.literal, entry.reason);
+        bool revert = !interface().testReason(entry.literal, entry.reason);
         if (revert) {
             if (info.firstReason.value() == position) {
                 // When the first reason is reverted we requeue the propagation.

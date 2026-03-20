@@ -13,7 +13,39 @@ Solver::Solver() { }
 SolverImpl::SolverImpl()
     : literalInfos(*this, ValueKind::Boolean)
     , clauses(*this)
+    , builtinTrueFalse(*this)
     , auxBoolNames(*this, TheoryId::AuxBooleanVariables) { }
+
+SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
+    BooleanValue b = solver.impl().newBoolean(TheoryId::TrueFalse);
+    VERIFY(b == true_literal);
+    VERIFY(!b == false_literal);
+    solver.impl().assignTrue(b, makeReason<ReasonKind::Always>({}));
+    VERIFY(solver.impl().sat.propagate());
+}
+
+// -------------------------- Always reason -------------------------
+
+bool SolverImpl::AlwaysReason::testReason(Solver&, BooleanValue, const Reason&) {
+    return true;
+}
+
+ClauseAndIndex SolverImpl::AlwaysReason::reasonToClause(Solver& solver, BooleanValue lit, const Reason&) {
+    auto& clause = solver.scratchClause();
+    clause.push_back(lit);
+    return { clause, 0 };
+}
+
+// ------------------------- Decision reason ------------------------
+
+bool SolverImpl::DecisionReason::testReason(Solver&, BooleanValue, const Reason&) {
+    return false;
+}
+
+ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue, const Reason&) {
+    // A decision cannot be justified
+    VERIFY_NOT_REACHED();
+}
 
 // ------------------------ SatCore forwards ------------------------
 
@@ -48,11 +80,11 @@ void SatCore::Interface::onBacktrack() {
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
     auto& impl = static_cast<SolverImpl&>(*this);
+#define REASON(name, data, propagating, implMember) \
+    case ReasonKind::name:                          \
+        return impl.implMember.testReason(impl, lit, reason);
     switch (reason.kind()) {
-    case ReasonKind::Always:
-        return true;
-    case ReasonKind::Clause:
-        return impl.clauses.testReason(impl, lit, reason);
+#include <verify/backend/reasons.inc>
     default:
         VERIFY_NOT_REACHED();
     }
@@ -60,14 +92,11 @@ bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
 
 ClauseAndIndex SatCore::Interface::reasonToClause(Literal lit, const Reason& reason) {
     auto& impl = static_cast<SolverImpl&>(*this);
+#define REASON(name, data, propagating, implMember) \
+    case ReasonKind::name:                          \
+        return impl.implMember.reasonToClause(impl, lit, reason);
     switch (reason.kind()) {
-    case ReasonKind::Always: {
-        auto& clause = impl.scratchClause();
-        clause.push_back(lit);
-        return { clause, 0 };
-    }
-    case ReasonKind::Clause:
-        return impl.clauses.reasonToClause(impl, lit, reason);
+#include <verify/backend/reasons.inc>
     default:
         VERIFY_NOT_REACHED();
     }

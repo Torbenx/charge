@@ -12,8 +12,8 @@ enum class ReasonKind : uint8_t {
 };
 
 inline bool isFullyPropagating(ReasonKind kind) {
-#define REASON(name, data, propagating) \
-    case ReasonKind::name:             \
+#define REASON(name, data, propagating, ...) \
+    case ReasonKind::name:                   \
         return propagating;
     switch (kind) {
 #include <verify/backend/reasons.inc>

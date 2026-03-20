@@ -38,11 +38,11 @@ inline ValueKind kindOf(TheoryId theory) {
 }
 
 struct Value {
-    Value(TheoryId theory, uint32_t id)
+    constexpr Value(TheoryId theory, uint32_t id)
         : theoryBits(std::to_underlying(theory)), idBits(id) { }
 
-    TheoryId theory() const { return (TheoryId)theoryBits; }
-    uint32_t id() const { return idBits; }
+    constexpr TheoryId theory() const { return (TheoryId)theoryBits; }
+    constexpr uint32_t id() const { return idBits; }
     bool operator==(const Value&) const = default;
 
     uint32_t theoryBits : 8;
@@ -56,15 +56,18 @@ For each literal X there exist the complementary literal NOT X.
 */
 struct BooleanValue : Value {
     using Value::Value;
-    explicit BooleanValue(Value v)
+    constexpr explicit BooleanValue(Value v)
         : Value(v) { }
 
-    BooleanValue negated() const {
+    constexpr BooleanValue negated() const {
         return BooleanValue(theory(), id() ^ 1u);
     }
 
-    BooleanValue operator!() const { return negated(); }
+    constexpr BooleanValue operator!() const { return negated(); }
 };
+
+inline constexpr BooleanValue true_literal = BooleanValue(TheoryId::TrueFalse, 0);
+inline constexpr BooleanValue false_literal = BooleanValue(TheoryId::TrueFalse, 1);
 
 struct ClauseAndIndex {
     std::span<const BooleanValue> clause;
