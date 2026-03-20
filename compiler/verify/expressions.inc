@@ -1,30 +1,29 @@
-#ifndef EXPR_KIND
-#define EXPR_KIND(name, signature)
+#ifndef EXPR
+#define EXPR(name, result, ...)
+#endif
+#ifndef SIMPLE_EXPR
+#define SIMPLE_EXPR(name, result) EXPR(name, result)
 #endif
 
-EXPR_KIND(BoolLiteral, Bool())
-EXPR_KIND(BoolLoad, Bool(MemoryDecl, Member, CodePos))
-EXPR_KIND(BoolEquality, Bool(Bool, Bool))
+EXPR(Equality, Bool, Expr left, Expr right)
 
-EXPR_KIND(TypeLiteral, Type(ExprVector))
-EXPR_KIND(TypeLoad, Type(MemoryDecl, Member, CodePos))
-EXPR_KIND(TypeEquality, Bool(Type, Type))
-EXPR_KIND(TypeMemberTree, MemberTree(Type))
+SIMPLE_EXPR(FalseLiteral, Bool)
+EXPR(BoolLoad, Bool, MemoryDecl decl, Member member, CodePos pos)
 
-EXPR_KIND(MemberTreeLiteral, MemberTree)
-EXPR_KIND(MemberTreeEquality, Bool(MemberTree, MemberTree))
+EXPR(TypeLiteral, Type, TypeDecl decl, ExprList args)
+EXPR(TypeLoad, Type, MemoryDecl decl, Member member, CodePos pos)
+EXPR(TypeSelfMember, Member, Type type)
 
-EXPR_KIND(MemberLiteral, Member())
-EXPR_KIND(MemberLoad, Member(MemoryDecl, Member, CodePos))
-EXPR_KIND(MemberEquality, Bool(Member, Member))
-EXPR_KIND(MemberComposite, Member(Member, Member))
-EXPR_KIND(MemberContains, Bool(Member, Member))
-EXPR_KIND(MemberTreeFor, MemberTree(Member))
+SIMPLE_EXPR(MemberLiteral, Member)
+EXPR(MemberLoad, Member, MemoryDecl decl, Member member, CodePos pos)
+EXPR(MemberCompose, Member, Member left, Member right)
+EXPR(MemberContains, Bool, Member parent, Member child)
 
-EXPR_KIND(MemoryDeclLiteral, MemoryDecl())
-EXPR_KIND(MemoryDeclEquality, Bool(MemoryDecl, MemoryDecl))
+SIMPLE_EXPR(MemoryDeclLiteral, MemoryDecl)
+EXPR(MemoryDeclType, Type, MemoryDecl decl)
 
-EXPR_KIND(LocationLoadDecl, MemoryDecl(MemoryDecl, Member, CodePos))
-EXPR_KIND(LocationLoadMember, Member(MemoryDecl, Member, CodePos))
+EXPR(LocationLoadDecl, MemoryDecl, MemoryDecl decl, Member member, CodePos pos)
+EXPR(LocationLoadMember, Member, MemoryDecl decl, Member member, CodePos pos)
 
-#undef EXPR_KIND
+#undef SIMPLE_EXPR
+#undef EXPR

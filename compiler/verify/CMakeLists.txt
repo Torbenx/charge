@@ -1,4 +1,6 @@
 
+add_subdirectory(backend)
+
 target_sources(compiler
     PRIVATE
     tests.cpp
