@@ -30,7 +30,7 @@ struct Expr {
     uint32_t boolNegatedBit : 1 = 0;
     uint32_t idBits : 24 = 0;
 
-    bool operator==(const Expr&) const;
+    bool operator==(const Expr&) const = default;
 };
 
 struct Bool : Expr {
@@ -69,21 +69,49 @@ struct ListBase {
     uint32_t m_size = 0;
 
     bool empty() const { return m_size == 0; }
+    int_t size() const { return m_size; }
 };
 struct ExprList : ListBase { };
 struct FrameList : ListBase { };
-struct ParentList : ListBase { };
 struct SortList : ListBase { };
+
+struct PhiParent {
+    uint32_t id;
+};
+
+struct MemberLiteral {
+    uint32_t id;
+};
+
+struct PhiParentList : ListBase {
+    PhiParent at(int_t index) const {
+        VERIFY(index < size());
+        return { m_offset + (uint32_t)index };
+    }
+};
+
+struct MemberList : ListBase {
+    MemberLiteral at(int_t index) const {
+        VERIFY(index < size());
+        return { m_offset + (uint32_t)index };
+    }
+};
+
+struct DContext {
+    uint32_t id;
+
+    bool operator==(const DContext&) const = default;
+};
 
 template<typename T>
 struct D : T {
-    SortList pSorts;
-    D(T t, SortList pSorts)
-        : T(t), pSorts(pSorts) { }
+    DContext dctx;
+    D(T t, DContext dctx)
+        : T(t), dctx(dctx) { }
     operator D<Expr>() const
         requires std::is_base_of_v<Expr, T>
     {
-        return D<Expr>((const T&)*this, pSorts);
+        return D<Expr>((const T&)*this, dctx);
     }
 };
 

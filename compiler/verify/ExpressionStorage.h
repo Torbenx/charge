@@ -34,8 +34,7 @@ struct data;
     SPECIALIZE_BINFO(name, true, 1, D##a)               \
     SPECIALIZE_BINFO(name, true, 2, D##b)               \
     SPECIALIZE_BINFO(name, true, 3, D##c)
-#define SIMPLE_EXPR(name, sortType)
-#define EXPR(name, sortType, args...)                 \
+#define COMPOUND_EXPR(name, sortType, args...)        \
     SPECIALIZE_BINFOS(name, args, D_unused, D_unused) \
     SPECIALIZE_DEPENDENT_BINFOS(name, args, _unused, _unused)
 #include <verify/expressions.inc>
@@ -64,9 +63,8 @@ struct base;
     DECLARE_BASE(name, true, 3, D##c)
 #define EXPR_DEPENDENT_BASES(name, ...) EXPR_DEPENDENT_BASES_HELPER(name, __VA_ARGS__, _unused static const _unused, _unused static const _unused)
 
-#define SIMPLE_EXPR(name, sortType)
-#define EXPR(name, sortType, args...) \
-    EXPR_BASES(name, args)            \
+#define COMPOUND_EXPR(name, sortType, args...) \
+    EXPR_BASES(name, args)                     \
     EXPR_DEPENDENT_BASES(name, args)
 #include <verify/expressions.inc>
 
@@ -93,35 +91,8 @@ struct ExpressionStorage {
 private:
     using arr = expr_detail::arr;
 
-    template<typename T>
-    static ListBase makeListInternal(std::vector<T>& vec, std::span<const T> list) {
-        uint32_t offset = vec.size();
-        vec.insert(vec.end(), list.begin(), list.end());
-        return { offset, (uint32_t)list.size() };
-    }
-
-    template<typename T>
-    static std::span<const T> viewInternal(const std::vector<T>& vec, ListBase list) {
-        VERIFY((int_t)list.m_offset + (int_t)list.m_size <= (int_t)vec.size());
-        return { vec.data() + list.m_offset, list.m_size };
-    }
-
 public:
-    ExprList makeList(std::span<const Expr> list) {
-        return { makeListInternal(expressionLists, list) };
-    }
-    auto view(ExprList list) const {
-        return viewInternal(expressionLists, list);
-    }
-    SortList makeList(std::span<const Sort> list) {
-        return { makeListInternal(sortLists, list) };
-    }
-    auto view(SortList list) const {
-        return viewInternal(sortLists, list);
-    }
-
-#define SIMPLE_EXPR(name, sortType)
-#define EXPR(name, sortType, args...)                                            \
+#define COMPOUND_EXPR(name, sortType, args...)                                   \
     expr_detail::compound<ExprKind::name, false> get##name(sortType r) const;    \
     sortType add##name(const expr_detail::compound<ExprKind::name, false>& val); \
     expr_detail::compound<ExprKind::name, true> get##name(D##sortType r) const;  \
@@ -130,8 +101,6 @@ public:
 
 private:
     std::vector<arr> expressions;
-    std::vector<Expr> expressionLists;
-    std::vector<Sort> sortLists;
 };
 
 }

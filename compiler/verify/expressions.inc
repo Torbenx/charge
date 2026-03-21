@@ -1,28 +1,34 @@
 #ifndef EXPR
-#define EXPR(name, sort, ...)
+#define EXPR(name, sort)
 #endif
-#ifndef SIMPLE_EXPR
-#define SIMPLE_EXPR(name, sort) EXPR(name, sort)
+#ifndef COMPOUND_EXPR
+#define COMPOUND_EXPR(name, sort, ...) EXPR(name, sort)
+#endif
+#ifndef INLINE_EXPR
+#define INLINE_EXPR(name, sort, arg) EXPR(name, sort)
 #endif
 
-EXPR(Equality, Bool, Expr left, Expr right)
+COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
 
-SIMPLE_EXPR(FalseLiteral, Bool)
-EXPR(BoolLoad, Bool, MemoryLoc loc, CodePos pos)
+INLINE_EXPR(FalseLiteral, Bool, bool)
+COMPOUND_EXPR(BoolLoad, Bool, MemoryLoc loc, CodePos pos)
+INLINE_EXPR(PhiParent, Bool, PhiParent)
 
-EXPR(TypeLiteral, Type, TypeDecl decl, ExprList args)
-EXPR(TypeLoad, Type, MemoryLoc loc, CodePos pos)
-EXPR(TypeSelfMember, Member, Type type)
+COMPOUND_EXPR(TypeLiteral, Type, TypeDecl decl, ExprList args)
+COMPOUND_EXPR(TypeLoad, Type, MemoryLoc loc, CodePos pos)
+COMPOUND_EXPR(TypeSelfMember, Member, Type type)
 
-SIMPLE_EXPR(MemberLiteral, Member)
-EXPR(MemberLoad, Member, MemoryLoc loc, CodePos pos)
-EXPR(MemberCompose, Member, Member left, Member right)
-EXPR(MemberContains, Bool, Member parent, Member child)
+INLINE_EXPR(MemberLiteral, Member, MemberLiteral)
+COMPOUND_EXPR(MemberLoad, Member, MemoryLoc loc, CodePos pos)
+COMPOUND_EXPR(MemberCompose, Member, Member left, Member right)
+COMPOUND_EXPR(MemberContains, Bool, Member parent, Member child)
 
-SIMPLE_EXPR(MemoryDeclLiteral, MemoryDecl)
-EXPR(MemoryDeclType, Type, MemoryDecl decl)
+// TODO: INLINE_EXPR(MemoryDeclLiteral, MemoryDecl)
+COMPOUND_EXPR(MemoryDeclType, Type, MemoryDecl decl)
 
-EXPR(MemoryLocLoad, MemoryLoc, MemoryLoc loc, CodePos pos)
+COMPOUND_EXPR(MakeMemoryLoc, MemoryLoc, MemoryDecl decl, Member member)
+COMPOUND_EXPR(MemoryLocLoad, MemoryLoc, MemoryLoc loc, CodePos pos)
 
-#undef SIMPLE_EXPR
+#undef COMPOUND_EXPR
+#undef INLINE_EXPR
 #undef EXPR

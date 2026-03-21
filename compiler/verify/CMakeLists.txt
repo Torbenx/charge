@@ -6,6 +6,7 @@ target_sources(compiler
     Expr.h
     ExpressionStorage.cpp
     ExpressionStorage.h
+    Problem.cpp
     Problem.h
     z3.h
     z3tests.cpp
