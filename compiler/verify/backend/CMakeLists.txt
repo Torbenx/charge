@@ -6,7 +6,11 @@ target_sources(compiler
     Data.h
     DataManager.cpp
     DataManager.h
+    EqualityTests.cpp
+    PairSet.h
     Reason.h
+    RewriteEquality.cpp
+    RewriteEquality.h
     SatCore.cpp
     SatCore.h
     SatTest.cpp

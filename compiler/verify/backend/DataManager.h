@@ -66,7 +66,7 @@ struct DataManager {
     }
 
     DataManager();
-    Value newValue(TheoryId);
+    Value newValue(TheoryId, int_t count);
     void registerTheoryData(TheoryDataBase&, TheoryId, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
     void registerKindData(KindDataBase&, ValueKind, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
     ~DataManager();

@@ -1,9 +1,11 @@
 #pragma once
 
+#include <verify/backend/Clauses.h>
 #include <verify/backend/DataManager.h>
+#include <verify/backend/PairSet.h>
+#include <verify/backend/RewriteEquality.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Solver.h>
-#include <verify/backend/Clauses.h>
 
 #include <ReverseMemberPointer.h>
 
@@ -21,11 +23,23 @@ struct SolverImpl : Solver, SatCore::Interface {
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
+    struct RewriteEqualities {
+        using arr = std::array<RewriteEquality, std::to_underlying(ValueKind::COUNT)>;
+        RewriteEqualities(Solver&);
+        template<int_t... kinds>
+        RewriteEqualities(Solver&, int_sequence<kinds...>);
+        RewriteEquality& operator[](ValueKind kind) { return m_rwes[std::to_underlying(kind)]; }
+        bool testReason(Solver&, BooleanValue, const Reason&);
+        ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+        arr m_rwes;
+    };
 
     SolverImpl();
 
     Value newValue(TheoryId);
     BooleanValue newBoolean(TheoryId);
+
+    void onNewPair(PairHandle);
 
     // The initialization order here matters:
 
@@ -43,6 +57,9 @@ struct SolverImpl : Solver, SatCore::Interface {
     Clauses clauses;
     // Now we can construct the builtin true and false literals, also likely to be used in other theories
     BuiltinTrueFalse builtinTrueFalse;
+
+    std::array<PairSet, std::to_underlying(ValueKind::COUNT)> pairs;
+    RewriteEqualities rewriteEqualities;
 
     TheoryData<std::string, 2> auxBoolNames;
 };

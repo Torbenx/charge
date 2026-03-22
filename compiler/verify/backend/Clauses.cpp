@@ -51,7 +51,7 @@ void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
     }
 }
 
-void Clauses::unapplyAssignment(Solver& solver, BooleanValue literal) {
+void Clauses::unapplyAssignment(Solver&, BooleanValue literal) {
     for (auto inst : instances[!literal]) {
         auto& clauseMask = clauseMasks[inst.clauseIndex];
         auto mask = literalMask(inst.literalIndex);

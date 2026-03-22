@@ -5,5 +5,8 @@
 REASON(Always, EmptyReasonData, true, alwaysReason)
 REASON(Decision, DecisionData, false, decisionReason)
 REASON(Clause, LiteralInstance, true, clauses)
+REASON(Equality, EmptyReasonData, true, rewriteEqualities)
+REASON(Disequality, DisequalityReason, true, rewriteEqualities)
+REASON(DisequalityByAlwaysDisequal, DisequalityReason, true, rewriteEqualities)
 
 #undef REASON

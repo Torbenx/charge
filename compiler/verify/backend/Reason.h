@@ -95,6 +95,32 @@ struct PackedReason {
         return T((tagBits >> offset) & mask);
     }
 
+    Data data() const {
+        std::array<std::byte, sizeof(Data)> out;
+        std::copy_n(dataBytes.begin(), out.size(), out.begin());
+        return std::bit_cast<Data>(out);
+    }
+
+    uint32_t kindBits : 8;
+    uint32_t tagBits : 24;
+    std::array<std::byte, 8> dataBytes;
+};
+
+template<typename Data>
+struct PackedReason<Data, uint32_t> {
+    PackedReason(Data data, uint32_t tag)
+        : kindBits(0), tagBits(tag), dataBytes(packReasonData(data)) { VERIFY(tag < (1u << 24)); }
+
+    uint32_t tag() const {
+        return tagBits;
+    }
+
+    Data data() const {
+        std::array<std::byte, sizeof(Data)> out;
+        std::copy_n(dataBytes.begin(), out.size(), out.begin());
+        return std::bit_cast<Data>(out);
+    }
+
     uint32_t kindBits : 8;
     uint32_t tagBits : 24;
     std::array<std::byte, 8> dataBytes;
@@ -109,10 +135,8 @@ struct Reason {
     ReasonKind kind() const { return ReasonKind(kindBits); }
     bool isDecision() const { return kind() == ReasonKind::Decision; }
 
-    template<ReasonKind k>
-    reason_data_t<k> get() const {
-        VERIFY(kind() == k);
-        using T = reason_data_t<k>;
+    template<typename T>
+    T getData() const {
         if constexpr (sizeof(T) <= 8) {
             std::array<std::byte, sizeof(T)> out;
             std::copy_n(dataBytes.begin(), out.size(), out.begin());
@@ -120,6 +144,11 @@ struct Reason {
         } else {
             return std::bit_cast<T>(*this);
         }
+    }
+    template<ReasonKind k>
+    reason_data_t<k> get() const {
+        VERIFY(kind() == k);
+        return getData<reason_data_t<k>>();
     }
 
     uint32_t kindBits : 8;

@@ -14,6 +14,7 @@ SolverImpl::SolverImpl()
     : literalInfos(*this, ValueKind::Boolean)
     , clauses(*this)
     , builtinTrueFalse(*this)
+    , rewriteEqualities(*this)
     , auxBoolNames(*this, TheoryId::AuxBooleanVariables) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
@@ -47,6 +48,23 @@ ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue,
     VERIFY_NOT_REACHED();
 }
 
+// ----------------------- Rewrite equalities -----------------------
+
+SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver)
+    : RewriteEqualities(solver, make_int_sequence<(int_t)ValueKind::COUNT>()) { }
+
+template<int_t... kinds>
+SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver, int_sequence<kinds...>)
+    : m_rwes { RewriteEquality(solver, (ValueKind)kinds, equalityTheoryFor((ValueKind)kinds))... } { }
+
+bool SolverImpl::RewriteEqualities::testReason(Solver& solver, BooleanValue literal, const Reason& reason) {
+    return (*this)[valueKindOfEqualityTheory(literal.theory())].testReason(solver, literal, reason);
+}
+
+ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, BooleanValue literal, const Reason& reason) {
+    return (*this)[valueKindOfEqualityTheory(literal.theory())].reasonToClause(solver, literal, reason);
+}
+
 // ------------------------ SatCore forwards ------------------------
 
 int_t Solver::currentDecisionLevel() const {
@@ -72,10 +90,18 @@ bool Solver::alwaysTrue(BooleanValue value) {
 
 void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
+
+#define EQUALITY_THEORY(valueKind) impl.rewriteEqualities[ValueKind::valueKind].newDecisionLevel(impl);
+#include <verify/backend/theories.inc>
+
 }
 
 void SatCore::Interface::onBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
+
+#define EQUALITY_THEORY(valueKind) impl.rewriteEqualities[ValueKind::valueKind].backtrack(impl);
+#include <verify/backend/theories.inc>
+
 }
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
@@ -105,15 +131,44 @@ ClauseAndIndex SatCore::Interface::reasonToClause(Literal lit, const Reason& rea
 void SatCore::Interface::propagateAssignment(Literal lit) {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.clauses.propagateAssignment(impl, lit);
+
+    switch (lit.theory()) {
+
+#define EQUALITY_THEORY(valueKind)                                                   \
+    case TheoryId::valueKind##Equality:                                              \
+        impl.rewriteEqualities[ValueKind::valueKind].propagateAssignment(impl, lit); \
+        break;
+#include <verify/backend/theories.inc>
+
+    default:
+        break;
+    }
 }
 
 void SatCore::Interface::unapplyAssignment(Literal lit) {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.clauses.unapplyAssignment(impl, lit);
+
+    switch (lit.theory()) {
+    default:
+        break;
+    }
 }
 
-void SatCore::Interface::reapplyAssignment(Literal) {
+void SatCore::Interface::reapplyAssignment(Literal lit) {
     auto& impl = static_cast<SolverImpl&>(*this);
+
+    switch (lit.theory()) {
+
+#define EQUALITY_THEORY(valueKind)                                                 \
+    case TheoryId::valueKind##Equality:                                            \
+        impl.rewriteEqualities[ValueKind::valueKind].reapplyAssignment(impl, lit); \
+        break;
+#include <verify/backend/theories.inc>
+
+    default:
+        break;
+    }
 }
 
 void SatCore::Interface::learnClause(std::vector<BooleanValue> clause) {
@@ -164,16 +219,144 @@ int_t Solver::booleanCount(TheoryId theory) {
     return valueCount(theory) / 2;
 }
 
+// -------------------------- Rewrite order -------------------------
+
+template<TheoryId theory>
+static uint32_t pairLabelOf(Solver& solver, Value v) {
+    static constexpr ValueKind kind = kindOf(theory);
+    return solver.impl().pairs[std::to_underlying(kind)].label(decodePairTheoryValue<theory>(v).pairId());
+}
+
+std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
+    auto theoryOrdering = a.theory() <=> b.theory();
+    if (theoryOrdering != 0)
+        return theoryOrdering;
+
+    switch (a.theory()) {
+    case TheoryId::TrueFalse:
+    case TheoryId::ClauseGlueVariables:
+    case TheoryId::AuxBooleanVariables:
+    case TheoryId::AuxUninterpretedConstants:
+        return a.id() <=> b.id();
+
+#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)                                     \
+    case TheoryId::name: {                                                                                   \
+        auto pairOrdering = pairLabelOf<TheoryId::name>(*this, a) <=> pairLabelOf<TheoryId::name>(*this, b); \
+        if (pairOrdering != 0)                                                                               \
+            return pairOrdering;                                                                             \
+        return a.id() <=> b.id();                                                                            \
+    }
+#include <verify/backend/theories.inc>
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+// ------------------------------ Pairs -----------------------------
+
+uint32_t PairSet::get(Solver& solver, Pair pair) {
+    return Base::get(solver, pair);
+}
+
+std::strong_ordering PairSet::compare(Solver& solver, Pair a, Pair b) {
+    auto targetOrdering = solver.rewriteOrder(a.target, b.target);
+    if (targetOrdering != 0)
+        return targetOrdering;
+    return solver.rewriteOrder(a.source, b.source);
+}
+
+uint32_t PairSet::makeNode(Solver&, Pair pair, TreeLabel label) {
+    PairHandle handle(kindOf(pair.source.theory()), nextNodeHandle());
+    return Base::makeNode(label, pair);
+}
+
+void SolverImpl::onNewPair(PairHandle handle) {
+    VERIFY(!handle.specialPair());
+#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)       \
+    if (handle.valueKind() == ValueKind::pairValueKind) {                      \
+        VERIFY(valueCount(TheoryId::name) == handle.pairId() * valuesPerPair); \
+        data.newValue(TheoryId::name, valuesPerPair);                          \
+    }
+#include <verify/backend/theories.inc>
+
+    rewriteEqualities[handle.valueKind()].newPair(*this, handle);
+}
+
+PairHandle Solver::findPair(Value a, Value b) {
+    VERIFY(a != b);
+    ValueKind valueKind = kindOf(a.theory());
+    VERIFY(valueKind == kindOf(b.theory()));
+    if (rewriteOrder(a, b) > 0)
+        std::swap(a, b);
+
+    if (valueKind == ValueKind::Boolean) {
+        if (BooleanValue(a).negated()) {
+            a = !(BooleanValue)a;
+            b = !(BooleanValue)b;
+        }
+        if (a == true_literal)
+            return PairHandle(b);
+    }
+
+    return findPair({ a, b });
+}
+
+PairHandle Solver::findPair(Pair p) {
+    ValueKind valueKind = kindOf(p.source.theory());
+    auto& pairs = impl().pairs[std::to_underlying(valueKind)];
+    int_t oldSize = pairs.size();
+    uint32_t id = pairs.get(*this, p);
+    PairHandle handle { valueKind, id };
+    if (pairs.size() != oldSize)
+        impl().onNewPair(handle);
+    return handle;
+}
+
+Pair Solver::at(PairHandle handle) {
+    if (handle.specialPair()) {
+        auto b = handle.encodedValue();
+        VERIFY(kindOf(b.theory()) == ValueKind::Boolean);
+        return { true_literal, b };
+    }
+
+    return impl().pairs[std::to_underlying(handle.valueKind())].at(handle.pairId());
+}
+
+// ---------------------------- Equality ----------------------------
+
+bool Solver::alwaysDisequal(Value, Value) { return false; }
+
+BooleanValue Solver::equality(Value a, Value b) {
+    return equality(findPair(a, b));
+}
+
+BooleanValue Solver::equality(PairHandle handle) {
+    if (handle.specialPair()) {
+        auto b = handle.encodedValue();
+        VERIFY(kindOf(b.theory()) == ValueKind::Boolean);
+        // Encodes true == b which is equivalent to b
+        return (BooleanValue)b;
+    }
+
+    return impl().rewriteEqualities[handle.valueKind()].makeEquality(handle);
+}
+
+bool Solver::assignedEqual(Value a, Value b) {
+    auto valueKind = kindOf(a.theory());
+    VERIFY(valueKind == kindOf(b.theory()));
+    return impl().rewriteEqualities[valueKind].connected(a, b);
+}
+
 // ------------------------- Value factories ------------------------
 
 Value SolverImpl::newValue(TheoryId theory) {
-    return data.newValue(theory);
+    return data.newValue(theory, 1);
 }
 
 BooleanValue SolverImpl::newBoolean(TheoryId theory) {
     VERIFY(kindOf(theory) == ValueKind::Boolean);
-    BooleanValue result(newValue(theory));
-    newValue(theory);
+    BooleanValue result(data.newValue(theory, 2));
     return result;
 }
 

@@ -35,7 +35,7 @@ void deallocateAndDestroyData(std::byte*& data, const DataManager::TheoryInfo& t
         VERIFY(data == nullptr);
         return;
     }
-    for (int_t i = 0; i < (int_t)theoryInfo.valueCount; i++) {
+    for (int_t i = 0; i < dataInfo.elementCount(theoryInfo.valueCount); i++) {
         dataInfo.destroyFunction(data + i * dataInfo.elementSize);
     }
     std::allocator<std::byte> alloc;
@@ -81,11 +81,12 @@ void DataManager::registerKindData(KindDataBase& data, ValueKind kind, int_t ele
     data.m_table = dataInfo.table;
 }
 
-Value DataManager::newValue(TheoryId theory) {
+Value DataManager::newValue(TheoryId theory, int_t count) {
+    VERIFY(count > 0);
     auto& theoryInfo = at(theory);
     auto& kindInfo = at(kindOf(theory));
-    uint32_t valueId = theoryInfo.valueCount++;
-    Value resultValue(theory, valueId);
+    int_t firstValueId = theoryInfo.valueCount;
+    theoryInfo.valueCount += count;
     if (theoryInfo.valueCount > theoryInfo.dataCapacity) {
         int_t oldCapacity = theoryInfo.dataCapacity;
         int_t newCapacity = std::max<int_t>(oldCapacity * 2, 4);
@@ -99,12 +100,14 @@ Value DataManager::newValue(TheoryId theory) {
         }
     }
     for (auto& dataInfo : theoryInfo.datas) {
-        initValue(dataInfo.pointer, dataInfo, resultValue);
+        for (int_t i = 0; i < count; i++)
+            initValue(dataInfo.pointer, dataInfo, Value(theory, firstValueId + i));
     }
     for (auto& dataInfo : kindInfo.datas) {
-        initValue(dataInfo.table[std::to_underlying(theory)], dataInfo, resultValue);
+        for (int_t i = 0; i < count; i++)
+            initValue(dataInfo.table[std::to_underlying(theory)], dataInfo, Value(theory, firstValueId + i));
     }
-    return resultValue;
+    return Value(theory, firstValueId);
 }
 
 DataManager::DataManager() { }
