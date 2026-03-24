@@ -14,7 +14,7 @@ THEORY(TrueFalse, Boolean)
 THEORY(ClauseGlueVariables, Boolean)
 THEORY(AuxBooleanVariables, Boolean)
 THEORY(AuxUninterpretedConstants, UninterpretedConstant)
-EQUALITY_THEORY(Boolean)
+PAIR_THEORY(BooleanEquality, Boolean, Boolean, 1)
 EQUALITY_THEORY(UninterpretedConstant)
 
 #undef THEORY

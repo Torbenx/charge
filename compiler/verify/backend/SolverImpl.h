@@ -24,13 +24,15 @@ struct SolverImpl : Solver, SatCore::Interface {
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
     struct RewriteEqualities {
-        using arr = std::array<RewriteEquality, std::to_underlying(ValueKind::COUNT)>;
+        using arr = std::array<RewriteEquality, std::to_underlying(ValueKind::COUNT) - 1>;
         RewriteEqualities(Solver&);
         template<int_t... kinds>
         RewriteEqualities(Solver&, int_sequence<kinds...>);
-        RewriteEquality& operator[](ValueKind kind) { return m_rwes[std::to_underlying(kind)]; }
+        RewriteEquality& operator[](ValueKind kind) { return m_rwes[std::to_underlying(kind) - 1]; }
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+
+    private:
         arr m_rwes;
     };
 
@@ -39,7 +41,10 @@ struct SolverImpl : Solver, SatCore::Interface {
     Value newValue(TheoryId);
     BooleanValue newBoolean(TheoryId);
 
+    void onNewBooleanPair(PairHandle);
     void onNewPair(PairHandle);
+    template<TheoryId theory>
+    uint64_t pairLabelOf(Value v);
 
     // The initialization order here matters:
 

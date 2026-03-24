@@ -370,4 +370,47 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     EXPECT_FALSE(solver.assignedFalse(e12));
 }
 
+TEST(VerifyBackend, BooleanEqual) {
+    SolverImpl solver;
+    auto a = solver.newAuxBoolean("a");
+    auto b = solver.newAuxBoolean("b");
+    EXPECT_EQ(a, solver.equality(a, true_literal));
+    EXPECT_EQ(!a, solver.equality(!a, true_literal));
+    EXPECT_EQ(!a, solver.equality(a, false_literal));
+    EXPECT_EQ(a, solver.equality(!a, false_literal));
+
+    auto eq = solver.equality(a, b);
+    EXPECT_FALSE(solver.assignedTrue(eq));
+    EXPECT_FALSE(solver.assignedTrue(eq));
+
+    // Test truth table
+    solver.decideTrue(a);
+    EXPECT_TRUE(solver.sat.propagate());
+    solver.decideTrue(b);
+    EXPECT_TRUE(solver.sat.propagate());
+    EXPECT_TRUE(solver.assignedTrue(eq));
+    solver.sat.backtrack(0);
+
+    solver.decideTrue(a);
+    EXPECT_TRUE(solver.sat.propagate());
+    solver.decideTrue(!b);
+    EXPECT_TRUE(solver.sat.propagate());
+    EXPECT_TRUE(solver.assignedFalse(eq));
+    solver.sat.backtrack(0);
+
+    solver.decideTrue(!a);
+    EXPECT_TRUE(solver.sat.propagate());
+    solver.decideTrue(b);
+    EXPECT_TRUE(solver.sat.propagate());
+    EXPECT_TRUE(solver.assignedFalse(eq));
+    solver.sat.backtrack(0);
+
+    solver.decideTrue(!a);
+    EXPECT_TRUE(solver.sat.propagate());
+    solver.decideTrue(!b);
+    EXPECT_TRUE(solver.sat.propagate());
+    EXPECT_TRUE(solver.assignedTrue(eq));
+    solver.sat.backtrack(0);
+}
+
 }

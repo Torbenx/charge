@@ -41,8 +41,10 @@ constexpr ValueKind kindOf(TheoryId theory) {
 
 constexpr TheoryId equalityTheoryFor(ValueKind valueKind) {
     switch (valueKind) {
-#define EQUALITY_THEORY(valueKind) \
-    case ValueKind::valueKind:     \
+    case ValueKind::Boolean:
+        return TheoryId::BooleanEquality;
+#define EQUALITY_THEORY(valueKind, ...) \
+    case ValueKind::valueKind:          \
         return TheoryId::valueKind##Equality;
 #include <verify/backend/theories.inc>
     default:
@@ -52,7 +54,9 @@ constexpr TheoryId equalityTheoryFor(ValueKind valueKind) {
 
 constexpr ValueKind valueKindOfEqualityTheory(TheoryId theory) {
     switch (theory) {
-#define EQUALITY_THEORY(valueKind)      \
+    case TheoryId::BooleanEquality:
+        return ValueKind::Boolean;
+#define EQUALITY_THEORY(valueKind, ...) \
     case TheoryId::valueKind##Equality: \
         return ValueKind::valueKind;
 #include <verify/backend/theories.inc>
@@ -90,6 +94,10 @@ struct BooleanValue : Value {
 
     constexpr bool negated() const {
         return (id() & 1u) != 0;
+    }
+
+    constexpr BooleanValue baseValue() const {
+        return BooleanValue(theory(), id() & ~1u);
     }
 };
 

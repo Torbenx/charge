@@ -28,7 +28,7 @@ struct Solver {
     std::strong_ordering rewriteOrder(Value, Value);
 
     PairHandle findPair(Value, Value);
-    PairHandle findPair(Pair); // Must to be already oriented
+    PairHandle findPair(Pair); // Must be already oriented
     Pair at(PairHandle);
 
     BooleanValue equality(Value, Value);

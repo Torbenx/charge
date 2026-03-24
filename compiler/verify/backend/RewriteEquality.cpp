@@ -263,23 +263,8 @@ void RewriteEquality::assignDisequalByAlwaysDisequal(Solver& solver, PairHandle 
     solver.assignTrue(!makeEquality(assignPair), makeReason<ReasonKind::DisequalityByAlwaysDisequal>({ 0, alwaysDiseqA, alwaysDiseqB }));
 }
 
-void RewriteEquality::propagateAssignment(Solver& solver, BooleanValue lit) {
-    if (lit.negated()) {
-        applyDisequal(solver, pairOf(lit), true);
-    } else {
-        applyEqual(solver, pairOf(lit), true);
-    }
-}
-
-void RewriteEquality::reapplyAssignment(Solver& solver, BooleanValue lit) {
-    if (lit.negated()) {
-        applyDisequal(solver, pairOf(lit), false);
-    } else {
-        applyEqual(solver, pairOf(lit), false);
-    }
-}
-
 void RewriteEquality::newPair(Solver& solver, PairHandle pair) {
+    VERIFY(pair.valueKind() == m_valueKind);
     auto [source, target] = solver.at(pair);
     addEdge(source, target, pair);
     addEdge(target, source, pair);
@@ -408,13 +393,11 @@ void RewriteEquality::path(Solver& solver, Value a, Value b, std::vector<Boolean
 
 bool RewriteEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     if (reason.kind() == ReasonKind::Equality) {
-        VERIFY(!assignedLiteral.negated());
         auto [source, target] = solver.at(pairOf(assignedLiteral));
         return connected(source, target);
     }
 
     // disequality
-    VERIFY(assignedLiteral.negated());
     DisequalityReason data = reason.getData<DisequalityReason>();
     if (reason.kind() == ReasonKind::Disequality && !solver.assignedFalse(makeEquality(PairHandle(m_valueKind, data.pairId()))))
         return false;
@@ -428,7 +411,6 @@ ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assi
     auto& result = solver.scratchClause();
 
     if (reason.kind() == ReasonKind::Equality) {
-        VERIFY(!assignedLiteral.negated());
         result.push_back(assignedLiteral);
 
         auto [a, b] = solver.at(pairOf(assignedLiteral));
@@ -438,7 +420,6 @@ ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assi
     }
 
     // disequality
-    VERIFY(assignedLiteral.negated());
     result.push_back(assignedLiteral);
     auto data = reason.getData<DisequalityReason>();
     if (reason.kind() == ReasonKind::Disequality)

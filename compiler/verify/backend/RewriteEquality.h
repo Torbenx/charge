@@ -14,8 +14,8 @@ struct RewriteEquality {
         return { m_valueKind, equality.id() / 2 };
     }
 
-    void propagateAssignment(Solver&, BooleanValue);
-    void reapplyAssignment(Solver&, BooleanValue);
+    void applyEqual(Solver& solver, PairHandle eqPair, bool propagate);
+    void applyDisequal(Solver& solver, PairHandle diseqPair, bool propagate);
 
     void checkInvariances(Solver&);
 
@@ -85,9 +85,6 @@ private:
     void assignDisequalByAlwaysDisequal(Solver&, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB);
 
     void pathInTree(Solver&, Value a, Value b, std::vector<BooleanValue>&);
-
-    void applyEqual(Solver& solver, PairHandle eqPair, bool propagate);
-    void applyDisequal(Solver& solver, PairHandle diseqPair, bool propagate);
 
     EqualityInfo& infoFor(Value v) {
         return equalityInfos[v];

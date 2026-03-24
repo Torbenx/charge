@@ -51,11 +51,11 @@ ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue,
 // ----------------------- Rewrite equalities -----------------------
 
 SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver)
-    : RewriteEqualities(solver, make_int_sequence<(int_t)ValueKind::COUNT>()) { }
+    : RewriteEqualities(solver, make_int_sequence<(int_t)ValueKind::COUNT - 1>()) { }
 
 template<int_t... kinds>
 SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver, int_sequence<kinds...>)
-    : m_rwes { RewriteEquality(solver, (ValueKind)kinds, equalityTheoryFor((ValueKind)kinds))... } { }
+    : m_rwes { RewriteEquality(solver, ValueKind(kinds + 1), equalityTheoryFor(ValueKind(kinds + 1)))... } { }
 
 bool SolverImpl::RewriteEqualities::testReason(Solver& solver, BooleanValue literal, const Reason& reason) {
     return (*this)[valueKindOfEqualityTheory(literal.theory())].testReason(solver, literal, reason);
@@ -91,17 +91,15 @@ bool Solver::alwaysTrue(BooleanValue value) {
 void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
 
-#define EQUALITY_THEORY(valueKind) impl.rewriteEqualities[ValueKind::valueKind].newDecisionLevel(impl);
+#define EQUALITY_THEORY(valueKind, ...) impl.rewriteEqualities[ValueKind::valueKind].newDecisionLevel(impl);
 #include <verify/backend/theories.inc>
-
 }
 
 void SatCore::Interface::onBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
 
-#define EQUALITY_THEORY(valueKind) impl.rewriteEqualities[ValueKind::valueKind].backtrack(impl);
+#define EQUALITY_THEORY(valueKind, ...) impl.rewriteEqualities[ValueKind::valueKind].backtrack(impl);
 #include <verify/backend/theories.inc>
-
 }
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
@@ -134,10 +132,16 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
 
     switch (lit.theory()) {
 
-#define EQUALITY_THEORY(valueKind)                                                   \
-    case TheoryId::valueKind##Equality:                                              \
-        impl.rewriteEqualities[ValueKind::valueKind].propagateAssignment(impl, lit); \
-        break;
+#define EQUALITY_THEORY(valueKind)                                             \
+    case TheoryId::valueKind##Equality: {                                      \
+        auto& rwe = impl.rewriteEqualities[ValueKind::valueKind];              \
+        auto pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
+        if (lit.negated())                                                     \
+            rwe.applyDisequal(impl, pair, true);                               \
+        else                                                                   \
+            rwe.applyEqual(impl, pair, true);                                  \
+        break;                                                                 \
+    }
 #include <verify/backend/theories.inc>
 
     default:
@@ -160,10 +164,16 @@ void SatCore::Interface::reapplyAssignment(Literal lit) {
 
     switch (lit.theory()) {
 
-#define EQUALITY_THEORY(valueKind)                                                 \
-    case TheoryId::valueKind##Equality:                                            \
-        impl.rewriteEqualities[ValueKind::valueKind].reapplyAssignment(impl, lit); \
-        break;
+#define EQUALITY_THEORY(valueKind)                                             \
+    case TheoryId::valueKind##Equality: {                                      \
+        auto& rwe = impl.rewriteEqualities[ValueKind::valueKind];              \
+        auto pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
+        if (lit.negated())                                                     \
+            rwe.applyDisequal(impl, pair, false);                              \
+        else                                                                   \
+            rwe.applyEqual(impl, pair, false);                                 \
+        break;                                                                 \
+    }
 #include <verify/backend/theories.inc>
 
     default:
@@ -221,12 +231,6 @@ int_t Solver::booleanCount(TheoryId theory) {
 
 // -------------------------- Rewrite order -------------------------
 
-template<TheoryId theory>
-static uint32_t pairLabelOf(Solver& solver, Value v) {
-    static constexpr ValueKind kind = kindOf(theory);
-    return solver.impl().pairs[std::to_underlying(kind)].label(decodePairTheoryValue<theory>(v).pairId());
-}
-
 std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     auto theoryOrdering = a.theory() <=> b.theory();
     if (theoryOrdering != 0)
@@ -241,7 +245,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
 
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)                                     \
     case TheoryId::name: {                                                                                   \
-        auto pairOrdering = pairLabelOf<TheoryId::name>(*this, a) <=> pairLabelOf<TheoryId::name>(*this, b); \
+        auto pairOrdering = impl().pairLabelOf<TheoryId::name>(a) <=> impl().pairLabelOf<TheoryId::name>(b); \
         if (pairOrdering != 0)                                                                               \
             return pairOrdering;                                                                             \
         return a.id() <=> b.id();                                                                            \
@@ -273,6 +277,7 @@ uint32_t PairSet::makeNode(Solver&, Pair pair, TreeLabel label) {
 
 void SolverImpl::onNewPair(PairHandle handle) {
     VERIFY(!handle.specialPair());
+    VERIFY(handle.valueKind() != ValueKind::Boolean); // Bools have their own version of this function.
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)       \
     if (handle.valueKind() == ValueKind::pairValueKind) {                      \
         VERIFY(valueCount(TheoryId::name) == handle.pairId() * valuesPerPair); \
@@ -281,6 +286,29 @@ void SolverImpl::onNewPair(PairHandle handle) {
 #include <verify/backend/theories.inc>
 
     rewriteEqualities[handle.valueKind()].newPair(*this, handle);
+}
+
+void SolverImpl::onNewBooleanPair(PairHandle handle) {
+    VERIFY(!handle.specialPair());
+    VERIFY(handle.valueKind() == ValueKind::Boolean);
+
+    BooleanValue newBool = newBoolean(TheoryId::BooleanEquality);
+
+    /*
+    Equalities are eagerly encoded as clauses.
+    For each equality there will be 4 clauses:
+        a == b ||  a ||  b
+        a == b || !a || !b
+        a != b ||  a || !b
+        a != b || !a ||  b
+    */
+    auto [a, b] = at(handle);
+    auto lit = (BooleanValue)encodePairTheoryValue<TheoryId::BooleanEquality>(handle);
+    VERIFY(lit == newBool);
+    addClause({ lit, (BooleanValue)a, (BooleanValue)b });
+    addClause({ lit, !(BooleanValue)a, !(BooleanValue)b });
+    addClause({ !lit, (BooleanValue)a, !(BooleanValue)b });
+    addClause({ !lit, !(BooleanValue)a, (BooleanValue)b });
 }
 
 PairHandle Solver::findPair(Value a, Value b) {
@@ -306,6 +334,17 @@ PairHandle Solver::findPair(Pair p) {
     ValueKind valueKind = kindOf(p.source.theory());
     auto& pairs = impl().pairs[std::to_underlying(valueKind)];
     int_t oldSize = pairs.size();
+
+    if (valueKind == ValueKind::Boolean) {
+        bool negated = BooleanValue(p.target).negated();
+        p.target = BooleanValue(p.target).baseValue();
+        uint32_t idx = pairs.get(*this, p);
+        if (pairs.size() != oldSize) {
+            impl().onNewBooleanPair(PairHandle { valueKind, idx * 2u });
+        }
+        return PairHandle { valueKind, idx * 2u + (negated ? 1u : 0u) };
+    }
+
     uint32_t id = pairs.get(*this, p);
     PairHandle handle { valueKind, id };
     if (pairs.size() != oldSize)
@@ -320,14 +359,54 @@ Pair Solver::at(PairHandle handle) {
         return { true_literal, b };
     }
 
-    return impl().pairs[std::to_underlying(handle.valueKind())].at(handle.pairId());
+    auto& pairs = impl().pairs[std::to_underlying(handle.valueKind())];
+    if (handle.valueKind() == ValueKind::Boolean) {
+        uint32_t idx = handle.pairId() / 2;
+        bool targetNegated = (handle.pairId() & 1u) != 0u;
+        Pair pair = pairs.at(idx);
+        if (targetNegated)
+            pair.target = !(BooleanValue)pair.target;
+        return pair;
+    }
+
+    return pairs.at(handle.pairId());
+}
+
+template<TheoryId theory>
+uint64_t SolverImpl::pairLabelOf(Value v) {
+    static constexpr ValueKind kind = kindOf(theory);
+
+    auto& pairs = this->pairs[std::to_underlying(kind)];
+    PairHandle handle = decodePairTheoryValue<theory>(v);
+    if constexpr (theory == TheoryId::BooleanEquality) {
+        uint32_t idx = handle.pairId() / 2;
+        bool negated = (handle.pairId() & 1u) != 0u;
+        return (uint64_t)pairs.label(idx) * 2 + (negated ? 1 : 0);
+    } else {
+        return pairs.label(handle.pairId());
+    }
 }
 
 // ---------------------------- Equality ----------------------------
 
-bool Solver::alwaysDisequal(Value, Value) { return false; }
+bool Solver::alwaysDisequal(Value a, Value b) {
+    ValueKind valueKind = kindOf(a.theory());
+    VERIFY(valueKind == kindOf(b.theory()));
+    switch (valueKind) {
+    case ValueKind::Boolean:
+        if (a == !(BooleanValue)b)
+            return true;
+        return false;
+    default:
+        return false;
+    }
+}
 
 BooleanValue Solver::equality(Value a, Value b) {
+    if (a == b)
+        return true_literal;
+    if (alwaysDisequal(a, b))
+        return false_literal;
     return equality(findPair(a, b));
 }
 
@@ -339,7 +418,11 @@ BooleanValue Solver::equality(PairHandle handle) {
         return (BooleanValue)b;
     }
 
-    return impl().rewriteEqualities[handle.valueKind()].makeEquality(handle);
+    if (handle.valueKind() == ValueKind::Boolean) {
+        return (BooleanValue)encodePairTheoryValue<TheoryId::BooleanEquality>(handle);
+    } else {
+        return impl().rewriteEqualities[handle.valueKind()].makeEquality(handle);
+    }
 }
 
 bool Solver::assignedEqual(Value a, Value b) {
