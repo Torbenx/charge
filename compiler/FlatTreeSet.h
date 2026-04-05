@@ -71,7 +71,7 @@ protected:
     template<typename... Args>
     uint32_t get(Args&&... args) {
         if (rootNode == NIL_HANDLE) {
-            rootNode = impl()->makeNode(args..., TreeLabel::rootLabel());
+            rootNode = impl()->makeNode(std::forward<Args>(args)..., TreeLabel::rootLabel());
             return rootNode;
         }
         uint32_t handle = rootNode;
@@ -88,7 +88,7 @@ protected:
 
             uint32_t result = nodes.size();
             nextHandle = result;
-            VERIFY(result == impl()->makeNode(args..., node.label.extend(c > 0)));
+            VERIFY(result == impl()->makeNode(std::forward<Args>(args)..., node.label.extend(c > 0)));
             return result;
         }
     }

@@ -29,10 +29,7 @@ struct RewriteEquality {
     void forEachParentOf(Value value, auto&& callback);
     void forEachEqualValue(Value value, auto&& callback);
 
-    bool connected(Value a, Value b) {
-        return infoFor(a).root == infoFor(b).root;
-    }
-    void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
+    Value rewrite(Value v) { return infoFor(v).root; }
 
 private:
     struct EqualityInfo {
@@ -78,6 +75,10 @@ private:
         std::vector<uint32_t> disequalities; //!< Sorted list of disequalities this node is a part of
     };
 
+    bool connected(Value a, Value b) {
+        return infoFor(a).root == infoFor(b).root;
+    }
+
     void addEdge(Value value, Value otherValue, PairHandle pair);
 
     void assignEqual(Solver&, PairHandle assignPair);
@@ -85,6 +86,7 @@ private:
     void assignDisequalByAlwaysDisequal(Solver&, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB);
 
     void pathInTree(Solver&, Value a, Value b, std::vector<BooleanValue>&);
+    void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
 
     EqualityInfo& infoFor(Value v) {
         return equalityInfos[v];

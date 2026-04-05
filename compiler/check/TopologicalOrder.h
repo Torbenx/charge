@@ -36,35 +36,38 @@ struct TopologicalOrder {
             return;
         }
 
-        std::vector<bool> mask;
-        mask.resize(sNode.orderIndex - tNode.orderIndex + 1);
+        std::vector<std::optional<NodeId>> maskVec;
+        maskVec.resize(sNode.orderIndex - tNode.orderIndex + 1);
+        auto mask = [&maskVec, offset = tNode.orderIndex](int_t index) -> auto& { return maskVec[index - offset]; };
         std::vector<NodeId> relocatedNodes;
 
-        int_t index = 0;
+        int_t index = tNode.orderIndex;
         int_t writeIndex = index;
-        NodeId* subOrder = order.data() + tNode.orderIndex;
-        for (; index < (int_t)mask.size(); index++) {
-            if (mask[index]) {
-                for (auto childId : at(subOrder[index]).children) {
+        mask(tNode.orderIndex) = source;
+        for (; index <= (int_t)sNode.orderIndex; index++) {
+            NodeId parentId = order[index];
+            if (mask(index).has_value()) {
+                for (auto childId : at(parentId).children) {
                     const Node& childNode = at(childId);
-                    if (childNode.orderIndex <= sNode.orderIndex) // childNode.orderIndex >= tNode.orderIndex is guaranteed
-                        mask[childNode.orderIndex - tNode.orderIndex] = true;
+                    if (childNode.orderIndex <= sNode.orderIndex && !mask(childNode.orderIndex).has_value()) {
+                        // childNode.orderIndex >= tNode.orderIndex is guaranteed
+                        mask(childNode.orderIndex) = parentId;
+                    }
                 }
-                relocatedNodes.push_back(subOrder[index]);
+                relocatedNodes.push_back(parentId);
             } else {
-                subOrder[writeIndex] = subOrder[index];
-                at(subOrder[index]).orderIndex = tNode.orderIndex + writeIndex;
+                order[writeIndex] = parentId;
+                at(parentId).orderIndex = writeIndex;
                 writeIndex += 1;
             }
         }
-        if (mask.back()) {
+        if (maskVec.back().has_value()) {
             // cycle
         }
-        for (int_t relocIndex = 0; relocIndex <(int_t)relocatedNodes.size(); writeIndex++, relocIndex++) {
-            subOrder[writeIndex] = relocatedNodes[relocIndex];
-            at(relocatedNodes[relocIndex]).orderIndex = tNode.orderIndex + writeIndex;
+        for (int_t relocIndex = 0; relocIndex < (int_t)relocatedNodes.size(); writeIndex++, relocIndex++) {
+            order[writeIndex] = relocatedNodes[relocIndex];
+            at(relocatedNodes[relocIndex]).orderIndex = writeIndex;
         }
-        std::copy(relocatedNodes.begin(), relocatedNodes.end(), order.begin() + writeIndex);
         sNode.children.push_back(target);
     }
 

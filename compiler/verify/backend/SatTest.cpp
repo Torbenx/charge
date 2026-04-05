@@ -118,9 +118,9 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     SolverImpl& solver = solverPtr->impl();
 
     // generate
-    VERIFY(solver.newAuxBoolean("var0_unused").id() == 0);
+    VERIFY(solver.newAuxBooleanVariable().id() == 0);
     for (int_t varId = 1; varId <= parser.variableCount; varId++)
-        VERIFY(solver.newAuxBoolean("var" + std::to_string(varId)).id() == varId * 2);
+        VERIFY(solver.newAuxBooleanVariable().id() == varId * 2);
     for (const auto& clause : parser.cnf) {
         std::vector<BooleanValue> outClause;
         for (int_t i = 0; i < (int_t)clause.size(); i++) {

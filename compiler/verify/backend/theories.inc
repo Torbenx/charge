@@ -6,17 +6,19 @@
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) THEORY(name, theoryValueKind)
 #endif
 
-#ifndef EQUALITY_THEORY
-#define EQUALITY_THEORY(valueKind) PAIR_THEORY(valueKind##Equality, Boolean, valueKind, 2)
-#endif
-
 THEORY(TrueFalse, Boolean)
 THEORY(ClauseGlueVariables, Boolean)
 THEORY(AuxBooleanVariables, Boolean)
-THEORY(AuxUninterpretedConstants, UninterpretedConstant)
+
 PAIR_THEORY(BooleanEquality, Boolean, Boolean, 1)
-EQUALITY_THEORY(UninterpretedConstant)
+PAIR_THEORY(UninterpretedConstantEquality, Boolean, UninterpretedConstant, 2)
+PAIR_THEORY(MemberEquality, Boolean, Member, 2)
+
+THEORY(AuxUninterpretedConstants, UninterpretedConstant)
+
+THEORY(MemberLiterals, Member)
+THEORY(CompositeMembers, Member)
+THEORY(AuxMemberVariables, Member)
 
 #undef THEORY
 #undef PAIR_THEORY
-#undef EQUALITY_THEORY

@@ -4,18 +4,14 @@
 
 namespace verify::backend {
 
-static Value newValue(SolverImpl& solver) {
-    return solver.newValue(TheoryId::AuxUninterpretedConstants);
-}
-
 static ClauseAndIndex equalityClause(SolverImpl& solver, BooleanValue lit) {
     return solver.reasonToClause(lit, makeReason<ReasonKind::Equality>({}));
 }
 
 TEST(VerifyBackend, EqualityTreePath1) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
 
     BooleanValue e12 = solver.equality(v1, v2);
     EXPECT_FALSE(solver.assignedEqual(v1, v2));
@@ -46,9 +42,9 @@ TEST(VerifyBackend, EqualityTreePath1) {
 
 TEST(VerifyBackend, EqualityTreePath2) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
 
     BooleanValue e12 = solver.equality(v1, v2);
     BooleanValue e13 = solver.equality(v1, v3);
@@ -70,9 +66,9 @@ TEST(VerifyBackend, EqualityTreePath2) {
 
 TEST(VerifyBackend, EqualityTreePath3) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
 
     BooleanValue e13 = solver.equality(v1, v3);
     BooleanValue e23 = solver.equality(v2, v3);
@@ -98,7 +94,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
     for (int_t i = 0; i < 4; i++) {
         vals.emplace_back();
         for (int_t j = 0; j < 4; j++)
-            vals.back().push_back(newValue(solver));
+            vals.back().push_back(solver.newAuxUninterpretedConstant());
     }
 
     solver.decideTrue(solver.equality(vals[0][0], vals[0][1]));
@@ -184,9 +180,9 @@ TEST(VerifyBackend, EqualityTreePath4) {
 
 TEST(VerifyBackend, EqualityPropagation1) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
     solver.addClause({ solver.equality(v1, v2) });
     solver.addClause({ solver.equality(v2, v3) });
     solver.addClause({ !solver.equality(v1, v3) });
@@ -196,10 +192,10 @@ TEST(VerifyBackend, EqualityPropagation1) {
 
 TEST(VerifyBackend, EqualityPropagation2) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBoolean({});
-    Value s = newValue(solver);
-    Value t1 = newValue(solver);
-    Value t2 = newValue(solver);
+    BooleanValue c = solver.newAuxBooleanVariable();
+    Value s = solver.newAuxUninterpretedConstant();
+    Value t1 = solver.newAuxUninterpretedConstant();
+    Value t2 = solver.newAuxUninterpretedConstant();
     solver.addClause({ c, solver.equality(s, t1), solver.equality(s, t2) });
     solver.addClause({ !c });
     solver.addClause({ solver.equality(t1, t2) });
@@ -210,10 +206,10 @@ TEST(VerifyBackend, EqualityPropagation2) {
 
 TEST(VerifyBackend, DisequalityPropagation1) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBoolean({});
-    Value s = newValue(solver);
-    Value t1 = newValue(solver);
-    Value t2 = newValue(solver);
+    BooleanValue c = solver.newAuxBooleanVariable();
+    Value s = solver.newAuxUninterpretedConstant();
+    Value t1 = solver.newAuxUninterpretedConstant();
+    Value t2 = solver.newAuxUninterpretedConstant();
     solver.addClause({ c, solver.equality(s, t1), solver.equality(s, t2) });
     solver.addClause({ !solver.equality(s, t1) });
     solver.addClause({ solver.equality(t1, t2) });
@@ -223,10 +219,10 @@ TEST(VerifyBackend, DisequalityPropagation1) {
 
 TEST(VerifyBackend, DisequalityPropagation2) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBoolean({});
-    Value s = newValue(solver);
-    Value t1 = newValue(solver);
-    Value t2 = newValue(solver);
+    BooleanValue c = solver.newAuxBooleanVariable();
+    Value s = solver.newAuxUninterpretedConstant();
+    Value t1 = solver.newAuxUninterpretedConstant();
+    Value t2 = solver.newAuxUninterpretedConstant();
     solver.addClause({ c, solver.equality(s, t1), solver.equality(s, t2) });
     solver.addClause({ solver.equality(t1, t2) });
     solver.addClause({ !solver.equality(s, t1) });
@@ -236,10 +232,10 @@ TEST(VerifyBackend, DisequalityPropagation2) {
 
 TEST(VerifyBackend, EqualityProblem) {
     SolverImpl solver;
-    Value s = newValue(solver);
-    Value t1 = newValue(solver);
-    Value t2 = newValue(solver);
-    Value t3 = newValue(solver);
+    Value s = solver.newAuxUninterpretedConstant();
+    Value t1 = solver.newAuxUninterpretedConstant();
+    Value t2 = solver.newAuxUninterpretedConstant();
+    Value t3 = solver.newAuxUninterpretedConstant();
 
     solver.addClause({ !solver.equality(s, t1), !solver.equality(s, t2), solver.equality(s, t3) });
     solver.addClause({ !solver.equality(s, t1), solver.equality(s, t2), !solver.equality(s, t3) });
@@ -292,9 +288,9 @@ TEST(VerifyBackend, EqualityProblem) {
 
 TEST(VerifyBackend, DisequalityOfParentAppliesToNewEdgeAddedOnChild) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
     solver.sat.propagate();
 
     solver.decideTrue(solver.equality(v1, v2));
@@ -313,9 +309,9 @@ TEST(VerifyBackend, DisequalityOfParentAppliesToNewEdgeAddedOnChild) {
 
 TEST(VerifyBackend, OutOfOrderRevertedDisequalities) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
     solver.sat.propagate();
 
     BooleanValue e13 = solver.equality(v1, v3);
@@ -347,10 +343,10 @@ TEST(VerifyBackend, OutOfOrderRevertedDisequalities) {
 
 TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     SolverImpl solver;
-    Value v1 = newValue(solver);
-    Value v2 = newValue(solver);
-    Value v3 = newValue(solver);
-    Value v4 = newValue(solver);
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
+    Value v4 = solver.newAuxUninterpretedConstant();
     solver.sat.propagate();
 
     solver.decideTrue(!solver.equality(v3, v4));
@@ -372,8 +368,8 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
 
 TEST(VerifyBackend, BooleanEqual) {
     SolverImpl solver;
-    auto a = solver.newAuxBoolean("a");
-    auto b = solver.newAuxBoolean("b");
+    auto a = solver.newAuxBooleanVariable();
+    auto b = solver.newAuxBooleanVariable();
     EXPECT_EQ(a, solver.equality(a, true_literal));
     EXPECT_EQ(!a, solver.equality(!a, true_literal));
     EXPECT_EQ(!a, solver.equality(a, false_literal));

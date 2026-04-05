@@ -7,6 +7,9 @@ target_sources(compiler
     DataManager.cpp
     DataManager.h
     EqualityTests.cpp
+    Members.cpp
+    Members.h
+    MemberTests.cpp
     PairSet.h
     Reason.h
     RewriteEquality.cpp

@@ -2,6 +2,7 @@
 
 #include <verify/backend/Clauses.h>
 #include <verify/backend/DataManager.h>
+#include <verify/backend/Members.h>
 #include <verify/backend/PairSet.h>
 #include <verify/backend/RewriteEquality.h>
 #include <verify/backend/SatCore.h>
@@ -24,16 +25,8 @@ struct SolverImpl : Solver, SatCore::Interface {
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
     struct RewriteEqualities {
-        using arr = std::array<RewriteEquality, std::to_underlying(ValueKind::COUNT) - 1>;
-        RewriteEqualities(Solver&);
-        template<int_t... kinds>
-        RewriteEqualities(Solver&, int_sequence<kinds...>);
-        RewriteEquality& operator[](ValueKind kind) { return m_rwes[std::to_underlying(kind) - 1]; }
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
-
-    private:
-        arr m_rwes;
     };
 
     SolverImpl();
@@ -56,7 +49,7 @@ struct SolverImpl : Solver, SatCore::Interface {
     DataManager data;
 
     // Setup literal infos before SatCore
-    KindData<SatCore::LiteralInfo> literalInfos;
+    KindData<SatCore::LiteralInfo, ValueKind::Boolean> literalInfos;
     // Initialize SatCore and Clauses next, some theories may perform assignments during construction
     SatCore sat;
     Clauses clauses;
@@ -64,9 +57,11 @@ struct SolverImpl : Solver, SatCore::Interface {
     BuiltinTrueFalse builtinTrueFalse;
 
     std::array<PairSet, std::to_underlying(ValueKind::COUNT)> pairs;
-    RewriteEqualities rewriteEqualities;
 
-    TheoryData<std::string, 2> auxBoolNames;
+    RewriteEqualities rewriteEqualities;
+    RewriteEquality uninterpConstantEquality;
+
+    Members members;
 };
 
 inline SolverImpl& Solver::impl() {

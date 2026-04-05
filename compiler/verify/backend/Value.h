@@ -13,8 +13,8 @@ struct Solver;
 enum class ValueKind : uint8_t {
     Boolean,
     UninterpretedConstant,
+    Member,
     // Type,
-    // Member,
     // MemoryDeclaration,
 
     COUNT,
@@ -32,32 +32,6 @@ constexpr ValueKind kindOf(TheoryId theory) {
     switch (theory) {
 #define THEORY(name, valueKind) \
     case TheoryId::name:        \
-        return ValueKind::valueKind;
-#include <verify/backend/theories.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-constexpr TheoryId equalityTheoryFor(ValueKind valueKind) {
-    switch (valueKind) {
-    case ValueKind::Boolean:
-        return TheoryId::BooleanEquality;
-#define EQUALITY_THEORY(valueKind, ...) \
-    case ValueKind::valueKind:          \
-        return TheoryId::valueKind##Equality;
-#include <verify/backend/theories.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-constexpr ValueKind valueKindOfEqualityTheory(TheoryId theory) {
-    switch (theory) {
-    case TheoryId::BooleanEquality:
-        return ValueKind::Boolean;
-#define EQUALITY_THEORY(valueKind, ...) \
-    case TheoryId::valueKind##Equality: \
         return ValueKind::valueKind;
 #include <verify/backend/theories.inc>
     default:
@@ -103,6 +77,18 @@ struct BooleanValue : Value {
 
 inline constexpr BooleanValue true_literal = BooleanValue(TheoryId::TrueFalse, 0);
 inline constexpr BooleanValue false_literal = BooleanValue(TheoryId::TrueFalse, 1);
+
+struct Member : Value {
+    using Value::Value;
+    constexpr explicit Member(Value v)
+        : Value(v) { }
+
+    bool literal() const { return theory() == TheoryId::MemberLiterals; }
+    bool composite() const { return theory() == TheoryId::CompositeMembers; }
+    bool variable() const { return !literal() && !composite(); }
+};
+
+inline constexpr Member identity_member = Member(TheoryId::CompositeMembers, 0);
 
 struct ClauseAndIndex {
     std::span<const BooleanValue> clause;

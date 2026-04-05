@@ -59,7 +59,7 @@ struct Clauses {
     std::vector<std::vector<BooleanValue>> clauses;
 
     //! The occurrence map for each literal
-    KindData<std::vector<LiteralInstance>> instances;
+    KindData<std::vector<LiteralInstance>, ValueKind::Boolean> instances;
 };
 
 }

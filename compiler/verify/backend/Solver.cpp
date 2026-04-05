@@ -14,8 +14,8 @@ SolverImpl::SolverImpl()
     : literalInfos(*this, ValueKind::Boolean)
     , clauses(*this)
     , builtinTrueFalse(*this)
-    , rewriteEqualities(*this)
-    , auxBoolNames(*this, TheoryId::AuxBooleanVariables) { }
+    , uninterpConstantEquality(*this, ValueKind::UninterpretedConstant, TheoryId::UninterpretedConstantEquality)
+    , members(*this) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     BooleanValue b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -50,19 +50,18 @@ ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue,
 
 // ----------------------- Rewrite equalities -----------------------
 
-SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver)
-    : RewriteEqualities(solver, make_int_sequence<(int_t)ValueKind::COUNT - 1>()) { }
-
-template<int_t... kinds>
-SolverImpl::RewriteEqualities::RewriteEqualities(Solver& solver, int_sequence<kinds...>)
-    : m_rwes { RewriteEquality(solver, ValueKind(kinds + 1), equalityTheoryFor(ValueKind(kinds + 1)))... } { }
-
-bool SolverImpl::RewriteEqualities::testReason(Solver& solver, BooleanValue literal, const Reason& reason) {
-    return (*this)[valueKindOfEqualityTheory(literal.theory())].testReason(solver, literal, reason);
+bool SolverImpl::RewriteEqualities::testReason(Solver& solver, BooleanValue lit, const Reason& reason) {
+    if (lit.theory() == TheoryId::UninterpretedConstantEquality)
+        return solver.impl().uninterpConstantEquality.testReason(solver, lit, reason);
+    else
+        VERIFY_NOT_REACHED();
 }
 
-ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, BooleanValue literal, const Reason& reason) {
-    return (*this)[valueKindOfEqualityTheory(literal.theory())].reasonToClause(solver, literal, reason);
+ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, BooleanValue lit, const Reason& reason) {
+    if (lit.theory() == TheoryId::UninterpretedConstantEquality)
+        return solver.impl().uninterpConstantEquality.reasonToClause(solver, lit, reason);
+    else
+        VERIFY_NOT_REACHED();
 }
 
 // ------------------------ SatCore forwards ------------------------
@@ -90,16 +89,14 @@ bool Solver::alwaysTrue(BooleanValue value) {
 
 void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
-
-#define EQUALITY_THEORY(valueKind, ...) impl.rewriteEqualities[ValueKind::valueKind].newDecisionLevel(impl);
-#include <verify/backend/theories.inc>
+    impl.uninterpConstantEquality.newDecisionLevel(impl);
+    impl.members.newDecisionLevel(impl);
 }
 
 void SatCore::Interface::onBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
-
-#define EQUALITY_THEORY(valueKind, ...) impl.rewriteEqualities[ValueKind::valueKind].backtrack(impl);
-#include <verify/backend/theories.inc>
+    impl.uninterpConstantEquality.backtrack(impl);
+    impl.members.backtrack(impl);
 }
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
@@ -131,19 +128,20 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
     impl.clauses.propagateAssignment(impl, lit);
 
     switch (lit.theory()) {
-
-#define EQUALITY_THEORY(valueKind)                                             \
-    case TheoryId::valueKind##Equality: {                                      \
-        auto& rwe = impl.rewriteEqualities[ValueKind::valueKind];              \
-        auto pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
-        if (lit.negated())                                                     \
-            rwe.applyDisequal(impl, pair, true);                               \
-        else                                                                   \
-            rwe.applyEqual(impl, pair, true);                                  \
-        break;                                                                 \
+    case TheoryId::UninterpretedConstantEquality: {
+        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
+        if (lit.negated())
+            impl.uninterpConstantEquality.applyDisequal(impl, pair, true);
+        else
+            impl.uninterpConstantEquality.applyEqual(impl, pair, true);
+        break;
     }
-#include <verify/backend/theories.inc>
-
+    case TheoryId::MemberEquality: {
+        PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
+        if (!lit.negated())
+            impl.members.applyEqual(impl, pair, true);
+        break;
+    }
     default:
         break;
     }
@@ -163,19 +161,20 @@ void SatCore::Interface::reapplyAssignment(Literal lit) {
     auto& impl = static_cast<SolverImpl&>(*this);
 
     switch (lit.theory()) {
-
-#define EQUALITY_THEORY(valueKind)                                             \
-    case TheoryId::valueKind##Equality: {                                      \
-        auto& rwe = impl.rewriteEqualities[ValueKind::valueKind];              \
-        auto pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
-        if (lit.negated())                                                     \
-            rwe.applyDisequal(impl, pair, false);                              \
-        else                                                                   \
-            rwe.applyEqual(impl, pair, false);                                 \
-        break;                                                                 \
+    case TheoryId::UninterpretedConstantEquality: {
+        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
+        if (lit.negated())
+            impl.uninterpConstantEquality.applyDisequal(impl, pair, false);
+        else
+            impl.uninterpConstantEquality.applyEqual(impl, pair, false);
+        break;
     }
-#include <verify/backend/theories.inc>
-
+    case TheoryId::MemberEquality: {
+        PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
+        if (!lit.negated())
+            impl.members.applyEqual(impl, pair, false);
+        break;
+    }
     default:
         break;
     }
@@ -229,6 +228,12 @@ int_t Solver::booleanCount(TheoryId theory) {
     return valueCount(theory) / 2;
 }
 
+// ------------------------ Members forwards ------------------------
+
+Member Solver::composeMembers(std::span<const Member> expr) {
+    return impl().members.compose(*this, expr);
+}
+
 // -------------------------- Rewrite order -------------------------
 
 std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
@@ -241,7 +246,14 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::ClauseGlueVariables:
     case TheoryId::AuxBooleanVariables:
     case TheoryId::AuxUninterpretedConstants:
+    case TheoryId::MemberLiterals:
+    case TheoryId::AuxMemberVariables:
         return a.id() <=> b.id();
+
+    case TheoryId::CompositeMembers: {
+        auto& ms = impl().members;
+        return ms.compositeLabel((Member)a) <=> ms.compositeLabel((Member)b);
+    }
 
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)                                     \
     case TheoryId::name: {                                                                                   \
@@ -271,7 +283,6 @@ std::strong_ordering PairSet::compare(Solver& solver, Pair a, Pair b) {
 }
 
 uint32_t PairSet::makeNode(Solver&, Pair pair, TreeLabel label) {
-    PairHandle handle(kindOf(pair.source.theory()), nextNodeHandle());
     return Base::makeNode(label, pair);
 }
 
@@ -285,7 +296,10 @@ void SolverImpl::onNewPair(PairHandle handle) {
     }
 #include <verify/backend/theories.inc>
 
-    rewriteEqualities[handle.valueKind()].newPair(*this, handle);
+    if (handle.valueKind() == ValueKind::UninterpretedConstant)
+        uninterpConstantEquality.newPair(*this, handle);
+    else if (handle.valueKind() == ValueKind::Member)
+        members.newPair(*this, handle);
 }
 
 void SolverImpl::onNewBooleanPair(PairHandle handle) {
@@ -412,23 +426,36 @@ BooleanValue Solver::equality(Value a, Value b) {
 
 BooleanValue Solver::equality(PairHandle handle) {
     if (handle.specialPair()) {
+        // Encodes true == b which is equivalent to b
         auto b = handle.encodedValue();
         VERIFY(kindOf(b.theory()) == ValueKind::Boolean);
-        // Encodes true == b which is equivalent to b
         return (BooleanValue)b;
     }
 
     if (handle.valueKind() == ValueKind::Boolean) {
         return (BooleanValue)encodePairTheoryValue<TheoryId::BooleanEquality>(handle);
+    } else if (handle.valueKind() == ValueKind::UninterpretedConstant) {
+        return impl().uninterpConstantEquality.makeEquality(handle);
+    } else if (handle.valueKind() == ValueKind::Member) {
+        return impl().members.makeEquality(handle);
     } else {
-        return impl().rewriteEqualities[handle.valueKind()].makeEquality(handle);
+        VERIFY_NOT_REACHED();
     }
 }
 
 bool Solver::assignedEqual(Value a, Value b) {
     auto valueKind = kindOf(a.theory());
     VERIFY(valueKind == kindOf(b.theory()));
-    return impl().rewriteEqualities[valueKind].connected(a, b);
+    if (valueKind == ValueKind::Boolean) {
+        return (assignedTrue((BooleanValue)a) && assignedTrue((BooleanValue)b))
+            || (assignedFalse((BooleanValue)a) && assignedFalse((BooleanValue)b));
+    } else if (valueKind == ValueKind::UninterpretedConstant) {
+        return impl().uninterpConstantEquality.rewrite(a) == impl().uninterpConstantEquality.rewrite(b);
+    } else if (valueKind == ValueKind::Member) {
+        return impl().members.rewrite((Member)a) == impl().members.rewrite((Member)b);
+    } else {
+        VERIFY_NOT_REACHED();
+    }
 }
 
 // ------------------------- Value factories ------------------------
@@ -443,10 +470,16 @@ BooleanValue SolverImpl::newBoolean(TheoryId theory) {
     return result;
 }
 
-BooleanValue Solver::newAuxBoolean(std::string name) {
-    BooleanValue v = impl().newBoolean(TheoryId::AuxBooleanVariables);
-    impl().auxBoolNames[v] = std::move(name);
-    return v;
+BooleanValue Solver::newAuxBooleanVariable() {
+    return impl().newBoolean(TheoryId::AuxBooleanVariables);
+}
+
+Value Solver::newAuxUninterpretedConstant() {
+    return impl().newValue(TheoryId::AuxUninterpretedConstants);
+}
+
+Member Solver::newAuxMemberVariable() {
+    return (Member)impl().newValue(TheoryId::AuxMemberVariables);
 }
 
 }

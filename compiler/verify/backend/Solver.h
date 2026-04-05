@@ -25,6 +25,11 @@ struct Solver {
     int_t valueCount(TheoryId);
     int_t booleanCount(TheoryId);
 
+    Member composeMembers(std::span<const Member>);
+    Member composeMembers(std::initializer_list<Member> expr) {
+        return composeMembers((std::span<const Member>)expr);
+    }
+
     std::strong_ordering rewriteOrder(Value, Value);
 
     PairHandle findPair(Value, Value);
@@ -35,7 +40,9 @@ struct Solver {
     BooleanValue equality(PairHandle);
     bool assignedEqual(Value, Value);
 
-    BooleanValue newAuxBoolean(std::string name);
+    BooleanValue newAuxBooleanVariable();
+    Value newAuxUninterpretedConstant();
+    Member newAuxMemberVariable();
 
     /*! \brief Return whether \p a and \p b are always disequal
 

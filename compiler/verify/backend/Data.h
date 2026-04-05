@@ -44,10 +44,10 @@ struct KindDataBase {
     std::byte** m_table = nullptr;
 };
 
-template<typename T, int_t groupSize = 1>
+template<typename T, TheoryId theory, int_t groupSize = 1>
 struct TheoryData : private TheoryDataBase {
     static_assert(groupSize > 0);
-    TheoryData(Solver& solver, TheoryId theory)
+    TheoryData(Solver& solver)
         : TheoryDataBase(solver, theory, sizeof(T), groupSize, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
 
     T& operator[](Value v) const {
@@ -55,10 +55,12 @@ struct TheoryData : private TheoryDataBase {
     }
 };
 
-template<typename T>
+template<typename T, ValueKind kind = ValueKind::COUNT>
 struct KindData : private KindDataBase {
-    KindData(Solver& solver, ValueKind kind)
+    KindData(Solver& solver) requires (kind < ValueKind::COUNT)
         : KindDataBase(solver, kind, sizeof(T), 1, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
+    KindData(Solver& solver, ValueKind dynamicKind)
+        : KindDataBase(solver, dynamicKind, sizeof(T), 1, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
 
     T& operator[](Value v) const {
         return *(reinterpret_cast<T*>(theoryData(v.theory())) + v.id());
