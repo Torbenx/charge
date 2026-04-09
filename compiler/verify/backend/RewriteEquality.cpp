@@ -304,7 +304,7 @@ void RewriteEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
         infoFor(tree[index].value).edgesOffset += 1;
 }
 
-void RewriteEquality::pathInTree(Solver& solver, Value a, Value b, std::vector<BooleanValue>& result) {
+void RewriteEquality::pathInTree(Solver& solver, Value a, Value b, ClauseBuilder& result) {
     VERIFY(connected(a, b));
 
     struct StackEntry {
@@ -350,13 +350,13 @@ void RewriteEquality::pathInTree(Solver& solver, Value a, Value b, std::vector<B
         int_t sIndex = rootIndex + tree[index].linkSource;
         int_t tIndex = index + tree[index].linkTarget;
         auto pair = solver.findPair({ sIndex == -1 ? treeRoot : tree[sIndex].value, tree[tIndex].value });
-        result.push_back(!makeEquality(pair));
+        result.add(solver, !makeEquality(pair));
         stack.push_back({ index, tIndex, bIndex });
         bIndex = sIndex;
     }
 }
 
-void RewriteEquality::path(Solver& solver, Value a, Value b, std::vector<BooleanValue>& result) {
+void RewriteEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& result) {
     Value aRoot = infoFor(a).root;
     Value bRoot = infoFor(b).root;
     if (aRoot == bRoot) {
@@ -383,7 +383,7 @@ void RewriteEquality::path(Solver& solver, Value a, Value b, std::vector<Boolean
         const auto& entry = backtrackTrace[aIndex];
         aIndex = backtrackPos(entry.roots.source);
         if (aIndex == bIndex) {
-            result.push_back(!makeEquality(solver.findPair(entry.link)));
+            result.add(solver, !makeEquality(solver.findPair(entry.link)));
             path(solver, entry.link.target, a, result);
             path(solver, entry.link.source, b, result);
             return;
@@ -408,29 +408,29 @@ bool RewriteEquality::testReason(Solver& solver, BooleanValue assignedLiteral, c
 }
 
 ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
-    auto& result = solver.scratchClause();
+    auto result = solver.beginClause();
 
     if (reason.kind() == ReasonKind::Equality) {
-        result.push_back(assignedLiteral);
+        result.add(solver, assignedLiteral);
 
         auto [a, b] = solver.at(pairOf(assignedLiteral));
         path(solver, a, b, result);
 
-        return { .clause = result, .forceLiteralIndex = 0 };
+        return { .clause = solver.viewClause(result), .forceLiteralIndex = 0 };
     }
 
     // disequality
-    result.push_back(assignedLiteral);
+    result.add(solver, assignedLiteral);
     auto data = reason.getData<DisequalityReason>();
     if (reason.kind() == ReasonKind::Disequality)
-        result.push_back(makeEquality(PairHandle(m_valueKind, data.pairId())));
+        result.add(solver, makeEquality(PairHandle(m_valueKind, data.pairId())));
 
     auto [impliedA, impliedB] = solver.at(pairOf(assignedLiteral));
     auto [originalA, originalB] = data.diseqPair();
     path(solver, impliedA, originalA, result);
     path(solver, impliedB, originalB, result);
 
-    return { .clause = result, .forceLiteralIndex = 0 };
+    return { .clause = solver.viewClause(result), .forceLiteralIndex = 0 };
 }
 
 void RewriteEquality::newDecisionLevel(Solver& solver) {

@@ -32,9 +32,9 @@ bool SolverImpl::AlwaysReason::testReason(Solver&, BooleanValue, const Reason&) 
 }
 
 ClauseAndIndex SolverImpl::AlwaysReason::reasonToClause(Solver& solver, BooleanValue lit, const Reason&) {
-    auto& clause = solver.scratchClause();
-    clause.push_back(lit);
-    return { clause, 0 };
+    auto builder = solver.beginClause();
+    builder.add(solver, lit);
+    return { solver.viewClause(builder), 0 };
 }
 
 // ------------------------- Decision reason ------------------------
@@ -83,6 +83,12 @@ void Solver::assignTrue(BooleanValue trueLit, const Reason& reason) {
 }
 bool Solver::alwaysTrue(BooleanValue value) {
     return impl().sat.alwaysTrue(value);
+}
+ClauseBuilder Solver::beginClause() {
+    return impl().sat.beginClause();
+}
+std::span<const BooleanValue> Solver::viewClause(const ClauseBuilder& builder) {
+    return impl().sat.viewClause(builder);
 }
 
 // ------------------------ SatCore callbacks -----------------------
@@ -215,6 +221,11 @@ void Solver::addClause(std::vector<BooleanValue> clause) {
     }
 
     impl().clauses.addClause(*this, clause);
+}
+
+void Solver::addClause(const ClauseBuilder& builder) {
+    auto span = impl().sat.viewClause(builder);
+    addClause({ span.begin(), span.end() });
 }
 
 // -------------------------- Data forwards -------------------------

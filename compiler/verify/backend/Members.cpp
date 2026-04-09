@@ -108,7 +108,7 @@ std::vector<Member> Members::rewrite(Member m) {
 
 void Members::markUsesAsDirty(VariableInfo& varInfo) {
     for (RewriteTracePosition use : varInfo.rewriteUses) {
-        VERIFY(!varInfo.tracePos.has_value() || use < varInfo.tracePos.value());
+        VERIFY(!varInfo.rwPos.has_value() || use < varInfo.rwPos.value());
         dirtyRewrites.push(use);
     }
     for (PairHandle pair : varInfo.pairUses) {
@@ -121,7 +121,7 @@ void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> exp
     auto& varInfo = infoFor(target);
     RewriteTracePosition tracePos(rewriteTrace.size());
     rewriteTrace.push_back(target);
-    pairs[encodePairTheoryValue<TheoryId::MemberEquality>(pair)].rewrite = tracePos;
+    pairs[makeEquality(pair)].rewrite = tracePos;
     for (Member m : expression) {
         if (!m.literal())
             infoFor(m).rewriteUses.push_back(tracePos);
@@ -129,8 +129,23 @@ void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> exp
     varInfo.currentRewrite = expression;
     varInfo.rewriteExpression = std::move(expression);
     varInfo.rewritePair = pair;
-    varInfo.tracePos = tracePos;
+    varInfo.rwPos = tracePos;
     markUsesAsDirty(varInfo);
+}
+
+void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
+    println("add identity rewrite from {}", pair.pairId());
+    IdentityRewriteTracePosition tracePos(identityRewriteTrace.size());
+    pairs[makeEquality(pair)].identityRewrite = tracePos;
+    for (Member target : targets) {
+        auto& varInfo = infoFor(target);
+        varInfo.currentRewrite.clear();
+        varInfo.rewriteExpression.clear();
+        varInfo.rewritePair = pair;
+        varInfo.idRwPos = tracePos;
+        markUsesAsDirty(varInfo);
+    }
+    identityRewriteTrace.push_back({ std::move(targets), pair });
 }
 
 void Members::updateRewrite(VariableInfo& varInfo) {
@@ -187,23 +202,32 @@ void Members::updatePair(Solver& solver, PairHandle handle, bool propagate) {
     if (ordering > 0)
         std::swap(aRW, bRW);
 
-    VERIFY(!bRW.empty());
-    VERIFY(!aRW.empty());
+    VERIFY(!aRW.empty()); // because aRW != bRW and aRW.size >= bRW.size
+    if (bRW.empty() && std::ranges::any_of(aRW, [](Member m) { return m.literal(); })) {
+        decideDisequal(solver, handle, propagate);
+        return;
+    }
     if (aRW.front().literal() && bRW.front().literal()) {
         VERIFY(aRW.front() != bRW.front());
         decideDisequal(solver, handle, propagate);
+        return;
     }
     if (aRW.back().literal() && bRW.back().literal()) {
         VERIFY(aRW.back() != bRW.back());
         decideDisequal(solver, handle, propagate);
+        return;
     }
 
     if (solver.assignedTrue(equality)) {
         if (bRW.size() == 0) {
-            // TODO: Rewrite all elements of a to the identity?
-        } else if (bRW.size() == 1) {
+            // Rewrite all elements of a to the identity
+            addIdentityRewrite(std::move(aRW), handle);
+        } else if (auto subRange = std::ranges::search(aRW, bRW); !subRange.empty()) {
+            aRW.erase(subRange.begin(), subRange.end());
+            addIdentityRewrite(std::move(aRW), handle);
+        } else if (bRW.size() == 1 && !bRW[0].literal()) {
             // Rewrite b[0] to a
-            addRewrite(bRW[0], handle, aRW);
+            addRewrite(bRW[0], handle, std::move(aRW));
         } else {
             // Undecided
         }
@@ -278,7 +302,7 @@ bool Members::testReason(Solver&, BooleanValue assignedLiteral, const Reason& re
         VERIFY_NOT_REACHED();
 }
 
-void Members::explainRewrite(Solver& solver, Member m, std::vector<BooleanValue>& clause) {
+void Members::explainRewrite(Solver& solver, Member m, ClauseBuilder& clause) {
     if (m.literal())
         return;
     if (m.composite()) {
@@ -288,39 +312,40 @@ void Members::explainRewrite(Solver& solver, Member m, std::vector<BooleanValue>
     }
 
     auto& varInfo = infoFor(m);
-    if (!varInfo.hadRewrite(backtrackCounter) || varInfo.explainCounter == explainCounter)
+    if (!varInfo.hadRewrite(backtrackCounter))
         return;
 
-    varInfo.explainCounter = explainCounter;
     VERIFY(varInfo.rewritePair.has_value());
-    clause.push_back(!makeEquality(*varInfo.rewritePair));
-    Pair pair = solver.at(*varInfo.rewritePair);
-    explainRewrite(solver, (Member)pair.source, clause);
-    explainRewrite(solver, (Member)pair.target, clause);
+    if (clause.add(solver, !makeEquality(*varInfo.rewritePair))) {
+        Pair pair = solver.at(*varInfo.rewritePair);
+        explainRewrite(solver, (Member)pair.source, clause);
+        explainRewrite(solver, (Member)pair.target, clause);
+    }
 }
 
 ClauseAndIndex Members::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     // TODO: This likely doesn't work correctly with out of order reverted rewrites
     PairHandle pair = pairOf(assignedLiteral);
     auto [a, b] = solver.at(pair);
-    auto& clause = solver.scratchClause();
+    ClauseBuilder clause = solver.beginClause();
     if (reason.kind() == ReasonKind::MemberEquality)
         VERIFY(!assignedLiteral.negated());
     else if (reason.kind() == ReasonKind::MemberDisequality)
         VERIFY(assignedLiteral.negated());
     else
         VERIFY_NOT_REACHED();
-    clause.push_back(assignedLiteral);
+    clause.add(solver, assignedLiteral);
 
-    explainCounter += 1;
     explainRewrite(solver, (Member)a, clause);
     explainRewrite(solver, (Member)b, clause);
-    return { clause, 0 };
+    return { solver.viewClause(clause), 0 };
 }
 
 void Members::newDecisionLevel(Solver& solver) {
     rewriteDecisionPoints.push_back(rewriteTrace.size());
     VERIFY((int_t)rewriteDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    identityRewriteDecisionPoints.push_back(identityRewriteTrace.size());
+    VERIFY((int_t)identityRewriteDecisionPoints.size() == solver.currentDecisionLevel() + 1);
     decidedPairDecisionPoints.push_back(decidedPairTrace.size());
     VERIFY((int_t)decidedPairDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
@@ -329,18 +354,20 @@ void Members::backtrack(Solver& solver) {
     VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
     int_t rwTargetSize = rewriteDecisionPoints[lastLevelToRevert];
+    int_t idRwTargetSize = identityRewriteDecisionPoints[lastLevelToRevert];
     int_t eqTargetSize = decidedPairDecisionPoints[lastLevelToRevert];
     backtrackCounter += 1;
 
     for (int_t i = rewriteTrace.size() - 1; i >= rwTargetSize; i--) {
         Member target = rewriteTrace[i];
         auto& varInfo = infoFor(target);
-        VERIFY(varInfo.tracePos.has_value() && varInfo.tracePos.value() == RewriteTracePosition(i));
+        VERIFY(varInfo.rwPos == RewriteTracePosition(i));
+        VERIFY(!varInfo.idRwPos.has_value());
         VERIFY(varInfo.rewritePair.has_value());
         auto& pairInfo = pairs[makeEquality(*varInfo.rewritePair)];
         VERIFY(pairInfo.rewrite == RewriteTracePosition(i));
         pairInfo.rewrite.reset();
-        varInfo.tracePos.reset();
+        varInfo.rwPos.reset();
         varInfo.backtrackCounter = backtrackCounter;
         varInfo.currentRewrite = { target };
         for (Member m : varInfo.rewriteExpression) {
@@ -354,6 +381,27 @@ void Members::backtrack(Solver& solver) {
     }
     rewriteTrace.erase(rewriteTrace.begin() + rwTargetSize, rewriteTrace.end());
     rewriteDecisionPoints.resize(lastLevelToRevert);
+
+    for (int_t i = identityRewriteTrace.size() - 1; i >= idRwTargetSize; i--) {
+        auto& entry = identityRewriteTrace[i];
+        for (Member target : entry.targets) {
+            auto& varInfo = infoFor(target);
+            VERIFY(!varInfo.rwPos.has_value());
+            VERIFY(varInfo.idRwPos == IdentityRewriteTracePosition(i));
+            VERIFY(varInfo.rewritePair == entry.rewritePair);
+            VERIFY(varInfo.rewriteExpression.empty());
+            VERIFY(varInfo.currentRewrite.empty());
+            varInfo.idRwPos.reset();
+            varInfo.backtrackCounter = backtrackCounter;
+            varInfo.currentRewrite = { target };
+            markUsesAsDirty(varInfo);
+        }
+        auto& pairInfo = pairs[makeEquality(entry.rewritePair)];
+        VERIFY(pairInfo.identityRewrite == IdentityRewriteTracePosition(i));
+        pairInfo.identityRewrite.reset();
+    }
+    identityRewriteTrace.erase(identityRewriteTrace.begin() + idRwTargetSize, identityRewriteTrace.end());
+    identityRewriteDecisionPoints.resize(lastLevelToRevert);
 
     for (int_t i = eqTargetSize; i < (int_t)decidedPairTrace.size(); i++) {
         auto& pairInfo = pairs[encodePairTheoryValue<TheoryId::MemberEquality>(decidedPairTrace[i])];

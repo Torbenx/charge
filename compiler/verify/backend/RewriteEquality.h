@@ -85,8 +85,8 @@ private:
     void assignDisequal(Solver&, PairHandle assignPair, PairHandle diseqPair);
     void assignDisequalByAlwaysDisequal(Solver&, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB);
 
-    void pathInTree(Solver&, Value a, Value b, std::vector<BooleanValue>&);
-    void path(Solver&, Value a, Value b, std::vector<BooleanValue>&);
+    void pathInTree(Solver&, Value a, Value b, ClauseBuilder&);
+    void path(Solver&, Value a, Value b, ClauseBuilder&);
 
     EqualityInfo& infoFor(Value v) {
         return equalityInfos[v];

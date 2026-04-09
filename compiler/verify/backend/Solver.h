@@ -17,9 +17,12 @@ struct Solver {
     bool assignedFalse(BooleanValue lit);
     void decideTrue(BooleanValue literal);
     void assignTrue(BooleanValue trueLit, const Reason& reason);
-
     bool alwaysTrue(BooleanValue);
     bool alwaysFalse(BooleanValue v) { return alwaysTrue(!v); }
+
+    ClauseBuilder beginClause();
+    std::span<const BooleanValue> viewClause(const ClauseBuilder&);
+    void addClause(const ClauseBuilder& builder);
     void addClause(std::vector<BooleanValue> clause);
 
     int_t valueCount(TheoryId);
@@ -51,16 +54,9 @@ struct Solver {
     */
     bool alwaysDisequal(Value a, Value b);
 
-    std::vector<BooleanValue>& scratchClause() {
-        m_scratchClause.clear();
-        return m_scratchClause;
-    }
-
 private:
     friend SolverImpl;
     Solver();
-
-    std::vector<BooleanValue> m_scratchClause;
 };
 
 }

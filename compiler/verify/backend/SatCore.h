@@ -62,6 +62,7 @@ struct SatCore {
 
         uint32_t subTraceIndex = -1;
         uint32_t lastContainingClauseId = -1;
+        uint32_t lastContainingLearnClauseId = -1;
 
         bool tentativelyTrue() const { return firstReason.has_value(); }
     };
@@ -88,15 +89,17 @@ struct SatCore {
         wipClause.clear();
         return r;
     }
-    void addToClause(const ClauseBuilder& b, Literal lit) {
+    bool addToClause(const ClauseBuilder& b, Literal lit) {
         VERIFY(b.clauseId == nextClauseId - 1);
         auto& info = infoFor(lit);
         if (info.lastContainingClauseId != b.clauseId) {
             wipClause.push_back(lit);
             info.lastContainingClauseId = b.clauseId;
+            return true;
         }
+        return false;
     }
-    std::span<const Literal> endClause(const ClauseBuilder& b) {
+    std::span<const Literal> viewClause(const ClauseBuilder& b) {
         VERIFY(b.clauseId == nextClauseId - 1);
         return wipClause;
     }
@@ -182,6 +185,8 @@ private:
         return trace[pos.index];
     }
 
+    bool addToLearnClause(Literal lit);
+
     //! Try to learn a new clause from \p conflict
     /*!
     The function uses the current subTrace that should be from the backtrack() operation that
@@ -224,6 +229,9 @@ private:
 
     uint32_t nextClauseId = 0;
     std::vector<Literal> wipClause;
+
+    uint32_t learnClauseId = 0;
+    std::vector<Literal> learnClause;
 
     std::vector<Conflict> conflicts;
     std::vector<SubTraceEntry> subTrace;

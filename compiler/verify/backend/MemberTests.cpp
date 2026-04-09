@@ -100,4 +100,57 @@ TEST(VerifyBackend, MembersRewriteUpdate) {
     EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
 }
 
+TEST(VerifyBackend, MembersIdentityRewrite) {
+    SolverImpl solver;
+    Member v1 = solver.newAuxMemberVariable();
+    Member v2 = solver.newAuxMemberVariable();
+    Member l1 = newLiteral(solver);
+
+    BooleanValue eq0 = solver.equality(solver.composeMembers({ v1, v2 }), l1);
+    BooleanValue eq1 = solver.equality(v1, l1);
+    BooleanValue eq2 = solver.equality(v2, identity_member);
+
+    solver.decideTrue(eq0);
+    solver.sat.propagate();
+    solver.decideTrue(eq1);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(eq2));
+
+    solver.sat.backtrack(0);
+
+    solver.decideTrue(eq1);
+    solver.sat.propagate();
+    solver.decideTrue(eq2);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(eq0));
+
+    solver.sat.backtrack(0);
+
+    solver.decideTrue(eq2);
+    solver.sat.propagate();
+    solver.decideTrue(eq0);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(eq1));
+}
+
+TEST(VerifyBackend, MembersSubExpr) {
+    SolverImpl solver;
+    Member v1 = solver.newAuxMemberVariable();
+    Member v2 = solver.newAuxMemberVariable();
+    Member v3 = solver.newAuxMemberVariable();
+    Member l1 = newLiteral(solver);
+
+    BooleanValue eq0 = solver.equality(solver.composeMembers({ v1, v2, v3 }), l1);
+    BooleanValue eq1 = solver.equality(v1, identity_member);
+    BooleanValue eq2 = solver.equality(v2, l1);
+    BooleanValue eq3 = solver.equality(v3, identity_member);
+
+    solver.decideTrue(eq0);
+    solver.sat.propagate();
+    solver.decideTrue(eq2);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(eq1));
+    EXPECT_TRUE(solver.assignedTrue(eq3));
+}
+
 }

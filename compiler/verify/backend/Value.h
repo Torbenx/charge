@@ -100,7 +100,7 @@ struct ClauseBuilder {
 
     explicit ClauseBuilder(uint32_t clauseId)
         : clauseId(clauseId) { }
-    void add(Solver&, BooleanValue);
+    bool add(Solver&, BooleanValue);
 };
 
 //! Represents an unordered pair of values

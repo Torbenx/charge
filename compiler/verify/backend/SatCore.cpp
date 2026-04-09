@@ -13,8 +13,17 @@ SatCore::LiteralInfo& SatCore::Interface::infoFor(Literal lit) {
     return impl.literalInfos[lit];
 }
 
-void ClauseBuilder::add(Solver& solver, BooleanValue val) {
-    solver.impl().sat.addToClause(*this, val);
+bool ClauseBuilder::add(Solver& solver, BooleanValue val) {
+    return solver.impl().sat.addToClause(*this, val);
+}
+
+bool SatCore::addToLearnClause(Literal lit) {
+    if (infoFor(lit).lastContainingLearnClauseId != learnClauseId) {
+        learnClause.push_back(lit);
+        infoFor(lit).lastContainingLearnClauseId = learnClauseId;
+        return true;
+    }
+    return false;
 }
 
 void SatCore::queuePropagation(Literal lit) {
@@ -145,7 +154,8 @@ bool SatCore::tryLearn(Conflict conflict) {
     [[maybe_unused]] auto wasTrue = [&](Literal lit) { return wasReversed(lit) || infoFor(lit).tentativelyTrue(); };
     [[maybe_unused]] auto wasFalse = [&](Literal lit) { return wasTrue(!lit); };
 
-    auto newClause = beginClause();
+    learnClauseId += 1;
+    learnClause.clear();
     int_t position = subTrace.size();
     int_t openLiterals = 0;
     bool seenSinglePropagatingReason = true;
@@ -161,7 +171,7 @@ bool SatCore::tryLearn(Conflict conflict) {
             VERIFY(wasTrue(trueLit));
 
             if (info.tentativelyTrue()) {
-                addToClause(newClause, falseLit);
+                addToLearnClause(falseLit);
             } else {
                 VERIFY(!shouldBeVisited[info.subTraceIndex]);
                 openLiterals += 1;
@@ -198,10 +208,9 @@ bool SatCore::tryLearn(Conflict conflict) {
 
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
-                addToClause(newClause, !entry.literal);
-                // print("learning: "); dumpClause(newClause);
-                auto span = endClause(newClause);
-                interface().learnClause({ span.begin(), span.end() });
+                addToLearnClause(!entry.literal);
+                // print("learning: "); dumpClause(learnClause);
+                interface().learnClause(learnClause);
                 VERIFY(conflicts.empty());
             }
 
@@ -210,8 +219,9 @@ bool SatCore::tryLearn(Conflict conflict) {
                 return true;
             }
 
-            newClause = beginClause();
-            addToClause(newClause, entry.literal);
+            learnClauseId += 1;
+            learnClause.clear();
+            addToLearnClause(entry.literal);
             seenSinglePropagatingReason = true;
         } else
             seenSinglePropagatingReason = false;
@@ -229,7 +239,7 @@ bool SatCore::tryLearn(Conflict conflict) {
                 VERIFY(wasTrue(lit));
 
             if (info.tentativelyTrue()) {
-                addToClause(newClause, lit);
+                addToLearnClause(lit);
             } else if (index != forceLiteralIndex) {
                 auto it = std::find_if(subTrace.begin(), subTrace.end(), [l = !lit](SubTraceEntry entry) { return entry.literal == l; });
                 VERIFY(it != subTrace.end());

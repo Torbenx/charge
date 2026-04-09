@@ -42,12 +42,13 @@ struct Members {
 
 private:
     using RewriteTracePosition = TracePosition;
+    using IdentityRewriteTracePosition = TracePosition;
     using DecidedPairTracePosition = TracePosition;
 
     struct VariableInfo {
-        uint32_t explainCounter = 0;
         uint32_t backtrackCounter = 0;
-        std::optional<RewriteTracePosition> tracePos;
+        std::optional<RewriteTracePosition> rwPos;
+        std::optional<IdentityRewriteTracePosition> idRwPos;
         std::optional<PairHandle> rewritePair; //!< Only meaningful when hasRewrite() or hadRewrite() is true
         std::vector<Member> rewriteExpression; //!< Only meaningful when hasRewrite() or hadRewrite() is true
         std::vector<Member> currentRewrite;
@@ -57,19 +58,25 @@ private:
         VariableInfo(Value m)
             : currentRewrite { (Member)m } { }
 
-        bool hasRewrite() const { return tracePos.has_value(); }
+        bool hasRewrite() const { return rwPos.has_value() || idRwPos.has_value(); }
         bool hadRewrite(int_t backtrackCounter) const {
             return hasRewrite() || (int_t)this->backtrackCounter == backtrackCounter;
         }
     };
 
+    struct IdentityRewriteTraceEntry {
+        std::vector<Member> targets;
+        PairHandle rewritePair;
+    };
+
     struct PairInfo {
         std::optional<RewriteTracePosition> rewrite;
+        std::optional<IdentityRewriteTracePosition> identityRewrite;
         std::optional<DecidedPairTracePosition> equality;
         std::optional<DecidedPairTracePosition> disequality;
 
         bool decidedOrRewritten() const {
-            return rewrite.has_value() || equality.has_value() || disequality.has_value();
+            return rewrite.has_value() || identityRewrite.has_value() || equality.has_value() || disequality.has_value();
         }
     };
 
@@ -92,6 +99,7 @@ private:
 
     void markUsesAsDirty(VariableInfo&);
     void addRewrite(Member target, PairHandle pair, std::vector<Member> expression);
+    void addIdentityRewrite(std::vector<Member> targets, PairHandle pair);
     void updateRewrite(VariableInfo&);
     void updateRewrites();
 
@@ -100,7 +108,7 @@ private:
     void updatePair(Solver&, PairHandle, bool propagate);
     void grind(Solver&, bool propagate);
 
-    void explainRewrite(Solver&, Member m, std::vector<BooleanValue>& clause);
+    void explainRewrite(Solver&, Member m, ClauseBuilder& clause);
 
     VariableInfo& infoFor(Member m) {
         VERIFY(m.variable());
@@ -111,13 +119,14 @@ private:
     CompositeMembers compositeMembers;
     KindData<VariableInfo, ValueKind::Member> variables;
     std::vector<Member> rewriteTrace;
+    std::vector<IdentityRewriteTraceEntry> identityRewriteTrace;
     std::vector<PairHandle> decidedPairTrace;
     std::priority_queue<RewriteTracePosition> dirtyRewrites;
     std::priority_queue<PairHandle, std::vector<PairHandle>, PairHandleCompare> dirtyPairs;
     std::vector<uint32_t> rewriteDecisionPoints;
+    std::vector<uint32_t> identityRewriteDecisionPoints;
     std::vector<uint32_t> decidedPairDecisionPoints;
     int_t backtrackCounter = 0;
-    int_t explainCounter = 0;
 };
 
 }
