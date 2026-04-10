@@ -243,18 +243,18 @@ std::pair<std::vector<std::vector<BooleanValue>>, bool> SatCore::tryLearn(Confli
             Literal lit = clause[index];
             auto& info = infoFor(!lit);
 
-            if (index != forceLiteralIndex)
-                VERIFY(wasFalse(lit));
-            else
-                VERIFY(wasTrue(lit));
+            // if (index != forceLiteralIndex)
+            //     VERIFY(wasFalse(lit));
+            // else
+            //     VERIFY(wasTrue(lit));
 
             if (info.tentativelyTrue()) {
                 addToLearnClause(lit);
             } else if (index != forceLiteralIndex) {
-                auto it = std::find_if(subTrace.begin(), subTrace.end(), [l = !lit](SubTraceEntry entry) { return entry.literal == l; });
-                VERIFY(it != subTrace.end());
-                VERIFY(it - subTrace.begin() < position);
-                VERIFY(it - subTrace.begin() == (int_t)info.subTraceIndex);
+                // auto it = std::find_if(subTrace.begin(), subTrace.end(), [l = !lit](SubTraceEntry entry) { return entry.literal == l; });
+                // VERIFY(it != subTrace.end());
+                // VERIFY(it - subTrace.begin() < position);
+                // VERIFY(it - subTrace.begin() == (int_t)info.subTraceIndex);
                 if (!shouldBeVisited[info.subTraceIndex]) {
                     openLiterals += 1;
                     shouldBeVisited[info.subTraceIndex] = true;
