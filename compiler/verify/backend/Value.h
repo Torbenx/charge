@@ -28,6 +28,8 @@ enum class TheoryId : uint8_t {
     Invalid = std::numeric_limits<uint8_t>::max()
 };
 
+std::string_view nameString(TheoryId);
+
 constexpr ValueKind kindOf(TheoryId theory) {
     switch (theory) {
 #define THEORY(name, valueKind) \

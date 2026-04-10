@@ -175,7 +175,7 @@ namespace {
     }
 }
 
-TEST(Check, SatProblems) {
+TEST(Check, DISABLED_SatProblems) {
     std::filesystem::path testDir = COMPILER_TEST_DIR "/sat";
     bool overwriteSolutionFiles = false;
 

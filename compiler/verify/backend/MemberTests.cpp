@@ -33,7 +33,7 @@ TEST(VerifyBackend, MembersBasic1) {
     }
     println("------------");
     {
-        solver.sat.backtrack(0);
+        solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
@@ -53,7 +53,7 @@ TEST(VerifyBackend, MembersBasic1) {
     }
     println("------------");
     {
-        solver.sat.backtrack(0);
+        solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
@@ -73,7 +73,7 @@ TEST(VerifyBackend, MembersBasic1) {
     }
     println("------------");
     {
-        solver.sat.backtrack(0);
+        solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
@@ -116,7 +116,7 @@ TEST(VerifyBackend, MembersIdentityRewrite) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq2));
 
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 
     solver.decideTrue(eq1);
     solver.sat.propagate();
@@ -124,7 +124,7 @@ TEST(VerifyBackend, MembersIdentityRewrite) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq0));
 
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 
     solver.decideTrue(eq2);
     solver.sat.propagate();
@@ -151,6 +151,72 @@ TEST(VerifyBackend, MembersSubExpr) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq1));
     EXPECT_TRUE(solver.assignedTrue(eq3));
+}
+
+TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
+    SolverImpl solver;
+    Member v0 = solver.newAuxMemberVariable();
+    Member v1 = solver.newAuxMemberVariable();
+    Member v2 = solver.newAuxMemberVariable();
+
+    Member l1 = newLiteral(solver);
+    Member l2 = newLiteral(solver);
+    Member l3 = newLiteral(solver);
+
+    BooleanValue eq1 = solver.equality(v0, solver.composeMembers({ l1, v1 }));
+    BooleanValue eq2 = solver.equality(v0, solver.composeMembers({ v2, l2 }));
+    BooleanValue eq3 = solver.equality(v0, l3);
+
+    // assign eq1
+    solver.decideTrue(eq1);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(eq3));
+    {
+        // Should be justified by eq1
+        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        EXPECT_EQ(clause.size(), 2);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(clause[0], !eq3);
+        EXPECT_EQ(clause[1], !eq1);
+    }
+
+    // assign eq2
+    solver.addClause({ eq2 });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(eq3));
+    {
+        // Should still be justified by eq1
+        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        EXPECT_EQ(clause.size(), 2);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(clause[0], !eq3);
+        EXPECT_EQ(clause[1], !eq1);
+    }
+
+    // revert eq1
+    auto cachedReason = solver.sat.firstReason(!eq3);
+    solver.sat.beginBacktrack(0);
+    EXPECT_FALSE(solver.assignedFalse(eq3));
+    {
+        // Should still be justified by eq1 even after backtrack
+        auto [clause, index] = solver.reasonToClause(!eq3, cachedReason);
+        EXPECT_EQ(clause.size(), 2);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(clause[0], !eq3);
+        EXPECT_EQ(clause[1], !eq1);
+    }
+    solver.sat.endBacktrack();
+
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(eq3));
+    {
+        // After propagating should be justified by eq2
+        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        EXPECT_EQ(clause.size(), 2);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(clause[0], !eq3);
+        EXPECT_EQ(clause[1], !eq2);
+    }
 }
 
 }

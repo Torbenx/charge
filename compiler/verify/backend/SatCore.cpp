@@ -77,6 +77,16 @@ bool SatCore::assignedTrue(Literal lit) {
     return lit != firstPropagation && !info.prevPropagation.has_value();
 }
 
+Reason SatCore::firstReason(Literal lit) {
+    const auto& info = infoFor(lit);
+    VERIFY(info.firstReason.has_value());
+    return at(*info.firstReason).reason;
+}
+
+ClauseAndIndex SatCore::justifyAssignment(Literal lit) {
+    return interface().reasonToClause(lit, firstReason(lit));
+}
+
 bool SatCore::alwaysTrue(Literal lit) {
     if (!assignedTrue(lit))
         return false;
@@ -102,6 +112,7 @@ void SatCore::assignTrue(Literal trueLit, const Reason& reason) {
         print("assigning {}, reason: ", formatValue(trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
+    VERIFY(!backtracking);
 
     auto& info = infoFor(trueLit);
     TracePosition tracePos(trace.size());
@@ -126,6 +137,7 @@ void SatCore::assignTrue(Literal trueLit, const Reason& reason) {
 
 bool SatCore::propagate() {
     VERIFY(conflicts.empty());
+    VERIFY(!backtracking);
 
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
@@ -138,14 +150,14 @@ bool SatCore::propagate() {
     return true;
 }
 
-bool SatCore::tryLearn(Conflict conflict) {
+std::pair<std::vector<std::vector<BooleanValue>>, bool> SatCore::tryLearn(Conflict conflict) {
     VERIFY(conflicts.empty());
     VERIFY(!subTrace.empty());
     SubTraceEntry conflictDecision = subTrace.front();
     VERIFY(conflictDecision.reason.isDecision());
     if (infoFor(conflictDecision.literal).tentativelyTrue()) {
         // If the decision was not reverted, propagating it will lead to a conflict
-        return false;
+        return {};
     }
 
     [[maybe_unused]] auto wasReversed = [&](Literal lit) {
@@ -180,12 +192,13 @@ bool SatCore::tryLearn(Conflict conflict) {
         }
         if (openLiterals == 0) {
             // All literals in the clause were false, this is a conflict.
-            return false;
+            return {};
         }
         if (!isFullyPropagating(conflict.reason.kind()))
             seenSinglePropagatingReason = false;
     }
 
+    std::vector<std::vector<Literal>> learnedClauses;
     for (;;) {
         for (;;) {
             position -= 1;
@@ -196,7 +209,7 @@ bool SatCore::tryLearn(Conflict conflict) {
                 // get here we iterated though the entire trace without marking the decision to be
                 // visited and thus it is not part of the implication graph that lead to the
                 // conflict.
-                return false;
+                return { std::move(learnedClauses), false };
             }
         }
 
@@ -210,14 +223,11 @@ bool SatCore::tryLearn(Conflict conflict) {
             if (!seenSinglePropagatingReason) {
                 addToLearnClause(!entry.literal);
                 // print("learning: "); dumpClause(learnClause);
-                interface().learnClause(learnClause);
-                VERIFY(conflicts.empty());
+                learnedClauses.push_back(learnClause);
             }
 
-            if (entry.reason.isDecision()) {
-                VERIFY(firstPropagation.has_value());
-                return true;
-            }
+            if (entry.reason.isDecision())
+                return { std::move(learnedClauses), true };
 
             learnClauseId += 1;
             learnClause.clear();
@@ -280,17 +290,28 @@ bool SatCore::analyzeConflicts() {
         };
 
         // Backtrack until all conflicts are resolved
-        while (!conflicts.empty()) {
+        for (;;) {
             if (currentDecisionLevel() == -1)
                 return false;
 
-            backtrack(currentDecisionLevel());
+            beginBacktrack(currentDecisionLevel());
             removeResolvedConflcits();
+            if (conflicts.empty())
+                break;
+            endBacktrack();
         }
 
         // Learn from the last conflict that was resolved
-        if (tryLearn(drivingConflict))
+        auto [learnedClauses, result] = tryLearn(drivingConflict);
+        endBacktrack();
+        for (auto& clause : learnedClauses) {
+            interface().learnClause(std::move(clause));
+            VERIFY(conflicts.empty());
+        }
+        if (result) {
+            VERIFY(firstPropagation.has_value());
             return true;
+        }
 
         // tryLearn() detected that a conflict still persists, find it by propagating
         propagate();
@@ -298,14 +319,15 @@ bool SatCore::analyzeConflicts() {
     }
 }
 
-void SatCore::backtrack(int_t targetLevel) {
+void SatCore::beginBacktrack(int_t targetLevel) {
+    VERIFY(!backtracking);
     VERIFY(targetLevel >= 0);
+    backtracking = true;
     TracePosition position = decisions[targetLevel];
-    while ((int_t)decisions.size() > targetLevel)
-        decisions.pop_back();
+    decisions.erase(decisions.begin() + targetLevel, decisions.end());
     VERIFY(currentDecisionLevel() == targetLevel - 1);
 
-    interface().onBacktrack();
+    interface().onBeginBacktrack();
 
     subTrace.clear();
     subTrace.reserve(trace.size() - position.index);
@@ -344,7 +366,11 @@ void SatCore::backtrack(int_t targetLevel) {
         } else {
             if (info.firstReason.value() == position) {
                 if (assignedTrue(entry.literal)) {
-                    interface().reapplyAssignment(entry.literal);
+                    // Note: Repropagation is necessary for correctness of the theory solvers.
+                    //       For the clauses it is redudant and harms performance.
+                    //       This could be avoided by keeping track of clause and theory propagation separately.
+                    interface().unapplyAssignment(entry.literal);
+                    queuePropagation(entry.literal);
                 }
             }
             *(entry.prevReason.has_value() ? &at(*entry.prevReason).nextReason : &info.firstReason) = writePosition;
@@ -357,6 +383,12 @@ void SatCore::backtrack(int_t targetLevel) {
     trace.erase(trace.begin() + writePosition.index, trace.end());
 
     // checkInvariances();
+}
+
+void SatCore::endBacktrack() {
+    VERIFY(backtracking);
+    backtracking = false;
+    interface().onEndBacktrack();
 }
 
 std::vector<Reason> SatCore::collectReasons(Literal trueLit) {

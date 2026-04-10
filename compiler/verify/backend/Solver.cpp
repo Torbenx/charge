@@ -69,6 +69,10 @@ ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, Boo
 int_t Solver::currentDecisionLevel() const {
     return impl().sat.currentDecisionLevel();
 }
+void Solver::backtrack(int_t targetLevel) {
+    impl().sat.beginBacktrack(targetLevel);
+    impl().sat.endBacktrack();
+}
 bool Solver::assignedTrue(BooleanValue lit) {
     return impl().sat.assignedTrue(lit);
 }
@@ -99,10 +103,16 @@ void SatCore::Interface::onNewDecisionLevel() {
     impl.members.newDecisionLevel(impl);
 }
 
-void SatCore::Interface::onBacktrack() {
+void SatCore::Interface::onBeginBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
-    impl.uninterpConstantEquality.backtrack(impl);
-    impl.members.backtrack(impl);
+    impl.uninterpConstantEquality.beginBacktrack(impl);
+    impl.members.beginBacktrack(impl);
+}
+
+void SatCore::Interface::onEndBacktrack() {
+    auto& impl = static_cast<SolverImpl&>(*this);
+    impl.uninterpConstantEquality.endBacktrack(impl);
+    impl.members.endBacktrack(impl);
 }
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
@@ -137,15 +147,15 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
     case TheoryId::UninterpretedConstantEquality: {
         PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
         if (lit.negated())
-            impl.uninterpConstantEquality.applyDisequal(impl, pair, true);
+            impl.uninterpConstantEquality.propagateDisequal(impl, pair);
         else
-            impl.uninterpConstantEquality.applyEqual(impl, pair, true);
+            impl.uninterpConstantEquality.propagateEqual(impl, pair);
         break;
     }
     case TheoryId::MemberEquality: {
         PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
         if (!lit.negated())
-            impl.members.applyEqual(impl, pair, true);
+            impl.members.propagateEqual(impl, pair);
         break;
     }
     default:
@@ -158,29 +168,6 @@ void SatCore::Interface::unapplyAssignment(Literal lit) {
     impl.clauses.unapplyAssignment(impl, lit);
 
     switch (lit.theory()) {
-    default:
-        break;
-    }
-}
-
-void SatCore::Interface::reapplyAssignment(Literal lit) {
-    auto& impl = static_cast<SolverImpl&>(*this);
-
-    switch (lit.theory()) {
-    case TheoryId::UninterpretedConstantEquality: {
-        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
-        if (lit.negated())
-            impl.uninterpConstantEquality.applyDisequal(impl, pair, false);
-        else
-            impl.uninterpConstantEquality.applyEqual(impl, pair, false);
-        break;
-    }
-    case TheoryId::MemberEquality: {
-        PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
-        if (!lit.negated())
-            impl.members.applyEqual(impl, pair, false);
-        break;
-    }
     default:
         break;
     }

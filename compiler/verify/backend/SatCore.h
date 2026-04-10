@@ -71,14 +71,14 @@ struct SatCore {
         LiteralInfo& infoFor(Literal);
 
         void onNewDecisionLevel();
-        void onBacktrack();
+        void onBeginBacktrack();
+        void onEndBacktrack();
 
         bool testReason(Literal, const Reason&);
         ClauseAndIndex reasonToClause(Literal, const Reason&);
 
         void propagateAssignment(Literal);
         void unapplyAssignment(Literal);
-        void reapplyAssignment(Literal);
 
         void learnClause(std::vector<BooleanValue>);
     };
@@ -112,6 +112,9 @@ struct SatCore {
     problem is unsatisfiable.
     */
     int_t currentDecisionLevel() const { return (int_t)decisions.size() - 1; }
+
+    Reason firstReason(Literal lit);
+    ClauseAndIndex justifyAssignment(Literal lit);
 
     //! Returns true if \p lit is assigned true and this assignment was propagated to the theories
     bool assignedTrue(Literal lit);
@@ -149,7 +152,9 @@ struct SatCore {
     forcing in the order they appeared in the original trace. Note this doesn't always mean that
     the literal assignment was also reverted since another reason may still be forcing.
     */
-    void backtrack(int_t level);
+    void beginBacktrack(int_t level);
+
+    void endBacktrack();
 
     //! Explicitly check that the invariances of the solver hold
     void checkInvariances();
@@ -193,9 +198,9 @@ private:
     resolved \p conflict. When successful the function will identify the UIPs, generate new clauses
     and clear the conflicts. The function will fail if it detects that the solver is still in a
     conflict state. In this case calling propagate() will produce a conflict again.
-    \returns true if successful
+    \returns the list of clauses learned and a bool indicating if the function was successful
     */
-    bool tryLearn(Conflict conflict);
+    std::pair<std::vector<std::vector<Literal>>, bool> tryLearn(Conflict conflict);
 
     //! Append \p lit the end of the propagation queue
     /*!
@@ -226,6 +231,8 @@ private:
     //! Last element in the propagation queue
     /*! \see firstPropagation */
     std::optional<Literal> lastPropagation;
+
+    bool backtracking = false;
 
     uint32_t nextClauseId = 0;
     std::vector<Literal> wipClause;

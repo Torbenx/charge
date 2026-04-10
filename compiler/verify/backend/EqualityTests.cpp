@@ -4,11 +4,7 @@
 
 namespace verify::backend {
 
-static ClauseAndIndex equalityClause(SolverImpl& solver, BooleanValue lit) {
-    return solver.reasonToClause(lit, makeReason<ReasonKind::Equality>({}));
-}
-
-TEST(VerifyBackend, EqualityTreePath1) {
+TEST(VerifyBackend, EqualityBasic) {
     SolverImpl solver;
     Value v1 = solver.newAuxUninterpretedConstant();
     Value v2 = solver.newAuxUninterpretedConstant();
@@ -21,23 +17,6 @@ TEST(VerifyBackend, EqualityTreePath1) {
 
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedEqual(v1, v2));
-
-    {
-        auto [clause, forcedIndex] = equalityClause(solver, e12);
-        EXPECT_EQ(clause.size(), 2);
-        EXPECT_EQ(forcedIndex, 0);
-        EXPECT_EQ(clause[0], e12);
-        EXPECT_EQ(clause[1], !e12);
-    }
-
-    solver.sat.backtrack(0);
-    {
-        auto [clause, forcedIndex] = equalityClause(solver, e12);
-        EXPECT_EQ(clause.size(), 2);
-        EXPECT_EQ(forcedIndex, 0);
-        EXPECT_EQ(clause[0], e12);
-        EXPECT_EQ(clause[1], !e12);
-    }
 }
 
 TEST(VerifyBackend, EqualityTreePath2) {
@@ -57,7 +36,7 @@ TEST(VerifyBackend, EqualityTreePath2) {
     EXPECT_TRUE(solver.assignedTrue(e23));
     EXPECT_TRUE(solver.assignedEqual(v2, v3));
 
-    auto [clause, forcedIndex] = equalityClause(solver, e23);
+    auto [clause, forcedIndex] = solver.sat.justifyAssignment(e23);
     EXPECT_EQ(clause.size(), 3);
     EXPECT_EQ(clause[forcedIndex], e23);
     EXPECT_TRUE(std::find(clause.begin(), clause.end(), !e12) != clause.end());
@@ -81,7 +60,7 @@ TEST(VerifyBackend, EqualityTreePath3) {
     EXPECT_TRUE(solver.assignedTrue(e12));
     EXPECT_TRUE(solver.assignedEqual(v1, v2));
 
-    auto [clause, forcedIndex] = equalityClause(solver, e12);
+    auto [clause, forcedIndex] = solver.sat.justifyAssignment(e12);
     EXPECT_EQ(clause.size(), 3);
     EXPECT_EQ(clause[forcedIndex], e12);
     EXPECT_TRUE(std::find(clause.begin(), clause.end(), !e13) != clause.end());
@@ -106,7 +85,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
     EXPECT_TRUE(solver.assignedEqual(vals[0][0], vals[0][3]));
     BooleanValue e00_03 = solver.equality(vals[0][0], vals[0][3]);
     {
-        auto [clause, forcedIndex] = equalityClause(solver, e00_03);
+        auto [clause, forcedIndex] = solver.sat.justifyAssignment(e00_03);
         EXPECT_EQ(clause.size(), 4);
         EXPECT_EQ(clause[forcedIndex], solver.equality(vals[0][0], vals[0][3]));
         EXPECT_TRUE(std::find(clause.begin(), clause.end(), !solver.equality(vals[0][0], vals[0][1])) != clause.end());
@@ -136,7 +115,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
 
     auto testConnections = [&] {
         {
-            auto [clause, forcedIndex] = equalityClause(solver, e30_33);
+            auto [clause, forcedIndex] = solver.reasonToClause(e30_33, makeReason<ReasonKind::Equality>({}));
             EXPECT_EQ(clause.size(), 10);
             EXPECT_EQ(clause[forcedIndex], solver.equality(vals[3][0], vals[3][3]));
 
@@ -154,7 +133,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
         }
 
         {
-            auto [clause, forcedIndex] = equalityClause(solver, e32_33);
+            auto [clause, forcedIndex] = solver.reasonToClause(e32_33, makeReason<ReasonKind::Equality>({}));
             EXPECT_EQ(clause.size(), 8);
             EXPECT_EQ(clause[forcedIndex], solver.equality(vals[3][2], vals[3][3]));
 
@@ -171,11 +150,12 @@ TEST(VerifyBackend, EqualityTreePath4) {
     };
     testConnections();
 
-    solver.sat.backtrack(0);
+    solver.sat.beginBacktrack(0);
     EXPECT_FALSE(solver.assignedEqual(vals[3][0], vals[3][3]));
     EXPECT_FALSE(solver.assignedEqual(vals[3][2], vals[3][3]));
 
     testConnections();
+    solver.sat.endBacktrack();
 }
 
 TEST(VerifyBackend, EqualityPropagation1) {
@@ -333,12 +313,150 @@ TEST(VerifyBackend, OutOfOrderRevertedDisequalities) {
     EXPECT_TRUE(solver.assignedFalse(e23));
 
     // revert v1 != v3
-    solver.sat.backtrack(solver.currentDecisionLevel());
+    solver.backtrack(solver.currentDecisionLevel());
     solver.sat.propagate();
 
     // check v2 != v3 still holds
     EXPECT_TRUE(solver.assignedFalse(e13));
     EXPECT_TRUE(solver.assignedFalse(e23));
+}
+
+TEST(VerifyBackend, OutOfOrderRevertedDisequalitiyReasons) {
+    SolverImpl solver;
+    Value v0 = solver.newAuxUninterpretedConstant();
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
+    solver.sat.propagate();
+
+    BooleanValue e01 = solver.equality(v0, v1);
+    BooleanValue e02 = solver.equality(v0, v2);
+    BooleanValue e03 = solver.equality(v0, v3);
+    BooleanValue e13 = solver.equality(v1, v3);
+    BooleanValue e23 = solver.equality(v2, v3);
+
+    solver.decideTrue(e01);
+    solver.sat.propagate();
+    solver.decideTrue(e02);
+    solver.sat.propagate();
+
+    // assign v1 != v3
+    solver.decideTrue(!e13);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e03));
+    {
+        auto [clause, index] = solver.sat.justifyAssignment(!e03);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e13);
+        EXPECT_EQ(clause[2], !e01);
+    }
+
+    // assign v2 != v3
+    solver.addClause({ !e23 });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e03));
+    {
+        // Justification unchanged
+        auto [clause, index] = solver.sat.justifyAssignment(!e03);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e13);
+        EXPECT_EQ(clause[2], !e01);
+    }
+
+    // revert v1 != v3
+    auto cachedReason = solver.sat.firstReason(!e03);
+    solver.sat.beginBacktrack(solver.currentDecisionLevel());
+    {
+        // Justification unchanged
+        auto [clause, index] = solver.reasonToClause(!e03, cachedReason);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e13);
+        EXPECT_EQ(clause[2], !e01);
+    }
+    solver.sat.endBacktrack();
+
+    // check v0 != v3 still holds after propagation
+    EXPECT_FALSE(solver.assignedFalse(e03));
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e03));
+    {
+        // Justification updated
+        auto [clause, index] = solver.sat.justifyAssignment(!e03);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e23);
+        EXPECT_EQ(clause[2], !e02);
+    }
+}
+
+TEST(VerifyBackend, OutOfOrderRevertedDisequalitiyReasonsInterleavedTrace) {
+    SolverImpl solver;
+    Value v0 = solver.newAuxUninterpretedConstant();
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+    Value v3 = solver.newAuxUninterpretedConstant();
+
+    BooleanValue b0 = solver.newAuxBooleanVariable();
+    BooleanValue b1 = solver.newAuxBooleanVariable();
+
+    BooleanValue e01 = solver.equality(v0, v1);
+    BooleanValue e02 = solver.equality(v0, v2);
+    BooleanValue e03 = solver.equality(v0, v3);
+    BooleanValue e13 = solver.equality(v1, v3);
+    BooleanValue e23 = solver.equality(v2, v3);
+
+    solver.addClause({ b0, b1, !e13 });
+    solver.addClause({ b0, !e23 });
+    solver.addClause({ e01 });
+    solver.addClause({ e02 });
+    solver.sat.propagate();
+
+    solver.decideTrue(!b1);
+    solver.sat.propagate();
+
+    // assign v1 != v3 and v2 != v3 at the same time
+    // trace order should be v1 != v3, v2 != v3, v0 != v3
+    solver.addClause({ !b0 });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e13));
+    EXPECT_TRUE(solver.assignedFalse(e23));
+    EXPECT_TRUE(solver.assignedFalse(e03));
+    {
+        auto [clause, index] = solver.sat.justifyAssignment(!e03);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e13);
+        EXPECT_EQ(clause[2], !e01);
+    }
+
+    // revert v1 != v3
+    auto cachedReason = solver.sat.firstReason(!e03);
+    solver.sat.beginBacktrack(solver.currentDecisionLevel());
+    {
+        // Justification unchanged
+        auto [clause, index] = solver.reasonToClause(!e03, cachedReason);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e13);
+        EXPECT_EQ(clause[2], !e01);
+    }
+    solver.sat.endBacktrack();
+
+    // check v0 != v3 still holds after propagation
+    EXPECT_FALSE(solver.assignedFalse(e03));
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e03));
+    {
+        // Justification updated
+        auto [clause, index] = solver.sat.justifyAssignment(!e03);
+        EXPECT_EQ(clause.size(), 3);
+        EXPECT_EQ(clause[0], !e03);
+        EXPECT_EQ(clause[1], e23);
+        EXPECT_EQ(clause[2], !e02);
+    }
 }
 
 TEST(VerifyBackend, DisequalityCleanedUpInParents) {
@@ -358,7 +476,7 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     solver.decideTrue(solver.equality(v2, v4));
     solver.sat.propagate();
 
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
     solver.sat.propagate();
 
     BooleanValue e12 = solver.equality(v1, v2);
@@ -385,28 +503,28 @@ TEST(VerifyBackend, BooleanEqual) {
     solver.decideTrue(b);
     EXPECT_TRUE(solver.sat.propagate());
     EXPECT_TRUE(solver.assignedTrue(eq));
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 
     solver.decideTrue(a);
     EXPECT_TRUE(solver.sat.propagate());
     solver.decideTrue(!b);
     EXPECT_TRUE(solver.sat.propagate());
     EXPECT_TRUE(solver.assignedFalse(eq));
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 
     solver.decideTrue(!a);
     EXPECT_TRUE(solver.sat.propagate());
     solver.decideTrue(b);
     EXPECT_TRUE(solver.sat.propagate());
     EXPECT_TRUE(solver.assignedFalse(eq));
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 
     solver.decideTrue(!a);
     EXPECT_TRUE(solver.sat.propagate());
     solver.decideTrue(!b);
     EXPECT_TRUE(solver.sat.propagate());
     EXPECT_TRUE(solver.assignedTrue(eq));
-    solver.sat.backtrack(0);
+    solver.backtrack(0);
 }
 
 }

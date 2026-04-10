@@ -143,7 +143,7 @@ struct DisequalityReason : private PackedReason<DisequalPair, uint32_t> {
 RewriteEquality::RewriteEquality(Solver& solver, ValueKind valueKind, TheoryId theory)
     : equalityInfos(solver, valueKind), m_theory(theory), m_valueKind(valueKind) { }
 
-void RewriteEquality::applyEqual(Solver& solver, PairHandle eqPair, bool propagate) {
+void RewriteEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     auto [source, target] = solver.at(eqPair);
     if (connected(source, target))
         return;
@@ -160,42 +160,41 @@ void RewriteEquality::applyEqual(Solver& solver, PairHandle eqPair, bool propaga
     const auto& targetEdges = targetRootInfo.edges;
     const auto& targetDiseq = targetRootInfo.disequalities;
 
-    if (propagate) {
-        // Detect when after this link
-        // a) both sides of an edge will belong to the same tree, or
-        // b) the sides of an edge will belong to different sides of a disquality
-        for (auto edge : sourceEdges) {
-            if (edge.pair == eqPair)
-                continue;
-            Value otherRoot = infoFor(edge.otherValue).root;
-            if (otherRoot == targetInfo.root)
-                assignEqual(solver, edge.pair);
+    // Detect when after this link
+    // a) both sides of an edge will belong to the same tree, or
+    // b) the sides of an edge will belong to different sides of a disquality
+    for (auto edge : sourceEdges) {
+        if (edge.pair == eqPair)
+            continue;
+        Value otherRoot = infoFor(edge.otherValue).root;
+        if (otherRoot == targetInfo.root)
+            assignEqual(solver, edge.pair);
 
-            forEachCommonElement(infoFor(otherRoot).disequalities, targetDiseq, [this, &solver, &edge](int_t diseqId) {
+        forEachCommonElement(infoFor(otherRoot).disequalities, targetDiseq, [this, &solver, &edge](int_t diseqId) {
+            assignDisequal(solver, edge.pair, PairHandle(m_valueKind, diseqId));
+        });
+    }
+    for (auto edge : targetEdges) {
+        if (edge.pair == eqPair)
+            continue;
+        Value otherRoot = infoFor(edge.otherValue).root;
+        const auto& otherRootInfo = infoFor(otherRoot);
+        // Note: Similiar code in newVariable()
+        if (solver.alwaysDisequal(sourceInfo.root, otherRoot)) {
+            assignDisequalByAlwaysDisequal(solver, edge.pair, sourceInfo.root, otherRoot);
+        } else {
+            forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
                 assignDisequal(solver, edge.pair, PairHandle(m_valueKind, diseqId));
             });
-        }
-        for (auto edge : targetEdges) {
-            if (edge.pair == eqPair)
-                continue;
-            Value otherRoot = infoFor(edge.otherValue).root;
-            const auto& otherRootInfo = infoFor(otherRoot);
-            // Note: Similiar code in newVariable()
-            if (solver.alwaysDisequal(sourceInfo.root, otherRoot)) {
-                assignDisequalByAlwaysDisequal(solver, edge.pair, sourceInfo.root, otherRoot);
-            } else {
-                forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
-                    assignDisequal(solver, edge.pair, PairHandle(m_valueKind, diseqId));
-                });
-            }
         }
     }
     mergeInto(sourceDiseq, targetDiseq);
 
+    TracePosition tracePosition { (uint32_t)equalityTrace.size() };
     equalityTrace.push_back({ Pair { source, target }, Pair { sourceRootInfo.root, targetRootInfo.root } });
 
     int_t oldSourceTreeSize = sourceTree.size();
-    sourceTree.push_back({ targetInfo.root, (uint32_t)(targetTree.size() + 1), (uint32_t)(sourceInfo.treeOffset + 1), (uint32_t)(targetInfo.treeOffset + 1) });
+    sourceTree.push_back({ targetInfo.root });
     sourceTree.insert(sourceTree.end(), targetTree.begin(), targetTree.end());
 
     int_t oldSourceEdgeCount = sourceEdges.size();
@@ -204,6 +203,7 @@ void RewriteEquality::applyEqual(Solver& solver, PairHandle eqPair, bool propaga
     targetRootInfo.root = sourceInfo.root;
     targetRootInfo.treeOffset = oldSourceTreeSize;
     targetRootInfo.edgesOffset += oldSourceEdgeCount;
+    targetRootInfo.tracePosition = tracePosition;
     for (int_t i = 0; i < (int_t)targetTree.size(); i++) {
         auto& info = infoFor(targetTree[i].value);
         info.root = sourceInfo.root;
@@ -212,7 +212,7 @@ void RewriteEquality::applyEqual(Solver& solver, PairHandle eqPair, bool propaga
     }
 }
 
-void RewriteEquality::applyDisequal(Solver& solver, PairHandle diseqPair, bool propagate) {
+void RewriteEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {
     auto [source, target] = solver.at(diseqPair);
     Value sourceRoot = infoFor(source).root;
     Value targetRoot = infoFor(target).root;
@@ -231,16 +231,14 @@ void RewriteEquality::applyDisequal(Solver& solver, PairHandle diseqPair, bool p
 
     disequalityTrace.push_back({ diseqPair });
 
-    if (propagate) {
-        Value root = infoFor(target).root;
-        const auto& rootInfo = infoFor(root);
-        for (auto edge : rootInfo.edges) {
-            if (edge.pair == diseqPair)
-                continue;
-            Value otherRoot = infoFor(edge.otherValue).root;
-            if (otherRoot != root && contains(infoFor(otherRoot).disequalities, diseqPair.pairId()))
-                assignDisequal(solver, edge.pair, diseqPair);
-        }
+    Value root = infoFor(target).root;
+    const auto& rootInfo = infoFor(root);
+    for (auto edge : rootInfo.edges) {
+        if (edge.pair == diseqPair)
+            continue;
+        Value otherRoot = infoFor(edge.otherValue).root;
+        if (otherRoot != root && contains(infoFor(otherRoot).disequalities, diseqPair.pairId()))
+            assignDisequal(solver, edge.pair, diseqPair);
     }
 }
 
@@ -304,74 +302,16 @@ void RewriteEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
         infoFor(tree[index].value).edgesOffset += 1;
 }
 
-void RewriteEquality::pathInTree(Solver& solver, Value a, Value b, ClauseBuilder& result) {
-    VERIFY(connected(a, b));
-
-    struct StackEntry {
-        int_t rootIndex;
-        int_t aIndex;
-        int_t bIndex;
-    };
-    std::vector<StackEntry> stack;
-
-    Value treeRoot = infoFor(a).root;
-    const auto* tree = infoFor(treeRoot).tree.data();
-    int_t rootIndex = -1;
-    int_t aIndex = infoFor(a).treeOffset;
-    int_t bIndex = infoFor(b).treeOffset;
-    for (;;) {
-        if (aIndex == bIndex) {
-            if (stack.empty())
-                break;
-            rootIndex = stack.back().rootIndex;
-            aIndex = stack.back().aIndex;
-            bIndex = stack.back().bIndex;
-            stack.pop_back();
-            continue;
-        }
-        if (aIndex > bIndex)
-            std::swap(aIndex, bIndex);
-
-        int_t index = rootIndex + 1;
-        for (;;) {
-            int_t nextIndex = index + tree[index].subTreeSize;
-            if (nextIndex <= bIndex) {
-                index = nextIndex;
-                continue;
-            }
-            if (index < aIndex) {
-                // The path between a and b entirely lies in this subtree.
-                rootIndex = index;
-                index = rootIndex + 1;
-                continue;
-            }
-            break;
-        }
-        int_t sIndex = rootIndex + tree[index].linkSource;
-        int_t tIndex = index + tree[index].linkTarget;
-        auto pair = solver.findPair({ sIndex == -1 ? treeRoot : tree[sIndex].value, tree[tIndex].value });
-        result.add(solver, !makeEquality(pair));
-        stack.push_back({ index, tIndex, bIndex });
-        bIndex = sIndex;
-    }
-}
-
 void RewriteEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& result) {
-    Value aRoot = infoFor(a).root;
-    Value bRoot = infoFor(b).root;
-    if (aRoot == bRoot) {
-        pathInTree(solver, a, b, result);
+    if (a == b)
         return;
-    }
 
-    auto backtrackPos = [this](Value val) -> int_t {
-        if (infoFor(val).backtrackCounter == backtrackCounter)
-            return infoFor(val).backtrackTracePosition;
-        return std::numeric_limits<int_t>::max();
+    auto tracePos = [this](Value val) -> int_t {
+        return infoFor(val).tracePosition.value_or(TracePosition { std::numeric_limits<uint32_t>::max() }).index;
     };
 
-    int_t aIndex = backtrackPos(aRoot);
-    int_t bIndex = backtrackPos(bRoot);
+    int_t aIndex = tracePos(a);
+    int_t bIndex = tracePos(b);
     VERIFY(aIndex != bIndex);
 
     for (;;) {
@@ -380,8 +320,8 @@ void RewriteEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& resu
             std::swap(a, b);
         }
 
-        const auto& entry = backtrackTrace[aIndex];
-        aIndex = backtrackPos(entry.roots.source);
+        const auto& entry = equalityTrace[aIndex];
+        aIndex = tracePos(entry.roots.source);
         if (aIndex == bIndex) {
             result.add(solver, !makeEquality(solver.findPair(entry.link)));
             path(solver, entry.link.target, a, result);
@@ -440,16 +380,11 @@ void RewriteEquality::newDecisionLevel(Solver& solver) {
     VERIFY((int_t)disequalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
-void RewriteEquality::backtrack(Solver& solver) {
-    backtrackCounter += 1;
+void RewriteEquality::beginBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t targetSize = equalityDecisionPoints[lastLevelToRevert];
-    backtrackTrace.assign(equalityTrace.begin() + targetSize, equalityTrace.end());
-
-    while ((int_t)equalityTrace.size() > targetSize) {
-        auto [link, roots] = equalityTrace.back();
-        equalityTrace.pop_back();
-        int_t backtrackTracePos = equalityTrace.size() - targetSize;
+    int_t eqTargetSize = equalityDecisionPoints[lastLevelToRevert];
+    for (int_t i = equalityTrace.size() - 1; i >= eqTargetSize; i--) {
+        auto [link, roots] = equalityTrace[i];
 
         auto& sourceRootInfo = infoFor(roots.source);
         auto& targetRootInfo = infoFor(roots.target);
@@ -462,8 +397,6 @@ void RewriteEquality::backtrack(Solver& solver) {
         targetRootInfo.root = roots.target;
         targetRootInfo.treeOffset = -1;
         targetRootInfo.edgesOffset = 0;
-        targetRootInfo.backtrackCounter = backtrackCounter;
-        targetRootInfo.backtrackTracePosition = backtrackTracePos;
         for (int_t i = 0; i < (int_t)targetRootInfo.tree.size(); i++) {
             auto& info = infoFor(targetRootInfo.tree[i].value);
             info.root = roots.target;
@@ -471,10 +404,9 @@ void RewriteEquality::backtrack(Solver& solver) {
             info.edgesOffset -= newEdgesSize;
         }
     }
-    equalityDecisionPoints.resize(lastLevelToRevert);
 
-    targetSize = disequalityDecisionPoints[lastLevelToRevert];
-    while ((int_t)disequalityTrace.size() > targetSize) {
+    int_t diseqTargetSize = disequalityDecisionPoints[lastLevelToRevert];
+    while ((int_t)disequalityTrace.size() > diseqTargetSize) {
         auto [diseqPair] = disequalityTrace.back();
         disequalityTrace.pop_back();
         auto [source, target] = solver.at(diseqPair);
@@ -486,10 +418,20 @@ void RewriteEquality::backtrack(Solver& solver) {
             VERIFY(*it == diseqPair.pairId());
             disequalities.erase(it);
         };
-        forEachParentOf(source, removeDisequality);
-        forEachParentOf(target, removeDisequality);
+        forEachParentOf(source, removeDisequality, eqTargetSize);
+        forEachParentOf(target, removeDisequality, eqTargetSize);
     }
     disequalityDecisionPoints.resize(lastLevelToRevert);
+}
+
+void RewriteEquality::endBacktrack(Solver& solver) {
+    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
+    int_t targetSize = equalityDecisionPoints[lastLevelToRevert];
+    for (int_t i = targetSize; i < (int_t)equalityTrace.size(); i++) {
+        infoFor(equalityTrace[i].roots.target).tracePosition.reset();
+    }
+    equalityTrace.erase(equalityTrace.begin() + targetSize, equalityTrace.end());
+    equalityDecisionPoints.resize(lastLevelToRevert);
 }
 
 void RewriteEquality::checkInvariances(Solver& solver) {
@@ -498,9 +440,10 @@ void RewriteEquality::checkInvariances(Solver& solver) {
         const auto& rootInfo = infoFor(info.root);
         if (info.treeOffset == -1) {
             VERIFY(info.root == value);
+            VERIFY(!info.tracePosition.has_value());
         } else {
             VERIFY(rootInfo.tree[info.treeOffset].value == value);
-            VERIFY(rootInfo.tree[info.treeOffset].subTreeSize == info.tree.size() + 1);
+            VERIFY(value == equalityTrace[info.tracePosition->index].roots.target);
         }
         VERIFY(std::equal(info.tree.begin(), info.tree.end(), rootInfo.tree.begin() + info.treeOffset + 1));
         VERIFY(std::equal(info.edges.begin(), info.edges.end(), rootInfo.edges.begin() + info.edgesOffset));

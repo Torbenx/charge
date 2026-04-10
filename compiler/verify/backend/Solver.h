@@ -13,6 +13,7 @@ struct Solver {
     const SolverImpl& impl() const;
 
     int_t currentDecisionLevel() const;
+    void backtrack(int_t targetLevel);
     bool assignedTrue(BooleanValue lit);
     bool assignedFalse(BooleanValue lit);
     void decideTrue(BooleanValue literal);

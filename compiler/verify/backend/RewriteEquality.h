@@ -1,5 +1,6 @@
 #pragma once
 
+#include <verify/backend/SatCore.h>
 #include <verify/backend/Solver.h>
 
 namespace verify::backend {
@@ -14,19 +15,20 @@ struct RewriteEquality {
         return { m_valueKind, equality.id() / 2 };
     }
 
-    void applyEqual(Solver& solver, PairHandle eqPair, bool propagate);
-    void applyDisequal(Solver& solver, PairHandle diseqPair, bool propagate);
+    void propagateEqual(Solver& solver, PairHandle eqPair);
+    void propagateDisequal(Solver& solver, PairHandle diseqPair);
 
     void checkInvariances(Solver&);
 
     bool testReason(Solver&, BooleanValue, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     void newDecisionLevel(Solver&);
-    void backtrack(Solver&);
+    void beginBacktrack(Solver&);
+    void endBacktrack(Solver&);
 
     void newPair(Solver&, PairHandle);
 
-    void forEachParentOf(Value value, auto&& callback);
+    void forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit = std::numeric_limits<uint32_t>::max());
     void forEachEqualValue(Value value, auto&& callback);
 
     Value rewrite(Value v) { return infoFor(v).root; }
@@ -35,17 +37,6 @@ private:
     struct EqualityInfo {
         struct TreeNode {
             Value value;
-            uint32_t subTreeSize = 1;
-            //! Node where this tree attaches to its parent tree
-            /*!
-            Always lies in the parent tree before this node. Stored is the offset in the parent tree.
-            */
-            uint32_t linkSource = 0;
-            //! Node where the parent tree attaches to this tree
-            /*!
-            Always lies with in this subtree (linkTarget < subTreeSize). Stored is the offset from this node.
-            */
-            uint32_t linkTarget = 0;
 
             bool operator==(const TreeNode&) const = default;
         };
@@ -68,8 +59,7 @@ private:
         Value root;
         int32_t treeOffset = -1; //!< Offset in root's tree
         uint32_t edgesOffset = 0; //!< Offset of this values edges in root's edges
-        uint32_t backtrackCounter = 0;
-        uint32_t backtrackTracePosition = -1; //!< Position of the trace entry where this value ceased to be a root or -1 if it is a root
+        std::optional<TracePosition> tracePosition; //!< Position of the trace entry where this value ceased to be a root.
         std::vector<TreeNode> tree;
         std::vector<Edge> edges;
         std::vector<uint32_t> disequalities; //!< Sorted list of disequalities this node is a part of
@@ -85,7 +75,6 @@ private:
     void assignDisequal(Solver&, PairHandle assignPair, PairHandle diseqPair);
     void assignDisequalByAlwaysDisequal(Solver&, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB);
 
-    void pathInTree(Solver&, Value a, Value b, ClauseBuilder&);
     void path(Solver&, Value a, Value b, ClauseBuilder&);
 
     EqualityInfo& infoFor(Value v) {
@@ -108,35 +97,21 @@ private:
     std::vector<uint32_t> equalityDecisionPoints; //!< Trace sizes at the respective decision levels
     std::vector<uint32_t> disequalityDecisionPoints; //!< Trace sizes at the respective decision levels
 
-    //! Copy of the trace at the time of backtracking. Used to reconstruct paths after backtracking
-    std::vector<EqualityTraceEntry> backtrackTrace;
-
-    uint32_t backtrackCounter = 0;
     TheoryId m_theory;
     ValueKind m_valueKind;
 };
 
-inline void RewriteEquality::forEachParentOf(Value value, auto&& callback) {
-    const auto& valueInfo = infoFor(value);
-    callback(valueInfo.root);
-
-    int_t valueIndex = valueInfo.treeOffset;
-    const auto& tree = infoFor(valueInfo.root).tree;
-    int_t rootIndex = -1;
+inline void RewriteEquality::forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit) {
     for (;;) {
-        if (rootIndex == valueIndex)
+        callback(value);
+        const auto& valueInfo = infoFor(value);
+        if (!valueInfo.tracePosition.has_value())
             break;
 
-        int_t index = rootIndex + 1;
-        for (;;) {
-            int_t nextIndex = index + tree[index].subTreeSize;
-            if (nextIndex > valueIndex)
-                break;
-            index = nextIndex;
-        }
-        rootIndex = index;
-
-        callback(tree[rootIndex].value);
+        uint32_t index = valueInfo.tracePosition->index;
+        if (index >= traceSizeLimit)
+            break;
+        value = equalityTrace[index].roots.source;
     }
 }
 
