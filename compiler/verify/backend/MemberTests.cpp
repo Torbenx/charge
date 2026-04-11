@@ -18,11 +18,9 @@ TEST(VerifyBackend, MembersBasic1) {
     BooleanValue eq2 = solver.equality(solver.composeMembers({ l1, v2 }), solver.composeMembers({ v1, l3 }));
     BooleanValue eq3 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
 
-    println("------------");
     {
         solver.decideTrue(eq1);
         solver.sat.propagate();
-        println("-");
         solver.decideTrue(eq2);
         solver.sat.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq3));
@@ -31,7 +29,6 @@ TEST(VerifyBackend, MembersBasic1) {
         std::vector<Member> expectedV2 { l2, l3 };
         EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
     }
-    println("------------");
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
@@ -39,7 +36,6 @@ TEST(VerifyBackend, MembersBasic1) {
         std::vector<Member> expectedV2 { v2 };
         EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
     }
-    println("------------");
     {
         solver.decideTrue(eq2);
         solver.sat.propagate();
@@ -51,7 +47,6 @@ TEST(VerifyBackend, MembersBasic1) {
         std::vector<Member> expectedV2 { l2, l3 };
         EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
     }
-    println("------------");
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
@@ -59,7 +54,6 @@ TEST(VerifyBackend, MembersBasic1) {
         std::vector<Member> expectedV2 { v2 };
         EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
     }
-    println("------------");
     {
         solver.decideTrue(eq3);
         solver.sat.propagate();
@@ -71,7 +65,6 @@ TEST(VerifyBackend, MembersBasic1) {
         std::vector<Member> expectedV2 { l2, l3 };
         EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
     }
-    println("------------");
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };

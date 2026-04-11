@@ -117,7 +117,6 @@ void Members::markUsesAsDirty(VariableInfo& varInfo) {
 }
 
 void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> expression) {
-    println("add rewrite from {}", pair.pairId());
     auto& varInfo = infoFor(target);
     RewriteTracePosition tracePos(rewriteTrace.size());
     rewriteTrace.push_back({ { target }, pair });
@@ -133,7 +132,6 @@ void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> exp
 }
 
 void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
-    println("add identity rewrite from {}", pair.pairId());
     RewriteTracePosition tracePos(rewriteTrace.size());
     pairs[makeEquality(pair)].rewrite = tracePos;
     for (Member target : targets) {
@@ -147,7 +145,6 @@ void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
 }
 
 void Members::updateRewrite(VariableInfo& varInfo) {
-    println("update rewrite {}", rewriteTrace[varInfo.tracePos.value().index].rewritePair.pairId());
     auto& rw = varInfo.currentRewrite;
     rw.clear();
     for (Member m : varInfo.rewriteExpression) {
@@ -170,7 +167,6 @@ void Members::assignEqual(Solver& solver, PairHandle handle) {
 }
 
 void Members::assignDisequal(Solver& solver, PairHandle handle) {
-    println("decide disequal {}", handle.pairId());
     AssignedPairTracePosition tracePos(assignedPairTrace.size());
     assignedPairTrace.push_back(handle);
     auto equality = makeEquality(handle);
@@ -179,7 +175,6 @@ void Members::assignDisequal(Solver& solver, PairHandle handle) {
 }
 
 void Members::updatePair(Solver& solver, PairHandle handle) {
-    println("update pair {}", handle.pairId());
     VERIFY(dirtyRewrites.empty());
     BooleanValue equality(encodePairTheoryValue<TheoryId::MemberEquality>(handle));
     if (pairs[equality].assignedOrRewritten())
@@ -200,34 +195,30 @@ void Members::updatePair(Solver& solver, PairHandle handle) {
         std::swap(aRW, bRW);
 
     VERIFY(!aRW.empty()); // because aRW != bRW and aRW.size >= bRW.size
-    if (bRW.empty() && std::ranges::any_of(aRW, [](Member m) { return m.literal(); })) {
-        assignDisequal(solver, handle);
-        return;
-    }
-    if (aRW.front().literal() && bRW.front().literal()) {
-        VERIFY(aRW.front() != bRW.front());
-        assignDisequal(solver, handle);
-        return;
-    }
-    if (aRW.back().literal() && bRW.back().literal()) {
-        VERIFY(aRW.back() != bRW.back());
-        assignDisequal(solver, handle);
+    if (auto subRange = std::ranges::search(aRW, bRW); subRange.size() == bRW.size()) {
+        // b is a subexpression of a or b is empty
+        aRW.erase(subRange.begin(), subRange.end());
+        if (std::ranges::any_of(aRW, [](Member m) { return m.literal(); })) {
+            // a contains a literal can thus never be empty
+            assignDisequal(solver, handle);
+        } else if (solver.assignedTrue(equality)) {
+            // Rewrite all elements of a to the identity
+            addIdentityRewrite(std::move(aRW), handle);
+        }
         return;
     }
 
-    if (solver.assignedTrue(equality)) {
-        if (bRW.size() == 0) {
-            // Rewrite all elements of a to the identity
-            addIdentityRewrite(std::move(aRW), handle);
-        } else if (auto subRange = std::ranges::search(aRW, bRW); !subRange.empty()) {
-            aRW.erase(subRange.begin(), subRange.end());
-            addIdentityRewrite(std::move(aRW), handle);
-        } else if (bRW.size() == 1 && !bRW[0].literal()) {
-            // Rewrite b[0] to a
-            addRewrite(bRW[0], handle, std::move(aRW));
-        } else {
-            // Unassigned
-        }
+    if (aRW.front().literal() && bRW.front().literal()) {
+        // a.front() and  b.front() are distinct literals
+        VERIFY(aRW.front() != bRW.front());
+        assignDisequal(solver, handle);
+    } else if (aRW.back().literal() && bRW.back().literal()) {
+        // a.back() and  b.back() are distinct literals
+        VERIFY(aRW.back() != bRW.back());
+        assignDisequal(solver, handle);
+    } else if (solver.assignedTrue(equality) && bRW.size() == 1 && !bRW[0].literal()) {
+        // Rewrite b[0] to a
+        addRewrite(bRW[0], handle, std::move(aRW));
     }
 }
 
@@ -255,7 +246,6 @@ void Members::newPair(Solver& solver, PairHandle pair) {
 }
 
 void Members::propagateEqual(Solver& solver, PairHandle pair) {
-    println("propagateEqual {}", pair.pairId());
     VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
     VERIFY(solver.assignedTrue(makeEquality(pair)));
     updatePair(solver, pair);
@@ -296,14 +286,12 @@ bool Members::testReason(Solver&, BooleanValue assignedLiteral, const Reason& re
     if (reason.kind() == ReasonKind::MemberEquality) {
         return pairInfo.equality.has_value();
     } else if (reason.kind() == ReasonKind::MemberDisequality) {
-        println("test disequal {} -> {}", pairOf(assignedLiteral).pairId(), pairInfo.disequality.has_value());
         return pairInfo.disequality.has_value();
     } else
         VERIFY_NOT_REACHED();
 }
 
 void Members::explainRewrite(Solver& solver, Member m, ClauseBuilder& clause) {
-    println("explain {}:{}", nameString(m.theory()), m.id());
     if (m.literal())
         return;
     if (m.composite()) {
@@ -324,7 +312,6 @@ void Members::explainRewrite(Solver& solver, Member m, ClauseBuilder& clause) {
 }
 
 ClauseAndIndex Members::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
-    // TODO: This likely doesn't work correctly with out of order reverted rewrites
     PairHandle pair = pairOf(assignedLiteral);
     auto [a, b] = solver.at(pair);
     ClauseBuilder clause = solver.beginClause();
@@ -387,6 +374,8 @@ void Members::beginBacktrack(Solver& solver) {
         dirtyRewrites.pop();
     }
     updateRewrites();
+    // No new information should become available as result of the backtrack
+    // so there is no need to update the pairs.
     decltype(dirtyPairs) emptyDirtyPairs;
     dirtyPairs = emptyDirtyPairs; // priority_queue has no clear()
 }

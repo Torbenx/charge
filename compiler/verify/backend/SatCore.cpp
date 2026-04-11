@@ -339,16 +339,19 @@ void SatCore::beginBacktrack(int_t targetLevel) {
         auto& info = infoFor(entry.literal);
         VERIFY(info.firstReason.has_value() && info.lastReason.has_value());
 
+        if (info.firstReason.value() == position) {
+            // When the first reason is reverted we requeue the propagation.
+            if (firstPropagation != entry.literal && !info.prevPropagation.has_value()) {
+                interface().unapplyAssignment(entry.literal);
+                queuePropagation(entry.literal);
+            }
+        }
+
         bool revert = !interface().testReason(entry.literal, entry.reason);
         if (revert) {
             if (info.firstReason.value() == position) {
-                // When the first reason is reverted we requeue the propagation.
                 info.subTraceIndex = subTrace.size();
                 subTrace.push_back({ entry.literal, entry.reason });
-                if (assignedTrue(entry.literal)) {
-                    interface().unapplyAssignment(entry.literal);
-                    queuePropagation(entry.literal);
-                }
             }
             if (entry.nextReason.has_value()) {
                 // tell nextReason to update prevReason
@@ -364,12 +367,6 @@ void SatCore::beginBacktrack(int_t targetLevel) {
                 removePropagation(entry.literal);
             }
         } else {
-            if (info.firstReason.value() == position) {
-                if (assignedTrue(entry.literal)) {
-                    interface().unapplyAssignment(entry.literal);
-                    queuePropagation(entry.literal);
-                }
-            }
             *(entry.prevReason.has_value() ? &at(*entry.prevReason).nextReason : &info.firstReason) = writePosition;
             *(entry.nextReason.has_value() ? &at(*entry.nextReason).prevReason : &info.lastReason) = writePosition;
 
