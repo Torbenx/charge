@@ -366,9 +366,6 @@ void SatCore::beginBacktrack(int_t targetLevel) {
         } else {
             if (info.firstReason.value() == position) {
                 if (assignedTrue(entry.literal)) {
-                    // Note: Repropagation is necessary for correctness of the theory solvers.
-                    //       For the clauses it is redudant and harms performance.
-                    //       This could be avoided by keeping track of clause and theory propagation separately.
                     interface().unapplyAssignment(entry.literal);
                     queuePropagation(entry.literal);
                 }
