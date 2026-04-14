@@ -58,7 +58,6 @@ inline bool isVariableDecl(TokenKind kind) {
     SCOPE(IfBranch)               \
     SCOPE(ElseBranch)             \
     SCOPE(PlainStatement)         \
-    SCOPE(Argument)               \
     SCOPE(Parameter)              \
     SCOPE(Namespace)              \
     SCOPE(FunctionBody)           \

@@ -304,11 +304,6 @@ class EndCallInstruction:
         return "endCall"
 
 @dataclasses.dataclass
-class ErrorInstruction:
-    def format(self):
-        return "error"
-
-@dataclasses.dataclass
 class SetGlobalKindInstruction:
     globalKindExpr: str
     def format(self):
@@ -658,7 +653,7 @@ def linearIf(commonPrefix: str, state):
             line("VERIFY_NOT_REACHED();")
         else:
             line("tokEnd = skipToEndOfLine(tokEnd);")
-            line("emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);")
+            line("emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);")
             line("goto " + state.name + "$no_emit;")
     elif exactMatch == "/*":
         if onlyUsedAsThen(state):
@@ -666,7 +661,7 @@ def linearIf(commonPrefix: str, state):
         else:
             line("tokEnd = skipToEndOfBlockComment(tokEnd);")
             line("tokEnd += 2;")
-            line("emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);")
+            line("emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);")
             line("goto " + state.name + "$no_emit;")
     else:
         recurse(state, lambda s: s.punctuationCase(exactMatch), lambda case: generateCaseBody(case))
@@ -698,11 +693,11 @@ def checkForPunctuation(punc, handler):
     line("}")
 
 def inlineTokenAdvancer():
-    line("tokEnd = inlineAdvancer(tokEnd, state);")
+    line("tokEnd = inlineAdvancer(tokEnd, output);")
     line("tokBegin = tokEnd;")
 
 def emitToken(tokenKindExpr, tokenData = "0"):
-    line("emitToken(" + tokenKindExpr + ", tokBegin, " + tokenData + ", state);")
+    line("emitToken(" + tokenKindExpr + ", tokBegin, " + tokenData + ", output);")
 
 def emitCarriedToken():
     emitToken("carriedEmitTokenKind", "carriedEmitTokenData")
@@ -738,7 +733,7 @@ def collectPossibleThenStates(state):
 def readWord():
     line("{")
     with indent():
-        line("auto wordAndPos = readWord(tokEnd, state);")
+        line("auto wordAndPos = readWord(tokEnd, output);")
         line("tokEnd = wordAndPos.position;")
         line("this_identifier = wordAndPos.word;")
     line("}")
@@ -773,12 +768,11 @@ def generateWordCase(state):
             for c in state.keywordCases():
                 line("if (this_identifier == words[\"" + c.keyword + "\"]) {")
                 with indent():
-                    generateCaseBody(c)
+                    endedWithJumpInstruction = generateCaseBody(c)
+                    if not endedWithJumpInstruction:
+                        raise Exception(f"Case for keyword '{c.keyword}' in '{state.name}' should end with a 'next' instruction")
                 line("}")
-        if state.name == "error":
-            line("VERIFY_NOT_REACHED();")
-        else:
-            recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
+        recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
     line("}")
 
     labelLine("LABEL_MAYBE_UNUSED " + state.name + "$identifier_case:")
@@ -797,11 +791,12 @@ def generateWordCase(state):
                     while not ss is s:
                         line("// -> " + ss.thenState)
                         ss = findState(ss.thenState)
-                    generateCaseBody(c)
+                    endedWithJumpInstruction = generateCaseBody(c)
+                    if not endedWithJumpInstruction:
+                        raise Exception(f"Case for keyword '{c.identifier}' in '{state.name}' should end with a 'next' instruction")
                 line("}")
             if not s.thenCase() is None:
                 if not seenIdentifierState is None:
-                    print("Checking " + state.name)
                     for thenState in collectPossibleThenStates(s):
                         if findState(thenState).keywordCases() or findState(thenState).specialIdentifierCases():
                             raise Exception(f"starting from {state.name} identifier case in {seenIdentifierState.name} will shadow keywords in {thenState} due to then case in {s.name}")
@@ -809,14 +804,18 @@ def generateWordCase(state):
             s = findState(s.thenState)
     line("}")
     if state.identifierCase():
-        generateCaseBody(state.identifierCase())
+        endedWithJumpInstruction = generateCaseBody(state.identifierCase())
+        if not endedWithJumpInstruction:
+            raise Exception(f"Identifier case in '{state.name}' should end with a 'next' instruction")
     else:
         recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$identifier_case;"))
 
-errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
-errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
-errorCases += [IdentifierCase([ErrorInstruction()]), LiteralCase([ErrorInstruction()])]
-errorState = State("SwitchState", "error", "", [], errorCases)
+#errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
+#errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
+#errorCases += [IdentifierCase([ErrorInstruction()]), LiteralCase([ErrorInstruction()])]
+errorThenCase = ThenCase([])
+errorState = State("SwitchState", "error", "", [], [errorThenCase])
+nonErrorStates = states.copy()
 states += [errorState]
 
 def findState(name: str) -> State:
@@ -833,8 +832,11 @@ def recurse(state, check, func):
             func(val)
             return
         thenCase = state.thenCase()
+        thenCaseClosed = False
         if not thenCase is None:
-            generateCaseBody(thenCase, lambda target: recurse(findState(target), check, func))
+            thenCaseClosed = generateCaseBody(thenCase, lambda target: recurse(findState(target), check, func))
+        if thenCaseClosed:
+            return
         line("// -> " + state.thenState)
         if generateStateDebug:
             line("println(\" -> " + state.thenState + "\");")
@@ -861,7 +863,7 @@ def generateSwitchState(state):
         line("case '\\n': {")
         with indent():
             line("tokEnd += 1;")
-            line("markLineBegin(tokEnd, state);")
+            line("markLineBegin(tokEnd, output);")
             line("goto " + state.name + "$no_emit;")
         line("}")
 
@@ -874,7 +876,7 @@ def generateSwitchState(state):
             with indent():
                 line("tokEnd += 1;")
             line("}")
-            line("markLineBegin(tokEnd, state);")
+            line("markLineBegin(tokEnd, output);")
             line("goto " + state.name + "$no_emit;")
         line("}")
 
@@ -950,9 +952,10 @@ def generateLinearState(state):
     if not endCase is None:
         line("if (tokEnd[0] == '\\0') {")
         with indent():
-            generateCaseBody(endCase)
+            endedWithJumpInstruction = generateCaseBody(endCase)
+            if endedWithJumpInstruction: raise Exception("'end' case should not jump")
             emitToken("TokenKind::EOS")
-            line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);")
+            line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, output);")
             line("goto exit;")
         line("}")
 
@@ -961,23 +964,24 @@ def generateLinearState(state):
         if generateStateDebug:
             line("println(\" -> " + target + "\");")
         line("goto " + target + "$as_then;")
+    thenCaseClosed = False
     if not thenCase is None:
-        generateCaseBody(thenCase, lambda target: generateThenJump(target))
-    line("// then " + state.thenState)
-    generateThenJump(state.thenState)
+        thenCaseClosed = generateCaseBody(thenCase, lambda target: generateThenJump(target))
+    if not thenCaseClosed:
+        line("// then " + state.thenState)
+        generateThenJump(state.thenState)
 
-def generateError(case):
-    if type(case) is ThenCase:
+def generateCaseBody(case, thenHandler = lambda target: line("#error Use of stub thenHandler")):
+    if case is errorThenCase:
         line("goto error$as_then;")
-    else:
-        line("errorToken = LexerToken::" + case.cppName() + ";")
-        line("goto handle_parse_error;")
-
-def generateCaseBody(case, thenHandler = lambda target: line("xxxx")):
-    generateInstructions(case, case.instructions, thenHandler)
+        return True
+    return generateInstructions(case, case.instructions, thenHandler)
 
 def generateInstructions(case, instructions, thenHandler):
+    afterJumpInstruction = False
     for inst in instructions:
+        if afterJumpInstruction:
+            raise Exception("unreachable code")
         line("// " + inst.format())
         if type(inst) is EmitTokenInstruction:
             if generateLexTokenChecks:
@@ -996,14 +1000,14 @@ def generateInstructions(case, instructions, thenHandler):
                 emitToken(inst.tokenKindExpr, dataExpr)
         elif type(inst) is UpdateKindInstruction:
             if generateLexTokenChecks:
-                line("checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), " + inst.tokenKindExpr + ");")
-            line("state.tokenBuffer.tokens.back().setKind(" + inst.tokenKindExpr + ");")
+                line("checkTokenUpdate(output.tokenBuffer.tokens.back().kind(), " + inst.tokenKindExpr + ");")
+            line("output.tokenBuffer.tokens.back().setKind(" + inst.tokenKindExpr + ");")
         elif type(inst) is DiscardLastTokenInstruction:
-            line("discardLastToken(state);")
+            line("discardLastToken(output);")
         elif type(inst) is UpdateDataInstruction:
-            line("state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
+            line("output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
         elif type(inst) is UpdateSecondaryDataInstruction:
-            line("state.tokenBuffer.tokens.back().data2Bits = packData2(state.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
+            line("output.tokenBuffer.tokens.back().data2Bits = packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
@@ -1017,6 +1021,7 @@ def generateInstructions(case, instructions, thenHandler):
                 generateState(newState)
             else:
                 line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
+            afterJumpInstruction = True
         elif type(inst) is AssignInstruction:
             line(inst.leftName + " = " + inst.rightExpr + ";")
         elif type(inst) is PushScopeInstruction:
@@ -1030,7 +1035,7 @@ def generateInstructions(case, instructions, thenHandler):
                 line("auto result = popScope(scopePosition" + scopes + ");")
                 line("if (result == nullptr) {")
                 with indent():
-                    generateError(case)
+                    line("goto pop_scope_failed;")
                 line("}")
                 line("scopePosition = result;")
             line("}")
@@ -1045,19 +1050,20 @@ def generateInstructions(case, instructions, thenHandler):
             line("}")
         elif type(inst) is ThenInstruction:
             thenHandler(inst.newState)
+            afterJumpInstruction = True
         elif type(inst) is CommitDeclarationInstruction:
             nameExpr = "Word()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
-            line("this_declaration = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, state);")
+            line("this_declaration = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, output);")
         elif type(inst) is CommitImplDeclarationInstruction:
-            line("this_declaration = commitImplDeclaration<" + inst.declKindExpr + ">(tokBegin, declarationBegin, state);")
+            line("this_declaration = commitImplDeclaration<" + inst.declKindExpr + ">(tokBegin, declarationBegin, output);")
         elif type(inst) is RememberDeclarationBeginInstruction:
-            line("declarationBegin = state.tokenBuffer.currentToken();")
+            line("declarationBegin = output.tokenBuffer.currentToken();")
         elif type(inst) is EndDeclarationInstruction:
-            line("endDeclaration(state);")
+            line("endDeclaration(output);")
         elif type(inst) is EmitCallTokenInstruction:
-            line("argumentPosition = emitCallToken(argumentPosition, " + inst.tokenKindExpr + ", tokBegin, state);")
+            line("argumentPosition = emitCallToken(argumentPosition, " + inst.tokenKindExpr + ", tokBegin, output);")
         elif type(inst) is CallArgumentInstruction:
             nameExpr = "Word()"
             if not inst.nameExpr is None:
@@ -1069,13 +1075,12 @@ def generateInstructions(case, instructions, thenHandler):
                 nameExpr = inst.nameExpr
             line("updateCallArgument(argumentPosition, " + nameExpr + ");")
         elif type(inst) is EndCallInstruction:
-            line("argumentPosition = endCall(argumentPosition, state);")
-        elif type(inst) is ErrorInstruction:
-            generateError(case)
+            line("argumentPosition = endCall(argumentPosition, output);")
         elif type(inst) is SetGlobalKindInstruction:
-            line("setGlobalKind(state, " + inst.globalKindExpr + ");")
+            line("setGlobalKind(output, " + inst.globalKindExpr + ");")
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
+    return afterJumpInstruction
 
 def collectOrigins(state, instructions):
     for inst in instructions:
@@ -1112,7 +1117,8 @@ for state in states:
             line("goto " + state.name + "$no_emit;")
 line("}")
 
-for state in states:
+assert onlyUsedAsThen(errorState)
+for state in nonErrorStates:
     if len(state.origins) == 0:
         raise Exception("unused state '" + state.name + "'")
     if not shouldBeInlined(state):

@@ -55,21 +55,6 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$' || c == '#';
 }
 
-static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
-
-struct ScopeBuffer {
-    static size_t toIndex(ScopeKind* position) {
-        return (uintptr_t)position & (SCOPE_BUFFER_SIZE - 1);
-    }
-
-    ScopeKind* buffer;
-    ScopeBuffer()
-        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
-    ~ScopeBuffer() {
-        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
-    }
-};
-
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     // println("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
@@ -89,21 +74,6 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static constexpr int_t ARGUMENT_BUFFER_SIZE = 1024;
-static constexpr int_t ARGUMENT_BUFFER_SIZE_IN_BYTES = ARGUMENT_BUFFER_SIZE * sizeof(Word);
-
-struct ArgumentBuffer {
-    static size_t toIndex(Word* position) {
-        return ((uintptr_t)position & (ARGUMENT_BUFFER_SIZE_IN_BYTES - 1)) / sizeof(Word);
-    }
-    Word* buffer;
-    ArgumentBuffer()
-        : buffer((Word*)::operator new(ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES))) { }
-    ~ArgumentBuffer() {
-        ::operator delete(buffer, ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES));
-    }
-};
-
 static Word* addCallArgument(Word* position, Word name) {
     auto index = ArgumentBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -120,33 +90,33 @@ static void updateCallArgument(Word* position, Word name) {
     position[-1] = name;
 }
 
-NO_INLINE static Word* endCall(Word* position, ParseState& state) {
+NO_INLINE static Word* endCall(Word* position, ParseOutput& output) {
     uint32_t count = position[0].toUint();
-    auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
+    auto handle = output.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
+    output.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
     return position;
 }
 
-static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
+static SourceLocation locationInCurrentLine(const char* position, ParseOutput& output) {
     return {
         0u,
-        (uint32_t)state.tokenBuffer.lines.size() - 1,
-        (uint32_t)(position - state.tokenBuffer.lines.back().begin)
+        (uint32_t)output.tokenBuffer.lines.size() - 1,
+        (uint32_t)(position - output.tokenBuffer.lines.back().begin)
     };
 }
 
-NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseOutput& output) {
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), data });
 }
 
-NO_INLINE static void discardLastToken(ParseState& state) {
-    state.tokenBuffer.tokens.pop_back();
+NO_INLINE static void discardLastToken(ParseOutput& output) {
+    output.tokenBuffer.tokens.pop_back();
 }
 
-NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
-    uint32_t tokenIndex = state.tokenBuffer.tokens.size();
-    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
+NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseOutput& output) {
+    uint32_t tokenIndex = output.tokenBuffer.tokens.size();
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), 0 });
 
     auto index = ArgumentBuffer::toIndex(argPos);
     VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -156,15 +126,15 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     return argPos;
 }
 
-NO_INLINE static void markLineBegin(const char* position, ParseState& state) {
-    state.tokenBuffer.lines.push_back({ position });
+NO_INLINE static void markLineBegin(const char* position, ParseOutput& output) {
+    output.tokenBuffer.lines.push_back({ position });
 }
 
 struct WordAndPosition {
     const char* position;
     Word word;
 };
-[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseState& state) {
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseOutput& output) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -172,7 +142,7 @@ struct WordAndPosition {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
-    Word word = state.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
 
@@ -206,28 +176,28 @@ struct WordAndPosition {
     return position;
 };
 
-NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
-    state.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseOutput& output) {
+    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
 
-[[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
+[[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseOutput& output) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
             tokEnd = skipToEndOfLine(tokEnd);
-            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             continue;
         }
         if (tokEnd[0] == '\n') {
             tokEnd += 1;
-            markLineBegin(tokEnd, state);
+            markLineBegin(tokEnd, output);
             continue;
         }
         if (tokEnd[0] == '\r') {
@@ -236,7 +206,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
             } else {
                 tokEnd += 1;
             }
-            markLineBegin(tokEnd, state);
+            markLineBegin(tokEnd, output);
             continue;
         }
         break;
@@ -260,56 +230,48 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
+static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
+    // println("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
-        return state.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
-        return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, output));
     } else if constexpr (kind == DeclarationKind::Namespace) {
-        return state.pushNamespaceScope(name);
+        return output.pushNamespaceScope(name);
     } else {
-        return state.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, output));
     }
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
     static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
-    return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
+    return output.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, output));
 }
 
-static void endDeclaration(ParseState& state) {
-    // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
-    state.popScope(state.tokenBuffer.currentToken());
+static void endDeclaration(ParseOutput& output) {
+    // println("endDeclaration {}", output.tokenBuffer.wordTable.view(output.currentScope()->name()));
+    output.popScope(output.tokenBuffer.currentToken());
 }
 
 using GlobalKind = sema::GlobalKind;
-static void setGlobalKind(ParseState& state, GlobalKind kind) {
-    sema::cast<sema::GlobalProgram>(state.currentProgram())->m_globalKind = kind;
+static void setGlobalKind(ParseOutput& output, GlobalKind kind) {
+    sema::cast<sema::GlobalProgram>(output.currentProgram())->m_globalKind = kind;
 }
 
-void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
-    ScopeBuffer scopeBuffer;
-    ScopeKind* scopePosition = scopeBuffer.buffer;
-    scopePosition[0] = ScopeKind::Invalid;
-    ArgumentBuffer argumentBuffer;
-    Word* argumentPosition = argumentBuffer.buffer;
-
-    const char* tokBegin = sourceBufferPosition;
-    const char* tokEnd = sourceBufferPosition;
+StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
+    State parseState = inState.state;
+    const char* tokBegin = inState.sourcePosition;
+    const char* tokEnd = inState.sourcePosition;
+    ScopeKind* scopePosition = inState.scopePosition;
+    Word* argumentPosition = inState.argumentPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = {};
     Word argumentName;
-
     TokenKind tokenKind = (TokenKind)0;
-
-    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
-    State parseState = State::NamespaceDeclaration;
-    LexerToken errorToken = (LexerToken)0;
 
     switch (parseState) {
     case State::Expression:
@@ -431,7 +393,7 @@ void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler
     }
     // SwitchState expression
 expression$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -440,7 +402,7 @@ expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto expression$no_emit;
     }
     case '\r': {
@@ -449,7 +411,7 @@ expression$as_then:
         } else {
             tokEnd += 1;
         }
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto expression$no_emit;
     }
     case '!': {
@@ -457,9 +419,7 @@ expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::ExclaimEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // emitToken TokenKind::LogicalNotExpr
@@ -474,15 +434,11 @@ expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::PercentEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Percent;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '&': {
         char next = tokEnd[1];
@@ -491,51 +447,39 @@ expression$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::AmpAmpEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::AmpAmp;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::AmpEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Amp;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '(': {
         tokEnd += 1;
         // emitCallToken TokenKind::ParenthesizedExpr
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::ParenthesizedExpr, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::ParenthesizedExpr, tokBegin, output);
         // next first_argument_paren
         goto first_argument_paren$no_emit;
     }
     case ')': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::RightParen;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '*': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::StarEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // emitToken TokenKind::DereferenceExpr
@@ -559,9 +503,7 @@ expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::PlusEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // emitToken TokenKind::PlusExpr
@@ -574,9 +516,7 @@ expression$as_then:
     case ',': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Comma;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '-': {
         char next = tokEnd[1];
@@ -592,16 +532,12 @@ expression$as_then:
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::MinusEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::MinusGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // emitToken TokenKind::NegateExpr
@@ -628,49 +564,39 @@ expression$as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto expression$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto expression$no_emit;
         }
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::SlashEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Slash;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ':': {
         char next = tokEnd[1];
         if (next == ':') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::ColonColon;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Colon;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ';': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::SemiColon;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '<': {
         char next = tokEnd[1];
@@ -679,161 +605,117 @@ expression$as_then:
             if (next == '=') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::LessLessEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::LessLess;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '=') {
             char next = tokEnd[2];
             if (next == '>') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::LessEqualGreater;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::LessEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Less;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '=': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::EqualEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::EqualGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Equal;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '>': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::GreaterEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::GreaterGreaterEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::GreaterGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Greater;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '[': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::LeftSquare;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ']': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::RightSquare;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '^': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::HatEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Hat;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '{': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::LeftBrace;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '|': {
         char next = tokEnd[1];
         if (next == '=') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::VertEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '|') {
             char next = tokEnd[2];
             if (next == '=') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::VertVertEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::VertVert;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Vert;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '}': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::RightBrace;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '~': {
         tokEnd += 1;
@@ -938,7 +820,7 @@ expression$as_then:
     VERIFY_NOT_REACHED();
 expression$word_case_entry:
     {
-        auto wordAndPos = readWord(tokEnd, state);
+        auto wordAndPos = readWord(tokEnd, output);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
@@ -951,7 +833,7 @@ expression$word_case_entry:
             goto expression$no_emit;
         }
         // -> error
-        goto error$keyword_check;
+        goto error$as_then;
     }
 LABEL_MAYBE_UNUSED expression$identifier_case:
     if (isSpecialIdentifier(this_identifier)) {
@@ -965,7 +847,7 @@ LABEL_MAYBE_UNUSED expression$identifier_case:
 
     // SwitchState after_expression
 after_expression$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -974,7 +856,7 @@ after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto after_expression$no_emit;
     }
     case '\r': {
@@ -983,7 +865,7 @@ after_expression$as_then:
         } else {
             tokEnd += 1;
         }
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto after_expression$no_emit;
     }
     case '!': {
@@ -999,9 +881,7 @@ after_expression$as_then:
         }
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Exclaim;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '%': {
         char next = tokEnd[1];
@@ -1011,8 +891,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::PercentEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1043,8 +922,7 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = LexerToken::AmpAmpEqual;
-                        goto handle_parse_error;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -1071,8 +949,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::AmpEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1096,7 +973,7 @@ after_expression$as_then:
     case '(': {
         tokEnd += 1;
         // emitCallToken TokenKind::CallExpr
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::CallExpr, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::CallExpr, tokBegin, output);
         // next first_argument_paren
         goto first_argument_paren$no_emit;
     }
@@ -1108,8 +985,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::RightExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightParen;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1117,8 +993,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightParen;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1135,8 +1010,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::VariableType);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightParen;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1144,8 +1018,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightParen;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1162,8 +1035,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::ParenInImplExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightParen;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1178,13 +1050,12 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Paren);
             if (result == nullptr) {
-                errorToken = LexerToken::RightParen;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1200,8 +1071,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::StarEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1239,8 +1109,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::PlusEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1283,8 +1152,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::MinusEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1300,9 +1168,7 @@ after_expression$as_then:
         if (next == '>') {
             tokEnd += 2;
             // -> error
-            // error
-            errorToken = LexerToken::MinusGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // emitToken TokenKind::SubtractionExpr
@@ -1325,13 +1191,13 @@ after_expression$as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto after_expression$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto after_expression$no_emit;
         }
         if (next == '=') {
@@ -1340,8 +1206,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::SlashEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1378,8 +1243,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::BaseTypeExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::Colon;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1392,8 +1256,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::ReturnType);
                 if (result == nullptr) {
-                    errorToken = LexerToken::Colon;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1410,8 +1273,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::IfExprOrStmt);
             if (result == nullptr) {
-                errorToken = LexerToken::Colon;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -1419,8 +1281,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::LeftExpr);
             if (result == nullptr) {
-                errorToken = LexerToken::Colon;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -1428,8 +1289,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::PlainStatement);
             if (result == nullptr) {
-                errorToken = LexerToken::Colon;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -1450,8 +1310,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::BaseTypeExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::SemiColon;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1466,8 +1325,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType);
             if (result == nullptr) {
-                errorToken = LexerToken::SemiColon;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -1488,8 +1346,7 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = LexerToken::LessLessEqual;
-                        goto handle_parse_error;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -1515,9 +1372,7 @@ after_expression$as_then:
             if (next == '>') {
                 tokEnd += 3;
                 // -> error
-                // error
-                errorToken = LexerToken::LessEqualGreater;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // emitToken TokenKind::CompareLessEqualExpr
@@ -1552,8 +1407,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::IfExpr, ScopeKind::IfExprOrStmt);
                 if (result == nullptr) {
-                    errorToken = LexerToken::EqualGreater;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1569,8 +1423,7 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::VariableType, ScopeKind::LeftExpr);
             if (result == nullptr) {
-                errorToken = LexerToken::Equal;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -1602,8 +1455,7 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = LexerToken::GreaterGreaterEqual;
-                        goto handle_parse_error;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -1635,7 +1487,7 @@ after_expression$as_then:
     case '[': {
         tokEnd += 1;
         // emitCallToken TokenKind::IndexExpr
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::IndexExpr, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::IndexExpr, tokBegin, output);
         // next first_argument_square
         goto first_argument_square$no_emit;
     }
@@ -1645,13 +1497,12 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = LexerToken::RightSquare;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1667,8 +1518,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::HatEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1692,7 +1542,7 @@ after_expression$as_then:
     case '{': {
         tokEnd += 1;
         // emitCallToken TokenKind::Parameterize
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, output);
         // next first_argument_brace
         goto first_argument_brace$no_emit;
     }
@@ -1704,8 +1554,7 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::VertEqual;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -1726,8 +1575,7 @@ after_expression$as_then:
                 {
                     auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                     if (result == nullptr) {
-                        errorToken = LexerToken::VertVertEqual;
-                        goto handle_parse_error;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -1764,13 +1612,12 @@ after_expression$as_then:
             {
                 auto result = popScope(scopePosition, ScopeKind::BraceInImplExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightBrace;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
             // endCall
-            argumentPosition = endCall(argumentPosition, state);
+            argumentPosition = endCall(argumentPosition, output);
             // emitToken TokenKind::EmptyNode
             checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
             carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1782,13 +1629,12 @@ after_expression$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
             if (result == nullptr) {
-                errorToken = LexerToken::RightBrace;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1799,9 +1645,7 @@ after_expression$as_then:
     case '~': {
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Tilde;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '0':
     case '1':
@@ -1817,18 +1661,14 @@ after_expression$as_then:
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // -> error
-        // error
-        errorToken = LexerToken::Literal;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '\'': {
         tokEnd = skipToEndOfCharacterLiteral(tokEnd);
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
         // -> error
-        // error
-        errorToken = LexerToken::Literal;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case 'a':
     case 'b':
@@ -1893,23 +1733,23 @@ after_expression$as_then:
     VERIFY_NOT_REACHED();
 after_expression$word_case_entry:
     {
-        auto wordAndPos = readWord(tokEnd, state);
+        auto wordAndPos = readWord(tokEnd, output);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
     if (isKeyword(this_identifier)) {
         // -> error
-        goto error$keyword_check;
+        goto error$as_then;
     }
 LABEL_MAYBE_UNUSED after_expression$identifier_case:
     if (isSpecialIdentifier(this_identifier)) {
     }
     // -> error
-    goto error$identifier_case;
+    goto error$as_then;
 
     // LinearState comma_after_expression
 comma_after_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::CommaAfterExpression;
     if (std::string_view(tokEnd, 1) == ")"sv) {
@@ -1918,13 +1758,12 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Paren);
             if (result == nullptr) {
-                errorToken = LexerToken::RightParen;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1938,13 +1777,12 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
             if (result == nullptr) {
-                errorToken = LexerToken::RightSquare;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1960,13 +1798,12 @@ comma_after_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::BraceInImplExpr);
                 if (result == nullptr) {
-                    errorToken = LexerToken::RightBrace;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
             // endCall
-            argumentPosition = endCall(argumentPosition, state);
+            argumentPosition = endCall(argumentPosition, output);
             // emitToken TokenKind::EmptyNode
             checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
             carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1978,13 +1815,12 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Brace);
             if (result == nullptr) {
-                errorToken = LexerToken::RightBrace;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -1994,7 +1830,7 @@ comma_after_expression$no_emit:
     }
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -2015,7 +1851,7 @@ comma_after_expression$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::VariableType);
                     if (result == nullptr) {
-                        goto error$as_then;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -2023,7 +1859,7 @@ comma_after_expression$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::Parameter);
                     if (result == nullptr) {
-                        goto error$as_then;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -2031,7 +1867,7 @@ comma_after_expression$no_emit:
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
                 // emitToken TokenKind::ExpressionStmt
                 checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-                emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+                emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
                 // then parameter
                 goto parameter$keyword_check;
             }
@@ -2041,7 +1877,7 @@ comma_after_expression$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::RightExpr);
                     if (result == nullptr) {
-                        goto error$as_then;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -2049,7 +1885,7 @@ comma_after_expression$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::Parameter);
                     if (result == nullptr) {
-                        goto error$as_then;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -2057,7 +1893,7 @@ comma_after_expression$no_emit:
                 scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
                 // emitToken TokenKind::ExpressionStmt
                 checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-                emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+                emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
                 // then parameter
                 goto parameter$keyword_check;
             }
@@ -2068,13 +1904,13 @@ comma_after_expression$no_emit:
                 argumentPosition = addCallArgument(argumentPosition, Word());
                 // emitToken TokenKind::CallArgument
                 checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
-                emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+                emitToken(TokenKind::CallArgument, tokBegin, 0, output);
                 // -> check_designated_argument
                 // -> expression
                 goto expression$keyword_check;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED comma_after_expression$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -2090,7 +1926,7 @@ comma_after_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::VariableType);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -2098,7 +1934,7 @@ comma_after_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -2106,7 +1942,7 @@ comma_after_expression$no_emit:
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
             // emitToken TokenKind::ExpressionStmt
             checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-            emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+            emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
             // then parameter
             goto parameter$identifier_case;
         }
@@ -2116,7 +1952,7 @@ comma_after_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::RightExpr);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -2124,7 +1960,7 @@ comma_after_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::Parameter);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -2132,7 +1968,7 @@ comma_after_expression$no_emit:
             scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
             // emitToken TokenKind::ExpressionStmt
             checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-            emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+            emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
             // then parameter
             goto parameter$identifier_case;
         }
@@ -2143,12 +1979,12 @@ comma_after_expression$no_emit:
             argumentPosition = addCallArgument(argumentPosition, Word());
             // emitToken TokenKind::CallArgument
             checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
-            emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+            emitToken(TokenKind::CallArgument, tokBegin, 0, output);
             // -> check_designated_argument
             goto check_designated_argument$identifier_case;
         }
         // -> error
-        goto error$identifier_case;
+        goto error$as_then;
     }
     // ifScope ScopeKind::Parameter
     if (scopePosition[0] == ScopeKind::Parameter) {
@@ -2161,7 +1997,7 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::VariableType);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2169,7 +2005,7 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2177,7 +2013,7 @@ comma_after_expression$no_emit:
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
         checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-        emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+        emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
         // then parameter
         goto parameter$as_then;
     }
@@ -2187,7 +2023,7 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::RightExpr);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2195,7 +2031,7 @@ comma_after_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2203,7 +2039,7 @@ comma_after_expression$no_emit:
         scopePosition = pushScope(scopePosition, ScopeKind::Parameter);
         // emitToken TokenKind::ExpressionStmt
         checkLexToken(TokenKind::ExpressionStmt, LexerToken::Invalid);
-        emitToken(TokenKind::ExpressionStmt, tokBegin, 0, state);
+        emitToken(TokenKind::ExpressionStmt, tokBegin, 0, output);
         // then parameter
         goto parameter$as_then;
     }
@@ -2217,7 +2053,7 @@ comma_after_expression$no_emit:
 
     // LinearState comma_else
 comma_else$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::CommaElse;
     if (std::string_view(tokEnd, 2) == "=>"sv) {
@@ -2234,7 +2070,7 @@ comma_else$no_emit:
 
     // LinearState argument
 argument$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::Argument;
 argument$as_then:
@@ -2242,7 +2078,7 @@ argument$as_then:
     argumentPosition = addCallArgument(argumentPosition, Word());
     // emitToken TokenKind::CallArgument
     checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
-    emitToken(TokenKind::CallArgument, tokBegin, 0, state);
+    emitToken(TokenKind::CallArgument, tokBegin, 0, output);
     // then check_designated_argument
     goto check_designated_argument$as_then;
 
@@ -2250,7 +2086,7 @@ argument$as_then:
 check_designated_argument$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -2275,9 +2111,9 @@ check_designated_argument$as_then:
 
     // LinearState maybe_designated_argument
 maybe_designated_argument$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 maybe_designated_argument$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::MaybeDesignatedArgument;
     if (std::string_view(tokEnd, 1) == ":"sv) {
@@ -2287,7 +2123,7 @@ maybe_designated_argument$no_emit:
             // callArgument argumentName
             updateCallArgument(argumentPosition, argumentName);
             // discardLastToken
-            discardLastToken(state);
+            discardLastToken(output);
             // next expression
             goto expression$no_emit;
         }
@@ -2297,13 +2133,13 @@ maybe_designated_argument$no_emit:
 
     // LinearState first_argument_paren
 first_argument_paren$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentParen;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightParen);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -2318,13 +2154,13 @@ first_argument_paren$no_emit:
 
     // LinearState first_argument_square
 first_argument_square$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentSquare;
     if (std::string_view(tokEnd, 1) == "]"sv) {
         tokEnd += 1;
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightSquare);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -2339,13 +2175,13 @@ first_argument_square$no_emit:
 
     // LinearState first_argument_brace
 first_argument_brace$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::FirstArgumentBrace;
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
         // endCall
-        argumentPosition = endCall(argumentPosition, state);
+        argumentPosition = endCall(argumentPosition, output);
         // emitToken TokenKind::EmptyNode
         checkLexToken(TokenKind::EmptyNode, LexerToken::RightBrace);
         carriedEmitTokenKind = TokenKind::EmptyNode;
@@ -2360,20 +2196,20 @@ first_argument_brace$no_emit:
 
     // LinearState access_punctuation
 access_punctuation$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 access_punctuation$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AccessPunctuation;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED access_punctuation$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -2390,9 +2226,9 @@ access_punctuation$no_emit:
 
     // LinearState single_or_compound_statement
 single_or_compound_statement$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 single_or_compound_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::SingleOrCompoundStatement;
     // then statement
@@ -2400,14 +2236,14 @@ single_or_compound_statement$no_emit:
 
     // LinearState after_statement
 after_statement$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterStatement;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -2418,8 +2254,7 @@ after_statement$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::IfBranch);
                     if (result == nullptr) {
-                        errorToken = LexerToken::Else;
-                        goto handle_parse_error;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
@@ -2434,13 +2269,13 @@ after_statement$no_emit:
                 {
                     auto result = popScope(scopePosition, ScopeKind::FunctionBody);
                     if (result == nullptr) {
-                        goto error$as_then;
+                        goto pop_scope_failed;
                     }
                     scopePosition = result;
                 }
                 // then after_declaration
                 // endDeclaration
-                endDeclaration(state);
+                endDeclaration(output);
                 // ifScope ScopeKind::Struct
                 if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
@@ -2460,13 +2295,13 @@ after_statement$no_emit:
                     goto templated_declaration$keyword_check;
                 }
                 // -> error
-                goto error$keyword_check;
+                goto error$as_then;
             }
             // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
             if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
                 // then after_declaration
                 // endDeclaration
-                endDeclaration(state);
+                endDeclaration(output);
                 // ifScope ScopeKind::Struct
                 if (scopePosition[0] == ScopeKind::Struct) {
                     // then member_declaration
@@ -2486,13 +2321,13 @@ after_statement$no_emit:
                     goto templated_declaration$keyword_check;
                 }
                 // -> error
-                goto error$keyword_check;
+                goto error$as_then;
             }
             // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
             {
                 auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -2510,13 +2345,13 @@ after_statement$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::FunctionBody);
                 if (result == nullptr) {
-                    goto error$as_then;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
             // then after_declaration
             // endDeclaration
-            endDeclaration(state);
+            endDeclaration(output);
             // ifScope ScopeKind::Struct
             if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
@@ -2533,13 +2368,13 @@ after_statement$no_emit:
                 goto enum_value_declaration$identifier_case;
             }
             // -> error
-            goto error$identifier_case;
+            goto error$as_then;
         }
         // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
         if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
             // then after_declaration
             // endDeclaration
-            endDeclaration(state);
+            endDeclaration(output);
             // ifScope ScopeKind::Struct
             if (scopePosition[0] == ScopeKind::Struct) {
                 // then member_declaration
@@ -2556,13 +2391,13 @@ after_statement$no_emit:
                 goto enum_value_declaration$identifier_case;
             }
             // -> error
-            goto error$identifier_case;
+            goto error$as_then;
         }
         // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
         {
             auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2577,7 +2412,7 @@ after_statement$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::FunctionBody);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -2593,7 +2428,7 @@ after_statement$no_emit:
     {
         auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
         if (result == nullptr) {
-            goto error$as_then;
+            goto pop_scope_failed;
         }
         scopePosition = result;
     }
@@ -2604,7 +2439,7 @@ after_statement$no_emit:
 
     // SwitchState statement
 statement$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 statement$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
@@ -2613,7 +2448,7 @@ statement$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto statement$no_emit;
     }
     case '\r': {
@@ -2622,7 +2457,7 @@ statement$as_then:
         } else {
             tokEnd += 1;
         }
-        markLineBegin(tokEnd, state);
+        markLineBegin(tokEnd, output);
         goto statement$no_emit;
     }
     case '!': {
@@ -2633,9 +2468,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::ExclaimEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
@@ -2656,18 +2489,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::PercentEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Percent;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '&': {
         char next = tokEnd[1];
@@ -2679,18 +2508,14 @@ statement$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
                 // -> expression
                 // -> error
-                // error
-                errorToken = LexerToken::AmpAmpEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::AmpAmp;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -2698,18 +2523,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::AmpEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Amp;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '(': {
         tokEnd += 1;
@@ -2717,7 +2538,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // emitCallToken TokenKind::ParenthesizedExpr
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::ParenthesizedExpr, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::ParenthesizedExpr, tokBegin, output);
         // next first_argument_paren
         goto first_argument_paren$no_emit;
     }
@@ -2727,9 +2548,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::RightParen;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '*': {
         char next = tokEnd[1];
@@ -2739,9 +2558,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::StarEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
@@ -2774,9 +2591,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::PlusEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
@@ -2795,9 +2610,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Comma;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '-': {
         char next = tokEnd[1];
@@ -2819,9 +2632,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::MinusEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             tokEnd += 2;
@@ -2829,9 +2640,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::MinusGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
@@ -2864,13 +2673,13 @@ statement$as_then:
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto statement$no_emit;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
-            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto statement$no_emit;
         }
         if (next == '=') {
@@ -2879,18 +2688,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::SlashEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Slash;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ':': {
         char next = tokEnd[1];
@@ -2900,18 +2705,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::ColonColon;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Colon;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ';': {
         tokEnd += 1;
@@ -2919,9 +2720,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::SemiColon;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '<': {
         char next = tokEnd[1];
@@ -2933,18 +2732,14 @@ statement$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
                 // -> expression
                 // -> error
-                // error
-                errorToken = LexerToken::LessLessEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::LessLess;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '=') {
             char next = tokEnd[2];
@@ -2954,27 +2749,21 @@ statement$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
                 // -> expression
                 // -> error
-                // error
-                errorToken = LexerToken::LessEqualGreater;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::LessEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Less;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '=': {
         char next = tokEnd[1];
@@ -2984,9 +2773,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::EqualEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             tokEnd += 2;
@@ -2994,18 +2781,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::EqualGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Equal;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '>': {
         char next = tokEnd[1];
@@ -3015,9 +2798,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::GreaterEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '>') {
             char next = tokEnd[2];
@@ -3027,27 +2808,21 @@ statement$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
                 // -> expression
                 // -> error
-                // error
-                errorToken = LexerToken::GreaterGreaterEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::GreaterGreater;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Greater;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '[': {
         tokEnd += 1;
@@ -3055,9 +2830,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::LeftSquare;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case ']': {
         tokEnd += 1;
@@ -3065,9 +2838,7 @@ statement$as_then:
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::RightSquare;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '^': {
         char next = tokEnd[1];
@@ -3077,18 +2848,14 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::HatEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Hat;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '{': {
         tokEnd += 1;
@@ -3111,9 +2878,7 @@ statement$as_then:
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::VertEqual;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         if (next == '|') {
             char next = tokEnd[2];
@@ -3123,27 +2888,21 @@ statement$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
                 // -> expression
                 // -> error
-                // error
-                errorToken = LexerToken::VertVertEqual;
-                goto handle_parse_error;
+                goto error$as_then;
             }
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
             // -> expression
             // -> error
-            // error
-            errorToken = LexerToken::VertVert;
-            goto handle_parse_error;
+            goto error$as_then;
         }
         tokEnd += 1;
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
         // -> error
-        // error
-        errorToken = LexerToken::Vert;
-        goto handle_parse_error;
+        goto error$as_then;
     }
     case '}': {
         tokEnd += 1;
@@ -3151,8 +2910,7 @@ statement$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement);
             if (result == nullptr) {
-                errorToken = LexerToken::RightBrace;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3160,8 +2918,7 @@ statement$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::CompoundStmt);
             if (result == nullptr) {
-                errorToken = LexerToken::RightBrace;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3284,7 +3041,7 @@ statement$as_then:
     VERIFY_NOT_REACHED();
 statement$word_case_entry:
     {
-        auto wordAndPos = readWord(tokEnd, state);
+        auto wordAndPos = readWord(tokEnd, output);
         tokEnd = wordAndPos.position;
         this_identifier = wordAndPos.word;
     }
@@ -3351,18 +3108,18 @@ LABEL_MAYBE_UNUSED statement$identifier_case:
 
     // LinearState let_statement
 let_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::LetStatement;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED let_statement$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -3379,18 +3136,18 @@ let_statement$no_emit:
 
     // LinearState var_statement
 var_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::VarStatement;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED var_statement$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -3407,9 +3164,9 @@ var_statement$no_emit:
 
     // LinearState after_return
 after_return$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_return$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterReturn;
     if (std::string_view(tokEnd, 1) == ";"sv) {
@@ -3418,14 +3175,13 @@ after_return$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::RightExpr);
             if (result == nullptr) {
-                errorToken = LexerToken::SemiColon;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
         // updateKind TokenKind::EmptyReturnStmt
-        checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), TokenKind::EmptyReturnStmt);
-        state.tokenBuffer.tokens.back().setKind(TokenKind::EmptyReturnStmt);
+        checkTokenUpdate(output.tokenBuffer.tokens.back().kind(), TokenKind::EmptyReturnStmt);
+        output.tokenBuffer.tokens.back().setKind(TokenKind::EmptyReturnStmt);
         // next after_statement
         goto after_statement$no_emit;
     }
@@ -3434,7 +3190,7 @@ after_return$no_emit:
 
     // LinearState else_branch
 else_branch$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::ElseBranch;
     if (std::string_view(tokEnd, 1) == ":"sv) {
@@ -3454,9 +3210,9 @@ else_branch$no_emit:
 
     // LinearState after_simple_variable_declaration_id
 after_simple_variable_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_simple_variable_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterSimpleVariableDeclarationId;
     if (std::string_view(tokEnd, 1) == ":"sv) {
@@ -3478,9 +3234,9 @@ after_simple_variable_declaration_id$no_emit:
 
     // LinearState after_variable_declaration_id
 after_variable_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_variable_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableDeclarationId;
 after_variable_declaration_id$as_then:
@@ -3525,8 +3281,7 @@ after_variable_declaration_id$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = LexerToken::Comma;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3545,8 +3300,7 @@ after_variable_declaration_id$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = LexerToken::RightParen;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3562,9 +3316,9 @@ after_variable_declaration_id$as_then:
 
     // LinearState variable_type
 variable_type$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 variable_type$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::VariableType;
     if (std::string_view(tokEnd, 1) == "<"sv) {
@@ -3572,7 +3326,7 @@ variable_type$no_emit:
         if (next != '<' && next != '=') {
             tokEnd += 1;
             // updateData sema::VariableKind::Generic
-            state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::Generic);
+            output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::Generic);
             // pushScope ScopeKind::GenericCategoryExpression
             scopePosition = pushScope(scopePosition, ScopeKind::GenericCategoryExpression);
             // emitToken TokenKind::VariableGenericCategory
@@ -3585,7 +3339,7 @@ variable_type$no_emit:
     }
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -3593,19 +3347,19 @@ variable_type$no_emit:
         LABEL_MAYBE_UNUSED variable_type$keyword_check:
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::UniqueReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::UniqueReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::UniqueReference);
                 // next after_variable_unique_modifier
                 goto after_variable_unique_modifier$no_emit;
             }
             if (this_identifier == words["shared"]) {
                 // updateData sema::VariableKind::SharedReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::SharedReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::SharedReference);
                 // next after_variable_shared_modifier
                 goto after_variable_shared_modifier$no_emit;
             }
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
                 // next after_variable_const_modifier
                 goto after_variable_const_modifier$no_emit;
             }
@@ -3629,7 +3383,7 @@ variable_type$no_emit:
 
     // LinearState after_variable_modifier
 after_variable_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableModifier;
 after_variable_modifier$as_then:
@@ -3662,8 +3416,7 @@ after_variable_modifier$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = LexerToken::Comma;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3682,8 +3435,7 @@ after_variable_modifier$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Parameter);
             if (result == nullptr) {
-                errorToken = LexerToken::RightParen;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3701,12 +3453,12 @@ after_variable_modifier$as_then:
 
     // LinearState after_variable_unique_modifier
 after_variable_unique_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableUniqueModifier;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -3714,7 +3466,7 @@ after_variable_unique_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_unique_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3738,12 +3490,12 @@ after_variable_unique_modifier$no_emit:
 
     // LinearState after_variable_shared_modifier
 after_variable_shared_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableSharedModifier;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -3751,7 +3503,7 @@ after_variable_shared_modifier$no_emit:
         LABEL_MAYBE_UNUSED after_variable_shared_modifier$keyword_check:
             if (this_identifier == words["const"]) {
                 // updateData sema::VariableKind::ConstSharedReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstSharedReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3775,12 +3527,12 @@ after_variable_shared_modifier$no_emit:
 
     // LinearState after_variable_const_modifier
 after_variable_const_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableConstModifier;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -3792,7 +3544,7 @@ after_variable_const_modifier$no_emit:
             }
             if (this_identifier == words["unique"]) {
                 // updateData sema::VariableKind::ConstUniqueReference
-                state.tokenBuffer.tokens.back().data1Bits = packData1(state.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
+                output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), sema::VariableKind::ConstUniqueReference);
                 // next after_variable_modifier
                 goto after_variable_modifier$no_emit;
             }
@@ -3816,21 +3568,21 @@ after_variable_const_modifier$no_emit:
 
     // LinearState after_parameters
 after_parameters$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_parameters$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterParameters;
     // emitToken TokenKind::EmptyNode
     checkLexToken(TokenKind::EmptyNode, LexerToken::Invalid);
-    emitToken(TokenKind::EmptyNode, tokBegin, 0, state);
+    emitToken(TokenKind::EmptyNode, tokBegin, 0, output);
     // ifScope ScopeKind::FunctionParameters
     if (scopePosition[0] == ScopeKind::FunctionParameters) {
         // popScope ScopeKind::FunctionParameters
         {
             auto result = popScope(scopePosition, ScopeKind::FunctionParameters);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3843,7 +3595,7 @@ after_parameters$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::TemplateParameters);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -3855,7 +3607,7 @@ after_parameters$no_emit:
 
     // LinearState first_parameter
 first_parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::FirstParameter;
     if (std::string_view(tokEnd, 1) == ")"sv) {
@@ -3870,15 +3622,15 @@ first_parameter$no_emit:
 
     // LinearState parameter
 parameter$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::Parameter;
 parameter$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -3889,7 +3641,7 @@ parameter$as_then:
                 goto var_parameter$no_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED parameter$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -3906,18 +3658,18 @@ parameter$as_then:
 
     // LinearState var_parameter
 var_parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::VarParameter;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED var_parameter$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -3934,9 +3686,9 @@ var_parameter$no_emit:
 
     // LinearState impl_expression
 impl_expression$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 impl_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::ImplExpression;
     if (std::string_view(tokEnd, 1) == "("sv) {
@@ -3952,13 +3704,13 @@ impl_expression$no_emit:
     }
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED impl_expression$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -3975,9 +3727,9 @@ impl_expression$no_emit:
 
     // LinearState after_impl_expression
 after_impl_expression$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_impl_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterImplExpression;
     if (std::string_view(tokEnd, 2) == "::"sv) {
@@ -3990,7 +3742,7 @@ after_impl_expression$no_emit:
         // pushScope ScopeKind::BraceInImplExpr
         scopePosition = pushScope(scopePosition, ScopeKind::BraceInImplExpr);
         // emitCallToken TokenKind::Parameterize
-        argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, state);
+        argumentPosition = emitCallToken(argumentPosition, TokenKind::Parameterize, tokBegin, output);
         // next argument
         goto argument$no_emit;
     }
@@ -4002,8 +3754,7 @@ after_impl_expression$no_emit:
             {
                 auto result = popScope(scopePosition, ScopeKind::GenericCategoryExpression);
                 if (result == nullptr) {
-                    errorToken = LexerToken::Greater;
-                    goto handle_parse_error;
+                    goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
@@ -4017,7 +3768,7 @@ after_impl_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::StructImplExpression);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -4030,7 +3781,7 @@ after_impl_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::FunctionImplExpression);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -4043,7 +3794,7 @@ after_impl_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::EnumImplExpression);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -4056,7 +3807,7 @@ after_impl_expression$no_emit:
         {
             auto result = popScope(scopePosition, ScopeKind::GlobalImplExpression);
             if (result == nullptr) {
-                goto error$as_then;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -4072,18 +3823,18 @@ after_impl_expression$no_emit:
 
     // LinearState impl_access_expression
 impl_access_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::ImplAccessExpression;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED impl_access_expression$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -4106,8 +3857,7 @@ no_declaration$as_then:
         {
             auto result = popScope(scopePosition, ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum);
             if (result == nullptr) {
-                errorToken = LexerToken::RightBrace;
-                goto handle_parse_error;
+                goto pop_scope_failed;
             }
             scopePosition = result;
         }
@@ -4115,8 +3865,8 @@ no_declaration$as_then:
         goto after_declaration$no_emit;
     }
     if (tokEnd[0] == '\0') {
-        emitToken(TokenKind::EOS, tokBegin, 0, state);
-        emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, state);
+        emitToken(TokenKind::EOS, tokBegin, 0, output);
+        emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, output);
         goto exit;
     }
     // then error
@@ -4124,13 +3874,13 @@ no_declaration$as_then:
 
     // LinearState namespace_declaration
 namespace_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::NamespaceDeclaration;
 namespace_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4147,7 +3897,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4158,7 +3908,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4169,7 +3919,7 @@ namespace_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4180,21 +3930,21 @@ namespace_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
@@ -4207,31 +3957,31 @@ namespace_declaration$as_then:
 
     // LinearState namespace_declaration_id
 namespace_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::NamespaceDeclarationId;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED namespace_declaration_id$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // rememberDeclarationBegin
-        declarationBegin = state.tokenBuffer.currentToken();
+        declarationBegin = output.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Namespace, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::Namespace>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::NamespaceDecl
         checkLexToken(TokenKind::NamespaceDecl, LexerToken::Identifier);
-        emitToken(TokenKind::NamespaceDecl, tokBegin, packData1(TokenKind::NamespaceDecl, this_identifier), state);
+        emitToken(TokenKind::NamespaceDecl, tokBegin, packData1(TokenKind::NamespaceDecl, this_identifier), output);
         // updateSecondaryData this_declaration
-        state.tokenBuffer.tokens.back().data2Bits = packData2(state.tokenBuffer.tokens.back().kind(), this_declaration);
+        output.tokenBuffer.tokens.back().data2Bits = packData2(output.tokenBuffer.tokens.back().kind(), this_declaration);
         // next after_namespace_declaration_id
         goto after_namespace_declaration_id$no_emit;
     }
@@ -4240,7 +3990,7 @@ namespace_declaration_id$no_emit:
 
     // LinearState after_namespace_declaration_id
 after_namespace_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterNamespaceDeclarationId;
     if (std::string_view(tokEnd, 1) == ":"sv) {
@@ -4256,7 +4006,7 @@ after_namespace_declaration_id$no_emit:
 
     // LinearState namespace_declaration_body
 namespace_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::NamespaceDeclarationBody;
     if (std::string_view(tokEnd, 1) == "{"sv) {
@@ -4273,7 +4023,7 @@ namespace_declaration_body$no_emit:
 templated_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4281,19 +4031,19 @@ templated_declaration$as_then:
         LABEL_MAYBE_UNUSED templated_declaration$keyword_check:
             if (this_identifier == words["static"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next after_static
                 goto after_static$no_emit;
             }
             // -> no_declaration
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED templated_declaration$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
             if (this_identifier == words["template"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4303,7 +4053,7 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["incomplete"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4313,7 +4063,7 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["virtual"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4323,41 +4073,41 @@ templated_declaration$as_then:
             }
             if (this_identifier == words["fn"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
         }
         // -> no_declaration
         // -> error
-        goto error$identifier_case;
+        goto error$as_then;
     }
     // then no_declaration
     goto no_declaration$as_then;
 
     // LinearState templated_declaration_with_attributes
 templated_declaration_with_attributes$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 templated_declaration_with_attributes$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::TemplatedDeclarationWithAttributes;
 templated_declaration_with_attributes$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4368,7 +4118,7 @@ templated_declaration_with_attributes$as_then:
                 goto after_static$no_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED templated_declaration_with_attributes$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -4410,16 +4160,16 @@ templated_declaration_with_attributes$as_then:
             }
         }
         // -> error
-        goto error$identifier_case;
+        goto error$as_then;
     }
     // then error
     goto error$as_then;
 
     // LinearState after_template
 after_template$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_template$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterTemplate;
     if (std::string_view(tokEnd, 1) == "("sv) {
@@ -4439,12 +4189,12 @@ after_template_parameters$as_then:
 
     // LinearState function_declaration_id
 function_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::FunctionDeclarationId;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4452,7 +4202,7 @@ function_declaration_id$no_emit:
         LABEL_MAYBE_UNUSED function_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Function
-                this_declaration = commitImplDeclaration<DeclarationKind::Function>(tokBegin, declarationBegin, state);
+                this_declaration = commitImplDeclaration<DeclarationKind::Function>(tokBegin, declarationBegin, output);
                 // pushScope ScopeKind::FunctionImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::FunctionImplExpression);
                 // emitToken TokenKind::FunctionImplDecl
@@ -4463,13 +4213,13 @@ function_declaration_id$no_emit:
                 goto impl_expression$with_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED function_declaration_id$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Function, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::Function>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::FunctionDecl
         checkLexToken(TokenKind::FunctionDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::FunctionDecl;
@@ -4482,9 +4232,9 @@ function_declaration_id$no_emit:
 
     // LinearState after_function_declaration_id
 after_function_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_function_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterFunctionDeclarationId;
 after_function_declaration_id$as_then:
@@ -4543,12 +4293,12 @@ after_function_parameters$as_then:
 
     // LinearState struct_declaration_id
 struct_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::StructDeclarationId;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4556,7 +4306,7 @@ struct_declaration_id$no_emit:
         LABEL_MAYBE_UNUSED struct_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Struct
-                this_declaration = commitImplDeclaration<DeclarationKind::Struct>(tokBegin, declarationBegin, state);
+                this_declaration = commitImplDeclaration<DeclarationKind::Struct>(tokBegin, declarationBegin, output);
                 // pushScope ScopeKind::StructImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::StructImplExpression);
                 // emitToken TokenKind::StructImplDecl
@@ -4567,13 +4317,13 @@ struct_declaration_id$no_emit:
                 goto impl_expression$with_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED struct_declaration_id$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Struct, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::Struct>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::StructDecl
         checkLexToken(TokenKind::StructDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::StructDecl;
@@ -4586,9 +4336,9 @@ struct_declaration_id$no_emit:
 
     // LinearState after_struct_declaration_id
 after_struct_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_struct_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterStructDeclarationId;
 after_struct_declaration_id$as_then:
@@ -4605,7 +4355,7 @@ after_struct_declaration_id$as_then:
 
     // LinearState struct_declaration_body
 struct_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::StructDeclarationBody;
     if (std::string_view(tokEnd, 1) == "{"sv) {
@@ -4620,13 +4370,13 @@ struct_declaration_body$no_emit:
 
     // LinearState member_declaration
 member_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::MemberDeclaration;
 member_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4640,9 +4390,9 @@ member_declaration$as_then:
                 // pushScope ScopeKind::BaseTypeExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::BaseTypeExpr);
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // commitDeclaration DeclarationKind::BaseMember
-                this_declaration = commitDeclaration<DeclarationKind::BaseMember>(Word(), tokBegin, declarationBegin, state);
+                this_declaration = commitDeclaration<DeclarationKind::BaseMember>(Word(), tokBegin, declarationBegin, output);
                 // emitToken TokenKind::BaseMemberDecl
                 checkLexToken(TokenKind::BaseMemberDecl, LexerToken::Base);
                 carriedEmitTokenKind = TokenKind::BaseMemberDecl;
@@ -4653,7 +4403,7 @@ member_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4664,7 +4414,7 @@ member_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4675,7 +4425,7 @@ member_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4686,29 +4436,29 @@ member_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
         }
         // rememberDeclarationBegin
-        declarationBegin = state.tokenBuffer.currentToken();
+        declarationBegin = output.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::Member, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::Member>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::MemberDecl
         checkLexToken(TokenKind::MemberDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::MemberDecl;
@@ -4721,12 +4471,12 @@ member_declaration$as_then:
 
     // LinearState enum_declaration_id
 enum_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::EnumDeclarationId;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4734,7 +4484,7 @@ enum_declaration_id$no_emit:
         LABEL_MAYBE_UNUSED enum_declaration_id$keyword_check:
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::Enum
-                this_declaration = commitImplDeclaration<DeclarationKind::Enum>(tokBegin, declarationBegin, state);
+                this_declaration = commitImplDeclaration<DeclarationKind::Enum>(tokBegin, declarationBegin, output);
                 // pushScope ScopeKind::EnumImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::EnumImplExpression);
                 // emitToken TokenKind::EnumImplDecl
@@ -4745,13 +4495,13 @@ enum_declaration_id$no_emit:
                 goto impl_expression$with_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED enum_declaration_id$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::Enum, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::Enum>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::EnumDecl
         checkLexToken(TokenKind::EnumDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::EnumDecl;
@@ -4764,9 +4514,9 @@ enum_declaration_id$no_emit:
 
     // LinearState after_enum_declaration_id
 after_enum_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_enum_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterEnumDeclarationId;
 after_enum_declaration_id$as_then:
@@ -4783,7 +4533,7 @@ after_enum_declaration_id$as_then:
 
     // LinearState enum_declaration_body
 enum_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::EnumDeclarationBody;
     if (std::string_view(tokEnd, 1) == "{"sv) {
@@ -4798,13 +4548,13 @@ enum_declaration_body$no_emit:
 
     // LinearState enum_value_declaration
 enum_value_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::EnumValueDeclaration;
 enum_value_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4817,7 +4567,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["template"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::TemplateAttribute
                 checkLexToken(TokenKind::TemplateAttribute, LexerToken::Template);
                 carriedEmitTokenKind = TokenKind::TemplateAttribute;
@@ -4828,7 +4578,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["incomplete"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::IncompleteAttribute
                 checkLexToken(TokenKind::IncompleteAttribute, LexerToken::Incomplete);
                 carriedEmitTokenKind = TokenKind::IncompleteAttribute;
@@ -4839,7 +4589,7 @@ enum_value_declaration$as_then:
             if (this_identifier == words["virtual"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // emitToken TokenKind::VirtualAttribute
                 checkLexToken(TokenKind::VirtualAttribute, LexerToken::Virtual);
                 carriedEmitTokenKind = TokenKind::VirtualAttribute;
@@ -4850,29 +4600,29 @@ enum_value_declaration$as_then:
             if (this_identifier == words["fn"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next function_declaration_id
                 goto function_declaration_id$no_emit;
             }
             if (this_identifier == words["struct"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next struct_declaration_id
                 goto struct_declaration_id$no_emit;
             }
             if (this_identifier == words["enum"]) {
                 // -> templated_declaration
                 // rememberDeclarationBegin
-                declarationBegin = state.tokenBuffer.currentToken();
+                declarationBegin = output.tokenBuffer.currentToken();
                 // next enum_declaration_id
                 goto enum_declaration_id$no_emit;
             }
         }
         // rememberDeclarationBegin
-        declarationBegin = state.tokenBuffer.currentToken();
+        declarationBegin = output.tokenBuffer.currentToken();
         // commitDeclaration DeclarationKind::EnumValue, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::EnumValue>(this_identifier, tokBegin, declarationBegin, output);
         // emitToken TokenKind::ImplicitEnumValueDecl
         checkLexToken(TokenKind::ImplicitEnumValueDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::ImplicitEnumValueDecl;
@@ -4885,9 +4635,9 @@ enum_value_declaration$as_then:
 
     // LinearState after_enum_value_declaration_id
 after_enum_value_declaration_id$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_enum_value_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterEnumValueDeclarationId;
     if (std::string_view(tokEnd, 1) == "="sv) {
@@ -4895,8 +4645,8 @@ after_enum_value_declaration_id$no_emit:
         if (next != '=' && next != '>') {
             tokEnd += 1;
             // updateKind TokenKind::ExplicitEnumValueDecl
-            checkTokenUpdate(state.tokenBuffer.tokens.back().kind(), TokenKind::ExplicitEnumValueDecl);
-            state.tokenBuffer.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
+            checkTokenUpdate(output.tokenBuffer.tokens.back().kind(), TokenKind::ExplicitEnumValueDecl);
+            output.tokenBuffer.tokens.back().setKind(TokenKind::ExplicitEnumValueDecl);
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
             // emitToken TokenKind::AssignStmt
@@ -4921,12 +4671,12 @@ after_enum_value_declaration_id$no_emit:
 
     // LinearState after_static
 after_static$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterStatic;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
@@ -4938,7 +4688,7 @@ after_static$no_emit:
             }
             if (this_identifier == words["impl"]) {
                 // commitImplDeclaration DeclarationKind::StaticVariable
-                this_declaration = commitImplDeclaration<DeclarationKind::StaticVariable>(tokBegin, declarationBegin, state);
+                this_declaration = commitImplDeclaration<DeclarationKind::StaticVariable>(tokBegin, declarationBegin, output);
                 // pushScope ScopeKind::GlobalImplExpression
                 scopePosition = pushScope(scopePosition, ScopeKind::GlobalImplExpression);
                 // emitToken TokenKind::GlobalImplDecl
@@ -4949,7 +4699,7 @@ after_static$no_emit:
                 goto impl_expression$with_emit;
             }
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED after_static$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
@@ -4959,9 +4709,9 @@ after_static$no_emit:
             }
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, output);
         // setGlobalKind GlobalKind::Let
-        setGlobalKind(state, GlobalKind::Let);
+        setGlobalKind(output, GlobalKind::Let);
         // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
@@ -4974,26 +4724,26 @@ after_static$no_emit:
 
     // LinearState static_var_variable_declaration
 static_var_variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::StaticVarVariableDeclaration;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED static_var_variable_declaration$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, output);
         // setGlobalKind GlobalKind::Var
-        setGlobalKind(state, GlobalKind::Var);
+        setGlobalKind(output, GlobalKind::Var);
         // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
@@ -5006,26 +4756,26 @@ static_var_variable_declaration$no_emit:
 
     // LinearState static_open_variable_declaration
 static_open_variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::StaticOpenVariableDeclaration;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
-            auto wordAndPos = readWord(tokEnd, state);
+            auto wordAndPos = readWord(tokEnd, output);
             tokEnd = wordAndPos.position;
             this_identifier = wordAndPos.word;
         }
         if (isKeyword(this_identifier)) {
             // -> error
-            goto error$keyword_check;
+            goto error$as_then;
         }
     LABEL_MAYBE_UNUSED static_open_variable_declaration$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
         // commitDeclaration DeclarationKind::StaticVariable, this_identifier
-        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, state);
+        this_declaration = commitDeclaration<DeclarationKind::StaticVariable>(this_identifier, tokBegin, declarationBegin, output);
         // setGlobalKind GlobalKind::OpenLet
-        setGlobalKind(state, GlobalKind::OpenLet);
+        setGlobalKind(output, GlobalKind::OpenLet);
         // emitToken TokenKind::GlobalDecl
         checkLexToken(TokenKind::GlobalDecl, LexerToken::Identifier);
         carriedEmitTokenKind = TokenKind::GlobalDecl;
@@ -5038,14 +4788,14 @@ static_open_variable_declaration$no_emit:
 
     // LinearState after_declaration
 after_declaration$with_emit:
-    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, state);
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, state);
+    tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterDeclaration;
 after_declaration$as_then:
     // endDeclaration
-    endDeclaration(state);
+    endDeclaration(output);
     // ifScope ScopeKind::Struct
     if (scopePosition[0] == ScopeKind::Struct) {
         // then member_declaration
@@ -5064,551 +4814,27 @@ after_declaration$as_then:
     // then error
     goto error$as_then;
 
-    // SwitchState error
+
+pop_scope_failed:
 error$as_then:
-    switch (tokEnd[0]) {
-    case '\n':
-    case '\r':
-        VERIFY_NOT_REACHED();
-    case '!': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::ExclaimEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Exclaim;
-        goto handle_parse_error;
-    }
-    case '%': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::PercentEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Percent;
-        goto handle_parse_error;
-    }
-    case '&': {
-        char next = tokEnd[1];
-        if (next == '&') {
-            char next = tokEnd[2];
-            if (next == '=') {
-                tokEnd += 3;
-                // error
-                errorToken = LexerToken::AmpAmpEqual;
-                goto handle_parse_error;
-            }
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::AmpAmp;
-            goto handle_parse_error;
-        }
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::AmpEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Amp;
-        goto handle_parse_error;
-    }
-    case '(': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::LeftParen;
-        goto handle_parse_error;
-    }
-    case ')': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::RightParen;
-        goto handle_parse_error;
-    }
-    case '*': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::StarEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Star;
-        goto handle_parse_error;
-    }
-    case '+': {
-        char next = tokEnd[1];
-        if (next == '+') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::PlusPlus;
-            goto handle_parse_error;
-        }
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::PlusEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Plus;
-        goto handle_parse_error;
-    }
-    case ',': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Comma;
-        goto handle_parse_error;
-    }
-    case '-': {
-        char next = tokEnd[1];
-        if (next == '-') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::MinusMinus;
-            goto handle_parse_error;
-        }
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::MinusEqual;
-            goto handle_parse_error;
-        }
-        if (next == '>') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::MinusGreater;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Minus;
-        goto handle_parse_error;
-    }
-    case '.': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Point;
-        goto handle_parse_error;
-    }
-    case '/': {
-        char next = tokEnd[1];
-        if (next == '*') {
-            tokEnd += 2;
-            VERIFY_NOT_REACHED();
-        }
-        if (next == '/') {
-            tokEnd += 2;
-            VERIFY_NOT_REACHED();
-        }
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::SlashEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Slash;
-        goto handle_parse_error;
-    }
-    case ':': {
-        char next = tokEnd[1];
-        if (next == ':') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::ColonColon;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Colon;
-        goto handle_parse_error;
-    }
-    case ';': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::SemiColon;
-        goto handle_parse_error;
-    }
-    case '<': {
-        char next = tokEnd[1];
-        if (next == '<') {
-            char next = tokEnd[2];
-            if (next == '=') {
-                tokEnd += 3;
-                // error
-                errorToken = LexerToken::LessLessEqual;
-                goto handle_parse_error;
-            }
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::LessLess;
-            goto handle_parse_error;
-        }
-        if (next == '=') {
-            char next = tokEnd[2];
-            if (next == '>') {
-                tokEnd += 3;
-                // error
-                errorToken = LexerToken::LessEqualGreater;
-                goto handle_parse_error;
-            }
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::LessEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Less;
-        goto handle_parse_error;
-    }
-    case '=': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::EqualEqual;
-            goto handle_parse_error;
-        }
-        if (next == '>') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::EqualGreater;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Equal;
-        goto handle_parse_error;
-    }
-    case '>': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::GreaterEqual;
-            goto handle_parse_error;
-        }
-        if (next == '>') {
-            char next = tokEnd[2];
-            if (next == '=') {
-                tokEnd += 3;
-                // error
-                errorToken = LexerToken::GreaterGreaterEqual;
-                goto handle_parse_error;
-            }
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::GreaterGreater;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Greater;
-        goto handle_parse_error;
-    }
-    case '[': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::LeftSquare;
-        goto handle_parse_error;
-    }
-    case ']': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::RightSquare;
-        goto handle_parse_error;
-    }
-    case '^': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::HatEqual;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Hat;
-        goto handle_parse_error;
-    }
-    case '{': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::LeftBrace;
-        goto handle_parse_error;
-    }
-    case '|': {
-        char next = tokEnd[1];
-        if (next == '=') {
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::VertEqual;
-            goto handle_parse_error;
-        }
-        if (next == '|') {
-            char next = tokEnd[2];
-            if (next == '=') {
-                tokEnd += 3;
-                // error
-                errorToken = LexerToken::VertVertEqual;
-                goto handle_parse_error;
-            }
-            tokEnd += 2;
-            // error
-            errorToken = LexerToken::VertVert;
-            goto handle_parse_error;
-        }
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Vert;
-        goto handle_parse_error;
-    }
-    case '}': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::RightBrace;
-        goto handle_parse_error;
-    }
-    case '~': {
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Tilde;
-        goto handle_parse_error;
-    }
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-    case '8':
-    case '9': {
-        do {
-            tokEnd += 1;
-        } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
-        // error
-        errorToken = LexerToken::Literal;
-        goto handle_parse_error;
-    }
-    case '\'': {
-        tokEnd = skipToEndOfCharacterLiteral(tokEnd);
-        VERIFY(tokEnd[0] == '\'');
-        tokEnd += 1;
-        // error
-        errorToken = LexerToken::Literal;
-        goto handle_parse_error;
-    }
-    case 'a':
-    case 'b':
-    case 'c':
-    case 'd':
-    case 'e':
-    case 'f':
-    case 'g':
-    case 'h':
-    case 'i':
-    case 'j':
-    case 'k':
-    case 'l':
-    case 'm':
-    case 'n':
-    case 'o':
-    case 'p':
-    case 'q':
-    case 'r':
-    case 's':
-    case 't':
-    case 'u':
-    case 'v':
-    case 'w':
-    case 'x':
-    case 'y':
-    case 'z':
-    case 'A':
-    case 'B':
-    case 'C':
-    case 'D':
-    case 'E':
-    case 'F':
-    case 'G':
-    case 'H':
-    case 'I':
-    case 'J':
-    case 'K':
-    case 'L':
-    case 'M':
-    case 'N':
-    case 'O':
-    case 'P':
-    case 'Q':
-    case 'R':
-    case 'S':
-    case 'T':
-    case 'U':
-    case 'V':
-    case 'W':
-    case 'X':
-    case 'Y':
-    case 'Z':
-    case '#':
-    case '$':
-    case '_':
-        goto error$word_case_entry;
-    default: {
-        VERIFY_NOT_REACHED();
-    }
-    } // switch
-    VERIFY_NOT_REACHED();
-error$word_case_entry:
-    {
-        auto wordAndPos = readWord(tokEnd, state);
-        tokEnd = wordAndPos.position;
-        this_identifier = wordAndPos.word;
-    }
-    if (isKeyword(this_identifier)) {
-    LABEL_MAYBE_UNUSED error$keyword_check:
-        if (this_identifier == words["assert"]) {
-            // error
-            errorToken = LexerToken::Assert;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["break"]) {
-            // error
-            errorToken = LexerToken::Break;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["catch"]) {
-            // error
-            errorToken = LexerToken::Catch;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["const"]) {
-            // error
-            errorToken = LexerToken::Const;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["continue"]) {
-            // error
-            errorToken = LexerToken::Continue;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["destroy"]) {
-            // error
-            errorToken = LexerToken::Destroy;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["discard"]) {
-            // error
-            errorToken = LexerToken::Discard;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["do"]) {
-            // error
-            errorToken = LexerToken::Do;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["elif"]) {
-            // error
-            errorToken = LexerToken::Elif;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["else"]) {
-            // error
-            errorToken = LexerToken::Else;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["for"]) {
-            // error
-            errorToken = LexerToken::For;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["if"]) {
-            // error
-            errorToken = LexerToken::If;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["impl"]) {
-            // error
-            errorToken = LexerToken::Impl;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["let"]) {
-            // error
-            errorToken = LexerToken::Let;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["return"]) {
-            // error
-            errorToken = LexerToken::Return;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["shared"]) {
-            // error
-            errorToken = LexerToken::Shared;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["static"]) {
-            // error
-            errorToken = LexerToken::Static;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["try"]) {
-            // error
-            errorToken = LexerToken::Try;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["unique"]) {
-            // error
-            errorToken = LexerToken::Unique;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["var"]) {
-            // error
-            errorToken = LexerToken::Var;
-            goto handle_parse_error;
-        }
-        if (this_identifier == words["while"]) {
-            // error
-            errorToken = LexerToken::While;
-            goto handle_parse_error;
-        }
-        VERIFY_NOT_REACHED();
-    }
-LABEL_MAYBE_UNUSED error$identifier_case:
-    if (isSpecialIdentifier(this_identifier)) {
-    }
-    // error
-    errorToken = LexerToken::Identifier;
-    goto handle_parse_error;
-
-
 exit:
-    VERIFY(scopePosition == scopeBuffer.buffer + 1);
+    return { parseState, tokBegin, scopePosition, argumentPosition };
+}
+
+void parseImpl(const char* sourceBufferPosition, ParseOutput& output, ErrorHandler* errorHandler) {
+    ScopeBuffer scopeBuffer;
+    ScopeKind* scopePosition = scopeBuffer.buffer;
+    scopePosition[0] = ScopeKind::Invalid;
+    ArgumentBuffer argumentBuffer;
+    Word* argumentPosition = argumentBuffer.buffer;
+
+    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
+    auto ret = parseImpl({ State::NamespaceDeclaration, sourceBufferPosition, scopePosition, argumentPosition }, output);
+
+    VERIFY(ret.scopePosition == scopeBuffer.buffer + 1);
     VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
     VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
-    VERIFY(argumentPosition == argumentBuffer.buffer);
-    return;
-
-handle_parse_error:
-    errorHandler->invalidToken(errorToken, parseState, scopePosition, state);
-    return;
+    VERIFY(ret.argumentPosition == argumentBuffer.buffer);
 }
 
 }

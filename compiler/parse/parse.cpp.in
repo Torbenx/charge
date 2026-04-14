@@ -55,21 +55,6 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$' || c == '#';
 }
 
-static constexpr int_t SCOPE_BUFFER_SIZE = 1024;
-
-struct ScopeBuffer {
-    static size_t toIndex(ScopeKind* position) {
-        return (uintptr_t)position & (SCOPE_BUFFER_SIZE - 1);
-    }
-
-    ScopeKind* buffer;
-    ScopeBuffer()
-        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
-    ~ScopeBuffer() {
-        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
-    }
-};
-
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     // println("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
@@ -89,21 +74,6 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static constexpr int_t ARGUMENT_BUFFER_SIZE = 1024;
-static constexpr int_t ARGUMENT_BUFFER_SIZE_IN_BYTES = ARGUMENT_BUFFER_SIZE * sizeof(Word);
-
-struct ArgumentBuffer {
-    static size_t toIndex(Word* position) {
-        return ((uintptr_t)position & (ARGUMENT_BUFFER_SIZE_IN_BYTES - 1)) / sizeof(Word);
-    }
-    Word* buffer;
-    ArgumentBuffer()
-        : buffer((Word*)::operator new(ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES))) { }
-    ~ArgumentBuffer() {
-        ::operator delete(buffer, ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES));
-    }
-};
-
 static Word* addCallArgument(Word* position, Word name) {
     auto index = ArgumentBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -120,33 +90,33 @@ static void updateCallArgument(Word* position, Word name) {
     position[-1] = name;
 }
 
-NO_INLINE static Word* endCall(Word* position, ParseState& state) {
+NO_INLINE static Word* endCall(Word* position, ParseOutput& output) {
     uint32_t count = position[0].toUint();
-    auto handle = state.tokenBuffer.addCallArguments({ position - count, position });
+    auto handle = output.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
-    state.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
+    output.tokenBuffer.tokens[position[1].toUint()].setData1<DataKind::CallArguments>(handle);
     return position;
 }
 
-static SourceLocation locationInCurrentLine(const char* position, ParseState& state) {
+static SourceLocation locationInCurrentLine(const char* position, ParseOutput& output) {
     return {
         0u,
-        (uint32_t)state.tokenBuffer.lines.size() - 1,
-        (uint32_t)(position - state.tokenBuffer.lines.back().begin)
+        (uint32_t)output.tokenBuffer.lines.size() - 1,
+        (uint32_t)(position - output.tokenBuffer.lines.back().begin)
     };
 }
 
-NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseState& state) {
-    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), data });
+NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseOutput& output) {
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), data });
 }
 
-NO_INLINE static void discardLastToken(ParseState& state) {
-    state.tokenBuffer.tokens.pop_back();
+NO_INLINE static void discardLastToken(ParseOutput& output) {
+    output.tokenBuffer.tokens.pop_back();
 }
 
-NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseState& state) {
-    uint32_t tokenIndex = state.tokenBuffer.tokens.size();
-    state.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, state), 0 });
+NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseOutput& output) {
+    uint32_t tokenIndex = output.tokenBuffer.tokens.size();
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), 0 });
 
     auto index = ArgumentBuffer::toIndex(argPos);
     VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -156,15 +126,15 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     return argPos;
 }
 
-NO_INLINE static void markLineBegin(const char* position, ParseState& state) {
-    state.tokenBuffer.lines.push_back({ position });
+NO_INLINE static void markLineBegin(const char* position, ParseOutput& output) {
+    output.tokenBuffer.lines.push_back({ position });
 }
 
 struct WordAndPosition {
     const char* position;
     Word word;
 };
-[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseState& state) {
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseOutput& output) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -172,7 +142,7 @@ struct WordAndPosition {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
-    Word word = state.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
 
@@ -206,28 +176,28 @@ struct WordAndPosition {
     return position;
 };
 
-NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseState& state) {
-    state.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, state) }, (uint32_t)(end - begin) });
+NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseOutput& output) {
+    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
 
-[[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseState& state) {
+[[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseOutput& output) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
         const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
             tokEnd = skipToEndOfLine(tokEnd);
-            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
-            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, state);
+            emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             continue;
         }
         if (tokEnd[0] == '\n') {
             tokEnd += 1;
-            markLineBegin(tokEnd, state);
+            markLineBegin(tokEnd, output);
             continue;
         }
         if (tokEnd[0] == '\r') {
@@ -236,7 +206,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
             } else {
                 tokEnd += 1;
             }
-            markLineBegin(tokEnd, state);
+            markLineBegin(tokEnd, output);
             continue;
         }
         break;
@@ -260,69 +230,71 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
-    // println("commitDeclaration {}", state.tokenBuffer.wordTable.view(name));
+static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
+    // println("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
-        return state.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
-        return state.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, output));
     } else if constexpr (kind == DeclarationKind::Namespace) {
-        return state.pushNamespaceScope(name);
+        return output.pushNamespaceScope(name);
     } else {
-        return state.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, state));
+        return output.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, output));
     }
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseState& state) {
+static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
     static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
-    return state.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, state));
+    return output.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, output));
 }
 
-static void endDeclaration(ParseState& state) {
-    // println("endDeclaration {}", state.tokenBuffer.wordTable.view(state.currentScope()->name()));
-    state.popScope(state.tokenBuffer.currentToken());
+static void endDeclaration(ParseOutput& output) {
+    // println("endDeclaration {}", output.tokenBuffer.wordTable.view(output.currentScope()->name()));
+    output.popScope(output.tokenBuffer.currentToken());
 }
 
 using GlobalKind = sema::GlobalKind;
-static void setGlobalKind(ParseState& state, GlobalKind kind) {
-    sema::cast<sema::GlobalProgram>(state.currentProgram())->m_globalKind = kind;
+static void setGlobalKind(ParseOutput& output, GlobalKind kind) {
+    sema::cast<sema::GlobalProgram>(output.currentProgram())->m_globalKind = kind;
 }
 
-void parseImpl(const char* sourceBufferPosition, ParseState& state, ErrorHandler* errorHandler) {
-    ScopeBuffer scopeBuffer;
-    ScopeKind* scopePosition = scopeBuffer.buffer;
-    scopePosition[0] = ScopeKind::Invalid;
-    ArgumentBuffer argumentBuffer;
-    Word* argumentPosition = argumentBuffer.buffer;
-
-    const char* tokBegin = sourceBufferPosition;
-    const char* tokEnd = sourceBufferPosition;
+StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
+    State parseState = inState.state;
+    const char* tokBegin = inState.sourcePosition;
+    const char* tokEnd = inState.sourcePosition;
+    ScopeKind* scopePosition = inState.scopePosition;
+    Word* argumentPosition = inState.argumentPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = {};
     Word argumentName;
-
     TokenKind tokenKind = (TokenKind)0;
-
-    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
-    State parseState = State::NamespaceDeclaration;
-    LexerToken errorToken = (LexerToken)0;
 
     // GENERATED CODE HERE
 
+pop_scope_failed:
+error$as_then:
 exit:
-    VERIFY(scopePosition == scopeBuffer.buffer + 1);
+    return { parseState, tokBegin, scopePosition, argumentPosition };
+}
+
+void parseImpl(const char* sourceBufferPosition, ParseOutput& output, ErrorHandler* errorHandler) {
+    ScopeBuffer scopeBuffer;
+    ScopeKind* scopePosition = scopeBuffer.buffer;
+    scopePosition[0] = ScopeKind::Invalid;
+    ArgumentBuffer argumentBuffer;
+    Word* argumentPosition = argumentBuffer.buffer;
+
+    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
+    auto ret = parseImpl({ State::NamespaceDeclaration, sourceBufferPosition, scopePosition, argumentPosition }, output);
+
+    VERIFY(ret.scopePosition == scopeBuffer.buffer + 1);
     VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
     VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
-    VERIFY(argumentPosition == argumentBuffer.buffer);
-    return;
-
-handle_parse_error:
-    errorHandler->invalidToken(errorToken, parseState, scopePosition, state);
-    return;
+    VERIFY(ret.argumentPosition == argumentBuffer.buffer);
 }
 
 }
