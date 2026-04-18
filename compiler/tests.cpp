@@ -340,9 +340,7 @@ struct CheckExprParser {
 
 }
 
-using ParseErrorHandler = server::BasicParseErrorHandler;
-
-struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErrorHandler, sema::ErrorHandler {
+struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::ErrorHandler {
     struct Pair {
         Word key;
         std::string_view value;
@@ -427,7 +425,9 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, ParseErro
     }
 
     void runTest() {
-        parse::parseImpl(context.tokenBuffer.source.data(), context, this);
+        parse::Parser parser(context.tokenBuffer.source.data());
+        parser.parse(context);
+        VERIFY(parser.done());
         VERIFY(context.m_scopeStack.size() == 1);
 
         visit(context.tokenBuffer);
@@ -584,8 +584,9 @@ TEST(Charge, BuiltinModule) {
     auto sourceBuffer = server::readFile(builtinModule);
 
     sema::Context context({}, sourceBuffer);
-    ParseErrorHandler errorHandler;
-    parse::parseImpl(sourceBuffer.data(), context, &errorHandler);
+    parse::Parser parser(sourceBuffer.data());
+    parser.parse(context);
+    VERIFY(parser.done());
     for (auto prog : context.programsInModule(context.thisModule()))
         sema::Generator::signatureCheck(context, prog);
 
@@ -600,8 +601,9 @@ TEST(Charge, Files) {
     auto builtinModuleSrc = server::readFile(builtinModule);
     sema::Context builtinContext({}, builtinModuleSrc);
     {
-        ParseErrorHandler errorHandler;
-        parse::parseImpl(builtinModuleSrc.data(), builtinContext, &errorHandler);
+        parse::Parser parser(builtinModuleSrc.data());
+        parser.parse(builtinContext);
+        ASSERT_TRUE(parser.done());
         for (auto prog : builtinContext.programsInModule(builtinContext.thisModule()))
             sema::Generator::signatureCheck(builtinContext, prog);
         builtinContext.checkBuiltins();
@@ -630,8 +632,9 @@ TEST(Charge, TokenSpelling) {
         auto fileSource = server::readFile(filePath);
         // No module dependency need since no semantic analysis will be done
         sema::Context context({}, fileSource);
-        ParseErrorHandler errorHandler;
-        parse::parseImpl(context.tokenBuffer.source.data(), context, &errorHandler);
+        parse::Parser parser(fileSource.data());
+        parser.parse(context);
+        ASSERT_TRUE(parser.done());
 
         for (const auto& token : context.tokenBuffer.tokens) {
             std::string_view computedSpelling = context.tokenBuffer.tokenSpelling(token);
@@ -650,7 +653,9 @@ TEST(Charge, DISABLED_Benchmark) {
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
-        parse::parseImpl(context.tokenBuffer.source.data(), context, nullptr);
+        parse::Parser parser(sourceBuffer.data());
+        parser.parse(context);
+        ASSERT_TRUE(parser.done());
         VERIFY(context.m_scopeStack.size() == 1);
     }
 }

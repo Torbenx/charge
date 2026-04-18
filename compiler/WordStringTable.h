@@ -125,12 +125,17 @@ constexpr uint32_t WordStringTable::allocateStorage(std::string_view string) {
         stringStorageOffset += 1;
     return offset / 2;
 }
-constexpr std::string_view WordStringTable::getStorage(uint32_t index) const {
+namespace WordStringTableDetail {
+constexpr std::string_view getStorage(const char* stringStorage, uint32_t index) {
     uint32_t offset = index * 2;
     std::array<char, 2> lengthBuffer;
     std::copy_n(&stringStorage[offset], 2, lengthBuffer.data());
     auto length = std::bit_cast<uint16_t>(lengthBuffer);
     return { &stringStorage[offset] + 2, length };
+}
+}
+constexpr std::string_view WordStringTable::getStorage(uint32_t index) const {
+    return WordStringTableDetail::getStorage(stringStorage, index);
 }
 
 constexpr WordStringTable::WordStringTable(const WordStringTable& other)
@@ -247,5 +252,27 @@ public:
         auto table = get();
         Word word = table.get(str);
         return word;
+    }
+    constexpr Word find(std::string_view str) const {
+        return findWithHash(str, Word::hash(str));
+    }
+    constexpr Word findWithHash(std::string_view str, uint32_t hash) const {
+        if (str.empty())
+            return Word();
+
+        WordTableView view(entryStorage);
+        auto state = view.beginLookup(hash);
+        for (;;) {
+            auto& entry = view.entries[state.bucket];
+            if (entry.empty())
+                return Word();
+
+            if (entry.word.hash() == hash) {
+                if (WordStringTableDetail::getStorage(stringStorage.data(), entry.payload) == str) [[likely]]
+                    return entry.word;
+            }
+
+            view.advanceLookup(state);
+        }
     }
 };

@@ -55,6 +55,16 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$' || c == '#';
 }
 
+static void setData1(TokenInfo& token, uint32_t data1Bits) {
+    token.data1Bits = data1Bits;
+}
+static void setData2(TokenInfo& token, uint32_t data2Bits) {
+    token.data2Bits = data2Bits;
+}
+
+static void setData1(SimpleTokenInfo&, uint32_t) { }
+static void setData2(SimpleTokenInfo&, uint32_t) { }
+
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     // println("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
@@ -90,7 +100,7 @@ static void updateCallArgument(Word* position, Word name) {
     position[-1] = name;
 }
 
-NO_INLINE static Word* endCall(Word* position, ParseOutput& output) {
+NO_INLINE static Word* endCall(Word* position, sema::Context& output) {
     uint32_t count = position[0].toUint();
     auto handle = output.tokenBuffer.addCallArguments({ position - count, position });
     position -= count + 2;
@@ -98,7 +108,13 @@ NO_INLINE static Word* endCall(Word* position, ParseOutput& output) {
     return position;
 }
 
-static SourceLocation locationInCurrentLine(const char* position, ParseOutput& output) {
+NO_INLINE static Word* endCall(Word* position, SimpleOutput&) {
+    uint32_t count = position[0].toUint();
+    position -= count + 2;
+    return position;
+}
+
+static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
     return {
         0u,
         (uint32_t)output.tokenBuffer.lines.size() - 1,
@@ -106,15 +122,23 @@ static SourceLocation locationInCurrentLine(const char* position, ParseOutput& o
     };
 }
 
-NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, ParseOutput& output) {
+NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, sema::Context& output) {
     output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), data });
 }
 
-NO_INLINE static void discardLastToken(ParseOutput& output) {
+NO_INLINE static void discardLastToken(sema::Context& output) {
     output.tokenBuffer.tokens.pop_back();
 }
 
-NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, ParseOutput& output) {
+NO_INLINE static void emitToken(TokenKind kind, const char*, uint32_t, SimpleOutput& output) {
+    output.tokenBuffer.tokens.push_back(kind);
+}
+
+NO_INLINE static void discardLastToken(SimpleOutput& output) {
+    output.tokenBuffer.tokens.pop_back();
+}
+
+NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, sema::Context& output) {
     uint32_t tokenIndex = output.tokenBuffer.tokens.size();
     output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), 0 });
 
@@ -125,16 +149,28 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     argPos += 2;
     return argPos;
 }
+NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char*, SimpleOutput& output) {
+    uint32_t tokenIndex = output.tokenBuffer.tokens.size();
+    output.tokenBuffer.tokens.push_back(kind);
 
-NO_INLINE static void markLineBegin(const char* position, ParseOutput& output) {
+    auto index = ArgumentBuffer::toIndex(argPos);
+    VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
+    argPos[1] = Word::fromUint(tokenIndex);
+    argPos[2] = Word::fromUint(0);
+    argPos += 2;
+    return argPos;
+}
+
+NO_INLINE static void markLineBegin(const char* position, sema::Context& output) {
     output.tokenBuffer.lines.push_back({ position });
 }
+static void markLineBegin(const char*, SimpleOutput&) { }
 
 struct WordAndPosition {
     const char* position;
     Word word;
 };
-[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, ParseOutput& output) {
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, sema::Context& output) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -144,6 +180,17 @@ struct WordAndPosition {
     auto hash = Word::finalizeHash(hashState);
     Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
+}
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, SimpleOutput&) {
+    const char* wordBegin = position;
+    Word::HashState hashState;
+    do {
+        Word::iterateHash(hashState, position[0]);
+        position += 1;
+    } while (isWordBulkCharacter(position[0]));
+    auto hash = Word::finalizeHash(hashState);
+    Word word = words.findWithHash(std::string_view(wordBegin, position), hash);
+    return { position, word.empty() ? words["T"] : word };
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -176,10 +223,12 @@ struct WordAndPosition {
     return position;
 };
 
-NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, ParseOutput& output) {
+NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, sema::Context& output) {
     output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
+static void emitWhitespace(WhitespaceKind, const char*, const char*, SimpleOutput&) { }
 
+template<typename ParseOutput>
 [[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseOutput& output) {
     for (;;) {
         tokEnd = skipWhitespace(tokEnd);
@@ -230,7 +279,7 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
+static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, sema::Context& output) {
     // println("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
         return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output));
@@ -244,26 +293,55 @@ static sema::DeclarationValue commitDeclaration(Word name, const char* currentPo
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, ParseOutput& output) {
+static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, sema::Context& output) {
     static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
     return output.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, output));
 }
 
-static void endDeclaration(ParseOutput& output) {
+static void endDeclaration(sema::Context& output) {
     // println("endDeclaration {}", output.tokenBuffer.wordTable.view(output.currentScope()->name()));
     output.popScope(output.tokenBuffer.currentToken());
 }
 
 using GlobalKind = sema::GlobalKind;
-static void setGlobalKind(ParseOutput& output, GlobalKind kind) {
+static void setGlobalKind(sema::Context& output, GlobalKind kind) {
     sema::cast<sema::GlobalProgram>(output.currentProgram())->m_globalKind = kind;
 }
 
+template<DeclarationKind kind>
+static sema::DeclarationValue commitDeclaration(Word, const char*, TokenHandle, SimpleOutput&) {
+    return sema::INVALID_DECLARATION_VALUE;
+}
+
+template<DeclarationKind kind>
+static sema::DeclarationValue commitImplDeclaration(const char*, TokenHandle, SimpleOutput&) {
+    return sema::INVALID_DECLARATION_VALUE;
+}
+
+static void endDeclaration(SimpleOutput&) { }
+
+using GlobalKind = sema::GlobalKind;
+static void setGlobalKind(SimpleOutput&, GlobalKind) { }
+
+template<typename ParseOutput>
+LexerToken lexImpl(char const*& tokEnd, ParseOutput& output) {
+    const char* tokBegin = tokEnd;
+    Word this_identifier;
+
+    // GENERATED LEXER CODE HERE
+
+error$as_then:
+    VERIFY_NOT_REACHED();
+}
+
+template<typename ParseOutput>
 StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
     State parseState = inState.state;
+    State continueState = inState.continueState;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;
     ScopeKind* scopePosition = inState.scopePosition;
+    ScopeKind* savedScopePosition = inState.scopePosition;
     Word* argumentPosition = inState.argumentPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
@@ -276,25 +354,46 @@ StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
     // GENERATED CODE HERE
 
 pop_scope_failed:
+    println("Pop scope failed in state '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
+    return { ReturnStatus::ScopeError, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
 error$as_then:
+    println("Reached error state after '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
+    return { ReturnStatus::UnhandledCase, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
 exit:
-    return { parseState, tokBegin, scopePosition, argumentPosition };
+    return { ReturnStatus::EOS, parseState, continueState, tokBegin, scopePosition, argumentPosition };
 }
 
-void parseImpl(const char* sourceBufferPosition, ParseOutput& output, ErrorHandler* errorHandler) {
-    ScopeBuffer scopeBuffer;
-    ScopeKind* scopePosition = scopeBuffer.buffer;
-    scopePosition[0] = ScopeKind::Invalid;
-    ArgumentBuffer argumentBuffer;
-    Word* argumentPosition = argumentBuffer.buffer;
+void Parser::parse(SimpleOutput& output) {
+    m_state = parseImpl(m_state, output);
+}
 
-    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
-    auto ret = parseImpl({ State::NamespaceDeclaration, sourceBufferPosition, scopePosition, argumentPosition }, output);
+void Parser::parse(sema::Context& output) {
+    m_state = parseImpl(m_state, output);
+}
 
-    VERIFY(ret.scopePosition == scopeBuffer.buffer + 1);
+LexerToken Parser::lexToken() {
+    SimpleOutput output;
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+Parser::Parser(const char* sourcePosition)
+    : m_state {
+        ReturnStatus::UnhandledCase,
+        State::NamespaceDeclaration,
+        State::NamespaceDeclaration,
+        sourcePosition,
+        scopeBuffer.buffer,
+        argumentBuffer.buffer
+    } {
+    m_state.scopePosition[0] = ScopeKind::Invalid;
+    pushScope(ScopeKind::Namespace);
+}
+
+bool Parser::checkFinalState() const {
     VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
     VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
-    VERIFY(ret.argumentPosition == argumentBuffer.buffer);
+    VERIFY(m_state.argumentPosition == argumentBuffer.buffer);
+    return m_state.scopePosition == scopeBuffer.buffer + 1;
 }
 
 }

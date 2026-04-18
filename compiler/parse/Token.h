@@ -43,7 +43,6 @@ inline bool isVariableDecl(TokenKind kind) {
 // ---------------------------- ScopeKind ---------------------------
 
 #define ENUMERATE_SCOPE_KINDS     \
-    SCOPE(Invalid)                \
     SCOPE(IfExpr)                 \
     SCOPE(IfExprOrStmt)           \
     SCOPE(CompoundStmt)           \
@@ -57,7 +56,6 @@ inline bool isVariableDecl(TokenKind kind) {
     SCOPE(VariableType)           \
     SCOPE(IfBranch)               \
     SCOPE(ElseBranch)             \
-    SCOPE(PlainStatement)         \
     SCOPE(Parameter)              \
     SCOPE(Namespace)              \
     SCOPE(FunctionBody)           \
@@ -77,6 +75,9 @@ enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,
     ENUMERATE_SCOPE_KINDS
 #undef SCOPE
+
+    COUNT,
+    Invalid = COUNT,
 };
 std::string_view nameString(ScopeKind);
 

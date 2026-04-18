@@ -5,7 +5,7 @@ namespace parse {
 std::string_view nameString(DataKind kind) {
     switch (kind) {
 #define DATAKIND(type, name) \
-    case DataKind::name:       \
+    case DataKind::name:     \
         return #name;
 
 #include <parse/tokens.inc>
@@ -17,7 +17,7 @@ std::string_view nameString(DataKind kind) {
 std::string_view nameString(TokenKind kind) {
     switch (kind) {
 #define TOKEN(kind, lexToken, data1, data2) \
-    case TokenKind::kind:       \
+    case TokenKind::kind:                   \
         return #kind;
 
 #include <parse/tokens.inc>
@@ -28,6 +28,9 @@ std::string_view nameString(TokenKind kind) {
 
 std::string_view nameString(ScopeKind kind) {
     switch (kind) {
+    case ScopeKind::Invalid:
+        return "Invalid";
+
 #define SCOPE(kind)       \
     case ScopeKind::kind: \
         return #kind;

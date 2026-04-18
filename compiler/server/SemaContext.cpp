@@ -176,8 +176,9 @@ TEST(Server, ForEachToken) {
         auto fileSource = readFile(filePath);
         // No module dependency need since no semantic analysis will be done
         SemaContext context({}, fileSource);
-        BasicParseErrorHandler errorHandler;
-        parse::parseImpl(context.tokenBuffer.source.data(), context, &errorHandler);
+        parse::Parser parser(fileSource.data());
+        parser.parse(context);
+        ASSERT_TRUE(parser.done());
         context.makeScratchProgram();
         context.forEachToken([&](SemaUtil& util, parse::TokenHandle handle) {
             EXPECT_EQ(context.utilFor(handle).programHandle, util.programHandle);

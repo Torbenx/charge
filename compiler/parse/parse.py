@@ -310,6 +310,11 @@ class SetGlobalKindInstruction:
         return "setGlobalKind " + self.globalKindExpr
 
 @dataclasses.dataclass
+class LexTokenInstruction:
+    def format(self):
+        return "lexToken"
+
+@dataclasses.dataclass
 class State:
     kind: str
     name: str
@@ -702,6 +707,10 @@ def emitToken(tokenKindExpr, tokenData = "0"):
 def emitCarriedToken():
     emitToken("carriedEmitTokenKind", "carriedEmitTokenData")
 
+def rememberContinueState(state):
+    line("continueState = State::" + stateCppName(state.name) + ";")
+    line("savedScopePosition = scopePosition;")
+
 def rememberState(state):
     if generateStateDebug:
         line("println(\"" + state.name + ": {}\", *tokEnd);")
@@ -810,9 +819,13 @@ def generateWordCase(state):
     else:
         recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$identifier_case;"))
 
-#errorCases  = [PunctuationCase(p, [ErrorInstruction()]) for p in punctuations]
-#errorCases += [KeywordCase(k, [ErrorInstruction()]) for k in keywords]
-#errorCases += [IdentifierCase([ErrorInstruction()]), LiteralCase([ErrorInstruction()])]
+def generateEndCase(case):
+    endedWithJumpInstruction = generateCaseBody(case)
+    if not endedWithJumpInstruction:
+        emitToken("TokenKind::EOS")
+        line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, output);")
+        line("goto exit;")
+
 errorThenCase = ThenCase([])
 errorState = State("SwitchState", "error", "", [], [errorThenCase])
 nonErrorStates = states.copy()
@@ -916,6 +929,11 @@ def generateSwitchState(state):
         recurse(state, lambda s: s.literalCase(), lambda case: generateCaseBody(case))
     line("}")
 
+    # end
+    line ("case '\\0':")
+    with indent():
+        recurse(state, lambda s: s.endCase(), lambda case: generateEndCase(case))
+
     # word
     for character in string.ascii_lowercase + string.ascii_uppercase:
         line("case '" + character + "':")
@@ -952,11 +970,7 @@ def generateLinearState(state):
     if not endCase is None:
         line("if (tokEnd[0] == '\\0') {")
         with indent():
-            endedWithJumpInstruction = generateCaseBody(endCase)
-            if endedWithJumpInstruction: raise Exception("'end' case should not jump")
-            emitToken("TokenKind::EOS")
-            line("emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, output);")
-            line("goto exit;")
+            generateEndCase(endCase)
         line("}")
 
     thenCase = state.thenCase()
@@ -1005,9 +1019,9 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is DiscardLastTokenInstruction:
             line("discardLastToken(output);")
         elif type(inst) is UpdateDataInstruction:
-            line("output.tokenBuffer.tokens.back().data1Bits = packData1(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
+            line("setData1(output.tokenBuffer.tokens.back(), packData1(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
         elif type(inst) is UpdateSecondaryDataInstruction:
-            line("output.tokenBuffer.tokens.back().data2Bits = packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + ");")
+            line("setData2(output.tokenBuffer.tokens.back(), packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if shouldBeInlined(newState):
@@ -1078,6 +1092,9 @@ def generateInstructions(case, instructions, thenHandler):
             line("argumentPosition = endCall(argumentPosition, output);")
         elif type(inst) is SetGlobalKindInstruction:
             line("setGlobalKind(output, " + inst.globalKindExpr + ");")
+        elif type(inst) is LexTokenInstruction:
+            line("return LexerToken::" + case.cppName() + ";")
+            afterJumpInstruction = True
         else:
             raise Exception("invalid instruction \"" + inst.format() + "\"")
     return afterJumpInstruction
@@ -1107,11 +1124,19 @@ def onlyUsedAsThen(state):
         return False
     return True
 
-line("switch (parseState) {")
+def hasNonTrivialThenUses(state):
+    if [o for o in state.origins if type(o) is State and o.thenCase() is not None]:
+        return True
+    return False
+
+def onlyUsedAsTrivialThen(state):
+    return onlyUsedAsThen(state) and not hasNonTrivialThenUses(state)
+
+line("switch (continueState) {")
 for state in states:
     line("case State::" + stateCppName(state.name) + ":")
     with indent():
-        if shouldBeInlined(state) or onlyUsedAsThen(state):
+        if shouldBeInlined(state) or onlyUsedAsTrivialThen(state) or state.name == "error":
             line("VERIFY_NOT_REACHED();")
         else:
             line("goto " + state.name + "$no_emit;")
@@ -1127,7 +1152,7 @@ for state in nonErrorStates:
         if withEmitLabelUsed:
             labelLine(state.name + "$with_emit:")
             emitCarriedToken()
-        noEmitLabelUsed = not onlyUsedAsThen(state)
+        noEmitLabelUsed = not onlyUsedAsTrivialThen(state)
         if noEmitLabelUsed:
             labelLine(state.name + "$no_emit:")
         if noEmitLabelUsed or withEmitLabelUsed:
@@ -1139,10 +1164,27 @@ for state in nonErrorStates:
             rememberState(state)
         if [o for o in state.origins if not type(o) is NextInstruction]:
             labelLine(state.name + "$as_then:")
+        rememberContinueState(state)
 
         generateState(state)
 
         lineNoIndent()
+
+generatedParserLines = generatedLines
+generatedLines = []
+
+allCases  = [PunctuationCase(p, [LexTokenInstruction()]) for p in punctuations]
+allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in keywords]
+allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in specialIdentifiers]
+allCases += [IdentifierCase([LexTokenInstruction()]), LiteralCase([LexTokenInstruction()])]
+allCases += [EndCase([LexTokenInstruction()])]
+lexState = State("SwitchState", "lex", "error", [], allCases)
+lexState.origins = [NextInstruction("blub")]
+labelLine("lex$no_emit:")
+line("tokEnd = skipWhitespace(tokEnd);")
+line("tokBegin = tokEnd;")
+generateState(lexState)
+generatedLexerLines = generatedLines
 
 # combine/write
 currentDir = pathlib.Path(__file__).parent.resolve()
@@ -1156,7 +1198,15 @@ for inputLine in inputLines:
     if strippedLine.startswith("// GENERATED CODE HERE"):
         extraIndent = len(inputLine) - len(strippedLine) - 4
         lineEnding = inputLine[len(inputLine.rstrip('\r\n')):]
-        for generatedLine in generatedLines:
+        for generatedLine in generatedParserLines:
+            if len(generatedLine) > 0:
+                outputLines.append(' ' * extraIndent + generatedLine + lineEnding)
+            else:
+                outputLines.append(lineEnding)
+    elif strippedLine.startswith("// GENERATED LEXER CODE HERE"):
+        extraIndent = len(inputLine) - len(strippedLine) - 4
+        lineEnding = inputLine[len(inputLine.rstrip('\r\n')):]
+        for generatedLine in generatedLexerLines:
             if len(generatedLine) > 0:
                 outputLines.append(' ' * extraIndent + generatedLine + lineEnding)
             else:
@@ -1164,8 +1214,13 @@ for inputLine in inputLines:
     else:
         outputLines.append(inputLine)
 
-with open(currentDir / "parse.cpp", "w") as f:
-    f.writelines(outputLines)
+def writeTo(file, lines):
+    with open(file, "r") as f:
+        if f.readlines() == lines:
+            return
+    with open(file, "w") as f:
+        f.writelines(lines)
+writeTo(currentDir / "parse.cpp", outputLines)
 
 # generate .h
 generatedLines = []
@@ -1202,7 +1257,7 @@ line("std::string_view nameString(LexerToken);")
 line("std::string_view fixedSpelling(LexerToken);")
 lineNoIndent()
 
-line("enum class State {")
+line("enum class State : uint8_t {")
 with indent():
     for state in states:
         line(stateCppName(state.name) + ",")
@@ -1214,8 +1269,7 @@ line("}")
 outputLines = []
 for generatedLine in generatedLines:
     outputLines.append(generatedLine + lineEnding)
-with open(currentDir / "parse_gen.h", "w") as f:
-    f.writelines(outputLines)
+writeTo(currentDir / "parse_gen.h", outputLines)
 
 # generate .cpp
 generatedLines = []
@@ -1291,5 +1345,4 @@ line("}")
 outputLines = []
 for generatedLine in generatedLines:
     outputLines.append(generatedLine + lineEnding)
-with open(currentDir / "parse_gen.cpp", "w") as f:
-    f.writelines(outputLines)
+writeTo(currentDir / "parse_gen.cpp", outputLines)

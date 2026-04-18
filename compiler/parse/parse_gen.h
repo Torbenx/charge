@@ -154,7 +154,7 @@ enum class LexerToken : uint8_t {
 std::string_view nameString(LexerToken);
 std::string_view fixedSpelling(LexerToken);
 
-enum class State {
+enum class State : uint8_t {
     Expression,
     AfterExpression,
     CommaAfterExpression,

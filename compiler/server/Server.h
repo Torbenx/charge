@@ -36,24 +36,6 @@ struct RequestHandle {
 
 std::string readFile(const path& file);
 
-struct BasicParseErrorHandler : parse::ErrorHandler {
-    void invalidToken(parse::LexerToken token, parse::State state, parse::ScopeKind* scopes, sema::Context& context) override {
-        println("");
-        println(
-            "Invalid token '{}' for state '{}' and scope '{}' on line {}",
-            parse::nameString(token), parse::nameString(state), parse::nameString(scopes[0]), context.tokenBuffer.lines.size());
-        println("scopes:");
-        for (;;) {
-            println("  {}", parse::nameString(*scopes));
-            if (*scopes == parse::ScopeKind::Invalid)
-                break;
-            scopes -= 1;
-        }
-        println("");
-        VERIFY_NOT_REACHED();
-    }
-};
-
 struct Server {
 
     struct Method {
@@ -160,7 +142,6 @@ struct Server {
     std::vector<RequestInfo> m_openRequests;
     std::vector<std::unique_ptr<Method>> m_methods;
     std::unordered_set<FileInfo, FileInfoHash, FileInfoEqual> m_fileCache;
-    BasicParseErrorHandler parseErrorHandler;
     sema::SimpleErrorHandler semaErrorHandler;
 
     int_t remainingContentSize = 0;

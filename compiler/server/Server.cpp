@@ -410,7 +410,9 @@ void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> i
     info.context = std::make_unique<SemaContext>(imports, info.sourceData);
     auto& context = *info.context;
     context.errorHandler = &semaErrorHandler;
-    parse::parseImpl(context.tokenBuffer.source.data(), context, &parseErrorHandler);
+    parse::Parser parser(info.sourceData.data());
+    parser.parse(context);
+    VERIFY(parser.done());
     context.signatureCheckAll();
     auto scratchProg = context.newProgram(sema::ProgramKind::Struct, Word(), parse::TokenHandle(), context.globalNamespace(), SourceLocation());
     VERIFY(scratchProgram(context) == scratchProg);

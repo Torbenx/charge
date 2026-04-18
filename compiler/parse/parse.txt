@@ -247,7 +247,6 @@ SwitchState after_expression() then error
             next single_or_compound_statement
         popScope ScopeKind::IfExprOrStmt
         popScope ScopeKind::LeftExpr
-        popScope ScopeKind::PlainStatement
         pushScope ScopeKind::IfBranch
         emitToken TokenKind::IfStmt
         next single_or_compound_statement
@@ -351,7 +350,7 @@ LinearState access_punctuation(tokenKind) then error
 
 LinearState single_or_compound_statement() then statement
 
-LinearState after_statement() then statement
+LinearState after_statement() then error
     keyword else
         popScope ScopeKind::IfBranch
         pushScope ScopeKind::ElseBranch
@@ -362,13 +361,15 @@ LinearState after_statement() then statement
             then after_declaration
         ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
             then after_declaration
-        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
-        pushScope ScopeKind::PlainStatement
+        ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
+            popScope ScopeKind::IfBranch, ScopeKind::ElseBranch
+            then statement # TODO: This is not correct for nested ifs or outside a compound statement
+        ifScope ScopeKind::CompoundStmt
+            then statement
 
 SwitchState statement() then expression
     punctuation {
         pushScope ScopeKind::CompoundStmt
-        pushScope ScopeKind::PlainStatement
         emitToken TokenKind::CompoundStmt
         next statement
     keyword if
@@ -393,7 +394,8 @@ SwitchState statement() then expression
         next expression
 
     punctuation }
-        popScope ScopeKind::IfBranch, ScopeKind::ElseBranch, ScopeKind::PlainStatement
+        ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
+            popScope ScopeKind::IfBranch, ScopeKind::ElseBranch
         popScope ScopeKind::CompoundStmt
         emitToken TokenKind::EmptyNode
         next after_statement
