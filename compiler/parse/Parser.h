@@ -1,11 +1,12 @@
 #pragma once
 
+#include <parse/api.h>
 #include <parse/parse_gen.h>
 #include <sema/Context.h>
 
 namespace parse {
 
-struct Parser;
+struct RecoveryElement;
 
 inline constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
@@ -75,96 +76,103 @@ struct SimpleOutput {
 };
 
 enum class ReturnStatus : uint8_t {
+    Ready,
     EOS,
     UnhandledCase,
     ScopeError,
 };
 
-struct StateMachineState {
-    ReturnStatus status = ReturnStatus::UnhandledCase;
-    State state = State::Error;
-    State continueState = State::Error;
-    const char* sourcePosition = nullptr;
-    ScopeKind* scopePosition = nullptr;
-    Word* argumentPosition = nullptr;
-};
-
-struct SavedState {
-    ReturnStatus status = ReturnStatus::UnhandledCase;
-    State state = State::Error;
-    State continueState = State::Error;
-    const char* sourcePosition = nullptr;
-    std::vector<ScopeKind> scopeBuffer;
-    std::vector<Word> argumentBuffer;
-};
+struct SimpleParser;
 
 struct Parser {
     Parser(const char* sourcePosition);
 
     ReturnStatus status() const { return m_state.status; }
     bool checkFinalState() const;
-    bool done() const { return status() == ReturnStatus::EOS && checkFinalState(); }
 
     State state() const { return m_state.state; }
-    void setState(State state) {
-        m_state.state = state;
-        m_state.continueState = state;
-    }
 
     const char* sourcePosition() const { return m_state.sourcePosition; }
-    void setSourcePosition(const char* pos) { m_state.sourcePosition = pos; }
-
-    LexerToken lexToken();
-
-    void parse(SimpleOutput& output);
-    void parse(sema::Context& output);
-
-    void pushScope(ScopeKind scope) {
-        auto index = ScopeBuffer::toIndex(m_state.scopePosition);
-        VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
-        m_state.scopePosition += 1;
-        m_state.scopePosition[0] = scope;
-    }
-
-    ScopeKind popScope() {
-        auto index = ScopeBuffer::toIndex(m_state.scopePosition);
-        VERIFY(index > 0);
-        ScopeKind ret = m_state.scopePosition[0];
-        m_state.scopePosition -= 1;
-        return ret;
-    }
+    SourceLocation location(sema::Context&) const;
 
     ScopeKind topScope() const { return m_state.scopePosition[0]; }
-
     std::span<const ScopeKind> scopes() const {
         return { scopeBuffer.buffer, m_state.scopePosition + 1 };
     }
 
-    SavedState save() const {
-        return {
-            m_state.status,
-            m_state.state,
-            m_state.continueState,
-            m_state.sourcePosition,
-            scopeBuffer.save(m_state.scopePosition),
-            argumentBuffer.save(m_state.argumentPosition),
-        };
-    }
-    void restore(const SavedState& in) {
-        m_state = {
-            in.status,
-            in.state,
-            in.continueState,
-            in.sourcePosition,
-            scopeBuffer.restore(in.scopeBuffer),
-            argumentBuffer.restore(in.argumentBuffer)
-        };
-    }
+    LexerToken lexToken();
+    ReturnStatus parse(sema::Context&, int_t tokenLimit = -1);
+    ReturnStatus apply(sema::Context&, RecoveryElement);
 
 private:
+    struct InternalState {
+        ReturnStatus status = ReturnStatus::UnhandledCase;
+        State state = State::Error;
+        State continueState = State::Error;
+        TokenHandle declarationBegin = {};
+        Word savedArgumentName = {};
+        const char* sourcePosition = nullptr;
+        ScopeKind* scopePosition = nullptr;
+        Word* argumentPosition = nullptr;
+    };
+
+    template<typename ParseOutput>
+    static InternalState parseImpl(const InternalState&, ParseOutput&, int_t tokenLimit);
+
     ScopeBuffer scopeBuffer;
     ArgumentBuffer argumentBuffer;
-    StateMachineState m_state;
+    InternalState m_state;
+
+    friend SimpleParser;
+};
+
+struct SimpleParser {
+    struct SavedState {
+        ReturnStatus status = ReturnStatus::UnhandledCase;
+        State state = State::Error;
+        State continueState = State::Error;
+        const char* sourcePosition = nullptr;
+        std::vector<ScopeKind> scopeBuffer;
+    };
+
+    SimpleParser();
+    SimpleParser(const char* sourcePosition);
+
+    ReturnStatus status() const { return m_state.status; }
+    bool checkFinalState() const;
+
+    State state() const { return m_state.state; }
+
+    const char* sourcePosition() const { return m_state.sourcePosition; }
+    void setSourcePosition(const char* pos) { m_state.sourcePosition = pos; }
+
+    ScopeKind topScope() const { return m_state.scopePosition[0]; }
+    std::span<const ScopeKind> scopes() const {
+        return { scopeBuffer.buffer, m_state.scopePosition + 1 };
+    }
+
+    void pushScope(ScopeKind);
+    ScopeKind popScope();
+
+    LexerToken lexToken();
+    ReturnStatus parse(SimpleOutput&, int_t tokenLimit = -1);
+    ReturnStatus apply(SimpleOutput&, RecoveryElement);
+
+    SavedState save() const;
+    void restore(const SavedState&);
+    void copyState(const Parser&);
+
+private:
+    struct InternalState {
+        ReturnStatus status = ReturnStatus::UnhandledCase;
+        State state = State::Error;
+        State continueState = State::Error;
+        const char* sourcePosition = nullptr;
+        ScopeKind* scopePosition = nullptr;
+    };
+
+    ScopeBuffer scopeBuffer;
+    InternalState m_state;
 };
 
 }

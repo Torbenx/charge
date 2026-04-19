@@ -5,10 +5,11 @@
 #include <sema/Constant.h>
 #include <types.h>
 
-
 #include <array>
 
 namespace parse {
+
+inline constexpr Word unresolved_identifier = words["(unresolved_identifier)"];
 
 // ---------------------------- TokenKind ---------------------------
 

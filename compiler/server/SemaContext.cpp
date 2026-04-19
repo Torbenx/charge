@@ -1,5 +1,6 @@
 #include <server/SemaContext.h>
 
+#include <parse/api.h>
 #include <sema/Generator.h>
 #include <server/Server.h>
 
@@ -176,9 +177,7 @@ TEST(Server, ForEachToken) {
         auto fileSource = readFile(filePath);
         // No module dependency need since no semantic analysis will be done
         SemaContext context({}, fileSource);
-        parse::Parser parser(fileSource.data());
-        parser.parse(context);
-        ASSERT_TRUE(parser.done());
+        parse::parseOrThrow(context);
         context.makeScratchProgram();
         context.forEachToken([&](SemaUtil& util, parse::TokenHandle handle) {
             EXPECT_EQ(context.utilFor(handle).programHandle, util.programHandle);

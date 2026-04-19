@@ -5,7 +5,7 @@
 #include <server/SemanticHighlight.h>
 #include <server/SemanticTokens.h>
 
-#include <parse/parse_impl.h>
+#include <parse/api.h>
 #include <server/json_objects.h>
 #include <server/json_tuple.h>
 
@@ -410,9 +410,7 @@ void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> i
     info.context = std::make_unique<SemaContext>(imports, info.sourceData);
     auto& context = *info.context;
     context.errorHandler = &semaErrorHandler;
-    parse::Parser parser(info.sourceData.data());
-    parser.parse(context);
-    VERIFY(parser.done());
+    parse::parseOrThrow(context);
     context.signatureCheckAll();
     auto scratchProg = context.newProgram(sema::ProgramKind::Struct, Word(), parse::TokenHandle(), context.globalNamespace(), SourceLocation());
     VERIFY(scratchProgram(context) == scratchProg);

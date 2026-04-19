@@ -78,6 +78,7 @@ regularIdentifiers = [
     "type",
     "unique_ref",
     "value",
+    "(unresolved_identifier)",
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]
@@ -607,6 +608,7 @@ states = Parser(lines).parseStates()
 
 outputIndentation = 1
 generatedLines = []
+generateSingleStep = False
 
 generateStateDebug = False
 generateLexTokenChecks = True
@@ -1019,7 +1021,7 @@ def generateInstructions(case, instructions, thenHandler):
                 dataExpr = "packData1(" + inst.tokenKindExpr + ", this_identifier)"
             elif not inst.dataExpr is None:
                 dataExpr = "packData1(" + inst.tokenKindExpr + ", " + inst.dataExpr + ")"
-            if inst.delayed:
+            if inst.delayed and not generateSingleStep:
                 line("carriedEmitTokenKind = " + inst.tokenKindExpr + ";")
                 line("carriedEmitTokenData = " + dataExpr + ";")
             else:
@@ -1036,7 +1038,10 @@ def generateInstructions(case, instructions, thenHandler):
             line("setData2(output.tokenBuffer.tokens.back(), packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
-            line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
+            if generateSingleStep:
+                line("goto single_step_complete;")
+            else:
+                line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
             afterJumpInstruction = True
         elif type(inst) is AssignInstruction:
             line(inst.leftName + " = " + inst.rightExpr + ";")
@@ -1084,12 +1089,12 @@ def generateInstructions(case, instructions, thenHandler):
             nameExpr = "Word()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
-            line("argumentPosition = addCallArgument(argumentPosition, " + nameExpr + ");")
+            line("argumentPosition = addCallArgument(argumentPosition, " + nameExpr + ", output);")
         elif type(inst) is UpdateCallArgumentInstruction:
             nameExpr = "Word()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
-            line("updateCallArgument(argumentPosition, " + nameExpr + ");")
+            line("updateCallArgument(argumentPosition, " + nameExpr + ", output);")
         elif type(inst) is EndCallInstruction:
             line("argumentPosition = endCall(argumentPosition, output);")
         elif type(inst) is SetGlobalKindInstruction:
@@ -1162,6 +1167,10 @@ for state in nonErrorStates:
         rememberState(state)
         if not hasNonTrivialThenUses(state):
             rememberContinueState(state)
+        line("if (tokenLimit == 0)")
+        with indent():
+            line("goto reached_token_limit;")
+        line("tokenLimit -= 1;")
     if [o for o in state.origins if not type(o) is NextInstruction]:
         labelLine(state.name + "$as_then:")
     if hasNonTrivialThenUses(state):

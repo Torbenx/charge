@@ -1,7 +1,5 @@
 #pragma once
 
-#include <parse/parse_gen.h>
-#include <parse/parse_impl.h>
 #include <sema/SimpleErrorHandler.h>
 #include <server/LanguageServerProtocol.h>
 #include <server/SemaContext.h>

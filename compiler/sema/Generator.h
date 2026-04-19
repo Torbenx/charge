@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sema/Context.h>
 #include <sema/Util.h>
 
 #include <FlatSet.h>

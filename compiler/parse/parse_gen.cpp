@@ -366,8 +366,10 @@ std::string_view nameString(State state) {
         return "FirstArgumentSquare";
     case State::FirstArgumentBrace:
         return "FirstArgumentBrace";
-    case State::AccessPunctuation:
-        return "AccessPunctuation";
+    case State::MemberAccess:
+        return "MemberAccess";
+    case State::StaticAccess:
+        return "StaticAccess";
     case State::SingleOrCompoundStatement:
         return "SingleOrCompoundStatement";
     case State::AfterStatement:
@@ -509,7 +511,11 @@ std::span<const LexerToken> possibleTokens(State state) {
         static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightBrace, LexerToken::Star, LexerToken::Tilde };
         return r;
     }
-    case State::AccessPunctuation: {
+    case State::MemberAccess: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::StaticAccess: {
         static constexpr std::array r = { LexerToken::Identifier };
         return r;
     }

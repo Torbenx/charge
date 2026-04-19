@@ -1,7 +1,7 @@
 #include <WordStringTable.h>
 #include <log.h>
 
-#include <parse/parse_impl.h>
+#include <parse/api.h>
 #include <sema/Generator.h>
 
 #include <server/Server.h>
@@ -425,9 +425,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     }
 
     void runTest() {
-        parse::Parser parser(context.tokenBuffer.source.data());
-        parser.parse(context);
-        VERIFY(parser.done());
+        parse::parseOrThrow(context);
         VERIFY(context.m_scopeStack.size() == 1);
 
         visit(context.tokenBuffer);
@@ -584,9 +582,7 @@ TEST(Charge, BuiltinModule) {
     auto sourceBuffer = server::readFile(builtinModule);
 
     sema::Context context({}, sourceBuffer);
-    parse::Parser parser(sourceBuffer.data());
-    parser.parse(context);
-    VERIFY(parser.done());
+    parse::parseOrThrow(context);
     for (auto prog : context.programsInModule(context.thisModule()))
         sema::Generator::signatureCheck(context, prog);
 
@@ -601,9 +597,7 @@ TEST(Charge, Files) {
     auto builtinModuleSrc = server::readFile(builtinModule);
     sema::Context builtinContext({}, builtinModuleSrc);
     {
-        parse::Parser parser(builtinModuleSrc.data());
-        parser.parse(builtinContext);
-        ASSERT_TRUE(parser.done());
+        parse::parseOrThrow(builtinContext);
         for (auto prog : builtinContext.programsInModule(builtinContext.thisModule()))
             sema::Generator::signatureCheck(builtinContext, prog);
         builtinContext.checkBuiltins();
@@ -632,9 +626,7 @@ TEST(Charge, TokenSpelling) {
         auto fileSource = server::readFile(filePath);
         // No module dependency need since no semantic analysis will be done
         sema::Context context({}, fileSource);
-        parse::Parser parser(fileSource.data());
-        parser.parse(context);
-        ASSERT_TRUE(parser.done());
+        parse::parseOrThrow(context);
 
         for (const auto& token : context.tokenBuffer.tokens) {
             std::string_view computedSpelling = context.tokenBuffer.tokenSpelling(token);
@@ -653,9 +645,7 @@ TEST(Charge, DISABLED_Benchmark) {
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
-        parse::Parser parser(sourceBuffer.data());
-        parser.parse(context);
-        ASSERT_TRUE(parser.done());
+        parse::parseOrThrow(context);
         VERIFY(context.m_scopeStack.size() == 1);
     }
 }

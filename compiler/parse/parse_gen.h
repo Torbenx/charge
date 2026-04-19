@@ -64,6 +64,7 @@ inline constexpr ConstWordStringTable words {
     wordInIdRange("type", 2, Word::MAX_ID + 1),
     wordInIdRange("unique_ref", 2, Word::MAX_ID + 1),
     wordInIdRange("value", 2, Word::MAX_ID + 1),
+    wordInIdRange("(unresolved_identifier)", 2, Word::MAX_ID + 1),
 };
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -165,7 +166,8 @@ enum class State : uint8_t {
     FirstArgumentParen,
     FirstArgumentSquare,
     FirstArgumentBrace,
-    AccessPunctuation,
+    MemberAccess,
+    StaticAccess,
     SingleOrCompoundStatement,
     AfterStatement,
     Statement,

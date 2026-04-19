@@ -25,9 +25,8 @@ SwitchState expression() then error
         next expression
 
     punctuation .
-        tokenKind = TokenKind::MemberAccessExpr
         emitToken TokenKind::ImplicitSelfReference
-        next access_punctuation
+        next member_access
 
     punctuation (
         emitCallToken TokenKind::ParenthesizedExpr
@@ -169,11 +168,9 @@ SwitchState after_expression() then error
         next expression
 
     punctuation .
-        tokenKind = TokenKind::MemberAccessExpr
-        next access_punctuation
+        next member_access
     punctuation ::
-        tokenKind = TokenKind::StaticAccessExpr
-        next access_punctuation
+        next static_access
 
     punctuation (
         emitCallToken TokenKind::CallExpr
@@ -341,9 +338,14 @@ LinearState first_argument_brace() then argument
     then
         pushScope ScopeKind::Brace
 
-LinearState access_punctuation(tokenKind) then error
+LinearState member_access() then error
     identifier
-        emitToken tokenKind
+        emitToken TokenKind::MemberAccessExpr
+        next after_expression
+
+LinearState static_access() then error
+    identifier
+        emitToken TokenKind::StaticAccessExpr
         next after_expression
 
 # --- Statements

@@ -1,6 +1,6 @@
 #include <WordTable.h>
+#include <parse/Parser.h>
 #include <parse/parse_gen.h>
-#include <parse/parse_impl.h>
 #include <utility>
 
 #ifdef __GNUC__
@@ -84,7 +84,7 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static Word* addCallArgument(Word* position, Word name) {
+static Word* addCallArgument(Word* position, Word name, sema::Context&) {
     auto index = ArgumentBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)ARGUMENT_BUFFER_SIZE);
     uint32_t newCount = position[0].toUint() + 1;
@@ -94,7 +94,7 @@ static Word* addCallArgument(Word* position, Word name) {
     return position;
 }
 
-static void updateCallArgument(Word* position, Word name) {
+static void updateCallArgument(Word* position, Word name, sema::Context&) {
     uint32_t count = position[0].toUint();
     VERIFY(count != 0);
     position[-1] = name;
@@ -108,11 +108,11 @@ NO_INLINE static Word* endCall(Word* position, sema::Context& output) {
     return position;
 }
 
-NO_INLINE static Word* endCall(Word* position, SimpleOutput&) {
-    uint32_t count = position[0].toUint();
-    position -= count + 2;
-    return position;
-}
+static Word* addCallArgument(Word* ptr, Word, SimpleOutput&) { return ptr; }
+
+static void updateCallArgument(Word*, Word, SimpleOutput&) { }
+
+static Word* endCall(Word* ptr, SimpleOutput&) { return ptr; }
 
 static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
     return {
@@ -150,16 +150,9 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     argPos += 2;
     return argPos;
 }
-NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char*, SimpleOutput& output) {
-    uint32_t tokenIndex = output.tokenBuffer.tokens.size();
+NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char*, SimpleOutput& output) {
     output.tokenBuffer.tokens.push_back(kind);
-
-    auto index = ArgumentBuffer::toIndex(argPos);
-    VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
-    argPos[1] = Word::fromUint(tokenIndex);
-    argPos[2] = Word::fromUint(0);
-    argPos += 2;
-    return argPos;
+    return ptr;
 }
 
 NO_INLINE static void markLineBegin(const char* position, sema::Context& output) {
@@ -856,7 +849,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
+Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     State continueState = inState.continueState;
     const char* tokBegin = inState.sourcePosition;
@@ -868,9 +861,8 @@ StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
-    TokenHandle declarationBegin = {};
-    Word argumentName;
-    TokenKind tokenKind = (TokenKind)0;
+    TokenHandle declarationBegin = inState.declarationBegin;
+    Word argumentName = inState.savedArgumentName;
 
     switch (continueState) {
     case State::Expression:
@@ -893,8 +885,10 @@ StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
         goto first_argument_square$no_emit;
     case State::FirstArgumentBrace:
         goto first_argument_brace$no_emit;
-    case State::AccessPunctuation:
-        goto access_punctuation$no_emit;
+    case State::MemberAccess:
+        goto member_access$no_emit;
+    case State::StaticAccess:
+        goto static_access$no_emit;
     case State::SingleOrCompoundStatement:
         goto single_or_compound_statement$no_emit;
     case State::AfterStatement:
@@ -997,6 +991,9 @@ expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::Expression;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 expression$as_then:
     continueState = State::Expression;
     savedScopePosition = scopePosition;
@@ -1150,14 +1147,12 @@ expression$as_then:
     }
     case '.': {
         tokEnd += 1;
-        // tokenKind = TokenKind::MemberAccessExpr
-        tokenKind = TokenKind::MemberAccessExpr;
         // emitToken TokenKind::ImplicitSelfReference
         checkLexToken(TokenKind::ImplicitSelfReference, LexerToken::Point);
         carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
         carriedEmitTokenData = 0;
-        // next access_punctuation
-        goto access_punctuation$with_emit;
+        // next member_access
+        goto member_access$with_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -1458,6 +1453,9 @@ after_expression$no_emit:
     parseState = State::AfterExpression;
     continueState = State::AfterExpression;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
@@ -1786,10 +1784,8 @@ after_expression$as_then:
     }
     case '.': {
         tokEnd += 1;
-        // tokenKind = TokenKind::MemberAccessExpr
-        tokenKind = TokenKind::MemberAccessExpr;
-        // next access_punctuation
-        goto access_punctuation$no_emit;
+        // next member_access
+        goto member_access$no_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -1837,10 +1833,8 @@ after_expression$as_then:
         char next = tokEnd[1];
         if (next == ':') {
             tokEnd += 2;
-            // tokenKind = TokenKind::StaticAccessExpr
-            tokenKind = TokenKind::StaticAccessExpr;
-            // next access_punctuation
-            goto access_punctuation$no_emit;
+            // next static_access
+            goto static_access$no_emit;
         }
         tokEnd += 1;
         // ifScope ScopeKind::BaseTypeExpr
@@ -2355,6 +2349,9 @@ comma_after_expression$no_emit:
     parseState = State::CommaAfterExpression;
     continueState = State::CommaAfterExpression;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Paren
@@ -2504,7 +2501,7 @@ comma_after_expression$no_emit:
             if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
                 // then argument
                 // callArgument
-                argumentPosition = addCallArgument(argumentPosition, Word());
+                argumentPosition = addCallArgument(argumentPosition, Word(), output);
                 // emitToken TokenKind::CallArgument
                 checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
                 emitToken(TokenKind::CallArgument, tokBegin, 0, output);
@@ -2579,7 +2576,7 @@ comma_after_expression$no_emit:
         if (scopePosition[0] == ScopeKind::Paren || scopePosition[0] == ScopeKind::Square || scopePosition[0] == ScopeKind::Brace || scopePosition[0] == ScopeKind::BraceInImplExpr) {
             // then argument
             // callArgument
-            argumentPosition = addCallArgument(argumentPosition, Word());
+            argumentPosition = addCallArgument(argumentPosition, Word(), output);
             // emitToken TokenKind::CallArgument
             checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
             emitToken(TokenKind::CallArgument, tokBegin, 0, output);
@@ -2661,6 +2658,9 @@ comma_else$no_emit:
     parseState = State::CommaElse;
     continueState = State::CommaElse;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
         // emitToken TokenKind::CommaElseExpr
@@ -2678,11 +2678,14 @@ argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::Argument;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 argument$as_then:
     continueState = State::Argument;
     savedScopePosition = scopePosition;
     // callArgument
-    argumentPosition = addCallArgument(argumentPosition, Word());
+    argumentPosition = addCallArgument(argumentPosition, Word(), output);
     // emitToken TokenKind::CallArgument
     checkLexToken(TokenKind::CallArgument, LexerToken::Invalid);
     emitToken(TokenKind::CallArgument, tokBegin, 0, output);
@@ -2694,6 +2697,9 @@ check_designated_argument$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::CheckDesignatedArgument;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 check_designated_argument$as_then:
     continueState = State::CheckDesignatedArgument;
     savedScopePosition = scopePosition;
@@ -2731,12 +2737,15 @@ maybe_designated_argument$no_emit:
     parseState = State::MaybeDesignatedArgument;
     continueState = State::MaybeDesignatedArgument;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
             tokEnd += 1;
             // callArgument argumentName
-            updateCallArgument(argumentPosition, argumentName);
+            updateCallArgument(argumentPosition, argumentName, output);
             // discardLastToken
             discardLastToken(output);
             // next expression
@@ -2753,6 +2762,9 @@ first_argument_paren$no_emit:
     parseState = State::FirstArgumentParen;
     continueState = State::FirstArgumentParen;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // endCall
@@ -2776,6 +2788,9 @@ first_argument_square$no_emit:
     parseState = State::FirstArgumentSquare;
     continueState = State::FirstArgumentSquare;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "]"sv) {
         tokEnd += 1;
         // endCall
@@ -2799,6 +2814,9 @@ first_argument_brace$no_emit:
     parseState = State::FirstArgumentBrace;
     continueState = State::FirstArgumentBrace;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
         // endCall
@@ -2815,15 +2833,18 @@ first_argument_brace$no_emit:
     // then argument
     goto argument$as_then;
 
-    // LinearState access_punctuation
-access_punctuation$with_emit:
+    // LinearState member_access
+member_access$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
-access_punctuation$no_emit:
+member_access$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-    parseState = State::AccessPunctuation;
-    continueState = State::AccessPunctuation;
+    parseState = State::MemberAccess;
+    continueState = State::MemberAccess;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -2834,13 +2855,46 @@ access_punctuation$no_emit:
             // -> error
             goto error$as_then;
         }
-    LABEL_MAYBE_UNUSED access_punctuation$identifier_case:
+    LABEL_MAYBE_UNUSED member_access$identifier_case:
         if (isSpecialIdentifier(this_identifier)) {
         }
-        // emitToken tokenKind
-        checkLexToken(tokenKind, LexerToken::Identifier);
-        carriedEmitTokenKind = tokenKind;
-        carriedEmitTokenData = packData1(tokenKind, this_identifier);
+        // emitToken TokenKind::MemberAccessExpr
+        checkLexToken(TokenKind::MemberAccessExpr, LexerToken::Identifier);
+        carriedEmitTokenKind = TokenKind::MemberAccessExpr;
+        carriedEmitTokenData = packData1(TokenKind::MemberAccessExpr, this_identifier);
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState static_access
+static_access$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+    parseState = State::StaticAccess;
+    continueState = State::StaticAccess;
+    savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    if (isWordFirstCharacter(tokEnd[0])) {
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+        if (isKeyword(this_identifier)) {
+            // -> error
+            goto error$as_then;
+        }
+    LABEL_MAYBE_UNUSED static_access$identifier_case:
+        if (isSpecialIdentifier(this_identifier)) {
+        }
+        // emitToken TokenKind::StaticAccessExpr
+        checkLexToken(TokenKind::StaticAccessExpr, LexerToken::Identifier);
+        carriedEmitTokenKind = TokenKind::StaticAccessExpr;
+        carriedEmitTokenData = packData1(TokenKind::StaticAccessExpr, this_identifier);
         // next after_expression
         goto after_expression$with_emit;
     }
@@ -2856,6 +2910,9 @@ single_or_compound_statement$no_emit:
     parseState = State::SingleOrCompoundStatement;
     continueState = State::SingleOrCompoundStatement;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     // then statement
     goto statement$as_then;
 
@@ -2868,6 +2925,9 @@ after_statement$no_emit:
     parseState = State::AfterStatement;
     continueState = State::AfterStatement;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3095,6 +3155,9 @@ statement$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::Statement;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 statement$as_then:
     continueState = State::Statement;
     savedScopePosition = scopePosition;
@@ -3311,14 +3374,12 @@ statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // tokenKind = TokenKind::MemberAccessExpr
-        tokenKind = TokenKind::MemberAccessExpr;
         // emitToken TokenKind::ImplicitSelfReference
         checkLexToken(TokenKind::ImplicitSelfReference, LexerToken::Point);
         carriedEmitTokenKind = TokenKind::ImplicitSelfReference;
         carriedEmitTokenData = 0;
-        // next access_punctuation
-        goto access_punctuation$with_emit;
+        // next member_access
+        goto member_access$with_emit;
     }
     case '/': {
         char next = tokEnd[1];
@@ -3773,6 +3834,9 @@ let_statement$no_emit:
     parseState = State::LetStatement;
     continueState = State::LetStatement;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3803,6 +3867,9 @@ var_statement$no_emit:
     parseState = State::VarStatement;
     continueState = State::VarStatement;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3835,6 +3902,9 @@ after_return$no_emit:
     parseState = State::AfterReturn;
     continueState = State::AfterReturn;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // popScope ScopeKind::RightExpr
@@ -3861,6 +3931,9 @@ else_branch$no_emit:
     parseState = State::ElseBranch;
     continueState = State::ElseBranch;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -3885,6 +3958,9 @@ after_simple_variable_declaration_id$no_emit:
     parseState = State::AfterSimpleVariableDeclarationId;
     continueState = State::AfterSimpleVariableDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -3911,6 +3987,9 @@ after_variable_declaration_id$no_emit:
     parseState = State::AfterVariableDeclarationId;
     continueState = State::AfterVariableDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
@@ -3995,6 +4074,9 @@ variable_type$no_emit:
     parseState = State::VariableType;
     continueState = State::VariableType;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "<"sv) {
         char next = tokEnd[1];
         if (next != '<' && next != '=') {
@@ -4062,6 +4144,9 @@ after_variable_modifier$no_emit:
     parseState = State::AfterVariableModifier;
     continueState = State::AfterVariableModifier;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
@@ -4134,6 +4219,9 @@ after_variable_unique_modifier$no_emit:
     parseState = State::AfterVariableUniqueModifier;
     continueState = State::AfterVariableUniqueModifier;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4173,6 +4261,9 @@ after_variable_shared_modifier$no_emit:
     parseState = State::AfterVariableSharedModifier;
     continueState = State::AfterVariableSharedModifier;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4212,6 +4303,9 @@ after_variable_const_modifier$no_emit:
     parseState = State::AfterVariableConstModifier;
     continueState = State::AfterVariableConstModifier;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4257,6 +4351,9 @@ after_parameters$no_emit:
     parseState = State::AfterParameters;
     continueState = State::AfterParameters;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     // emitToken TokenKind::EmptyNode
     checkLexToken(TokenKind::EmptyNode, LexerToken::Invalid);
     emitToken(TokenKind::EmptyNode, tokBegin, 0, output);
@@ -4296,6 +4393,9 @@ first_parameter$no_emit:
     parseState = State::FirstParameter;
     continueState = State::FirstParameter;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // next after_parameters
@@ -4313,6 +4413,9 @@ parameter$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::Parameter;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 parameter$as_then:
     continueState = State::Parameter;
     savedScopePosition = scopePosition;
@@ -4351,6 +4454,9 @@ var_parameter$no_emit:
     parseState = State::VarParameter;
     continueState = State::VarParameter;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4383,6 +4489,9 @@ impl_expression$no_emit:
     parseState = State::ImplExpression;
     continueState = State::ImplExpression;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::ParenInImplExpr
@@ -4426,6 +4535,9 @@ after_impl_expression$no_emit:
     parseState = State::AfterImplExpression;
     continueState = State::AfterImplExpression;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 2) == "::"sv) {
         tokEnd += 2;
         // next impl_access_expression
@@ -4522,6 +4634,9 @@ impl_access_expression$no_emit:
     parseState = State::ImplAccessExpression;
     continueState = State::ImplAccessExpression;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4573,6 +4688,9 @@ namespace_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::NamespaceDeclaration;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 namespace_declaration$as_then:
     continueState = State::NamespaceDeclaration;
     savedScopePosition = scopePosition;
@@ -4660,6 +4778,9 @@ namespace_declaration_id$no_emit:
     parseState = State::NamespaceDeclarationId;
     continueState = State::NamespaceDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4695,6 +4816,9 @@ after_namespace_declaration_id$no_emit:
     parseState = State::AfterNamespaceDeclarationId;
     continueState = State::AfterNamespaceDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -4713,6 +4837,9 @@ namespace_declaration_body$no_emit:
     parseState = State::NamespaceDeclarationBody;
     continueState = State::NamespaceDeclarationBody;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Namespace
@@ -4810,6 +4937,9 @@ templated_declaration_with_attributes$no_emit:
     parseState = State::TemplatedDeclarationWithAttributes;
     continueState = State::TemplatedDeclarationWithAttributes;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 templated_declaration_with_attributes$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -4880,6 +5010,9 @@ after_template$no_emit:
     parseState = State::AfterTemplate;
     continueState = State::AfterTemplate;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
@@ -4895,6 +5028,9 @@ after_template_parameters$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterTemplateParameters;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_template_parameters$as_then:
     continueState = State::AfterTemplateParameters;
     savedScopePosition = scopePosition;
@@ -4908,6 +5044,9 @@ function_declaration_id$no_emit:
     parseState = State::FunctionDeclarationId;
     continueState = State::FunctionDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4953,6 +5092,9 @@ after_function_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterFunctionDeclarationId;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_function_declaration_id$as_then:
     continueState = State::AfterFunctionDeclarationId;
     savedScopePosition = scopePosition;
@@ -4971,6 +5113,9 @@ after_function_parameters$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterFunctionParameters;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_function_parameters$as_then:
     continueState = State::AfterFunctionParameters;
     savedScopePosition = scopePosition;
@@ -5022,6 +5167,9 @@ struct_declaration_id$no_emit:
     parseState = State::StructDeclarationId;
     continueState = State::StructDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5067,6 +5215,9 @@ after_struct_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterStructDeclarationId;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_struct_declaration_id$as_then:
     continueState = State::AfterStructDeclarationId;
     savedScopePosition = scopePosition;
@@ -5088,6 +5239,9 @@ struct_declaration_body$no_emit:
     parseState = State::StructDeclarationBody;
     continueState = State::StructDeclarationBody;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Struct
@@ -5103,6 +5257,9 @@ member_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::MemberDeclaration;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 member_declaration$as_then:
     continueState = State::MemberDeclaration;
     savedScopePosition = scopePosition;
@@ -5208,6 +5365,9 @@ enum_declaration_id$no_emit:
     parseState = State::EnumDeclarationId;
     continueState = State::EnumDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5253,6 +5413,9 @@ after_enum_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterEnumDeclarationId;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_enum_declaration_id$as_then:
     continueState = State::AfterEnumDeclarationId;
     savedScopePosition = scopePosition;
@@ -5274,6 +5437,9 @@ enum_declaration_body$no_emit:
     parseState = State::EnumDeclarationBody;
     continueState = State::EnumDeclarationBody;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Enum
@@ -5289,6 +5455,9 @@ enum_value_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::EnumValueDeclaration;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 enum_value_declaration$as_then:
     continueState = State::EnumValueDeclaration;
     savedScopePosition = scopePosition;
@@ -5382,6 +5551,9 @@ after_enum_value_declaration_id$no_emit:
     parseState = State::AfterEnumValueDeclarationId;
     continueState = State::AfterEnumValueDeclarationId;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
         if (next != '=' && next != '>') {
@@ -5418,6 +5590,9 @@ after_static$no_emit:
     parseState = State::AfterStatic;
     continueState = State::AfterStatic;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5473,6 +5648,9 @@ static_var_variable_declaration$no_emit:
     parseState = State::StaticVarVariableDeclaration;
     continueState = State::StaticVarVariableDeclaration;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5507,6 +5685,9 @@ static_open_variable_declaration$no_emit:
     parseState = State::StaticOpenVariableDeclaration;
     continueState = State::StaticOpenVariableDeclaration;
     savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5541,6 +5722,9 @@ after_declaration$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterDeclaration;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
 after_declaration$as_then:
     continueState = State::AfterDeclaration;
     savedScopePosition = scopePosition;
@@ -5567,20 +5751,41 @@ after_declaration$as_then:
 
 pop_scope_failed:
     println("Pop scope failed in state '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::ScopeError, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
+    return { ReturnStatus::ScopeError, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
 error$as_then:
     println("Reached error state after '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::UnhandledCase, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
+    return { ReturnStatus::UnhandledCase, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
+reached_token_limit:
+    return { ReturnStatus::Ready, parseState, parseState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
 exit:
-    return { ReturnStatus::EOS, parseState, continueState, tokBegin, scopePosition, argumentPosition };
+    return { ReturnStatus::EOS, parseState, continueState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
 }
 
-void Parser::parse(SimpleOutput& output) {
-    m_state = parseImpl(m_state, output);
+ReturnStatus Parser::parse(sema::Context& output, int_t tokenLimit) {
+    m_state = parseImpl(m_state, output, tokenLimit);
+    return status();
 }
 
-void Parser::parse(sema::Context& output) {
-    m_state = parseImpl(m_state, output);
+ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
+    Parser::InternalState inState = {
+        m_state.status,
+        m_state.state,
+        m_state.continueState,
+        TokenHandle(),
+        Word(),
+        m_state.sourcePosition,
+        m_state.scopePosition,
+        nullptr
+    };
+    auto outState = Parser::parseImpl(inState, output, tokenLimit);
+    m_state = {
+        outState.status,
+        outState.state,
+        outState.continueState,
+        outState.sourcePosition,
+        outState.scopePosition
+    };
+    return status();
 }
 
 LexerToken Parser::lexToken() {
@@ -5588,24 +5793,13 @@ LexerToken Parser::lexToken() {
     return lexImpl(m_state.sourcePosition, output);
 }
 
-Parser::Parser(const char* sourcePosition)
-    : m_state {
-        ReturnStatus::UnhandledCase,
-        State::NamespaceDeclaration,
-        State::NamespaceDeclaration,
-        sourcePosition,
-        scopeBuffer.buffer,
-        argumentBuffer.buffer
-    } {
-    m_state.scopePosition[0] = ScopeKind::Invalid;
-    pushScope(ScopeKind::Namespace);
+LexerToken SimpleParser::lexToken() {
+    SimpleOutput output;
+    return lexImpl(m_state.sourcePosition, output);
 }
 
-bool Parser::checkFinalState() const {
-    VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
-    VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
-    VERIFY(m_state.argumentPosition == argumentBuffer.buffer);
-    return m_state.scopePosition == scopeBuffer.buffer + 1;
+SourceLocation Parser::location(sema::Context& context) const {
+    return locationInCurrentLine(sourcePosition(), context);
 }
 
 }

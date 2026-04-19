@@ -1,6 +1,6 @@
 #include <WordTable.h>
+#include <parse/Parser.h>
 #include <parse/parse_gen.h>
-#include <parse/parse_impl.h>
 #include <utility>
 
 #ifdef __GNUC__
@@ -84,7 +84,7 @@ static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
     return position;
 }
 
-static Word* addCallArgument(Word* position, Word name) {
+static Word* addCallArgument(Word* position, Word name, sema::Context&) {
     auto index = ArgumentBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)ARGUMENT_BUFFER_SIZE);
     uint32_t newCount = position[0].toUint() + 1;
@@ -94,7 +94,7 @@ static Word* addCallArgument(Word* position, Word name) {
     return position;
 }
 
-static void updateCallArgument(Word* position, Word name) {
+static void updateCallArgument(Word* position, Word name, sema::Context&) {
     uint32_t count = position[0].toUint();
     VERIFY(count != 0);
     position[-1] = name;
@@ -108,11 +108,11 @@ NO_INLINE static Word* endCall(Word* position, sema::Context& output) {
     return position;
 }
 
-NO_INLINE static Word* endCall(Word* position, SimpleOutput&) {
-    uint32_t count = position[0].toUint();
-    position -= count + 2;
-    return position;
-}
+static Word* addCallArgument(Word* ptr, Word, SimpleOutput&) { return ptr; }
+
+static void updateCallArgument(Word*, Word, SimpleOutput&) { }
+
+static Word* endCall(Word* ptr, SimpleOutput&) { return ptr; }
 
 static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
     return {
@@ -150,16 +150,9 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     argPos += 2;
     return argPos;
 }
-NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char*, SimpleOutput& output) {
-    uint32_t tokenIndex = output.tokenBuffer.tokens.size();
+NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char*, SimpleOutput& output) {
     output.tokenBuffer.tokens.push_back(kind);
-
-    auto index = ArgumentBuffer::toIndex(argPos);
-    VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
-    argPos[1] = Word::fromUint(tokenIndex);
-    argPos[2] = Word::fromUint(0);
-    argPos += 2;
-    return argPos;
+    return ptr;
 }
 
 NO_INLINE static void markLineBegin(const char* position, sema::Context& output) {
@@ -336,7 +329,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
+Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     State continueState = inState.continueState;
     const char* tokBegin = inState.sourcePosition;
@@ -348,28 +341,48 @@ StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
     uint32_t carriedEmitTokenData = 0;
     Word this_identifier;
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
-    TokenHandle declarationBegin = {};
-    Word argumentName;
-    TokenKind tokenKind = (TokenKind)0;
+    TokenHandle declarationBegin = inState.declarationBegin;
+    Word argumentName = inState.savedArgumentName;
 
     // GENERATED CODE HERE
 
 pop_scope_failed:
     println("Pop scope failed in state '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::ScopeError, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
+    return { ReturnStatus::ScopeError, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
 error$as_then:
     println("Reached error state after '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::UnhandledCase, parseState, continueState, tokBegin, savedScopePosition, argumentPosition };
+    return { ReturnStatus::UnhandledCase, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
+reached_token_limit:
+    return { ReturnStatus::Ready, parseState, parseState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
 exit:
-    return { ReturnStatus::EOS, parseState, continueState, tokBegin, scopePosition, argumentPosition };
+    return { ReturnStatus::EOS, parseState, continueState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
 }
 
-void Parser::parse(SimpleOutput& output) {
-    m_state = parseImpl(m_state, output);
+ReturnStatus Parser::parse(sema::Context& output, int_t tokenLimit) {
+    m_state = parseImpl(m_state, output, tokenLimit);
+    return status();
 }
 
-void Parser::parse(sema::Context& output) {
-    m_state = parseImpl(m_state, output);
+ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
+    Parser::InternalState inState = {
+        m_state.status,
+        m_state.state,
+        m_state.continueState,
+        TokenHandle(),
+        Word(),
+        m_state.sourcePosition,
+        m_state.scopePosition,
+        nullptr
+    };
+    auto outState = Parser::parseImpl(inState, output, tokenLimit);
+    m_state = {
+        outState.status,
+        outState.state,
+        outState.continueState,
+        outState.sourcePosition,
+        outState.scopePosition
+    };
+    return status();
 }
 
 LexerToken Parser::lexToken() {
@@ -377,24 +390,13 @@ LexerToken Parser::lexToken() {
     return lexImpl(m_state.sourcePosition, output);
 }
 
-Parser::Parser(const char* sourcePosition)
-    : m_state {
-        ReturnStatus::UnhandledCase,
-        State::NamespaceDeclaration,
-        State::NamespaceDeclaration,
-        sourcePosition,
-        scopeBuffer.buffer,
-        argumentBuffer.buffer
-    } {
-    m_state.scopePosition[0] = ScopeKind::Invalid;
-    pushScope(ScopeKind::Namespace);
+LexerToken SimpleParser::lexToken() {
+    SimpleOutput output;
+    return lexImpl(m_state.sourcePosition, output);
 }
 
-bool Parser::checkFinalState() const {
-    VERIFY(scopeBuffer.buffer[0] == ScopeKind::Invalid);
-    VERIFY(scopeBuffer.buffer[1] == ScopeKind::Namespace);
-    VERIFY(m_state.argumentPosition == argumentBuffer.buffer);
-    return m_state.scopePosition == scopeBuffer.buffer + 1;
+SourceLocation Parser::location(sema::Context& context) const {
+    return locationInCurrentLine(sourcePosition(), context);
 }
 
 }
