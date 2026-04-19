@@ -739,6 +739,18 @@ def collectPossibleThenStates(state):
     collectPossibleThenStatesInto(state, result)
     return result
 
+def collectPossibleCases(originalState):
+    statesToConsider = collectPossibleThenStates(originalState)
+    statesToConsider.add(originalState.name)
+    result = set()
+    for stateName in statesToConsider:
+        state = findState(stateName)
+        for case in state.cases:
+            if type(case) is ThenCase or type(case) is EndCase:
+                continue
+            result.add(case.cppName())
+    return result
+
 def readWord():
     line("{")
     with indent():
@@ -1125,7 +1137,7 @@ def onlyUsedAsThen(state):
     return True
 
 def hasNonTrivialThenUses(state):
-    if [o for o in state.origins if type(o) is State and o.thenCase() is not None]:
+    if [o for o in state.origins if (type(o) is State and o.thenCase() is not None) or type(o) is ThenInstruction]:
         return True
     return False
 
@@ -1162,9 +1174,12 @@ for state in nonErrorStates:
             else:
                 inlineTokenAdvancer()
             rememberState(state)
+            if not hasNonTrivialThenUses(state):
+                rememberContinueState(state)
         if [o for o in state.origins if not type(o) is NextInstruction]:
             labelLine(state.name + "$as_then:")
-        rememberContinueState(state)
+        if hasNonTrivialThenUses(state):
+            rememberContinueState(state)
 
         generateState(state)
 
@@ -1264,6 +1279,8 @@ with indent():
 line("};")
 line("std::string_view nameString(State);")
 lineNoIndent()
+line("std::span<const LexerToken> possibleTokens(State);")
+lineNoIndent()
 line("}")
 
 outputLines = []
@@ -1340,6 +1357,23 @@ with indent():
     line("}")
 line("}")
 lineNoIndent()
+
+line("std::span<const LexerToken> possibleTokens(State state) {")
+with indent():
+    line("switch (state) {")
+    for state in nonErrorStates:
+        line("case State::" + stateCppName(state.name) + ": {")
+        with indent():
+            line("static constexpr std::array r = { LexerToken::" + (", LexerToken::".join(sorted(collectPossibleCases(state)))) + " };")
+            line("return r;")
+        line("}")
+    line("default:")
+    with indent():
+        line("VERIFY_NOT_REACHED();")
+    line("}")
+line("}")
+lineNoIndent()
+
 line("}")
 
 outputLines = []

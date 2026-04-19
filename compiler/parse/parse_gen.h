@@ -216,4 +216,6 @@ enum class State : uint8_t {
 };
 std::string_view nameString(State);
 
+std::span<const LexerToken> possibleTokens(State);
+
 }

@@ -467,4 +467,239 @@ std::string_view nameString(State state) {
     }
 }
 
+std::span<const LexerToken> possibleTokens(State state) {
+    switch (state) {
+    case State::Expression: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::AfterExpression: {
+        static constexpr std::array r = { LexerToken::Amp, LexerToken::AmpAmp, LexerToken::AmpAmpEqual, LexerToken::AmpEqual, LexerToken::Colon, LexerToken::ColonColon, LexerToken::Comma, LexerToken::Equal, LexerToken::EqualEqual, LexerToken::EqualGreater, LexerToken::ExclaimEqual, LexerToken::Greater, LexerToken::GreaterEqual, LexerToken::GreaterGreater, LexerToken::GreaterGreaterEqual, LexerToken::Hat, LexerToken::HatEqual, LexerToken::LeftBrace, LexerToken::LeftParen, LexerToken::LeftSquare, LexerToken::Less, LexerToken::LessEqual, LexerToken::LessLess, LexerToken::LessLessEqual, LexerToken::Minus, LexerToken::MinusEqual, LexerToken::MinusMinus, LexerToken::Percent, LexerToken::PercentEqual, LexerToken::Plus, LexerToken::PlusEqual, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::SemiColon, LexerToken::Slash, LexerToken::SlashEqual, LexerToken::Star, LexerToken::StarEqual, LexerToken::Vert, LexerToken::VertEqual, LexerToken::VertVert, LexerToken::VertVertEqual };
+        return r;
+    }
+    case State::CommaAfterExpression: {
+        static constexpr std::array r = { LexerToken::Else, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::Star, LexerToken::Tilde, LexerToken::Var };
+        return r;
+    }
+    case State::CommaElse: {
+        static constexpr std::array r = { LexerToken::EqualGreater };
+        return r;
+    }
+    case State::Argument: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::CheckDesignatedArgument: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::MaybeDesignatedArgument: {
+        static constexpr std::array r = { LexerToken::Amp, LexerToken::AmpAmp, LexerToken::AmpAmpEqual, LexerToken::AmpEqual, LexerToken::Colon, LexerToken::ColonColon, LexerToken::Comma, LexerToken::Equal, LexerToken::EqualEqual, LexerToken::EqualGreater, LexerToken::ExclaimEqual, LexerToken::Greater, LexerToken::GreaterEqual, LexerToken::GreaterGreater, LexerToken::GreaterGreaterEqual, LexerToken::Hat, LexerToken::HatEqual, LexerToken::LeftBrace, LexerToken::LeftParen, LexerToken::LeftSquare, LexerToken::Less, LexerToken::LessEqual, LexerToken::LessLess, LexerToken::LessLessEqual, LexerToken::Minus, LexerToken::MinusEqual, LexerToken::MinusMinus, LexerToken::Percent, LexerToken::PercentEqual, LexerToken::Plus, LexerToken::PlusEqual, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::SemiColon, LexerToken::Slash, LexerToken::SlashEqual, LexerToken::Star, LexerToken::StarEqual, LexerToken::Vert, LexerToken::VertEqual, LexerToken::VertVert, LexerToken::VertVertEqual };
+        return r;
+    }
+    case State::FirstArgumentParen: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightParen, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::FirstArgumentSquare: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightSquare, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::FirstArgumentBrace: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightBrace, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::AccessPunctuation: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::SingleOrCompoundStatement: {
+        static constexpr std::array r = { LexerToken::Destroy, LexerToken::Discard, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftBrace, LexerToken::LeftParen, LexerToken::Let, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Return, LexerToken::RightBrace, LexerToken::Star, LexerToken::Tilde, LexerToken::Var };
+        return r;
+    }
+    case State::AfterStatement: {
+        static constexpr std::array r = { LexerToken::Base, LexerToken::Destroy, LexerToken::Discard, LexerToken::Else, LexerToken::Enum, LexerToken::Exclaim, LexerToken::Fn, LexerToken::Identifier, LexerToken::If, LexerToken::Incomplete, LexerToken::LeftBrace, LexerToken::LeftParen, LexerToken::Let, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Namespace, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Return, LexerToken::RightBrace, LexerToken::Star, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Tilde, LexerToken::Var, LexerToken::Virtual };
+        return r;
+    }
+    case State::Statement: {
+        static constexpr std::array r = { LexerToken::Destroy, LexerToken::Discard, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftBrace, LexerToken::LeftParen, LexerToken::Let, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Return, LexerToken::RightBrace, LexerToken::Star, LexerToken::Tilde, LexerToken::Var };
+        return r;
+    }
+    case State::LetStatement: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::VarStatement: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::AfterReturn: {
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::SemiColon, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::ElseBranch: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::AfterSimpleVariableDeclarationId: {
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::Comma, LexerToken::Equal, LexerToken::RightParen, LexerToken::SemiColon };
+        return r;
+    }
+    case State::AfterVariableDeclarationId: {
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::Comma, LexerToken::Equal, LexerToken::RightParen, LexerToken::SemiColon };
+        return r;
+    }
+    case State::VariableType: {
+        static constexpr std::array r = { LexerToken::Const, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Less, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::Shared, LexerToken::Star, LexerToken::Tilde, LexerToken::Unique };
+        return r;
+    }
+    case State::AfterVariableModifier: {
+        static constexpr std::array r = { LexerToken::Comma, LexerToken::Equal, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightParen, LexerToken::SemiColon, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::AfterVariableUniqueModifier: {
+        static constexpr std::array r = { LexerToken::Comma, LexerToken::Const, LexerToken::Equal, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightParen, LexerToken::SemiColon, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::AfterVariableSharedModifier: {
+        static constexpr std::array r = { LexerToken::Comma, LexerToken::Const, LexerToken::Equal, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightParen, LexerToken::SemiColon, LexerToken::Star, LexerToken::Tilde };
+        return r;
+    }
+    case State::AfterVariableConstModifier: {
+        static constexpr std::array r = { LexerToken::Comma, LexerToken::Equal, LexerToken::Exclaim, LexerToken::Identifier, LexerToken::If, LexerToken::LeftParen, LexerToken::Literal, LexerToken::Minus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::PlusPlus, LexerToken::Point, LexerToken::RightParen, LexerToken::SemiColon, LexerToken::Shared, LexerToken::Star, LexerToken::Tilde, LexerToken::Unique };
+        return r;
+    }
+    case State::AfterParameters: {
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::Enum, LexerToken::EqualGreater, LexerToken::Fn, LexerToken::Incomplete, LexerToken::MinusGreater, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::FirstParameter: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::RightParen, LexerToken::Var };
+        return r;
+    }
+    case State::Parameter: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Var };
+        return r;
+    }
+    case State::VarParameter: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::ImplExpression: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::LeftParen };
+        return r;
+    }
+    case State::AfterImplExpression: {
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::ColonColon, LexerToken::Greater, LexerToken::LeftBrace, LexerToken::LeftParen };
+        return r;
+    }
+    case State::ImplAccessExpression: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::NoDeclaration: {
+        static constexpr std::array r = { LexerToken::RightBrace };
+        return r;
+    }
+    case State::NamespaceDeclaration: {
+        static constexpr std::array r = { LexerToken::Enum, LexerToken::Fn, LexerToken::Incomplete, LexerToken::Namespace, LexerToken::RightBrace, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::NamespaceDeclarationId: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::AfterNamespaceDeclarationId: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::NamespaceDeclarationBody: {
+        static constexpr std::array r = { LexerToken::LeftBrace };
+        return r;
+    }
+    case State::TemplatedDeclaration: {
+        static constexpr std::array r = { LexerToken::Enum, LexerToken::Fn, LexerToken::Incomplete, LexerToken::RightBrace, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::TemplatedDeclarationWithAttributes: {
+        static constexpr std::array r = { LexerToken::Enum, LexerToken::Fn, LexerToken::Incomplete, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::AfterTemplate: {
+        static constexpr std::array r = { LexerToken::LeftParen };
+        return r;
+    }
+    case State::AfterTemplateParameters: {
+        static constexpr std::array r = { LexerToken::Enum, LexerToken::Fn, LexerToken::Incomplete, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::FunctionDeclarationId: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Impl };
+        return r;
+    }
+    case State::AfterFunctionDeclarationId: {
+        static constexpr std::array r = { LexerToken::LeftParen };
+        return r;
+    }
+    case State::AfterFunctionParameters: {
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::EqualGreater, LexerToken::MinusGreater };
+        return r;
+    }
+    case State::StructDeclarationId: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Impl };
+        return r;
+    }
+    case State::AfterStructDeclarationId: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::StructDeclarationBody: {
+        static constexpr std::array r = { LexerToken::LeftBrace };
+        return r;
+    }
+    case State::MemberDeclaration: {
+        static constexpr std::array r = { LexerToken::Base, LexerToken::Enum, LexerToken::Fn, LexerToken::Identifier, LexerToken::Incomplete, LexerToken::RightBrace, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::EnumDeclarationId: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Impl };
+        return r;
+    }
+    case State::AfterEnumDeclarationId: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::EnumDeclarationBody: {
+        static constexpr std::array r = { LexerToken::LeftBrace };
+        return r;
+    }
+    case State::EnumValueDeclaration: {
+        static constexpr std::array r = { LexerToken::Enum, LexerToken::Fn, LexerToken::Identifier, LexerToken::Incomplete, LexerToken::RightBrace, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    case State::AfterEnumValueDeclarationId: {
+        static constexpr std::array r = { LexerToken::Equal, LexerToken::SemiColon };
+        return r;
+    }
+    case State::AfterStatic: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Impl, LexerToken::Open, LexerToken::Var };
+        return r;
+    }
+    case State::StaticVarVariableDeclaration: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::StaticOpenVariableDeclaration: {
+        static constexpr std::array r = { LexerToken::Identifier };
+        return r;
+    }
+    case State::AfterDeclaration: {
+        static constexpr std::array r = { LexerToken::Base, LexerToken::Enum, LexerToken::Fn, LexerToken::Identifier, LexerToken::Incomplete, LexerToken::Namespace, LexerToken::RightBrace, LexerToken::Static, LexerToken::Struct, LexerToken::Template, LexerToken::Virtual };
+        return r;
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 }

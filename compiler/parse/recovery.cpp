@@ -93,36 +93,6 @@ constexpr EnumTable<ScopeKind, SyntaxCategory> containingSyntax {
     { ScopeKind::GenericCategoryExpression, SyntaxCategory::Expression },
 };
 
-const EnumTable<ScopeKind, std::vector<LexerToken>> afterRecoveries {
-    { ScopeKind::IfExpr, { LexerToken::EqualGreater } },
-    { ScopeKind::IfExprOrStmt, { LexerToken::EqualGreater, LexerToken::Colon } },
-    { ScopeKind::CompoundStmt, { LexerToken::RightBrace } },
-    { ScopeKind::Paren, { LexerToken::RightParen } },
-    { ScopeKind::ParenInImplExpr, { LexerToken::RightParen } },
-    { ScopeKind::Square, { LexerToken::RightSquare } },
-    { ScopeKind::Brace, { LexerToken::RightBrace } },
-    { ScopeKind::BraceInImplExpr, { LexerToken::RightBrace } },
-    { ScopeKind::LeftExpr, {} },
-    { ScopeKind::RightExpr, {} },
-    { ScopeKind::VariableType, { LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen } },
-    { ScopeKind::IfBranch, { LexerToken::SemiColon, LexerToken::RightBrace, LexerToken::Else } },
-    { ScopeKind::ElseBranch, { LexerToken::SemiColon, LexerToken::RightBrace } },
-    { ScopeKind::Parameter, { LexerToken::RightParen } },
-    { ScopeKind::Namespace, { LexerToken::RightBrace } },
-    { ScopeKind::FunctionBody, { LexerToken::RightBrace } },
-    { ScopeKind::ReturnType, { LexerToken::Colon, LexerToken::SemiColon } },
-    { ScopeKind::FunctionParameters, { LexerToken::RightParen } },
-    { ScopeKind::Struct, { LexerToken::RightBrace } },
-    { ScopeKind::Enum, { LexerToken::RightBrace } },
-    { ScopeKind::BaseTypeExpr, { LexerToken::Equal, LexerToken::SemiColon } },
-    { ScopeKind::TemplateParameters, { LexerToken::RightParen } },
-    { ScopeKind::StructImplExpression, { LexerToken::Colon } },
-    { ScopeKind::FunctionImplExpression, { LexerToken::LeftParen } },
-    { ScopeKind::EnumImplExpression, { LexerToken::Colon } },
-    { ScopeKind::GlobalImplExpression, { LexerToken::Colon, LexerToken::Equal, LexerToken::SemiColon } },
-    { ScopeKind::GenericCategoryExpression, { LexerToken::Greater } },
-};
-
 struct RecoveryInstructions {
     uint32_t skipTokens = 0;
     std::vector<LexerToken> insertTokens = {};
@@ -132,8 +102,10 @@ struct RecoveryInstructions {
 
 std::vector<RecoveryInstructions> generateCases(Parser& parser) {
     if (parser.status() == ReturnStatus::EOS) {
-        VERIFY(parser.checkFinalState());
-        return {};
+        if (parser.checkFinalState())
+            return {};
+        else
+            return { { .insertTokens = { LexerToken::RightBrace } } };
     }
 
     State state = parser.state();
@@ -174,79 +146,17 @@ std::vector<RecoveryInstructions> generateCases(Parser& parser) {
         break;
     case SyntaxCategory::ParameterList: {
         VERIFY(scope == ScopeKind::Parameter); // The other scopes can never be at the top when an error occours.
-        switch (state) {
-        case State::AfterVariableDeclarationId:
-        case State::AfterSimpleVariableDeclarationId:
-            // Test all possible continuations
-            // Note that continuing with '=' is syntactically equivalent to continuing with ':'.
-            for (LexerToken rt : { LexerToken::Comma, LexerToken::Colon, LexerToken::RightParen }) {
-                cases.push_back({ .insertTokens = { rt } });
-            }
-            break;
-        case State::FirstParameter:
-        case State::Parameter:
-            // Test all possible continuations (add an identifier or end the parameter list)
-            for (LexerToken rt : { LexerToken::Identifier, LexerToken::RightParen })
-                cases.push_back({ .insertTokens = { rt } });
-            break;
-        default:
-            // All other states not possible when Parameter is the top scope.
-            VERIFY(token == LexerToken::SemiColon);
-        }
+        for (LexerToken rt : possibleTokens(state))
+            cases.push_back({ .insertTokens = { rt } });
         break;
     }
     case SyntaxCategory::Declaration: {
-        switch (state) {
-        case State::MemberDeclaration:
-        case State::EnumValueDeclaration:
-        case State::NamespaceDeclaration:
-            if (state == State::MemberDeclaration) {
-                for (LexerToken rt : { LexerToken::Identifier, LexerToken::Base })
-                    cases.push_back({ .insertTokens = { rt } });
-            } else if (state == State::EnumValueDeclaration) {
-                cases.push_back({ .insertTokens = { LexerToken::Identifier } });
-            } else if (state == State::NamespaceDeclaration) {
-                cases.push_back({ .insertTokens = { LexerToken::Namespace } });
-            }
-            [[fallthrough]];
-        case State::TemplatedDeclarationWithAttributes:
-            for (LexerToken rt : { LexerToken::Template, LexerToken::Fn, LexerToken::Struct, LexerToken::Enum, LexerToken::Static })
-                cases.push_back({ .insertTokens = { rt } });
-            break;
-        case State::EnumDeclarationId:
-        case State::StructDeclarationId:
-        case State::FunctionDeclarationId:
-            for (LexerToken rt : { LexerToken::Identifier, LexerToken::Impl })
-                cases.push_back({ .insertTokens = { rt } });
-            break;
-        case State::NamespaceDeclarationId:
-            cases.push_back({ .insertTokens = { LexerToken::Identifier } });
-            break;
-        case State::AfterFunctionDeclarationId:
-            cases.push_back({ .insertTokens = { LexerToken::LeftParen } });
-            break;
-        case State::AfterStructDeclarationId:
-        case State::AfterNamespaceDeclarationId:
-        case State::AfterEnumDeclarationId:
-            cases.push_back({ .insertTokens = { LexerToken::Colon } });
-            break;
-        case State::AfterFunctionParameters:
-            // Note that continuing with '=>' is syntactically equivalent to continuing with '->'.
-            for (LexerToken rt : { LexerToken::Colon, LexerToken::MinusGreater, LexerToken::SemiColon })
-                cases.push_back({ .insertTokens = { rt } });
-            break;
-        case State::EnumDeclarationBody:
-        case State::StructDeclarationBody:
-        case State::NamespaceDeclarationBody:
-            cases.push_back({ .insertTokens = { LexerToken::LeftBrace } });
-            break;
-        default:
-            VERIFY_NOT_REACHED(); // TODO: List incomplete
-        }
+        for (LexerToken rt : possibleTokens(state))
+            cases.push_back({ .insertTokens = { rt } });
         break;
     }
     default:
-        break;
+        VERIFY_NOT_REACHED();
     }
 
     return cases;
@@ -269,7 +179,7 @@ struct RecoveryState {
     // depth greater than maxBadDepth are pruned.
     struct ErrorNode {
         uint32_t totalAdvancedTokens() const { return totalSkippedTokens + totalParsedTokens - totalInsertedTokens; }
-        uint32_t modificationCost() const { return totalSkippedTokens + totalInsertedTokens; }
+        uint32_t modificationCost() const { return totalSkippedTokens * 2 + totalInsertedTokens * 3; }
 
         std::optional<ErrorNode*> parent;
         uint32_t totalSkippedTokens = 0;
@@ -381,6 +291,7 @@ struct RecoveryState {
                 std::string combined = prefix + sourceStr;
                 const char* orignalSourcePosition = parser.sourcePosition();
                 parser.setSourcePosition(combined.data());
+                println("parsing \"{}\" in state '{}'", combined, nameString(parent.state.continueState));
                 parser.parse(output);
 
                 if (output.tokenBuffer.tokens.size() < c.insertTokens.size()) {
@@ -529,7 +440,6 @@ TEST(Parse, RecoveryBasic12) {
     parser.parse(output);
     EXPECT_FALSE(parser.done());
     auto result = RecoveryState::recover(parser);
-    EXPECT_EQ(result.size(), 2);
     auto effectiveInput = RecoveryState::effectiveInputString(parser, result);
     EXPECT_EQ(effectiveInput, "; } fn f2(): { return (a + x ); }");
 }

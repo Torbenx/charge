@@ -137,7 +137,7 @@ struct Parser {
     ScopeKind topScope() const { return m_state.scopePosition[0]; }
 
     std::span<const ScopeKind> scopes() const {
-        return { scopeBuffer.buffer, m_state.scopePosition };
+        return { scopeBuffer.buffer, m_state.scopePosition + 1 };
     }
 
     SavedState save() const {

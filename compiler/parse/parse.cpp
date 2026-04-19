@@ -954,13 +954,13 @@ StateMachineState parseImpl(StateMachineState inState, ParseOutput& output) {
     case State::AfterTemplate:
         goto after_template$no_emit;
     case State::AfterTemplateParameters:
-        VERIFY_NOT_REACHED();
+        goto after_template_parameters$no_emit;
     case State::FunctionDeclarationId:
         goto function_declaration_id$no_emit;
     case State::AfterFunctionDeclarationId:
         goto after_function_declaration_id$no_emit;
     case State::AfterFunctionParameters:
-        VERIFY_NOT_REACHED();
+        goto after_function_parameters$no_emit;
     case State::StructDeclarationId:
         goto struct_declaration_id$no_emit;
     case State::AfterStructDeclarationId:
@@ -1456,9 +1456,9 @@ after_expression$no_emit:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     parseState = State::AfterExpression;
-after_expression$as_then:
     continueState = State::AfterExpression;
     savedScopePosition = scopePosition;
+after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -3909,9 +3909,9 @@ after_variable_declaration_id$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableDeclarationId;
-after_variable_declaration_id$as_then:
     continueState = State::AfterVariableDeclarationId;
     savedScopePosition = scopePosition;
+after_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -4060,9 +4060,9 @@ after_variable_modifier$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::AfterVariableModifier;
-after_variable_modifier$as_then:
     continueState = State::AfterVariableModifier;
     savedScopePosition = scopePosition;
+after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
         if (next != '=' && next != '>') {
@@ -4547,8 +4547,6 @@ impl_access_expression$no_emit:
 
     // LinearState no_declaration
 no_declaration$as_then:
-    continueState = State::NoDeclaration;
-    savedScopePosition = scopePosition;
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum
@@ -4727,8 +4725,6 @@ namespace_declaration_body$no_emit:
 
     // LinearState templated_declaration
 templated_declaration$as_then:
-    continueState = State::TemplatedDeclaration;
-    savedScopePosition = scopePosition;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4812,9 +4808,9 @@ templated_declaration_with_attributes$no_emit:
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
     parseState = State::TemplatedDeclarationWithAttributes;
-templated_declaration_with_attributes$as_then:
     continueState = State::TemplatedDeclarationWithAttributes;
     savedScopePosition = scopePosition;
+templated_declaration_with_attributes$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4895,6 +4891,10 @@ after_template$no_emit:
     goto error$as_then;
 
     // LinearState after_template_parameters
+after_template_parameters$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+    parseState = State::AfterTemplateParameters;
 after_template_parameters$as_then:
     continueState = State::AfterTemplateParameters;
     savedScopePosition = scopePosition;
@@ -4967,6 +4967,10 @@ after_function_declaration_id$as_then:
     goto error$as_then;
 
     // LinearState after_function_parameters
+after_function_parameters$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+    parseState = State::AfterFunctionParameters;
 after_function_parameters$as_then:
     continueState = State::AfterFunctionParameters;
     savedScopePosition = scopePosition;
