@@ -1036,17 +1036,7 @@ def generateInstructions(case, instructions, thenHandler):
             line("setData2(output.tokenBuffer.tokens.back(), packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
-            if shouldBeInlined(newState):
-                line("// inlined " + newState.name)
-                assert newState.origins == [inst]
-                assert newState.kind == "LinearState"
-                if inst.carriesEmitToken:
-                    emitCarriedToken()
-                inlineTokenAdvancer()
-                rememberState(newState)
-                generateState(newState)
-            else:
-                line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
+            line("goto " + newState.name + ("$with_emit" if inst.carriesEmitToken else "$no_emit") + ";")
             afterJumpInstruction = True
         elif type(inst) is AssignInstruction:
             line(inst.leftName + " = " + inst.rightExpr + ";")
@@ -1127,10 +1117,6 @@ for state in states:
             collectOrigins(state, c.instructions)
 
 
-def shouldBeInlined(state):
-    #return len(state.origins) == 1 and state.kind == "LinearState" and type(state.origins[0]) is NextInstruction
-    return False
-
 def onlyUsedAsThen(state):
     if [o for o in state.origins if type(o) is NextInstruction]:
         return False
@@ -1148,7 +1134,7 @@ line("switch (continueState) {")
 for state in states:
     line("case State::" + stateCppName(state.name) + ":")
     with indent():
-        if shouldBeInlined(state) or onlyUsedAsTrivialThen(state) or state.name == "error":
+        if onlyUsedAsTrivialThen(state) or state.name == "error":
             line("VERIFY_NOT_REACHED();")
         else:
             line("goto " + state.name + "$no_emit;")
@@ -1158,32 +1144,32 @@ assert onlyUsedAsThen(errorState)
 for state in nonErrorStates:
     if len(state.origins) == 0:
         raise Exception("unused state '" + state.name + "'")
-    if not shouldBeInlined(state):
-        line("// " + state.kind + " " + state.name)
-        withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitToken]
-        if withEmitLabelUsed:
-            labelLine(state.name + "$with_emit:")
-            emitCarriedToken()
-        noEmitLabelUsed = not onlyUsedAsTrivialThen(state)
-        if noEmitLabelUsed:
-            labelLine(state.name + "$no_emit:")
-        if noEmitLabelUsed or withEmitLabelUsed:
-            if state.kind == "SwitchState":
-                line("tokEnd = skipWhitespace(tokEnd);")
-                line("tokBegin = tokEnd;")
-            else:
-                inlineTokenAdvancer()
-            rememberState(state)
-            if not hasNonTrivialThenUses(state):
-                rememberContinueState(state)
-        if [o for o in state.origins if not type(o) is NextInstruction]:
-            labelLine(state.name + "$as_then:")
-        if hasNonTrivialThenUses(state):
+
+    line("// " + state.kind + " " + state.name)
+    withEmitLabelUsed = [o for o in state.origins if type(o) is NextInstruction and o.carriesEmitToken]
+    if withEmitLabelUsed:
+        labelLine(state.name + "$with_emit:")
+        emitCarriedToken()
+    noEmitLabelUsed = not onlyUsedAsTrivialThen(state)
+    if noEmitLabelUsed:
+        labelLine(state.name + "$no_emit:")
+    if noEmitLabelUsed or withEmitLabelUsed:
+        if state.kind == "SwitchState":
+            line("tokEnd = skipWhitespace(tokEnd);")
+            line("tokBegin = tokEnd;")
+        else:
+            inlineTokenAdvancer()
+        rememberState(state)
+        if not hasNonTrivialThenUses(state):
             rememberContinueState(state)
+    if [o for o in state.origins if not type(o) is NextInstruction]:
+        labelLine(state.name + "$as_then:")
+    if hasNonTrivialThenUses(state):
+        rememberContinueState(state)
 
-        generateState(state)
+    generateState(state)
 
-        lineNoIndent()
+    lineNoIndent()
 
 generatedParserLines = generatedLines
 generatedLines = []
