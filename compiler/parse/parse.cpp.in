@@ -135,7 +135,8 @@ NO_INLINE static void emitToken(TokenKind kind, const char*, uint32_t, SimpleOut
 }
 
 NO_INLINE static void discardLastToken(SimpleOutput& output) {
-    output.tokenBuffer.tokens.pop_back();
+    if (!output.tokenBuffer.tokens.empty())
+        output.tokenBuffer.tokens.pop_back();
 }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, sema::Context& output) {

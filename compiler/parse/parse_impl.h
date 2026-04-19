@@ -102,13 +102,17 @@ struct Parser {
     Parser(const char* sourcePosition);
 
     ReturnStatus status() const { return m_state.status; }
-    State state() const { return m_state.state; }
     bool checkFinalState() const;
     bool done() const { return status() == ReturnStatus::EOS && checkFinalState(); }
+
+    State state() const { return m_state.state; }
     void setState(State state) {
         m_state.state = state;
         m_state.continueState = state;
     }
+
+    const char* sourcePosition() const { return m_state.sourcePosition; }
+    void setSourcePosition(const char* pos) { m_state.sourcePosition = pos; }
 
     LexerToken lexToken();
 
