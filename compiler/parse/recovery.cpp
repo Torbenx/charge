@@ -1,5 +1,6 @@
 #include <parse/Parser.h>
 #include <sema/Context.h>
+#include <EnumTable.h>
 
 #include <gtest/gtest.h>
 
@@ -75,56 +76,6 @@ enum class SyntaxCategory : uint8_t {
     Statement,
     ParameterList,
     Declaration,
-};
-
-template<typename E, typename T>
-struct EnumTable {
-private:
-    static constexpr size_t N = std::to_underlying(E::COUNT);
-
-    std::array<T, N> m_data;
-
-    template<size_t... I>
-    constexpr EnumTable(T defaultValue, std::index_sequence<I...>)
-        : m_data { ((void)I, defaultValue)... } { }
-
-public:
-    struct Entry {
-        E key;
-        T value;
-        constexpr Entry(E key, T value)
-            : key(key), value(value) { }
-    };
-    constexpr EnumTable(T defaultValue, std::initializer_list<Entry> entries)
-        : EnumTable(defaultValue, std::make_index_sequence<N>()) {
-        std::array<bool, N> checkArray;
-        checkArray.fill(false);
-        for (const Entry& entry : entries) {
-            auto val = std::to_underlying(entry.key);
-            VERIFY(!checkArray[val]);
-            checkArray[val] = true;
-            m_data[val] = entry.value;
-        }
-    }
-
-    constexpr EnumTable(std::initializer_list<Entry> entries)
-        : EnumTable(T(), std::make_index_sequence<N>()) {
-        std::array<bool, N> checkArray;
-        checkArray.fill(false);
-        for (const Entry& entry : entries) {
-            auto val = std::to_underlying(entry.key);
-            VERIFY(!checkArray[val]);
-            checkArray[val] = true;
-            m_data[val] = entry.value;
-        }
-        std::ranges::all_of(checkArray, [](bool b) { return b; });
-    }
-
-    constexpr T operator()(E e) const {
-        auto i = std::to_underlying(e);
-        assert(i >= 0 && i < N && "Index out of range");
-        return m_data[i];
-    }
 };
 
 static constexpr EnumTable<ScopeKind, SyntaxCategory> containingSyntax {

@@ -10,6 +10,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.cpp"
                    DEPENDS parse/parse.txt parse/parse.py parse/parse.cpp.in)
 
 add_executable(compiler
+    EnumTable.h
     FlatSet.cpp
     FlatSet.h
     FlatTreeSet.cpp
