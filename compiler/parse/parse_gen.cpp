@@ -1,3 +1,5 @@
+#include <parse/parse_gen.h>
+
 #include <parse/TokenBuffer.h>
 
 namespace parse {

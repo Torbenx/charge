@@ -1,4 +1,6 @@
 #include <sema/Context.h>
+
+#include <parse/parse_gen.h>
 #include <sema/Generator.h>
 
 namespace sema {
@@ -269,7 +271,7 @@ NamespaceHandle Context::newNamespace(Word name, std::optional<NamespaceHandle> 
 }
 
 std::optional<ProgramHandle> Context::containingProgram(parse::TokenHandle tok) {
-    auto it = std::partition_point(programStorage.begin(), programStorage.end(), [tok] (ProgramUnion& prog) {
+    auto it = std::partition_point(programStorage.begin(), programStorage.end(), [tok](ProgramUnion& prog) {
         return prog.get().tokenRangeBegin <= tok;
     });
     if (it == programStorage.begin())

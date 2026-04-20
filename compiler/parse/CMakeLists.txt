@@ -11,6 +11,7 @@ target_sources(compiler
     parse_gen.cpp
     parse_gen.h
     recovery.cpp
+    TokenBuffer.cpp
     TokenBuffer.h
     Token.cpp
     Token.h

@@ -228,6 +228,11 @@ constexpr auto wordInIdRange(const char (&s)[N], size_t firstValidId, size_t fir
     return detail::ConstEntry<N>(s, firstValidId, firstInvalidId);
 }
 
+template<int_t N>
+constexpr auto wordWithId(const char (&s)[N], size_t id) {
+    return detail::ConstEntry<N>(s, id, id + 1);
+}
+
 template<typename... Ts>
 struct ConstWordStringTable {
 private:

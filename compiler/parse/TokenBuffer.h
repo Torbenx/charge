@@ -3,7 +3,6 @@
 #include <PageBumpAllocator.h>
 #include <parse/IdentifierTable.h>
 #include <parse/Token.h>
-#include <parse/parse_gen.h>
 
 #include <utility>
 #include <vector>
@@ -48,13 +47,10 @@ struct TokenBuffer {
     PageBumpAllocator<TokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
-    IdentifierTable wordTable { words };
+    IdentifierTable wordTable;
     std::vector<Word> callArguments;
     std::string_view source;
-    TokenBuffer(std::string_view source)
-        : source(source) {
-        reset();
-    }
+    TokenBuffer(std::string_view source);
 
     void reset() {
         tokens.clear();
@@ -89,15 +85,7 @@ struct TokenBuffer {
         return lines[loc.lineIndex()].begin + loc.offsetInLine();
     }
 
-    std::string_view tokenSpelling(TokenInfo info) const {
-        LexerToken lexToken = lexerToken(info.kind());
-        // TODO: Support literals
-        if (lexToken == LexerToken::Identifier) {
-            return wordTable.view(info.data1<DataKind::Word>());
-        } else {
-            return fixedSpelling(lexToken);
-        }
-    }
+    std::string_view tokenSpelling(TokenInfo info) const;
 
     std::string_view whitespaceSpelling(WhitespaceInfo info) const {
         return std::string_view(sourcePointer(info.location()), info.length);
@@ -108,35 +96,14 @@ struct TokenBuffer {
     }
 
     //! Finds the last token starts at or before \p location
-    std::optional<TokenHandle> findPrecedingToken(SourceLocation location) const {
-        auto nextTokenIt = std::upper_bound(tokens.begin(), tokens.end(), location);
-        if (nextTokenIt == tokens.begin())
-            return std::nullopt;
-        auto it = std::prev(nextTokenIt);
-        VERIFY(it->location() <= location);
-        return toHandle(it);
-    }
+    std::optional<TokenHandle> findPrecedingToken(SourceLocation location) const;
 
     //! Finds the tokens containing \p location
     /*!
     There may be 0, 1 or 2 tokens containing a given location.
     Annotation tokens (with 0 length) are never included.
     */
-    std::vector<TokenHandle> findContainingTokens(SourceLocation location) const {
-        auto nextIt = std::upper_bound(tokens.begin(), tokens.end(), location);
-        std::vector<TokenHandle> result;
-        for (; nextIt != tokens.begin() && *std::prev(nextIt) <= location; --nextIt) {
-            auto it = std::prev(nextIt);
-            if (it->lineIndex() != location.lineIndex())
-                continue;
-            int_t length = tokenSpelling(*it).length();
-            if (length == 0)
-                continue;
-            if ((int_t)it->offsetInLine() + length >= (int_t)location.offsetInLine())
-                result.push_back(toHandle(it));
-        }
-        return result;
-    }
+    std::vector<TokenHandle> findContainingTokens(SourceLocation location) const;
 };
 
 template<typename Impl>

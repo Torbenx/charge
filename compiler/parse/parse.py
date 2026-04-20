@@ -1237,7 +1237,7 @@ generatedLines = []
 outputIndentation = 0
 lineNoIndent("#pragma once")
 lineNoIndent()
-lineNoIndent("#include <WordStringTable.h>")
+lineNoIndent("#include <parse/IdentifierTable.h>")
 lineNoIndent()
 line("namespace parse {")
 lineNoIndent()
@@ -1245,12 +1245,14 @@ lineNoIndent()
 line("inline constexpr ConstWordStringTable words {")
 with indent():
     for keyword in keywords:
-        line("wordInIdRange(\"" + keyword + "\", 0, 1),")
+        line("wordWithId(\"" + keyword + "\", KEYWORD_WORD_ID),")
     for identifier in specialIdentifiers:
-        line("wordInIdRange(\"" + identifier + "\", 1, 2),")
+        line("wordWithId(\"" + identifier + "\", SPECIAL_IDENTIFIER_WORD_ID),")
     for identifier in regularIdentifiers:
-        line("wordInIdRange(\"" + identifier + "\", 2, Word::MAX_ID + 1),")
+        line("wordInIdRange(\"" + identifier + "\", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),")
 line("};")
+line("inline constexpr Word unresolved_identifier = words[\"(unresolved_identifier)\"];")
+lineNoIndent()
 
 line("enum class LexerToken : uint8_t {")
 with indent():
@@ -1286,6 +1288,8 @@ writeTo(currentDir / "parse_gen.h", outputLines)
 # generate .cpp
 generatedLines = []
 outputIndentation = 0
+lineNoIndent("#include <parse/parse_gen.h>")
+lineNoIndent()
 lineNoIndent("#include <parse/TokenBuffer.h>")
 lineNoIndent()
 line("namespace parse {")

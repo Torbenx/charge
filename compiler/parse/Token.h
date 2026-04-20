@@ -1,7 +1,6 @@
 #pragma once
 
 #include <WordTable.h>
-#include <parse/parse_gen.h>
 #include <sema/Constant.h>
 #include <types.h>
 
@@ -9,9 +8,9 @@
 
 namespace parse {
 
-inline constexpr Word unresolved_identifier = words["(unresolved_identifier)"];
-
 // ---------------------------- TokenKind ---------------------------
+
+enum class LexerToken : uint8_t;
 
 enum class TokenKind : uint8_t {
 #define TOKEN(kind, lexToken, data1, data2) kind,

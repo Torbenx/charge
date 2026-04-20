@@ -1,3 +1,4 @@
+#include <parse/parse_gen.h>
 #include <sema/Context.h>
 #include <sema/Generator.h>
 #include <sema/errors.h>

@@ -1,6 +1,7 @@
 #include <server/SemaContext.h>
 
 #include <parse/api.h>
+#include <parse/parse_gen.h>
 #include <sema/Generator.h>
 #include <server/Server.h>
 
