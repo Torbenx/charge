@@ -190,6 +190,7 @@ DeclarationValue Context::pushNamespaceScope(Word name) {
     std::optional<DeclarationValue> maybeResult = scope->getDeclaration(name);
     if (maybeResult.has_value()) {
         VERIFY(maybeResult->kind() == DeclarationValueKind::Namespace);
+        pushScope((DeclarationValue)maybeResult.value(), getNamespace(maybeResult.value().nsHandle()));
         return maybeResult.value();
     }
     auto nsHandle = newNamespace(name, m_scopeStack.back().value.nsHandle());

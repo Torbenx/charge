@@ -104,6 +104,8 @@ struct TokenBuffer {
     Annotation tokens (with 0 length) are never included.
     */
     std::vector<TokenHandle> findContainingTokens(SourceLocation location) const;
+
+    SourceLocation findSourceLocation(const char* position) const;
 };
 
 template<typename Impl>

@@ -2,6 +2,9 @@
 
 #include <types.h>
 
+#include <utility>
+#include <algorithm>
+
 template<typename E, typename T>
 struct EnumTable {
     static constexpr size_t N = std::to_underlying(E::COUNT);

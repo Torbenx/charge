@@ -1,6 +1,6 @@
-#include <WordTable.h>
 #include <parse/Parser.h>
-#include <parse/parse_gen.h>
+#include <sema/Context.h>
+
 #include <utility>
 
 #ifdef __GNUC__
@@ -184,7 +184,7 @@ struct WordAndPosition {
     } while (isWordBulkCharacter(position[0]));
     auto hash = Word::finalizeHash(hashState);
     Word word = words.findWithHash(std::string_view(wordBegin, position), hash);
-    return { position, word.empty() ? words["T"] : word };
+    return { position, word.empty() ? generated_identifier : word };
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -293,7 +293,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 }
 
 static void endDeclaration(sema::Context& output) {
-    // println("endDeclaration {}", output.tokenBuffer.wordTable.view(output.currentScope()->name()));
+    // println("endDeclaration on line {}", output.tokenBuffer.lines.size());
     output.popScope(output.tokenBuffer.currentToken());
 }
 
@@ -863,8 +863,11 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = inState.declarationBegin;
     Word argumentName = inState.savedArgumentName;
+    int_t expectedParsedTokens = (int_t)inState.parsedTokens + tokenLimit;
 
     switch (continueState) {
+    case State::Start:
+        goto start$no_emit;
     case State::Expression:
         goto expression$no_emit;
     case State::AfterExpression:
@@ -984,6 +987,23 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     case State::Error:
         VERIFY_NOT_REACHED();
     }
+    // LinearState start
+start$no_emit:
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+    parseState = State::Start;
+    continueState = State::Start;
+    savedScopePosition = scopePosition;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    // pushScope ScopeKind::Invalid
+    scopePosition = pushScope(scopePosition, ScopeKind::Invalid);
+    // pushScope ScopeKind::Namespace
+    scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
+    // then namespace_declaration
+    goto namespace_declaration$as_then;
+
     // SwitchState expression
 expression$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
@@ -4676,6 +4696,22 @@ no_declaration$as_then:
         goto after_declaration$no_emit;
     }
     if (tokEnd[0] == '\0') {
+        // popScope ScopeKind::Namespace
+        {
+            auto result = popScope(scopePosition, ScopeKind::Namespace);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
+        // popScope ScopeKind::Invalid
+        {
+            auto result = popScope(scopePosition, ScopeKind::Invalid);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
         emitToken(TokenKind::EOS, tokBegin, 0, output);
         emitWhitespace(WhitespaceKind::EOS, tokBegin, tokEnd, output);
         goto exit;
@@ -5749,16 +5785,39 @@ after_declaration$as_then:
     goto error$as_then;
 
 
+    ReturnStatus returnStatus;
 pop_scope_failed:
-    println("Pop scope failed in state '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::ScopeError, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
+    returnStatus = ReturnStatus::ScopeError;
+    tokenLimit += 1; // Don't count the token that caused the error as parsed
+    goto return_stmt;
 error$as_then:
-    println("Reached error state after '{}' at \"{:.12}\"", nameString(parseState), tokBegin);
-    return { ReturnStatus::UnhandledCase, parseState, continueState, declarationBegin, argumentName, tokBegin, savedScopePosition, argumentPosition };
+    returnStatus = ReturnStatus::UnhandledCase;
+    tokenLimit += 1; // Don't count the token that caused the error as parsed
+    goto return_stmt;
 reached_token_limit:
-    return { ReturnStatus::Ready, parseState, parseState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
+    continueState = parseState;
+    savedScopePosition = scopePosition;
+    returnStatus = ReturnStatus::Ready;
+    goto return_stmt;
 exit:
-    return { ReturnStatus::EOS, parseState, continueState, declarationBegin, argumentName, tokBegin, scopePosition, argumentPosition };
+    continueState = parseState;
+    savedScopePosition = scopePosition;
+    returnStatus = ReturnStatus::EOS;
+    goto return_stmt;
+
+return_stmt:
+    int_t actualParsedTokens = expectedParsedTokens - tokenLimit; // tokenLimit holds how many tokens remain to the limit
+    return {
+        returnStatus,
+        parseState,
+        continueState,
+        (uint32_t)actualParsedTokens,
+        declarationBegin,
+        argumentName,
+        tokBegin,
+        savedScopePosition,
+        argumentPosition
+    };
 }
 
 ReturnStatus Parser::parse(sema::Context& output, int_t tokenLimit) {
@@ -5771,6 +5830,7 @@ ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
         m_state.status,
         m_state.state,
         m_state.continueState,
+        m_state.parsedTokens,
         TokenHandle(),
         Word(),
         m_state.sourcePosition,
@@ -5782,6 +5842,7 @@ ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
         outState.status,
         outState.state,
         outState.continueState,
+        outState.parsedTokens,
         outState.sourcePosition,
         outState.scopePosition
     };

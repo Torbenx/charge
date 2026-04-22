@@ -5,7 +5,7 @@
 namespace parse {
 
 TokenBuffer::TokenBuffer(std::string_view source)
-    : source(source), wordTable { words } {
+    : wordTable { words }, source(source) {
     reset();
 }
 
@@ -42,6 +42,13 @@ std::vector<TokenHandle> TokenBuffer::findContainingTokens(SourceLocation locati
             result.push_back(toHandle(it));
     }
     return result;
+}
+
+SourceLocation TokenBuffer::findSourceLocation(const char* position) const {
+    VERIFY(source.begin() <= position && position <= source.end());
+    auto it = std::ranges::upper_bound(lines, position, std::less(), [](const LineInfo& info) { return info.begin; });
+    VERIFY(it != lines.begin());
+    return SourceLocation(0, it - lines.begin() - 1, position - std::prev(it)->begin);
 }
 
 }

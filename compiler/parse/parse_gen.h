@@ -64,9 +64,9 @@ inline constexpr ConstWordStringTable words {
     wordInIdRange("type", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),
     wordInIdRange("unique_ref", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),
     wordInIdRange("value", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),
-    wordInIdRange("(unresolved_identifier)", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),
+    wordInIdRange("(generated_identifier)", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),
 };
-inline constexpr Word unresolved_identifier = words["(unresolved_identifier)"];
+inline constexpr Word generated_identifier = words["(generated_identifier)"];
 
 enum class LexerToken : uint8_t {
     LeftParen, // (
@@ -158,6 +158,7 @@ std::string_view nameString(LexerToken);
 std::string_view fixedSpelling(LexerToken);
 
 enum class State : uint8_t {
+    Start,
     Expression,
     AfterExpression,
     CommaAfterExpression,
@@ -220,6 +221,7 @@ enum class State : uint8_t {
 };
 std::string_view nameString(State);
 
+std::span<const State> thenStates(State);
 std::span<const LexerToken> possibleTokens(State);
 
 }

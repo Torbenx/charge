@@ -1,4 +1,9 @@
 
+LinearState start() then namespace_declaration
+    then
+        pushScope ScopeKind::Invalid
+        pushScope ScopeKind::Namespace
+
 # --- Expressions
 
 SwitchState expression() then error
@@ -579,6 +584,8 @@ LinearState no_declaration() then error
         popScope ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum
         next after_declaration
     end
+        popScope ScopeKind::Namespace
+        popScope ScopeKind::Invalid
 
 LinearState namespace_declaration() then templated_declaration
     keyword namespace

@@ -78,7 +78,7 @@ regularIdentifiers = [
     "type",
     "unique_ref",
     "value",
-    "(unresolved_identifier)",
+    "(generated_identifier)",
 ]
 
 punctuations = punctuationTokens + ["//", "/*"]
@@ -1120,6 +1120,7 @@ for state in states:
             state.origins.append(s)
         for c in s.cases:
             collectOrigins(state, c.instructions)
+findState("start").origins.append(NextInstruction("start"))
 
 
 def onlyUsedAsThen(state):
@@ -1251,7 +1252,7 @@ with indent():
     for identifier in regularIdentifiers:
         line("wordInIdRange(\"" + identifier + "\", FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1),")
 line("};")
-line("inline constexpr Word unresolved_identifier = words[\"(unresolved_identifier)\"];")
+line("inline constexpr Word generated_identifier = words[\"(generated_identifier)\"];")
 lineNoIndent()
 
 line("enum class LexerToken : uint8_t {")
@@ -1276,6 +1277,7 @@ with indent():
 line("};")
 line("std::string_view nameString(State);")
 lineNoIndent()
+line("std::span<const State> thenStates(State);")
 line("std::span<const LexerToken> possibleTokens(State);")
 lineNoIndent()
 line("}")
@@ -1363,8 +1365,36 @@ with indent():
     for state in nonErrorStates:
         line("case State::" + stateCppName(state.name) + ": {")
         with indent():
-            line("static constexpr std::array r = { LexerToken::" + (", LexerToken::".join(sorted(collectPossibleCases(state)))) + " };")
-            line("return r;")
+            caseNames = []
+            for case in state.cases:
+                if type(case) is ThenCase or type(case) is EndCase:
+                    continue
+                caseNames.append(case.cppName())
+            if caseNames:
+                line("static constexpr std::array r = { " + (", ".join(["LexerToken::" + c for c in caseNames])) + " };")
+                line("return r;")
+            else:
+                line("return {};")
+        line("}")
+    line("default:")
+    with indent():
+        line("VERIFY_NOT_REACHED();")
+    line("}")
+line("}")
+lineNoIndent()
+
+line("std::span<const State> thenStates(State state) {")
+with indent():
+    line("switch (state) {")
+    for state in states:
+        line("case State::" + stateCppName(state.name) + ": {")
+        with indent():
+            thenStates = sorted(collectPossibleThenStates(state))
+            if thenStates:
+                line("static constexpr std::array r = { " + (", ".join(["State::" + stateCppName(s) for s in thenStates])) + " };")
+                line("return r;")
+            else:
+                line("return {};")
         line("}")
     line("default:")
     with indent():

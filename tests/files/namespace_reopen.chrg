@@ -1,0 +1,18 @@
+namespace n: {
+    struct A: { }
+}
+namespace m: {
+    struct B: { }
+}
+namespace n: {
+    struct C: { }
+}
+
+// expect-value n::A
+static a = n::A;
+
+// expect-value m::B
+static b = m::B;
+
+// expect-value n::C
+static c = n::C;

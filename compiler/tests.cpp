@@ -1,6 +1,7 @@
 #include <WordStringTable.h>
 #include <log.h>
 
+#include <parse/Parser.h>
 #include <parse/api.h>
 #include <sema/Generator.h>
 
@@ -24,8 +25,8 @@
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string_view(argv[1]) == std::string_view("--server")) {
 #ifdef WIN32
-            _setmode(_fileno(stdin), _O_BINARY);
-            _setmode(_fileno(stdout), _O_BINARY);
+        _setmode(_fileno(stdin), _O_BINARY);
+        _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
         server::Server s;
@@ -374,12 +375,13 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     };
 
     static constexpr auto words = ConstWordStringTable(
-        "expect-token", "expect-source-position",
-        "line", "column", "expect-identifier",
+        "expect-token", "expect-source-position", "expect-recovery",
+        "line", "column", "skip", "expect-identifier",
         "expect-type", "expect-value", "expect-return-type", "expect-impl", "expect-error");
 
     WordStringTable wordTable { words };
     sema::Context context;
+    std::vector<parse::RecoveredError> recoveredErrors;
     CommandQueue commandQueue;
 
     TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
@@ -425,10 +427,9 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     }
 
     void runTest() {
-        parse::parseOrThrow(context);
-        VERIFY(context.m_scopeStack.size() == 1);
-
+        recoveredErrors = parse::parseAndRecover(context);
         visit(context.tokenBuffer);
+        EXPECT_TRUE(recoveredErrors.empty());
     }
 
     void handleComment(parse::WhitespaceInfo whitespace, std::string_view comment) {
@@ -495,6 +496,45 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
                         invalidKey(&command, &pair);
                 }
                 break;
+            case words["expect-recovery"].toUint(): {
+                const char* recoveryRangeBegin = context.tokenBuffer.whitespaceSpelling(whitespace).end();
+                parse::SimpleParser parser(recoveryRangeBegin);
+                const char* recoveryRangeEnd = parser.lexToken() == parse::LexerToken::EOS ? context.tokenBuffer.source.end() + 1 : parser.sourcePosition();
+                std::optional<std::vector<parse::RecoveredError>::iterator> errorIt;
+                for (auto it = recoveredErrors.begin(); it != recoveredErrors.end(); ++it) {
+                    if (recoveryRangeBegin <= it->errorState.sourcePosition && it->errorState.sourcePosition < recoveryRangeEnd) {
+                        EXPECT_FALSE(errorIt.has_value());
+                        errorIt = it;
+                    }
+                }
+                EXPECT_TRUE(errorIt.has_value());
+                if (errorIt.has_value()) {
+                    parse::RecoveredError error = std::move(*errorIt.value());
+                    recoveredErrors.erase(errorIt.value());
+
+                    EXPECT_TRUE(error.unanimousAndIsolated);
+                    int_t insertIndex = 0;
+                    bool seenSkipKey = false;
+                    for (const auto& pair : command.pairs) {
+                        if (pair.key.empty()) {
+                            ASSERT_LT(insertIndex, (int_t)error.recovery.insertTokens.size());
+                            parse::LexerToken insert = error.recovery.insertTokens[insertIndex++];
+                            if (insert == parse::LexerToken::Identifier)
+                                EXPECT_EQ("identifier", pair.value);
+                            else
+                                EXPECT_EQ(parse::fixedSpelling(insert), pair.value);
+                        } else if (pair.key == words["skip"]) {
+                            EXPECT_EQ(error.recovery.skipTokens, parseInteger(pair.value));
+                            seenSkipKey = true;
+                        } else
+                            invalidKey(&command, &pair);
+                    }
+                    EXPECT_EQ(insertIndex, (int_t)error.recovery.insertTokens.size());
+                    if (!seenSkipKey)
+                        EXPECT_EQ(error.recovery.skipTokens, 0);
+                }
+                break;
+            }
             }
             default:
                 commandQueue.push(std::move(command));
@@ -533,8 +573,8 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
             return;
         }
 
-        //println("-------------------------------");
-        //program->dump(context);
+        // println("-------------------------------");
+        // program->dump(context);
 
         if (semanticError.has_value()) {
             FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.tokenBuffer.wordTable.view(context.program(semanticError->prog)->name());

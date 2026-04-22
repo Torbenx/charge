@@ -1,10 +1,11 @@
+#include <EnumTable.h>
 #include <parse/Parser.h>
 #include <sema/Context.h>
-#include <EnumTable.h>
 
 #include <gtest/gtest.h>
 
 #include <list>
+#include <bitset>
 
 namespace parse {
 
@@ -27,8 +28,10 @@ struct RecoveryElement {
 static std::string_view exampleString(LexerToken tok) {
     std::string_view spelling = fixedSpelling(tok);
     if (spelling.empty()) {
-        VERIFY(tok == LexerToken::Identifier);
-        return "x";
+        if (tok == LexerToken::Identifier)
+            return "x";
+        else
+            VERIFY_NOT_REACHED();
     }
     return spelling;
 }
@@ -65,77 +68,62 @@ ReturnStatus Parser::apply(sema::Context& context, RecoveryElement e) {
             token.setLocation(loc);
             // Mark generated identifiers
             if (lexerToken(token.kind()) == LexerToken::Identifier)
-                token.setData1<DataKind::Word>(unresolved_identifier);
+                token.setData1<DataKind::Word>(generated_identifier);
         }
     }
     return status();
 }
 
-enum class SyntaxCategory : uint8_t {
-    Expression,
-    Statement,
-    ParameterList,
-    Declaration,
-};
+ReturnStatus SimpleParser::apply(SimpleOutput& output, const RecoveryInstructions& instructions) {
+    for (int_t i = 0; i < (int_t)instructions.skipTokens; i++) {
+        if (auto status = apply(output, RecoveryElement::skip1()); status != ReturnStatus::Ready)
+            return status;
+    }
+    for (auto insert : instructions.insertTokens) {
+        if (auto status = apply(output, RecoveryElement::insert(insert)); status != ReturnStatus::Ready)
+            return status;
+    }
+    return ReturnStatus::Ready;
+}
 
-static constexpr EnumTable<ScopeKind, SyntaxCategory> containingSyntax {
-    { ScopeKind::IfExpr, SyntaxCategory::Expression },
-    { ScopeKind::IfExprOrStmt, SyntaxCategory::Expression },
-    { ScopeKind::CompoundStmt, SyntaxCategory::Statement },
-    { ScopeKind::Paren, SyntaxCategory::Expression },
-    { ScopeKind::ParenInImplExpr, SyntaxCategory::Expression },
-    { ScopeKind::Square, SyntaxCategory::Expression },
-    { ScopeKind::Brace, SyntaxCategory::Expression },
-    { ScopeKind::BraceInImplExpr, SyntaxCategory::Expression },
-    { ScopeKind::LeftExpr, SyntaxCategory::Expression },
-    { ScopeKind::RightExpr, SyntaxCategory::Expression },
-    { ScopeKind::VariableType, SyntaxCategory::Expression },
-    { ScopeKind::IfBranch, SyntaxCategory::Statement },
-    { ScopeKind::ElseBranch, SyntaxCategory::Statement },
-    { ScopeKind::Parameter, SyntaxCategory::ParameterList },
-    { ScopeKind::Namespace, SyntaxCategory::Declaration },
-    { ScopeKind::FunctionBody, SyntaxCategory::Statement },
-    { ScopeKind::ReturnType, SyntaxCategory::Expression },
-    { ScopeKind::FunctionParameters, SyntaxCategory::ParameterList },
-    { ScopeKind::Struct, SyntaxCategory::Declaration },
-    { ScopeKind::Enum, SyntaxCategory::Declaration },
-    { ScopeKind::BaseTypeExpr, SyntaxCategory::Expression },
-    { ScopeKind::TemplateParameters, SyntaxCategory::ParameterList },
-    { ScopeKind::StructImplExpression, SyntaxCategory::Expression },
-    { ScopeKind::FunctionImplExpression, SyntaxCategory::Expression },
-    { ScopeKind::EnumImplExpression, SyntaxCategory::Expression },
-    { ScopeKind::GlobalImplExpression, SyntaxCategory::Expression },
-    { ScopeKind::GenericCategoryExpression, SyntaxCategory::Expression },
-};
+ReturnStatus Parser::apply(sema::Context& output, const RecoveryInstructions& instructions) {
+    for (int_t i = 0; i < (int_t)instructions.skipTokens; i++) {
+        if (auto status = apply(output, RecoveryElement::skip1()); status != ReturnStatus::Ready)
+            return status;
+    }
+    for (auto insert : instructions.insertTokens) {
+        if (auto status = apply(output, RecoveryElement::insert(insert)); status != ReturnStatus::Ready)
+            return status;
+    }
+    return ReturnStatus::Ready;
+}
 
 static std::vector<RecoveryElement> generateCases(SimpleParser& parser) {
-    if (parser.status() == ReturnStatus::EOS) {
-        if (parser.checkFinalState())
-            return {};
-        else
-            return { RecoveryElement::insert(LexerToken::RightBrace) };
-    }
-
-    State state = parser.state();
-    ScopeKind scope = parser.scopes().back();
-    SyntaxCategory syntax = containingSyntax(scope);
-    LexerToken token = parser.lexToken();
-    if (token == LexerToken::EOS)
+    if (parser.status() == ReturnStatus::EOS)
         return {};
-    std::vector<RecoveryElement> cases;
-    std::vector<LexerToken> skipped;
-    cases.push_back(RecoveryElement::skip1());
 
-    auto addInsert = [&cases](LexerToken token) { cases.push_back(RecoveryElement::insert(token)); };
-    auto addInserts = [&cases](std::span<const LexerToken> tokens) {
-        for (LexerToken tok : tokens)
+    std::vector<RecoveryElement> cases;
+    if (parser.lexToken() != LexerToken::EOS)
+        cases.push_back(RecoveryElement::skip1());
+
+    std::bitset<std::to_underlying(LexerToken::EOS)> consideredInserts;
+    auto addInserts = [&cases, &consideredInserts](std::span<const LexerToken> tokens) {
+        for (LexerToken tok : tokens) {
+            if (consideredInserts.test(std::to_underlying(tok)))
+                continue;
+            consideredInserts.set(std::to_underlying(tok));
             cases.push_back(RecoveryElement::insert(tok));
+        }
     };
 
-    switch (syntax) {
-    case SyntaxCategory::Expression: {
-        if (state == State::AfterExpression || state == State::AfterImplExpression || state == State::MaybeDesignatedArgument) {
-            // after expression ->
+    std::vector<State> statesToConsider = { parser.state() };
+    do {
+        State state = statesToConsider.back();
+        statesToConsider.pop_back();
+        auto thens = thenStates(state);
+        statesToConsider.insert(statesToConsider.end(), thens.begin(), thens.end());
+
+        if (state == State::AfterExpression) {
             static constexpr std::array continuations = {
                 LexerToken::RightParen,
                 LexerToken::RightSquare,
@@ -147,35 +135,22 @@ static std::vector<RecoveryElement> generateCases(SimpleParser& parser) {
                 LexerToken::Greater // For generic category expressions and stand in as a binary operator
             };
             addInserts(continuations);
-        } else if (state == State::MemberAccess || state == State::StaticAccess) {
-            // failed access -> insert an identifier
-            addInsert(LexerToken::Identifier);
-        } else {
-            // at expression -> insert a primary expression
-            addInsert(LexerToken::Identifier);
+        } else if (state == State::Expression) {
+            static constexpr std::array continuations = {
+                LexerToken::Identifier
+            };
+            addInserts(continuations);
+        } else if (state != State::Error) {
+            addInserts(possibleTokens(state));
         }
-        break;
-    }
-    case SyntaxCategory::Statement:
-        // These scopes can never be at the top-most one when an error occours.
-        break;
-    case SyntaxCategory::ParameterList: {
-        VERIFY(scope == ScopeKind::Parameter); // The other scopes can never be at the top when an error occours.
-        addInserts(possibleTokens(state));
-        break;
-    }
-    case SyntaxCategory::Declaration: {
-        addInserts(possibleTokens(state));
-        break;
-    }
-    default:
-        VERIFY_NOT_REACHED();
-    }
+    } while (!statesToConsider.empty());
 
     return cases;
 }
 
 struct RecoveryState {
+    static constexpr uint32_t MAX_BAD_DEPTH = 10;
+
     struct ErrorNode;
 
     struct RecoveryCase : RecoveryElement {
@@ -185,18 +160,27 @@ struct RecoveryState {
     // An error node is considered 'bad' when there exists a node with greater advance that
     // requires fewer modifications. All the 'good' nodes are stored in a vector ordered by total
     // advance. The 'bad depth' is number of consecutive error nodes that are bad. Nodes at a bad
-    // depth greater than maxBadDepth are pruned.
+    // depth greater than MAX_BAD_DEPTH are pruned.
     struct ErrorNode {
-        uint32_t totalAdvancedTokens() const { return totalSkippedTokens + totalParsedTokens - totalInsertedTokens; }
+        uint32_t totalAdvancedTokens() const { return state.parsedTokens + totalSkippedTokens - totalInsertedTokens; }
         uint32_t modificationCost() const { return totalSkippedTokens * 2 + totalInsertedTokens * 3; }
 
         std::optional<ErrorNode*> parent;
         uint32_t totalSkippedTokens = 0;
-        uint32_t totalParsedTokens = 0;
         uint32_t totalInsertedTokens = 0;
         uint32_t badDepth = 0;
-        SimpleParser::SavedState state;
+        SavedParserState state;
         std::vector<RecoveryCase> cases;
+    };
+
+    struct ReturnElement {
+        uint32_t totalAdvancedTokens() const { return state.parsedTokens + totalSkippedTokens - totalInsertedTokens; }
+        uint32_t parsedSourceTokens() const { return state.parsedTokens - totalInsertedTokens; }
+
+        uint32_t totalSkippedTokens = 0;
+        uint32_t totalInsertedTokens = 0;
+        SavedParserState state;
+        RecoveryElement recovery;
     };
 
     struct ErrorInfo {
@@ -267,40 +251,43 @@ struct RecoveryState {
     }
 
     void grind(SimpleParser& parser) {
+        SimpleOutput output;
         while (!queue.empty()) {
             ErrorNode& parent = *queue.front();
             queue.pop_front();
-            if (parent.badDepth >= 2)
+            if (parent.badDepth >= MAX_BAD_DEPTH)
                 continue;
             for (auto& c : parent.cases) {
                 parser.restore(parent.state);
-                SimpleOutput output;
+                output.reset();
 
-                if (parser.apply(output, c) != ReturnStatus::Ready)
+                // if (c.isInsert())
+                //     println("Inserting '{}' at \"{}\"", exampleString(c.insert()), parent.state.sourcePosition);
+                // else
+                //     println("Skipping 1 at \"{}\"", parent.state.sourcePosition);
+                if (parser.apply(output, c) != ReturnStatus::Ready) {
+                    // if (c.isInsert())
+                    //     println("Inserting '{}' failed: {}", exampleString(c.insert()), formatInternalErrorMessage({ parser.save(), parser.lexToken() }));
                     continue;
+                }
                 parser.parse(output);
 
+                // if (parser.error())
+                //     println("{}", formatInternalErrorMessage({ parser.save(), parser.lexToken() }));
                 c.nextError = std::make_unique<ErrorNode>(ErrorNode {
                     .parent = &parent,
                     .totalSkippedTokens = (uint32_t)(parent.totalSkippedTokens + c.skips()),
-                    .totalParsedTokens = (uint32_t)(parent.totalParsedTokens + output.tokenBuffer.tokens.size()),
                     .totalInsertedTokens = (uint32_t)(parent.totalInsertedTokens + c.inserts()),
                     .state = parser.save(),
                     .cases = generateCases(parser) });
                 insertError(*c.nextError);
-                checkInvariances();
                 queue.push_back(&*c.nextError);
             }
         }
     }
 
-    std::vector<RecoveryElement> recoveryPath() const {
-        VERIFY(!goodErrors.empty());
-        return recoveryPath(*goodErrors.front().node);
-    }
-
-    std::vector<RecoveryElement> recoveryPath(ErrorNode& inNode) const {
-        std::vector<RecoveryElement> result;
+    std::vector<ReturnElement> recoveryPath(ErrorNode& inNode) const {
+        std::vector<ReturnElement> result;
         ErrorNode* node = &inNode;
         while (node->parent.has_value()) {
             ErrorNode& parent = *node->parent;
@@ -308,26 +295,32 @@ struct RecoveryState {
                 return c.nextError.get() == node;
             });
             VERIFY(it != parent.cases.end());
-            result.push_back(*it);
+            result.push_back(ReturnElement {
+                .totalSkippedTokens = parent.totalSkippedTokens,
+                .totalInsertedTokens = parent.totalInsertedTokens,
+                .state = parent.state,
+                .recovery = *it });
             node = &parent;
         }
         std::ranges::reverse(result);
         return result;
     }
 
-    static std::vector<RecoveryElement> recover(SimpleParser& parser) {
+    static std::vector<std::vector<ReturnElement>> recover(SimpleParser& parser) {
         auto error = std::make_unique<ErrorNode>(ErrorNode {
             .parent = std::nullopt,
-            .totalSkippedTokens = 0,
-            .totalParsedTokens = 0,
             .state = parser.save(),
             .cases = generateCases(parser) });
         RecoveryState state { .rootError = std::move(error) };
         state.goodErrors.push_back(*state.rootError);
         state.queue.push_back(&*state.rootError);
         state.grind(parser);
-        parser.restore(state.rootError->state);
-        return state.recoveryPath();
+
+        std::vector<std::vector<ReturnElement>> result;
+        for (auto it = state.goodErrors.begin(); it != state.goodErrors.end() && it->node->cases.empty(); ++it) {
+            result.emplace_back(state.recoveryPath(*it->node));
+        }
+        return result;
     }
 
     void checkNodeInvariances(ErrorNode& node) {
@@ -354,13 +347,119 @@ struct RecoveryState {
     std::unique_ptr<ErrorNode> rootError = nullptr;
 };
 
-TEST(Parse, LexEOF) {
-    std::string_view source = "a\nstatic +";
-    Parser parser(source.data());
-    EXPECT_EQ(parser.lexToken(), LexerToken::Identifier);
-    EXPECT_EQ(parser.lexToken(), LexerToken::Static);
-    EXPECT_EQ(parser.lexToken(), LexerToken::Plus);
-    EXPECT_EQ(parser.lexToken(), LexerToken::EOS);
+struct RecoveryGroup {
+    RecoveryInstructions recovery;
+    uint32_t sourceTokenPosition;
+    bool unanimousAndIsolated = false;
+    SavedParserState firstErrorState;
+
+    bool operator==(const RecoveryGroup& other) const {
+        return sourceTokenPosition == other.sourceTokenPosition
+            && recovery == other.recovery;
+    }
+};
+
+std::vector<RecoveryGroup> buildGroups(std::span<RecoveryState::ReturnElement> in) {
+    std::vector<RecoveryGroup> result;
+    uint32_t parsedSourceTokens = 0;
+    for (auto& element : in) {
+        if (result.empty() || element.parsedSourceTokens() != parsedSourceTokens) {
+            result.push_back({ .recovery = {},
+                .sourceTokenPosition = element.totalAdvancedTokens(),
+                .firstErrorState = std::move(element.state) });
+            parsedSourceTokens = element.parsedSourceTokens();
+        }
+
+        // Note: Application of inserts and skips commutes
+        if (element.recovery.isInsert())
+            result.back().recovery.insertTokens.push_back(element.recovery.insert());
+        else
+            result.back().recovery.skipTokens += 1;
+    }
+    return result;
+}
+
+std::vector<RecoveredError> recoverAndAnalyze(const SavedParserState& rootErrorState) {
+    SimpleParser parser;
+    parser.restore(rootErrorState);
+    auto ungroupedPaths = RecoveryState::recover(parser);
+    VERIFY(!ungroupedPaths.empty());
+    std::vector<std::vector<RecoveryGroup>> paths;
+    for (auto& path : ungroupedPaths)
+        paths.emplace_back(buildGroups(path));
+
+    using It = std::vector<RecoveryGroup>::iterator;
+    std::vector<It> errorIts;
+    for (auto& path : paths)
+        errorIts.push_back(path.begin());
+
+    // Find all the unanimous, isolated error
+    for (;;) {
+        if (errorIts.front() == paths.front().end())
+            break;
+        const RecoveryGroup& group = *errorIts.front();
+        bool allEqual = true;
+        bool anyAtEnd = false;
+        for (int_t pathId = 1; pathId < (int_t)paths.size(); pathId++) {
+            if (errorIts[pathId] == paths[pathId].end()) {
+                anyAtEnd = true;
+                break;
+            }
+            if (*errorIts[pathId] != group) {
+                allEqual = false;
+                break;
+            }
+        }
+        if (anyAtEnd)
+            break;
+        if (!allEqual) {
+            // Advance the min element
+            auto minIt = std::ranges::min_element(errorIts, std::less(), [](It it) { return it->sourceTokenPosition; });
+            VERIFY(minIt != errorIts.end());
+            *minIt += 1;
+            continue;
+        }
+
+        int_t maxPrevPos = std::numeric_limits<int_t>::lowest();
+        int_t minNextPos = std::numeric_limits<int_t>::max();
+        for (int_t pathId = 0; pathId < (int_t)paths.size(); pathId++) {
+            const auto& path = paths[pathId];
+            auto it = errorIts[pathId];
+            if (it > path.begin())
+                maxPrevPos = std::max<int_t>(maxPrevPos, std::prev(it)->sourceTokenPosition);
+            if (it < std::prev(path.end()))
+                minNextPos = std::min<int_t>(minNextPos, std::next(it)->sourceTokenPosition);
+        }
+        VERIFY(maxPrevPos < (int_t)group.sourceTokenPosition);
+        VERIFY(minNextPos > (int_t)group.sourceTokenPosition);
+        static constexpr int_t ISOLATION_REQUIREMENT = 3;
+        bool isIsolated = (int_t)group.sourceTokenPosition - ISOLATION_REQUIREMENT >= maxPrevPos
+            && (int_t)group.sourceTokenPosition + ISOLATION_REQUIREMENT <= minNextPos;
+
+        for (auto& it : errorIts) {
+            if (isIsolated)
+                it->unanimousAndIsolated = true;
+            it += 1;
+        }
+    }
+
+    // TODO: Implement some kind of deterministic tie break. Maybe based on custering?
+    auto minPathIt = std::ranges::min_element(paths, std::less(),
+        [](const std::vector<RecoveryGroup>& path) { return path.size(); });
+    auto& path = *minPathIt;
+    std::vector<RecoveredError> result;
+    for (RecoveryGroup& elem : path) {
+        parser.restore(elem.firstErrorState);
+        LexerToken token = parser.lexToken();
+        result.push_back(RecoveredError {
+            Error {
+                .errorState = std::move(elem.firstErrorState),
+                .errorToken = token },
+            elem.recovery,
+            elem.unanimousAndIsolated,
+        });
+    }
+    return result;
 }
 
 TEST(Parse, RecoveryBasic) {
@@ -368,10 +467,12 @@ TEST(Parse, RecoveryBasic) {
     SimpleParser parser(source.data());
     SimpleOutput output;
     parser.parse(output);
-    EXPECT_FALSE(parser.checkFinalState());
-    auto result = RecoveryState::recover(parser);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
     ASSERT_EQ(result.size(), 1);
-    EXPECT_EQ(result.front(), RecoveryElement::skip1());
+    EXPECT_EQ(result.front().recovery, RecoveryElement::skip1());
 }
 
 TEST(Parse, RecoveryBasic2) {
@@ -379,10 +480,12 @@ TEST(Parse, RecoveryBasic2) {
     SimpleParser parser(source.data());
     SimpleOutput output;
     parser.parse(output);
-    EXPECT_FALSE(parser.checkFinalState());
-    auto result = RecoveryState::recover(parser);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
     ASSERT_EQ(result.size(), 1);
-    EXPECT_EQ(result.front(), RecoveryElement::insert(LexerToken::Identifier));
+    EXPECT_EQ(result.front().recovery, RecoveryElement::insert(LexerToken::Identifier));
 }
 
 TEST(Parse, RecoveryBasic12) {
@@ -390,11 +493,55 @@ TEST(Parse, RecoveryBasic12) {
     SimpleParser parser(source.data());
     SimpleOutput output;
     parser.parse(output);
-    EXPECT_FALSE(parser.checkFinalState());
-    auto result = RecoveryState::recover(parser);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
     ASSERT_EQ(result.size(), 2);
-    EXPECT_EQ(result[0], RecoveryElement::skip1());
-    EXPECT_EQ(result[1], RecoveryElement::insert(LexerToken::Identifier));
+    EXPECT_EQ(result[0].recovery, RecoveryElement::skip1());
+    EXPECT_EQ(result[1].recovery, RecoveryElement::insert(LexerToken::Identifier));
+}
+
+TEST(Parse, RecoveryUnterminatedScope) {
+    std::string_view source = "namespace n: { ";
+    SimpleParser parser(source.data());
+    SimpleOutput output;
+    parser.parse(output);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result.front().recovery, RecoveryElement::insert(LexerToken::RightBrace));
+}
+
+TEST(Parse, RecoveryEOSinExpr) {
+    std::string_view source = "fn f(): { (a + ";
+    SimpleParser parser(source.data());
+    SimpleOutput output;
+    parser.parse(output);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
+    ASSERT_EQ(result.size(), 4);
+    EXPECT_EQ(result[0].recovery, RecoveryElement::insert(LexerToken::Identifier));
+    EXPECT_EQ(result[1].recovery, RecoveryElement::insert(LexerToken::RightParen));
+    EXPECT_EQ(result[2].recovery, RecoveryElement::insert(LexerToken::SemiColon));
+    EXPECT_EQ(result[3].recovery, RecoveryElement::insert(LexerToken::RightBrace));
+}
+
+TEST(Parse, RecoveryAfterImpl) {
+    std::string_view source = "fn impl (a, b): { }";
+    SimpleParser parser(source.data());
+    SimpleOutput output;
+    parser.parse(output);
+    EXPECT_FALSE(parser.done());
+    auto results = RecoveryState::recover(parser);
+    ASSERT_EQ(results.size(), 1);
+    auto& result = results.front();
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result.front().recovery, RecoveryElement::insert(LexerToken::Identifier));
 }
 
 }

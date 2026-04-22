@@ -234,11 +234,11 @@ void Server::dispatchMessage(const MethodInfo& method, std::string messageData, 
     }
     try {
         method.dispatchFunc(*method.methodImpl, *this, handle, message.params.value_or(json::RawDataView()));
-    } catch (...) {
+    } catch (const std::exception& ex) {
         if (message.id.has_value()) {
             lsp::ResponseMessage response;
             response.id.value = message.id;
-            response.error = lsp::ResponseError { .code = lsp::ErrorCode::InternalError, .message = "" };
+            response.error = lsp::ResponseError { .code = lsp::ErrorCode::InternalError, .message = ex.what() };
             std::string responseFmt = json::format(response);
             writeMessage(responseFmt);
         }
@@ -410,7 +410,7 @@ void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> i
     info.context = std::make_unique<SemaContext>(imports, info.sourceData);
     auto& context = *info.context;
     context.errorHandler = &semaErrorHandler;
-    parse::parseOrThrow(context);
+    parse::parseAndRecover(context);
     context.signatureCheckAll();
     auto scratchProg = context.newProgram(sema::ProgramKind::Struct, Word(), parse::TokenHandle(), context.globalNamespace(), SourceLocation());
     VERIFY(scratchProgram(context) == scratchProg);

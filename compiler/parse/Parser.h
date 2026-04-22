@@ -1,8 +1,13 @@
 #pragma once
 
+#include <parse/TokenBuffer.h>
 #include <parse/api.h>
 #include <parse/parse_gen.h>
-#include <sema/Context.h>
+
+
+namespace sema {
+struct Context;
+}
 
 namespace parse {
 
@@ -69,17 +74,13 @@ struct SimpleTokenBuffer {
     std::vector<SimpleTokenInfo> tokens;
 
     TokenHandle currentToken() const { return { (uint32_t)tokens.size() }; }
+    void reset() { tokens.clear(); }
 };
 
 struct SimpleOutput {
     SimpleTokenBuffer tokenBuffer;
-};
 
-enum class ReturnStatus : uint8_t {
-    Ready,
-    EOS,
-    UnhandledCase,
-    ScopeError,
+    void reset() { tokenBuffer.reset(); }
 };
 
 struct SimpleParser;
@@ -88,9 +89,13 @@ struct Parser {
     Parser(const char* sourcePosition);
 
     ReturnStatus status() const { return m_state.status; }
-    bool checkFinalState() const;
+    bool done() const { return status() == ReturnStatus::EOS; }
+    bool error() const {
+        return status() == ReturnStatus::UnhandledCase || status() == ReturnStatus::ScopeError;
+    }
 
     State state() const { return m_state.state; }
+    int_t parsedTokens() const { return m_state.parsedTokens; }
 
     const char* sourcePosition() const { return m_state.sourcePosition; }
     SourceLocation location(sema::Context&) const;
@@ -103,12 +108,14 @@ struct Parser {
     LexerToken lexToken();
     ReturnStatus parse(sema::Context&, int_t tokenLimit = -1);
     ReturnStatus apply(sema::Context&, RecoveryElement);
+    ReturnStatus apply(sema::Context&, const RecoveryInstructions&);
 
 private:
     struct InternalState {
-        ReturnStatus status = ReturnStatus::UnhandledCase;
-        State state = State::Error;
-        State continueState = State::Error;
+        ReturnStatus status = ReturnStatus::Ready;
+        State state = State::Start;
+        State continueState = State::Start;
+        uint32_t parsedTokens = 0;
         TokenHandle declarationBegin = {};
         Word savedArgumentName = {};
         const char* sourcePosition = nullptr;
@@ -127,21 +134,17 @@ private:
 };
 
 struct SimpleParser {
-    struct SavedState {
-        ReturnStatus status = ReturnStatus::UnhandledCase;
-        State state = State::Error;
-        State continueState = State::Error;
-        const char* sourcePosition = nullptr;
-        std::vector<ScopeKind> scopeBuffer;
-    };
-
     SimpleParser();
     SimpleParser(const char* sourcePosition);
 
     ReturnStatus status() const { return m_state.status; }
-    bool checkFinalState() const;
+    bool done() const { return status() == ReturnStatus::EOS; }
+    bool error() const {
+        return status() == ReturnStatus::UnhandledCase || status() == ReturnStatus::ScopeError;
+    }
 
     State state() const { return m_state.state; }
+    int_t parsedTokens() const { return m_state.parsedTokens; }
 
     const char* sourcePosition() const { return m_state.sourcePosition; }
     void setSourcePosition(const char* pos) { m_state.sourcePosition = pos; }
@@ -157,16 +160,19 @@ struct SimpleParser {
     LexerToken lexToken();
     ReturnStatus parse(SimpleOutput&, int_t tokenLimit = -1);
     ReturnStatus apply(SimpleOutput&, RecoveryElement);
+    ReturnStatus apply(SimpleOutput&, const RecoveryInstructions&);
 
-    SavedState save() const;
-    void restore(const SavedState&);
+    SavedParserState save() const;
+    void restore(const SavedParserState&);
+    static SavedParserState saveStateOf(const Parser&);
     void copyState(const Parser&);
 
 private:
     struct InternalState {
-        ReturnStatus status = ReturnStatus::UnhandledCase;
-        State state = State::Error;
-        State continueState = State::Error;
+        ReturnStatus status = ReturnStatus::Ready;
+        State state = State::Start;
+        State continueState = State::Start;
+        uint32_t parsedTokens = 0;
         const char* sourcePosition = nullptr;
         ScopeKind* scopePosition = nullptr;
     };

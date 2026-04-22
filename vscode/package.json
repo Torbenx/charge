@@ -1,6 +1,6 @@
 {
-  "name": "charge-lang",
-  "displayName": "Charge Lang",
+  "name": "charge-language",
+  "displayName": "Charge Language",
   "description": "Charge Language Extension",
   "version": "0.0.1",
   "engines": {

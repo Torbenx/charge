@@ -73,6 +73,7 @@ struct Context {
             currentProgram()->tokenRangeEnd = endLocation;
         }
         m_scopeStack.pop_back();
+        VERIFY(!m_scopeStack.empty());
     }
     void pushScope(DeclarationValue value, Scope* scope) { m_scopeStack.push_back({ value, scope }); }
     void pushEmptyScope(DeclarationValue value) { m_scopeStack.push_back({ value, std::nullopt }); }
