@@ -709,10 +709,6 @@ def emitToken(tokenKindExpr, tokenData = "0"):
 def emitCarriedToken():
     emitToken("carriedEmitTokenKind", "carriedEmitTokenData")
 
-def rememberContinueState(state):
-    line("continueState = State::" + stateCppName(state.name) + ";")
-    line("savedScopePosition = scopePosition;")
-
 def rememberState(state):
     if generateStateDebug:
         line("println(\"" + state.name + ": {}\", *tokEnd);")
@@ -1027,15 +1023,13 @@ def generateInstructions(case, instructions, thenHandler):
             else:
                 emitToken(inst.tokenKindExpr, dataExpr)
         elif type(inst) is UpdateKindInstruction:
-            if generateLexTokenChecks:
-                line("checkTokenUpdate(output.tokenBuffer.tokens.back().kind(), " + inst.tokenKindExpr + ");")
-            line("output.tokenBuffer.tokens.back().setKind(" + inst.tokenKindExpr + ");")
+            line("setBackKind(output, " + inst.tokenKindExpr + ");")
         elif type(inst) is DiscardLastTokenInstruction:
             line("discardLastToken(output);")
         elif type(inst) is UpdateDataInstruction:
-            line("setData1(output.tokenBuffer.tokens.back(), packData1(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
+            line("setBackData1(output, " + inst.tokenDataExpr + ");")
         elif type(inst) is UpdateSecondaryDataInstruction:
-            line("setData2(output.tokenBuffer.tokens.back(), packData2(output.tokenBuffer.tokens.back().kind(), " + inst.tokenDataExpr + "));")
+            line("setBackData2(output, " + inst.tokenDataExpr + ");")
         elif type(inst) is NextInstruction:
             newState = findState(inst.newState)
             if generateSingleStep:
@@ -1128,19 +1122,11 @@ def onlyUsedAsThen(state):
         return False
     return True
 
-def hasNonTrivialThenUses(state):
-    if [o for o in state.origins if (type(o) is State and o.thenCase() is not None) or type(o) is ThenInstruction]:
-        return True
-    return False
-
-def onlyUsedAsTrivialThen(state):
-    return onlyUsedAsThen(state) and not hasNonTrivialThenUses(state)
-
-line("switch (continueState) {")
+line("switch (parseState) {")
 for state in states:
     line("case State::" + stateCppName(state.name) + ":")
     with indent():
-        if onlyUsedAsTrivialThen(state) or state.name == "error":
+        if onlyUsedAsThen(state) or state.name == "error":
             line("VERIFY_NOT_REACHED();")
         else:
             line("goto " + state.name + "$no_emit;")
@@ -1156,7 +1142,7 @@ for state in nonErrorStates:
     if withEmitLabelUsed:
         labelLine(state.name + "$with_emit:")
         emitCarriedToken()
-    noEmitLabelUsed = not onlyUsedAsTrivialThen(state)
+    noEmitLabelUsed = not onlyUsedAsThen(state)
     if noEmitLabelUsed:
         labelLine(state.name + "$no_emit:")
     if noEmitLabelUsed or withEmitLabelUsed:
@@ -1166,16 +1152,12 @@ for state in nonErrorStates:
         else:
             inlineTokenAdvancer()
         rememberState(state)
-        if not hasNonTrivialThenUses(state):
-            rememberContinueState(state)
         line("if (tokenLimit == 0)")
         with indent():
             line("goto reached_token_limit;")
         line("tokenLimit -= 1;")
     if [o for o in state.origins if not type(o) is NextInstruction]:
         labelLine(state.name + "$as_then:")
-    if hasNonTrivialThenUses(state):
-        rememberContinueState(state)
 
     generateState(state)
 

@@ -41,9 +41,6 @@ static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
     auto expected = lexerToken(semToken);
     VERIFY(expected == LexerToken::Invalid || lexToken == expected);
 }
-static void checkTokenUpdate(TokenKind oldKind, TokenKind newKind) {
-    VERIFY(lexerToken(oldKind) == lexerToken(newKind));
-}
 
 static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -55,15 +52,27 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$' || c == '#';
 }
 
-static void setData1(TokenInfo& token, uint32_t data1Bits) {
-    token.data1Bits = data1Bits;
+static void setBackData1(sema::Context& context, auto data) {
+    context.tokenBuffer.tokens.back().data1Bits = packData1(context.tokenBuffer.tokens.back().kind(), data);
 }
-static void setData2(TokenInfo& token, uint32_t data2Bits) {
-    token.data2Bits = data2Bits;
+static void setBackData2(sema::Context& context, auto data) {
+    context.tokenBuffer.tokens.back().data2Bits = packData2(context.tokenBuffer.tokens.back().kind(), data);
+}
+static void setBackKind(sema::Context& context, TokenKind newKind) {
+    VERIFY(lexerToken(context.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
+    context.tokenBuffer.tokens.back().setKind(newKind);
 }
 
-static void setData1(SimpleTokenInfo&, uint32_t) { }
-static void setData2(SimpleTokenInfo&, uint32_t) { }
+static void setBackData1(SimpleOutput&, auto) { }
+static void setBackData2(SimpleOutput&, auto) { }
+static void setBackKind(SimpleOutput& output, TokenKind newKind) {
+    VERIFY(lexerToken(output.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
+    output.tokenBuffer.tokens.back().setKind(newKind);
+}
+
+static void setBackData1(const NoOutput&, auto) { }
+static void setBackData2(const NoOutput&, auto) { }
+static void setBackKind(const NoOutput&, TokenKind) { }
 
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
     // println("pushScope {}", nameString(kind));
@@ -109,10 +118,11 @@ NO_INLINE static Word* endCall(Word* position, sema::Context& output) {
 }
 
 static Word* addCallArgument(Word* ptr, Word, SimpleOutput&) { return ptr; }
-
 static void updateCallArgument(Word*, Word, SimpleOutput&) { }
-
 static Word* endCall(Word* ptr, SimpleOutput&) { return ptr; }
+static Word* addCallArgument(Word* ptr, Word, const NoOutput&) { return ptr; }
+static void updateCallArgument(Word*, Word, const NoOutput&) { }
+static Word* endCall(Word* ptr, const NoOutput&) { return ptr; }
 
 static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
     return {
@@ -126,7 +136,7 @@ NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data
     output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), data });
 }
 
-NO_INLINE static void discardLastToken(sema::Context& output) {
+static void discardLastToken(sema::Context& output) {
     output.tokenBuffer.tokens.pop_back();
 }
 
@@ -134,10 +144,13 @@ NO_INLINE static void emitToken(TokenKind kind, const char*, uint32_t, SimpleOut
     output.tokenBuffer.tokens.push_back(kind);
 }
 
-NO_INLINE static void discardLastToken(SimpleOutput& output) {
+static void discardLastToken(SimpleOutput& output) {
     if (!output.tokenBuffer.tokens.empty())
         output.tokenBuffer.tokens.pop_back();
 }
+
+static void emitToken(TokenKind, const char*, uint32_t, const NoOutput&) { }
+static void discardLastToken(const NoOutput&) {}
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, sema::Context& output) {
     uint32_t tokenIndex = output.tokenBuffer.tokens.size();
@@ -154,11 +167,13 @@ NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char*, Sim
     output.tokenBuffer.tokens.push_back(kind);
     return ptr;
 }
+static Word* emitCallToken(Word* ptr, TokenKind, const char*, const NoOutput&) { return ptr; }
 
 NO_INLINE static void markLineBegin(const char* position, sema::Context& output) {
     output.tokenBuffer.lines.push_back({ position });
 }
 static void markLineBegin(const char*, SimpleOutput&) { }
+static void markLineBegin(const char*, const NoOutput&) { }
 
 struct WordAndPosition {
     const char* position;
@@ -175,7 +190,7 @@ struct WordAndPosition {
     Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
-[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, SimpleOutput&) {
+[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, const NoOutput&) {
     const char* wordBegin = position;
     Word::HashState hashState;
     do {
@@ -185,6 +200,9 @@ struct WordAndPosition {
     auto hash = Word::finalizeHash(hashState);
     Word word = words.findWithHash(std::string_view(wordBegin, position), hash);
     return { position, word.empty() ? generated_identifier : word };
+}
+[[nodiscard]] static WordAndPosition readWord(const char* position, SimpleOutput&) {
+    return readWord(position, NoOutput());
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -221,6 +239,7 @@ NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, con
     output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
 static void emitWhitespace(WhitespaceKind, const char*, const char*, SimpleOutput&) { }
+static void emitWhitespace(WhitespaceKind, const char*, const char*, const NoOutput&) { }
 
 template<typename ParseOutput>
 [[nodiscard]] NO_INLINE static const char* inlineAdvancer(const char* tokEnd, ParseOutput& output) {
@@ -306,19 +325,27 @@ template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word, const char*, TokenHandle, SimpleOutput&) {
     return sema::INVALID_DECLARATION_VALUE;
 }
-
 template<DeclarationKind kind>
 static sema::DeclarationValue commitImplDeclaration(const char*, TokenHandle, SimpleOutput&) {
     return sema::INVALID_DECLARATION_VALUE;
 }
 
+template<DeclarationKind kind>
+static sema::DeclarationValue commitDeclaration(Word, const char*, TokenHandle, const NoOutput&) {
+    return sema::INVALID_DECLARATION_VALUE;
+}
+template<DeclarationKind kind>
+static sema::DeclarationValue commitImplDeclaration(const char*, TokenHandle, const NoOutput&) {
+    return sema::INVALID_DECLARATION_VALUE;
+}
+
 static void endDeclaration(SimpleOutput&) { }
-
-using GlobalKind = sema::GlobalKind;
 static void setGlobalKind(SimpleOutput&, GlobalKind) { }
+static void endDeclaration(const NoOutput&) { }
+static void setGlobalKind(const NoOutput&, GlobalKind) { }
 
-template<typename ParseOutput>
-LexerToken lexImpl(char const*& tokEnd, ParseOutput& output) {
+LexerToken lexToken(char const*& tokEnd) {
+    NoOutput output;
     const char* tokBegin = tokEnd;
     Word this_identifier;
 
@@ -331,11 +358,9 @@ error$as_then:
 template<typename ParseOutput>
 Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
-    State continueState = inState.continueState;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;
     ScopeKind* scopePosition = inState.scopePosition;
-    ScopeKind* savedScopePosition = inState.scopePosition;
     Word* argumentPosition = inState.argumentPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
@@ -357,13 +382,9 @@ error$as_then:
     tokenLimit += 1; // Don't count the token that caused the error as parsed
     goto return_stmt;
 reached_token_limit:
-    continueState = parseState;
-    savedScopePosition = scopePosition;
     returnStatus = ReturnStatus::Ready;
     goto return_stmt;
 exit:
-    continueState = parseState;
-    savedScopePosition = scopePosition;
     returnStatus = ReturnStatus::EOS;
     goto return_stmt;
 
@@ -372,12 +393,11 @@ return_stmt:
     return {
         returnStatus,
         parseState,
-        continueState,
         (uint32_t)actualParsedTokens,
         declarationBegin,
         argumentName,
         tokBegin,
-        savedScopePosition,
+        scopePosition,
         argumentPosition
     };
 }
@@ -391,7 +411,6 @@ ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
     Parser::InternalState inState = {
         m_state.status,
         m_state.state,
-        m_state.continueState,
         m_state.parsedTokens,
         TokenHandle(),
         Word(),
@@ -403,7 +422,6 @@ ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
     m_state = {
         outState.status,
         outState.state,
-        outState.continueState,
         outState.parsedTokens,
         outState.sourcePosition,
         outState.scopePosition
@@ -411,14 +429,26 @@ ReturnStatus SimpleParser::parse(SimpleOutput& output, int_t tokenLimit) {
     return status();
 }
 
-LexerToken Parser::lexToken() {
-    SimpleOutput output;
-    return lexImpl(m_state.sourcePosition, output);
-}
-
-LexerToken SimpleParser::lexToken() {
-    SimpleOutput output;
-    return lexImpl(m_state.sourcePosition, output);
+ReturnStatus SimpleParser::parse(const NoOutput& output, int_t tokenLimit) {
+    Parser::InternalState inState = {
+        m_state.status,
+        m_state.state,
+        m_state.parsedTokens,
+        TokenHandle(),
+        Word(),
+        m_state.sourcePosition,
+        m_state.scopePosition,
+        nullptr
+    };
+    auto outState = Parser::parseImpl(inState, output, tokenLimit);
+    m_state = {
+        outState.status,
+        outState.state,
+        outState.parsedTokens,
+        outState.sourcePosition,
+        outState.scopePosition
+    };
+    return status();
 }
 
 SourceLocation Parser::location(sema::Context& context) const {

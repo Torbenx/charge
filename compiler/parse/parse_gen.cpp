@@ -354,8 +354,10 @@ std::string_view nameString(State state) {
         return "Expression";
     case State::AfterExpression:
         return "AfterExpression";
-    case State::CommaAfterExpression:
-        return "CommaAfterExpression";
+    case State::CommaAfterExpressionInArguments:
+        return "CommaAfterExpressionInArguments";
+    case State::CommaAfterExpressionInParameters:
+        return "CommaAfterExpressionInParameters";
     case State::CommaElse:
         return "CommaElse";
     case State::Argument:
@@ -486,8 +488,12 @@ std::span<const LexerToken> possibleTokens(State state) {
         static constexpr std::array r = { LexerToken::PlusPlus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::Minus, LexerToken::Star, LexerToken::Amp, LexerToken::Hat, LexerToken::Vert, LexerToken::Slash, LexerToken::Percent, LexerToken::LessLess, LexerToken::GreaterGreater, LexerToken::AmpAmp, LexerToken::VertVert, LexerToken::ExclaimEqual, LexerToken::EqualEqual, LexerToken::Less, LexerToken::LessEqual, LexerToken::Greater, LexerToken::GreaterEqual, LexerToken::PlusEqual, LexerToken::MinusEqual, LexerToken::StarEqual, LexerToken::AmpEqual, LexerToken::HatEqual, LexerToken::VertEqual, LexerToken::SlashEqual, LexerToken::PercentEqual, LexerToken::LessLessEqual, LexerToken::GreaterGreaterEqual, LexerToken::AmpAmpEqual, LexerToken::VertVertEqual, LexerToken::Point, LexerToken::ColonColon, LexerToken::LeftParen, LexerToken::LeftSquare, LexerToken::LeftBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::RightBrace, LexerToken::Comma, LexerToken::SemiColon, LexerToken::EqualGreater, LexerToken::Colon, LexerToken::Equal };
         return r;
     }
-    case State::CommaAfterExpression: {
+    case State::CommaAfterExpressionInArguments: {
         static constexpr std::array r = { LexerToken::Else, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::RightBrace };
+        return r;
+    }
+    case State::CommaAfterExpressionInParameters: {
+        static constexpr std::array r = { LexerToken::RightParen };
         return r;
     }
     case State::CommaElse: {
@@ -724,8 +730,12 @@ std::span<const State> thenStates(State state) {
         static constexpr std::array r = { State::Error };
         return r;
     }
-    case State::CommaAfterExpression: {
-        static constexpr std::array r = { State::Argument, State::CheckDesignatedArgument, State::Error, State::Expression, State::Parameter };
+    case State::CommaAfterExpressionInArguments: {
+        static constexpr std::array r = { State::Argument, State::CheckDesignatedArgument, State::Error, State::Expression };
+        return r;
+    }
+    case State::CommaAfterExpressionInParameters: {
+        static constexpr std::array r = { State::Error, State::Parameter };
         return r;
     }
     case State::CommaElse: {

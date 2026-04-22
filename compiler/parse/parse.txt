@@ -1,7 +1,7 @@
 
 LinearState start() then namespace_declaration
     then
-        pushScope ScopeKind::Invalid
+        pushScope ScopeKind::Start
         pushScope ScopeKind::Namespace
 
 # --- Expressions
@@ -223,7 +223,19 @@ SwitchState after_expression() then error
         next after_expression
 
     punctuation ,
-        next comma_after_expression
+        ifScope ScopeKind::VariableType
+            popScope ScopeKind::VariableType
+            popScope ScopeKind::Parameter
+            pushScope ScopeKind::Parameter
+            emitToken TokenKind::ExpressionStmt
+            next comma_after_expression_in_parameters
+        ifScope ScopeKind::RightExpr
+            popScope ScopeKind::RightExpr
+            popScope ScopeKind::Parameter
+            pushScope ScopeKind::Parameter
+            emitToken TokenKind::ExpressionStmt
+            next comma_after_expression_in_parameters
+        next comma_after_expression_in_arguments
 
     punctuation ;
         ifScope ScopeKind::BaseTypeExpr
@@ -258,7 +270,7 @@ SwitchState after_expression() then error
         emitToken TokenKind::AssignStmt
         next expression
 
-LinearState comma_after_expression() then error
+LinearState comma_after_expression_in_arguments() then argument
     keyword else
         next comma_else
 
@@ -283,23 +295,10 @@ LinearState comma_after_expression() then error
         emitToken TokenKind::EmptyNode
         next after_expression
 
-    then
-        ifScope ScopeKind::Parameter
-            then parameter
-        ifScope ScopeKind::VariableType
-            popScope ScopeKind::VariableType
-            popScope ScopeKind::Parameter
-            pushScope ScopeKind::Parameter
-            emitToken TokenKind::ExpressionStmt
-            then parameter
-        ifScope ScopeKind::RightExpr
-            popScope ScopeKind::RightExpr
-            popScope ScopeKind::Parameter
-            pushScope ScopeKind::Parameter
-            emitToken TokenKind::ExpressionStmt
-            then parameter
-        ifScope ScopeKind::Paren, ScopeKind::Square, ScopeKind::Brace, ScopeKind::BraceInImplExpr
-            then argument
+LinearState comma_after_expression_in_parameters() then parameter
+    punctuation )
+        popScope ScopeKind::Parameter
+        next after_parameters
 
 LinearState comma_else() then error
     punctuation =>
@@ -585,7 +584,7 @@ LinearState no_declaration() then error
         next after_declaration
     end
         popScope ScopeKind::Namespace
-        popScope ScopeKind::Invalid
+        popScope ScopeKind::Start
 
 LinearState namespace_declaration() then templated_declaration
     keyword namespace

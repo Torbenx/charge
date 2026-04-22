@@ -83,6 +83,18 @@ struct SimpleOutput {
     void reset() { tokenBuffer.reset(); }
 };
 
+struct NoTokenBuffer {
+    TokenHandle currentToken() const { return {}; }
+    void reset() { }
+};
+struct NoOutput {
+    NoTokenBuffer tokenBuffer;
+
+    void reset() { tokenBuffer.reset(); }
+};
+
+LexerToken lexToken(const char*&);
+
 struct SimpleParser;
 
 struct Parser {
@@ -105,7 +117,7 @@ struct Parser {
         return { scopeBuffer.buffer, m_state.scopePosition + 1 };
     }
 
-    LexerToken lexToken();
+    LexerToken skipToken() { return lexToken(m_state.sourcePosition); }
     ReturnStatus parse(sema::Context&, int_t tokenLimit = -1);
     ReturnStatus apply(sema::Context&, RecoveryElement);
     ReturnStatus apply(sema::Context&, const RecoveryInstructions&);
@@ -114,7 +126,6 @@ private:
     struct InternalState {
         ReturnStatus status = ReturnStatus::Ready;
         State state = State::Start;
-        State continueState = State::Start;
         uint32_t parsedTokens = 0;
         TokenHandle declarationBegin = {};
         Word savedArgumentName = {};
@@ -157,10 +168,13 @@ struct SimpleParser {
     void pushScope(ScopeKind);
     ScopeKind popScope();
 
-    LexerToken lexToken();
+    LexerToken skipToken() { return lexToken(m_state.sourcePosition); }
     ReturnStatus parse(SimpleOutput&, int_t tokenLimit = -1);
     ReturnStatus apply(SimpleOutput&, RecoveryElement);
     ReturnStatus apply(SimpleOutput&, const RecoveryInstructions&);
+    ReturnStatus parse(const NoOutput&, int_t tokenLimit = -1);
+    ReturnStatus apply(const NoOutput&, RecoveryElement);
+    ReturnStatus apply(const NoOutput&, const RecoveryInstructions&);
 
     SavedParserState save() const;
     void restore(const SavedParserState&);
@@ -171,7 +185,6 @@ private:
     struct InternalState {
         ReturnStatus status = ReturnStatus::Ready;
         State state = State::Start;
-        State continueState = State::Start;
         uint32_t parsedTokens = 0;
         const char* sourcePosition = nullptr;
         ScopeKind* scopePosition = nullptr;

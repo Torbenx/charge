@@ -23,7 +23,6 @@ enum class ReturnStatus : uint8_t {
 struct SavedParserState {
     ReturnStatus status;
     State state;
-    State continueState;
     uint32_t parsedTokens = 0;
     const char* sourcePosition = nullptr;
     std::vector<ScopeKind> scopeBuffer;
@@ -32,6 +31,9 @@ struct SavedParserState {
 };
 
 struct Error {
+    static Error make(SavedParserState preErrorState);
+
+    SavedParserState preErrorState;
     SavedParserState errorState;
     LexerToken errorToken;
 };

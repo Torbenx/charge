@@ -13,8 +13,16 @@ fn p3(a /* expect-recovery skip=1 */ b): { }
 
 fn f1 /* expect-recovery ( */ a, b): { }
 fn f2(a, b) /* expect-recovery : */ { }
+fn f3 /* expect-recovery ( ) */: { }
 
-fn impl /* expect-recovery identifer */ (a, b): { }
+struct s0: {
+    /* expect-recovery identifier */ : type.foo;
+    base /* expect-recovery identifier */;
+}
+
+enum e0: {
+    /* expect-recovery identifier */ = (expr);
+}
 
 namespace n: /* expect-recovery { */ }
 template(p) static var split_between_cases1 = bar;

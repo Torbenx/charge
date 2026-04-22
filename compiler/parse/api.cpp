@@ -1,54 +1,10 @@
 #include <parse/api.h>
 
 #include <parse/Parser.h>
+#include <parse/Token.h>
 #include <sema/Context.h>
 
 namespace parse {
-
-static Error makeError(SavedParserState state) {
-    SimpleParser parser;
-    parser.restore(state);
-    LexerToken token = parser.lexToken();
-    return { std::move(state), token };
-}
-
-std::optional<Error> tryParse(sema::Context& context) {
-    VERIFY(context.tokenBuffer.tokens.empty());
-    Parser parser(context.tokenBuffer.source.data());
-    parser.parse(context);
-    if (parser.done())
-        return std::nullopt;
-    else
-        return makeError(SimpleParser::saveStateOf(parser));
-}
-
-void parseOrThrow(sema::Context& context) {
-    auto errorOpt = tryParse(context);
-    if (errorOpt.has_value()) {
-        std::string message = formatInternalErrorMessage(errorOpt.value(), context);
-        throw ParseException(std::move(errorOpt.value()), std::move(message));
-    }
-}
-
-std::vector<RecoveredError> recoverAndAnalyze(const SavedParserState& rootErrorState);
-
-std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
-    VERIFY(context.tokenBuffer.tokens.empty());
-    Parser parser(context.tokenBuffer.source.data());
-    parser.parse(context);
-    if (parser.done())
-        return {};
-
-    auto path = recoverAndAnalyze(SimpleParser::saveStateOf(parser));
-    for (const auto& element : path) {
-        VERIFY(SimpleParser::saveStateOf(parser) == element.errorState);
-        VERIFY(parser.apply(context, element.recovery) == ReturnStatus::Ready);
-        parser.parse(context);
-    }
-    VERIFY(parser.done());
-    VERIFY(context.m_scopeStack.size() == 1);
-    return path;
-}
 
 static std::string findSourceExcerpt(const char* begin) {
     const char* position = begin;
@@ -85,11 +41,67 @@ static std::string detailedMessage(const Error& error) {
     case ReturnStatus::ScopeError:
         return fmt::format("Invalid scope '{}' while handling token '{}' in state '{}'",
             nameString(error.errorState.scopeBuffer.back()),
-            tokenDesc, nameString(error.errorState.continueState));
+            tokenDesc, nameString(error.errorState.state));
         break;
     default:
         VERIFY_NOT_REACHED();
     }
+}
+
+Error Error::make(SavedParserState preErrorState) {
+    const char* pos = preErrorState.sourcePosition;
+    LexerToken errorToken = lexToken(pos);
+    SimpleParser parser;
+    parser.restore(preErrorState);
+    parser.parse(NoOutput(), 1);
+    VERIFY(parser.error());
+    return {
+        .preErrorState = std::move(preErrorState),
+        .errorState = parser.save(),
+        .errorToken = errorToken
+    };
+}
+
+std::optional<Error> tryParse(sema::Context& context) {
+    VERIFY(context.tokenBuffer.tokens.empty());
+    Parser parser(context.tokenBuffer.source.data());
+    parser.parse(context);
+    if (parser.done())
+        return std::nullopt;
+    else
+        return Error::make(SimpleParser::saveStateOf(parser));
+}
+
+void parseOrThrow(sema::Context& context) {
+    auto errorOpt = tryParse(context);
+    if (errorOpt.has_value()) {
+        std::string message = formatInternalErrorMessage(errorOpt.value(), context);
+        throw ParseException(std::move(errorOpt.value()), std::move(message));
+    }
+}
+
+std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState);
+
+std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
+    VERIFY(context.tokenBuffer.tokens.empty());
+    std::vector<RecoveredError> errors;
+    {
+        SimpleParser parser(context.tokenBuffer.source.data());
+        parser.parse(NoOutput());
+        if (!parser.done())
+            errors = recoverAndAnalyze(context.tokenBuffer.source, parser.save());
+    }
+
+    Parser parser(context.tokenBuffer.source.data());
+    for (const auto& element : errors) {
+        parser.parse(context, (int_t)element.preErrorState.parsedTokens - parser.parsedTokens());
+        VERIFY(SimpleParser::saveStateOf(parser) == element.preErrorState);
+        VERIFY(parser.apply(context, element.recovery) == ReturnStatus::Ready);
+    }
+    parser.parse(context);
+    VERIFY(parser.done());
+    VERIFY(context.m_scopeStack.size() == 1);
+    return errors;
 }
 
 std::string formatInternalErrorMessage(const Error& error, sema::Context& context) {

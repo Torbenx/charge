@@ -499,7 +499,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
             case words["expect-recovery"].toUint(): {
                 const char* recoveryRangeBegin = context.tokenBuffer.whitespaceSpelling(whitespace).end();
                 parse::SimpleParser parser(recoveryRangeBegin);
-                const char* recoveryRangeEnd = parser.lexToken() == parse::LexerToken::EOS ? context.tokenBuffer.source.end() + 1 : parser.sourcePosition();
+                const char* recoveryRangeEnd = parser.skipToken() == parse::LexerToken::EOS ? context.tokenBuffer.source.end() + 1 : parser.sourcePosition();
                 std::optional<std::vector<parse::RecoveredError>::iterator> errorIt;
                 for (auto it = recoveredErrors.begin(); it != recoveredErrors.end(); ++it) {
                     if (recoveryRangeBegin <= it->errorState.sourcePosition && it->errorState.sourcePosition < recoveryRangeEnd) {
