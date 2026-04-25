@@ -115,6 +115,10 @@ std::optional<SourceLocation> SemaUtil::declarationLocation(const DeclarationInf
         info);
 }
 
+void SemaContext::parseAndRecover() {
+    m_parseErrors = parse::parseAndRecover(*this);
+}
+
 void SemaContext::signatureCheckAll() {
     for (auto handle : programsInModule(thisModule()))
         Generator::signatureCheck(*this, handle);

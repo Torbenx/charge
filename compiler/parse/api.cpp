@@ -48,15 +48,15 @@ static std::string detailedMessage(const Error& error) {
     }
 }
 
-Error Error::make(SavedParserState preErrorState) {
-    const char* pos = preErrorState.sourcePosition;
-    LexerToken errorToken = lexToken(pos);
+Error Error::make(SavedParserState preRecoveryState) {
     SimpleParser parser;
-    parser.restore(preErrorState);
-    parser.parse(NoOutput(), 1);
+    parser.restore(preRecoveryState);
+    parser.parse(NoOutput(), 2);
     VERIFY(parser.error());
+    const char* pos = parser.sourcePosition();
+    LexerToken errorToken = lexToken(pos);
     return {
-        .preErrorState = std::move(preErrorState),
+        .preRecoveryState = std::move(preRecoveryState),
         .errorState = parser.save(),
         .errorToken = errorToken
     };
@@ -94,8 +94,8 @@ std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
 
     Parser parser(context.tokenBuffer.source.data());
     for (const auto& element : errors) {
-        parser.parse(context, (int_t)element.preErrorState.parsedTokens - parser.parsedTokens());
-        VERIFY(SimpleParser::saveStateOf(parser) == element.preErrorState);
+        parser.parse(context, (int_t)element.preRecoveryState.parsedTokens - parser.parsedTokens());
+        VERIFY(SimpleParser::saveStateOf(parser) == element.preRecoveryState);
         VERIFY(parser.apply(context, element.recovery) == ReturnStatus::Ready);
     }
     parser.parse(context);

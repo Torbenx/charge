@@ -344,8 +344,8 @@ static void setGlobalKind(SimpleOutput&, GlobalKind) { }
 static void endDeclaration(const NoOutput&) { }
 static void setGlobalKind(const NoOutput&, GlobalKind) { }
 
-LexerToken lexToken(char const*& tokEnd) {
-    NoOutput output;
+template<typename ParseOutput>
+LexerToken lexImpl(char const*& tokEnd, ParseOutput& output) {
     const char* tokBegin = tokEnd;
     Word this_identifier;
 
@@ -375,10 +375,12 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     ReturnStatus returnStatus;
 pop_scope_failed:
     returnStatus = ReturnStatus::ScopeError;
+    tokEnd = tokBegin;
     tokenLimit += 1; // Don't count the token that caused the error as parsed
     goto return_stmt;
 error$as_then:
     returnStatus = ReturnStatus::UnhandledCase;
+    tokEnd = tokBegin;
     tokenLimit += 1; // Don't count the token that caused the error as parsed
     goto return_stmt;
 reached_token_limit:
@@ -396,7 +398,7 @@ return_stmt:
         (uint32_t)actualParsedTokens,
         declarationBegin,
         argumentName,
-        tokBegin,
+        tokEnd,
         scopePosition,
         argumentPosition
     };
@@ -449,6 +451,40 @@ ReturnStatus SimpleParser::parse(const NoOutput& output, int_t tokenLimit) {
         outState.scopePosition
     };
     return status();
+}
+
+LexerToken lexToken(const char*& position) {
+    NoOutput output;
+    return lexImpl(position, output);
+}
+
+LexerToken Parser::skipToken(sema::Context& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+LexerToken SimpleParser::skipToken(SimpleOutput& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+LexerToken SimpleParser::skipToken(const NoOutput& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+const char* advanceToToken(const char* position) {
+    NoOutput output;
+    return inlineAdvancer(position, output);
+}
+
+void Parser::advanceToToken(sema::Context& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
+}
+
+void SimpleParser::advanceToToken(SimpleOutput& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
+}
+
+void SimpleParser::advanceToToken(const NoOutput& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
 }
 
 SourceLocation Parser::location(sema::Context& context) const {

@@ -429,7 +429,9 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     void runTest() {
         recoveredErrors = parse::parseAndRecover(context);
         visit(context.tokenBuffer);
-        EXPECT_TRUE(recoveredErrors.empty());
+        for (const auto& error : recoveredErrors) {
+            ADD_FAILURE() << "Unhandled parse error: " << parse::formatInternalErrorMessage(error, context);
+        }
     }
 
     void handleComment(parse::WhitespaceInfo whitespace, std::string_view comment) {
@@ -498,11 +500,13 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
                 break;
             case words["expect-recovery"].toUint(): {
                 const char* recoveryRangeBegin = context.tokenBuffer.whitespaceSpelling(whitespace).end();
-                parse::SimpleParser parser(recoveryRangeBegin);
-                const char* recoveryRangeEnd = parser.skipToken() == parse::LexerToken::EOS ? context.tokenBuffer.source.end() + 1 : parser.sourcePosition();
+                const char* recoveryRangeEnd = recoveryRangeBegin;
+                if (parse::lexToken(recoveryRangeEnd) == parse::LexerToken::EOS)
+                    recoveryRangeEnd = context.tokenBuffer.source.end() + 1;
                 std::optional<std::vector<parse::RecoveredError>::iterator> errorIt;
                 for (auto it = recoveredErrors.begin(); it != recoveredErrors.end(); ++it) {
-                    if (recoveryRangeBegin <= it->errorState.sourcePosition && it->errorState.sourcePosition < recoveryRangeEnd) {
+                    const char* errorPos = parse::advanceToToken(it->preRecoveryState.sourcePosition);
+                    if (recoveryRangeBegin <= errorPos && errorPos < recoveryRangeEnd) {
                         EXPECT_FALSE(errorIt.has_value());
                         errorIt = it;
                     }

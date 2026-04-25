@@ -344,19 +344,19 @@ static void setGlobalKind(SimpleOutput&, GlobalKind) { }
 static void endDeclaration(const NoOutput&) { }
 static void setGlobalKind(const NoOutput&, GlobalKind) { }
 
-LexerToken lexToken(char const*& tokEnd) {
-    NoOutput output;
+template<typename ParseOutput>
+LexerToken lexImpl(char const*& tokEnd, ParseOutput& output) {
     const char* tokBegin = tokEnd;
     Word this_identifier;
 
-lex$no_emit:
+lex$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
         markLineBegin(tokEnd, output);
-        goto lex$no_emit;
+        goto lex$retry;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
@@ -365,7 +365,7 @@ lex$no_emit:
             tokEnd += 1;
         }
         markLineBegin(tokEnd, output);
-        goto lex$no_emit;
+        goto lex$retry;
     }
     case '!': {
         char next = tokEnd[1];
@@ -486,13 +486,13 @@ lex$no_emit:
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
-            goto lex$no_emit;
+            goto lex$retry;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
-            goto lex$no_emit;
+            goto lex$retry;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -1016,12 +1016,12 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     }
     // LinearState start
 start$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::Start;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // pushScope ScopeKind::Start
     scopePosition = pushScope(scopePosition, ScopeKind::Start);
     // pushScope ScopeKind::Namespace
@@ -1033,18 +1033,19 @@ start$no_emit:
 expression$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 expression$no_emit:
-    tokEnd = skipWhitespace(tokEnd);
-    tokBegin = tokEnd;
     parseState = State::Expression;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+expression$retry:
+    tokEnd = skipWhitespace(tokEnd);
+    tokBegin = tokEnd;
 expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
         markLineBegin(tokEnd, output);
-        goto expression$no_emit;
+        goto expression$retry;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
@@ -1053,7 +1054,7 @@ expression$as_then:
             tokEnd += 1;
         }
         markLineBegin(tokEnd, output);
-        goto expression$no_emit;
+        goto expression$retry;
     }
     case '!': {
         char next = tokEnd[1];
@@ -1204,13 +1205,13 @@ expression$as_then:
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
-            goto expression$no_emit;
+            goto expression$retry;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
-            goto expression$no_emit;
+            goto expression$retry;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -1491,18 +1492,19 @@ LABEL_MAYBE_UNUSED expression$identifier_case:
 after_expression$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_expression$no_emit:
-    tokEnd = skipWhitespace(tokEnd);
-    tokBegin = tokEnd;
     parseState = State::AfterExpression;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+after_expression$retry:
+    tokEnd = skipWhitespace(tokEnd);
+    tokBegin = tokEnd;
 after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
         markLineBegin(tokEnd, output);
-        goto after_expression$no_emit;
+        goto after_expression$retry;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
@@ -1511,7 +1513,7 @@ after_expression$as_then:
             tokEnd += 1;
         }
         markLineBegin(tokEnd, output);
-        goto after_expression$no_emit;
+        goto after_expression$retry;
     }
     case '!': {
         char next = tokEnd[1];
@@ -1889,13 +1891,13 @@ after_expression$as_then:
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
-            goto after_expression$no_emit;
+            goto after_expression$retry;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
-            goto after_expression$no_emit;
+            goto after_expression$retry;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -2439,12 +2441,12 @@ LABEL_MAYBE_UNUSED after_expression$identifier_case:
 
     // LinearState comma_after_expression_in_arguments
 comma_after_expression_in_arguments$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::CommaAfterExpressionInArguments;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Paren
@@ -2562,12 +2564,12 @@ comma_after_expression_in_arguments$no_emit:
 comma_after_expression_in_parameters$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 comma_after_expression_in_parameters$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::CommaAfterExpressionInParameters;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Parameter
@@ -2586,12 +2588,12 @@ comma_after_expression_in_parameters$no_emit:
 
     // LinearState comma_else
 comma_else$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::CommaElse;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
         // emitToken TokenKind::CommaElseExpr
@@ -2606,12 +2608,12 @@ comma_else$no_emit:
 
     // LinearState argument
 argument$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::Argument;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 argument$as_then:
     // callArgument
     argumentPosition = addCallArgument(argumentPosition, Word(), output);
@@ -2652,12 +2654,12 @@ check_designated_argument$as_then:
 maybe_designated_argument$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 maybe_designated_argument$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::MaybeDesignatedArgument;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -2675,12 +2677,12 @@ maybe_designated_argument$no_emit:
 
     // LinearState first_argument_paren
 first_argument_paren$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::FirstArgumentParen;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // endCall
@@ -2699,12 +2701,12 @@ first_argument_paren$no_emit:
 
     // LinearState first_argument_square
 first_argument_square$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::FirstArgumentSquare;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "]"sv) {
         tokEnd += 1;
         // endCall
@@ -2723,12 +2725,12 @@ first_argument_square$no_emit:
 
     // LinearState first_argument_brace
 first_argument_brace$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::FirstArgumentBrace;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
         // endCall
@@ -2749,12 +2751,12 @@ first_argument_brace$no_emit:
 member_access$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 member_access$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::MemberAccess;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -2780,12 +2782,12 @@ member_access$no_emit:
 
     // LinearState static_access
 static_access$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::StaticAccess;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -2813,12 +2815,12 @@ static_access$no_emit:
 single_or_compound_statement$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 single_or_compound_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::SingleOrCompoundStatement;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // then statement
     goto statement$as_then;
 
@@ -2826,12 +2828,12 @@ single_or_compound_statement$no_emit:
 after_statement$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterStatement;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3056,18 +3058,19 @@ after_statement$no_emit:
 statement$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 statement$no_emit:
-    tokEnd = skipWhitespace(tokEnd);
-    tokBegin = tokEnd;
     parseState = State::Statement;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+statement$retry:
+    tokEnd = skipWhitespace(tokEnd);
+    tokBegin = tokEnd;
 statement$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
         markLineBegin(tokEnd, output);
-        goto statement$no_emit;
+        goto statement$retry;
     }
     case '\r': {
         if (tokEnd[1] == '\n') {
@@ -3076,7 +3079,7 @@ statement$as_then:
             tokEnd += 1;
         }
         markLineBegin(tokEnd, output);
-        goto statement$no_emit;
+        goto statement$retry;
     }
     case '!': {
         char next = tokEnd[1];
@@ -3290,13 +3293,13 @@ statement$as_then:
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
-            goto statement$no_emit;
+            goto statement$retry;
         }
         if (next == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
-            goto statement$no_emit;
+            goto statement$retry;
         }
         if (next == '=') {
             tokEnd += 2;
@@ -3731,12 +3734,12 @@ LABEL_MAYBE_UNUSED statement$identifier_case:
 
     // LinearState let_statement
 let_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::LetStatement;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3762,12 +3765,12 @@ let_statement$no_emit:
 
     // LinearState var_statement
 var_statement$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::VarStatement;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -3795,12 +3798,12 @@ var_statement$no_emit:
 after_return$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_return$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterReturn;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // popScope ScopeKind::RightExpr
@@ -3821,12 +3824,12 @@ after_return$no_emit:
 
     // LinearState else_branch
 else_branch$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::ElseBranch;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -3846,12 +3849,12 @@ else_branch$no_emit:
 after_simple_variable_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_simple_variable_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterSimpleVariableDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -3873,12 +3876,12 @@ after_simple_variable_declaration_id$no_emit:
 after_variable_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_variable_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterVariableDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
@@ -3958,12 +3961,12 @@ after_variable_declaration_id$as_then:
 variable_type$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 variable_type$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::VariableType;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "<"sv) {
         char next = tokEnd[1];
         if (next != '<' && next != '=') {
@@ -4026,12 +4029,12 @@ variable_type$no_emit:
 
     // LinearState after_variable_modifier
 after_variable_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterVariableModifier;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
@@ -4099,12 +4102,12 @@ after_variable_modifier$as_then:
 
     // LinearState after_variable_unique_modifier
 after_variable_unique_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterVariableUniqueModifier;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4139,12 +4142,12 @@ after_variable_unique_modifier$no_emit:
 
     // LinearState after_variable_shared_modifier
 after_variable_shared_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterVariableSharedModifier;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4179,12 +4182,12 @@ after_variable_shared_modifier$no_emit:
 
     // LinearState after_variable_const_modifier
 after_variable_const_modifier$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterVariableConstModifier;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4225,12 +4228,12 @@ after_variable_const_modifier$no_emit:
 after_parameters$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_parameters$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterParameters;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // emitToken TokenKind::EmptyNode
     checkLexToken(TokenKind::EmptyNode, LexerToken::Invalid);
     emitToken(TokenKind::EmptyNode, tokBegin, 0, output);
@@ -4265,12 +4268,12 @@ after_parameters$no_emit:
 
     // LinearState first_parameter
 first_parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::FirstParameter;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // next after_parameters
@@ -4285,12 +4288,12 @@ first_parameter$no_emit:
 parameter$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::Parameter;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 parameter$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -4322,12 +4325,12 @@ parameter$as_then:
 
     // LinearState var_parameter
 var_parameter$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::VarParameter;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4355,12 +4358,12 @@ var_parameter$no_emit:
 impl_expression$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 impl_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::ImplExpression;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::ParenInImplExpr
@@ -4399,12 +4402,12 @@ impl_expression$no_emit:
 after_impl_expression$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_impl_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterImplExpression;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 2) == "::"sv) {
         tokEnd += 2;
         // next impl_access_expression
@@ -4496,12 +4499,12 @@ after_impl_expression$no_emit:
 
     // LinearState impl_access_expression
 impl_access_expression$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::ImplAccessExpression;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4566,12 +4569,12 @@ no_declaration$as_then:
 
     // LinearState namespace_declaration
 namespace_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::NamespaceDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 namespace_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -4652,12 +4655,12 @@ namespace_declaration$as_then:
 
     // LinearState namespace_declaration_id
 namespace_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::NamespaceDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4688,12 +4691,12 @@ namespace_declaration_id$no_emit:
 
     // LinearState after_namespace_declaration_id
 after_namespace_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterNamespaceDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -4707,12 +4710,12 @@ after_namespace_declaration_id$no_emit:
 
     // LinearState namespace_declaration_body
 namespace_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::NamespaceDeclarationBody;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Namespace
@@ -4805,12 +4808,12 @@ templated_declaration$as_then:
 templated_declaration_with_attributes$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 templated_declaration_with_attributes$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::TemplatedDeclarationWithAttributes;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 templated_declaration_with_attributes$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -4876,12 +4879,12 @@ templated_declaration_with_attributes$as_then:
 after_template$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_template$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterTemplate;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
@@ -4899,12 +4902,12 @@ after_template_parameters$as_then:
 
     // LinearState function_declaration_id
 function_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::FunctionDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -4947,12 +4950,12 @@ function_declaration_id$no_emit:
 after_function_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_function_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterFunctionDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_function_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
@@ -5009,12 +5012,12 @@ after_function_parameters$as_then:
 
     // LinearState struct_declaration_id
 struct_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::StructDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5057,12 +5060,12 @@ struct_declaration_id$no_emit:
 after_struct_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_struct_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterStructDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_struct_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
@@ -5077,12 +5080,12 @@ after_struct_declaration_id$as_then:
 
     // LinearState struct_declaration_body
 struct_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::StructDeclarationBody;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Struct
@@ -5095,12 +5098,12 @@ struct_declaration_body$no_emit:
 
     // LinearState member_declaration
 member_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::MemberDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 member_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -5199,12 +5202,12 @@ member_declaration$as_then:
 
     // LinearState enum_declaration_id
 enum_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::EnumDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5247,12 +5250,12 @@ enum_declaration_id$no_emit:
 after_enum_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_enum_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterEnumDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_enum_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
@@ -5267,12 +5270,12 @@ after_enum_declaration_id$as_then:
 
     // LinearState enum_declaration_body
 enum_declaration_body$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::EnumDeclarationBody;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Enum
@@ -5285,12 +5288,12 @@ enum_declaration_body$no_emit:
 
     // LinearState enum_value_declaration
 enum_value_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::EnumValueDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 enum_value_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
         {
@@ -5377,12 +5380,12 @@ enum_value_declaration$as_then:
 after_enum_value_declaration_id$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_enum_value_declaration_id$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterEnumValueDeclarationId;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
         if (next != '=' && next != '>') {
@@ -5413,12 +5416,12 @@ after_enum_value_declaration_id$no_emit:
 
     // LinearState after_static
 after_static$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterStatic;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5469,12 +5472,12 @@ after_static$no_emit:
 
     // LinearState static_var_variable_declaration
 static_var_variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::StaticVarVariableDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5504,12 +5507,12 @@ static_var_variable_declaration$no_emit:
 
     // LinearState static_open_variable_declaration
 static_open_variable_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::StaticOpenVariableDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (isWordFirstCharacter(tokEnd[0])) {
         {
             auto wordAndPos = readWord(tokEnd, output);
@@ -5541,12 +5544,12 @@ static_open_variable_declaration$no_emit:
 after_declaration$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_declaration$no_emit:
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     parseState = State::AfterDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
 after_declaration$as_then:
     // endDeclaration
     endDeclaration(output);
@@ -5572,10 +5575,12 @@ after_declaration$as_then:
     ReturnStatus returnStatus;
 pop_scope_failed:
     returnStatus = ReturnStatus::ScopeError;
+    tokEnd = tokBegin;
     tokenLimit += 1; // Don't count the token that caused the error as parsed
     goto return_stmt;
 error$as_then:
     returnStatus = ReturnStatus::UnhandledCase;
+    tokEnd = tokBegin;
     tokenLimit += 1; // Don't count the token that caused the error as parsed
     goto return_stmt;
 reached_token_limit:
@@ -5593,7 +5598,7 @@ return_stmt:
         (uint32_t)actualParsedTokens,
         declarationBegin,
         argumentName,
-        tokBegin,
+        tokEnd,
         scopePosition,
         argumentPosition
     };
@@ -5646,6 +5651,40 @@ ReturnStatus SimpleParser::parse(const NoOutput& output, int_t tokenLimit) {
         outState.scopePosition
     };
     return status();
+}
+
+LexerToken lexToken(const char*& position) {
+    NoOutput output;
+    return lexImpl(position, output);
+}
+
+LexerToken Parser::skipToken(sema::Context& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+LexerToken SimpleParser::skipToken(SimpleOutput& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+LexerToken SimpleParser::skipToken(const NoOutput& output) {
+    return lexImpl(m_state.sourcePosition, output);
+}
+
+const char* advanceToToken(const char* position) {
+    NoOutput output;
+    return inlineAdvancer(position, output);
+}
+
+void Parser::advanceToToken(sema::Context& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
+}
+
+void SimpleParser::advanceToToken(SimpleOutput& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
+}
+
+void SimpleParser::advanceToToken(const NoOutput& output) {
+    m_state.sourcePosition = inlineAdvancer(m_state.sourcePosition, output);
 }
 
 SourceLocation Parser::location(sema::Context& context) const {

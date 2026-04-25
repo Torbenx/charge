@@ -1,5 +1,6 @@
 #pragma once
 
+#include <parse/api.h>
 #include <sema/Context.h>
 #include <sema/Util.h>
 
@@ -42,6 +43,9 @@ struct SemaUtil : sema::Util {
 struct SemaContext : sema::Context {
     using Context::Context;
 
+    void parseAndRecover();
+    std::span<const parse::RecoveredError> parseErrors() const { return m_parseErrors; }
+
     void signatureCheckAll();
     void makeScratchProgram();
 
@@ -65,6 +69,7 @@ struct SemaContext : sema::Context {
 
 private:
     std::optional<sema::ProgramHandle> m_scratchProgram;
+    std::vector<parse::RecoveredError> m_parseErrors;
 
     void forEachTokenImpl(const void* data, void (*)(const void*, SemaUtil&, parse::TokenHandle));
 };

@@ -1,5 +1,6 @@
 #include <server/Server.h>
 
+#include <server/Diagnostic.h>
 #include <server/GoToDefinition.h>
 #include <server/Hover.h>
 #include <server/SemanticHighlight.h>
@@ -113,7 +114,7 @@ struct MergeMethods<MethodCollection<Ms1...>, MethodCollection<Ms2...>> {
 //! Methods that don't have client/server caps and an initialize function
 using CoreMethods = MethodCollection<DidOpen, DidChange, DidClose>;
 //! Language features that can be optionally supported by the server
-using ConfigurableMethods = MethodCollection<Hover, GoToDefinition, SemanticTokens, SemanticHighlight>;
+using ConfigurableMethods = MethodCollection<Hover, GoToDefinition, SemanticTokens, SemanticHighlight, Diagnostic>;
 using AllMethods = MergeMethods<CoreMethods, ConfigurableMethods>::type;
 
 template<typename>
@@ -342,14 +343,14 @@ void Server::receiverChacacter(char val) {
 
 Server::FileInfo& Server::fileInfo(const path& filePath) {
     auto canon = filePath.lexically_normal();
-    #ifdef WIN32
+#ifdef WIN32
     auto copy = canon.native();
     for (auto& c : copy) {
         if (c >= 'A' && c <= 'Z')
             c += ' ';
     }
     canon = copy;
-    #endif
+#endif
     auto it = m_fileCache.find(canon);
     if (it == m_fileCache.end())
         it = m_fileCache.emplace(canon).first;
@@ -399,10 +400,6 @@ void Server::clientClosedFile(const path& filePath) {
     updateSource(info);
 }
 
-static sema::ProgramHandle scratchProgram(sema::Context& context) {
-    return context.programsInModule(context.thisModule()).back();
-}
-
 void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> imports) {
     if (info.context != nullptr)
         return;
@@ -410,10 +407,8 @@ void Server::ensureContext(FileInfo& info, std::span<const sema::ModuleImport> i
     info.context = std::make_unique<SemaContext>(imports, info.sourceData);
     auto& context = *info.context;
     context.errorHandler = &semaErrorHandler;
-    parse::parseAndRecover(context);
+    context.parseAndRecover();
     context.signatureCheckAll();
-    auto scratchProg = context.newProgram(sema::ProgramKind::Struct, Word(), parse::TokenHandle(), context.globalNamespace(), SourceLocation());
-    VERIFY(scratchProgram(context) == scratchProg);
 }
 
 SemaContext& Server::acquireContext(const path& file, std::span<const sema::ModuleImport> imports) {

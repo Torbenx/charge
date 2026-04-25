@@ -31,9 +31,9 @@ struct SavedParserState {
 };
 
 struct Error {
-    static Error make(SavedParserState preErrorState);
+    static Error make(SavedParserState preRecoveryState);
 
-    SavedParserState preErrorState;
+    SavedParserState preRecoveryState;
     SavedParserState errorState;
     LexerToken errorToken;
 };

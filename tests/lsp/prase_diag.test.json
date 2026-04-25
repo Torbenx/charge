@@ -1,0 +1,70 @@
+{
+    "tests": [
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "fn f(a) => a + ;" }
+            ],
+            "request": {
+                "method": "textDocument/diagnostic",
+                "params": { "textDocument": { "uri": "file:///dummyFile" } }
+            },
+            "result": {
+                "kind": "full",
+                "items": [
+                    {
+                        "range": {
+                            "start": { "line": 0, "character": 13 },
+                            "end": { "line": 0, "character": 14 }
+                        },
+                        "severity": 1,
+                        "message": "Syntax error: Excess '+'?"
+                    }
+                ]
+            }
+        },
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "fn f(a) => a" }
+            ],
+            "request": {
+                "method": "textDocument/diagnostic",
+                "params": { "textDocument": { "uri": "file:///dummyFile" } }
+            },
+            "result": {
+                "kind": "full",
+                "items": [
+                    {
+                        "range": {
+                            "start": { "line": 0, "character": 12 },
+                            "end": { "line": 0, "character": 12 }
+                        },
+                        "severity": 1,
+                        "message": "Syntax error: Missing ';'?"
+                    }
+                ]
+            }
+        },
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "fn f(a: type; b: type) => a;" }
+            ],
+            "request": {
+                "method": "textDocument/diagnostic",
+                "params": { "textDocument": { "uri": "file:///dummyFile" } }
+            },
+            "result": {
+                "kind": "full",
+                "items": [
+                    {
+                        "range": {
+                            "start": { "line": 0, "character": 12 },
+                            "end": { "line": 0, "character": 14 }
+                        },
+                        "severity": 1,
+                        "message": "Syntax error: Replace ';' with ','?"
+                    }
+                ]
+            }
+        }
+    ]
+}

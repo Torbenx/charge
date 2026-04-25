@@ -661,7 +661,7 @@ def linearIf(commonPrefix: str, state):
         else:
             line("tokEnd = skipToEndOfLine(tokEnd);")
             line("emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);")
-            line("goto " + state.name + "$no_emit;")
+            line("goto " + state.name + "$retry;")
     elif exactMatch == "/*":
         if onlyUsedAsThen(state):
             line("VERIFY_NOT_REACHED();")
@@ -669,7 +669,7 @@ def linearIf(commonPrefix: str, state):
             line("tokEnd = skipToEndOfBlockComment(tokEnd);")
             line("tokEnd += 2;")
             line("emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);")
-            line("goto " + state.name + "$no_emit;")
+            line("goto " + state.name + "$retry;")
     else:
         recurse(state, lambda s: s.punctuationCase(exactMatch), lambda case: generateCaseBody(case))
 
@@ -887,7 +887,7 @@ def generateSwitchState(state):
         with indent():
             line("tokEnd += 1;")
             line("markLineBegin(tokEnd, output);")
-            line("goto " + state.name + "$no_emit;")
+            line("goto " + state.name + "$retry;")
         line("}")
 
         line("case '\\r': {")
@@ -900,7 +900,7 @@ def generateSwitchState(state):
                 line("tokEnd += 1;")
             line("}")
             line("markLineBegin(tokEnd, output);")
-            line("goto " + state.name + "$no_emit;")
+            line("goto " + state.name + "$retry;")
         line("}")
 
     # punctuations
@@ -1146,16 +1146,17 @@ for state in nonErrorStates:
     if noEmitLabelUsed:
         labelLine(state.name + "$no_emit:")
     if noEmitLabelUsed or withEmitLabelUsed:
-        if state.kind == "SwitchState":
-            line("tokEnd = skipWhitespace(tokEnd);")
-            line("tokBegin = tokEnd;")
-        else:
-            inlineTokenAdvancer()
         rememberState(state)
         line("if (tokenLimit == 0)")
         with indent():
             line("goto reached_token_limit;")
         line("tokenLimit -= 1;")
+        if state.kind == "SwitchState":
+            labelLine(state.name + "$retry:")
+            line("tokEnd = skipWhitespace(tokEnd);")
+            line("tokBegin = tokEnd;")
+        else:
+            inlineTokenAdvancer()
     if [o for o in state.origins if not type(o) is NextInstruction]:
         labelLine(state.name + "$as_then:")
 
@@ -1173,7 +1174,7 @@ allCases += [IdentifierCase([LexTokenInstruction()]), LiteralCase([LexTokenInstr
 allCases += [EndCase([LexTokenInstruction()])]
 lexState = State("SwitchState", "lex", "error", [], allCases)
 lexState.origins = [NextInstruction("blub")]
-labelLine("lex$no_emit:")
+labelLine("lex$retry:")
 line("tokEnd = skipWhitespace(tokEnd);")
 line("tokBegin = tokEnd;")
 generateState(lexState)

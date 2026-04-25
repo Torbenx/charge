@@ -2,262 +2,152 @@
     "tests": [
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "static x = type;"
-                }
+                { "uri": "file:///dummyFile", "text": "static x = type;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 12
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 12 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nstruct type\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nstruct type\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "namespace nspace: { } static x = nspace;"
-                }
+                { "uri": "file:///dummyFile", "text": "namespace nspace: { } static x = nspace;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 35
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 35 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nnamespace nspace\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nnamespace nspace\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "struct A: { member: type; } static x = A::member;"
-                }
+                { "uri": "file:///dummyFile", "text": "struct A: { member: type; } static x = A::member;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 45
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 45 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nA::member: type\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nA::member: type\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "template(v) struct A: { static x = v; }"
-                }
+                { "uri": "file:///dummyFile", "text": "template(v) struct A: { static x = v; }" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 31
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 31 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nstatic let A{v: v}::x: _ = v\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nstatic let A{v: v}::x: _ = v\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "template(T: type) static open val = type; static x = val;"
-                }
+                { "uri": "file:///dummyFile", "text": "template(T: type) static open val = type; static x = val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 54
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 54 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nstatic open let val: type\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nstatic open let val: type\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "enum E: { val; } static x = E::val;"
-                }
+                { "uri": "file:///dummyFile", "text": "enum E: { val; } static x = E::val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 32
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 32 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nE::val = ...\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nE::val = ...\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "fn f(val) => val;"
-                }
+                { "uri": "file:///dummyFile", "text": "fn f(val) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 15
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 15 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nlet val: _\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nlet val: _\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "fn f(var val) => val;"
-                }
+                { "uri": "file:///dummyFile", "text": "fn f(var val) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 18
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 18 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nvar val: _\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nvar val: _\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "fn f(val: unique) => val;"
-                }
+                { "uri": "file:///dummyFile", "text": "fn f(val: unique) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 23
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 23 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nval: unique _\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nval: unique _\n```" }
             }
         },
         {
             "documents": [
-                {
-                    "uri": "file:///dummyFile",
-                    "text": "fn f(val: const) => val;"
-                }
+                { "uri": "file:///dummyFile", "text": "fn f(val: const) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
                 "params": {
-                    "textDocument": {
-                        "uri": "file:///dummyFile"
-                    },
-                    "position": {
-                        "line": 0,
-                        "character": 22
-                    }
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 22 }
                 }
             },
             "result": {
-                "contents": {
-                    "kind": "markdown",
-                    "value": "```charge\nval: const shared _\n```"
-                }
+                "contents": { "kind": "markdown", "value": "```charge\nval: const shared _\n```" }
             }
         }
     ]

@@ -71,12 +71,11 @@ void SimpleParser::copyState(const Parser& parser) {
 }
 
 TEST(Parse, LexEOF) {
-    std::string_view source = "a\nstatic +";
-    SimpleParser parser(source.data());
-    EXPECT_EQ(parser.skipToken(), LexerToken::Identifier);
-    EXPECT_EQ(parser.skipToken(), LexerToken::Static);
-    EXPECT_EQ(parser.skipToken(), LexerToken::Plus);
-    EXPECT_EQ(parser.skipToken(), LexerToken::EOS);
+    const char* source = "a\nstatic +";
+    EXPECT_EQ(lexToken(source), LexerToken::Identifier);
+    EXPECT_EQ(lexToken(source), LexerToken::Static);
+    EXPECT_EQ(lexToken(source), LexerToken::Plus);
+    EXPECT_EQ(lexToken(source), LexerToken::EOS);
 }
 
 TEST(Parse, TokenCount) {

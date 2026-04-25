@@ -93,6 +93,7 @@ struct NoOutput {
     void reset() { tokenBuffer.reset(); }
 };
 
+[[nodiscard]] const char* advanceToToken(const char* input);
 LexerToken lexToken(const char*&);
 
 struct SimpleParser;
@@ -117,7 +118,8 @@ struct Parser {
         return { scopeBuffer.buffer, m_state.scopePosition + 1 };
     }
 
-    LexerToken skipToken() { return lexToken(m_state.sourcePosition); }
+    void advanceToToken(sema::Context&);
+    LexerToken skipToken(sema::Context&);
     ReturnStatus parse(sema::Context&, int_t tokenLimit = -1);
     ReturnStatus apply(sema::Context&, RecoveryElement);
     ReturnStatus apply(sema::Context&, const RecoveryInstructions&);
@@ -168,10 +170,13 @@ struct SimpleParser {
     void pushScope(ScopeKind);
     ScopeKind popScope();
 
-    LexerToken skipToken() { return lexToken(m_state.sourcePosition); }
+    void advanceToToken(SimpleOutput&);
+    LexerToken skipToken(SimpleOutput&);
     ReturnStatus parse(SimpleOutput&, int_t tokenLimit = -1);
     ReturnStatus apply(SimpleOutput&, RecoveryElement);
     ReturnStatus apply(SimpleOutput&, const RecoveryInstructions&);
+    void advanceToToken(const NoOutput&);
+    LexerToken skipToken(const NoOutput&);
     ReturnStatus parse(const NoOutput&, int_t tokenLimit = -1);
     ReturnStatus apply(const NoOutput&, RecoveryElement);
     ReturnStatus apply(const NoOutput&, const RecoveryInstructions&);

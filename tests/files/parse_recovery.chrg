@@ -1,15 +1,12 @@
 fn f(): {
-    a + a /* expect-recovery skip=1 */ a;
-    (a + /* expect-recovery identifier */);
+    (a /* expect-recovery skip=1 */ + );
     (/* expect-recovery skip=1 */: x);
     (a: x, /* expect-recovery skip=1 */: y);
-
-    a, else /* expect-recovery => */ foo();
 }
 
 fn p1(/* expect-recovery skip=1 */: type): { }
 fn p2(/* expect-recovery identifier */ : type.foo): { }
-fn p3(a /* expect-recovery skip=1 */ b): { }
+fn p3(a: type /* expect-recovery , skip=1 */ ; b: type): { }
 
 fn f1 /* expect-recovery ( */ a, b): { }
 fn f2(a, b) /* expect-recovery : */ { }
@@ -17,7 +14,6 @@ fn f3 /* expect-recovery ( ) */: { }
 
 struct s0: {
     /* expect-recovery identifier */ : type.foo;
-    base /* expect-recovery identifier */;
 }
 
 enum e0: {

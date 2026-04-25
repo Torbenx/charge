@@ -1,6 +1,8 @@
 
 target_sources(compiler
     PRIVATE
+    Diagnostic.cpp
+    Diagnostic.h
     GoToDefinition.cpp
     GoToDefinition.h
     Hover.cpp
