@@ -680,7 +680,7 @@ TEST(Charge, TokenSpelling) {
     }
 }
 
-TEST(Charge, DISABLED_Benchmark) {
+TEST(Charge, DISABLED_BenchmarkSema) {
     namespace fs = std::filesystem;
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
     ASSERT_TRUE(fs::is_regular_file(file));
@@ -689,7 +689,39 @@ TEST(Charge, DISABLED_Benchmark) {
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
-        parse::parseOrThrow(context);
-        VERIFY(context.m_scopeStack.size() == 1);
+        parse::Parser parser(sourceBuffer.data());
+        parser.parse(context);
+        ASSERT_TRUE(parser.done());
+        ASSERT_TRUE(context.m_scopeStack.size() == 1);
+    }
+}
+
+TEST(Charge, DISABLED_BenchmarkSimple) {
+    namespace fs = std::filesystem;
+    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < 10; i++) {
+        parse::SimpleOutput output;
+        parse::SimpleParser parser(sourceBuffer.data());
+        parser.parse(output);
+        ASSERT_TRUE(parser.done());
+    }
+}
+
+TEST(Charge, DISABLED_BenchmarkNoOutput) {
+    namespace fs = std::filesystem;
+    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < 10; i++) {
+        parse::NoOutput output;
+        parse::SimpleParser parser(sourceBuffer.data());
+        parser.parse(output);
+        ASSERT_TRUE(parser.done());
     }
 }

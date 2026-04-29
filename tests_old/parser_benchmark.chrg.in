@@ -1,0 +1,716 @@
+
+fn f1(x: unique, y: shared, z: const, zx1: unique const, zy1: shared const, zx2: const unique, zy2: const shared, var a, b): { }
+
+fn f1x(x: unique type, y: shared = init, z: const type = init, zx1: unique const type, zy1: shared const = init, zx2: const unique type = init, var a: type, b = init): { }
+
+fn f2(x = init): { }
+
+fn f3(x: type): { }
+
+fn f4(x = init, var y): { }
+
+fn f5(x: type, var y): { }
+
+fn f6() -> type: { }
+
+fn g1() => value;
+
+struct S1: { }
+
+struct S2: {
+    a;
+    b: type;
+    c = init;
+    d: type = init;
+    fn test(): { }
+}
+
+struct H1: {
+    base m();
+
+    base q: {
+        fn test2(): { }
+    }
+}
+
+static v1;
+
+static var v3;
+
+static w1: type;
+
+static w2 = init;
+
+static w3: type = init;
+
+template(T) struct T1: { }
+
+template(T: type) struct T2: { }
+
+template(T = init) struct T3: { }
+
+template(T: type = init) struct T4: { }
+
+fn impl x(): { }
+
+fn impl x::y{a}::z(): { }
+
+fn impl (+x)(): { }
+
+struct impl x::y{a}::z: { }
+
+struct impl (+x): { }
+
+enum E1: {
+    val1;
+
+    fn f(): { }
+
+    val2 = x;
+}
+
+
+struct X: { }
+struct Y: { }
+
+struct SelfTypeErrors: {
+    template(self_type: type)
+    fn f1() -> X: { }
+
+    template(self_type = X)
+    fn f2() -> X: { }
+}
+
+static noInit: X;
+
+namespace FnImpl: {
+
+fn base(x: X) -> X: { }
+
+fn impl base(x: X, x2: X) -> X: { }
+
+fn impl base(x1: X) -> X: { }
+
+fn impl base(x: unique X) -> X: { }
+
+fn genericBase(x: <expression_category::value> X) -> X: { }
+fn impl genericBase(x: <expression_category::unique_ref> X) -> X: { }
+
+fn impl base(x: Y) -> X: { }
+
+fn impl base(x: X) -> Y: { }
+
+}
+
+struct Fn: {
+
+fn f1(x: X = X()) -> X: { }
+
+fn f2(self = Fn()) -> X: { }
+
+fn f3(self: Fn) -> X: { }
+
+fn f4(): { }
+
+}
+
+namespace OpenReturnType: {
+
+fn f1() -> return_type: { }
+
+}
+
+namespace GlobalImpl: {
+
+template(T: type) static var g1: type = T;
+static impl g1{X}: type = bool;
+
+template(T: type) static open g2: type = T;
+static impl g2{X}: bool = true;
+
+}
+
+namespace Stmt: {
+
+static var staticX = X();
+
+fn f1() -> X: { destroy staticX; }
+
+fn f2() -> X: { discard staticX; }
+
+}
+
+enum ImplicitImplBase: {
+    enumValue;
+    struct Struct: { }
+
+    template(x: X) fn f1() -> X: { }
+    template(x: X) fn f2() -> X: { }
+    template(x: X) fn f3() -> X: { }
+}
+
+enum impl ImplicitImplBase: {
+
+fn unknown() -> X: { }
+
+fn enumValue() -> X: { }
+
+fn Struct() -> X: { }
+
+template(x: X, y: Y) fn f1() -> X: { }
+
+template(y: X) fn f2() -> X: { }
+
+template(x: Y) fn f3() -> X: { }
+
+}
+
+namespace Parameterize: {
+
+struct S1: { }
+static g1 = S1{X};
+
+template(T: type) struct S2: { }
+static g2 = S2{X}{X};
+
+static g3 = X(){X};
+
+static g4 = S2{X, X};
+
+static g5 = S2{T1: X};
+
+template(T1: type, T2: type) static r1 = X();
+static g6 = r1{X};
+
+}
+
+namespace CallTarget: {
+
+struct S1: { }
+static g2 = S1()();
+
+template(T: type) fn f1() -> X: { }
+static g3 = f1();
+
+}
+
+struct Lookup: {
+
+member: X;
+fn f1() => member;
+
+fn f2() => unknown;
+
+fn f2x() -> X: { { let x = X; } x; }
+
+fn f3() => Lookup::unknown;
+
+fn f4() => X()::foo;
+
+static r1 = X();
+fn f5() => r1::foo;
+
+fn f6(self) => .unknown;
+
+fn f7(self) => .r1;
+
+fn fref(self) -> X: { }
+fn f8(self) => .fref;
+
+}
+
+struct MemberFunction: {
+
+fn fr1() -> X: { }
+fn f1(self) => .fr1();
+
+
+template(T: type) fn fr2(self) -> X: { }
+fn f2(self) => .fr2();
+
+}
+
+namespace SelfLookup: {
+
+static g1 = self;
+
+static g2 = self_type;
+
+}
+
+namespace Init: {
+
+static g1: type = X();
+
+fn fr1(x: unique X) -> X: { }
+fn f1() => fr1(X());
+
+fn f2(x: shared X) => fr1(x);
+
+}
+
+struct Member: {
+    memberWithoutType;
+}
+
+namespace ExplicitImpl: {
+static var r1 = X();
+struct impl r1: { }
+}
+
+fn test(): {
+
+a;
+1;
+'a';
+
+.a;
+./**/a;
+
+();
+(a);
+(a,);
+(a, /**/);
+(a, b);
+(a, b,);
+(a, /**/ b, /**/);
+(p: a);
+(p: a,);
+(p /**/ : a, /**/);
+(p: a, q: b);
+(p: a, q: b,);
+(p /**/ : a, /**/ q: /**/ b, /**/);
+
+a{};
+a{/**/};
+
+a{
+};
+a{b};
+a();
+a(/**/);
+a(b);
+a[];
+a[/**/];
+a[b];
+a.b;
+a./**/b;
+a::b;
+a::/**/b;
+a.b{};
+a::b{};
+a++;
+a--;
+
+!a;
+~a;
+++a;
+--a;
++a;
+-a;
+*a;
+
+a + b;
+a - b;
+a * b;
+a & b;
+a ^ b;
+a | b;
+a / b;
+a % b;
+a << b;
+a >> b;
+a != b;
+a == b;
+a < b;
+a <= b;
+a > b;
+a >= b;
+a && b;
+a || b;
+
+if a => b;
+a, else => b;
+
+a = b;
+a += b;
+a -= b;
+a *= b;
+a /= b;
+a %= b;
+a &= b;
+a ^= b;
+a |= b;
+a <<= b;
+a >>= b;
+a &&= b;
+a ||= b;
+
+{ a; }
+
+(a, else => b, c);
+
+if a: b;
+if a: { }
+if a: { b; }
+
+if a: b; else: c;
+
+if a: { } else: { }
+
+if a: { b; } else: { c; }
+
+let a;
+var a;
+let a = init;
+let a: type;
+let a: type = init;
+let a: unique;
+let a: unique type;
+let a: unique = init;
+let a: unique type = init;
+
+if a: let b; else: let c;
+
+(a, b) = c;
+
+(if a => b) = c;
+
+return a;
+
+return;
+
+destroy a;
+
+}
+
+namespace blub1: {
+
+namespace n: {
+    struct A: { }
+}
+namespace m: {
+    struct B: { }
+}
+namespace n: {
+    struct C: { }
+}
+
+static a = n::A;
+
+static b = m::B;
+
+static c = n::C;
+
+}
+
+namespace blub2: {
+
+struct X: { }
+static XX: type = X;
+
+namespace OuterNS: { namespace InnerNS: { struct A: { } } }
+static ns = OuterNS::InnerNS;
+static nsa = OuterNS::InnerNS::A;
+
+template(x: XX) struct Y: { }
+static Z = Y;
+
+template(T: type) struct Foo: { }
+static U: type = Foo{X};
+
+template(T) struct Bar: { }
+static V: type = Bar{X};
+static W: type = Bar{Y};
+
+template(T: type) struct Outer: {
+    struct A: { }
+
+    static AliasA: type = A;
+
+    template(T) struct B: { }
+
+    static BA: type = B{A};
+
+    static refB = B;
+}
+
+static refAccess = Outer{X}::refB;
+
+struct A: { }
+template(a) struct B: { }
+template(b, a) struct C: { }
+template(c, b, a) struct D: { }
+template(d, c, b, a) struct E: { }
+static ABBCDE = E{D{C{B{A}, A}, B{A}, A}, C{B{A}, A}, B{A}, A};
+
+fn f1() => X;
+fn f2(t) => X;
+fn f3(t: type) => X;
+fn f4(t: type) => X;
+
+fn t1() => X;
+static tt1 = t1;
+
+fn t2(x) => X;
+static tt2 = t2;
+
+template(T: type) fn t3() => X;
+static tt3 = t3{X};
+
+fn func1() => X;
+static call1 = func1();
+
+fn func2(x) => x;
+static call2 = func2(X);
+
+fn func3(a, b, c, d, e) => X;
+static call3 = func3(X, X, X, X, X);
+
+template(x: type) fn func4(y: type) => X;
+static func4ref = func4{X};
+static call4direct = func4{X}(X);
+static call4indirect = func4ref(X);
+
+static nested = func2(func1());
+static nestedRef = nested;
+
+static nested2 = func2(func2(func1()));
+
+template(arg) static identity = arg;
+static func2id = identity{func2};
+
+template(T: type) fn refT(x: T) => T;
+static call_refT = refT(func4ref);
+
+template(T: type) fn refArg(arg: T) => arg;
+
+template(T: type) fn refArg2(arg0: T, arg1: T) => arg1;
+
+struct CallMe: { t: type; }
+static callConstructor = CallMe(X);
+
+struct CallMe2: { base type; }
+static callConstructor2 = CallMe2(X);
+
+template(T: type) struct CallMeT: { t: T; }
+static callConstructorT = CallMeT(X());
+
+struct Base: { static MyX: type = X; }
+struct Derived: {
+    base Base;
+    static MyXinDerived = MyX;
+}
+static BaseMyX = Base::MyX;
+static DerivedMyX = Derived::MyX;
+
+template(T: type) struct Wrapped: { }
+template(T: type) struct BaseT: { static TofBase = T; }
+template(T: type) struct DerivedT: { static TofDerived = T; base BaseT{Wrapped{T}}; }
+static testTofDerived = DerivedT{X}::TofDerived;
+static testTofBase = DerivedT{X}::TofBase;
+
+struct WithMember: { member: X; }
+fn accessMember(w: shared WithMember) => w.member;
+static memberPointer = WithMember::member;
+
+struct DerivedWithMember: { base WithMember; }
+fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
+static composedMemberPointer = DerivedWithMember::member;
+
+fn withBody1() -> X: { }
+fn withBody2() -> X: { withBody1(); }
+fn withBody3() -> X: withBody1();
+fn withBody4() -> X: { let x: X = X(); let y = x; }
+fn withBody5() -> X: { let x = identity{X()}; }
+
+static boolTest = false;
+fn ifTest() -> X: { if true: {} }
+fn ifTest2() -> X: { if true: { withBody1(); } }
+fn ifTest3() -> X: { if true: { let x: X = X(); } }
+fn ifTest4() -> X: { if true: let x: X = X(); }
+fn ifElseTest1() -> X: { if true: let x: X = X(); else: let y: X; }
+
+namespace parameter_expr_match: {
+
+template(T1: type, T2: type)
+struct blub: { }
+
+template(T: type)
+fn target(b: blub{T, T}) -> T: { }
+
+template(T: type)
+static test1 = target(blub{T, X}());
+
+template(T: type)
+static test2 = target(blub{X, T}());
+
+}
+
+fn referenceParameter(x: shared X) -> X: { }
+
+fn passReference() -> X: {
+    let x: X;
+    referenceParameter(x);
+}
+
+
+fn addConst(x1: const unique X, x2: const shared X) -> X: { }
+fn addShared(x1: shared X, x2: const shared X) -> X: { }
+fn testRefCast(x1: unique X, x2: shared X, x3: const unique X) -> X: {
+    addConst(x1, x2);
+    addShared(x1, x3);
+}
+
+fn typeExpr() -> type: { }
+fn typeExprFold() -> X: {
+    let x: typeExpr() = X;
+}
+
+static var staticVar = X;
+fn needsShared(x: shared type) -> type: { }
+fn testStaticVarIsShared() => needsShared(staticVar);
+
+static open openVar = X;
+fn examineOpenVar() => openVar;
+
+
+template(T: type)
+fn baseFunc(t: T) -> T: { }
+
+fn impl baseFunc{X}(t: X) -> type: { }
+
+template(T: type)
+struct BaseType: {
+    fn baseFunc(t: T) -> T: { }
+
+    template(S: type)
+    fn tmplFunc(t: T, s: S) -> type: { }
+
+    template(x)
+    fn implicitTmplFunc() -> type: { }
+
+    fn implicitTmplFunc2(x) -> type: { }
+}
+
+struct impl BaseType{X}: {
+    fn baseFunc(t: X) -> X: { }
+
+    template(S: type)
+    fn tmplFunc(t: X, s: S) -> type: { }
+
+    fn impl tmplFunc{X}(t: X, s: X) -> type: { }
+
+    template(x: type)
+    fn implicitTmplFunc() -> type: { }
+
+    fn implicitTmplFunc2(x: type) -> type: { }
+}
+
+template(T: type, S: type)
+fn mixedTemplateFunction(t: T, s: S) -> S: { }
+
+static callMixedTemplateFunction = mixedTemplateFunction{X}(X(), X);
+
+template(value)
+struct ConstantValue: { }
+
+template(c: expression_category)
+fn genericExpressionCategory(p: <c> X) -> ConstantValue{c}: { }
+
+static staticX: X = X();
+static testGenericExpressionDeduction1 = genericExpressionCategory(staticX);
+
+static testGenericExpressionDeduction2 = genericExpressionCategory(X());
+
+static expressionCategoryTest = expression_category::value;
+
+enum E1: {
+    val;
+}
+static examineEnumValue = E1::val;
+
+struct DeriveFromEnum: {
+    base E1;
+}
+static accessEnumValueViaDerivedStruct = DeriveFromEnum::val;
+
+static examineFalse = false;
+
+static examineNestedFalse = bool::false;
+
+static examineTrue = true;
+
+static examineNestedTrue = bool::true;
+
+template(Inherit: type)
+struct OuterStruct: {
+    template(Explicit: type)
+    struct InnerStruct: {
+        static myType = self_type;
+
+        template(self_type) fn testSelfType() => self_type;
+
+        fn testSelf1(self: const shared) => self;
+
+        template(self_type) fn testSelf2(self: const shared) => self;
+    }
+}
+
+struct TestSelfCalls: {
+    fn simpleFunc(self: const shared) => self;
+
+    fn callSimpleFunc(mySelf: const shared TestSelfCalls) => mySelf.simpleFunc();
+
+    template(selfT: type, Explicit: type, Deduced: type)
+    struct ComplexResult: { }
+    template(self_type, Explicit: type, Deduced: type)
+    fn complexFunc(self: const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
+}
+
+struct DerivedSelfCalls: {
+    base TestSelfCalls;
+
+    fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);
+}
+
+struct TestUnbasedAccessExprs: {
+    myMember: X;
+    fn accessMyMember(self: const shared) => .myMember;
+    fn accessMyMemberFunc(self: const shared) => .accessMyMember();
+}
+
+fn testLetParameterCategory(x: X) => genericExpressionCategory(x);
+fn testVarParameterCategory(var x: X) => genericExpressionCategory(x);
+fn testUniqueParameterCategory(x: unique X) => genericExpressionCategory(x);
+fn testConstUniqueParameterCategory(x: const unique X) => genericExpressionCategory(x);
+fn testSharedParameterCategory(x: shared X) => genericExpressionCategory(x);
+fn testConstSharedParameterCategory(x: const shared X) => genericExpressionCategory(x);
+
+template(c: expression_category)
+fn genericParameterCategory(x: <c> X) => genericExpressionCategory(x);
+fn testValueParameterCategoryFold() => genericParameterCategory(X());
+fn testUniqueParameterCategoryFold(x: unique X) => genericParameterCategory(x);
+fn testConstUniqueParameterCategoryFold(x: const unique X) => genericParameterCategory(x);
+fn testSharedParameterCategoryFold(x: shared X) => genericParameterCategory(x);
+fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCategory(x);
+
+template(c: expression_category)
+fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }
+
+template(T: type) static open openGlobalImplTest: bool = false;
+static impl openGlobalImplTest{X}: bool = true;
+static examineOpenGlobalImpl1 = openGlobalImplTest{X};
+static examineOpenGlobalImpl2 = openGlobalImplTest{A};
+
+template(T: type)
+fn openReturnType() -> return_type: { }
+static examineOpenReturnType = openReturnType{X}();
+
+static examineLogicalNotExplicit = logical_not(true);
+
+static examineLogicalNotOperator = !true;
+
+static examineLogicalNotFun = !!true;
+
+}
