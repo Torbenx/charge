@@ -258,12 +258,12 @@ SwitchState after_expression() then error
             popScope ScopeKind::ReturnType
             pushScope ScopeKind::FunctionBody
             emitToken TokenKind::FunctionBody
-            next single_or_compound_statement
+            next statement
         popScope ScopeKind::IfExprOrStmt
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::IfBranch
         emitToken TokenKind::IfStmt
-        next single_or_compound_statement
+        next statement
     punctuation =
         popScope ScopeKind::VariableType, ScopeKind::LeftExpr
         pushScope ScopeKind::RightExpr
@@ -354,8 +354,6 @@ LinearState static_access() then error
 
 # --- Statements
 
-LinearState single_or_compound_statement() then statement
-
 LinearState after_statement() then error
     keyword else
         popScope ScopeKind::IfBranch
@@ -426,7 +424,7 @@ LinearState after_return() then expression
 LinearState else_branch() then error
     punctuation :
         emitToken TokenKind::ElseStmt
-        next single_or_compound_statement
+        next statement
 
 # --- Variable declaration
 
@@ -672,7 +670,7 @@ LinearState after_function_parameters() then error
     punctuation :
         pushScope ScopeKind::FunctionBody
         emitToken TokenKind::FunctionBody
-        next single_or_compound_statement
+        next statement
     punctuation ->
         pushScope ScopeKind::ReturnType
         emitToken TokenKind::ReturnType
