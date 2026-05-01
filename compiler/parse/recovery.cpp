@@ -491,11 +491,10 @@ std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const Sav
     auto& path = *minPathIt;
     std::vector<RecoveredError> result;
     for (RecoveryGroup& elem : path) {
-        result.push_back(RecoveredError {
-            Error::make(std::move(elem.preFirstRecoveryState)),
-            elem.recovery,
-            elem.unanimousAndIsolated,
-        });
+        result.push_back(RecoveredError(
+            std::move(elem.preFirstRecoveryState),
+            std::move(elem.recovery),
+            elem.unanimousAndIsolated));
     }
     return result;
 }

@@ -1,0 +1,59 @@
+
+%{
+#pragma once
+#include <parse/parse_gen.h>
+namespace parse {
+%}
+
+%language=C++
+%7bit
+%compare-lengths
+%compare-strncmp
+%readonly-tables
+%enum
+%define class-name KeywordTable
+%define lookup-function-name get
+%define constants-prefix KEYWORD_TABLE_
+%define word-array-name KEYWORD_TABLE_ENTRIES
+%define length-table-name KEYWORD_TABLE_LENGTHS
+%global-table
+%struct-type
+%define slot-name string
+%define initializer-suffix ,LexerToken::Identifier
+struct KeywordTableEntry { const char* string; LexerToken token; };
+
+%%
+assert,LexerToken::Assert
+break,LexerToken::Break
+catch,LexerToken::Catch
+const,LexerToken::Const
+continue,LexerToken::Continue
+destroy,LexerToken::Destroy
+discard,LexerToken::Discard
+do,LexerToken::Do
+elif,LexerToken::Elif
+else,LexerToken::Else
+for,LexerToken::For
+if,LexerToken::If
+impl,LexerToken::Impl
+let,LexerToken::Let
+return,LexerToken::Return
+shared,LexerToken::Shared
+static,LexerToken::Static
+try,LexerToken::Try
+unique,LexerToken::Unique
+var,LexerToken::Var
+while,LexerToken::While
+enum,LexerToken::Enum
+fn,LexerToken::Fn
+base,LexerToken::Base
+incomplete,LexerToken::Incomplete
+namespace,LexerToken::Namespace
+open,LexerToken::Open
+struct,LexerToken::Struct
+template,LexerToken::Template
+trait,LexerToken::Trait
+virtual,LexerToken::Virtual
+%%
+
+}

@@ -23,14 +23,14 @@ struct Word {
         state.latent = state.hash + (state.hash << 7) + c;
         state.hash = newHash;
     }
-    static constexpr uint32_t finalizeHash(HashState state) {
-        return (state.hash + state.latent) & ~((1u << Word::ID_BITS) - 1);
+    static constexpr uint32_t finalizeHash(HashState state, [[maybe_unused]] uint32_t length) {
+        return std::rotr(state.hash + state.latent, length) & ~((1u << Word::ID_BITS) - 1);
     }
     static constexpr uint32_t hash(std::string_view str) {
         HashState hash;
         for (char c : str)
             iterateHash(hash, c);
-        return finalizeHash(hash);
+        return finalizeHash(hash, str.length());
     }
 
     uint32_t idBits : ID_BITS = 0;

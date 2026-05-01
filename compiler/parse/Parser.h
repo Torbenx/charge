@@ -4,7 +4,6 @@
 #include <parse/api.h>
 #include <parse/parse_gen.h>
 
-
 namespace sema {
 struct Context;
 }

@@ -611,7 +611,7 @@ generatedLines = []
 generateSingleStep = False
 
 generateStateDebug = False
-generateLexTokenChecks = True
+generateLexTokenChecks = False
 
 def line(line: str = ""):
     generatedLines.append('    ' * outputIndentation + line)
@@ -710,8 +710,6 @@ def emitCarriedToken():
     emitToken("carriedEmitTokenKind", "carriedEmitTokenData")
 
 def rememberState(state):
-    if generateStateDebug:
-        line("println(\"" + state.name + ": {}\", *tokEnd);")
     line("parseState = State::" + stateCppName(state.name) + ";")
 
 def collectPossibleThenStatesFromInstructions(instructions, result):
@@ -778,56 +776,48 @@ def collectKeywordCases(state):
     return result
 
 def generateWordCase(state):
-    readWord()
-    # Keywords
-    line("if (isKeyword(this_identifier)) {")
-    with indent():
-        if state.keywordCases():
-            labelLine("LABEL_MAYBE_UNUSED " + state.name + "$keyword_check:")
-            for c in state.keywordCases():
-                line("if (this_identifier == words[\"" + c.keyword + "\"]) {")
-                with indent():
-                    endedWithJumpInstruction = generateCaseBody(c)
-                    if not endedWithJumpInstruction:
-                        raise Exception(f"Case for keyword '{c.keyword}' in '{state.name}' should end with a 'next' instruction")
-                line("}")
-        recurse(state, lambda s: s if s != state and s.keywordCases() else None, lambda s: line("goto " + s.name + "$keyword_check;"))
-    line("}")
+    def caseLabel(keyword):
+        labelLine("case toCaseValue<identifier_t>(LexerToken::" + keywordCppName(keyword) + ", \"" + keyword + "\"):")
 
-    labelLine("LABEL_MAYBE_UNUSED " + state.name + "$identifier_case:")
-    # Special identifiers
-    line("if (isSpecialIdentifier(this_identifier)) {")
+    labelLine("LABEL_MAYBE_UNUSED " + state.name + "$word_case_with_read:")
+    readWord()
+    labelLine("LABEL_MAYBE_UNUSED " + state.name + "$word_case:")
+    keywords = set()
+    specialIds = set()
+    for c in state.keywordCases():
+        keywords.add(c.keyword)
+    for c in state.specialIdentifierCases():
+        specialIds.add(c.identifier)
+    if state.identifierCase():
+        for thenName in collectPossibleThenStates(state):
+            then = findState(thenName)
+            for c in then.keywordCases():
+                keywords.add(c.keyword)
+            for c in then.specialIdentifierCases():
+                specialIds.add(c.identifier)
+    line("if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {")
     with indent():
-        s = state
-        seenIdentifierState = None
-        while s.name != "error":
-            if not s.identifierCase() is None:
-                seenIdentifierState = s
-            for c in s.specialIdentifierCases():
-                line("if (this_identifier == words[\"" + c.identifier + "\"]) {")
+        line("switch (toSwitchValue(this_identifier)) {")
+        with indent():
+            for keyword in sorted(keywords):
+                caseLabel(keyword)
+                recurse(state, lambda s: s.keywordCase(keyword), lambda c: generateCaseBody(c))
+            for specialId in sorted(specialIds):
+                caseLabel(specialId)
+                recurse(state, lambda s: s.specialIdentifierCase(specialId), lambda c: generateCaseBody(c))
+            labelLine("default:")
+            if state.identifierCase():
+                line("if (isKeyword(this_identifier)) {")
                 with indent():
-                    ss = state
-                    while not ss is s:
-                        line("// -> " + ss.thenState)
-                        ss = findState(ss.thenState)
-                    endedWithJumpInstruction = generateCaseBody(c)
-                    if not endedWithJumpInstruction:
-                        raise Exception(f"Case for keyword '{c.identifier}' in '{state.name}' should end with a 'next' instruction")
+                    line("goto error$as_then;")
                 line("}")
-            if not s.thenCase() is None:
-                if not seenIdentifierState is None:
-                    for thenState in collectPossibleThenStates(s):
-                        if findState(thenState).keywordCases() or findState(thenState).specialIdentifierCases():
-                            raise Exception(f"starting from {state.name} identifier case in {seenIdentifierState.name} will shadow keywords in {thenState} due to then case in {s.name}")
-                break
-            s = findState(s.thenState)
+            line("break;")
+        line("}")
     line("}")
     if state.identifierCase():
-        endedWithJumpInstruction = generateCaseBody(state.identifierCase())
-        if not endedWithJumpInstruction:
-            raise Exception(f"Identifier case in '{state.name}' should end with a 'next' instruction")
+        generateCaseBody(state.identifierCase())
     else:
-        recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$identifier_case;"))
+        recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$word_case;"))
 
 def generateEndCase(case):
     endedWithJumpInstruction = generateCaseBody(case)
@@ -951,7 +941,7 @@ def generateSwitchState(state):
     line("case '$':")
     line("case '_':")
     with indent():
-        line("goto " + state.name + "$word_case_entry;")
+        recurse(state, lambda s: s if s.hasWordCase() else None, lambda s: line("goto " + s.name + "$word_case_with_read;"))
 
     # default
     line("default: {")
@@ -963,8 +953,8 @@ def generateSwitchState(state):
 
     line("VERIFY_NOT_REACHED();")
 
-    labelLine(state.name + "$word_case_entry:")
-    generateWordCase(state)
+    if state.hasWordCase():
+        generateWordCase(state)
 
 def generateLinearState(state):
     for c in state.punctuationCases():
@@ -1067,7 +1057,7 @@ def generateInstructions(case, instructions, thenHandler):
             thenHandler(inst.newState)
             afterJumpInstruction = True
         elif type(inst) is CommitDeclarationInstruction:
-            nameExpr = "Word()"
+            nameExpr = "identifier_t()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
             line("this_declaration = commitDeclaration<" + inst.declKindExpr + ">(" + nameExpr + ", tokBegin, declarationBegin, output);")
@@ -1080,12 +1070,12 @@ def generateInstructions(case, instructions, thenHandler):
         elif type(inst) is EmitCallTokenInstruction:
             line("argumentPosition = emitCallToken(argumentPosition, " + inst.tokenKindExpr + ", tokBegin, output);")
         elif type(inst) is CallArgumentInstruction:
-            nameExpr = "Word()"
+            nameExpr = "identifier_t()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
             line("argumentPosition = addCallArgument(argumentPosition, " + nameExpr + ", output);")
         elif type(inst) is UpdateCallArgumentInstruction:
-            nameExpr = "Word()"
+            nameExpr = "identifier_t()"
             if not inst.nameExpr is None:
                 nameExpr = inst.nameExpr
             line("updateCallArgument(argumentPosition, " + nameExpr + ", output);")
@@ -1157,6 +1147,8 @@ for state in nonErrorStates:
             line("tokBegin = tokEnd;")
         else:
             inlineTokenAdvancer()
+        if generateStateDebug:
+            line("println(\"" + state.name + ": {}\", *tokEnd);")
     if [o for o in state.origins if not type(o) is NextInstruction]:
         labelLine(state.name + "$as_then:")
 
@@ -1247,10 +1239,25 @@ with indent():
     line(identifierCppName() + ",")
     line(literalCppName() + ",")
     line("EOS,")
+    lineNoIndent()
+    line("FirstKeyword = " + keywordCppName(keywords[0])+ ",")
+    line("LastKeyword = " + keywordCppName(keywords[-1])+ ",")
+    lineNoIndent()
+    line("FirstSpecialIdentifier = " + keywordCppName(specialIdentifiers[0])+ ",")
+    line("LastSpecialIdentifier = " + keywordCppName(specialIdentifiers[-1])+ ",")
+    lineNoIndent()
     line("Invalid = 255")
 line("};")
 line("std::string_view nameString(LexerToken);")
 line("std::string_view fixedSpelling(LexerToken);")
+line("constexpr bool isKeyword(LexerToken token) {")
+with indent():
+    line("return LexerToken::FirstKeyword <= token && token <= LexerToken::LastKeyword;")
+line("}")
+line("constexpr bool isSpecialIdentifier(LexerToken token) {")
+with indent():
+    line("return LexerToken::FirstSpecialIdentifier <= token && token <= LexerToken::LastSpecialIdentifier;")
+line("}")
 lineNoIndent()
 
 line("enum class State : uint8_t {")
@@ -1392,3 +1399,35 @@ outputLines = []
 for generatedLine in generatedLines:
     outputLines.append(generatedLine + lineEnding)
 writeTo(currentDir / "parse_gen.cpp", outputLines)
+
+gperfFile = """
+%{
+#pragma once
+#include <parse/parse_gen.h>
+namespace parse {
+%}
+
+%language=C++
+%7bit
+%compare-lengths
+%compare-strncmp
+%readonly-tables
+%enum
+%define class-name KeywordTable
+%define lookup-function-name get
+%define constants-prefix KEYWORD_TABLE_
+%define word-array-name KEYWORD_TABLE_ENTRIES
+%define length-table-name KEYWORD_TABLE_LENGTHS
+%global-table
+%struct-type
+%define slot-name string
+%define initializer-suffix ,LexerToken::Identifier
+struct KeywordTableEntry { const char* string; LexerToken token; };
+
+%%
+""" + lineEnding.join([keyword + ",LexerToken::" + keywordCppName(keyword) for keyword in keywords + specialIdentifiers]) + """
+%%
+
+}
+"""
+writeTo(currentDir / "keyword_table.gperf", gperfFile.splitlines(True))

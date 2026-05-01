@@ -31,9 +31,8 @@ struct SavedParserState {
 };
 
 struct Error {
-    static Error make(SavedParserState preRecoveryState);
+    explicit Error(SavedParserState errorState);
 
-    SavedParserState preRecoveryState;
     SavedParserState errorState;
     LexerToken errorToken;
 };
@@ -46,8 +45,14 @@ struct RecoveryInstructions {
 };
 
 struct RecoveredError : Error {
+    RecoveredError(
+        SavedParserState preRecoveryState,
+        RecoveryInstructions recovery,
+        bool unanimousAndIsolated = false);
+
+    SavedParserState preRecoveryState;
     RecoveryInstructions recovery;
-    bool unanimousAndIsolated = false;
+    bool unanimousAndIsolated;
 };
 
 struct ParseException : std::exception {

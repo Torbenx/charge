@@ -680,6 +680,8 @@ TEST(Charge, TokenSpelling) {
     }
 }
 
+using Clock = std::chrono::high_resolution_clock;
+
 TEST(Charge, DISABLED_BenchmarkSema) {
     namespace fs = std::filesystem;
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
@@ -706,7 +708,11 @@ TEST(Charge, DISABLED_BenchmarkSimple) {
     for (int i = 0; i < 10; i++) {
         parse::SimpleOutput output;
         parse::SimpleParser parser(sourceBuffer.data());
+        auto start = Clock::now();
         parser.parse(output);
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.tokenBuffer.tokens.size() << " tokens.\n";
         ASSERT_TRUE(parser.done());
     }
 }
@@ -719,9 +725,14 @@ TEST(Charge, DISABLED_BenchmarkNoOutput) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < 10; i++) {
+
         parse::NoOutput output;
         parse::SimpleParser parser(sourceBuffer.data());
+        auto start = Clock::now();
         parser.parse(output);
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced no tokens.\n";
         ASSERT_TRUE(parser.done());
     }
 }

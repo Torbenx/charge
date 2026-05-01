@@ -48,18 +48,25 @@ static std::string detailedMessage(const Error& error) {
     }
 }
 
-Error Error::make(SavedParserState preRecoveryState) {
+Error::Error(SavedParserState errorStateArg)
+    : errorState(std::move(errorStateArg)) {
+    const char* pos = errorState.sourcePosition;
+    errorToken = lexToken(pos);
+}
+
+static SavedParserState recoveryToErrorState(const SavedParserState& preRecoveryState) {
     SimpleParser parser;
     parser.restore(preRecoveryState);
     parser.parse(NoOutput(), 2);
     VERIFY(parser.error());
-    const char* pos = parser.sourcePosition();
-    LexerToken errorToken = lexToken(pos);
-    return {
-        .preRecoveryState = std::move(preRecoveryState),
-        .errorState = parser.save(),
-        .errorToken = errorToken
-    };
+    return parser.save();
+}
+
+RecoveredError::RecoveredError(SavedParserState preRecoveryState, RecoveryInstructions recovery, bool unanimousAndIsolated)
+    : Error(recoveryToErrorState(preRecoveryState))
+    , preRecoveryState(std::move(preRecoveryState))
+    , recovery(std::move(recovery))
+    , unanimousAndIsolated(unanimousAndIsolated) {
 }
 
 std::optional<Error> tryParse(sema::Context& context) {
@@ -69,7 +76,7 @@ std::optional<Error> tryParse(sema::Context& context) {
     if (parser.done())
         return std::nullopt;
     else
-        return Error::make(SimpleParser::saveStateOf(parser));
+        return Error(SimpleParser::saveStateOf(parser));
 }
 
 void parseOrThrow(sema::Context& context) {

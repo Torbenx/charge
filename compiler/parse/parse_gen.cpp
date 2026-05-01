@@ -376,8 +376,6 @@ std::string_view nameString(State state) {
         return "MemberAccess";
     case State::StaticAccess:
         return "StaticAccess";
-    case State::SingleOrCompoundStatement:
-        return "SingleOrCompoundStatement";
     case State::AfterStatement:
         return "AfterStatement";
     case State::Statement:
@@ -530,9 +528,6 @@ std::span<const LexerToken> possibleTokens(State state) {
     case State::StaticAccess: {
         static constexpr std::array r = { LexerToken::Identifier };
         return r;
-    }
-    case State::SingleOrCompoundStatement: {
-        return {};
     }
     case State::AfterStatement: {
         static constexpr std::array r = { LexerToken::Else };
@@ -772,10 +767,6 @@ std::span<const State> thenStates(State state) {
     }
     case State::StaticAccess: {
         static constexpr std::array r = { State::Error };
-        return r;
-    }
-    case State::SingleOrCompoundStatement: {
-        static constexpr std::array r = { State::Error, State::Expression, State::Statement };
         return r;
     }
     case State::AfterStatement: {

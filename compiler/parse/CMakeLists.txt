@@ -5,6 +5,7 @@ target_sources(compiler
     api.cpp
     api.h
     IdentifierTable.h
+    keyword_table.h
     parse.cpp
     Parser.cpp
     Parser.h

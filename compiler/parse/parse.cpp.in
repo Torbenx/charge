@@ -1,11 +1,14 @@
 #include <parse/Parser.h>
+#include <parse/keyword_table.h>
 #include <sema/Context.h>
 
+#include <bitset>
+#include <concepts>
 #include <utility>
 
 #ifdef __GNUC__
 #define LABEL_MAYBE_UNUSED [[maybe_unused]]
-#define NO_INLINE [[gnu::noinline]]
+#define NO_INLINE // [[gnu::noinline]]
 #else
 #define LABEL_MAYBE_UNUSED
 #define NO_INLINE
@@ -52,6 +55,11 @@ static bool isWordFirstCharacter(uint8_t c) {
         || c == '_' || c == '$' || c == '#';
 }
 
+template<std::same_as<LexerToken> T1>
+constexpr uint32_t packData1(TokenKind, T1) {
+    return 0;
+}
+
 static void setBackData1(sema::Context& context, auto data) {
     context.tokenBuffer.tokens.back().data1Bits = packData1(context.tokenBuffer.tokens.back().kind(), data);
 }
@@ -59,14 +67,14 @@ static void setBackData2(sema::Context& context, auto data) {
     context.tokenBuffer.tokens.back().data2Bits = packData2(context.tokenBuffer.tokens.back().kind(), data);
 }
 static void setBackKind(sema::Context& context, TokenKind newKind) {
-    VERIFY(lexerToken(context.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
+    // VERIFY(lexerToken(context.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
     context.tokenBuffer.tokens.back().setKind(newKind);
 }
 
 static void setBackData1(SimpleOutput&, auto) { }
 static void setBackData2(SimpleOutput&, auto) { }
 static void setBackKind(SimpleOutput& output, TokenKind newKind) {
-    VERIFY(lexerToken(output.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
+    // VERIFY(lexerToken(output.tokenBuffer.tokens.back().kind()) == lexerToken(newKind));
     output.tokenBuffer.tokens.back().setKind(newKind);
 }
 
@@ -117,11 +125,11 @@ NO_INLINE static Word* endCall(Word* position, sema::Context& output) {
     return position;
 }
 
-static Word* addCallArgument(Word* ptr, Word, SimpleOutput&) { return ptr; }
-static void updateCallArgument(Word*, Word, SimpleOutput&) { }
+static Word* addCallArgument(Word* ptr, LexerToken, SimpleOutput&) { return ptr; }
+static void updateCallArgument(Word*, LexerToken, SimpleOutput&) { }
 static Word* endCall(Word* ptr, SimpleOutput&) { return ptr; }
-static Word* addCallArgument(Word* ptr, Word, const NoOutput&) { return ptr; }
-static void updateCallArgument(Word*, Word, const NoOutput&) { }
+static Word* addCallArgument(Word* ptr, LexerToken, const NoOutput&) { return ptr; }
+static void updateCallArgument(Word*, LexerToken, const NoOutput&) { }
 static Word* endCall(Word* ptr, const NoOutput&) { return ptr; }
 
 static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
@@ -150,7 +158,7 @@ static void discardLastToken(SimpleOutput& output) {
 }
 
 static void emitToken(TokenKind, const char*, uint32_t, const NoOutput&) { }
-static void discardLastToken(const NoOutput&) {}
+static void discardLastToken(const NoOutput&) { }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, sema::Context& output) {
     uint32_t tokenIndex = output.tokenBuffer.tokens.size();
@@ -186,23 +194,72 @@ struct WordAndPosition {
         Word::iterateHash(hashState, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    auto hash = Word::finalizeHash(hashState);
+    auto hash = Word::finalizeHash(hashState, position - wordBegin);
     Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
-[[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, const NoOutput&) {
+struct WordMask {
+    int_t shiftBits;
+
+    constexpr int_t resultBits() const { return 32 - shiftBits; }
+    constexpr uint32_t mask(Word word) const { return word.toUint() >> shiftBits; }
+};
+constexpr WordMask keywordMask() {
+    std::vector<Word> keywords;
+    words.forEachWord([&](Word word, std::string_view) {
+        if (!isKeyword(word) && !isSpecialIdentifier(word))
+            return;
+        keywords.push_back(word);
+    });
+
+    static constexpr int_t MAX_BITS = 10;
+    for (int_t bits = 1; bits <= MAX_BITS; bits++) {
+        std::bitset<(size_t)1 << MAX_BITS> set;
+        int_t shiftBits = 32 - bits;
+        bool allUnique = true;
+        for (Word w : keywords) {
+            uint32_t index = w.toUint() >> shiftBits;
+            if (set.test(index)) {
+                allUnique = false;
+                break;
+            }
+            set.set(index);
+        }
+        if (allUnique)
+            return { shiftBits };
+    }
+    VERIFY_NOT_REACHED();
+}
+inline constexpr auto KEYWORD_MASK = keywordMask();
+constexpr uint32_t toSwitchValue(Word word) { return KEYWORD_MASK.mask(word); }
+template<std::same_as<Word> T>
+constexpr uint32_t toCaseValue(LexerToken, std::string_view str) {
+    Word word = words.find(str);
+    VERIFY(!word.empty());
+    return toSwitchValue(word);
+}
+
+struct TokenAndPosition {
+    const char* position;
+    LexerToken word;
+};
+[[nodiscard]] NO_INLINE static TokenAndPosition readWord(const char* position, const NoOutput&) {
     const char* wordBegin = position;
-    Word::HashState hashState;
     do {
-        Word::iterateHash(hashState, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    auto hash = Word::finalizeHash(hashState);
-    Word word = words.findWithHash(std::string_view(wordBegin, position), hash);
-    return { position, word.empty() ? generated_identifier : word };
+    const auto* entry = KeywordTable::get(wordBegin, position - wordBegin);
+    if (entry == nullptr)
+        return { position, LexerToken::Identifier };
+    return { position, entry->token };
 }
-[[nodiscard]] static WordAndPosition readWord(const char* position, SimpleOutput&) {
+[[nodiscard]] static TokenAndPosition readWord(const char* position, SimpleOutput&) {
     return readWord(position, NoOutput());
+}
+constexpr LexerToken toSwitchValue(LexerToken token) { return token; }
+template<std::same_as<LexerToken> T>
+constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
+    return token;
 }
 
 [[nodiscard]] static const char* skipWhitespace(const char* position) {
@@ -322,7 +379,7 @@ static void setGlobalKind(sema::Context& output, GlobalKind kind) {
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitDeclaration(Word, const char*, TokenHandle, SimpleOutput&) {
+static sema::DeclarationValue commitDeclaration(LexerToken, const char*, TokenHandle, SimpleOutput&) {
     return sema::INVALID_DECLARATION_VALUE;
 }
 template<DeclarationKind kind>
@@ -331,7 +388,7 @@ static sema::DeclarationValue commitImplDeclaration(const char*, TokenHandle, Si
 }
 
 template<DeclarationKind kind>
-static sema::DeclarationValue commitDeclaration(Word, const char*, TokenHandle, const NoOutput&) {
+static sema::DeclarationValue commitDeclaration(LexerToken, const char*, TokenHandle, const NoOutput&) {
     return sema::INVALID_DECLARATION_VALUE;
 }
 template<DeclarationKind kind>
@@ -347,7 +404,8 @@ static void setGlobalKind(const NoOutput&, GlobalKind) { }
 template<typename ParseOutput>
 LexerToken lexImpl(char const*& tokEnd, ParseOutput& output) {
     const char* tokBegin = tokEnd;
-    Word this_identifier;
+    using identifier_t = decltype(readWord(nullptr, output).word);
+    identifier_t this_identifier;
 
     // GENERATED LEXER CODE HERE
 
@@ -364,10 +422,13 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     Word* argumentPosition = inState.argumentPosition;
     TokenKind carriedEmitTokenKind = (TokenKind)0;
     uint32_t carriedEmitTokenData = 0;
-    Word this_identifier;
+    using identifier_t = decltype(readWord(nullptr, output).word);
+    identifier_t this_identifier;
     sema::DeclarationValue this_declaration = sema::INVALID_DECLARATION_VALUE;
     TokenHandle declarationBegin = inState.declarationBegin;
-    Word argumentName = inState.savedArgumentName;
+    identifier_t argumentName = {};
+    if constexpr (std::is_same_v<identifier_t, Word>)
+        argumentName = inState.savedArgumentName;
     int_t expectedParsedTokens = (int_t)inState.parsedTokens + tokenLimit;
 
     // GENERATED CODE HERE
@@ -391,13 +452,16 @@ exit:
     goto return_stmt;
 
 return_stmt:
+    Word argumentNameOut = {};
+    if constexpr (std::is_same_v<identifier_t, Word>)
+        argumentNameOut = argumentName;
     int_t actualParsedTokens = expectedParsedTokens - tokenLimit; // tokenLimit holds how many tokens remain to the limit
     return {
         returnStatus,
         parseState,
         (uint32_t)actualParsedTokens,
         declarationBegin,
-        argumentName,
+        argumentNameOut,
         tokEnd,
         scopePosition,
         argumentPosition

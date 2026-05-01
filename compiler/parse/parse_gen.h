@@ -152,10 +152,23 @@ enum class LexerToken : uint8_t {
     Identifier,
     Literal,
     EOS,
+
+    FirstKeyword = Assert,
+    LastKeyword = While,
+
+    FirstSpecialIdentifier = Enum,
+    LastSpecialIdentifier = Virtual,
+
     Invalid = 255
 };
 std::string_view nameString(LexerToken);
 std::string_view fixedSpelling(LexerToken);
+constexpr bool isKeyword(LexerToken token) {
+    return LexerToken::FirstKeyword <= token && token <= LexerToken::LastKeyword;
+}
+constexpr bool isSpecialIdentifier(LexerToken token) {
+    return LexerToken::FirstSpecialIdentifier <= token && token <= LexerToken::LastSpecialIdentifier;
+}
 
 enum class State : uint8_t {
     Start,
@@ -172,7 +185,6 @@ enum class State : uint8_t {
     FirstArgumentBrace,
     MemberAccess,
     StaticAccess,
-    SingleOrCompoundStatement,
     AfterStatement,
     Statement,
     LetStatement,

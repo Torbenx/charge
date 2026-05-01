@@ -5,6 +5,7 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse_gen.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse_gen.h"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/parse/keyword_table.gperf"
                    COMMAND ${Python3_EXECUTABLE}
                    ARGS "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.py"
                    DEPENDS parse/parse.txt parse/parse.py parse/parse.cpp.in)
