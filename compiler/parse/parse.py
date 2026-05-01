@@ -161,6 +161,10 @@ class ThenCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
 
+class DispatchCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+
 class EndCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
@@ -371,6 +375,12 @@ class State:
                 return c
         return None
 
+    def dispatchCase(self) -> DispatchCase | None:
+        for c in self.cases:
+            if type(c) is DispatchCase:
+                return c
+        return None
+
     def endCase(self) -> EndCase | None:
         for c in self.cases:
             if type(c) is EndCase:
@@ -434,7 +444,7 @@ class Parser:
             if self.lineLevel() != 0:
                 self.parseError("expected level 0")
             stateKind = self.parseWord()
-            if stateKind != "SwitchState" and stateKind != "LinearState":
+            if stateKind not in ["SwitchState", "LinearState"]:
                 self.parseError("invalid state")
             name = self.parseWord()
 
@@ -490,6 +500,10 @@ class Parser:
                 self.advanceLine()
                 instructions = self.parseInstructions()
                 cases.append(ThenCase(instructions))
+            elif caseKind == "dispatch":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(DispatchCase(instructions))
             elif caseKind == "end":
                 self.advanceLine()
                 instructions = self.parseInstructions()
@@ -716,7 +730,7 @@ def collectPossibleThenStatesFromInstructions(instructions, result):
     for inst in instructions:
         if type(inst) is IfScopeInstruction:
             collectPossibleThenStatesFromInstructions(inst.instructions, result)
-        if type(inst) is ThenInstruction:
+        if type(inst) is ThenInstruction or type(inst) is NextInstruction:
             if not inst.newState in result:
                 result.add(inst.newState)
                 collectPossibleThenStatesInto(findState(inst.newState), result)
@@ -724,8 +738,10 @@ def collectPossibleThenStatesFromInstructions(instructions, result):
 def collectPossibleThenStatesInto(state, result):
     if state.name == "error":
         return
-    if not state.thenCase() is None:
+    if state.thenCase():
         collectPossibleThenStatesFromInstructions(state.thenCase().instructions, result)
+    if state.dispatchCase():
+        collectPossibleThenStatesFromInstructions(state.dispatchCase().instructions, result)
     if not state.thenState in result:
         result.add(state.thenState)
         collectPossibleThenStatesInto(findState(state.thenState), result)
@@ -742,7 +758,7 @@ def collectPossibleCases(originalState):
     for stateName in statesToConsider:
         state = findState(stateName)
         for case in state.cases:
-            if type(case) is ThenCase or type(case) is EndCase:
+            if type(case) is ThenCase or type(case) is DispatchCase or type(case) is EndCase:
                 continue
             result.add(case.cppName())
     return result
@@ -754,26 +770,6 @@ def readWord():
         line("tokEnd = wordAndPos.position;")
         line("this_identifier = wordAndPos.word;")
     line("}")
-
-def collectKeywordCases(state):
-    result = {}
-    seenIdentifierState = None
-    s = state
-    while s.name != "error":
-        if not s.identifierCase() is None:
-            seenIdentifierState = s
-        for c in s.keywordCases():
-            if not c.keyword in result:
-                result[c.keyword] = c
-        for c in s.specialIdentifierCases():
-            if not c.identifier in result:
-                result[c.identifier] = c
-        if not s.thenCase() is None:
-            if not seenIdentifierState is None:
-                raise Exception(f"starting from {state.name} identifier case in {seenIdentifierState.name} may shadow keywords due to then case in {s.name}")
-            break
-        s = findState(s.thenState)
-    return result
 
 def generateWordCase(state):
     def caseLabel(keyword):
@@ -788,7 +784,8 @@ def generateWordCase(state):
         keywords.add(c.keyword)
     for c in state.specialIdentifierCases():
         specialIds.add(c.identifier)
-    if state.identifierCase():
+    performExaustiveMatch = state.identifierCase() is not None or True
+    if performExaustiveMatch:
         for thenName in collectPossibleThenStates(state):
             then = findState(thenName)
             for c in then.keywordCases():
@@ -806,7 +803,7 @@ def generateWordCase(state):
                 caseLabel(specialId)
                 recurse(state, lambda s: s.specialIdentifierCase(specialId), lambda c: generateCaseBody(c))
             labelLine("default:")
-            if state.identifierCase():
+            if performExaustiveMatch:
                 line("if (isKeyword(this_identifier)) {")
                 with indent():
                     line("goto error$as_then;")
@@ -814,8 +811,8 @@ def generateWordCase(state):
             line("break;")
         line("}")
     line("}")
-    if state.identifierCase():
-        generateCaseBody(state.identifierCase())
+    if performExaustiveMatch:
+        recurse(state, lambda s: s.identifierCase(), lambda c: generateCaseBody(c))
     else:
         recurse(state, lambda s: s if s != state and s.hasWordCase() else None, lambda s: line("goto " + s.name + "$word_case;"))
 
@@ -1136,6 +1133,12 @@ for state in nonErrorStates:
     if noEmitLabelUsed:
         labelLine(state.name + "$no_emit:")
     if noEmitLabelUsed or withEmitLabelUsed:
+        if state.dispatchCase():
+            assert not [o for o in state.origins if not type(o) is NextInstruction]
+            dispatchClosed = generateCaseBody(state.dispatchCase())
+            if dispatchClosed:
+                lineNoIndent()
+                continue
         rememberState(state)
         line("if (tokenLimit == 0)")
         with indent():
@@ -1357,7 +1360,7 @@ with indent():
         with indent():
             caseNames = []
             for case in state.cases:
-                if type(case) is ThenCase or type(case) is EndCase:
+                if type(case) is ThenCase or type(case) is DispatchCase or type(case) is EndCase:
                     continue
                 caseNames.append(case.cppName())
             if caseNames:

@@ -386,6 +386,8 @@ std::string_view nameString(State state) {
         return "VarStatement";
     case State::AfterReturn:
         return "AfterReturn";
+    case State::CheckElseBranch:
+        return "CheckElseBranch";
     case State::ElseBranch:
         return "ElseBranch";
     case State::AfterSimpleVariableDeclarationId:
@@ -530,8 +532,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return r;
     }
     case State::AfterStatement: {
-        static constexpr std::array r = { LexerToken::Else };
-        return r;
+        return {};
     }
     case State::Statement: {
         static constexpr std::array r = { LexerToken::LeftBrace, LexerToken::If, LexerToken::Let, LexerToken::Var, LexerToken::Return, LexerToken::Destroy, LexerToken::Discard, LexerToken::RightBrace };
@@ -547,6 +548,10 @@ std::span<const LexerToken> possibleTokens(State state) {
     }
     case State::AfterReturn: {
         static constexpr std::array r = { LexerToken::SemiColon };
+        return r;
+    }
+    case State::CheckElseBranch: {
+        static constexpr std::array r = { LexerToken::Else };
         return r;
     }
     case State::ElseBranch: {
@@ -770,7 +775,7 @@ std::span<const State> thenStates(State state) {
         return r;
     }
     case State::AfterStatement: {
-        static constexpr std::array r = { State::AfterDeclaration, State::EnumValueDeclaration, State::Error, State::Expression, State::MemberDeclaration, State::NamespaceDeclaration, State::NoDeclaration, State::Statement, State::TemplatedDeclaration };
+        static constexpr std::array r = { State::AfterDeclaration, State::CheckElseBranch, State::EnumValueDeclaration, State::Error, State::Expression, State::MemberDeclaration, State::NamespaceDeclaration, State::NoDeclaration, State::Statement, State::TemplatedDeclaration };
         return r;
     }
     case State::Statement: {
@@ -787,6 +792,10 @@ std::span<const State> thenStates(State state) {
     }
     case State::AfterReturn: {
         static constexpr std::array r = { State::Error, State::Expression };
+        return r;
+    }
+    case State::CheckElseBranch: {
+        static constexpr std::array r = { State::Error, State::Expression, State::Statement };
         return r;
     }
     case State::ElseBranch: {
@@ -842,7 +851,7 @@ std::span<const State> thenStates(State state) {
         return r;
     }
     case State::AfterImplExpression: {
-        static constexpr std::array r = { State::AfterEnumDeclarationId, State::AfterFunctionDeclarationId, State::AfterStructDeclarationId, State::Error };
+        static constexpr std::array r = { State::AfterEnumDeclarationId, State::AfterFunctionDeclarationId, State::AfterSimpleVariableDeclarationId, State::AfterStructDeclarationId, State::AfterVariableDeclarationId, State::Error };
         return r;
     }
     case State::ImplAccessExpression: {

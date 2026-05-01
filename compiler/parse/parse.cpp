@@ -282,7 +282,7 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
         position += 1;
     }
     return position;
-};
+}
 
 [[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
     position += 1;
@@ -905,7 +905,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
+[[gnu::always_inline]] Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;
@@ -961,6 +961,8 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
         goto var_statement$no_emit;
     case State::AfterReturn:
         goto after_return$no_emit;
+    case State::CheckElseBranch:
+        goto check_else_branch$no_emit;
     case State::ElseBranch:
         goto else_branch$no_emit;
     case State::AfterSimpleVariableDeclarationId:
@@ -1008,13 +1010,13 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     case State::AfterTemplate:
         goto after_template$no_emit;
     case State::AfterTemplateParameters:
-        VERIFY_NOT_REACHED();
+        goto after_template_parameters$no_emit;
     case State::FunctionDeclarationId:
         goto function_declaration_id$no_emit;
     case State::AfterFunctionDeclarationId:
         goto after_function_declaration_id$no_emit;
     case State::AfterFunctionParameters:
-        VERIFY_NOT_REACHED();
+        goto after_function_parameters$no_emit;
     case State::StructDeclarationId:
         goto struct_declaration_id$no_emit;
     case State::AfterStructDeclarationId:
@@ -1046,18 +1048,12 @@ Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, Pa
     }
     // LinearState start
 start$no_emit:
-    parseState = State::Start;
-    if (tokenLimit == 0)
-        goto reached_token_limit;
-    tokenLimit -= 1;
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     // pushScope ScopeKind::Start
     scopePosition = pushScope(scopePosition, ScopeKind::Start);
     // pushScope ScopeKind::Namespace
     scopePosition = pushScope(scopePosition, ScopeKind::Namespace);
-    // then namespace_declaration
-    goto namespace_declaration$as_then;
+    // next namespace_declaration
+    goto namespace_declaration$no_emit;
 
     // SwitchState expression
 expression$with_emit:
@@ -3229,7 +3225,22 @@ LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$word_case:
         case toCaseValue<identifier_t>(LexerToken::Else, "else"):
             // next comma_else
             goto comma_else$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::If, "if"):
+            // -> argument
+            // callArgument
+            argumentPosition = addCallArgument(argumentPosition, identifier_t(), output);
+            // emitToken TokenKind::CallArgument
+            emitToken(TokenKind::CallArgument, tokBegin, 0, output);
+            // -> check_designated_argument
+            // -> expression
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
@@ -3239,7 +3250,13 @@ LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$word_case:
     // emitToken TokenKind::CallArgument
     emitToken(TokenKind::CallArgument, tokBegin, 0, output);
     // -> check_designated_argument
-    goto check_designated_argument$word_case;
+    // argumentName = this_identifier
+    argumentName = this_identifier;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next maybe_designated_argument
+    goto maybe_designated_argument$with_emit;
 
     // LinearState comma_after_expression_in_parameters
 comma_after_expression_in_parameters$with_emit:
@@ -8145,114 +8162,6 @@ static_access$no_emit:
 after_statement$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_statement$no_emit:
-    parseState = State::AfterStatement;
-    if (tokenLimit == 0)
-        goto reached_token_limit;
-    tokenLimit -= 1;
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
-    if (isWordFirstCharacter(tokEnd[0])) {
-    LABEL_MAYBE_UNUSED after_statement$word_case_with_read:
-        {
-            auto wordAndPos = readWord(tokEnd, output);
-            tokEnd = wordAndPos.position;
-            this_identifier = wordAndPos.word;
-        }
-    LABEL_MAYBE_UNUSED after_statement$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
-            switch (toSwitchValue(this_identifier)) {
-            case toCaseValue<identifier_t>(LexerToken::Else, "else"):
-                // popScope ScopeKind::IfBranch
-                {
-                    auto result = popScope(scopePosition, ScopeKind::IfBranch);
-                    if (result == nullptr) {
-                        goto pop_scope_failed;
-                    }
-                    scopePosition = result;
-                }
-                // pushScope ScopeKind::ElseBranch
-                scopePosition = pushScope(scopePosition, ScopeKind::ElseBranch);
-                // next else_branch
-                goto else_branch$no_emit;
-            default:
-                break;
-            }
-        }
-        // ifScope ScopeKind::FunctionBody
-        if (scopePosition[0] == ScopeKind::FunctionBody) {
-            // popScope ScopeKind::FunctionBody
-            {
-                auto result = popScope(scopePosition, ScopeKind::FunctionBody);
-                if (result == nullptr) {
-                    goto pop_scope_failed;
-                }
-                scopePosition = result;
-            }
-            // then after_declaration
-            // endDeclaration
-            endDeclaration(output);
-            // ifScope ScopeKind::Struct
-            if (scopePosition[0] == ScopeKind::Struct) {
-                // then member_declaration
-                goto member_declaration$word_case;
-            }
-            // ifScope ScopeKind::Namespace
-            if (scopePosition[0] == ScopeKind::Namespace) {
-                // then namespace_declaration
-                goto namespace_declaration$word_case;
-            }
-            // ifScope ScopeKind::Enum
-            if (scopePosition[0] == ScopeKind::Enum) {
-                // then enum_value_declaration
-                goto enum_value_declaration$word_case;
-            }
-            // -> error
-            goto error$as_then;
-        }
-        // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
-        if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
-            // then after_declaration
-            // endDeclaration
-            endDeclaration(output);
-            // ifScope ScopeKind::Struct
-            if (scopePosition[0] == ScopeKind::Struct) {
-                // then member_declaration
-                goto member_declaration$word_case;
-            }
-            // ifScope ScopeKind::Namespace
-            if (scopePosition[0] == ScopeKind::Namespace) {
-                // then namespace_declaration
-                goto namespace_declaration$word_case;
-            }
-            // ifScope ScopeKind::Enum
-            if (scopePosition[0] == ScopeKind::Enum) {
-                // then enum_value_declaration
-                goto enum_value_declaration$word_case;
-            }
-            // -> error
-            goto error$as_then;
-        }
-        // ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
-        if (scopePosition[0] == ScopeKind::IfBranch || scopePosition[0] == ScopeKind::ElseBranch) {
-            // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch
-            {
-                auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch);
-                if (result == nullptr) {
-                    goto pop_scope_failed;
-                }
-                scopePosition = result;
-            }
-            // then statement
-            goto statement$word_case;
-        }
-        // ifScope ScopeKind::CompoundStmt
-        if (scopePosition[0] == ScopeKind::CompoundStmt) {
-            // then statement
-            goto statement$word_case;
-        }
-        // -> error
-        goto error$as_then;
-    }
     // ifScope ScopeKind::FunctionBody
     if (scopePosition[0] == ScopeKind::FunctionBody) {
         // popScope ScopeKind::FunctionBody
@@ -8263,32 +8172,51 @@ after_statement$no_emit:
             }
             scopePosition = result;
         }
-        // then after_declaration
-        goto after_declaration$as_then;
+        // next after_declaration
+        goto after_declaration$no_emit;
     }
     // ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
     if (scopePosition[0] == ScopeKind::Struct || scopePosition[0] == ScopeKind::Namespace || scopePosition[0] == ScopeKind::Enum) {
-        // then after_declaration
-        goto after_declaration$as_then;
+        // next after_declaration
+        goto after_declaration$no_emit;
     }
-    // ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
-    if (scopePosition[0] == ScopeKind::IfBranch || scopePosition[0] == ScopeKind::ElseBranch) {
-        // popScope ScopeKind::IfBranch, ScopeKind::ElseBranch
+    // ifScope ScopeKind::IfBranch
+    if (scopePosition[0] == ScopeKind::IfBranch) {
+        // popScope ScopeKind::IfBranch
         {
-            auto result = popScope(scopePosition, ScopeKind::IfBranch, ScopeKind::ElseBranch);
+            auto result = popScope(scopePosition, ScopeKind::IfBranch);
             if (result == nullptr) {
                 goto pop_scope_failed;
             }
             scopePosition = result;
         }
-        // then statement
-        goto statement$as_then;
+        // next check_else_branch
+        goto check_else_branch$no_emit;
+    }
+    // ifScope ScopeKind::ElseBranch
+    if (scopePosition[0] == ScopeKind::ElseBranch) {
+        // popScope ScopeKind::ElseBranch
+        {
+            auto result = popScope(scopePosition, ScopeKind::ElseBranch);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
+        // next statement
+        goto statement$no_emit;
     }
     // ifScope ScopeKind::CompoundStmt
     if (scopePosition[0] == ScopeKind::CompoundStmt) {
-        // then statement
-        goto statement$as_then;
+        // next statement
+        goto statement$no_emit;
     }
+    parseState = State::AfterStatement;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // then error
     goto error$as_then;
 
@@ -8938,13 +8866,20 @@ LABEL_MAYBE_UNUSED statement$word_case:
             // next var_statement
             goto var_statement$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
     // pushScope ScopeKind::LeftExpr
     scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
     // -> expression
-    goto expression$word_case;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next after_expression
+    goto after_expression$with_emit;
 
     // LinearState let_statement
 let_statement$no_emit:
@@ -9041,6 +8976,92 @@ after_return$no_emit:
     }
     // then expression
     goto expression$as_then;
+
+    // LinearState check_else_branch
+check_else_branch$no_emit:
+    parseState = State::CheckElseBranch;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED check_else_branch$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED check_else_branch$word_case:
+        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::Destroy, "destroy"):
+                // -> statement
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitToken TokenKind::DestroyStmt
+                carriedEmitTokenKind = TokenKind::DestroyStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Discard, "discard"):
+                // -> statement
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitToken TokenKind::DiscardStmt
+                carriedEmitTokenKind = TokenKind::DiscardStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Else, "else"):
+                // pushScope ScopeKind::ElseBranch
+                scopePosition = pushScope(scopePosition, ScopeKind::ElseBranch);
+                // next else_branch
+                goto else_branch$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // -> statement
+                // pushScope ScopeKind::LeftExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
+                // pushScope ScopeKind::IfExprOrStmt
+                scopePosition = pushScope(scopePosition, ScopeKind::IfExprOrStmt);
+                // next expression
+                goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Let, "let"):
+                // -> statement
+                // next let_statement
+                goto let_statement$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Return, "return"):
+                // -> statement
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitToken TokenKind::ReturnStmt
+                carriedEmitTokenKind = TokenKind::ReturnStmt;
+                carriedEmitTokenData = 0;
+                // next after_return
+                goto after_return$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Var, "var"):
+                // -> statement
+                // next var_statement
+                goto var_statement$no_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // -> statement
+        // pushScope ScopeKind::LeftExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // then statement
+    goto statement$as_then;
 
     // LinearState else_branch
 else_branch$no_emit:
@@ -9765,6 +9786,14 @@ LABEL_MAYBE_UNUSED variable_type$word_case:
             setBackData1(output, sema::VariableKind::ConstSharedReference);
             // next after_variable_const_modifier
             goto after_variable_const_modifier$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::If, "if"):
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression$no_emit;
         case toCaseValue<identifier_t>(LexerToken::Shared, "shared"):
             // updateData sema::VariableKind::SharedReference
             setBackData1(output, sema::VariableKind::SharedReference);
@@ -9776,13 +9805,20 @@ LABEL_MAYBE_UNUSED variable_type$word_case:
             // next after_variable_unique_modifier
             goto after_variable_unique_modifier$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // -> expression
-    goto expression$word_case;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next after_expression
+    goto after_expression$with_emit;
 
     // SwitchState after_variable_modifier
 after_variable_modifier$no_emit:
@@ -11045,7 +11081,19 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$word_case:
             setBackData1(output, sema::VariableKind::ConstUniqueReference);
             // next after_variable_modifier
             goto after_variable_modifier$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::If, "if"):
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
@@ -11053,7 +11101,11 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$word_case:
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // -> expression
-    goto expression$word_case;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next after_expression
+    goto after_expression$with_emit;
 
     // SwitchState after_variable_shared_modifier
 after_variable_shared_modifier$no_emit:
@@ -11716,7 +11768,19 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$word_case:
             setBackData1(output, sema::VariableKind::ConstSharedReference);
             // next after_variable_modifier
             goto after_variable_modifier$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::If, "if"):
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
@@ -11724,7 +11788,11 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$word_case:
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // -> expression
-    goto expression$word_case;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next after_expression
+    goto after_expression$with_emit;
 
     // SwitchState after_variable_const_modifier
 after_variable_const_modifier$no_emit:
@@ -12382,6 +12450,15 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$word_case_with_read:
 LABEL_MAYBE_UNUSED after_variable_const_modifier$word_case:
     if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
+        case toCaseValue<identifier_t>(LexerToken::If, "if"):
+            // -> after_variable_modifier
+            // pushScope ScopeKind::VariableType
+            scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+            // -> expression
+            // pushScope ScopeKind::IfExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+            // next expression
+            goto expression$no_emit;
         case toCaseValue<identifier_t>(LexerToken::Shared, "shared"):
             // next after_variable_modifier
             goto after_variable_modifier$no_emit;
@@ -12391,6 +12468,9 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$word_case:
             // next after_variable_modifier
             goto after_variable_modifier$no_emit;
         default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
             break;
         }
     }
@@ -12398,18 +12478,16 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$word_case:
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // -> expression
-    goto expression$word_case;
+    // emitToken TokenKind::IdentifierExpr
+    carriedEmitTokenKind = TokenKind::IdentifierExpr;
+    carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+    // next after_expression
+    goto after_expression$with_emit;
 
     // LinearState after_parameters
 after_parameters$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_parameters$no_emit:
-    parseState = State::AfterParameters;
-    if (tokenLimit == 0)
-        goto reached_token_limit;
-    tokenLimit -= 1;
-    tokEnd = inlineAdvancer(tokEnd, output);
-    tokBegin = tokEnd;
     // emitToken TokenKind::EmptyNode
     emitToken(TokenKind::EmptyNode, tokBegin, 0, output);
     // ifScope ScopeKind::FunctionParameters
@@ -12422,8 +12500,8 @@ after_parameters$no_emit:
             }
             scopePosition = result;
         }
-        // then after_function_parameters
-        goto after_function_parameters$as_then;
+        // next after_function_parameters
+        goto after_function_parameters$no_emit;
     }
     // ifScope ScopeKind::TemplateParameters
     if (scopePosition[0] == ScopeKind::TemplateParameters) {
@@ -12435,9 +12513,15 @@ after_parameters$no_emit:
             }
             scopePosition = result;
         }
-        // then after_template_parameters
-        goto after_template_parameters$as_then;
+        // next after_template_parameters
+        goto after_template_parameters$no_emit;
     }
+    parseState = State::AfterParameters;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // then error
     goto error$as_then;
 
@@ -12758,7 +12842,6 @@ namespace_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-namespace_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED namespace_declaration$word_case_with_read:
         {
@@ -12769,15 +12852,71 @@ namespace_declaration$as_then:
     LABEL_MAYBE_UNUSED namespace_declaration$word_case:
         if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::Static, "static"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // next after_static
+                goto after_static$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Enum, "enum"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // next enum_declaration_id
+                goto enum_declaration_id$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Fn, "fn"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // next function_declaration_id
+                goto function_declaration_id$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Incomplete, "incomplete"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // emitToken TokenKind::IncompleteAttribute
+                carriedEmitTokenKind = TokenKind::IncompleteAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Namespace, "namespace"):
                 // next namespace_declaration_id
                 goto namespace_declaration_id$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Struct, "struct"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // next struct_declaration_id
+                goto struct_declaration_id$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Template, "template"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // emitToken TokenKind::TemplateAttribute
+                carriedEmitTokenKind = TokenKind::TemplateAttribute;
+                carriedEmitTokenData = 0;
+                // next after_template
+                goto after_template$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Virtual, "virtual"):
+                // -> templated_declaration
+                // rememberDeclarationBegin
+                declarationBegin = output.tokenBuffer.currentToken();
+                // emitToken TokenKind::VirtualAttribute
+                carriedEmitTokenKind = TokenKind::VirtualAttribute;
+                carriedEmitTokenData = 0;
+                // next templated_declaration_with_attributes
+                goto templated_declaration_with_attributes$with_emit;
             default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
                 break;
             }
         }
         // -> templated_declaration
-        goto templated_declaration$word_case;
+        // -> no_declaration
+        // -> error
+        goto error$as_then;
     }
     // then templated_declaration
     goto templated_declaration$as_then;
@@ -12915,6 +13054,9 @@ templated_declaration$as_then:
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
                 break;
             }
         }
@@ -12977,6 +13119,9 @@ templated_declaration_with_attributes$as_then:
                 // next templated_declaration_with_attributes
                 goto templated_declaration_with_attributes$with_emit;
             default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
                 break;
             }
         }
@@ -13007,7 +13152,13 @@ after_template$no_emit:
     goto error$as_then;
 
     // LinearState after_template_parameters
-after_template_parameters$as_then:
+after_template_parameters$no_emit:
+    parseState = State::AfterTemplateParameters;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     // then templated_declaration_with_attributes
     goto templated_declaration_with_attributes$as_then;
 
@@ -13079,7 +13230,13 @@ after_function_declaration_id$as_then:
     goto error$as_then;
 
     // LinearState after_function_parameters
-after_function_parameters$as_then:
+after_function_parameters$no_emit:
+    parseState = State::AfterFunctionParameters;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -13212,7 +13369,6 @@ member_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-member_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED member_declaration$word_case_with_read:
         {
@@ -13400,7 +13556,6 @@ enum_value_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-enum_value_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED enum_value_declaration$word_case_with_read:
         {
@@ -13652,30 +13807,29 @@ static_open_variable_declaration$no_emit:
 after_declaration$with_emit:
     emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
 after_declaration$no_emit:
+    // endDeclaration
+    endDeclaration(output);
+    // ifScope ScopeKind::Struct
+    if (scopePosition[0] == ScopeKind::Struct) {
+        // next member_declaration
+        goto member_declaration$no_emit;
+    }
+    // ifScope ScopeKind::Namespace
+    if (scopePosition[0] == ScopeKind::Namespace) {
+        // next namespace_declaration
+        goto namespace_declaration$no_emit;
+    }
+    // ifScope ScopeKind::Enum
+    if (scopePosition[0] == ScopeKind::Enum) {
+        // next enum_value_declaration
+        goto enum_value_declaration$no_emit;
+    }
     parseState = State::AfterDeclaration;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-after_declaration$as_then:
-    // endDeclaration
-    endDeclaration(output);
-    // ifScope ScopeKind::Struct
-    if (scopePosition[0] == ScopeKind::Struct) {
-        // then member_declaration
-        goto member_declaration$as_then;
-    }
-    // ifScope ScopeKind::Namespace
-    if (scopePosition[0] == ScopeKind::Namespace) {
-        // then namespace_declaration
-        goto namespace_declaration$as_then;
-    }
-    // ifScope ScopeKind::Enum
-    if (scopePosition[0] == ScopeKind::Enum) {
-        // then enum_value_declaration
-        goto enum_value_declaration$as_then;
-    }
     // then error
     goto error$as_then;
 
@@ -13803,3 +13957,5 @@ SourceLocation Parser::location(sema::Context& context) const {
 }
 
 }
+
+#include "lexer_for_benchmark.cpp"

@@ -282,7 +282,7 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
         position += 1;
     }
     return position;
-};
+}
 
 [[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {
     position += 1;
@@ -414,7 +414,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
+[[gnu::always_inline]] Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;

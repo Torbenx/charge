@@ -190,6 +190,7 @@ enum class State : uint8_t {
     LetStatement,
     VarStatement,
     AfterReturn,
+    CheckElseBranch,
     ElseBranch,
     AfterSimpleVariableDeclarationId,
     AfterVariableDeclarationId,

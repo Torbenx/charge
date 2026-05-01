@@ -1,8 +1,9 @@
 
-LinearState start() then namespace_declaration
-    then
+LinearState start() then error
+    dispatch
         pushScope ScopeKind::Start
         pushScope ScopeKind::Namespace
+        next namespace_declaration
 
 # --- Expressions
 
@@ -355,21 +356,20 @@ LinearState static_access() then error
 # --- Statements
 
 LinearState after_statement() then error
-    keyword else
-        popScope ScopeKind::IfBranch
-        pushScope ScopeKind::ElseBranch
-        next else_branch
-    then
+    dispatch
         ifScope ScopeKind::FunctionBody
             popScope ScopeKind::FunctionBody
-            then after_declaration
+            next after_declaration
         ifScope ScopeKind::Struct, ScopeKind::Namespace, ScopeKind::Enum
-            then after_declaration
-        ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
-            popScope ScopeKind::IfBranch, ScopeKind::ElseBranch
-            then statement # TODO: This is not correct for nested ifs or outside a compound statement
+            next after_declaration
+        ifScope ScopeKind::IfBranch
+            popScope ScopeKind::IfBranch
+            next check_else_branch # TODO: This is not correct for nested ifs or outside a compound statement
+        ifScope ScopeKind::ElseBranch
+            popScope ScopeKind::ElseBranch
+            next statement         # TODO: This is not correct for nested ifs or outside a compound statement
         ifScope ScopeKind::CompoundStmt
-            then statement
+            next statement
 
 SwitchState statement() then expression
     punctuation {
@@ -420,6 +420,11 @@ LinearState after_return() then expression
         popScope ScopeKind::RightExpr
         updateKind TokenKind::EmptyReturnStmt
         next after_statement
+
+LinearState check_else_branch() then statement
+    keyword else
+        pushScope ScopeKind::ElseBranch
+        next else_branch
 
 LinearState else_branch() then error
     punctuation :
@@ -507,14 +512,14 @@ SwitchState after_variable_const_modifier() then after_variable_modifier
 # --- Parameters
 
 LinearState after_parameters() then error
-    then
+    dispatch
         emitToken TokenKind::EmptyNode
         ifScope ScopeKind::FunctionParameters
             popScope ScopeKind::FunctionParameters
-            then after_function_parameters
+            next after_function_parameters
         ifScope ScopeKind::TemplateParameters
             popScope ScopeKind::TemplateParameters
-            then after_template_parameters
+            next after_template_parameters
 
 LinearState first_parameter() then parameter
     punctuation )
@@ -773,11 +778,11 @@ LinearState static_open_variable_declaration() then error
         next after_simple_variable_declaration_id
 
 LinearState after_declaration() then error
-    then
+    dispatch
         endDeclaration
         ifScope ScopeKind::Struct
-            then member_declaration
+            next member_declaration
         ifScope ScopeKind::Namespace
-            then namespace_declaration
+            next namespace_declaration
         ifScope ScopeKind::Enum
-            then enum_value_declaration
+            next enum_value_declaration
