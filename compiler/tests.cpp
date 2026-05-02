@@ -717,7 +717,7 @@ TEST(Charge, TokenSpelling) {
 
 using Clock = std::chrono::high_resolution_clock;
 
-TEST(Charge, DISABLED_BenchmarkSema) {
+TEST(Charge, BenchmarkSema) {
     namespace fs = std::filesystem;
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
     ASSERT_TRUE(fs::is_regular_file(file));
@@ -733,7 +733,7 @@ TEST(Charge, DISABLED_BenchmarkSema) {
     }
 }
 
-TEST(Charge, DISABLED_BenchmarkSimple) {
+TEST(Charge, BenchmarkSimple) {
     namespace fs = std::filesystem;
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
     ASSERT_TRUE(fs::is_regular_file(file));
@@ -752,7 +752,7 @@ TEST(Charge, DISABLED_BenchmarkSimple) {
     }
 }
 
-TEST(Charge, DISABLED_BenchmarkNoOutput) {
+TEST(Charge, BenchmarkNoOutput) {
     namespace fs = std::filesystem;
     fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
     ASSERT_TRUE(fs::is_regular_file(file));
@@ -769,5 +769,25 @@ TEST(Charge, DISABLED_BenchmarkNoOutput) {
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced no tokens.\n";
         ASSERT_TRUE(parser.done());
+    }
+}
+
+namespace parse { const char* lexOld(const char* sourcePosition, std::vector<LexerToken>& output); }
+
+TEST(Charge, BenchmarkLexer) {
+    namespace fs = std::filesystem;
+    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < 10; i++) {
+        std::vector<parse::LexerToken> output;
+        auto start = Clock::now();
+        const char* finalPos = parse::lexOld(sourceBuffer.data(), output);
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.size() << " tokens.\n";
+        ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
