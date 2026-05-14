@@ -1,13 +1,9 @@
 
 add_subdirectory(backend)
+add_subdirectory(ir)
 
 target_sources(compiler
     PRIVATE
-    Expr.h
-    ExpressionStorage.cpp
-    ExpressionStorage.h
-    Problem.cpp
-    Problem.h
     z3.h
     z3tests.cpp
 )

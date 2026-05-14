@@ -20,6 +20,7 @@ target_sources(compiler
     Solver.cpp
     Solver.h
     SolverImpl.h
+    Types.h
     Value.cpp
     Value.h
 )

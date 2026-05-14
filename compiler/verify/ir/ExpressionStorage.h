@@ -1,8 +1,8 @@
 #pragma once
 
-#include <verify/Expr.h>
+#include <verify/ir/Expr.h>
 
-namespace verify::expr_detail {
+namespace verify::ir::expr_detail {
 
 using arr = std::array<uint32_t, 3>;
 struct D_unused;
@@ -37,7 +37,7 @@ struct data;
 #define COMPOUND_EXPR(name, sortType, args...)        \
     SPECIALIZE_BINFOS(name, args, D_unused, D_unused) \
     SPECIALIZE_DEPENDENT_BINFOS(name, args, _unused, _unused)
-#include <verify/expressions.inc>
+#include <verify/ir/expressions.inc>
 
 template<ExprKind kind, bool dependent, int_t idx>
 using data_t = typename data<kind, dependent, idx>::type;
@@ -66,7 +66,7 @@ struct base;
 #define COMPOUND_EXPR(name, sortType, args...) \
     EXPR_BASES(name, args)                     \
     EXPR_DEPENDENT_BASES(name, args)
-#include <verify/expressions.inc>
+#include <verify/ir/expressions.inc>
 
 template<ExprKind kind, bool dependent, int_t idx>
 struct basewrapper : base<kind, dependent, idx> {
@@ -85,7 +85,7 @@ struct compound : basewrapper<kind, dependent, 1>, basewrapper<kind, dependent, 
 
 }
 
-namespace verify {
+namespace verify::ir {
 
 struct ExpressionStorage {
 private:
@@ -97,7 +97,7 @@ public:
     sortType add##name(const expr_detail::compound<ExprKind::name, false>& val); \
     expr_detail::compound<ExprKind::name, true> get##name(D##sortType r) const;  \
     D##sortType add##name(const expr_detail::compound<ExprKind::name, true>& val);
-#include <verify/expressions.inc>
+#include <verify/ir/expressions.inc>
 
 private:
     std::vector<arr> expressions;

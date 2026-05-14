@@ -5,7 +5,7 @@
 #include <ranges>
 #include <utility>
 
-namespace verify {
+namespace verify::ir {
 
 enum class Sort : uint8_t {
     Bool,
@@ -17,7 +17,7 @@ enum class Sort : uint8_t {
 
 enum class ExprKind : uint8_t {
 #define EXPR(kind, ...) kind,
-#include <verify/expressions.inc>
+#include <verify/ir/expressions.inc>
 };
 
 struct Expr {
@@ -75,38 +75,46 @@ struct ExprList : ListBase { };
 struct FrameList : ListBase { };
 struct SortList : ListBase { };
 
-struct PhiParent {
-    uint32_t id;
+struct SmallHandle {
+    explicit SmallHandle(uint32_t id)
+        : m_id(id) { }
+    uint32_t id() const { return m_id; }
+    bool operator==(const SmallHandle&) const = default;
+
+private:
+    uint32_t m_id;
 };
 
-struct MemberLiteral {
-    uint32_t id;
-};
-
-struct PhiParentList : ListBase {
-    PhiParent at(int_t index) const {
-        VERIFY(index < size());
-        return { m_offset + (uint32_t)index };
+template<std::derived_from<SmallHandle> T>
+struct SmallHandleList : ListBase {
+    T at(int_t index) const {
+        VERIFY(index < ListBase::size());
+        return T { this->m_offset + (uint32_t)index };
+    }
+    bool contains(T t) const {
+        int_t diff = t.id() - this->m_offset;
+        return (size_t)diff < (size_t)this->m_size;
     }
 };
 
-struct MemberList : ListBase {
-    MemberLiteral at(int_t index) const {
-        VERIFY(index < size());
-        return { m_offset + (uint32_t)index };
-    }
+struct PhiParent : SmallHandle {
+    using SmallHandle::SmallHandle;
 };
+using PhiParentList = SmallHandleList<PhiParent>;
 
-struct DContext {
-    uint32_t id;
+struct MemberLiteral : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+using MemberLiteralList = SmallHandleList<MemberLiteral>;
 
-    bool operator==(const DContext&) const = default;
+struct DContext : SmallHandle {
+    using SmallHandle::SmallHandle;
 };
 
 template<typename T>
 struct D : T {
     DContext dctx;
-    D(T t, DContext dctx)
+    D(DContext dctx, T t)
         : T(t), dctx(dctx) { }
     operator D<Expr>() const
         requires std::is_base_of_v<Expr, T>
@@ -123,18 +131,33 @@ using DMember = D<Member>;
 using DMemoryDecl = D<MemoryDecl>;
 using DMemoryLoc = D<MemoryLoc>;
 
-struct TypeDecl {
-    explicit TypeDecl(uint32_t id)
-        : m_id(id) { }
-    uint32_t id() const { return m_id; }
-    uint32_t m_id;
+struct TypeDecl : SmallHandle {
+    using SmallHandle::SmallHandle;
 };
-using DTypeDecl = TypeDecl; // Type declaration cannot be dependent
+using DTypeDecl = TypeDecl; // Not dependent
 
-// Represents the code position just before execution of 'instruction'
-struct CodePos {
-    uint32_t instruction;
+struct TypeImpl : SmallHandle {
+    using SmallHandle::SmallHandle;
 };
-using DCodePos = CodePos; // Code positions cannot be dependent
+using DTypeImpl = TypeImpl; // Not dependent
+using TypeImplList = SmallHandleList<TypeImpl>;
+
+// Represents the code position just before the instruction 'id()'
+struct CodePos : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+using DCodePos = CodePos; // Not dependent
+using CodeBlock = SmallHandleList<CodePos>;
+
+struct FnDecl : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+using DFnDecl = FnDecl; // Not dependent
+
+struct FnImpl : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+using DFnImpl = FnImpl; // Not dependent
+using FnImplList = SmallHandleList<FnImpl>;
 
 }

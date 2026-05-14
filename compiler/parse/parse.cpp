@@ -13957,5 +13957,3 @@ SourceLocation Parser::location(sema::Context& context) const {
 }
 
 }
-
-#include "lexer_for_benchmark.cpp"

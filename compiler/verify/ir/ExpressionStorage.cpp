@@ -1,6 +1,6 @@
-#include <verify/ExpressionStorage.h>
+#include <verify/ir/ExpressionStorage.h>
 
-namespace verify::expr_detail {
+namespace verify::ir::expr_detail {
 
 template<int_t idx, ExprKind kind, bool dependent>
 auto get(const base<kind, dependent, idx>& b) {
@@ -16,7 +16,9 @@ template<ExprKind kind, int_t idx, size_t size>
 auto extractPSort(const base<kind, true, idx>& b, std::array<DContext, size> in) {
     using T = data_t<kind, true, idx>;
     if constexpr (HasDCtx<T>) {
-        std::array<DContext, size + 1> out;
+        std::array<uint32_t, size + 1> zeros;
+        zeros.fill(0);
+        auto out = std::bit_cast<std::array<DContext, size + 1>>(zeros);
         std::copy_n(in.begin(), size, out.begin());
         out[size] = std::bit_cast<T>(b).dctx;
         return out;
@@ -55,7 +57,7 @@ basewrapper<kind, true, idx> getWrapperWithDependence(const compound<kind, false
     if constexpr (std::is_void_v<T>) {
         return {};
     } else if constexpr (HasDCtx<DT>) {
-        return DT(get<idx>(in), dctx);
+        return DT(dctx, get<idx>(in));
     } else {
         return get<idx>(in);
     }
@@ -98,7 +100,7 @@ T fromArray(const arr& in) {
 
 }
 
-namespace verify {
+namespace verify::ir {
 
 using namespace expr_detail;
 
@@ -124,9 +126,9 @@ using namespace expr_detail;
         for (int_t i = 1; i < (int_t)ctxList.size(); i++)                                 \
             VERIFY(ctxList[i] == ctx);                                                    \
         sortType r = add##name(removeDependence(val));                                    \
-        return D<sortType> { r, ctx };                                                    \
+        return D<sortType> { ctx, r };                                                    \
     }
 
-#include <verify/expressions.inc>
+#include <verify/ir/expressions.inc>
 
 }
