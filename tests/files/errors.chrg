@@ -63,6 +63,24 @@ fn f1() -> return_type: { }
 
 }
 
+namespace StructImpl: {
+
+struct base: { x: X; }
+
+// expect-error StructImplToFewMembers
+struct impl base: { }
+
+// expect-error StructImplMemberIsBaseMismatch
+struct impl base: { base X; }
+
+// expect-error StructImplMemberNameMismatch
+struct impl base: { y: X; }
+
+// expect-error StructImplMemberTypeMismatch
+struct impl base: { x: Y; }
+
+}
+
 namespace GlobalImpl: {
 
 template(T: type) static var g1: type = T;

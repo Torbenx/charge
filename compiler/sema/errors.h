@@ -14,6 +14,11 @@ struct FunctionImplFunctionParameterGenericCategoryMismatch { };
 struct FunctionImplFunctionParameterTypeMismatch { };
 struct FunctionImplReturnTypeMismatch { };
 
+struct StructImplToFewMembers { };
+struct StructImplMemberIsBaseMismatch { };
+struct StructImplMemberNameMismatch { };
+struct StructImplMemberTypeMismatch { };
+
 struct GlobalImplTargetNotOpen { };
 struct GlobalImplTypeMismatch { };
 

@@ -109,7 +109,6 @@ Constant Generator::makeCopyOfOpenGlobal(Constant value) {
 }
 
 Type Generator::makeOpenReturnType(Constant value) {
-
     if (value.kind() == ConstantKind::Self)
         return Type(ConstantKind::OpenReturnType$Self, value.id());
     if (value.kind() == ConstantKind::Parameterize) {
@@ -408,23 +407,16 @@ std::vector<Expression> Generator::generateCallArguments(DeductionState& state, 
     return arguments;
 }
 
-MemberPointerData Generator::generateMemberPointer(Type originType, std::span<const uint32_t> memberIndices) {
-    MemberPointerData result;
-    result.m_data.push_back(originType.toUint());
-    for (uint32_t memberIndex : memberIndices)
-        extendMemberPointer(result, memberIndex);
-    return result;
-}
-
-void Generator::extendMemberPointer(MemberPointerData& pointer, uint32_t memberIndex) {
-    Type parentType = Type::fromUint(pointer.m_data.back());
-    pointer.m_data.push_back(memberIndex);
-
-    auto base = asFoldBase(parentType);
-    const auto& members = cast<StructProgram>(base.program)->members;
-    VERIFY(memberIndex < members.size());
-    Type memberType = verifyType(fold(base, members[memberIndex].type()));
-    pointer.m_data.push_back(memberType.toUint());
+MemberPointerData Generator::generateMemberPointer(Type containingType, std::span<const uint32_t> memberIndices) {
+    std::vector<MemberPointer::Element> result;
+    for (uint32_t memberIndex : memberIndices) {
+        result.push_back({ containingType, memberIndex });
+        auto base = asFoldBase(containingType);
+        const auto& members = cast<StructProgram>(base.program)->members;
+        VERIFY(memberIndex < members.size());
+        containingType = verifyType(fold(base, members[memberIndex].type()));
+    }
+    return { containingType, result };
 }
 
 Type Generator::memberType(Type originType, std::span<const uint32_t> memberIndices) {
@@ -953,12 +945,12 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
     case ConstantKind::MemberPointer: {
         auto pMember = state.program->getMemberPointer(pValue);
         auto aMember = program->getMemberPointer(aValue);
-        if (!staticMatch(state, pMember.originType(), aMember.originType()))
+        if (pMember.elements.size() != aMember.elements.size())
             return false;
-        if (pMember.linkCount() != aMember.linkCount())
-            return false;
-        for (int_t linkIndex = 0; linkIndex < aMember.linkCount(); linkIndex++) {
-            if (pMember[linkIndex].memberIndex != aMember[linkIndex].memberIndex)
+        for (int_t i = 0; i < (int_t)aMember.elements.size(); i++) {
+            if (!staticMatch(state, pMember.elements[i].structImpl, aMember.elements[i].structImpl))
+                return false;
+            if (pMember.elements[i].memberIndex != aMember.elements[i].memberIndex)
                 return false;
         }
         return true;
@@ -1026,11 +1018,9 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     }
     case ConstantKind::MemberPointer: {
         auto externMember = base.program->getMemberPointer(v);
-        MemberPointerData member;
-        member.m_data.push_back(fold(base, externMember.originType()).toUint());
-        for (auto link : externMember) {
-            member.m_data.push_back(link.memberIndex);
-            member.m_data.push_back(link.memberType.toUint());
+        MemberPointerData member { verifyType(fold(base, externMember.memberType)) };
+        for (auto elem : externMember.elements) {
+            member.elements.push_back({ .structImpl = fold(base, elem.structImpl), .memberIndex = elem.memberIndex });
         }
         return program->addMemberPointer(context, member);
     }
@@ -1084,9 +1074,25 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     g.visitDeclaration();
 }
 
+Type Generator::originType(Constant memberPointer) {
+    if (memberPointer.kind() == ConstantKind::MemberPointer) {
+        auto pointer = program->getMemberPointer(memberPointer);
+        if (pointer.elements.empty())
+            return pointer.memberType;
+        return verifyType(fold(pointer.elements.front().structImpl, builtins::self_constant));
+    }
+
+    auto type = typeOf(memberPointer);
+    VERIFY(type.kind() == ConstantKind::Parameterize);
+    auto para = program->getParameterize(type);
+    VERIFY(para.base == builtins::member_ptr_template.program());
+    VERIFY(para.arguments.size() == 2);
+    return verifyType(para.arguments[0]);
+}
+
 Type Generator::memberType(Constant memberPointer) {
     if (memberPointer.kind() == ConstantKind::MemberPointer)
-        return program->getMemberPointer(memberPointer).memberType();
+        return program->getMemberPointer(memberPointer).memberType;
 
     auto type = typeOf(memberPointer);
     VERIFY(type.kind() == ConstantKind::Parameterize);
@@ -1191,8 +1197,7 @@ Type Generator::typeOf(Constant value) {
         return verifyType(fold(base, base.program->getComputedConstant(rExpr.computation).type));
     }
     case ConstantKind::MemberPointer: {
-        MemberPointer pointer = program->getMemberPointer(value);
-        std::array<Constant, 2> arguments { pointer.originType(), pointer.memberType() };
+        std::array<Constant, 2> arguments { originType(value), memberType(value) };
         return verifyType(makeParameterize(builtins::member_ptr_template.program(), arguments));
     }
     case ConstantKind::EnumValue:

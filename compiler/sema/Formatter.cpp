@@ -91,14 +91,15 @@ void Formatter::formatConstant(Constant c) {
         return;
     case ConstantKind::MemberPointer: {
         MemberPointer pointer = program->getMemberPointer(c);
-        formatConstant(pointer.originType());
         if (pointer.isIdentity()) {
+            formatConstant(pointer.memberType);
             output += "::self";
         } else {
-            for (auto link : pointer) {
-                auto progHandle = baseProgram(link.parentType).value();
+            formatConstant(pointer.elements.front().structImpl);
+            for (auto elem : pointer.elements) {
+                auto progHandle = baseProgram(elem.structImpl).value();
                 auto* structProg = cast<StructProgram>(context.program(progHandle));
-                const auto& member = structProg->members[link.memberIndex];
+                const auto& member = structProg->members[elem.memberIndex];
                 output += "::";
                 if (member.isBase()) {
                     output += "base ";
@@ -226,11 +227,11 @@ bool Formatter::formatAsDeclaration(Constant c) {
         formatConstant(c);
         MemberPointer pointer = program->getMemberPointer(c);
         if (!pointer.isIdentity()) {
-            const auto lastLink = pointer[pointer.linkCount() - 1];
-            auto* structProg = cast<StructProgram>(context.program(baseProgram(lastLink.parentType).value()));
+            const auto lastLink = pointer.elements.back();
+            auto* structProg = cast<StructProgram>(context.program(baseProgram(lastLink.structImpl).value()));
             if (!structProg->members[lastLink.memberIndex].isBase()) {
                 output += ": ";
-                formatConstant(pointer.memberType());
+                formatConstant(pointer.memberType);
             }
         }
         return true;

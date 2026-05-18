@@ -59,82 +59,21 @@ private:
 };
 
 struct MemberPointer {
-    struct Link {
-        Type parentType;
+    struct Element {
+        Constant structImpl;
         uint32_t memberIndex;
-        Type memberType;
-    };
-    struct iterator {
-    private:
-        using it_t = std::span<const uint32_t>::const_iterator;
-        it_t m_it;
-
-    public:
-        using value_type = Link;
-        using difference_type = int_t;
-
-        iterator() = default;
-        explicit iterator(it_t it)
-            : m_it(it) { }
-        iterator(const iterator&) = default;
-        iterator(iterator&&) = default;
-        iterator& operator=(const iterator&) = default;
-        iterator& operator=(iterator&&) = default;
-
-        iterator& operator++() {
-            m_it += 2;
-            return *this;
-        }
-        iterator operator++(int) {
-            iterator copy = *this;
-            m_it += 2;
-            return copy;
-        }
-        iterator& operator--() {
-            m_it -= 2;
-            return *this;
-        }
-        iterator operator--(int) {
-            iterator copy = *this;
-            m_it -= 2;
-            return copy;
-        }
-        Link operator*() const { return { Type::fromUint(*std::prev(m_it)), *m_it, Type::fromUint(*std::next(m_it)) }; }
-
-        auto operator<=>(const iterator& other) const {
-            return m_it <=> other.m_it;
-        }
-        bool operator==(const iterator&) const = default;
     };
 
-    // The even elements 0, 2, ... are types, the odd elements 1, 3, ... are member indices.
-    // Should always have odd length.
-    std::span<const uint32_t> m_data;
+    bool isIdentity() const { return elements.empty(); }
 
-    Type memberType() const {
-        VERIFY(!m_data.empty());
-        return Type::fromUint(m_data.back());
-    }
-    Type originType() const {
-        VERIFY(!m_data.empty());
-        return Type::fromUint(m_data.front());
-    }
-    bool isIdentity() const {
-        VERIFY(!m_data.empty());
-        return m_data.size() == 1;
-    }
-    int_t linkCount() const { return m_data.size() / 2; }
-
-    iterator begin() const { return iterator(m_data.begin() + 1); }
-    iterator end() const { return iterator(m_data.end()); }
-
-    Link operator[](int_t index) const { return *iterator(m_data.begin() + 2 * index + 1); }
+    Type memberType;
+    std::span<const Element> elements;
 };
-static_assert(std::bidirectional_iterator<MemberPointer::iterator>);
 
 struct MemberPointerData {
-    std::vector<uint32_t> m_data;
-    operator MemberPointer() const { return { m_data }; }
+    Type memberType;
+    std::vector<MemberPointer::Element> elements;
+    operator MemberPointer() const { return { memberType, elements }; }
 };
 struct MemberPointerSet : FlatTreeSetDetail::Base<MemberPointerSet, MemberPointerData> {
     uint32_t get(Context& context, ProgramHandle prog, MemberPointer);
@@ -286,24 +225,24 @@ struct Program {
     Constant addMemberPointer(Context& context, MemberPointer pointer);
     Constant addEnumValue(Context& context, EnumValue value);
 
-    ComputedConstant getComputedConstant(ExternConstant value) {
+    ComputedConstant getComputedConstant(ExternConstant value) const {
         VERIFY(value.kind() == ConstantKind::Computed);
         const auto& c = computations[value.id()];
         return { c.value, c.type, c.body };
     }
-    Parameterize getParameterize(ExternConstant value) {
+    Parameterize getParameterize(ExternConstant value) const {
         VERIFY(value.kind() == ConstantKind::Parameterize);
         return Parameterize::fromData(parameterizes.at(value.id()));
     }
-    RemoteComputation getRemoteComputedConstant(ExternConstant value) {
+    RemoteComputation getRemoteComputedConstant(ExternConstant value) const {
         VERIFY(value.kind() == ConstantKind::RemoteComputed);
         return remoteComputations.at(value.id());
     }
-    MemberPointer getMemberPointer(ExternConstant value) {
+    MemberPointer getMemberPointer(ExternConstant value) const {
         VERIFY(value.kind() == ConstantKind::MemberPointer);
         return memberPointers.at(value.id());
     }
-    EnumValue getEnumValue(ExternConstant value) {
+    EnumValue getEnumValue(ExternConstant value) const {
         switch (value.kind()) {
 #define BUILTIN_ENUM(name, constant_kind) \
     case ConstantKind::constant_kind:     \
@@ -316,14 +255,14 @@ struct Program {
             VERIFY_NOT_REACHED();
         }
     }
-    std::strong_ordering compareParameterizes(Constant a, Constant b) {
+    std::strong_ordering compareParameterizes(Constant a, Constant b) const {
         VERIFY(a.kind() == ConstantKind::Parameterize);
         VERIFY(b.kind() == ConstantKind::Parameterize);
         return parameterizes.label(a.id()) <=> parameterizes.label(b.id());
     }
 
     Expression addMemberExpression(MemberExpression);
-    MemberExpression getMemberExpression(Expression e) {
+    MemberExpression getMemberExpression(Expression e) const {
         VERIFY(e.kind() == ExpressionKind::MemberExpression);
         return memberExpressions[e.id()];
     }
@@ -384,7 +323,7 @@ struct Program {
         return m_selfConstant.value();
     }
 
-    std::optional<ProgramHandle> baseProgram(ExternConstant value) {
+    std::optional<ProgramHandle> baseProgram(ExternConstant value) const {
         if (value.kind() == ConstantKind::Program)
             return value.program();
         if (value.kind() == ConstantKind::Parameterize)

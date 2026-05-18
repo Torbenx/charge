@@ -29,7 +29,7 @@ uint32_t MemberPointerSet::get(Context& context, ProgramHandle prog, MemberPoint
     return Base::get(context, prog, ptr);
 }
 uint32_t MemberPointerSet::makeNode(Context&, ProgramHandle, MemberPointer ptr, TreeLabel label) {
-    return Base::makeNode(label, MemberPointerData { std::vector<uint32_t> { ptr.m_data.begin(), ptr.m_data.end() } });
+    return Base::makeNode(label, MemberPointerData { ptr.memberType, { ptr.elements.begin(), ptr.elements.end() } });
 }
 std::strong_ordering MemberPointerSet::compare(Context& context, ProgramHandle program, MemberPointer a, MemberPointer b) {
     return Util(context, program).compare(a, b);

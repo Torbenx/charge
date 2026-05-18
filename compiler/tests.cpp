@@ -135,6 +135,7 @@ struct CheckExpr {
 
     virtual void check(Context& ctx, ProgramHandle progHandle, Constant value) const = 0;
 };
+
 struct ParameterizeExpr : CheckExpr {
     NestedName base;
     std::vector<std::unique_ptr<CheckExpr>> arguments;
@@ -153,6 +154,7 @@ struct ParameterizeExpr : CheckExpr {
             arguments[i]->check(ctx, progHandle, parameterize.arguments[i]);
     }
 };
+
 struct LiteralExpr : CheckExpr {
     NestedName literal;
 
@@ -164,6 +166,7 @@ struct LiteralExpr : CheckExpr {
         VERIFY(literal.match(ctx, ctx.translate(progHandle, DeclarationValue::fromConstant(value))));
     }
 };
+
 struct ParameterExpr : CheckExpr {
     int_t parameterIndex = 0;
     explicit ParameterExpr(int_t index)
@@ -174,6 +177,7 @@ struct ParameterExpr : CheckExpr {
         VERIFY((int_t)value.id() == parameterIndex);
     }
 };
+
 struct TemplateSignatureExpr : CheckExpr {
     std::unique_ptr<CheckExpr> signatureValue;
 
@@ -186,6 +190,7 @@ struct TemplateSignatureExpr : CheckExpr {
         signatureValue->check(ctx, progHandle, value.templateSignatureBaseConstant());
     }
 };
+
 struct FunctionSignatureExpr : CheckExpr {
     std::unique_ptr<CheckExpr> signatureValue;
 
@@ -198,6 +203,7 @@ struct FunctionSignatureExpr : CheckExpr {
         signatureValue->check(ctx, progHandle, value.functionSignatureBaseConstant());
     }
 };
+
 struct EnumValueExpr : CheckExpr {
     std::unique_ptr<CheckExpr> typeExpr;
     Word valueName;
@@ -234,6 +240,30 @@ struct OpenReturnTypeExpr : CheckExpr {
 
     void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
         fnExpr->check(ctx, progHandle, value.returnTypeOf());
+    }
+};
+
+struct MemberPointerExpr : CheckExpr {
+    struct Element {
+        std::unique_ptr<CheckExpr> structImpl;
+        Word memberName;
+    };
+
+    std::vector<Element> elements;
+
+    MemberPointerExpr(std::vector<Element> elements)
+        : elements(std::move(elements)) { }
+
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
+        VERIFY(value.kind() == ConstantKind::MemberPointer);
+        Program* prog = ctx.program(progHandle);
+        auto pointer = prog->getMemberPointer(value);
+        VERIFY(pointer.elements.size() == elements.size());
+        for (int_t i = 0; i < (int_t)elements.size(); i++) {
+            elements[i].structImpl->check(ctx, progHandle, pointer.elements[i].structImpl);
+            ProgramHandle structImplProg = ctx.translate(progHandle, prog->baseProgram(pointer.elements[i].structImpl).value());
+            VERIFY(cast<StructProgram>(ctx.program(structImplProg))->members[pointer.elements[i].memberIndex].name() == elements[i].memberName);
+        }
     }
 };
 
@@ -324,6 +354,22 @@ struct CheckExprParser {
                 auto fnExpr = parse();
                 consume(")");
                 return std::make_unique<OpenReturnTypeExpr>(std::move(fnExpr));
+            }
+            if (id == "memberPointer") {
+                consume("(");
+                std::vector<MemberPointerExpr::Element> elements;
+                for (;;) {
+                    auto implExpr = parse();
+                    consume("/");
+                    auto name = context.tokenBuffer.wordTable.get(readId());
+                    elements.push_back({ std::move(implExpr), name });
+                    if (buffer.starts_with(","))
+                        consume(",");
+                    else
+                        break;
+                }
+                consume(")");
+                return std::make_unique<MemberPointerExpr>(std::move(elements));
             }
         }
 

@@ -499,9 +499,23 @@ void Generator::visitStructDeclaration() {
 }
 
 void Generator::checkStructImplDeclaration(Constant implOf) {
-    auto base = asFoldBase(implOf);
-    VERIFY(base.program->kind() == ProgramKind::Struct);
-    // TODO: Do checks
+    DeductionState state(context, baseProgram(implOf).value(), 0);
+    auto* implProgram = cast<StructProgram>(program);
+    auto* baseProg = cast<StructProgram>(state.program);
+
+    if (implProgram->members.size() < baseProg->members.size())
+        error<errors::StructImplToFewMembers>();
+    for (int_t index = 0; index < (int_t)baseProg->members.size(); index++) {
+        const auto& baseMember = baseProg->members[index];
+        const auto& implMember = implProgram->members[index];
+        if (implMember.isBase() != baseMember.isBase())
+            error<errors::StructImplMemberIsBaseMismatch>();
+        if (implMember.name() != baseMember.name())
+            error<errors::StructImplMemberNameMismatch>();
+        if (!staticMatch(state, baseMember.type(), (Constant)implMember.type()))
+            error<errors::StructImplMemberTypeMismatch>();
+    }
+    // TODO: Do more checks
 
     context.completeSignatureCheck(programHandle, true, implOf);
 }

@@ -187,13 +187,14 @@ struct Dumper {
 
     std::string formatMember(ProgramHandle progHandle, MemberPointer pointer) {
         std::string result;
-        for (auto link : pointer) {
+        for (auto elem : pointer.elements) {
             if (!result.empty())
                 result += ".";
-            auto* parentProg = cast<StructProgram>(context.program(context.program(progHandle)->baseProgram(link.parentType).value()));
-            const auto& member = parentProg->members[link.memberIndex];
+            ProgramHandle parentProgHandle = context.program(progHandle)->baseProgram(elem.structImpl).value();
+            auto* parentProg = cast<StructProgram>(context.program(parentProgHandle));
+            const auto& member = parentProg->members[elem.memberIndex];
             if (member.isBase())
-                result += "(base " + formatConstant(progHandle, link.memberType) + ")";
+                result += "(base " + formatConstant(parentProgHandle, (Constant)member.type()) + ")";
             else
                 result += context.tokenBuffer.wordTable.view(member.name());
         }
@@ -302,7 +303,11 @@ void Dumper::dumpProgram(ProgramHandle progHandle) {
         }
         case ConstantKind::MemberPointer: {
             auto pointer = program->getMemberPointer(value);
-            line << formatConstant(pointer.originType()) << "." << formatMember(programHandle, pointer);
+            if (pointer.isIdentity()) {
+                line << formatConstant(pointer.memberType) << ".self";
+            } else {
+                line << formatConstant(pointer.elements.front().structImpl) << "." << formatMember(programHandle, pointer);
+            }
             break;
         }
         case ConstantKind::EnumValue: {

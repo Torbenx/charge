@@ -83,8 +83,8 @@ DeclarationInfo SemaUtil::extractDeclarationInfo(const parse::TokenInfo& token) 
         auto pointer = program->getMemberPointer(c);
         if (pointer.isIdentity())
             return {};
-        auto lastLink = pointer[pointer.linkCount() - 1];
-        return MemberDeclaration { baseProgram(lastLink.parentType).value(), lastLink.memberIndex };
+        auto lastElement = pointer.elements.back();
+        return MemberDeclaration { baseProgram(lastElement.structImpl).value(), lastElement.memberIndex };
     }
     default:
         return {};

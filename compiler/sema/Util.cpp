@@ -92,16 +92,16 @@ std::strong_ordering Util::compare(Parameterize a, Parameterize b) {
 }
 
 std::strong_ordering Util::compare(MemberPointer a, MemberPointer b) {
-    auto parentTypeOrdering = compare(a.originType(), b.originType());
-    if (parentTypeOrdering != 0)
-        return parentTypeOrdering;
+    auto lengthOrdering = a.elements.size() <=> b.elements.size();
+    if (lengthOrdering != 0)
+        return lengthOrdering;
 
-    auto linkCountOrdering = a.linkCount() <=> b.linkCount();
-    if (linkCountOrdering != 0)
-        return linkCountOrdering;
+    for (int_t i = 0; i < (int_t)a.elements.size(); i++) {
+        auto implOrdering = compare(a.elements[i].structImpl, b.elements[i].structImpl);
+        if (implOrdering != 0)
+            return implOrdering;
 
-    for (int_t linkIndex = 0; linkIndex < a.linkCount(); linkIndex++) {
-        auto memberIndexOrdering = a[linkIndex].memberIndex <=> b[linkIndex].memberIndex;
+        auto memberIndexOrdering = a.elements[i].memberIndex <=> b.elements[i].memberIndex;
         if (memberIndexOrdering != 0)
             return memberIndexOrdering;
     }

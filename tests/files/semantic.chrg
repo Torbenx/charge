@@ -152,6 +152,7 @@ struct WithMember: { member: X; }
 // expect-return-type X
 fn accessMember(w: shared WithMember) => w.member;
 // expect-type member_ptr{WithMember, X}
+// expect-value @memberPointer(WithMember/member)
 static memberPointer = WithMember::member;
 
 struct DerivedWithMember: { base WithMember; }
@@ -425,3 +426,21 @@ static examineLogicalNotOperator = !true;
 
 // expect-type bool
 static examineLogicalNotFun = !!true;
+
+struct openStruct: {
+    x: X;
+
+    fn getX(self: const) -> X: { }
+    fn getT(self: const) -> type: { }
+}
+
+struct impl openStruct: {
+    x: X;
+    t: type;
+
+    // expect-return-type X
+    fn getX(self: const) => .x;
+
+    //; TODO: expect-return-type type
+    fn getT(self: const) => .t;
+}

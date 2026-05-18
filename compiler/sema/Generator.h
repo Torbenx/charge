@@ -361,9 +361,9 @@ struct Generator : Util {
     Constant fold(FoldBase base, ExternConstant v);
     bool staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
 
+    Type originType(Constant memberPointer);
     Type memberType(Constant memberPointer);
     MemberPointerData generateMemberPointer(Type originType, std::span<const uint32_t> memberIndices);
-    void extendMemberPointer(MemberPointerData& memberPointer, uint32_t memberIndex);
     Type memberType(Type originType, std::span<const uint32_t> memberIndices);
 
     Type typeOf(Constant);
