@@ -51,7 +51,7 @@ struct refcell: {
             prove !.target.uniquely_referenced();
             prove .unique_refs.empty();
             prove .shared_refs.size() == .shared_refcount;
-            let activeBorrows = count_if(.shared_refs, fn(r: const) => !r.uniquely_borrowed());
+            let activeBorrows = count_if(.shared_refs, fn(r: const) => r.uniquely_borrowed());
             prove .target.shared_reference_count() <= activeBorrows;
         }
     }

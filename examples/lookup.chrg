@@ -7,7 +7,6 @@ fn foo(): {
     // - doesn't bind 'self' argument
 
     base::name; // static access expressions
-    ::name;     // equivalent to self_type::name
     // - performs look up only in 'base'
     // - looking up a member gives a member pointer
     // - doesn't bind 'self' argument
