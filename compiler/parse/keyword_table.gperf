@@ -2,6 +2,7 @@
 %{
 #pragma once
 #include <parse/parse_gen.h>
+#include <cstring>
 namespace parse {
 %}
 

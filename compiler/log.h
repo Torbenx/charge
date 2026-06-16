@@ -1,14 +1,14 @@
 #pragma once
 
-#include <fmt/format.h>
+#include <print>
 
 template<typename... Args>
-void println(fmt::format_string<Args...> str, Args&&... args) {
-    fmt::println(stderr, str, std::forward<Args>(args)...);
+void dbgln(std::format_string<Args...> str, Args&&... args) {
+    std::println(stderr, str, std::forward<Args>(args)...);
 }
 template<typename... Args>
-void print(fmt::format_string<Args...> str, Args&&... args) {
-    fmt::print(stderr, str, std::forward<Args>(args)...);
+void dbgprint(std::format_string<Args...> str, Args&&... args) {
+    std::print(stderr, str, std::forward<Args>(args)...);
 }
 
 [[noreturn]] void handle_failure();

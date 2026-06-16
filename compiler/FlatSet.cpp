@@ -10,7 +10,7 @@ namespace {
             s += ", ";
         s += std::to_string(i);
     }
-    println("{}", s);
+    dbgln("{}", s);
 }
 }
 

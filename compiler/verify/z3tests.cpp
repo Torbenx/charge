@@ -119,34 +119,34 @@ TEST(Verify, Z3member) {
     auto m3 = c.constant("m3", memberSort);
     auto m4 = c.constant("m4", memberSort);
 
-    println("reflexive:");
+    dbgln("reflexive:");
     s.push();
     s.add(!memberContains(m1, m1));
     EXPECT_EQ(s.check(), z3::unsat);
     s.pop();
 
-    println("antisymmetric:");
+    dbgln("antisymmetric:");
     s.push();
     s.add(memberContains(m1, m2) && memberContains(m2, m1));
     s.add(m1 != m2);
     EXPECT_EQ(s.check(), z3::unsat);
     s.pop();
 
-    println("transitive:");
+    dbgln("transitive:");
     s.push();
     s.add(memberContains(m1, m2) && memberContains(m2, m3));
     s.add(!memberContains(m1, m3));
     EXPECT_EQ(s.check(), z3::unsat);
     s.pop();
 
-    println("tree:");
+    dbgln("tree:");
     s.push();
     s.add(memberContains(m1, m3) && memberContains(m2, m3));
     s.add(!memberContains(m1, m2) && !memberContains(m2, m1));
     EXPECT_EQ(s.check(), z3::unsat);
     s.pop();
 
-    println("test:");
+    dbgln("test:");
     s.add(memberContains(memberCompose(memberCompose(m1, m2), m3), memberCompose(memberCompose(m1, m2), m4)));
     // s.add(!memberContains(memberCompose(m1, memberCompose(m2, m3)), memberCompose(m1, memberCompose(m2, m4))));
     auto q = c.constant("q", memberSort);

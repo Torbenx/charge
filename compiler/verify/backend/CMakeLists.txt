@@ -1,5 +1,5 @@
 
-target_sources(compiler
+target_sources(${PROJECT_NAME}
     PRIVATE
     Clauses.cpp
     Clauses.h

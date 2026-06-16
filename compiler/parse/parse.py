@@ -849,7 +849,7 @@ def recurse(state, check, func):
             return
         line("// -> " + state.thenState)
         if generateStateDebug:
-            line("println(\" -> " + state.thenState + "\");")
+            line("dbgln(\" -> " + state.thenState + "\");")
         state = findState(state.thenState)
 
 def generateState(state):
@@ -973,7 +973,7 @@ def generateLinearState(state):
     thenCase = state.thenCase()
     def generateThenJump(target):
         if generateStateDebug:
-            line("println(\" -> " + target + "\");")
+            line("dbgln(\" -> " + target + "\");")
         line("goto " + target + "$as_then;")
     thenCaseClosed = False
     if not thenCase is None:
@@ -1151,7 +1151,7 @@ for state in nonErrorStates:
         else:
             inlineTokenAdvancer()
         if generateStateDebug:
-            line("println(\"" + state.name + ": {}\", *tokEnd);")
+            line("dbgln(\"" + state.name + ": {}\", *tokEnd);")
     if [o for o in state.origins if not type(o) is NextInstruction]:
         labelLine(state.name + "$as_then:")
 
@@ -1407,6 +1407,7 @@ gperfFile = """
 %{
 #pragma once
 #include <parse/parse_gen.h>
+#include <cstring>
 namespace parse {
 %}
 

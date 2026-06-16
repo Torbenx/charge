@@ -107,9 +107,9 @@ void SatCore::decideTrue(Literal literal) {
 
 void SatCore::assignTrue(Literal trueLit, const Reason& reason) {
     /*if (reason.isDecision()) {
-        println("deciding {}", formatValue(trueLit));
+        dbgln("deciding {}", formatValue(trueLit));
     } else {
-        print("assigning {}, reason: ", formatValue(trueLit));
+        dbgprint("assigning {}, reason: ", formatValue(trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
     VERIFY(!backtracking);
@@ -141,7 +141,7 @@ bool SatCore::propagate() {
 
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
-        // println("propagating {}", literalTheory.formatValue(*this, literal));
+        // dbgln("propagating {}", literalTheory.formatValue(*this, literal));
         removeFirstPropagation();
         interface().propagateAssignment(literal);
         if (!conflicts.empty())
@@ -222,7 +222,7 @@ std::pair<std::vector<std::vector<BooleanValue>>, bool> SatCore::tryLearn(Confli
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 addToLearnClause(!entry.literal);
-                // print("learning: "); dumpClause(learnClause);
+                // dbgprint("learning: "); dumpClause(learnClause);
                 learnedClauses.push_back(learnClause);
             }
 
@@ -414,19 +414,19 @@ std::vector<Reason> SatCore::collectReasons(Literal trueLit) {
         TracePosition pos = info.firstReason.value();
         VERIFY(!at(pos).prevReason.has_value());
         VERIFY(at(pos).literal == lit);
-        // print("{} ({} .. {}): {}", formatValue(lit), info.firstReason->index, info.lastReason->index, pos.index);
+        // dbgprint("{} ({} .. {}): {}", formatValue(lit), info.firstReason->index, info.lastReason->index, pos.index);
 
         while (at(pos).nextReason.has_value()) {
             TracePosition newPos = at(pos).nextReason.value();
             VERIFY(newPos > pos);
-            // print(" -> {}", newPos.index);
+            // dbgprint(" -> {}", newPos.index);
             VERIFY(at(newPos).literal == lit);
             VERIFY(at(newPos).prevReason.has_value());
             VERIFY(at(newPos).prevReason.value() == pos);
             pos = newPos;
         }
         VERIFY(pos == info.lastReason.value());
-        // println("");
+        // dbgln("");
     };
     for (auto& theory : valueTheories) {
         auto* bTheory = dynamic_cast<BooleanTheory*>(theory.theory);

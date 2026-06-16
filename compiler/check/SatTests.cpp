@@ -245,7 +245,7 @@ struct TestValueTheory : ValueTheory {
         : ValueTheory(solver, TEST_VALUE_KIND), baseLabel(solver, ValueCategory::Load) { }
 
     uint64_t labelOfValue(Solver&, Value v) override { return baseLabel + v.valueId; }
-    std::string formatValue(Solver&, Value v) override { return fmt::format("v{}", v.valueId + 1); }
+    std::string formatValue(Solver&, Value v) override { return std::format("v{}", v.valueId + 1); }
 
     ValueBaseLabel baseLabel;
 };

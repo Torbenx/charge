@@ -83,7 +83,7 @@ static void setBackData2(const NoOutput&, auto) { }
 static void setBackKind(const NoOutput&, TokenKind) { }
 
 static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
-    // println("pushScope {}", nameString(kind));
+    // dbgln("pushScope {}", nameString(kind));
     auto index = ScopeBuffer::toIndex(position);
     VERIFY(index + 1 < (size_t)SCOPE_BUFFER_SIZE);
     position += 1;
@@ -93,7 +93,7 @@ static ScopeKind* pushScope(ScopeKind* position, ScopeKind kind) {
 
 template<typename... Args>
 static ScopeKind* popScope(ScopeKind* position, Args... kinds) {
-    // println("popScope {}", nameString(*position));
+    // dbgln("popScope {}", nameString(*position));
     static_assert((std::is_same_v<Args, ScopeKind> && ...));
     if (((position[0] != kinds) && ...))
         return nullptr;
@@ -350,7 +350,7 @@ static sema::ProgramKind programKindForDeclaration(DeclarationKind kind) {
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, sema::Context& output) {
-    // println("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
+    // dbgln("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
         return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
@@ -369,7 +369,7 @@ static sema::DeclarationValue commitImplDeclaration(const char* currentPosition,
 }
 
 static void endDeclaration(sema::Context& output) {
-    // println("endDeclaration on line {}", output.tokenBuffer.lines.size());
+    // dbgln("endDeclaration on line {}", output.tokenBuffer.lines.size());
     output.popScope(output.tokenBuffer.currentToken());
 }
 

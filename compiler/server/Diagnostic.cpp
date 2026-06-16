@@ -24,11 +24,11 @@ static std::string suggestion(const parse::RecoveredError& error) {
         return {};
 
     if (insertToken.has_value() && skipToken.has_value()) {
-        return fmt::format("Replace '{}' with '{}'?", parse::fixedSpelling(skipToken.value()), parse::fixedSpelling(insertToken.value()));
+        return std::format("Replace '{}' with '{}'?", parse::fixedSpelling(skipToken.value()), parse::fixedSpelling(insertToken.value()));
     } else if (insertToken.has_value()) {
-        return fmt::format("Missing '{}'?", parse::fixedSpelling(insertToken.value()));
+        return std::format("Missing '{}'?", parse::fixedSpelling(insertToken.value()));
     } else if (skipToken.has_value()) {
-        return fmt::format("Excess '{}'?", parse::fixedSpelling(skipToken.value()));
+        return std::format("Excess '{}'?", parse::fixedSpelling(skipToken.value()));
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -56,7 +56,7 @@ Diagnostic::Result Diagnostic::doRequest(Server& server, const Params& params) {
             .severity = lsp::DiagnosticSeverity::Error,
             .code = std::nullopt,
             .source = std::nullopt,
-            .message = sug.empty() ? "Syntax error" : fmt::format("Syntax error: {}", sug),
+            .message = sug.empty() ? "Syntax error" : std::format("Syntax error: {}", sug),
         });
     }
     return {

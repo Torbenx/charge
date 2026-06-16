@@ -115,7 +115,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
     HoverResult result;
     if (m_useMarkdown) {
         result.contents.kind = lsp::MarkupKind::Markdown;
-        result.contents.value = fmt::format("```charge\n{}\n```", formatter.output);
+        result.contents.value = std::format("```charge\n{}\n```", formatter.output);
     } else {
         result.contents.kind = lsp::MarkupKind::PlainText;
         result.contents.value = std::move(formatter.output);

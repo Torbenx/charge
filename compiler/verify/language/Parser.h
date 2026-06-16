@@ -8,7 +8,9 @@
 namespace verify::language {
 
 inline constexpr ConstWordStringTable words {
-    "fn"
+    "fn",
+    "active",
+    "from"
 };
 
 struct ParserException : std::exception {

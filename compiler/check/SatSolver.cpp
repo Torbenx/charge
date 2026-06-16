@@ -260,7 +260,7 @@ void Solver::Clauses::propagateAssignment(Solver& solver, BooleanValue literal) 
         int popcnt = std::popcount(clauseMask);
 
         // solver.dumpClause(solver.clauses[inst.clauseIndex]);
-        // println("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
+        // dbgln("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
 
         // VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
         clauseMask &= ~literalMask(inst.literalIndex);
@@ -602,8 +602,8 @@ void Solver::addClause(std::vector<Literal> clause) {
     // -> extraClauses >= floor( (clause.size - MAX_CLAUSE_SIZE + MAX_CLAUSE_SIZE - 3) / (MAX_CLAUSE_SIZE - 2)
     int_t extraClauses = ((int_t)clause.size() - 3) / (Clauses::MAX_CLAUSE_SIZE - 2);
 
-    // println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
-    // print("clause: "); dumpClause(clause);
+    // dbgln("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
+    // dbgprint("clause: "); dumpClause(clause);
 
     int_t takenCount = 0;
     auto take = [&](std::vector<Literal>& into, int_t n) {
@@ -625,12 +625,12 @@ void Solver::addClause(std::vector<Literal> clause) {
         extraClause.push_back(negLit);
         take(extraClause, Clauses::MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
-        // print("extra: "); dumpClause(extraClause);
+        // dbgprint("extra: "); dumpClause(extraClause);
         m_clauses.addClause(*this, std::move(extraClause));
     }
 
     VERIFY(primaryClause.size() == Clauses::MAX_CLAUSE_SIZE);
-    // print("primary: "); dumpClause(primaryClause);
+    // dbgprint("primary: "); dumpClause(primaryClause);
     m_clauses.addClause(*this, std::move(primaryClause));
 
     VERIFY(takenCount == (int_t)clause.size());
@@ -647,9 +647,9 @@ void Solver::decideTrue(Literal literal) {
 
 void Solver::assignTrue(Literal trueLit, Reason reason) {
     /*if (reason.isDecision()) {
-        println("deciding {}", formatValue(trueLit));
+        dbgln("deciding {}", formatValue(trueLit));
     } else {
-        print("assigning {}, reason: ", formatValue(trueLit));
+        dbgprint("assigning {}, reason: ", formatValue(trueLit));
         dumpClause(theoryFor(reason).reasonToClause(*this, reason).clause);
     }*/
 
@@ -676,7 +676,7 @@ bool Solver::propagate() {
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
         auto& literalTheory = theoryFor(literal);
-        // println("propagating {}", literalTheory.formatValue(*this, literal));
+        // dbgln("propagating {}", literalTheory.formatValue(*this, literal));
         removeFirstPropagation();
 
         literalTheory.propagateAssignment(*this, literal);
@@ -693,8 +693,8 @@ void Solver::dumpClause(int_t clauseIndex) {
 }
 void Solver::dumpClause(std::span<const Literal> clause) {
     for (auto lit : clause)
-        print("{} ", formatValue(lit));
-    println("");
+        dbgprint("{} ", formatValue(lit));
+    dbgln("");
 }
 
 bool Solver::tryLearn(Conflict conflict) {
@@ -771,7 +771,7 @@ bool Solver::tryLearn(Conflict conflict) {
             // Add the new clause but only if it doesn't exists jet
             if (!seenSinglePropagatingReason) {
                 newClause.push_back(negate(entry.literal));
-                // print("learning: "); dumpClause(newClause);
+                // dbgprint("learning: "); dumpClause(newClause);
                 addClause(std::move(newClause));
                 VERIFY(conflicts.empty());
             }
@@ -960,19 +960,19 @@ void Solver::checkInvariances() {
         TracePosition pos = info.firstReason.value();
         VERIFY(!at(pos).prevReason.has_value());
         VERIFY(at(pos).literal == lit);
-        // print("{} ({} .. {}): {}", formatValue(lit), info.firstReason->index, info.lastReason->index, pos.index);
+        // dbgprint("{} ({} .. {}): {}", formatValue(lit), info.firstReason->index, info.lastReason->index, pos.index);
 
         while (at(pos).nextReason.has_value()) {
             TracePosition newPos = at(pos).nextReason.value();
             VERIFY(newPos > pos);
-            // print(" -> {}", newPos.index);
+            // dbgprint(" -> {}", newPos.index);
             VERIFY(at(newPos).literal == lit);
             VERIFY(at(newPos).prevReason.has_value());
             VERIFY(at(newPos).prevReason.value() == pos);
             pos = newPos;
         }
         VERIFY(pos == info.lastReason.value());
-        // println("");
+        // dbgln("");
     };
     for (auto& theory : valueTheories) {
         auto* bTheory = dynamic_cast<BooleanTheory*>(theory.theory);

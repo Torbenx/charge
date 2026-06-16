@@ -224,10 +224,10 @@ struct RecoveryState {
         uint32_t idx = allNodes.size();
         ErrorInfo info(idx, child);
         allNodes.emplace_back(std::move(child));
-        // print("inserting (adv={}, mod={}) into", info.totalAdvancedTokens, info.modificationCost);
+        // dbgprint("inserting (adv={}, mod={}) into", info.totalAdvancedTokens, info.modificationCost);
         // for (auto i : bestErrors)
-        //     print(" (adv={}, mod={})", i.totalAdvancedTokens, i.modificationCost);
-        // println("");
+        //     dbgprint(" (adv={}, mod={})", i.totalAdvancedTokens, i.modificationCost);
+        // dbgln("");
         auto lbIt = std::lower_bound(bestErrors.begin(), bestErrors.end(), info, CompareByTotalAdvance());
         if (lbIt == bestErrors.end()) {
             if (bestErrors.empty()) {
@@ -303,12 +303,12 @@ struct RecoveryState {
                 parser.restore(allNodes[parentIdx].preNextRecoveryState);
 
                 // if (c.isInsert())
-                //     println("Inserting '{}' at \"{}\"", exampleString(c.insert()), allNodes[parentIdx].preNextRecoveryState.sourcePosition);
+                //     dbgln("Inserting '{}' at \"{}\"", exampleString(c.insert()), allNodes[parentIdx].preNextRecoveryState.sourcePosition);
                 // else
-                //     println("Skipping 1 at \"{}\"", allNodes[parentIdx].preNextRecoveryState.sourcePosition);
+                //     dbgln("Skipping 1 at \"{}\"", allNodes[parentIdx].preNextRecoveryState.sourcePosition);
                 if (parser.apply(NoOutput(), c) != ReturnStatus::Ready) {
                     // if (c.isInsert())
-                    //     println("Inserting '{}' failed: {}", exampleString(c.insert()), formatInternalErrorMessage({ parser.save(), parser.skipToken() }));
+                    //     dbgln("Inserting '{}' failed: {}", exampleString(c.insert()), formatInternalErrorMessage({ parser.save(), parser.skipToken() }));
                     continue;
                 }
                 int_t prevParsedTokens = parser.parsedTokens();

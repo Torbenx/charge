@@ -8,7 +8,7 @@ namespace server::test {
 struct ServerWrapper {
 
     void sendMessage(std::string_view msg) {
-        auto header = fmt::format("Content-Length: {}\r\n\r\n", msg.size());
+        auto header = std::format("Content-Length: {}\r\n\r\n", msg.size());
         for (char c : header)
             server.receiverChacacter(c);
         for (char c : msg)

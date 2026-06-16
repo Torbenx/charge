@@ -6,12 +6,12 @@ namespace check {
 
 std::string EqualityTheory::formatPositiveLiteral(Solver& solver, int_t varId) {
     auto eq = equalityLink(varId);
-    return fmt::format("({} == {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
+    return std::format("({} == {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
 }
 
 std::string EqualityTheory::formatNegativeLiteral(Solver& solver, int_t varId) {
     auto eq = equalityLink(varId);
-    return fmt::format("({} != {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
+    return std::format("({} != {})", solver.formatValue(eq.source), solver.formatValue(eq.target));
 }
 
 void EqualityTheory::collectVariableInactiveReasons(Solver& solver, int_t varId, std::vector<BooleanValue>& clause) {

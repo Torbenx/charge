@@ -4,7 +4,7 @@
 
 namespace allocdetail {
 
-static constexpr size_t COMMIT_GRANULARITY = 8 * 4096;
+inline constexpr size_t COMMIT_GRANULARITY = 8 * 4096;
 void* reserveMemory(int_t capacityInBytes);
 void commitMemory(void*);
 void releaseMemory(void* base, int_t capacityInBytes);

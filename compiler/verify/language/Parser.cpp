@@ -260,7 +260,7 @@ struct Parser {
             s.advance();
             if (s.tokKind() != TokenKind::GlobalName)
                 s.error("Expected global name after 'fn'");
-            FnBuilder fn(db);
+            // FnBuilder fn(db);
             Word fnName = s.tok().word();
             s.advance();
             int_t parameterCount = 0;
@@ -298,8 +298,8 @@ struct Parser {
             case TokenKind::EndScope:
                 return;
             case TokenKind::ContinueScope:
-                if (!s.tok().word().empty())
-                    labels.insert(s.tok().word(), );
+                // TODO if (!s.tok().word().empty())
+                //     labels.insert(s.tok().word(), );
                 break;
             case TokenKind::Identifier:
                 break;

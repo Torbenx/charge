@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 
-target_sources(compiler
+target_sources(${PROJECT_NAME}
     PRIVATE
     BooleanVariables.h
     CodeBlockTheory.h

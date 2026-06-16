@@ -27,7 +27,7 @@ void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
         int popcnt = std::popcount(clauseMask);
 
         // solver.dumpClause(solver.clauses[inst.clauseIndex]);
-        // println("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
+        // dbgln("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
 
         // VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
         clauseMask &= ~literalMask(inst.literalIndex);
@@ -70,8 +70,8 @@ void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
     // -> extraClauses >= floor( (clause.size - MAX_CLAUSE_SIZE + MAX_CLAUSE_SIZE - 3) / (MAX_CLAUSE_SIZE - 2)
     int_t extraClauses = ((int_t)clause.size() - 3) / (MAX_CLAUSE_SIZE - 2);
 
-    // println("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
-    // print("clause: "); dumpClause(clause);
+    // dbgln("packing {} literals into {} clauses", clause.size(), extraClauses + 1);
+    // dbgprint("clause: "); dumpClause(clause);
 
     int_t takenCount = 0;
     auto take = [&](std::vector<BooleanValue>& into, int_t n) {
@@ -93,12 +93,12 @@ void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
         extraClause.push_back(!glueLit);
         take(extraClause, MAX_CLAUSE_SIZE - 1);
         VERIFY(extraClause.size() >= 3);
-        // print("extra: "); dumpClause(extraClause);
+        // dbgprint("extra: "); dumpClause(extraClause);
         addClauseInternal(solver, std::move(extraClause));
     }
 
     VERIFY(primaryClause.size() == MAX_CLAUSE_SIZE);
-    // print("primary: "); dumpClause(primaryClause);
+    // dbgprint("primary: "); dumpClause(primaryClause);
     addClauseInternal(solver, std::move(primaryClause));
 
     VERIFY(takenCount == (int_t)clause.size());

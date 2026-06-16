@@ -14,6 +14,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include <memory>
 
 using int_t = std::ptrdiff_t;
 template<int_t... Is>

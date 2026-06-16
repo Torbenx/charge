@@ -2,6 +2,8 @@
 
 #include <server/json.h>
 
+#include <cmath>
+
 namespace json::object_detail {
 
 template<typename T, int_t I>

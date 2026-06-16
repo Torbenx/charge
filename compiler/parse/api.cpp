@@ -35,11 +35,11 @@ static std::string detailedMessage(const Error& error) {
         tokenDesc = nameString(error.errorToken);
     switch (error.errorState.status) {
     case ReturnStatus::UnhandledCase:
-        return fmt::format("Invalid token '{}' for state '{}'",
+        return std::format("Invalid token '{}' for state '{}'",
             tokenDesc, nameString(error.errorState.state));
         break;
     case ReturnStatus::ScopeError:
-        return fmt::format("Invalid scope '{}' while handling token '{}' in state '{}'",
+        return std::format("Invalid scope '{}' while handling token '{}' in state '{}'",
             nameString(error.errorState.scopeBuffer.back()),
             tokenDesc, nameString(error.errorState.state));
         break;
@@ -113,13 +113,13 @@ std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
 
 std::string formatInternalErrorMessage(const Error& error, sema::Context& context) {
     SourceLocation location = context.tokenBuffer.findSourceLocation(error.errorState.sourcePosition);
-    return fmt::format("Parse error on line {}: {} at \"{}\"",
+    return std::format("Parse error on line {}: {} at \"{}\"",
         location.lineNumber(), detailedMessage(error),
         findSourceExcerpt(error.errorState.sourcePosition));
 }
 
 std::string formatInternalErrorMessage(const Error& error) {
-    return fmt::format("Parse error: {} at \"{}\"",
+    return std::format("Parse error: {} at \"{}\"",
         detailedMessage(error), findSourceExcerpt(error.errorState.sourcePosition));
 }
 

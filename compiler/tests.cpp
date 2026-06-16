@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
         while (!s.shouldExit()) {
             auto val = std::cin.get();
             if (std::cin.fail()) {
-                println("Reading stdin failed");
+                dbgln("Reading stdin failed");
                 break;
             }
             s.receiverChacacter(val);
@@ -448,7 +448,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     }
 
     void visitToken(parse::TokenInfo tok) {
-        // println("L{}: {}", tok.lineNumber(), nameString(tok.kind()));
+        // dbgln("L{}: {}", tok.lineNumber(), nameString(tok.kind()));
 
         if (commandQueue.empty())
             return;
@@ -623,7 +623,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
             return;
         }
 
-        // println("-------------------------------");
+        // dbgln("-------------------------------");
         // program->dump(context);
 
         if (semanticError.has_value()) {
@@ -652,12 +652,12 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
 
     Command popCommand(Word cause) {
         if (commandQueue.empty()) {
-            println("got error '{}' without pending command", wordTable.view(cause));
+            dbgln("got error '{}' without pending command", wordTable.view(cause));
             VERIFY_NOT_REACHED();
         }
         Command cmd = commandQueue.pop();
         if (cmd.command != cause) {
-            println("got error '{}' but pending command is '{}'", wordTable.view(cause), wordTable.view(cmd.command));
+            dbgln("got error '{}' but pending command is '{}'", wordTable.view(cause), wordTable.view(cmd.command));
             VERIFY_NOT_REACHED();
         }
         return cmd;
@@ -701,7 +701,7 @@ TEST(Charge, Files) {
         if (entry.path().extension().string() != ".chrg")
             continue;
 
-        println("File: {}", entry.path().filename().string());
+        dbgln("File: {}", entry.path().filename().string());
         auto sourceBuffer = server::readFile(entry.path());
 
         TestInstrumenter test(dependencies, sourceBuffer);

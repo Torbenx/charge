@@ -67,16 +67,16 @@ struct Server {
     lsp::Position toLSP(sema::Context&, SourceLocation);
 
     template<typename... Args>
-    void error(fmt::format_string<Args...> fmtstr, Args&&... args) {
-        std::cerr << "Error: " << fmt::format(fmtstr, std::forward<Args>(args)...) << '\n';
+    void error(std::format_string<Args...> fmtstr, Args&&... args) {
+        std::cerr << "Error: " << std::format(fmtstr, std::forward<Args>(args)...) << '\n';
     }
     template<typename... Args>
-    void fatal(fmt::format_string<Args...> fmtstr, Args&&... args) {
-        std::cerr << "Fatal: " << fmt::format(fmtstr, std::forward<Args>(args)...) << '\n';
+    void fatal(std::format_string<Args...> fmtstr, Args&&... args) {
+        std::cerr << "Fatal: " << std::format(fmtstr, std::forward<Args>(args)...) << '\n';
     }
     template<typename... Args>
-    void info(fmt::format_string<Args...> fmtstr, Args&&... args) {
-        std::cerr << "Info: " << fmt::format(fmtstr, std::forward<Args>(args)...) << '\n';
+    void info(std::format_string<Args...> fmtstr, Args&&... args) {
+        std::cerr << "Info: " << std::format(fmtstr, std::forward<Args>(args)...) << '\n';
     }
 
     struct RequestInfo {

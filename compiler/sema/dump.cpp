@@ -327,7 +327,7 @@ void Dumper::dumpProgram(ProgramHandle progHandle) {
 void Program::dump(Context& context) {
     Dumper dumper { context };
     dumper.dumpProgram(context.ownProgramHandle(this));
-    print("{}", dumper.output);
+    dbgprint("{}", dumper.output);
 }
 
 }
