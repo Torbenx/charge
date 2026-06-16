@@ -9,21 +9,16 @@
 #endif
 
 COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
+COMPOUND_EXPR(Load, Expr, MemoryLoc loc, CodePos pos)
+COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ArgumentList args)
 
 INLINE_EXPR(FalseLiteral, Bool, bool)
-COMPOUND_EXPR(BoolLoad, Bool, MemoryLoc loc, CodePos pos)
-COMPOUND_EXPR(BoolReturn, Bool, CodePos call, uint32_t index)
 INLINE_EXPR(PhiParentEdgeTaken, Bool, PhiParent)
 
-COMPOUND_EXPR(TypeLiteral, Type, TypeDecl decl, ExprList args)
-COMPOUND_EXPR(TypeLoad, Type, MemoryLoc loc, CodePos pos)
-COMPOUND_EXPR(TypeReturn, Type, CodePos call, uint32_t index)
-COMPOUND_EXPR(TypeSelfMember, Member, Type type)
 COMPOUND_EXPR(TypeIsImpl, Bool, Type type, TypeImpl impl)
 
 INLINE_EXPR(MemberLiteral, Member, MemberLiteral)
-COMPOUND_EXPR(MemberLoad, Member, MemoryLoc loc, CodePos pos)
-COMPOUND_EXPR(MemberReturn, Member, CodePos call, uint32_t index)
+COMPOUND_EXPR(TypeSelfMember, Member, Type type)
 COMPOUND_EXPR(MemberCompose, Member, Member left, Member right)
 COMPOUND_EXPR(MemberContains, Bool, Member parent, Member child)
 
@@ -31,8 +26,7 @@ COMPOUND_EXPR(MemberContains, Bool, Member parent, Member child)
 COMPOUND_EXPR(MemoryDeclType, Type, MemoryDecl decl)
 
 COMPOUND_EXPR(MakeMemoryLoc, MemoryLoc, MemoryDecl decl, Member member)
-COMPOUND_EXPR(MemoryLocLoad, MemoryLoc, MemoryLoc loc, CodePos pos)
-COMPOUND_EXPR(MemoryLocReturn, MemoryLoc, CodePos call, uint32_t index)
+COMPOUND_EXPR(MemoryLocType, Type, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocDecl, MemoryDecl, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocMember, Member, MemoryLoc loc)
 

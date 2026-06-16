@@ -9,6 +9,7 @@ namespace verify::ir {
 
 enum class Sort : uint8_t {
     Bool,
+    Fn,
     Type,
     Member,
     MemoryDecl,
@@ -46,6 +47,11 @@ struct Bool : Expr {
     }
 };
 
+struct Fn : Expr {
+    explicit Fn(Expr e)
+        : Expr(e) { }
+};
+
 struct Type : Expr {
     explicit Type(Expr e)
         : Expr(e) { }
@@ -62,6 +68,70 @@ struct Member : Expr {
 struct MemoryLoc : Expr {
     explicit MemoryLoc(Expr e)
         : Expr(e) { }
+};
+
+enum class Tactic : uint8_t {
+    // Temporary placeholder for a missing proof
+    Sorry,
+
+    // Proves generic propositions by running an SMT style solver against them
+    SmtSolve,
+
+    // Proves generic propositions P by showing that !P is incompatible with a set of proven clauses
+    Sat,
+
+    // Proves propositions of the form x = x
+    EqualityReflexive,
+
+    // Proves propositions of the form x_1 != x_2 or x_2 != x_3 or ... or x_(n-1) != x_n or x_1 = x_n
+    EqualityTransitive,
+
+    // Proves the disjunction of linear integer formulars by means of Farkas lemma
+    IntFarkas,
+
+    // For a store store_target <- store_value proves x != store_target or x.load@after_store = store_value
+    LoadStore,
+
+    // For a store to store_target proves x = store_target or x.load@after_store = x.load@before_store
+    SkipStore,
+
+    // Proves that for an active phi one of its edges is taken
+    // For @phi: phi @a @b @c this proves !@phi.active or @phi.from@a or @phi.from@b or @phi.from@c
+    PhiEnumerate,
+
+    // Proves that phi parents are mutually exlusive
+    // !@phi.from@a or !@phi.from@b for all pairs of parents @a, @b
+    PhiExclusivity,
+
+    // !@phi.from@a or @phi.active for all parents @a
+    PhiActivate,
+
+    // !@phi.from@label or @label.active
+    PhiActiveBackward,
+
+    // For @jump: jump @phi proves !@jump.active or @phi.from@jump
+    JumpActiveForward,
+
+    // For @branch: branch cond, @if_true, @if_false
+    // !@branch.active or !cond or @if_true.from@branch
+    // !@branch.active or cond or @if_false.from@branch
+    BranchActiveForward,
+
+    // For @branch: branch cond, @if_true, @if_false
+    // !@if_true.from@branch or cond
+    // !@if_false.from@branch or !cond
+    BranchDecision,
+};
+
+struct Proof {
+    Proof(Tactic tactic, uint32_t id)
+        : tacticBits(std::to_underlying(tactic)), idBits(id) { }
+
+    Tactic tactic() const { return (Tactic)tacticBits; }
+    uint32_t id() const { return idBits; }
+
+    uint32_t tacticBits : 8 = 0;
+    uint32_t idBits : 24 = 0;
 };
 
 struct ListBase {
@@ -97,6 +167,10 @@ struct SmallHandleList : ListBase {
     }
 };
 
+struct Theorem : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+
 struct PhiParent : SmallHandle {
     using SmallHandle::SmallHandle;
 };
@@ -107,57 +181,40 @@ struct MemberLiteral : SmallHandle {
 };
 using MemberLiteralList = SmallHandleList<MemberLiteral>;
 
-struct DContext : SmallHandle {
-    using SmallHandle::SmallHandle;
-};
-
-template<typename T>
-struct D : T {
-    DContext dctx;
-    D(DContext dctx, T t)
-        : T(t), dctx(dctx) { }
-    operator D<Expr>() const
-        requires std::is_base_of_v<Expr, T>
-    {
-        return D<Expr>((const T&)*this, dctx);
-    }
-};
-
-using DExprList = D<ExprList>;
-using DExpr = D<Expr>;
-using DBool = D<Bool>;
-using DType = D<Type>;
-using DMember = D<Member>;
-using DMemoryDecl = D<MemoryDecl>;
-using DMemoryLoc = D<MemoryLoc>;
-
-struct TypeDecl : SmallHandle {
-    using SmallHandle::SmallHandle;
-};
-using DTypeDecl = TypeDecl; // Not dependent
-
 struct TypeImpl : SmallHandle {
     using SmallHandle::SmallHandle;
 };
-using DTypeImpl = TypeImpl; // Not dependent
-using TypeImplList = SmallHandleList<TypeImpl>;
 
-// Represents the code position just before the instruction 'id()'
-struct CodePos : SmallHandle {
+enum class CodePosKind : uint8_t {
+    Simple,
+    Complex,
+};
+// Represents the code position just before the instruction at 'offset()'
+struct CodePos {
+    CodePos(CodePosKind kind, uint32_t data)
+        : kindBits(std::to_underlying(kind)), dataBits(data) { }
+
+    CodePosKind kind() const {
+        return (CodePosKind)kindBits;
+    }
+    bool simple() const {
+        return kind() == CodePosKind::Simple;
+    }
+    uint32_t offset() const {
+        VERIFY(simple());
+        return dataBits;
+    }
+
+    uint32_t kindBits : 8 = 0;
+    uint32_t dataBits : 24 = 0;
+};
+
+struct FnHandle : SmallHandle {
     using SmallHandle::SmallHandle;
 };
-using DCodePos = CodePos; // Not dependent
-using CodeBlock = SmallHandleList<CodePos>;
 
-struct FnDecl : SmallHandle {
+struct DeclHandle : SmallHandle {
     using SmallHandle::SmallHandle;
 };
-using DFnDecl = FnDecl; // Not dependent
-
-struct FnImpl : SmallHandle {
-    using SmallHandle::SmallHandle;
-};
-using DFnImpl = FnImpl; // Not dependent
-using FnImplList = SmallHandleList<FnImpl>;
 
 }

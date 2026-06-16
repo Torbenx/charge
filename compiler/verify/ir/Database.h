@@ -52,60 +52,67 @@ struct Instruction {
     } u;
 };
 
+struct Function : ExpressionStorage {
+
+    FnHandle repr(Fn expr);
+
+    const Instruction& inst(CodePos pos) const {
+        if (pos.simple()) {
+            VERIFY(pos.offset() < m_instructions.size());
+            return m_instructions[pos.offset()];
+        } else {
+            VERIFY(pos.dataBits < m_complexPositions.size());
+            return inst(m_complexPositions[pos.dataBits].simplePos);
+        }
+    }
+
+    Bool prop(Theorem t) const {
+        VERIFY(t.id() < m_theorems.size());
+        return m_theorems[t.id()].prop;
+    }
+    Proof proof(Theorem t) const {
+        VERIFY(t.id() < m_theorems.size());
+        return m_theorems[t.id()].proof;
+    }
+    CodePos position(Theorem t) const {
+        VERIFY(t.id() < m_theorems.size());
+        return m_theorems[t.id()].pos;
+    }
+
+private:
+    struct TheoremData {
+        Bool prop;
+        Proof proof;
+        CodePos pos;
+    };
+
+    struct ComplexPosData {
+        std::vector<PhiParent> backedges;
+        CodePos simplePos;
+    };
+
+    std::vector<Instruction> m_instructions;
+    std::vector<TheoremData> m_theorems;
+    std::vector<ComplexPosData> m_complexPositions;
+};
+
 struct Database : ExpressionStorage {
-    struct TypeImplementation {
-        TypeDecl declaration;
-        DContext dcontext;
 
-        DExprList arguments() const { return { dcontext, m_arguments }; }
-
-    private:
-        ExprList m_arguments;
-        MemberLiteralList m_members;
-        friend Database;
-    };
-
-    struct TypeDeclaration {
-        TypeImplList impls;
-        DContext dcontext;
-    };
-
-    struct FnImplementation {
-        FnDecl declaration;
-        DContext dcontext;
-
-        DExprList arguments() const { return { dcontext, m_arguments }; }
-
-    private:
-        ExprList m_arguments;
-        friend Database;
-    };
-
-    struct FnDeclaration {
-        FnImplList impls;
-        DContext context;
-    };
-
-    const TypeDeclaration& at(TypeDecl decl) {
-        VERIFY(decl.id() < typeDecls.size());
-        return typeDecls[decl.id()];
-    }
-    const TypeImplementation& at(TypeImpl impl) {
-        VERIFY(impl.id() < typeImpls.size());
-        return typeImpls[impl.id()];
-    }
-    std::span<const TypeImplementation> view(TypeImplList list) {
-        return viewInternal(typeImpls, list);
-    }
-
-    DType typeOf(TypeImpl impl, MemberLiteral literal) {
-        VERIFY(at(impl).m_members.contains(literal));
-        return { at(impl).dcontext, memberLiterals[literal.id()].type };
+    DeclHandle newDecl(DeclHandle parent) {
+        uint32_t id = declarations.size();
+        declarations.push_back({ .parent = parent, .children = {} });
+        declarations[parent.id()].children.push_back(DeclHandle(id));
+        return DeclHandle(id);
     }
 
 private:
     struct MemberLit {
         Type type;
+    };
+
+    struct DeclarationNode {
+        DeclHandle parent;
+        std::vector<DeclHandle> children;
     };
 
     template<typename T>
@@ -121,9 +128,8 @@ private:
         return { vec.data() + list.m_offset, list.m_size };
     }
 
-    std::vector<TypeDeclaration> typeDecls;
-    std::vector<TypeImplementation> typeImpls;
     std::vector<MemberLit> memberLiterals;
+    std::vector<DeclarationNode> declarations;
 };
 
 }

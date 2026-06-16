@@ -6,5 +6,4 @@ target_sources(compiler
     Expr.h
     ExpressionStorage.cpp
     ExpressionStorage.h
-    TypeBuilder.h
 )
