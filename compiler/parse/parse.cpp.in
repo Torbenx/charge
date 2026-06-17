@@ -40,7 +40,7 @@ LexerToken lexerToken(TokenKind semToken) {
         VERIFY_NOT_REACHED();
     }
 }
-static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
+[[maybe_unused]] static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
     auto expected = lexerToken(semToken);
     VERIFY(expected == LexerToken::Invalid || lexToken == expected);
 }
@@ -414,7 +414,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-[[gnu::always_inline]] Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
+[[gnu::always_inline]] inline Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;

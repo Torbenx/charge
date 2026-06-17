@@ -36,14 +36,14 @@ struct Constant;
 struct FunctionProgram;
 
 struct ModuleHandle {
-    uint16_t m_id = -1;
+    uint16_t m_id = limits::max;
     constexpr uint16_t id() const { return m_id; }
 
     bool operator==(const ModuleHandle&) const = default;
 };
 
 struct ProgramHandle {
-    uint32_t m_id = -1;
+    uint32_t m_id = limits::max;
     constexpr ProgramHandle() = default;
     constexpr ProgramHandle(uint32_t id)
         : m_id(id) { }
@@ -56,7 +56,7 @@ struct ProgramHandle {
 };
 
 struct NamespaceHandle {
-    uint32_t m_id = -1;
+    uint32_t m_id = limits::max;
     constexpr uint32_t id() const { return m_id; }
 
     bool operator==(const NamespaceHandle&) const = default;

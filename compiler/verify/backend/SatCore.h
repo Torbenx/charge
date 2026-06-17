@@ -41,7 +41,7 @@ struct TracePosition {
 
 template<>
 struct optional_traits<verify::backend::TracePosition> {
-    static constexpr verify::backend::TracePosition empty_value = verify::backend::TracePosition(-1);
+    static constexpr verify::backend::TracePosition empty_value = verify::backend::TracePosition(limits::max);
 };
 
 namespace verify::backend {
@@ -60,9 +60,9 @@ struct SatCore {
         std::optional<Literal> nextPropagation;
         std::optional<Literal> prevPropagation;
 
-        uint32_t subTraceIndex = -1;
-        uint32_t lastContainingClauseId = -1;
-        uint32_t lastContainingLearnClauseId = -1;
+        uint32_t subTraceIndex = limits::max;
+        uint32_t lastContainingClauseId = limits::max;
+        uint32_t lastContainingLearnClauseId = limits::max;
 
         bool tentativelyTrue() const { return firstReason.has_value(); }
     };

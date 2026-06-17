@@ -283,7 +283,7 @@ constexpr uint32_t dynamicEvaluateHash(const Solution& sol, std::string_view nam
 }
 
 template<Solution sol, int_t... I>
-constexpr uint32_t staticEvaluateHashHelper(std::string_view name, int_sequence<I...>) {
+constexpr uint32_t staticEvaluateHashHelper([[maybe_unused]] std::string_view name, int_sequence<I...>) {
     static constexpr uint32_t mask = (1u << sol.bitRangeLength) - 1u;
     return ((((getData(name, sol.usedData[I].dataIndex) >> sol.usedData[I].bitRangeStart) & mask) * sol.usedData[I].factor) + ... + 0) % (uint32_t)sol.primeModulo;
 }

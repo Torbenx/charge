@@ -1,6 +1,6 @@
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wsuggest-override"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsuggest-override"
 
 #include <z3++.h>
 
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop

@@ -40,7 +40,7 @@ LexerToken lexerToken(TokenKind semToken) {
         VERIFY_NOT_REACHED();
     }
 }
-static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
+[[maybe_unused]] static void checkLexToken(TokenKind semToken, LexerToken lexToken) {
     auto expected = lexerToken(semToken);
     VERIFY(expected == LexerToken::Invalid || lexToken == expected);
 }
@@ -905,7 +905,7 @@ error$as_then:
 }
 
 template<typename ParseOutput>
-[[gnu::always_inline]] Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
+[[gnu::always_inline]] inline Parser::InternalState Parser::parseImpl(const Parser::InternalState& inState, ParseOutput& output, int_t tokenLimit) {
     State parseState = inState.state;
     const char* tokBegin = inState.sourcePosition;
     const char* tokEnd = inState.sourcePosition;
@@ -1066,7 +1066,7 @@ expression$no_emit:
 expression$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-expression$as_then:
+LABEL_MAYBE_UNUSED expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -1515,7 +1515,7 @@ after_expression$no_emit:
 after_expression$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-after_expression$as_then:
+LABEL_MAYBE_UNUSED after_expression$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -2403,6 +2403,7 @@ comma_after_expression_in_arguments$no_emit:
 comma_after_expression_in_arguments$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -3268,6 +3269,7 @@ comma_after_expression_in_parameters$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED comma_after_expression_in_parameters$as_then:
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Parameter
@@ -3292,6 +3294,7 @@ comma_else$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED comma_else$as_then:
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;
         // emitToken TokenKind::CommaElseExpr
@@ -3312,7 +3315,7 @@ argument$no_emit:
 argument$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-argument$as_then:
+LABEL_MAYBE_UNUSED argument$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -4042,7 +4045,7 @@ argument$as_then:
     VERIFY_NOT_REACHED();
 
     // SwitchState check_designated_argument
-check_designated_argument$as_then:
+LABEL_MAYBE_UNUSED check_designated_argument$as_then:
     switch (tokEnd[0]) {
     case '\n':
     case '\r':
@@ -4530,6 +4533,7 @@ maybe_designated_argument$no_emit:
 maybe_designated_argument$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED maybe_designated_argument$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -5421,6 +5425,7 @@ first_argument_paren$no_emit:
 first_argument_paren$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED first_argument_paren$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -6313,6 +6318,7 @@ first_argument_square$no_emit:
 first_argument_square$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED first_argument_square$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -7205,6 +7211,7 @@ first_argument_brace$no_emit:
 first_argument_brace$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED first_argument_brace$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -8098,6 +8105,7 @@ member_access$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED member_access$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED member_access$word_case_with_read:
         {
@@ -8132,6 +8140,7 @@ static_access$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED static_access$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED static_access$word_case_with_read:
         {
@@ -8217,6 +8226,7 @@ after_statement$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_statement$as_then:
     // then error
     goto error$as_then;
 
@@ -8231,7 +8241,7 @@ statement$no_emit:
 statement$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-statement$as_then:
+LABEL_MAYBE_UNUSED statement$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -8889,6 +8899,7 @@ let_statement$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED let_statement$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED let_statement$word_case_with_read:
         {
@@ -8923,6 +8934,7 @@ var_statement$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED var_statement$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED var_statement$word_case_with_read:
         {
@@ -8959,6 +8971,7 @@ after_return$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_return$as_then:
     if (std::string_view(tokEnd, 1) == ";"sv) {
         tokEnd += 1;
         // popScope ScopeKind::RightExpr
@@ -8985,6 +8998,7 @@ check_else_branch$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED check_else_branch$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED check_else_branch$word_case_with_read:
         {
@@ -9071,6 +9085,7 @@ else_branch$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED else_branch$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -9095,6 +9110,7 @@ after_simple_variable_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_simple_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -9121,7 +9137,7 @@ after_variable_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-after_variable_declaration_id$as_then:
+LABEL_MAYBE_UNUSED after_variable_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -9202,6 +9218,7 @@ variable_type$no_emit:
 variable_type$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED variable_type$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -9829,7 +9846,7 @@ after_variable_modifier$no_emit:
 after_variable_modifier$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
-after_variable_modifier$as_then:
+LABEL_MAYBE_UNUSED after_variable_modifier$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -10429,6 +10446,7 @@ after_variable_unique_modifier$no_emit:
 after_variable_unique_modifier$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -11116,6 +11134,7 @@ after_variable_shared_modifier$no_emit:
 after_variable_shared_modifier$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -11803,6 +11822,7 @@ after_variable_const_modifier$no_emit:
 after_variable_const_modifier$retry:
     tokEnd = skipWhitespace(tokEnd);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
     switch (tokEnd[0]) {
     case '\n': {
         tokEnd += 1;
@@ -12522,6 +12542,7 @@ after_parameters$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_parameters$as_then:
     // then error
     goto error$as_then;
 
@@ -12533,6 +12554,7 @@ first_parameter$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED first_parameter$as_then:
     if (std::string_view(tokEnd, 1) == ")"sv) {
         tokEnd += 1;
         // next after_parameters
@@ -12553,7 +12575,7 @@ parameter$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-parameter$as_then:
+LABEL_MAYBE_UNUSED parameter$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED parameter$word_case_with_read:
         {
@@ -12591,6 +12613,7 @@ var_parameter$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED var_parameter$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED var_parameter$word_case_with_read:
         {
@@ -12627,6 +12650,7 @@ impl_expression$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED impl_expression$as_then:
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::ParenInImplExpr
@@ -12673,6 +12697,7 @@ after_impl_expression$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_impl_expression$as_then:
     if (std::string_view(tokEnd, 2) == "::"sv) {
         tokEnd += 2;
         // next impl_access_expression
@@ -12769,6 +12794,7 @@ impl_access_expression$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED impl_access_expression$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED impl_access_expression$word_case_with_read:
         {
@@ -12796,7 +12822,7 @@ impl_access_expression$no_emit:
     goto error$as_then;
 
     // LinearState no_declaration
-no_declaration$as_then:
+LABEL_MAYBE_UNUSED no_declaration$as_then:
     if (std::string_view(tokEnd, 1) == "}"sv) {
         tokEnd += 1;
         // popScope ScopeKind::Namespace, ScopeKind::Struct, ScopeKind::Enum
@@ -12842,6 +12868,7 @@ namespace_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED namespace_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED namespace_declaration$word_case_with_read:
         {
@@ -12929,6 +12956,7 @@ namespace_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED namespace_declaration_id$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED namespace_declaration_id$word_case_with_read:
         {
@@ -12968,6 +12996,7 @@ after_namespace_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_namespace_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -12987,6 +13016,7 @@ namespace_declaration_body$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED namespace_declaration_body$as_then:
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Namespace
@@ -12998,7 +13028,7 @@ namespace_declaration_body$no_emit:
     goto error$as_then;
 
     // LinearState templated_declaration
-templated_declaration$as_then:
+LABEL_MAYBE_UNUSED templated_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED templated_declaration$word_case_with_read:
         {
@@ -13077,7 +13107,7 @@ templated_declaration_with_attributes$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-templated_declaration_with_attributes$as_then:
+LABEL_MAYBE_UNUSED templated_declaration_with_attributes$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED templated_declaration_with_attributes$word_case_with_read:
         {
@@ -13141,6 +13171,7 @@ after_template$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_template$as_then:
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::TemplateParameters
@@ -13159,6 +13190,7 @@ after_template_parameters$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_template_parameters$as_then:
     // then templated_declaration_with_attributes
     goto templated_declaration_with_attributes$as_then;
 
@@ -13170,6 +13202,7 @@ function_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED function_declaration_id$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED function_declaration_id$word_case_with_read:
         {
@@ -13218,7 +13251,7 @@ after_function_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-after_function_declaration_id$as_then:
+LABEL_MAYBE_UNUSED after_function_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == "("sv) {
         tokEnd += 1;
         // pushScope ScopeKind::FunctionParameters
@@ -13237,6 +13270,7 @@ after_function_parameters$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_function_parameters$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -13283,6 +13317,7 @@ struct_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED struct_declaration_id$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED struct_declaration_id$word_case_with_read:
         {
@@ -13331,7 +13366,7 @@ after_struct_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-after_struct_declaration_id$as_then:
+LABEL_MAYBE_UNUSED after_struct_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -13351,6 +13386,7 @@ struct_declaration_body$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED struct_declaration_body$as_then:
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Struct
@@ -13369,6 +13405,7 @@ member_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED member_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED member_declaration$word_case_with_read:
         {
@@ -13470,6 +13507,7 @@ enum_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED enum_declaration_id$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED enum_declaration_id$word_case_with_read:
         {
@@ -13518,7 +13556,7 @@ after_enum_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
-after_enum_declaration_id$as_then:
+LABEL_MAYBE_UNUSED after_enum_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == ":"sv) {
         char next = tokEnd[1];
         if (next != ':') {
@@ -13538,6 +13576,7 @@ enum_declaration_body$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED enum_declaration_body$as_then:
     if (std::string_view(tokEnd, 1) == "{"sv) {
         tokEnd += 1;
         // pushScope ScopeKind::Enum
@@ -13556,6 +13595,7 @@ enum_value_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED enum_value_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED enum_value_declaration$word_case_with_read:
         {
@@ -13647,6 +13687,7 @@ after_enum_value_declaration_id$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_enum_value_declaration_id$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
         if (next != '=' && next != '>') {
@@ -13681,6 +13722,7 @@ after_static$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_static$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED after_static$word_case_with_read:
         {
@@ -13735,6 +13777,7 @@ static_var_variable_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED static_var_variable_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED static_var_variable_declaration$word_case_with_read:
         {
@@ -13773,6 +13816,7 @@ static_open_variable_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED static_open_variable_declaration$as_then:
     if (isWordFirstCharacter(tokEnd[0])) {
     LABEL_MAYBE_UNUSED static_open_variable_declaration$word_case_with_read:
         {
@@ -13830,6 +13874,7 @@ after_declaration$no_emit:
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_declaration$as_then:
     // then error
     goto error$as_then;
 

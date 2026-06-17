@@ -380,7 +380,7 @@ public:
     std::vector<CallData> calls;
 
 protected:
-    static constexpr uint32_t INVALID_SUBCLASS_DATA = -1;
+    static constexpr uint32_t INVALID_SUBCLASS_DATA = limits::max;
 
     std::optional<ExternConstant> m_type;
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;

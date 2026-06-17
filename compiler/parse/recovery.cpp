@@ -359,7 +359,7 @@ struct RecoveryState {
     static std::vector<std::vector<ReturnElement>> recover(SimpleParser& parser, const SavedParserState& errorState) {
         VERIFY(parser.parsedTokens() == 0);
         RecoveryState state;
-        state.makeNodes(-1, RecoveryElement::insert(LexerToken::Invalid), 0, 0, parser, errorState.parsedTokens);
+        state.makeNodes(limits::max, RecoveryElement::insert(LexerToken::Invalid), 0, 0, parser, errorState.parsedTokens);
         state.grind(parser);
 
         std::vector<std::vector<ReturnElement>> result;

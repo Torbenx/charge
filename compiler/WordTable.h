@@ -78,7 +78,7 @@ struct WordTableView {
         return (uint64_t)hash >> invLogSize;
     }
     constexpr uint32_t modSize(uint32_t in) const {
-        return in & hashToBucket(-1);
+        return in & hashToBucket(limits::max);
     }
     constexpr bool empty() const { return invLogSize == 0; }
     constexpr int_t bucketCount() const { return static_cast<uint32_t>((uint64_t)0x1'0000'0000 >> invLogSize); }

@@ -28,6 +28,40 @@ constexpr size_t alignmentCeil(size_t in, size_t alignment) {
     return (in + alignment - 1) & ~(alignment - 1);
 }
 
+namespace limits {
+
+struct max_t {
+    consteval operator uint8_t() const {
+        return std::numeric_limits<uint8_t>::max();
+    }
+    consteval operator uint16_t() const {
+        return std::numeric_limits<uint16_t>::max();
+    }
+    consteval operator uint32_t() const {
+        return std::numeric_limits<uint32_t>::max();
+    }
+    consteval operator uint64_t() const {
+        return std::numeric_limits<uint64_t>::max();
+    }
+
+    consteval operator int8_t() const {
+        return std::numeric_limits<int8_t>::max();
+    }
+    consteval operator int16_t() const {
+        return std::numeric_limits<int16_t>::max();
+    }
+    consteval operator int32_t() const {
+        return std::numeric_limits<int32_t>::max();
+    }
+    consteval operator int64_t() const {
+        return std::numeric_limits<int64_t>::max();
+    }
+};
+
+inline constexpr max_t max = {};
+
+}
+
 template<int_t N>
 struct FixedString {
     std::array<char, N + 1> storage;

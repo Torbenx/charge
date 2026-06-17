@@ -46,7 +46,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/W3;/wd4244;/wd4267")
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE "-Wall;-Wextra;-Wsuggest-override;-Wimplicit-fallthrough;-fsized-deallocation")
+    target_compile_options(${PROJECT_NAME} PRIVATE "-Wall;-Wextra;-Wsuggest-override;-Wimplicit-fallthrough;-fsized-deallocation;-Wno-logical-not-parentheses;-Wno-dangling-else")
 endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE z3i gtest ska_hash_maps)
 target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_TEST_DIR="${CMAKE_SOURCE_DIR}/tests")

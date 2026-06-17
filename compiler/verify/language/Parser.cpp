@@ -337,6 +337,7 @@ struct Parser {
             }
             case TokenKind::GlobalName:
             case TokenKind::LocalName:
+                break;
             }
         }
     }

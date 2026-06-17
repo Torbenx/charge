@@ -52,7 +52,7 @@ struct Value {
     uint32_t theoryBits : 8;
     uint32_t idBits : 24;
 };
-inline constexpr Value INVALID_VALUE = { TheoryId::Invalid, (uint32_t)-1 };
+inline constexpr Value INVALID_VALUE = { TheoryId::Invalid, (uint32_t)limits::max };
 
 //! A boolean value
 /*!

@@ -1152,8 +1152,7 @@ for state in nonErrorStates:
             inlineTokenAdvancer()
         if generateStateDebug:
             line("dbgln(\"" + state.name + ": {}\", *tokEnd);")
-    if [o for o in state.origins if not type(o) is NextInstruction]:
-        labelLine(state.name + "$as_then:")
+    labelLine("LABEL_MAYBE_UNUSED " + state.name + "$as_then:")
 
     generateState(state)
 
@@ -1204,9 +1203,12 @@ for inputLine in inputLines:
         outputLines.append(inputLine)
 
 def writeTo(file, lines):
-    with open(file, "r") as f:
-        if f.readlines() == lines:
-            return
+    try:
+        with open(file, "r") as f:
+            if f.readlines() == lines:
+                return
+    except:
+        pass
     with open(file, "w") as f:
         f.writelines(lines)
 writeTo(currentDir / "parse.cpp", outputLines)

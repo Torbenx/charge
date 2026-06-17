@@ -24,7 +24,7 @@ struct WhitespaceInfo : TaggedSourceLocation<WhitespaceKind> {
 };
 
 struct TokenHandle {
-    uint32_t m_id = -1;
+    uint32_t m_id = limits::max;
 
     constexpr uint32_t id() const { return m_id; }
 

@@ -10,7 +10,7 @@ struct TreeLabel {
     //! Returns the label for left or right child of this node
     [[nodiscard]] TreeLabel extend(bool right) const {
         uint32_t tmp1 = m_label + 1;
-        uint32_t exLabel = tmp1 & (right ? (uint32_t)-1 : m_label);
+        uint32_t exLabel = tmp1 & (right ? (uint32_t)limits::max : m_label);
         exLabel |= (tmp1 ^ m_label) >> 2;
         return TreeLabel(exLabel);
     }
@@ -32,7 +32,7 @@ private:
 
 namespace FlatTreeSetDetail {
 
-inline constexpr uint32_t NIL_HANDLE = -1;
+inline constexpr uint32_t NIL_HANDLE = limits::max;
 
 struct NodeBase {
     uint32_t leftChild = NIL_HANDLE;
