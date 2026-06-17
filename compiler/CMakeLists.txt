@@ -39,7 +39,6 @@ endif()
 
 add_subdirectory(parse)
 add_subdirectory(sema)
-add_subdirectory(check)
 add_subdirectory(server)
 add_subdirectory(verify)
 
