@@ -76,7 +76,7 @@ private:
 
 public:
     static constexpr int_t _json_base_counter = 0; // Tag to be recognized as a json object
-    template<int_t I>
+    template<int_t I, typename>
         requires(I < sizeof...(Ts))
     using _json_ref_data = typename std::decay_t<decltype(tuple_detail::by_index<I>(Container()))>::ref_data;
 };

@@ -7,7 +7,7 @@
 namespace json::object_detail {
 
 template<typename T, int_t I>
-using RefData = typename T::template _json_ref_data<I>;
+using RefData = typename T::template _json_ref_data<I, void>;
 
 template<typename T>
 concept RefObject = T::_json_base_counter >= 0;

@@ -5,15 +5,15 @@
 #include <algorithm>
 #include <utility>
 
-#define JSON_OBJECT        \
-    template<int_t index>  \
-    struct _json_ref_data; \
+#define JSON_OBJECT                 \
+    template<int_t index, typename> \
+    struct _json_ref_data;          \
     static constexpr int_t _json_base_counter = __COUNTER__;
 
-#define _json_member_impl(memberName, counter)                                                       \
+#define _json_member_impl(memberName, counter)                                                      \
     static _json_##memberName##_stub();                                                             \
-    template<>                                                                                      \
-    struct _json_ref_data<counter - _json_base_counter> {                                           \
+    template<typename _T>                                                                           \
+    struct _json_ref_data<counter - _json_base_counter, _T> {                                       \
         using type = decltype(_json_##memberName##_stub());                                         \
         static constexpr std::string_view name = #memberName;                                       \
         static constexpr void set(auto& obj, type&& member) { obj.memberName = std::move(member); } \
@@ -24,7 +24,7 @@
 #define JSON_MEMBER(name) _json_member_impl(name, __COUNTER__)
 
 namespace json {
-struct Null {};
+struct Null { };
 template<typename T>
 struct Nullable {
     std::optional<T> value;
