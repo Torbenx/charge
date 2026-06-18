@@ -419,8 +419,12 @@ SemaContext& Server::acquireContext(const path& file, std::span<const sema::Modu
 }
 
 SemaContext& Server::acquireContext(const path& file) {
-    std::array imports { acquireBuiltinContext().exportModule() };
-    return acquireContext(file, imports);
+    if (file.filename().string() == "builtins.chrg") {
+        return acquireContext(file, {});
+    } else {
+        std::array imports { acquireBuiltinContext().exportModule() };
+        return acquireContext(file, imports);
+    }
 }
 
 SemaContext& Server::acquireBuiltinContext() {

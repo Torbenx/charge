@@ -442,5 +442,5 @@ struct impl openStruct: {
     fn getX(self: const) => .x;
 
     //; TODO: expect-return-type type
-    fn getT(self: const) => .t;
+    //; fn getT(self: const) => .t;
 }

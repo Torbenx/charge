@@ -19,7 +19,7 @@ export function activate(context: ExtensionContext) {
 		console.error("output directory unknown");
 		return;
 	}
-	const serverModule = path.join(outputDir, 'compiler.exe');
+	const serverModule = path.join(outputDir, 'charge');
 
 	log("Starting language server at " + serverModule)
 
