@@ -132,7 +132,7 @@ struct SatCore {
     */
     void assignTrue(Literal trueLit, const Reason& reason);
 
-    //! Propagate the false assignments in the propagation queue to the clause masks
+    //! Propagate the assignments in the propagation queue to the clause masks
     /*!
     \returns true if all assignements were successfully propagated or false if a conflict arose
              during the propagation.
@@ -171,12 +171,12 @@ private:
 
     //! An entry in the trace
     /*!
-    Each entry represent a reason for a literal to false. The different reasons for a given literal
+    Each entry represent a reason for a literal assignment. The different reasons for a given literal
     are also linked together into a linked list.
     */
     struct TraceEntry {
-        Literal literal; //!< Literal that is false
-        Reason reason; //!< Reason the literal was assigned false
+        Literal literal; //!< Literal that is true
+        Reason reason; //!< Reason the literal was assigned
         std::optional<TracePosition> prevReason; //!< The previous reason for the assignment in trace order
         std::optional<TracePosition> nextReason; //!< The next reason for the assignment in trace order
     };
@@ -224,7 +224,7 @@ private:
     //! First element in the propagation queue
     /*!
     The propagation queue is stored as a linked list intrusively inside the BooleanTheory::LiteralInfo
-    (members nextPropagation and prevPropagation). It conatins the pending false assignments to be
+    (members nextPropagation and prevPropagation). It conatins the pending assignments to be
     processed by propagate().
     */
     std::optional<Literal> firstPropagation;
