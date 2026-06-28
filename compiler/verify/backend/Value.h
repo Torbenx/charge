@@ -13,6 +13,7 @@ struct Solver;
 enum class ValueKind : uint8_t {
     Boolean,
     UninterpretedConstant,
+    UninterpretedConstantSet,
     Member,
     // Type,
     // MemoryDeclaration,
@@ -118,8 +119,8 @@ struct Pair {
 //! Handle for an unordered pair of values
 /*!
 Has support for "special pairs" which consist of a value encoded in the handle
-and a special (theory dependent) value. Currently this is only used for bools
-to encode the pairs (true_literal, _).
+and a special (theory dependent) value. Currently this is used for bools
+to encode (true_literal, _) and for sets to encode (empty_set, _).
 */
 struct PairHandle {
     constexpr PairHandle(ValueKind kind, uint32_t id)

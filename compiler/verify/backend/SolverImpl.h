@@ -6,6 +6,7 @@
 #include <verify/backend/PairSet.h>
 #include <verify/backend/RewriteEquality.h>
 #include <verify/backend/SatCore.h>
+#include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
 
 #include <ReverseMemberPointer.h>
@@ -62,6 +63,8 @@ struct SolverImpl : Solver, SatCore::Interface {
     RewriteEquality uninterpConstantEquality;
 
     Members members;
+
+    Sets uninterpConstantSets;
 };
 
 inline SolverImpl& Solver::impl() {

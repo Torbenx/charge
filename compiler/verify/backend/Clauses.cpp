@@ -5,7 +5,7 @@
 namespace verify::backend {
 
 Clauses::Clauses(Solver& solver)
-    : instances(solver, ValueKind::Boolean) { }
+    : occMap(solver, ValueKind::Boolean) { }
 
 bool Clauses::testReason(Solver&, BooleanValue, const Reason& reason) {
     int_t clauseIndex = reason.get<ReasonKind::Clause>().clauseIndex;
@@ -21,16 +21,16 @@ void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
-    for (auto inst : instances[!literal]) {
-        clause_mask_t& clauseMask = clauseMasks[inst.clauseIndex];
+    for (auto occ : occMap[!literal]) {
+        clause_mask_t& clauseMask = clauseMasks[occ.clauseIndex];
         // Perform the popcount before we clear the bit so the operations can be executed in parallel
         int popcnt = std::popcount(clauseMask);
 
-        // solver.dumpClause(solver.clauses[inst.clauseIndex]);
-        // dbgln("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(inst.literalIndex), clauseMask & ~literalMask(inst.literalIndex));
+        // solver.dumpClause(solver.clauses[occ.clauseIndex]);
+        // dbgln("{:#032b} - {:#032b} = {:#032b}", clauseMask, literalMask(occ.literalIndex), clauseMask & ~literalMask(occ.literalIndex));
 
-        // VERIFY((clauseMask & literalMask(inst.literalIndex)) != (clause_mask_t)0);
-        clauseMask &= ~literalMask(inst.literalIndex);
+        // VERIFY((clauseMask & literalMask(occ.literalIndex)) != (clause_mask_t)0);
+        clauseMask &= ~literalMask(occ.literalIndex);
 
         // Detect if the clause has only one non-false literal (only one bit set).
         // Since popcnt still counts the bit we just cleared we must test against 2 instead of 1.
@@ -41,20 +41,19 @@ void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
 
         // Unit clause propagation:
         // All other literals in this clause are false thus the last one must be true.
-        const auto& clause = clauses[inst.clauseIndex];
+        const auto& clause = clauses[occ.clauseIndex];
 
         int_t trueLitIndex = std::countr_zero(clauseMask);
-        BooleanValue trueLit = clause[trueLitIndex];
-        LiteralInstance trueLitInst = inst;
-        trueLitInst.literalIndex = trueLitIndex;
-        solver.assignTrue(trueLit, makeReason<ReasonKind::Clause>(trueLitInst));
+        LiteralOccurrence trueLitOcc = occ;
+        trueLitOcc.literalIndex = trueLitIndex;
+        solver.assignTrue(clause[trueLitIndex], makeReason<ReasonKind::Clause>(trueLitOcc));
     }
 }
 
 void Clauses::unapplyAssignment(Solver&, BooleanValue literal) {
-    for (auto inst : instances[!literal]) {
-        auto& clauseMask = clauseMasks[inst.clauseIndex];
-        auto mask = literalMask(inst.literalIndex);
+    for (auto occ : occMap[!literal]) {
+        auto& clauseMask = clauseMasks[occ.clauseIndex];
+        auto mask = literalMask(occ.literalIndex);
         clauseMask |= mask;
     }
 }
@@ -111,9 +110,9 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
     int_t clauseIndex = clauses.size();
     clause_mask_t mask = 0;
     for (int_t index = 0; index < (int_t)clause.size(); index++) {
-        LiteralInstance inst { (uint32_t)index, (uint32_t)clauseIndex };
+        LiteralOccurrence occ { (uint32_t)index, (uint32_t)clauseIndex };
         BooleanValue lit = clause[index];
-        instances[lit].push_back(inst);
+        occMap[lit].push_back(occ);
         if (!solver.assignedFalse(lit))
             mask |= literalMask(index);
     }
@@ -122,8 +121,8 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
     clauseMasks.push_back(mask);
     if (std::popcount(mask) == 1) {
         int_t index = std::countr_zero(mask);
-        LiteralInstance inst { .literalIndex = (uint32_t)index, .clauseIndex = (uint32_t)clauseIndex };
-        solver.assignTrue(clauses.back()[index], makeReason<ReasonKind::Clause>(inst));
+        LiteralOccurrence occ { .literalIndex = (uint32_t)index, .clauseIndex = (uint32_t)clauseIndex };
+        solver.assignTrue(clauses.back()[index], makeReason<ReasonKind::Clause>(occ));
     }
 }
 

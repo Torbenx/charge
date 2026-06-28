@@ -17,6 +17,8 @@ target_sources(${PROJECT_NAME}
     SatCore.cpp
     SatCore.h
     SatTest.cpp
+    Sets.cpp
+    Sets.h
     Solver.cpp
     Solver.h
     SolverImpl.h

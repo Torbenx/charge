@@ -13,8 +13,15 @@ THEORY(AuxBooleanVariables, Boolean)
 PAIR_THEORY(BooleanEquality, Boolean, Boolean, 1)
 PAIR_THEORY(UninterpretedConstantEquality, Boolean, UninterpretedConstant, 2)
 PAIR_THEORY(MemberEquality, Boolean, Member, 2)
+PAIR_THEORY(UninterpretedConstantSetEquality, Boolean, UninterpretedConstantSet, 2)
+
+THEORY(UninterpretedConstantSetIsEmpty, Boolean)
+THEORY(UninterpretedConstantElementInSet, Boolean)
 
 THEORY(AuxUninterpretedConstants, UninterpretedConstant)
+
+THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
+THEORY(UninterpretedConstantSetExpressions, UninterpretedConstantSet)
 
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)

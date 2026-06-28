@@ -8,14 +8,14 @@ namespace verify::backend {
 using clause_mask_t = uint64_t;
 static constexpr int_t MAX_CLAUSE_SIZE = sizeof(clause_mask_t) * 8;
 
-struct LiteralInstance {
+struct LiteralOccurrence {
     static constexpr int_t LITERAL_BITS = std::bit_width((size_t)MAX_CLAUSE_SIZE - 1);
     static constexpr int_t MAX_CLAUSE_INDEX = ((int_t)1 << (32 - LITERAL_BITS)) - 1;
 
     uint32_t literalIndex : LITERAL_BITS = MAX_CLAUSE_SIZE - 1;
     uint32_t clauseIndex : 32 - LITERAL_BITS = MAX_CLAUSE_INDEX;
 
-    bool operator==(const LiteralInstance&) const = default;
+    bool operator==(const LiteralOccurrence&) const = default;
 };
 
 struct Clauses {
@@ -28,7 +28,6 @@ struct Clauses {
 
     void propagateAssignment(Solver&, BooleanValue);
     void unapplyAssignment(Solver&, BooleanValue);
-    LiteralInstance asInstance(const Reason& reason);
 
     void addClause(Solver&, std::vector<BooleanValue> clause);
     void addClauseInternal(Solver&, std::vector<BooleanValue> clause);
@@ -59,7 +58,7 @@ struct Clauses {
     std::vector<std::vector<BooleanValue>> clauses;
 
     //! The occurrence map for each literal
-    KindData<std::vector<LiteralInstance>, ValueKind::Boolean> instances;
+    KindData<std::vector<LiteralOccurrence>, ValueKind::Boolean> occMap;
 };
 
 }
