@@ -16,13 +16,7 @@ SolverImpl::SolverImpl()
     , builtinTrueFalse(*this)
     , uninterpConstantEquality(*this, theory_params::eqUninterpretedConstant)
     , members(*this)
-    , uninterpConstantSets(
-          *this,
-          TheoryId::UninterpretedConstantSetExpressions,
-          TheoryId::UninterpretedConstantEmptySet,
-          TheoryId::UninterpretedConstantSetEquality,
-          TheoryId::UninterpretedConstantSetIsEmpty,
-          TheoryId::UninterpretedConstantElementInSet) { }
+    , uninterpConstantSets(*this, theory_params::setsUninterpretedConstantSet) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     BooleanValue b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -53,22 +47,6 @@ bool SolverImpl::DecisionReason::testReason(Solver&, BooleanValue, const Reason&
 ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue, const Reason&) {
     // A decision cannot be justified
     VERIFY_NOT_REACHED();
-}
-
-// --------------------------- Set Reasons --------------------------
-
-bool SolverImpl::SetReasons::testReason(Solver& solver, BooleanValue lit, const Reason& reason) {
-    if (lit.theory() == TheoryId::UninterpretedConstantElementInSet)
-        return solver.impl().uninterpConstantSets.testReason(solver, lit, reason);
-    else
-        VERIFY_NOT_REACHED();
-}
-
-ClauseAndIndex SolverImpl::SetReasons::reasonToClause(Solver& solver, BooleanValue lit, const Reason& reason) {
-    if (lit.theory() == TheoryId::UninterpretedConstantElementInSet)
-        return solver.impl().uninterpConstantSets.reasonToClause(solver, lit, reason);
-    else
-        VERIFY_NOT_REACHED();
 }
 
 // ------------------------ SatCore forwards ------------------------
@@ -151,30 +129,32 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
     impl.clauses.propagateAssignment(impl, lit);
 
     switch (lit.theory()) {
-#define UNINTERPRETED_EQUALITY_THEORY(valueKind, member)                             \
+
+#define UNINTERPRETED_EQUALITY_THEORY(valueKind, memberName)                         \
     case TheoryId::valueKind##Equality: {                                            \
         PairHandle pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
         if (lit.negated())                                                           \
-            impl.member.propagateDisequal(impl, pair);                               \
+            impl.memberName.propagateDisequal(impl, pair);                           \
         else                                                                         \
-            impl.member.propagateEqual(impl, pair);                                  \
+            impl.memberName.propagateEqual(impl, pair);                              \
         break;                                                                       \
     }
+#define SET_THEORY(valueKind, memberName)                                            \
+    case TheoryId::valueKind##Equality: {                                            \
+        PairHandle pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
+        if (!lit.negated())                                                          \
+            impl.memberName.propagateEquality(impl, pair);                           \
+        break;                                                                       \
+    }                                                                                \
+    case TheoryId::valueKind##IsEmpty:                                               \
+        if (!lit.negated())                                                          \
+            impl.memberName.propagateIsEmpty(impl, lit);                             \
+        break;                                                                       \
+    case TheoryId::valueKind##ElementInSet:                                          \
+        impl.memberName.propagateElementAssignment(impl, lit);                       \
+        break;
 #include <verify/backend/theories.inc>
 
-    case TheoryId::UninterpretedConstantSetEquality: {
-        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantSetEquality>(lit);
-        if (!lit.negated())
-            impl.uninterpConstantSets.propagateEquality(impl, pair);
-        break;
-    }
-    case TheoryId::UninterpretedConstantSetIsEmpty:
-        if (!lit.negated())
-            impl.uninterpConstantSets.propagateIsEmpty(impl, lit);
-        break;
-    case TheoryId::UninterpretedConstantElementInSet:
-        impl.uninterpConstantSets.propagateElementAssignment(impl, lit);
-        break;
     case TheoryId::MemberEquality: {
         PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
         if (!lit.negated())
@@ -191,9 +171,13 @@ void SatCore::Interface::unapplyAssignment(Literal lit) {
     impl.clauses.unapplyAssignment(impl, lit);
 
     switch (lit.theory()) {
-    case TheoryId::UninterpretedConstantElementInSet:
-        impl.uninterpConstantSets.unapplyElementAssignment(impl, lit);
+
+#define SET_THEORY(valueKind, memberName)                    \
+    case TheoryId::valueKind##ElementInSet:                  \
+        impl.memberName.unapplyElementAssignment(impl, lit); \
         break;
+#include <verify/backend/theories.inc>
+
     default:
         break;
     }
@@ -275,7 +259,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::MemberLiterals:
     case TheoryId::AuxMemberVariables:
     case TheoryId::AuxUninterpretedConstantSets:
-    case TheoryId::UninterpretedConstantEmptySet:
+    case TheoryId::UninterpretedConstantSetEmptySet:
         return a.id() <=> b.id();
 
     case TheoryId::CompositeMembers: {
@@ -284,9 +268,8 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     }
 
     case TheoryId::UninterpretedConstantSetIsEmpty:
-    case TheoryId::UninterpretedConstantElementInSet:
+    case TheoryId::UninterpretedConstantSetElementInSet:
     case TheoryId::UninterpretedConstantSetExpressions:
-    case TheoryId::UninterpretedConstantSingletonSets:
         // Ordering is not important since not rewriting is done
         return a.id() <=> b.id();
 

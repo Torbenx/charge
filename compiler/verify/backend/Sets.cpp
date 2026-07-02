@@ -7,23 +7,26 @@
 
 namespace verify::backend {
 
-Sets::Sets(
-    Solver& solver,
-    TheoryId expressionTheory,
-    TheoryId emptySetTheory,
-    TheoryId equalityTheory,
-    TheoryId isEmptyTheory,
-    TheoryId elementInSetTheory)
-    : setKind(kindOf(expressionTheory))
-    , expressionTheory(expressionTheory)
-    , emptySetTheory(emptySetTheory)
-    , equalityTheory(equalityTheory)
-    , isEmptyTheory(isEmptyTheory)
-    , elementInSetTheory(elementInSetTheory)
-    , setInfos(solver, setKind)
-    , inSetInfos(solver, elementInSetTheory)
-    , isEmptyInfos(solver, isEmptyTheory) {
-    Value empty = solver.impl().newValue(emptySetTheory);
+struct SetClauseDefData {
+    Sets::Containment def;
+    Sets::Containment expr;
+};
+
+struct SetEqualityToElemData {
+    PairHandle pair;
+    Sets::Containment source;
+};
+
+struct SetEmptyToElemData {
+    BooleanValue isEmptyLiteral;
+};
+
+Sets::Sets(Solver& solver, const SetsParams& params)
+    : params(params)
+    , setInfos(solver, params.setKind)
+    , inSetInfos(solver, params.elementInSetTheory)
+    , isEmptyInfos(solver, params.isEmptyTheory) {
+    Value empty = solver.impl().newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
     solver.assignTrue(makeIsEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
     VERIFY(solver.impl().sat.propagate());
@@ -32,7 +35,7 @@ Sets::Sets(
 BooleanValue Sets::makeIsEmpty(Solver& solver, Value set) {
     auto& setInfo = setInfos[set];
     if (!setInfo.isEmptyLiteral.has_value()) {
-        BooleanValue newLit = solver.impl().newBoolean(isEmptyTheory);
+        BooleanValue newLit = solver.impl().newBoolean(params.isEmptyTheory);
         setInfo.isEmptyLiteral = newLit;
         isEmptyInfos[newLit] = { .set = set };
     }
@@ -41,7 +44,7 @@ BooleanValue Sets::makeIsEmpty(Solver& solver, Value set) {
 
 void Sets::newPair(Solver& solver, PairHandle pair) {
     VERIFY(!pair.specialPair());
-    VERIFY(pair.valueKind() == setKind);
+    VERIFY(pair.valueKind() == params.setKind);
     auto [a, b] = solver.at(pair);
     solver.addClause({
         makeEquality(pair),
@@ -53,17 +56,17 @@ void Sets::newPair(Solver& solver, PairHandle pair) {
 }
 
 bool Sets::unionExpression(Value value) const {
-    return value.theory() == expressionTheory && !clauses[value.id()].front().contained();
+    return value.theory() == params.expressionTheory && !clauses[value.id()].front().contained();
 }
 
 bool Sets::subsetExpression(Value value) const {
-    return value.theory() == expressionTheory && clauses[value.id()].front().contained();
+    return value.theory() == params.expressionTheory && clauses[value.id()].front().contained();
 }
 
 Value Sets::union_(Solver& solver, std::span<const Value> sets) {
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
-    Value result = Value(expressionTheory, id);
+    Value result = Value(params.expressionTheory, id);
     std::vector<Containment> clause;
     clause.push_back(!in(result));
     auto addSet = [this, &clause, clauseAttempt](Value set) {
@@ -75,7 +78,7 @@ Value Sets::union_(Solver& solver, std::span<const Value> sets) {
         }
     };
     for (Value set : sets) {
-        VERIFY(kindOf(set.theory()) == setKind);
+        VERIFY(kindOf(set.theory()) == params.setKind);
         if (set != emptySet())
             addSet(set);
     }
@@ -92,7 +95,7 @@ Value Sets::subset(Solver& solver, std::span<const Value> intersection, std::spa
     VERIFY(intersection.size() >= 1);
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
-    Value result = Value(expressionTheory, id);
+    Value result = Value(params.expressionTheory, id);
     std::vector<Containment> clause;
     clause.push_back(in(result));
     // For now assume no unions in 'intersection' and not subsets in 'minus'.
@@ -148,14 +151,14 @@ static size_t hashClause(std::span<const Sets::Containment> clause) {
 Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
     VERIFY(inClause.size() >= 3);
     VERIFY(inClause.size() <= MAX_CLAUSE_SIZE);
-    VERIFY((int_t)clauses.size() == solver.valueCount(expressionTheory));
+    VERIFY((int_t)clauses.size() == solver.valueCount(params.expressionTheory));
 
     std::ranges::sort(std::views::drop(inClause, 1), [&solver](Containment a, Containment b) -> bool {
         if (a.contained() != b.contained())
             return !a.contained();
         return solver.rewriteOrder(a.set(), b.set()) < 0;
     });
-    Value expressionValue(expressionTheory, clauses.size());
+    Value expressionValue(params.expressionTheory, clauses.size());
     size_t hash = hashClause(inClause);
     auto hashIt = clauseSet.find(HashLookup { hash, *this, inClause });
     if (hashIt != clauseSet.end()) {
@@ -166,7 +169,7 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
     clauses.emplace_back(std::move(inClause));
     auto& clause = clauses.back();
 
-    VERIFY(solver.impl().newValue(expressionTheory) == expressionValue);
+    VERIFY(solver.impl().newValue(params.expressionTheory) == expressionValue);
     VERIFY(clause.front().set() == expressionValue);
     for (int_t i = 0; i < (int_t)clause.size(); i++) {
         infoFor(clause[i]).occurrences.push_back({ .literalIndex = (uint32_t)i, .clauseIndex = expressionValue.id() });
@@ -188,7 +191,7 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
         if (popcnt == 1) {
             VERIFY(newMask == Clauses::literalMask(0));
             assignTrue(solver, element, clause[0],
-                makeReason<ReasonKind::SetClauseExhaustive>({ .literalIndex = 0, .clauseIndex = expressionValue.id() }));
+                makeReason(params.clauseExhaustiveReason, { .literalIndex = 0, .clauseIndex = expressionValue.id() }));
         }
     }
 
@@ -197,7 +200,7 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
 
 void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
     auto setLits = std::ranges::partition(boolClause, [this](BooleanValue lit) {
-        return lit.theory() != elementInSetTheory;
+        return lit.theory() != params.elementInSetTheory;
     });
     if (setLits.empty())
         return;
@@ -207,7 +210,7 @@ void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
     std::ranges::sort(setLits, std::less(), [this](BooleanValue lit) { return inSetInfos[lit].element.id(); });
     for (auto it = setLits.begin(); it != setLits.end();) {
         std::vector<Containment> setClause;
-        Value resultSet = Value(expressionTheory, clauses.size());
+        Value resultSet = Value(params.expressionTheory, clauses.size());
         setClause.push_back(in(resultSet));
 
         auto [clauseElement, firstCont] = mapFromBool(*it);
@@ -268,10 +271,12 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         if (occ.literalIndex == 0) {
             // If the first literal in a clause is true than all other literals are false.
             for (Containment lit : std::views::drop(clause, 1))
-                assignTrue(solver, element, !lit, makeReason<ReasonKind::SetClauseDefToExpr>({ .def = !literal, .expr = !lit }));
+                assignTrue(solver, element, !lit,
+                    makeReason(params.clauseDefToExprReason, { .def = !literal, .expr = !lit }));
         } else {
             // If any literal in a clause other than the first is true the first literal is false.
-            assignTrue(solver, element, !clause.front(), makeReason<ReasonKind::SetClauseExprToDef>({ .def = !clause.front(), .expr = !literal }));
+            assignTrue(solver, element, !clause.front(),
+                makeReason(params.clauseExprToDefReason, { .def = !clause.front(), .expr = !literal }));
         }
     }
 
@@ -293,7 +298,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         int_t trueLitIndex = std::countr_zero(clauseMask);
         LiteralOccurrence trueLitOcc = occ;
         trueLitOcc.literalIndex = trueLitIndex;
-        assignTrue(solver, element, clause[trueLitIndex], makeReason<ReasonKind::SetClauseExhaustive>(trueLitOcc));
+        assignTrue(solver, element, clause[trueLitIndex], makeReason(params.clauseExhaustiveReason, trueLitOcc));
     }
 
     // Propagate equalities
@@ -306,7 +311,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         //      redudant but I think is actually necessary for correctness in cases where 'in A' is
         //      reverted and 'in B' was learned in the meantime.
         Containment otherCont(otherSet, literal.contained());
-        assignTrue(solver, element, otherCont, makeReason<ReasonKind::SetEqualityToElem>({ pair, literal }));
+        assignTrue(solver, element, otherCont, makeReason(params.equalityToElementReason, { pair, literal }));
     }
 }
 
@@ -324,7 +329,7 @@ void Sets::propagateIsEmpty(Solver& solver, BooleanValue lit) {
     Value set = isEmptyInfos[lit].set;
     for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
         ElementId element(elementId);
-        assignTrue(solver, element, !in(set), makeReason<ReasonKind::SetEmptyToElem>({ lit }));
+        assignTrue(solver, element, !in(set), makeReason(params.emptyToElementReason, { lit }));
     }
 }
 
@@ -335,13 +340,13 @@ void Sets::propagateEquality(Solver& solver, PairHandle pair) {
         BooleanValue inA = mapToBool(solver, element, in(a));
         BooleanValue inB = mapToBool(solver, element, in(b));
         if (solver.assignedTrue(inA))
-            solver.assignTrue(inB, makeReason<ReasonKind::SetEqualityToElem>({ pair, in(a) }));
+            solver.assignTrue(inB, makeReason(params.equalityToElementReason, { pair, in(a) }));
         if (solver.assignedTrue(!inA))
-            solver.assignTrue(!inB, makeReason<ReasonKind::SetEqualityToElem>({ pair, !in(a) }));
+            solver.assignTrue(!inB, makeReason(params.equalityToElementReason, { pair, !in(a) }));
         if (solver.assignedTrue(inB))
-            solver.assignTrue(inA, makeReason<ReasonKind::SetEqualityToElem>({ pair, in(b) }));
+            solver.assignTrue(inA, makeReason(params.equalityToElementReason, { pair, in(b) }));
         if (solver.assignedTrue(!inB))
-            solver.assignTrue(!inA, makeReason<ReasonKind::SetEqualityToElem>({ pair, !in(b) }));
+            solver.assignTrue(!inA, makeReason(params.equalityToElementReason, { pair, !in(b) }));
     }
 }
 
@@ -356,11 +361,11 @@ Sets::ElementId Sets::newElement(Solver& solver) {
     }
 
     // Propagate empty sets
-    solver.forEachBoolean(isEmptyTheory, [&](BooleanValue isEmptyLit) {
+    solver.forEachBoolean(params.isEmptyTheory, [&](BooleanValue isEmptyLit) {
         if (solver.assignedTrue(isEmptyLit)) {
             auto& info = isEmptyInfos[isEmptyLit];
             assignTrue(solver, element, !in(info.set),
-                makeReason<ReasonKind::SetEmptyToElem>({ isEmptyLit }));
+                makeReason(params.emptyToElementReason, { isEmptyLit }));
         }
     });
 
@@ -369,23 +374,20 @@ Sets::ElementId Sets::newElement(Solver& solver) {
 
 bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
     auto [element, setLiteral] = inSetInfos[boolLiteral];
-    switch (reason.kind()) {
-    case ReasonKind::SetClauseDefToExpr:
-        return assignedFalse(solver, element, reason.get<ReasonKind::SetClauseDefToExpr>().def);
-    case ReasonKind::SetClauseExprToDef:
-        return assignedFalse(solver, element, reason.get<ReasonKind::SetClauseExprToDef>().expr);
-    case ReasonKind::SetClauseExhaustive: {
-        auto occ = reason.get<ReasonKind::SetClauseExhaustive>();
+    if (reason.kind() == params.clauseDefToExprReason) {
+        return assignedFalse(solver, element, reason.get(params.clauseDefToExprReason).def);
+    } else if (reason.kind() == params.clauseExprToDefReason) {
+        return assignedFalse(solver, element, reason.get(params.clauseExprToDefReason).expr);
+    } else if (reason.kind() == params.clauseExhaustiveReason) {
+        auto occ = reason.get(params.clauseExhaustiveReason);
         return std::popcount(elements[element.id()].clauseMasks[occ.clauseIndex]) == 1;
-    }
-    case ReasonKind::SetEqualityToElem: {
-        auto [pair, source] = reason.get<ReasonKind::SetEqualityToElem>();
+    } else if (reason.kind() == params.equalityToElementReason) {
+        auto [pair, source] = reason.get(params.equalityToElementReason);
         return solver.assignedTrue(makeEquality(pair))
             && assignedTrue(solver, element, source);
-    }
-    case ReasonKind::SetEmptyToElem:
-        return solver.assignedTrue(reason.get<ReasonKind::SetEmptyToElem>().isEmptyLiteral);
-    default:
+    } else if (reason.kind() == params.emptyToElementReason) {
+        return solver.assignedTrue(reason.get(params.emptyToElementReason).isEmptyLiteral);
+    } else {
         VERIFY_NOT_REACHED();
     }
 }
@@ -393,35 +395,31 @@ bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& re
 ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
     auto [element, setLiteral] = inSetInfos[boolLiteral];
     ClauseBuilder result = solver.beginClause();
-    switch (reason.kind()) {
-    case ReasonKind::SetClauseDefToExpr:
+    if (reason.kind() == params.clauseDefToExprReason) {
         result.add(solver, boolLiteral);
-        result.add(solver, mapToBool(solver, element, reason.get<ReasonKind::SetClauseDefToExpr>().def));
+        result.add(solver, mapToBool(solver, element, reason.get(params.clauseDefToExprReason).def));
         return { solver.viewClause(result), 0 };
-    case ReasonKind::SetClauseExprToDef:
+    } else if (reason.kind() == params.clauseExprToDefReason) {
         result.add(solver, boolLiteral);
-        result.add(solver, mapToBool(solver, element, reason.get<ReasonKind::SetClauseExprToDef>().expr));
+        result.add(solver, mapToBool(solver, element, reason.get(params.clauseExprToDefReason).expr));
         return { solver.viewClause(result), 0 };
-    case ReasonKind::SetClauseExhaustive: {
-        auto occ = reason.get<ReasonKind::SetClauseExhaustive>();
+    } else if (reason.kind() == params.clauseExhaustiveReason) {
+        auto occ = reason.get(params.clauseExhaustiveReason);
         for (Containment lit : clauses[occ.clauseIndex]) {
             result.add(solver, mapToBool(solver, element, lit));
         }
         return { solver.viewClause(result), occ.literalIndex };
-    }
-    case ReasonKind::SetEqualityToElem: {
-        auto [pair, assignSource] = reason.get<ReasonKind::SetEqualityToElem>();
+    } else if (reason.kind() == params.equalityToElementReason) {
+        auto [pair, assignSource] = reason.get(params.equalityToElementReason);
         result.add(solver, boolLiteral);
         result.add(solver, mapToBool(solver, element, !assignSource));
         result.add(solver, !makeEquality(pair));
         return { solver.viewClause(result), 0 };
-    }
-    case ReasonKind::SetEmptyToElem: {
+    } else if (reason.kind() == params.emptyToElementReason) {
         result.add(solver, boolLiteral);
-        result.add(solver, !reason.get<ReasonKind::SetEmptyToElem>().isEmptyLiteral);
+        result.add(solver, !reason.get(params.emptyToElementReason).isEmptyLiteral);
         return { solver.viewClause(result), 0 };
-    }
-    default:
+    } else {
         VERIFY_NOT_REACHED();
     }
 }
@@ -433,14 +431,14 @@ BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment lite
     }
     std::optional<BooleanValue>& maybeBool = inSetLiterals[element.id()];
     if (!maybeBool.has_value()) {
-        maybeBool = solver.impl().newBoolean(elementInSetTheory);
+        maybeBool = solver.impl().newBoolean(params.elementInSetTheory);
         inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
     }
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
 }
 
 std::pair<Sets::ElementId, Sets::Containment> Sets::mapFromBool(BooleanValue lit) {
-    VERIFY(lit.theory() == elementInSetTheory);
+    VERIFY(lit.theory() == params.elementInSetTheory);
     auto [element, set] = inSetInfos[lit];
     return { element, lit.negated() ? !in(set) : in(set) };
 }

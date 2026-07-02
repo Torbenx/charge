@@ -25,10 +25,6 @@ struct SolverImpl : Solver, SatCore::Interface {
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
-    struct SetReasons {
-        bool testReason(Solver&, BooleanValue, const Reason&);
-        ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
-    };
 
     SolverImpl();
 
@@ -45,7 +41,6 @@ struct SolverImpl : Solver, SatCore::Interface {
     // Initialize members with trivial ctors
     AlwaysReason alwaysReason;
     DecisionReason decisionReason;
-    SetReasons setReasons;
 
     // DataManager must be initialized first, everything depends on it
     DataManager data;

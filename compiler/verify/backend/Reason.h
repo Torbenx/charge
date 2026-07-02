@@ -166,10 +166,17 @@ struct Reason {
             return std::bit_cast<T>(*this);
         }
     }
+
     template<ReasonKind k>
     reason_data_t<k> get() const {
         VERIFY(kind() == k);
         return getData<reason_data_t<k>>();
+    }
+
+    template<typename T>
+    T get(TypedReasonKind<T> k) const {
+        VERIFY(kind() == k);
+        return getData<T>();
     }
 
     uint32_t kindBits : 8;

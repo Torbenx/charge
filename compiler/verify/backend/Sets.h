@@ -8,6 +8,40 @@
 
 namespace verify::backend {
 
+struct SetsParams {
+    ValueKind setKind;
+    TheoryId expressionTheory;
+    TheoryId emptySetTheory;
+    TheoryId equalityTheory;
+    TheoryId isEmptyTheory;
+    TheoryId elementInSetTheory;
+    TypedReasonKind<SetClauseDefData> clauseDefToExprReason;
+    TypedReasonKind<SetClauseDefData> clauseExprToDefReason;
+    TypedReasonKind<LiteralOccurrence> clauseExhaustiveReason;
+    TypedReasonKind<SetEqualityToElemData> equalityToElementReason;
+    TypedReasonKind<SetEmptyToElemData> emptyToElementReason;
+};
+
+namespace theory_params {
+
+#define SET_THEORY(valueKind, memberName)                                \
+    inline constexpr SetsParams sets##valueKind = {                      \
+        ValueKind::valueKind,                                            \
+        TheoryId::valueKind##Expressions,                                \
+        TheoryId::valueKind##EmptySet,                                   \
+        TheoryId::valueKind##Equality,                                   \
+        TheoryId::valueKind##IsEmpty,                                    \
+        TheoryId::valueKind##ElementInSet,                               \
+        makeTypedReasonKind<ReasonKind::valueKind##ClauseDefToExpr>(),   \
+        makeTypedReasonKind<ReasonKind::valueKind##ClauseExprToDef>(),   \
+        makeTypedReasonKind<ReasonKind::valueKind##ClauseExhaustive>(),  \
+        makeTypedReasonKind<ReasonKind::valueKind##EqualityToElement>(), \
+        makeTypedReasonKind<ReasonKind::valueKind##EmptyToElement>(),    \
+    };
+#include <verify/backend/theories.inc>
+
+}
+
 struct Sets {
     struct ElementId {
         explicit ElementId(uint32_t id)
@@ -43,15 +77,10 @@ struct Sets {
     };
     static Containment in(Value set) { return { set, true }; }
 
-    Sets(Solver&,
-        TheoryId expressionTheory,
-        TheoryId emptySetTheory,
-        TheoryId equalityTheory,
-        TheoryId isEmptyTheory,
-        TheoryId elementInSetTheory);
+    Sets(Solver&, const SetsParams&);
 
     BooleanValue makeEquality(PairHandle pair) {
-        return { equalityTheory, pair.pairId() * 2 };
+        return { params.equalityTheory, pair.pairId() * 2 };
     }
     BooleanValue makeIsEmpty(Solver& solver, Value value);
     void newPair(Solver&, PairHandle);
@@ -73,7 +102,7 @@ struct Sets {
 
     ElementId newElement(Solver& solver);
 
-    Value emptySet() { return Value(emptySetTheory, 0); }
+    Value emptySet() { return Value(params.emptySetTheory, 0); }
 
     Value union_(Solver&, std::span<const Value>);
     Value union_(Solver& solver, std::initializer_list<Value> vals) {
@@ -179,12 +208,7 @@ private:
     BooleanValue mapToBool(Solver&, ElementId, Containment);
     std::pair<ElementId, Containment> mapFromBool(BooleanValue);
 
-    ValueKind setKind;
-    TheoryId expressionTheory;
-    TheoryId emptySetTheory;
-    TheoryId equalityTheory;
-    TheoryId isEmptyTheory;
-    TheoryId elementInSetTheory;
+    SetsParams params;
 
     uint32_t nextClauseAttempt = 0;
 
@@ -225,20 +249,6 @@ private:
     KindData<SetInfo> setInfos;
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
     TheoryData<IsEmptyInfo, TheoryId::COUNT, 2> isEmptyInfos;
-};
-
-struct SetClauseDefData {
-    Sets::Containment def;
-    Sets::Containment expr;
-};
-
-struct SetEqualityToElemData {
-    PairHandle pair;
-    Sets::Containment source;
-};
-
-struct SetEmptyToElemData {
-    BooleanValue isEmptyLiteral;
 };
 
 }

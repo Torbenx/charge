@@ -18,6 +18,20 @@
     REASON(valueKind##DisequalityByAlwaysDisequal, DisequalityReason, true, memberName)
 #endif
 
+#ifndef SET_THEORY
+#define SET_THEORY(valueKind, memberName)                                          \
+    PAIR_THEORY(valueKind##Equality, Boolean, valueKind, 2)                        \
+    THEORY(valueKind##IsEmpty, Boolean)                                            \
+    THEORY(valueKind##ElementInSet, Boolean)                                       \
+    THEORY(valueKind##EmptySet, valueKind)                                         \
+    THEORY(valueKind##Expressions, valueKind)                                      \
+    REASON(valueKind##ClauseDefToExpr, SetClauseDefData, true, memberName)         \
+    REASON(valueKind##ClauseExprToDef, SetClauseDefData, true, memberName)         \
+    REASON(valueKind##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
+    REASON(valueKind##EqualityToElement, SetEqualityToElemData, false, memberName) \
+    REASON(valueKind##EmptyToElement, SetEmptyToElemData, false, memberName)
+#endif
+
 THEORY(TrueFalse, Boolean)
 THEORY(ClauseGlueVariables, Boolean)
 THEORY(AuxBooleanVariables, Boolean)
@@ -25,16 +39,10 @@ THEORY(AuxBooleanVariables, Boolean)
 PAIR_THEORY(BooleanEquality, Boolean, Boolean, 1)
 UNINTERPRETED_EQUALITY_THEORY(UninterpretedConstant, uninterpConstantEquality)
 PAIR_THEORY(MemberEquality, Boolean, Member, 2)
-PAIR_THEORY(UninterpretedConstantSetEquality, Boolean, UninterpretedConstantSet, 2)
-
-THEORY(UninterpretedConstantSetIsEmpty, Boolean)
-THEORY(UninterpretedConstantElementInSet, Boolean)
 
 THEORY(AuxUninterpretedConstants, UninterpretedConstant)
 
-THEORY(UninterpretedConstantEmptySet, UninterpretedConstantSet)
-THEORY(UninterpretedConstantSetExpressions, UninterpretedConstantSet)
-THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
+SET_THEORY(UninterpretedConstantSet, uninterpConstantSets)
 THEORY(AuxUninterpretedConstantSets, UninterpretedConstantSet)
 
 THEORY(MemberLiterals, Member)
@@ -48,13 +56,8 @@ REASON(Clause, LiteralOccurrence, true, clauses)
 REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
-REASON(SetClauseDefToExpr, SetClauseDefData, true, setReasons)
-REASON(SetClauseExprToDef, SetClauseDefData, true, setReasons)
-REASON(SetClauseExhaustive, LiteralOccurrence, true, setReasons)
-REASON(SetEqualityToElem, SetEqualityToElemData, false, setReasons)
-REASON(SetEmptyToElem, SetEmptyToElemData, false, setReasons)
-
 #undef REASON
 #undef THEORY
 #undef PAIR_THEORY
 #undef UNINTERPRETED_EQUALITY_THEORY
+#undef SET_THEORY
