@@ -1,4 +1,4 @@
-#include <verify/backend/RewriteEquality.h>
+#include <verify/backend/UninterpretedEquality.h>
 
 #include <gtest/gtest.h>
 
@@ -140,10 +140,10 @@ struct DisequalityReason : private PackedReason<DisequalPair, uint32_t> {
     DisequalPair diseqPair() const { return data(); }
 };
 
-RewriteEquality::RewriteEquality(Solver& solver, ValueKind valueKind, TheoryId theory)
-    : equalityInfos(solver, valueKind), m_theory(theory), m_valueKind(valueKind) { }
+UninterpretedEquality::UninterpretedEquality(Solver& solver, const UninterpretedEqualityParams& params)
+    : params(params), equalityInfos(solver, params.valueKind) { }
 
-void RewriteEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
+void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     auto [source, target] = solver.at(eqPair);
     if (connected(source, target))
         return;
@@ -171,7 +171,7 @@ void RewriteEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
             assignEqual(solver, edge.pair);
 
         forEachCommonElement(infoFor(otherRoot).disequalities, targetDiseq, [this, &solver, &edge](int_t diseqId) {
-            assignDisequal(solver, edge.pair, PairHandle(m_valueKind, diseqId));
+            assignDisequal(solver, edge.pair, PairHandle(params.valueKind, diseqId));
         });
     }
     for (auto edge : targetEdges) {
@@ -184,7 +184,7 @@ void RewriteEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
             assignDisequalByAlwaysDisequal(solver, edge.pair, sourceInfo.root, otherRoot);
         } else {
             forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
-                assignDisequal(solver, edge.pair, PairHandle(m_valueKind, diseqId));
+                assignDisequal(solver, edge.pair, PairHandle(params.valueKind, diseqId));
             });
         }
     }
@@ -212,7 +212,7 @@ void RewriteEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     }
 }
 
-void RewriteEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {
+void UninterpretedEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {
     auto [source, target] = solver.at(diseqPair);
     Value sourceRoot = infoFor(source).root;
     Value targetRoot = infoFor(target).root;
@@ -242,27 +242,29 @@ void RewriteEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {
     }
 }
 
-void RewriteEquality::assignEqual(Solver& solver, PairHandle assignPair) {
-    solver.assignTrue(makeEquality(assignPair), makeReason<ReasonKind::Equality>({}));
+void UninterpretedEquality::assignEqual(Solver& solver, PairHandle assignPair) {
+    solver.assignTrue(makeEquality(assignPair), makeReason(params.equalityReason, {}));
 }
 
-void RewriteEquality::assignDisequal(Solver& solver, PairHandle assignPair, PairHandle diseqPair) {
+void UninterpretedEquality::assignDisequal(Solver& solver, PairHandle assignPair, PairHandle diseqPair) {
     auto [diseqA, diseqB] = solver.at(diseqPair);
     if (!connected(solver.at(assignPair).source, diseqA))
         std::swap(diseqA, diseqB);
 
-    solver.assignTrue(!makeEquality(assignPair), makeReason<ReasonKind::Disequality>({ diseqPair.pairId(), diseqA, diseqB }));
+    solver.assignTrue(!makeEquality(assignPair),
+        makeReason(params.disequalityReason, { diseqPair.pairId(), diseqA, diseqB }));
 }
 
-void RewriteEquality::assignDisequalByAlwaysDisequal(Solver& solver, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB) {
+void UninterpretedEquality::assignDisequalByAlwaysDisequal(Solver& solver, PairHandle assignPair, Value alwaysDiseqA, Value alwaysDiseqB) {
     if (!connected(solver.at(assignPair).source, alwaysDiseqA))
         std::swap(alwaysDiseqA, alwaysDiseqB);
 
-    solver.assignTrue(!makeEquality(assignPair), makeReason<ReasonKind::DisequalityByAlwaysDisequal>({ 0, alwaysDiseqA, alwaysDiseqB }));
+    solver.assignTrue(!makeEquality(assignPair),
+        makeReason(params.disequalityByAlwaysDisqualReason, { 0, alwaysDiseqA, alwaysDiseqB }));
 }
 
-void RewriteEquality::newPair(Solver& solver, PairHandle pair) {
-    VERIFY(pair.valueKind() == m_valueKind);
+void UninterpretedEquality::newPair(Solver& solver, PairHandle pair) {
+    VERIFY(pair.valueKind() == params.valueKind);
     auto [source, target] = solver.at(pair);
     addEdge(source, target, pair);
     addEdge(target, source, pair);
@@ -278,13 +280,13 @@ void RewriteEquality::newPair(Solver& solver, PairHandle pair) {
             assignDisequalByAlwaysDisequal(solver, pair, sourceInfo.root, targetInfo.root);
         } else {
             forEachCommonElement(sourceRootInfo.disequalities, targetRootInfo.disequalities, [this, &solver, pair](int_t diseqId) {
-                assignDisequal(solver, pair, PairHandle(m_valueKind, diseqId));
+                assignDisequal(solver, pair, PairHandle(params.valueKind, diseqId));
             });
         }
     }
 }
 
-void RewriteEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
+void UninterpretedEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
     const auto& valueInfo = infoFor(value);
     int_t valueIndex = valueInfo.treeOffset;
     int_t edgeInsertPos = valueInfo.edgesOffset;
@@ -302,7 +304,7 @@ void RewriteEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
         infoFor(tree[index].value).edgesOffset += 1;
 }
 
-void RewriteEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& result) {
+void UninterpretedEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& result) {
     if (a == b)
         return;
 
@@ -331,15 +333,15 @@ void RewriteEquality::path(Solver& solver, Value a, Value b, ClauseBuilder& resu
     }
 }
 
-bool RewriteEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::Equality) {
+bool UninterpretedEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+    if (reason.kind() == params.equalityReason) {
         auto [source, target] = solver.at(pairOf(assignedLiteral));
         return connected(source, target);
     }
 
     // disequality
     DisequalityReason data = reason.getData<DisequalityReason>();
-    if (reason.kind() == ReasonKind::Disequality && !solver.assignedFalse(makeEquality(PairHandle(m_valueKind, data.pairId()))))
+    if (reason.kind() == params.disequalityReason && !solver.assignedFalse(makeEquality(PairHandle(params.valueKind, data.pairId()))))
         return false;
 
     auto [impliedA, impliedB] = solver.at(pairOf(assignedLiteral));
@@ -347,10 +349,10 @@ bool RewriteEquality::testReason(Solver& solver, BooleanValue assignedLiteral, c
     return connected(impliedA, originalA) && connected(impliedB, originalB);
 }
 
-ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
     auto result = solver.beginClause();
 
-    if (reason.kind() == ReasonKind::Equality) {
+    if (reason.kind() == params.equalityReason) {
         result.add(solver, assignedLiteral);
 
         auto [a, b] = solver.at(pairOf(assignedLiteral));
@@ -362,8 +364,8 @@ ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assi
     // disequality
     result.add(solver, assignedLiteral);
     auto data = reason.getData<DisequalityReason>();
-    if (reason.kind() == ReasonKind::Disequality)
-        result.add(solver, makeEquality(PairHandle(m_valueKind, data.pairId())));
+    if (reason.kind() == params.disequalityReason)
+        result.add(solver, makeEquality(PairHandle(params.valueKind, data.pairId())));
 
     auto [impliedA, impliedB] = solver.at(pairOf(assignedLiteral));
     auto [originalA, originalB] = data.diseqPair();
@@ -373,14 +375,14 @@ ClauseAndIndex RewriteEquality::reasonToClause(Solver& solver, BooleanValue assi
     return { .clause = solver.viewClause(result), .forceLiteralIndex = 0 };
 }
 
-void RewriteEquality::newDecisionLevel(Solver& solver) {
+void UninterpretedEquality::newDecisionLevel(Solver& solver) {
     equalityDecisionPoints.push_back(equalityTrace.size());
     disequalityDecisionPoints.push_back(disequalityTrace.size());
     VERIFY((int_t)equalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
     VERIFY((int_t)disequalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
-void RewriteEquality::beginBacktrack(Solver& solver) {
+void UninterpretedEquality::beginBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
     int_t eqTargetSize = equalityDecisionPoints[lastLevelToRevert];
     for (int_t i = equalityTrace.size() - 1; i >= eqTargetSize; i--) {
@@ -424,7 +426,7 @@ void RewriteEquality::beginBacktrack(Solver& solver) {
     disequalityDecisionPoints.resize(lastLevelToRevert);
 }
 
-void RewriteEquality::endBacktrack(Solver& solver) {
+void UninterpretedEquality::endBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
     int_t targetSize = equalityDecisionPoints[lastLevelToRevert];
     for (int_t i = targetSize; i < (int_t)equalityTrace.size(); i++) {
@@ -434,7 +436,7 @@ void RewriteEquality::endBacktrack(Solver& solver) {
     equalityDecisionPoints.resize(lastLevelToRevert);
 }
 
-void RewriteEquality::checkInvariances(Solver& solver) {
+void UninterpretedEquality::checkInvariances(Solver& solver) {
     auto checkValue = [this](Value value) {
         const auto& info = infoFor(value);
         const auto& rootInfo = infoFor(info.root);
@@ -455,8 +457,8 @@ void RewriteEquality::checkInvariances(Solver& solver) {
             }
         }
     };
-    for (int_t eqId = 0; eqId < solver.booleanCount(m_theory); eqId++) {
-        auto [source, target] = solver.at(PairHandle(m_valueKind, eqId));
+    for (int_t eqId = 0; eqId < solver.booleanCount(params.theory); eqId++) {
+        auto [source, target] = solver.at(PairHandle(params.valueKind, eqId));
         checkValue(source);
         checkValue(target);
     }

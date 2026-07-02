@@ -5,14 +5,36 @@
 
 namespace verify::backend {
 
-struct RewriteEquality {
-    RewriteEquality(Solver&, ValueKind, TheoryId);
+struct UninterpretedEqualityParams {
+    ValueKind valueKind;
+    TheoryId theory;
+    TypedReasonKind<EmptyReasonData> equalityReason;
+    TypedReasonKind<DisequalityReason> disequalityReason;
+    TypedReasonKind<DisequalityReason> disequalityByAlwaysDisqualReason;
+};
+
+namespace theory_params {
+
+#define UNINTERPRETED_EQUALITY_THEORY(valueKind, memberName)                       \
+    inline constexpr UninterpretedEqualityParams eq##valueKind = {                 \
+        ValueKind::valueKind,                                                      \
+        TheoryId::valueKind##Equality,                                             \
+        makeTypedReasonKind<ReasonKind::valueKind##Equality>(),                    \
+        makeTypedReasonKind<ReasonKind::valueKind##Disequality>(),                 \
+        makeTypedReasonKind<ReasonKind::valueKind##DisequalityByAlwaysDisequal>(), \
+    };
+#include <verify/backend/theories.inc>
+
+}
+
+struct UninterpretedEquality {
+    UninterpretedEquality(Solver&, const UninterpretedEqualityParams&);
 
     BooleanValue makeEquality(PairHandle pair) const {
-        return { m_theory, pair.pairId() * 2 };
+        return { params.theory, pair.pairId() * 2 };
     }
     PairHandle pairOf(BooleanValue equality) const {
-        return { m_valueKind, equality.id() / 2 };
+        return { params.valueKind, equality.id() / 2 };
     }
 
     void propagateEqual(Solver& solver, PairHandle eqPair);
@@ -90,18 +112,17 @@ private:
         PairHandle diseqPair;
     };
 
+    UninterpretedEqualityParams params;
+
     KindData<EqualityInfo> equalityInfos;
 
     std::vector<EqualityTraceEntry> equalityTrace;
     std::vector<DisequalityTraceEntry> disequalityTrace;
     std::vector<uint32_t> equalityDecisionPoints; //!< Trace sizes at the respective decision levels
     std::vector<uint32_t> disequalityDecisionPoints; //!< Trace sizes at the respective decision levels
-
-    TheoryId m_theory;
-    ValueKind m_valueKind;
 };
 
-inline void RewriteEquality::forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit) {
+inline void UninterpretedEquality::forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit) {
     for (;;) {
         callback(value);
         const auto& valueInfo = infoFor(value);
@@ -115,7 +136,7 @@ inline void RewriteEquality::forEachParentOf(Value value, auto&& callback, uint3
     }
 }
 
-inline void RewriteEquality::forEachEqualValue(Value value, auto&& callback) {
+inline void UninterpretedEquality::forEachEqualValue(Value value, auto&& callback) {
     const auto& tree = infoFor(infoFor(value).root).tree;
     for (const auto& node : tree) {
         callback(node.value);

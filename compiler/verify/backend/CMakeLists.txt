@@ -12,8 +12,6 @@ target_sources(${PROJECT_NAME}
     MemberTests.cpp
     PairSet.h
     Reason.h
-    RewriteEquality.cpp
-    RewriteEquality.h
     SatCore.cpp
     SatCore.h
     SatTest.cpp
@@ -24,6 +22,8 @@ target_sources(${PROJECT_NAME}
     Solver.h
     SolverImpl.h
     Types.h
+    UninterpretedEquality.cpp
+    UninterpretedEquality.h
     Value.cpp
     Value.h
 )

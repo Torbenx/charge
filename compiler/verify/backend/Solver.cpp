@@ -14,15 +14,15 @@ SolverImpl::SolverImpl()
     : literalInfos(*this, ValueKind::Boolean)
     , clauses(*this)
     , builtinTrueFalse(*this)
-    , uninterpConstantEquality(*this, ValueKind::UninterpretedConstant, TheoryId::UninterpretedConstantEquality)
+    , uninterpConstantEquality(*this, theory_params::eqUninterpretedConstant)
     , members(*this)
     , uninterpConstantSets(
-        *this,
-        TheoryId::UninterpretedConstantSetExpressions,
-        TheoryId::UninterpretedConstantEmptySet,
-        TheoryId::UninterpretedConstantSetEquality,
-        TheoryId::UninterpretedConstantSetIsEmpty,
-        TheoryId::UninterpretedConstantElementInSet) { }
+          *this,
+          TheoryId::UninterpretedConstantSetExpressions,
+          TheoryId::UninterpretedConstantEmptySet,
+          TheoryId::UninterpretedConstantSetEquality,
+          TheoryId::UninterpretedConstantSetIsEmpty,
+          TheoryId::UninterpretedConstantElementInSet) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     BooleanValue b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -55,22 +55,6 @@ ClauseAndIndex SolverImpl::DecisionReason::reasonToClause(Solver&, BooleanValue,
     VERIFY_NOT_REACHED();
 }
 
-// ----------------------- Rewrite equalities -----------------------
-
-bool SolverImpl::RewriteEqualities::testReason(Solver& solver, BooleanValue lit, const Reason& reason) {
-    if (lit.theory() == TheoryId::UninterpretedConstantEquality)
-        return solver.impl().uninterpConstantEquality.testReason(solver, lit, reason);
-    else
-        VERIFY_NOT_REACHED();
-}
-
-ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, BooleanValue lit, const Reason& reason) {
-    if (lit.theory() == TheoryId::UninterpretedConstantEquality)
-        return solver.impl().uninterpConstantEquality.reasonToClause(solver, lit, reason);
-    else
-        VERIFY_NOT_REACHED();
-}
-
 // --------------------------- Set Reasons --------------------------
 
 bool SolverImpl::SetReasons::testReason(Solver& solver, BooleanValue lit, const Reason& reason) {
@@ -86,8 +70,6 @@ ClauseAndIndex SolverImpl::SetReasons::reasonToClause(Solver& solver, BooleanVal
     else
         VERIFY_NOT_REACHED();
 }
-
-
 
 // ------------------------ SatCore forwards ------------------------
 
@@ -146,7 +128,7 @@ bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
     case ReasonKind::name:                          \
         return impl.implMember.testReason(impl, lit, reason);
     switch (reason.kind()) {
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
     default:
         VERIFY_NOT_REACHED();
     }
@@ -158,7 +140,7 @@ ClauseAndIndex SatCore::Interface::reasonToClause(Literal lit, const Reason& rea
     case ReasonKind::name:                          \
         return impl.implMember.reasonToClause(impl, lit, reason);
     switch (reason.kind()) {
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
     default:
         VERIFY_NOT_REACHED();
     }
@@ -169,14 +151,17 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
     impl.clauses.propagateAssignment(impl, lit);
 
     switch (lit.theory()) {
-    case TheoryId::UninterpretedConstantEquality: {
-        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
-        if (lit.negated())
-            impl.uninterpConstantEquality.propagateDisequal(impl, pair);
-        else
-            impl.uninterpConstantEquality.propagateEqual(impl, pair);
-        break;
+#define UNINTERPRETED_EQUALITY_THEORY(valueKind, member)                             \
+    case TheoryId::valueKind##Equality: {                                            \
+        PairHandle pair = decodePairTheoryValue<TheoryId::valueKind##Equality>(lit); \
+        if (lit.negated())                                                           \
+            impl.member.propagateDisequal(impl, pair);                               \
+        else                                                                         \
+            impl.member.propagateEqual(impl, pair);                                  \
+        break;                                                                       \
     }
+#include <verify/backend/theories.inc>
+
     case TheoryId::UninterpretedConstantSetEquality: {
         PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantSetEquality>(lit);
         if (!lit.negated())

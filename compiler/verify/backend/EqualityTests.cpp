@@ -115,7 +115,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
 
     auto testConnections = [&] {
         {
-            auto [clause, forcedIndex] = solver.reasonToClause(e30_33, makeReason<ReasonKind::Equality>({}));
+            auto [clause, forcedIndex] = solver.reasonToClause(e30_33, makeReason(theory_params::eqUninterpretedConstant.equalityReason, {}));
             EXPECT_EQ(clause.size(), 10);
             EXPECT_EQ(clause[forcedIndex], solver.equality(vals[3][0], vals[3][3]));
 
@@ -133,7 +133,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
         }
 
         {
-            auto [clause, forcedIndex] = solver.reasonToClause(e32_33, makeReason<ReasonKind::Equality>({}));
+            auto [clause, forcedIndex] = solver.reasonToClause(e32_33, makeReason(theory_params::eqUninterpretedConstant.equalityReason, {}));
             EXPECT_EQ(clause.size(), 8);
             EXPECT_EQ(clause[forcedIndex], solver.equality(vals[3][2], vals[3][3]));
 

@@ -8,7 +8,7 @@ namespace verify::backend {
 
 enum class ReasonKind : uint8_t {
 #define REASON(name, ...) name,
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
 };
 std::string_view nameString(ReasonKind);
 
@@ -17,7 +17,7 @@ inline bool isFullyPropagating(ReasonKind kind) {
     case ReasonKind::name:                   \
         return propagating;
     switch (kind) {
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
     default:
         VERIFY_NOT_REACHED();
     }
@@ -32,10 +32,30 @@ struct reason_data;
     struct reason_data<ReasonKind::name> { \
         using type = data;                 \
     };
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
 
 template<ReasonKind kind>
 using reason_data_t = typename reason_data<kind>::type;
+
+template<typename T>
+struct TypedReasonKind {
+    constexpr ReasonKind kind() const { return m_kind; }
+    constexpr bool operator==(const TypedReasonKind<T>&) const = default;
+    constexpr bool operator==(ReasonKind other) const { return m_kind == other; }
+    constexpr operator ReasonKind() const { return kind(); }
+
+    template<ReasonKind kind>
+    friend constexpr TypedReasonKind<reason_data_t<kind>> makeTypedReasonKind();
+
+private:
+    constexpr TypedReasonKind(ReasonKind kind)
+        : m_kind(kind) { }
+
+    ReasonKind m_kind;
+};
+
+template<ReasonKind kind>
+constexpr TypedReasonKind<reason_data_t<kind>> makeTypedReasonKind() { return kind; }
 
 template<typename T>
 std::array<std::byte, 8> packReasonData(T data) {
@@ -158,16 +178,20 @@ struct Reason {
 };
 static_assert(sizeof(Reason) == 12);
 
-template<ReasonKind kind>
-Reason makeReason(const reason_data_t<kind>& data) {
-    using T = reason_data_t<kind>;
+template<typename T>
+Reason makeReason(TypedReasonKind<T> kind, const T& data) {
     if constexpr (sizeof(T) <= 8) {
         return Reason(kind, 0, packReasonData(data));
     } else {
         Reason out = std::bit_cast<Reason>(data);
-        out.kindBits = std::to_underlying(kind);
+        out.kindBits = std::to_underlying(kind.kind());
         return out;
     }
+}
+
+template<ReasonKind kind>
+Reason makeReason(const reason_data_t<kind>& data) {
+    return makeReason(makeTypedReasonKind<kind>(), data);
 }
 
 struct EmptyReasonData { };

@@ -23,7 +23,7 @@ std::string_view nameString(ReasonKind kind) {
         return #name;
 
     switch (kind) {
-#include <verify/backend/reasons.inc>
+#include <verify/backend/theories.inc>
 
     default:
         VERIFY_NOT_REACHED();

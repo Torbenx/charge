@@ -4,7 +4,7 @@
 #include <verify/backend/DataManager.h>
 #include <verify/backend/Members.h>
 #include <verify/backend/PairSet.h>
-#include <verify/backend/RewriteEquality.h>
+#include <verify/backend/UninterpretedEquality.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
@@ -22,10 +22,6 @@ struct SolverImpl : Solver, SatCore::Interface {
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
     struct DecisionReason {
-        bool testReason(Solver&, BooleanValue, const Reason&);
-        ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
-    };
-    struct RewriteEqualities {
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
@@ -49,7 +45,6 @@ struct SolverImpl : Solver, SatCore::Interface {
     // Initialize members with trivial ctors
     AlwaysReason alwaysReason;
     DecisionReason decisionReason;
-    RewriteEqualities rewriteEqualities;
     SetReasons setReasons;
 
     // DataManager must be initialized first, everything depends on it
@@ -65,7 +60,7 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     std::array<PairSet, std::to_underlying(ValueKind::COUNT)> pairs;
 
-    RewriteEquality uninterpConstantEquality;
+    UninterpretedEquality uninterpConstantEquality;
 
     Members members;
 
