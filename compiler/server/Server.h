@@ -97,7 +97,7 @@ struct Server {
         bool openInClient = false;
         std::optional<file_time> lastWriteTime;
 
-        FileInfo(const path& filePath)
+        explicit FileInfo(const path& filePath)
             : filePath(filePath) { }
 
         void setSource(std::string newSourceData) {

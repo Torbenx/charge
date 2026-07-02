@@ -19,6 +19,7 @@ SolverImpl::SolverImpl()
     , uninterpConstantSets(
         *this,
         TheoryId::UninterpretedConstantSetExpressions,
+        TheoryId::UninterpretedConstantEmptySet,
         TheoryId::UninterpretedConstantSetEquality,
         TheoryId::UninterpretedConstantSetIsEmpty,
         TheoryId::UninterpretedConstantElementInSet) { }
@@ -69,6 +70,24 @@ ClauseAndIndex SolverImpl::RewriteEqualities::reasonToClause(Solver& solver, Boo
     else
         VERIFY_NOT_REACHED();
 }
+
+// --------------------------- Set Reasons --------------------------
+
+bool SolverImpl::SetReasons::testReason(Solver& solver, BooleanValue lit, const Reason& reason) {
+    if (lit.theory() == TheoryId::UninterpretedConstantElementInSet)
+        return solver.impl().uninterpConstantSets.testReason(solver, lit, reason);
+    else
+        VERIFY_NOT_REACHED();
+}
+
+ClauseAndIndex SolverImpl::SetReasons::reasonToClause(Solver& solver, BooleanValue lit, const Reason& reason) {
+    if (lit.theory() == TheoryId::UninterpretedConstantElementInSet)
+        return solver.impl().uninterpConstantSets.reasonToClause(solver, lit, reason);
+    else
+        VERIFY_NOT_REACHED();
+}
+
+
 
 // ------------------------ SatCore forwards ------------------------
 
@@ -159,14 +178,14 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
         break;
     }
     case TheoryId::UninterpretedConstantSetEquality: {
-        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantEquality>(lit);
+        PairHandle pair = decodePairTheoryValue<TheoryId::UninterpretedConstantSetEquality>(lit);
         if (!lit.negated())
             impl.uninterpConstantSets.propagateEquality(impl, pair);
         break;
     }
     case TheoryId::UninterpretedConstantSetIsEmpty:
-        if (lit.negated())
-            impl.uninterpConstantSets.propagateIsNonEmpty(impl, lit);
+        if (!lit.negated())
+            impl.uninterpConstantSets.propagateIsEmpty(impl, lit);
         break;
     case TheoryId::UninterpretedConstantElementInSet:
         impl.uninterpConstantSets.propagateElementAssignment(impl, lit);
@@ -189,6 +208,7 @@ void SatCore::Interface::unapplyAssignment(Literal lit) {
     switch (lit.theory()) {
     case TheoryId::UninterpretedConstantElementInSet:
         impl.uninterpConstantSets.unapplyElementAssignment(impl, lit);
+        break;
     default:
         break;
     }
@@ -220,6 +240,8 @@ static bool simplifyClause(Solver& solver, std::vector<BooleanValue>& clause) {
 }
 
 void Solver::addClause(std::vector<BooleanValue> clause) {
+    impl().uninterpConstantSets.refineClause(*this, clause);
+
     if (simplifyClause(*this, clause))
         return;
 
@@ -267,6 +289,8 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::AuxUninterpretedConstants:
     case TheoryId::MemberLiterals:
     case TheoryId::AuxMemberVariables:
+    case TheoryId::AuxUninterpretedConstantSets:
+    case TheoryId::UninterpretedConstantEmptySet:
         return a.id() <=> b.id();
 
     case TheoryId::CompositeMembers: {
@@ -275,13 +299,11 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     }
 
     case TheoryId::UninterpretedConstantSetIsEmpty:
-        VERIFY_NOT_REACHED();
     case TheoryId::UninterpretedConstantElementInSet:
-        VERIFY_NOT_REACHED();
     case TheoryId::UninterpretedConstantSetExpressions:
-        VERIFY_NOT_REACHED();
     case TheoryId::UninterpretedConstantSingletonSets:
-        VERIFY_NOT_REACHED();
+        // Ordering is not important since not rewriting is done
+        return a.id() <=> b.id();
 
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)                                     \
     case TheoryId::name: {                                                                                   \
@@ -369,11 +391,11 @@ PairHandle Solver::findPair(Value a, Value b) {
             b = !(BooleanValue)b;
         }
         if (a == true_literal)
-            return PairHandle(b);
+            return PairHandle::makeSpecialPair(b);
     } else if (valueKind == ValueKind::UninterpretedConstantSet) {
         Value emptySet = impl().uninterpConstantSets.emptySet();
         if (a == emptySet)
-            return PairHandle(b);
+            return PairHandle::makeSpecialPair(b);
     }
 
     return findPair({ a, b });
@@ -480,9 +502,9 @@ BooleanValue Solver::equality(PairHandle handle) {
     } else if (handle.valueKind() == ValueKind::UninterpretedConstantSet) {
         if (handle.specialPair()) {
             // Encodes emptySet == b which is equivalent to b being empty
-            return impl().uninterpConstantSets.makeIsEmpty(handle.encodedValue());
+            return impl().uninterpConstantSets.makeIsEmpty(*this, handle.encodedValue());
         }
-        impl().uninterpConstantSets.makeEquality(handle);
+        return impl().uninterpConstantSets.makeEquality(handle);
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -499,7 +521,7 @@ bool Solver::assignedEqual(Value a, Value b) {
     } else if (valueKind == ValueKind::Member) {
         return impl().members.rewrite((Member)a) == impl().members.rewrite((Member)b);
     } else {
-        VERIFY_NOT_REACHED();
+        return assignedTrue(equality(a, b));
     }
 }
 
@@ -521,6 +543,10 @@ BooleanValue Solver::newAuxBooleanVariable() {
 
 Value Solver::newAuxUninterpretedConstant() {
     return impl().newValue(TheoryId::AuxUninterpretedConstants);
+}
+
+Value Solver::newAuxUninterpretedConstantSet() {
+    return impl().newValue(TheoryId::AuxUninterpretedConstantSets);
 }
 
 Member Solver::newAuxMemberVariable() {

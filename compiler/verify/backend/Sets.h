@@ -4,6 +4,8 @@
 #include <verify/backend/Data.h>
 #include <verify/backend/Value.h>
 
+#include <unordered_set>
+
 namespace verify::backend {
 
 struct Sets {
@@ -12,6 +14,8 @@ struct Sets {
             : m_id(id) { }
         uint32_t id() const { return m_id; }
 
+        bool operator==(const ElementId&) const = default;
+
     private:
         uint32_t m_id = limits::max;
     };
@@ -19,29 +23,43 @@ struct Sets {
     //! Represents an internal boolean literal of the form '(not) in set'
     struct Containment {
         Containment(Value set, bool contained)
-            : m_set(set), m_contained(contained) { }
+            : theoryBits(std::to_underlying(set.theory()))
+            , idBits(set.id())
+            , containedBit(contained) { }
 
-        Value set() const { return m_set; }
-        bool contained() const { return m_contained; }
-        Containment operator!() const { return { m_set, !m_contained }; }
+        Value set() const { return Value((TheoryId)theoryBits, idBits); }
+        bool contained() const { return containedBit != 0u; }
+        Containment operator!() const {
+            Containment copy = *this;
+            copy.containedBit ^= 1u;
+            return copy;
+        }
         bool operator==(const Containment&) const = default;
 
     private:
-        Value m_set;
-        bool m_contained;
+        uint32_t theoryBits : 7;
+        uint32_t idBits : 24;
+        uint32_t containedBit : 1;
     };
     static Containment in(Value set) { return { set, true }; }
 
-    Sets(Solver&, TheoryId expressionTheory, TheoryId equalityTheory, TheoryId isEmptyTheory, TheoryId elementInSetTheory);
+    Sets(Solver&,
+        TheoryId expressionTheory,
+        TheoryId emptySetTheory,
+        TheoryId equalityTheory,
+        TheoryId isEmptyTheory,
+        TheoryId elementInSetTheory);
 
-    BooleanValue makeEquality(PairHandle);
-    BooleanValue makeIsEmpty(Value);
+    BooleanValue makeEquality(PairHandle pair) {
+        return { equalityTheory, pair.pairId() * 2 };
+    }
+    BooleanValue makeIsEmpty(Solver& solver, Value value);
     void newPair(Solver&, PairHandle);
 
     void propagateElementAssignment(Solver&, BooleanValue);
     void unapplyElementAssignment(Solver&, BooleanValue);
     void propagateEquality(Solver&, PairHandle);
-    void propagateIsNonEmpty(Solver&, BooleanValue);
+    void propagateIsEmpty(Solver&, BooleanValue);
 
     bool testReason(Solver&, BooleanValue, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
@@ -51,8 +69,11 @@ struct Sets {
         return assignedTrue(solver, element, !literal);
     }
     void assignTrue(Solver&, ElementId, Containment, const Reason&);
+    void decideTrue(Solver&, ElementId, Containment);
 
-    Value emptySet();
+    ElementId newElement(Solver& solver);
+
+    Value emptySet() { return Value(emptySetTheory, 0); }
 
     Value union_(Solver&, std::span<const Value>);
     Value union_(Solver& solver, std::initializer_list<Value> vals) {
@@ -78,6 +99,8 @@ struct Sets {
         return subset(solver, { intersection.begin(), intersection.end() }, { minus.begin(), minus.end() });
     }
 
+    void refineClause(Solver&, std::vector<BooleanValue>& clause);
+
 private:
     struct ElementInfo {
         //! Masks tracking the assignments in the expression clauses
@@ -100,6 +123,7 @@ private:
 
     struct SetInfo {
         std::array<LiteralInfo, 2> literalInfos = {};
+        std::optional<BooleanValue> isEmptyLiteral;
         std::vector<EqualityInfo> equalities;
         std::vector<std::optional<BooleanValue>> elementInSetLiterals;
     };
@@ -109,10 +133,41 @@ private:
         Value set = INVALID_VALUE;
     };
 
+    struct IsEmptyInfo {
+        Value set;
+    };
+
+    struct HashLookup {
+        size_t hash;
+        Sets& sets;
+        std::span<const Containment> clause;
+    };
+
+    struct HashEntry {
+        Value expr;
+        size_t hash;
+    };
+
+    struct ClauseHash {
+        using is_transparent = void;
+
+        size_t operator()(const HashEntry& entry) const { return entry.hash; }
+        size_t operator()(const HashLookup& lookup) const { return lookup.hash; }
+    };
+
+    struct ClauseHashEqual {
+        using is_transparent = void;
+
+        bool operator()(const HashEntry& a, const HashEntry& b) const {
+            return a.expr == b.expr;
+        }
+        bool operator()(const HashLookup& a, const HashEntry& b) const;
+    };
+
     bool unionExpression(Value) const;
     bool subsetExpression(Value) const;
 
-    void addClause(std::vector<Containment>);
+    Value addClause(Solver&, std::vector<Containment>);
 
     void propagateContainment(Solver&, ElementId, Containment);
     void unapplyContainment(Solver&, ElementId, Containment);
@@ -121,10 +176,12 @@ private:
         return setInfos[lit.set()].literalInfos[lit.contained()];
     }
 
-    BooleanValue map(Solver&, ElementId, Containment);
+    BooleanValue mapToBool(Solver&, ElementId, Containment);
+    std::pair<ElementId, Containment> mapFromBool(BooleanValue);
 
     ValueKind setKind;
     TheoryId expressionTheory;
+    TheoryId emptySetTheory;
     TheoryId equalityTheory;
     TheoryId isEmptyTheory;
     TheoryId elementInSetTheory;
@@ -161,11 +218,13 @@ private:
     - If the first literal is true than all other literals are false. This handles rules u4 and s4.
     */
     std::vector<std::vector<Containment>> clauses;
+    std::unordered_set<HashEntry, ClauseHash, ClauseHashEqual> clauseSet;
 
     std::vector<ElementInfo> elements;
 
     KindData<SetInfo> setInfos;
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
+    TheoryData<IsEmptyInfo, TheoryId::COUNT, 2> isEmptyInfos;
 };
 
 struct SetClauseDefData {
@@ -176,6 +235,10 @@ struct SetClauseDefData {
 struct SetEqualityToElemData {
     PairHandle pair;
     Sets::Containment source;
+};
+
+struct SetEmptyToElemData {
+    BooleanValue isEmptyLiteral;
 };
 
 }

@@ -29,6 +29,10 @@ struct SolverImpl : Solver, SatCore::Interface {
         bool testReason(Solver&, BooleanValue, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
     };
+    struct SetReasons {
+        bool testReason(Solver&, BooleanValue, const Reason&);
+        ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+    };
 
     SolverImpl();
 
@@ -45,6 +49,8 @@ struct SolverImpl : Solver, SatCore::Interface {
     // Initialize members with trivial ctors
     AlwaysReason alwaysReason;
     DecisionReason decisionReason;
+    RewriteEqualities rewriteEqualities;
+    SetReasons setReasons;
 
     // DataManager must be initialized first, everything depends on it
     DataManager data;
@@ -59,7 +65,6 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     std::array<PairSet, std::to_underlying(ValueKind::COUNT)> pairs;
 
-    RewriteEqualities rewriteEqualities;
     RewriteEquality uninterpConstantEquality;
 
     Members members;
@@ -72,6 +77,18 @@ inline SolverImpl& Solver::impl() {
 }
 inline const SolverImpl& Solver::impl() const {
     return static_cast<const SolverImpl&>(*this);
+}
+
+inline void Solver::forEachValue(TheoryId theory, auto&& callback) {
+    int_t valueCount = this->valueCount(theory);
+    for (int_t i = 0; i < valueCount; i++)
+        callback(Value(theory, i));
+}
+
+inline void Solver::forEachBoolean(TheoryId theory, auto&& callback) {
+    int_t boolCount = this->booleanCount(theory);
+    for (int_t i = 0; i < boolCount; i++)
+        callback(BooleanValue(theory, i * 2));
 }
 
 }

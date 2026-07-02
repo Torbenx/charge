@@ -10,6 +10,7 @@ enum class ReasonKind : uint8_t {
 #define REASON(name, ...) name,
 #include <verify/backend/reasons.inc>
 };
+std::string_view nameString(ReasonKind);
 
 inline bool isFullyPropagating(ReasonKind kind) {
 #define REASON(name, data, propagating, ...) \

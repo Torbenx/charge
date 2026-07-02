@@ -2,29 +2,54 @@
 
 #include <verify/backend/SolverImpl.h>
 
+#include <algorithm>
 #include <ranges>
 
 namespace verify::backend {
 
-Sets::Sets(Solver& solver, TheoryId expressionTheory, TheoryId equalityTheory, TheoryId isEmptyTheory, TheoryId elementInSetTheory)
+Sets::Sets(
+    Solver& solver,
+    TheoryId expressionTheory,
+    TheoryId emptySetTheory,
+    TheoryId equalityTheory,
+    TheoryId isEmptyTheory,
+    TheoryId elementInSetTheory)
     : setKind(kindOf(expressionTheory))
     , expressionTheory(expressionTheory)
+    , emptySetTheory(emptySetTheory)
     , equalityTheory(equalityTheory)
     , isEmptyTheory(isEmptyTheory)
     , elementInSetTheory(elementInSetTheory)
     , setInfos(solver, setKind)
-    , inSetInfos(solver, elementInSetTheory) {
-    // Construct empty set as union with no elements
-    Value empty = Value(expressionTheory, clauses.size());
-    clauses.push_back({ !in(empty) });
+    , inSetInfos(solver, elementInSetTheory)
+    , isEmptyInfos(solver, isEmptyTheory) {
+    Value empty = solver.impl().newValue(emptySetTheory);
     VERIFY(empty == emptySet());
+    solver.assignTrue(makeIsEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
+    VERIFY(solver.impl().sat.propagate());
+}
+
+BooleanValue Sets::makeIsEmpty(Solver& solver, Value set) {
+    auto& setInfo = setInfos[set];
+    if (!setInfo.isEmptyLiteral.has_value()) {
+        BooleanValue newLit = solver.impl().newBoolean(isEmptyTheory);
+        setInfo.isEmptyLiteral = newLit;
+        isEmptyInfos[newLit] = { .set = set };
+    }
+    return setInfo.isEmptyLiteral.value();
 }
 
 void Sets::newPair(Solver& solver, PairHandle pair) {
     VERIFY(!pair.specialPair());
     VERIFY(pair.valueKind() == setKind);
     auto [a, b] = solver.at(pair);
-    solver.addClause({ makeEquality(pair), !makeIsEmpty(subset(solver, { a }, { b })), !makeIsEmpty(subset(solver, { b }, { a })) });
+    solver.addClause({
+        makeEquality(pair),
+        !makeIsEmpty(solver, subset(solver, { a }, { b })),
+        !makeIsEmpty(solver, subset(solver, { b }, { a })),
+    });
+    setInfos[a].equalities.push_back({ pair, b });
+    setInfos[b].equalities.push_back({ pair, a });
 }
 
 bool Sets::unionExpression(Value value) const {
@@ -35,9 +60,7 @@ bool Sets::subsetExpression(Value value) const {
     return value.theory() == expressionTheory && clauses[value.id()].front().contained();
 }
 
-Value Sets::emptySet() { return Value(expressionTheory, 0); }
-
-Value Sets::union_(Solver&, std::span<const Value> sets) {
+Value Sets::union_(Solver& solver, std::span<const Value> sets) {
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
     Value result = Value(expressionTheory, id);
@@ -53,27 +76,19 @@ Value Sets::union_(Solver&, std::span<const Value> sets) {
     };
     for (Value set : sets) {
         VERIFY(kindOf(set.theory()) == setKind);
-        if (unionExpression(set)) {
-            const auto& unionClause = clauses[set.id()];
-            for (Containment lit : std::views::drop(unionClause, 1)) {
-                VERIFY(!unionExpression(lit.set()));
-                addSet(lit.set());
-            }
-        } else {
+        if (set != emptySet())
             addSet(set);
-        }
     }
     if (clause.size() == 1) {
         return emptySet();
-    } else if (clause.size() == 1) {
+    } else if (clause.size() == 2) {
         return clause[1].set();
     } else {
-        addClause(std::move(clause));
-        return result;
+        return addClause(solver, std::move(clause));
     }
 }
 
-Value Sets::subset(Solver&, std::span<const Value> intersection, std::span<const Value> minus) {
+Value Sets::subset(Solver& solver, std::span<const Value> intersection, std::span<const Value> minus) {
     VERIFY(intersection.size() >= 1);
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
@@ -94,55 +109,157 @@ Value Sets::subset(Solver&, std::span<const Value> intersection, std::span<const
     };
 
     for (Value set : intersection) {
-        if (set == emptySet()) {
+        if (set == emptySet())
             return emptySet();
-        }
-        VERIFY(!unionExpression(set));
-        if (subsetExpression(set)) {
-            auto& subsetClause = clauses[set.id()];
-            for (Containment lit : std::views::drop(subsetClause, 1)) {
-                if (!addSet(lit))
-                    return emptySet();
-            }
-        } else {
-            if (!addSet(!in(set)))
-                return emptySet();
-        }
+        if (!addSet(!in(set)))
+            return emptySet();
     }
     for (Value set : minus) {
-        VERIFY(!subsetExpression(set));
-        if (unionExpression(set)) {
-            auto& unionClause = clauses[set.id()];
-            for (Containment lit : std::views::drop(unionClause, 1)) {
-                Value unionPart = lit.set();
-                VERIFY(!subsetExpression(unionPart));
-                VERIFY(!unionExpression(unionPart));
-                if (!addSet(in(unionPart)))
-                    return emptySet();
-            }
-        } else {
-            if (!addSet(in(set)))
-                return emptySet();
-        }
+        if (set == emptySet())
+            continue;
+        if (!addSet(in(set)))
+            return emptySet();
     }
     VERIFY(clause.size() >= 2);
     if (clause.size() == 2) {
         VERIFY(!clause[1].contained()); // !contained indicates intersection
         return clause[1].set();
     } else {
-        addClause(std::move(clause));
-        return result;
+        return addClause(solver, std::move(clause));
     }
 }
 
-void Sets::addClause(std::vector<Containment> clause) {
-    VERIFY(clause.size() <= MAX_CLAUSE_SIZE);
-    uint32_t clauseId = clauses.size();
-    VERIFY(clause.front().set() == Value(expressionTheory, clauseId));
-    for (uint32_t i = 0; i < clause.size(); i++) {
-        infoFor(clause[i]).occurrences.push_back({ .literalIndex = i, .clauseIndex = clauseId });
+bool Sets::ClauseHashEqual::operator()(const HashLookup& a, const HashEntry& b) const {
+    return std::ranges::equal(std::views::drop(a.sets.clauses[b.expr.id()], 1), std::views::drop(a.clause, 1));
+}
+
+// https://www.boost.org/doc/libs/1_34_1/doc/html/boost/hash_combine.html
+static void hash_combine(size_t& seed, size_t hash_value) {
+    seed ^= hash_value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+static size_t hashClause(std::span<const Sets::Containment> clause) {
+    size_t hash = 0xabcdef01;
+    for (auto c : std::views::drop(clause, 1))
+        hash_combine(hash, std::bit_cast<uint32_t>(c));
+    return hash;
+}
+
+Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
+    VERIFY(inClause.size() >= 3);
+    VERIFY(inClause.size() <= MAX_CLAUSE_SIZE);
+    VERIFY((int_t)clauses.size() == solver.valueCount(expressionTheory));
+
+    std::ranges::sort(std::views::drop(inClause, 1), [&solver](Containment a, Containment b) -> bool {
+        if (a.contained() != b.contained())
+            return !a.contained();
+        return solver.rewriteOrder(a.set(), b.set()) < 0;
+    });
+    Value expressionValue(expressionTheory, clauses.size());
+    size_t hash = hashClause(inClause);
+    auto hashIt = clauseSet.find(HashLookup { hash, *this, inClause });
+    if (hashIt != clauseSet.end()) {
+        return hashIt->expr;
     }
-    clauses.emplace_back(std::move(clause));
+    clauseSet.emplace(HashEntry { expressionValue, hash });
+
+    clauses.emplace_back(std::move(inClause));
+    auto& clause = clauses.back();
+
+    VERIFY(solver.impl().newValue(expressionTheory) == expressionValue);
+    VERIFY(clause.front().set() == expressionValue);
+    for (int_t i = 0; i < (int_t)clause.size(); i++) {
+        infoFor(clause[i]).occurrences.push_back({ .literalIndex = (uint32_t)i, .clauseIndex = expressionValue.id() });
+    }
+
+    for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
+        ElementId element(elementId);
+        auto& masks = elements[element.id()].clauseMasks;
+        VERIFY(masks.size() == clauses.size() - 1);
+        // The first literal is for the just constructed set and cannot be assigned
+        clause_mask_t newMask = Clauses::literalMask(0);
+        for (int_t literalIndex = 1; literalIndex < (int_t)clause.size(); literalIndex++) {
+            if (!assignedFalse(solver, element, clause[literalIndex]))
+                newMask |= Clauses::literalMask(literalIndex);
+        }
+        masks.push_back(newMask);
+        int popcnt = std::popcount(newMask);
+        VERIFY(popcnt >= 1);
+        if (popcnt == 1) {
+            VERIFY(newMask == Clauses::literalMask(0));
+            assignTrue(solver, element, clause[0],
+                makeReason<ReasonKind::SetClauseExhaustive>({ .literalIndex = 0, .clauseIndex = expressionValue.id() }));
+        }
+    }
+
+    return expressionValue;
+}
+
+void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
+    auto setLits = std::ranges::partition(boolClause, [this](BooleanValue lit) {
+        return lit.theory() != elementInSetTheory;
+    });
+    if (setLits.empty())
+        return;
+
+    // Generate set expressions, a separate one for each element
+    std::vector<BooleanValue> replacementLiterals;
+    std::ranges::sort(setLits, std::less(), [this](BooleanValue lit) { return inSetInfos[lit].element.id(); });
+    for (auto it = setLits.begin(); it != setLits.end();) {
+        std::vector<Containment> setClause;
+        Value resultSet = Value(expressionTheory, clauses.size());
+        setClause.push_back(in(resultSet));
+
+        auto [clauseElement, firstCont] = mapFromBool(*it);
+        setClause.push_back(firstCont);
+        bool allPositive = firstCont.contained();
+        for (;;) {
+            ++it;
+            if (it == setLits.end())
+                break;
+            auto [element, cont] = mapFromBool(*it);
+            if (element != clauseElement)
+                break;
+            setClause.push_back(cont);
+            if (!cont.contained())
+                allPositive = false;
+        }
+
+        // All clauses contain at least one negative literal, a property that persists under resolution
+        VERIFY(!allPositive);
+        VERIFY(setClause.size() >= 2);
+        if (setClause.size() == 2) {
+            VERIFY(!setClause[1].contained());
+            replacementLiterals.push_back(makeIsEmpty(solver, setClause[1].set()));
+        } else {
+            replacementLiterals.push_back(makeIsEmpty(solver, addClause(solver, std::move(setClause))));
+        }
+    }
+
+    boolClause.erase(setLits.begin(), setLits.end());
+    boolClause.append_range(replacementLiterals);
+}
+
+void Sets::assignTrue(Solver& solver, ElementId element, Containment lit, const Reason& reason) {
+    solver.assignTrue(mapToBool(solver, element, lit), reason);
+}
+
+void Sets::decideTrue(Solver& solver, ElementId element, Containment lit) {
+    solver.decideTrue(mapToBool(solver, element, lit));
+}
+
+bool Sets::assignedTrue(Solver& solver, ElementId element, Containment lit) {
+    return solver.assignedTrue(mapToBool(solver, element, lit));
+}
+
+void Sets::propagateElementAssignment(Solver& solver, BooleanValue lit) {
+    auto [element, cont] = mapFromBool(lit);
+    propagateContainment(solver, element, cont);
+}
+
+void Sets::unapplyElementAssignment(Solver& solver, BooleanValue lit) {
+    auto [element, cont] = mapFromBool(lit);
+    unapplyContainment(solver, element, cont);
 }
 
 void Sets::propagateContainment(Solver& solver, ElementId element, Containment literal) {
@@ -151,7 +268,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         if (occ.literalIndex == 0) {
             // If the first literal in a clause is true than all other literals are false.
             for (Containment lit : std::views::drop(clause, 1))
-                assignTrue(solver, element, lit, makeReason<ReasonKind::SetClauseDefToExpr>({ .def = !literal, .expr = lit }));
+                assignTrue(solver, element, !lit, makeReason<ReasonKind::SetClauseDefToExpr>({ .def = !literal, .expr = !lit }));
         } else {
             // If any literal in a clause other than the first is true the first literal is false.
             assignTrue(solver, element, !clause.front(), makeReason<ReasonKind::SetClauseExprToDef>({ .def = !clause.front(), .expr = !literal }));
@@ -164,6 +281,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         clause_mask_t& clauseMask = clauseMasks[occ.clauseIndex];
 
         int popcnt = std::popcount(clauseMask);
+        VERIFY((clauseMask & Clauses::literalMask(occ.literalIndex)) != (clause_mask_t)0);
         clauseMask &= ~Clauses::literalMask(occ.literalIndex);
 
         if (popcnt > 2)
@@ -192,7 +310,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
     }
 }
 
-void Sets::unapplyContainment(Solver& solver, ElementId element, Containment literal) {
+void Sets::unapplyContainment(Solver&, ElementId element, Containment literal) {
     // See also Clauses::unapplyAssignment()
     auto& clauseMasks = elements[element.id()].clauseMasks;
     for (auto occ : infoFor(!literal).occurrences) {
@@ -200,6 +318,53 @@ void Sets::unapplyContainment(Solver& solver, ElementId element, Containment lit
         auto mask = Clauses::literalMask(occ.literalIndex);
         clauseMask |= mask;
     }
+}
+
+void Sets::propagateIsEmpty(Solver& solver, BooleanValue lit) {
+    Value set = isEmptyInfos[lit].set;
+    for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
+        ElementId element(elementId);
+        assignTrue(solver, element, !in(set), makeReason<ReasonKind::SetEmptyToElem>({ lit }));
+    }
+}
+
+void Sets::propagateEquality(Solver& solver, PairHandle pair) {
+    auto [a, b] = solver.at(pair);
+    for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
+        ElementId element(elementId);
+        BooleanValue inA = mapToBool(solver, element, in(a));
+        BooleanValue inB = mapToBool(solver, element, in(b));
+        if (solver.assignedTrue(inA))
+            solver.assignTrue(inB, makeReason<ReasonKind::SetEqualityToElem>({ pair, in(a) }));
+        if (solver.assignedTrue(!inA))
+            solver.assignTrue(!inB, makeReason<ReasonKind::SetEqualityToElem>({ pair, !in(a) }));
+        if (solver.assignedTrue(inB))
+            solver.assignTrue(inA, makeReason<ReasonKind::SetEqualityToElem>({ pair, in(b) }));
+        if (solver.assignedTrue(!inB))
+            solver.assignTrue(!inA, makeReason<ReasonKind::SetEqualityToElem>({ pair, !in(b) }));
+    }
+}
+
+Sets::ElementId Sets::newElement(Solver& solver) {
+    ElementId element(elements.size());
+    elements.emplace_back();
+    auto& masks = elements.back().clauseMasks;
+    masks.resize(clauses.size(), (clause_mask_t)0);
+    // Initially nothing is assigned
+    for (int_t clauseIndex = 0; clauseIndex < (int_t)clauses.size(); clauseIndex++) {
+        masks[clauseIndex] = Clauses::literalMask(clauses[clauseIndex].size()) - (clause_mask_t)1;
+    }
+
+    // Propagate empty sets
+    solver.forEachBoolean(isEmptyTheory, [&](BooleanValue isEmptyLit) {
+        if (solver.assignedTrue(isEmptyLit)) {
+            auto& info = isEmptyInfos[isEmptyLit];
+            assignTrue(solver, element, !in(info.set),
+                makeReason<ReasonKind::SetEmptyToElem>({ isEmptyLit }));
+        }
+    });
+
+    return element;
 }
 
 bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
@@ -218,6 +383,8 @@ bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& re
         return solver.assignedTrue(makeEquality(pair))
             && assignedTrue(solver, element, source);
     }
+    case ReasonKind::SetEmptyToElem:
+        return solver.assignedTrue(reason.get<ReasonKind::SetEmptyToElem>().isEmptyLiteral);
     default:
         VERIFY_NOT_REACHED();
     }
@@ -229,24 +396,29 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, co
     switch (reason.kind()) {
     case ReasonKind::SetClauseDefToExpr:
         result.add(solver, boolLiteral);
-        result.add(solver, map(solver, element, reason.get<ReasonKind::SetClauseDefToExpr>().def));
+        result.add(solver, mapToBool(solver, element, reason.get<ReasonKind::SetClauseDefToExpr>().def));
         return { solver.viewClause(result), 0 };
     case ReasonKind::SetClauseExprToDef:
         result.add(solver, boolLiteral);
-        result.add(solver, map(solver, element, reason.get<ReasonKind::SetClauseDefToExpr>().expr));
+        result.add(solver, mapToBool(solver, element, reason.get<ReasonKind::SetClauseExprToDef>().expr));
         return { solver.viewClause(result), 0 };
     case ReasonKind::SetClauseExhaustive: {
         auto occ = reason.get<ReasonKind::SetClauseExhaustive>();
         for (Containment lit : clauses[occ.clauseIndex]) {
-            result.add(solver, map(solver, element, lit));
+            result.add(solver, mapToBool(solver, element, lit));
         }
         return { solver.viewClause(result), occ.literalIndex };
     }
     case ReasonKind::SetEqualityToElem: {
         auto [pair, assignSource] = reason.get<ReasonKind::SetEqualityToElem>();
         result.add(solver, boolLiteral);
-        result.add(solver, map(solver, element, !assignSource));
+        result.add(solver, mapToBool(solver, element, !assignSource));
         result.add(solver, !makeEquality(pair));
+        return { solver.viewClause(result), 0 };
+    }
+    case ReasonKind::SetEmptyToElem: {
+        result.add(solver, boolLiteral);
+        result.add(solver, !reason.get<ReasonKind::SetEmptyToElem>().isEmptyLiteral);
         return { solver.viewClause(result), 0 };
     }
     default:
@@ -254,7 +426,7 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, co
     }
 }
 
-BooleanValue Sets::map(Solver& solver, ElementId element, Containment literal) {
+BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment literal) {
     auto& inSetLiterals = setInfos[literal.set()].elementInSetLiterals;
     if (inSetLiterals.size() <= element.id()) {
         inSetLiterals.resize(element.id() + 1);
@@ -265,6 +437,12 @@ BooleanValue Sets::map(Solver& solver, ElementId element, Containment literal) {
         inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
     }
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
+}
+
+std::pair<Sets::ElementId, Sets::Containment> Sets::mapFromBool(BooleanValue lit) {
+    VERIFY(lit.theory() == elementInSetTheory);
+    auto [element, set] = inSetInfos[lit];
+    return { element, lit.negated() ? !in(set) : in(set) };
 }
 
 }

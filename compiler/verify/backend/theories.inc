@@ -20,8 +20,10 @@ THEORY(UninterpretedConstantElementInSet, Boolean)
 
 THEORY(AuxUninterpretedConstants, UninterpretedConstant)
 
-THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
+THEORY(UninterpretedConstantEmptySet, UninterpretedConstantSet)
 THEORY(UninterpretedConstantSetExpressions, UninterpretedConstantSet)
+THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
+THEORY(AuxUninterpretedConstantSets, UninterpretedConstantSet)
 
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)

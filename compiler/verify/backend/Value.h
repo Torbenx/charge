@@ -123,15 +123,18 @@ and a special (theory dependent) value. Currently this is used for bools
 to encode (true_literal, _) and for sets to encode (empty_set, _).
 */
 struct PairHandle {
+    static constexpr PairHandle makeSpecialPair(Value value) {
+        return PairHandle(value);
+    }
     constexpr PairHandle(ValueKind kind, uint32_t id)
         : specialBit(0), kindBits(std::to_underlying(kind)), idBits(id) { }
-    constexpr explicit PairHandle(Value value)
-        : specialBit(1), kindBits(std::to_underlying(value.theory())), idBits(value.id()) { }
 
     bool specialPair() const { return specialBit; }
     ValueKind valueKind() const {
-        VERIFY(!specialPair());
-        return (ValueKind)kindBits;
+        if (specialPair())
+            return kindOf((TheoryId)kindBits);
+        else
+            return (ValueKind)kindBits;
     }
     uint32_t pairId() const {
         VERIFY(!specialPair());
@@ -152,6 +155,10 @@ struct PairHandle {
     }
 
     bool operator==(const PairHandle&) const = default;
+
+private:
+    constexpr explicit PairHandle(Value value)
+        : specialBit(1), kindBits(std::to_underlying(value.theory())), idBits(value.id()) { }
 
     uint32_t specialBit : 1;
     uint32_t kindBits : 7;
@@ -195,5 +202,5 @@ struct optional_traits<T> {
 };
 template<>
 struct optional_traits<verify::backend::PairHandle> {
-    static constexpr verify::backend::PairHandle empty_value { verify::backend::INVALID_VALUE };
+    static constexpr verify::backend::PairHandle empty_value = verify::backend::PairHandle::makeSpecialPair(verify::backend::INVALID_VALUE);
 };

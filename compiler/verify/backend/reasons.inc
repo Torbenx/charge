@@ -13,9 +13,10 @@ REASON(DisequalityByAlwaysDisequal, DisequalityReason, true, rewriteEqualities)
 REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
-REASON(SetClauseDefToExpr, SetClauseDefData, true, sets)
-REASON(SetClauseExprToDef, SetClauseDefData, true, sets)
-REASON(SetClauseExhaustive, LiteralOccurrence, true, sets)
-REASON(SetEqualityToElem, SetEqualityToElemData, false, sets)
+REASON(SetClauseDefToExpr, SetClauseDefData, true, setReasons)
+REASON(SetClauseExprToDef, SetClauseDefData, true, setReasons)
+REASON(SetClauseExhaustive, LiteralOccurrence, true, setReasons)
+REASON(SetEqualityToElem, SetEqualityToElemData, false, setReasons)
+REASON(SetEmptyToElem, SetEmptyToElemData, false, setReasons)
 
 #undef REASON

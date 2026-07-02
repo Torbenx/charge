@@ -28,6 +28,8 @@ struct Solver {
 
     int_t valueCount(TheoryId);
     int_t booleanCount(TheoryId);
+    void forEachValue(TheoryId, auto&& callback);
+    void forEachBoolean(TheoryId, auto&& callback);
 
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
@@ -47,6 +49,7 @@ struct Solver {
     BooleanValue newAuxBooleanVariable();
     Value newAuxUninterpretedConstant();
     Member newAuxMemberVariable();
+    Value newAuxUninterpretedConstantSet();
 
     /*! \brief Return whether \p a and \p b are always disequal
 

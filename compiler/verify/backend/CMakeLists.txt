@@ -19,10 +19,12 @@ target_sources(${PROJECT_NAME}
     SatTest.cpp
     Sets.cpp
     Sets.h
+    SetTests.cpp
     Solver.cpp
     Solver.h
     SolverImpl.h
     Types.h
     Value.cpp
     Value.h
+    VarSearch.h
 )
