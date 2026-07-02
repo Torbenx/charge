@@ -26,5 +26,4 @@ target_sources(${PROJECT_NAME}
     Types.h
     Value.cpp
     Value.h
-    VarSearch.h
 )

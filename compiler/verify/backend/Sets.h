@@ -191,8 +191,8 @@ private:
     //! Represents union and subset expressions
     /*!
     There are two kinds of expressions:
-    - Union expressions of the from union(a_1, ..., a_n) where the a_i are subset expressions or variables
-    - Subset expression of the from setminus(intersection(A_1, ... A_m), B_1, ..., B_n) where the A_i and B_j are variables
+    - Union expressions of the from union(a_1, ..., a_n)
+    - Subset expression of the from setminus(intersection(a_1, ... a_m), b_1, ..., b_n)
 
     The containment propagation rules for unions are:
     u1: in union(a_1, ..., a_n) and not in a_i for all i != k => in a_k
@@ -201,16 +201,16 @@ private:
     u4: not in union(a_1, ..., a_n) => not in a_i for all i
 
     And for subset expressions the rules are:
-    s1a: not in setminus(intersection(A_1, ... A_m), B_1, ..., B_n) and in A_i for all i and not in B_j for all j != k => in B_k
-    s1b: not in setminus(intersection(A_1, ... A_m), B_1, ..., B_n) and in A_i for all i != k and not in B_j for all j => not in A_k
-    s2:  in A_i for all i and not in B_j for all j => in setminus(intersection(A_1, ... A_m), B_1, ..., B_n)
-    s3a: not in A_i for any i => not in setminus(intersection(A_1, ... A_m), B_1, ..., B_n)
-    s3b: in B_j for any j => not in setminus(intersection(A_1, ... A_m), B_1, ..., B_n)
-    s4:  in setminus(intersection(A_1, ... A_m), B_1, ..., B_n) => in A_i for all i and not in B_j for all j
+    s1a: not in setminus(intersection(a_1, ... a_m), b_1, ..., b_n) and in a_i for all i and not in b_j for all j != k => in b_k
+    s1b: not in setminus(intersection(a_1, ... a_m), b_1, ..., b_n) and in a_i for all i != k and not in b_j for all j => not in a_k
+    s2:  in a_i for all i and not in b_j for all j => in setminus(intersection(a_1, ... a_m), b_1, ..., b_n)
+    s3a: not in a_i for any i => not in setminus(intersection(a_1, ... a_m), b_1, ..., b_n)
+    s3b: in b_j for any j => not in setminus(intersection(a_1, ... a_m), b_1, ..., b_n)
+    s4:  in setminus(intersection(a_1, ... a_m), b_1, ..., b_n) => in a_i for all i and not in b_j for all j
 
     We unify these by using 'clauses' of containment literals. The clauses are defined to be:
     [not in union(a_1, ..., a_n), in a_1, ..., in a_n]
-    [in setminus(intersection(A_1, ... A_m), B_1, ..., B_n), not in A_1, ..., not in A_m, in B_1, ..., in B_n]
+    [in setminus(intersection(a_1, ... a_m), b_1, ..., b_n), not in a_1, ..., not in a_m, in b_1, ..., in b_n]
 
     The rules for the clauses are:
     - If all except one literal in the clause is false the last literal is true. This handles rules u1, u2, s1a, s1b and s2.
