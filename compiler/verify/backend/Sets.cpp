@@ -221,10 +221,6 @@ void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
                 allPositive = false;
         }
 
-        for (Containment c : setClause)
-            dbgprint("{}{}:{} ", c.contained() ? "+" : "-", nameString(c.set().theory()), c.set().id());
-        dbgln("");
-
         // All clauses contain at least one negative literal, a property that persists under resolution
         VERIFY(!allPositive);
         VERIFY(setClause.size() >= 2);
