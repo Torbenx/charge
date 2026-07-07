@@ -17,15 +17,14 @@ struct SetEqualityToElemData {
     Sets::Containment source;
 };
 
-struct SetEmptyToElemData {
-    BooleanValue isEmptyLiteral;
-};
-
 Sets::Sets(Solver& solver, const SetsParams& params)
     : params(params)
     , setInfos(solver, params.setKind)
-    , inSetInfos(solver, params.elementInSetTheory)
-    , isEmptyInfos(solver, params.isEmptyTheory) {
+    , inSetInfos(solver, params.elementInSetTheory) {
+    VERIFY(clauses.empty());
+    elements.emplace_back();
+    elements.back().clauseMasks.resize(0);
+
     Value empty = solver.impl().newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
     solver.assignTrue(makeIsEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
@@ -33,13 +32,7 @@ Sets::Sets(Solver& solver, const SetsParams& params)
 }
 
 BooleanValue Sets::makeIsEmpty(Solver& solver, Value set) {
-    auto& setInfo = setInfos[set];
-    if (!setInfo.isEmptyLiteral.has_value()) {
-        BooleanValue newLit = solver.impl().newBoolean(params.isEmptyTheory);
-        setInfo.isEmptyLiteral = newLit;
-        isEmptyInfos[newLit] = { .set = set };
-    }
-    return setInfo.isEmptyLiteral.value();
+    return mapToBool(solver, forAllElement(), !in(set));
 }
 
 void Sets::newPair(Solver& solver, PairHandle pair) {
@@ -200,7 +193,7 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
 
 void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
     auto setLits = std::ranges::partition(boolClause, [this](BooleanValue lit) {
-        return lit.theory() != params.elementInSetTheory;
+        return lit.theory() != params.elementInSetTheory || inSetInfos[lit].element == forAllElement();
     });
     if (setLits.empty())
         return;
@@ -227,6 +220,10 @@ void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
             if (!cont.contained())
                 allPositive = false;
         }
+
+        for (Containment c : setClause)
+            dbgprint("{}{}:{} ", c.contained() ? "+" : "-", nameString(c.set().theory()), c.set().id());
+        dbgln("");
 
         // All clauses contain at least one negative literal, a property that persists under resolution
         VERIFY(!allPositive);
@@ -257,12 +254,26 @@ bool Sets::assignedTrue(Solver& solver, ElementId element, Containment lit) {
 
 void Sets::propagateElementAssignment(Solver& solver, BooleanValue lit) {
     auto [element, cont] = mapFromBool(lit);
-    propagateContainment(solver, element, cont);
+    if (element == forAllElement()) {
+        if (!cont.contained()) {
+            for (int_t elementId = 1; elementId < (int_t)elements.size(); elementId++) {
+                assignTrue(solver, ElementId(elementId), cont, makeReason(params.forAllDistribute, {}));
+            }
+            propagateContainment(solver, element, cont);
+        }
+    } else {
+        propagateContainment(solver, element, cont);
+    }
 }
 
 void Sets::unapplyElementAssignment(Solver& solver, BooleanValue lit) {
     auto [element, cont] = mapFromBool(lit);
-    unapplyContainment(solver, element, cont);
+    if (element == forAllElement()) {
+        if (!cont.contained())
+            unapplyContainment(solver, element, cont);
+    } else {
+        unapplyContainment(solver, element, cont);
+    }
 }
 
 void Sets::propagateContainment(Solver& solver, ElementId element, Containment literal) {
@@ -325,14 +336,6 @@ void Sets::unapplyContainment(Solver&, ElementId element, Containment literal) {
     }
 }
 
-void Sets::propagateIsEmpty(Solver& solver, BooleanValue lit) {
-    Value set = isEmptyInfos[lit].set;
-    for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
-        ElementId element(elementId);
-        assignTrue(solver, element, !in(set), makeReason(params.emptyToElementReason, { lit }));
-    }
-}
-
 void Sets::propagateEquality(Solver& solver, PairHandle pair) {
     auto [a, b] = solver.at(pair);
     for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
@@ -354,6 +357,7 @@ Sets::ElementId Sets::newElement(Solver& solver) {
     ElementId element(elements.size());
     elements.emplace_back();
     auto& masks = elements.back().clauseMasks;
+    masks = elements[forAllElement().id()].clauseMasks;
     masks.resize(clauses.size(), (clause_mask_t)0);
     // Initially nothing is assigned
     for (int_t clauseIndex = 0; clauseIndex < (int_t)clauses.size(); clauseIndex++) {
@@ -361,11 +365,10 @@ Sets::ElementId Sets::newElement(Solver& solver) {
     }
 
     // Propagate empty sets
-    solver.forEachBoolean(params.isEmptyTheory, [&](BooleanValue isEmptyLit) {
-        if (solver.assignedTrue(isEmptyLit)) {
-            auto& info = isEmptyInfos[isEmptyLit];
-            assignTrue(solver, element, !in(info.set),
-                makeReason(params.emptyToElementReason, { isEmptyLit }));
+    solver.forEachBoolean(params.elementInSetTheory, [&](BooleanValue boolLiteral) {
+        auto [literalElement, set] = inSetInfos[boolLiteral];
+        if (literalElement == forAllElement() && solver.assignedFalse(boolLiteral)) {
+            assignTrue(solver, element, !in(set), makeReason(params.forAllDistribute, {}));
         }
     });
 
@@ -373,7 +376,7 @@ Sets::ElementId Sets::newElement(Solver& solver) {
 }
 
 bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
-    auto [element, setLiteral] = inSetInfos[boolLiteral];
+    auto [element, setLiteral] = mapFromBool(boolLiteral);
     if (reason.kind() == params.clauseDefToExprReason) {
         return assignedFalse(solver, element, reason.get(params.clauseDefToExprReason).def);
     } else if (reason.kind() == params.clauseExprToDefReason) {
@@ -385,15 +388,15 @@ bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& re
         auto [pair, source] = reason.get(params.equalityToElementReason);
         return solver.assignedTrue(makeEquality(pair))
             && assignedTrue(solver, element, source);
-    } else if (reason.kind() == params.emptyToElementReason) {
-        return solver.assignedTrue(reason.get(params.emptyToElementReason).isEmptyLiteral);
+    } else if (reason.kind() == params.forAllDistribute) {
+        return assignedTrue(solver, forAllElement(), setLiteral);
     } else {
         VERIFY_NOT_REACHED();
     }
 }
 
 ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
-    auto [element, setLiteral] = inSetInfos[boolLiteral];
+    auto [element, setLiteral] = mapFromBool(boolLiteral);
     ClauseBuilder result = solver.beginClause();
     if (reason.kind() == params.clauseDefToExprReason) {
         result.add(solver, boolLiteral);
@@ -415,9 +418,9 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, co
         result.add(solver, mapToBool(solver, element, !assignSource));
         result.add(solver, !makeEquality(pair));
         return { solver.viewClause(result), 0 };
-    } else if (reason.kind() == params.emptyToElementReason) {
+    } else if (reason.kind() == params.forAllDistribute) {
         result.add(solver, boolLiteral);
-        result.add(solver, !reason.get(params.emptyToElementReason).isEmptyLiteral);
+        result.add(solver, !mapToBool(solver, forAllElement(), setLiteral));
         return { solver.viewClause(result), 0 };
     } else {
         VERIFY_NOT_REACHED();

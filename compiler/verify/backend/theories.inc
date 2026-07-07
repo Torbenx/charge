@@ -21,7 +21,6 @@
 #ifndef SET_THEORY
 #define SET_THEORY(valueKind, memberName)                                          \
     PAIR_THEORY(valueKind##Equality, Boolean, valueKind, 2)                        \
-    THEORY(valueKind##IsEmpty, Boolean)                                            \
     THEORY(valueKind##ElementInSet, Boolean)                                       \
     THEORY(valueKind##EmptySet, valueKind)                                         \
     THEORY(valueKind##Expressions, valueKind)                                      \
@@ -29,7 +28,7 @@
     REASON(valueKind##ClauseExprToDef, SetClauseDefData, true, memberName)         \
     REASON(valueKind##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
     REASON(valueKind##EqualityToElement, SetEqualityToElemData, false, memberName) \
-    REASON(valueKind##EmptyToElement, SetEmptyToElemData, false, memberName)
+    REASON(valueKind##ForAllDistribute, EmptyReasonData, false, memberName)
 #endif
 
 THEORY(TrueFalse, Boolean)

@@ -13,13 +13,12 @@ struct SetsParams {
     TheoryId expressionTheory;
     TheoryId emptySetTheory;
     TheoryId equalityTheory;
-    TheoryId isEmptyTheory;
     TheoryId elementInSetTheory;
     TypedReasonKind<SetClauseDefData> clauseDefToExprReason;
     TypedReasonKind<SetClauseDefData> clauseExprToDefReason;
     TypedReasonKind<LiteralOccurrence> clauseExhaustiveReason;
     TypedReasonKind<SetEqualityToElemData> equalityToElementReason;
-    TypedReasonKind<SetEmptyToElemData> emptyToElementReason;
+    TypedReasonKind<EmptyReasonData> forAllDistribute;
 };
 
 namespace theory_params {
@@ -30,13 +29,12 @@ namespace theory_params {
         TheoryId::valueKind##Expressions,                                \
         TheoryId::valueKind##EmptySet,                                   \
         TheoryId::valueKind##Equality,                                   \
-        TheoryId::valueKind##IsEmpty,                                    \
         TheoryId::valueKind##ElementInSet,                               \
         makeTypedReasonKind<ReasonKind::valueKind##ClauseDefToExpr>(),   \
         makeTypedReasonKind<ReasonKind::valueKind##ClauseExprToDef>(),   \
         makeTypedReasonKind<ReasonKind::valueKind##ClauseExhaustive>(),  \
         makeTypedReasonKind<ReasonKind::valueKind##EqualityToElement>(), \
-        makeTypedReasonKind<ReasonKind::valueKind##EmptyToElement>(),    \
+        makeTypedReasonKind<ReasonKind::valueKind##ForAllDistribute>(),  \
     };
 #include <verify/backend/theories.inc>
 
@@ -162,10 +160,6 @@ private:
         Value set = INVALID_VALUE;
     };
 
-    struct IsEmptyInfo {
-        Value set;
-    };
-
     struct HashLookup {
         size_t hash;
         Sets& sets;
@@ -192,6 +186,8 @@ private:
         }
         bool operator()(const HashLookup& a, const HashEntry& b) const;
     };
+
+    ElementId forAllElement() const { return ElementId(0); }
 
     bool unionExpression(Value) const;
     bool subsetExpression(Value) const;
@@ -248,7 +244,6 @@ private:
 
     KindData<SetInfo> setInfos;
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
-    TheoryData<IsEmptyInfo, TheoryId::COUNT, 2> isEmptyInfos;
 };
 
 }

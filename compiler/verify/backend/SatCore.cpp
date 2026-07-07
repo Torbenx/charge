@@ -136,8 +136,10 @@ void SatCore::assignTrue(Literal trueLit, const Reason& reason) {
 }
 
 bool SatCore::propagate() {
-    VERIFY(conflicts.empty());
     VERIFY(!backtracking);
+
+    if (!conflicts.empty())
+        return false;
 
     while (firstPropagation.has_value()) {
         Literal literal = firstPropagation.value();
@@ -306,7 +308,6 @@ bool SatCore::analyzeConflicts() {
         endBacktrack();
         for (auto& clause : learnedClauses) {
             interface().learnClause(std::move(clause));
-            VERIFY(conflicts.empty());
         }
         if (result) {
             VERIFY(firstPropagation.has_value());

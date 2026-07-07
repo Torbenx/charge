@@ -146,10 +146,6 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
             impl.memberName.propagateEquality(impl, pair);                           \
         break;                                                                       \
     }                                                                                \
-    case TheoryId::valueKind##IsEmpty:                                               \
-        if (!lit.negated())                                                          \
-            impl.memberName.propagateIsEmpty(impl, lit);                             \
-        break;                                                                       \
     case TheoryId::valueKind##ElementInSet:                                          \
         impl.memberName.propagateElementAssignment(impl, lit);                       \
         break;
@@ -267,7 +263,6 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         return ms.compositeLabel((Member)a) <=> ms.compositeLabel((Member)b);
     }
 
-    case TheoryId::UninterpretedConstantSetIsEmpty:
     case TheoryId::UninterpretedConstantSetElementInSet:
     case TheoryId::UninterpretedConstantSetExpressions:
         // Ordering is not important since not rewriting is done
