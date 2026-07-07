@@ -10,7 +10,12 @@ namespace verify::language {
 inline constexpr ConstWordStringTable words {
     "fn",
     "active",
-    "from"
+    "from",
+    "store",
+    "call",
+    "jump",
+    "branch",
+    "phi",
 };
 
 struct ParserException : std::exception {
@@ -34,6 +39,21 @@ struct LookupTable {
         if (result.found)
             return std::bit_cast<T>(m_table.entries[result.bucket].payload);
         return std::nullopt;
+    }
+
+    std::optional<T> insertOrUpdate(Word name, T value) {
+        auto result = m_table.findWord(name);
+        auto& entry = m_table.entries[result.bucket];
+        if (!result.found) {
+            entry = { name, std::bit_cast<uint32_t>(value) };
+            m_table.usedBuckets += 1;
+            m_table.maybeRehash();
+            return std::nullopt;
+        } else {
+            T ret = std::bit_cast<T>(entry.payload);
+            entry.payload = std::bit_cast<uint32_t>(value);
+            return ret;
+        }
     }
 
     WordTable m_table;

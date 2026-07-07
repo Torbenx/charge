@@ -31,6 +31,7 @@ enum class TokenKind : uint8_t {
     Colon,
     Comma,
     Point,
+    LeftArrow,
 };
 
 struct Token {
@@ -101,6 +102,14 @@ void Lexer::lex() {
             position += 1;
             tokens.push_back({ TokenKind::Point });
             continue;
+        case '<':
+            if (position[1] == '-') {
+                position += 2;
+                tokens.push_back({ TokenKind::LeftArrow });
+                continue;
+            } else {
+                VERIFY_NOT_REACHED();
+            }
 
         case '$':
             position += 1;
@@ -252,44 +261,77 @@ struct TokenStream {
     }
 };
 
-struct Parser {
+struct FunctionParser {
+    struct UnresolvedLabel {
+        struct Use {
+            // The instruction referring to the not-yet-resolved label.
+            ir::CodePos instruction;
+            // Which slot of the instruction the label fills: always 0 for a
+            // jump, 0 (true) or 1 (false) for a branch, the parent index for a phi.
+            uint32_t index;
+        };
 
-    void parseTopLevel(TokenStream s) {
-        if (s.tokKind() == TokenKind::Identifier && s.tok().word() == words["fn"]) {
-            // Parse function
-            s.advance();
-            if (s.tokKind() != TokenKind::GlobalName)
-                s.error("Expected global name after 'fn'");
-            // FnBuilder fn(db);
-            Word fnName = s.tok().word();
-            s.advance();
-            int_t parameterCount = 0;
-            for (;;) {
-                if (s.tokKind() != TokenKind::LocalName)
-                    s.error("Expected parameter name");
-                locals.insert(s.tok().word(), Local(LocalKind::Parameter, parameterCount));
-                s.advance();
-                parameterCount += 1;
-                if (s.tokKind() == TokenKind::Comma) {
-                    s.advance();
-                    continue;
-                } else if (s.tokKind() == TokenKind::RightParen) {
-                    s.advance();
-                    break;
-                } else {
-                    s.error("Unexpected token after parameter");
-                }
-            }
+        std::vector<Use> uses;
+    };
 
-            if (s.tokKind() != TokenKind::Colon)
-                s.error("Expected ':' after function parameters");
-            s.advance();
-            if (s.tokKind() != TokenKind::BeginScope)
-                s.error("Expected function body after ':'");
-            parseInstructions(s);
-        } else {
-            s.error("Unexpected token at top level");
+    // Compactly stores either a resolved CodePos or the index of an UnresolvedLabel
+    struct LabelInfo {
+        static LabelInfo resolved(ir::CodePos pos) {
+            return { .resolvedBit = 1, .valueBits = pos.id() };
         }
+        static LabelInfo unresolved(uint32_t index) {
+            return { .resolvedBit = 0, .valueBits = index };
+        }
+
+        bool isResolved() const { return resolvedBit; }
+
+        ir::CodePos codePos() const {
+            VERIFY(resolvedBit);
+            return ir::CodePos(valueBits);
+        }
+        uint32_t unresolvedIndex() const {
+            VERIFY(!resolvedBit);
+            return valueBits;
+        }
+
+        uint32_t resolvedBit : 1;
+        uint32_t valueBits : 31;
+    };
+
+    void parse(TokenStream s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["fn"]);
+        s.advance();
+
+        if (s.tokKind() != TokenKind::GlobalName)
+            s.error("Expected global name after 'fn'");
+        // FnBuilder fn(db);
+        Word fnName = s.tok().word();
+        s.advance();
+        int_t parameterCount = 0;
+        for (;;) {
+            if (s.tokKind() != TokenKind::LocalName)
+                s.error("Expected parameter name");
+            locals.insert(s.tok().word(), Local(LocalKind::Parameter, parameterCount));
+            s.advance();
+            parameterCount += 1;
+            if (s.tokKind() == TokenKind::Comma) {
+                s.advance();
+                continue;
+            } else if (s.tokKind() == TokenKind::RightParen) {
+                s.advance();
+                break;
+            } else {
+                s.error("Unexpected token after parameter");
+            }
+        }
+
+        if (s.tokKind() != TokenKind::Colon)
+            s.error("Expected ':' after function parameters");
+        s.advance();
+        if (s.tokKind() != TokenKind::BeginScope)
+            s.error("Expected function body after ':'");
+        parseInstructions(s);
     }
 
     void parseInstructions(TokenStream s) {
@@ -298,19 +340,130 @@ struct Parser {
             case TokenKind::EndScope:
                 return;
             case TokenKind::ContinueScope:
-                // TODO if (!s.tok().word().empty())
-                //     labels.insert(s.tok().word(), );
-                break;
-            case TokenKind::Identifier:
-                break;
+                if (!s.tok().word().empty())
+                    defineLabel(s.tok().word(), ir.here());
+                s.advance();
+                continue;
+            case TokenKind::Identifier: {
+                Word id = s.tok().word();
+                if (id == words["store"]) {
+                    parseStore(s);
+                } else if (id == words["call"]) {
+                    parseCall(s);
+                } else if (id == words["jump"]) {
+                    parseJump(s);
+                } else if (id == words["branch"]) {
+                    parseBranch(s);
+                } else if (id == words["phi"]) {
+                    parsePhi(s);
+                } else {
+                    s.error("Unknown instruction");
+                }
+                continue;
+            }
             default:
                 s.error("Expected instruction");
             }
-            s.advance();
         }
     }
 
-    void parseExpression(TokenStream& s) {
+    void parseStore(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["store"]);
+        s.advance();
+        ir::MemoryLoc loc = parseExpression<ir::MemoryLoc>(s);
+        if (s.tokKind() != TokenKind::LeftArrow)
+            s.error("Expected '<-' after store location");
+        s.advance();
+        ir::Expr value = parseExpression(s);
+        ir.addStore({ .loc = loc, .value = value });
+    }
+
+    void parseCall(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["call"]);
+        s.advance();
+        ir::Fn target = parseExpression<ir::Fn>(s);
+        if (s.tokKind() != TokenKind::LeftParen)
+            s.error("Expected '(' after call target");
+        s.advance();
+        std::vector<ir::Expr> args;
+        if (s.tokKind() != TokenKind::RightParen) {
+            for (;;) {
+                args.push_back(parseExpression(s));
+                if (s.tokKind() == TokenKind::Comma) {
+                    s.advance();
+                    continue;
+                } else if (s.tokKind() == TokenKind::RightParen) {
+                    break;
+                } else {
+                    s.error("Expected ',' or ')' in call arguments");
+                }
+            }
+        }
+        s.advance();
+        ir.addCall({ .target = target, .args = ir.makeExprList(args) });
+    }
+
+    void parseJump(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["jump"]);
+        s.advance();
+        if (s.tokKind() != TokenKind::LabelName)
+            s.error("Expected label after 'jump'");
+        ir::CodePos target = getLabel(s, ir.here(), 0);
+        s.advance();
+        ir.addJump({ .target = target });
+    }
+
+    void parseBranch(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["branch"]);
+        s.advance();
+        ir::Bool cond = parseExpression<ir::Bool>(s);
+        if (s.tokKind() != TokenKind::Comma)
+            s.error("Expected ',' after branch condition");
+        s.advance();
+        if (s.tokKind() != TokenKind::LabelName)
+            s.error("Expected true target label after branch condition");
+        ir::CodePos ifTrue = getLabel(s, ir.here(), 0);
+        s.advance();
+        if (s.tokKind() != TokenKind::Comma)
+            s.error("Expected ',' between branch targets");
+        s.advance();
+        if (s.tokKind() != TokenKind::LabelName)
+            s.error("Expected false target label");
+        ir::CodePos ifFalse = getLabel(s, ir.here(), 1);
+        s.advance();
+        ir.addBranch({ .cond = cond, .ifTrue = ifTrue, .ifFalse = ifFalse });
+    }
+
+    void parsePhi(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["phi"]);
+        s.advance();
+        std::vector<ir::CodePos> parents;
+        for (uint32_t parentIndex = 0;; parentIndex++) {
+            if (s.tokKind() != TokenKind::LabelName)
+                s.error("Expected parent label in phi");
+            parents.push_back(getLabel(s, ir.here(), parentIndex));
+            s.advance();
+            if (s.tokKind() == TokenKind::Comma) {
+                s.advance();
+                continue;
+            }
+            break;
+        }
+        ir.addPhi({ .parents = ir.makePhiParentList(parents) });
+    }
+
+    template<typename T>
+    T parseExpression(TokenStream& s) {
+        return (T)parseExpression(s);
+    }
+
+    ir::Expr parseExpression(TokenStream& s) {
+        std::optional<ir::Expr> e;
         for (;;) {
             switch (s.tokKind()) {
             case TokenKind::BeginScope:
@@ -318,9 +471,10 @@ struct Parser {
                 continue;
             case TokenKind::ContinueScope:
             case TokenKind::EndScope:
-                return;
+                if (e.has_value())
+                    s.error("Unexpected end of expression");
+                return e.value();
             case TokenKind::LabelName: {
-                ir::CodePos labelPos = getLabel(s);
                 s.advance();
                 if (s.tokKind() != TokenKind::Point)
                     s.error("Expected '.' after label");
@@ -328,32 +482,76 @@ struct Parser {
                 if (s.tokKind() != TokenKind::Identifier)
                     s.error("Expected identifier after label");
                 if (s.tok().word() == words["active"]) {
-
+                    VERIFY_NOT_REACHED(); // TODO
                 } else if (s.tok().word() == words["from"]) {
-
+                    VERIFY_NOT_REACHED(); // TODO
                 } else {
                     s.error("Invalid identifier after label");
                 }
             }
             case TokenKind::GlobalName:
             case TokenKind::LocalName:
-                break;
+                VERIFY_NOT_REACHED(); // TODO
             }
         }
     }
 
-    ir::CodePos getLabel(TokenStream& s) const {
+    // Resolves the label token under the cursor. If the label is already known
+    // its position is returned. Otherwise INVALID_CODE_POS is returned as a
+    // placeholder and the use is recorded on the unresolved label so it can be
+    // patched into 'instruction' at slot 'index' once the label is defined.
+    ir::CodePos getLabel(TokenStream& s, ir::CodePos instruction, uint32_t index) {
         VERIFY(s.tokKind() == TokenKind::LabelName);
-        auto maybeResult = labels.get(s.tok().word());
-        if (!maybeResult.has_value())
-            s.error("Invalid label");
-        return maybeResult.value();
+        Word name = s.tok().word();
+        auto info = labels.get(name);
+        if (info.has_value() && info->isResolved())
+            return info->codePos();
+
+        uint32_t unresolvedIndex;
+        if (info.has_value()) {
+            unresolvedIndex = info->unresolvedIndex();
+        } else {
+            unresolvedIndex = (uint32_t)unresolvedLabels.size();
+            unresolvedLabels.emplace_back();
+            labels.insert(name, LabelInfo::unresolved(unresolvedIndex));
+        }
+        unresolvedLabels[unresolvedIndex].uses.push_back({ .instruction = instruction, .index = index });
+        return ir::INVALID_CODE_POS;
     }
 
-    ir::Database& db;
+    void defineLabel(Word name, ir::CodePos pos) {
+        auto info = labels.insertOrUpdate(name, LabelInfo::resolved(pos));
+        if (!info.has_value())
+            return;
+
+        VERIFY(!info->isResolved());
+        for (const auto& use : unresolvedLabels[info->unresolvedIndex()].uses) {
+            switch (ir.inst(use.instruction).opcode) {
+            case ir::Opcode::Jump:
+                VERIFY(use.index == 0);
+                ir.setJumpTarget(use.instruction, pos);
+                break;
+            case ir::Opcode::Branch:
+                VERIFY(use.index <= 1);
+                if (use.index == 0)
+                    ir.setBranchTrueTarget(use.instruction, pos);
+                else
+                    ir.setBranchFalseTarget(use.instruction, pos);
+                break;
+            case ir::Opcode::Phi:
+                ir.setPhiParent(use.instruction, use.index, pos);
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+    }
+
+    ir::Function& ir;
     LookupTable<ir::Theorem> theorems;
-    LookupTable<ir::CodePos> labels;
+    LookupTable<LabelInfo> labels;
     LookupTable<Local> locals;
+    std::vector<UnresolvedLabel> unresolvedLabels;
 };
 
 }

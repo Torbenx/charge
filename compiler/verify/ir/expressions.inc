@@ -9,7 +9,7 @@
 #endif
 
 COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
-COMPOUND_EXPR(Load, Expr, MemoryLoc loc, CodePos pos)
+COMPOUND_EXPR(Load, Expr, MemoryLoc loc, RelativeCodePos pos)
 COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ExprList args)
 
 INLINE_EXPR(FalseLiteral, Bool, bool)

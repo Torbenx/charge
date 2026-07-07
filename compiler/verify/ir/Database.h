@@ -1,102 +1,12 @@
 #pragma once
 
-#include <verify/ir/ExpressionStorage.h>
+#include <verify/ir/Function.h>
 
 #include <ranges>
 
 namespace verify::ir {
 
-struct TypeBuilder;
-struct FnBuilder;
-
-struct CallFrame {
-};
-
-struct PhiParentInfo {
-    CodePos pos;
-};
-
-enum class Opcode : uint8_t {
-    Store,
-    Call,
-    Phi,
-};
-
-struct Instruction {
-    Opcode opcode() const { return m_opcode; }
-    auto store() const {
-        VERIFY(opcode() == Opcode::Store);
-        return u.store;
-    }
-    auto call() const {
-        VERIFY(opcode() == Opcode::Call);
-        return u.call;
-    }
-    auto phi() const {
-        VERIFY(opcode() == Opcode::Phi);
-        return u.phi;
-    }
-
-    Opcode m_opcode;
-    union {
-        struct {
-            MemoryLoc loc;
-            Expr expr;
-        } store;
-        struct {
-            FrameList frames;
-        } call;
-        struct {
-            PhiParentList parents;
-        } phi;
-    } u;
-};
-
-struct Function : ExpressionStorage {
-
-    FnHandle repr(Fn expr);
-
-    const Instruction& inst(CodePos pos) const {
-        if (pos.simple()) {
-            VERIFY(pos.offset() < m_instructions.size());
-            return m_instructions[pos.offset()];
-        } else {
-            VERIFY(pos.dataBits < m_complexPositions.size());
-            return inst(m_complexPositions[pos.dataBits].simplePos);
-        }
-    }
-
-    Bool prop(Theorem t) const {
-        VERIFY(t.id() < m_theorems.size());
-        return m_theorems[t.id()].prop;
-    }
-    Proof proof(Theorem t) const {
-        VERIFY(t.id() < m_theorems.size());
-        return m_theorems[t.id()].proof;
-    }
-    CodePos position(Theorem t) const {
-        VERIFY(t.id() < m_theorems.size());
-        return m_theorems[t.id()].pos;
-    }
-
-private:
-    struct TheoremData {
-        Bool prop;
-        Proof proof;
-        CodePos pos;
-    };
-
-    struct ComplexPosData {
-        std::vector<PhiParent> backedges;
-        CodePos simplePos;
-    };
-
-    std::vector<Instruction> m_instructions;
-    std::vector<TheoremData> m_theorems;
-    std::vector<ComplexPosData> m_complexPositions;
-};
-
-struct Database : ExpressionStorage {
+struct Database {
 
     DeclHandle newDecl(DeclHandle parent) {
         uint32_t id = declarations.size();

@@ -21,6 +21,11 @@ enum class ExprKind : uint8_t {
 #include <verify/ir/expressions.inc>
 };
 
+enum class Opcode : uint8_t {
+#define INSTRUCTION(name, ...) name,
+#include <verify/ir/instructions.inc>
+};
+
 struct Expr {
     Expr(ExprKind kind, uint32_t id)
         : kindBits(std::to_underlying(kind)), idBits(id) { }
@@ -35,6 +40,7 @@ struct Expr {
 };
 
 struct Bool : Expr {
+    static constexpr Sort sort = Sort::Bool;
     explicit Bool(Expr e)
         : Expr(e) { }
     explicit Bool(bool literal)
@@ -48,24 +54,29 @@ struct Bool : Expr {
 };
 
 struct Fn : Expr {
+    static constexpr Sort sort = Sort::Fn;
     explicit Fn(Expr e)
         : Expr(e) { }
 };
 
 struct Type : Expr {
+    static constexpr Sort sort = Sort::Type;
     explicit Type(Expr e)
         : Expr(e) { }
 };
 struct MemoryDecl : Expr {
+    static constexpr Sort sort = Sort::MemoryDecl;
     explicit MemoryDecl(Expr e)
         : Expr(e) { }
 };
 struct Member : Expr {
+    static constexpr Sort sort = Sort::Member;
     explicit Member(Expr e)
         : Expr(e) { }
 };
 
 struct MemoryLoc : Expr {
+    static constexpr Sort sort = Sort::MemoryLoc;
     explicit MemoryLoc(Expr e)
         : Expr(e) { }
 };
@@ -142,13 +153,12 @@ struct ListBase {
     int_t size() const { return m_size; }
 };
 struct ExprList : ListBase { };
-struct FrameList : ListBase { };
 struct SortList : ListBase { };
 
 struct SmallHandle {
-    explicit SmallHandle(uint32_t id)
+    explicit constexpr SmallHandle(uint32_t id)
         : m_id(id) { }
-    uint32_t id() const { return m_id; }
+    constexpr uint32_t id() const { return m_id; }
     bool operator==(const SmallHandle&) const = default;
 
 private:
@@ -185,20 +195,26 @@ struct TypeImpl : SmallHandle {
     using SmallHandle::SmallHandle;
 };
 
-enum class CodePosKind : uint8_t {
+enum class RelativePosKind : uint8_t {
     Simple,
     Complex,
 };
-// Represents the code position just before the instruction at 'offset()'
-struct CodePos {
-    CodePos(CodePosKind kind, uint32_t data)
+
+// Represents the code position just before the instruction at 'id()'.
+struct CodePos : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+inline constexpr CodePos INVALID_CODE_POS = CodePos(limits::max);
+
+struct RelativeCodePos {
+    RelativeCodePos(RelativePosKind kind, uint32_t data)
         : kindBits(std::to_underlying(kind)), dataBits(data) { }
 
-    CodePosKind kind() const {
-        return (CodePosKind)kindBits;
+    RelativePosKind kind() const {
+        return (RelativePosKind)kindBits;
     }
     bool simple() const {
-        return kind() == CodePosKind::Simple;
+        return kind() == RelativePosKind::Simple;
     }
     uint32_t offset() const {
         VERIFY(simple());
