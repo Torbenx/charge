@@ -13,7 +13,8 @@ COMPOUND_EXPR(Load, Expr, MemoryLoc loc, RelativeCodePos pos)
 COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ExprList args)
 
 INLINE_EXPR(FalseLiteral, Bool, bool)
-INLINE_EXPR(PhiParentEdgeTaken, Bool, PhiParent)
+INLINE_EXPR(PositionActive, Bool, CodePos)
+INLINE_EXPR(ParentEdgeTaken, Bool, PhiParent)
 
 COMPOUND_EXPR(TypeIsImpl, Bool, Type type, TypeImpl impl)
 

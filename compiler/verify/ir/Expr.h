@@ -26,61 +26,6 @@ enum class Opcode : uint8_t {
 #include <verify/ir/instructions.inc>
 };
 
-struct Expr {
-    Expr(ExprKind kind, uint32_t id)
-        : kindBits(std::to_underlying(kind)), idBits(id) { }
-
-    ExprKind kind() const { return (ExprKind)kindBits; }
-    uint32_t id() const { return idBits; }
-    uint32_t kindBits : 7 = 0;
-    uint32_t boolNegatedBit : 1 = 0;
-    uint32_t idBits : 24 = 0;
-
-    bool operator==(const Expr&) const = default;
-};
-
-struct Bool : Expr {
-    static constexpr Sort sort = Sort::Bool;
-    explicit Bool(Expr e)
-        : Expr(e) { }
-    explicit Bool(bool literal)
-        : Expr(ExprKind::FalseLiteral, 0) { boolNegatedBit = literal; }
-
-    Bool operator!() const {
-        Bool copy = *this;
-        copy.boolNegatedBit = !boolNegatedBit;
-        return copy;
-    }
-};
-
-struct Fn : Expr {
-    static constexpr Sort sort = Sort::Fn;
-    explicit Fn(Expr e)
-        : Expr(e) { }
-};
-
-struct Type : Expr {
-    static constexpr Sort sort = Sort::Type;
-    explicit Type(Expr e)
-        : Expr(e) { }
-};
-struct MemoryDecl : Expr {
-    static constexpr Sort sort = Sort::MemoryDecl;
-    explicit MemoryDecl(Expr e)
-        : Expr(e) { }
-};
-struct Member : Expr {
-    static constexpr Sort sort = Sort::Member;
-    explicit Member(Expr e)
-        : Expr(e) { }
-};
-
-struct MemoryLoc : Expr {
-    static constexpr Sort sort = Sort::MemoryLoc;
-    explicit MemoryLoc(Expr e)
-        : Expr(e) { }
-};
-
 enum class Tactic : uint8_t {
     // Temporary placeholder for a missing proof
     Sorry,
@@ -232,5 +177,87 @@ struct FnHandle : SmallHandle {
 struct DeclHandle : SmallHandle {
     using SmallHandle::SmallHandle;
 };
+
+namespace inline_expr_detail {
+    template<typename T>
+    constexpr uint32_t toUInt(T arg) {
+        if constexpr (std::derived_from<T, SmallHandle>)
+            return arg.id();
+        else
+            return static_cast<uint32_t>(arg);
+    }
+}
+
+struct Bool;
+struct Fn;
+struct Type;
+struct Member;
+struct MemoryDecl;
+struct MemoryLoc;
+
+struct Expr {
+#define INLINE_EXPR(name, sort, Arg) \
+    static sort make##name(Arg);
+#include <verify/ir/expressions.inc>
+
+    Expr(ExprKind kind, uint32_t id)
+        : kindBits(std::to_underlying(kind)), idBits(id) { }
+
+    ExprKind kind() const { return (ExprKind)kindBits; }
+    uint32_t id() const { return idBits; }
+    uint32_t kindBits : 7 = 0;
+    uint32_t boolNegatedBit : 1 = 0;
+    uint32_t idBits : 24 = 0;
+
+    bool operator==(const Expr&) const = default;
+};
+
+struct Bool : Expr {
+    static constexpr Sort sort = Sort::Bool;
+    explicit Bool(Expr e)
+        : Expr(e) { }
+    explicit Bool(bool literal)
+        : Expr(ExprKind::FalseLiteral, 0) { boolNegatedBit = literal; }
+
+    Bool operator!() const {
+        Bool copy = *this;
+        copy.boolNegatedBit = !boolNegatedBit;
+        return copy;
+    }
+};
+
+struct Fn : Expr {
+    static constexpr Sort sort = Sort::Fn;
+    explicit Fn(Expr e)
+        : Expr(e) { }
+};
+
+struct Type : Expr {
+    static constexpr Sort sort = Sort::Type;
+    explicit Type(Expr e)
+        : Expr(e) { }
+};
+struct MemoryDecl : Expr {
+    static constexpr Sort sort = Sort::MemoryDecl;
+    explicit MemoryDecl(Expr e)
+        : Expr(e) { }
+};
+struct Member : Expr {
+    static constexpr Sort sort = Sort::Member;
+    explicit Member(Expr e)
+        : Expr(e) { }
+};
+
+struct MemoryLoc : Expr {
+    static constexpr Sort sort = Sort::MemoryLoc;
+    explicit MemoryLoc(Expr e)
+        : Expr(e) { }
+};
+
+#define INLINE_EXPR(name, sort, Arg)                                        \
+    inline sort Expr::make##name(Arg arg) {                                 \
+        return (sort)Expr(ExprKind::name, inline_expr_detail::toUInt(arg)); \
+    }
+#include <verify/ir/expressions.inc>
 
 }

@@ -84,7 +84,14 @@ struct Function {
     void setJumpTarget(CodePos jumpInst, CodePos target);
     void setBranchTrueTarget(CodePos branchInst, CodePos target);
     void setBranchFalseTarget(CodePos branchInst, CodePos target);
-    void setPhiParent(CodePos phiInst, int_t index, CodePos parent);
+    void setParent(CodePos phiInst, int_t index, CodePos parent);
+
+    PhiParentList parents(CodePos phiInst) const;
+
+    CodePos parentPosition(PhiParent parent) const {
+        VERIFY(parent.id() < m_phiParents.size());
+        return m_phiParents[parent.id()];
+    }
 
 private:
     using expr_arr = std::array<uint32_t, 3>;

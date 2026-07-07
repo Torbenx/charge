@@ -71,13 +71,20 @@ void Function::setBranchFalseTarget(CodePos branchInst, CodePos target) {
     inst.data = toArray<data_t>(data);
 }
 
-void Function::setPhiParent(CodePos phiInst, int_t index, CodePos parent) {
+void Function::setParent(CodePos phiInst, int_t index, CodePos parent) {
     using data_t = function_detail::instruction_data<Opcode::Phi>;
     Inst& inst = instRef(phiInst);
     VERIFY(inst.opcode == Opcode::Phi);
     auto data = fromArray<data_t>(inst.data);
     VERIFY(index >= 0 && index < data.parents.size());
     m_phiParents[data.parents.m_offset + (uint32_t)index] = parent;
+}
+
+PhiParentList Function::parents(CodePos phiInst) const {
+    using data_t = function_detail::instruction_data<Opcode::Phi>;
+    const auto& in = inst(phiInst);
+    VERIFY(in.opcode == Opcode::Phi);
+    return fromArray<data_t>(in.data).parents;
 }
 
 }

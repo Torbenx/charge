@@ -52,7 +52,7 @@ struct Token {
 };
 
 struct Lexer {
-    void lex();
+    void lex(const char* position);
     Word readWord(const char*& position);
 
     struct ScopeStackEntry {
@@ -64,9 +64,7 @@ struct Lexer {
     std::vector<ScopeStackEntry> scopeStack;
 };
 
-void Lexer::lex() {
-    const char* position;
-
+void Lexer::lex(const char* position) {
     for (;;) {
         position = skipSpaces(position);
         switch (position[0]) {
@@ -256,7 +254,7 @@ struct TokenStream {
         }
     }
 
-    void error(std::string message) {
+    [[noreturn]] void error(std::string message) {
         throw ParserException(std::move(message));
     }
 };
@@ -305,7 +303,6 @@ struct FunctionParser {
 
         if (s.tokKind() != TokenKind::GlobalName)
             s.error("Expected global name after 'fn'");
-        // FnBuilder fn(db);
         Word fnName = s.tok().word();
         s.advance();
         int_t parameterCount = 0;
@@ -411,7 +408,7 @@ struct FunctionParser {
         s.advance();
         if (s.tokKind() != TokenKind::LabelName)
             s.error("Expected label after 'jump'");
-        ir::CodePos target = getLabel(s, ir.here(), 0);
+        ir::CodePos target = getLabelForInstruction(s, ir.here(), 0);
         s.advance();
         ir.addJump({ .target = target });
     }
@@ -426,14 +423,14 @@ struct FunctionParser {
         s.advance();
         if (s.tokKind() != TokenKind::LabelName)
             s.error("Expected true target label after branch condition");
-        ir::CodePos ifTrue = getLabel(s, ir.here(), 0);
+        ir::CodePos ifTrue = getLabelForInstruction(s, ir.here(), 0);
         s.advance();
         if (s.tokKind() != TokenKind::Comma)
             s.error("Expected ',' between branch targets");
         s.advance();
         if (s.tokKind() != TokenKind::LabelName)
             s.error("Expected false target label");
-        ir::CodePos ifFalse = getLabel(s, ir.here(), 1);
+        ir::CodePos ifFalse = getLabelForInstruction(s, ir.here(), 1);
         s.advance();
         ir.addBranch({ .cond = cond, .ifTrue = ifTrue, .ifFalse = ifFalse });
     }
@@ -446,7 +443,7 @@ struct FunctionParser {
         for (uint32_t parentIndex = 0;; parentIndex++) {
             if (s.tokKind() != TokenKind::LabelName)
                 s.error("Expected parent label in phi");
-            parents.push_back(getLabel(s, ir.here(), parentIndex));
+            parents.push_back(getLabelForInstruction(s, ir.here(), parentIndex));
             s.advance();
             if (s.tokKind() == TokenKind::Comma) {
                 s.advance();
@@ -471,10 +468,11 @@ struct FunctionParser {
                 continue;
             case TokenKind::ContinueScope:
             case TokenKind::EndScope:
-                if (e.has_value())
+                if (!e.has_value())
                     s.error("Unexpected end of expression");
                 return e.value();
             case TokenKind::LabelName: {
+                ir::CodePos labelPos = getLabel(s);
                 s.advance();
                 if (s.tokKind() != TokenKind::Point)
                     s.error("Expected '.' after label");
@@ -482,9 +480,23 @@ struct FunctionParser {
                 if (s.tokKind() != TokenKind::Identifier)
                     s.error("Expected identifier after label");
                 if (s.tok().word() == words["active"]) {
-                    VERIFY_NOT_REACHED(); // TODO
+                    s.advance();
+                    return ir::Expr::makePositionActive(labelPos);
                 } else if (s.tok().word() == words["from"]) {
-                    VERIFY_NOT_REACHED(); // TODO
+                    s.advance();
+                    if (s.tokKind() != TokenKind::LabelName)
+                        s.error("Expected label after '.from'");
+                    ir::CodePos parentPos = getLabel(s);
+                    s.advance();
+                    if (ir.inst(labelPos).opcode != ir::Opcode::Phi)
+                        s.error("'.from' requires a phi instruction");
+                    ir::PhiParentList parents = ir.parents(labelPos);
+                    for (int_t i = 0; i < parents.size(); i++) {
+                        ir::PhiParent parent = parents.at(i);
+                        if (ir.parentPosition(parent) == parentPos)
+                            return ir::Expr::makeParentEdgeTaken(parent);
+                    }
+                    s.error("Label is not a parent of the referenced phi");
                 } else {
                     s.error("Invalid identifier after label");
                 }
@@ -492,15 +504,27 @@ struct FunctionParser {
             case TokenKind::GlobalName:
             case TokenKind::LocalName:
                 VERIFY_NOT_REACHED(); // TODO
+            default:
+                s.error("Expected expression");
             }
         }
+    }
+
+    // Resolves the label token under the cursor, requiring it to already be
+    // defined. Unlike getLabelForInstruction, forward references are not allowed here.
+    ir::CodePos getLabel(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::LabelName);
+        auto info = labels.get(s.tok().word());
+        if (!info.has_value() || !info->isResolved())
+            s.error("Label must be defined before use");
+        return info->codePos();
     }
 
     // Resolves the label token under the cursor. If the label is already known
     // its position is returned. Otherwise INVALID_CODE_POS is returned as a
     // placeholder and the use is recorded on the unresolved label so it can be
     // patched into 'instruction' at slot 'index' once the label is defined.
-    ir::CodePos getLabel(TokenStream& s, ir::CodePos instruction, uint32_t index) {
+    ir::CodePos getLabelForInstruction(TokenStream& s, ir::CodePos instruction, uint32_t index) {
         VERIFY(s.tokKind() == TokenKind::LabelName);
         Word name = s.tok().word();
         auto info = labels.get(name);
@@ -539,7 +563,7 @@ struct FunctionParser {
                     ir.setBranchFalseTarget(use.instruction, pos);
                 break;
             case ir::Opcode::Phi:
-                ir.setPhiParent(use.instruction, use.index, pos);
+                ir.setParent(use.instruction, use.index, pos);
                 break;
             default:
                 VERIFY_NOT_REACHED();
