@@ -1,5 +1,7 @@
 #include <verify/language/Parser.h>
 
+#include <gtest/gtest.h>
+
 namespace verify::language {
 
 static const char* skipSpaces(const char* position) {
@@ -68,6 +70,9 @@ struct Lexer {
 };
 
 void Lexer::lex(const char* position) {
+    scopeStack.push_back({ .indent = 0 });
+    tokens.push_back({ TokenKind::BeginScope });
+
     for (;;) {
         position = skipSpaces(position);
         switch (position[0]) {
@@ -82,6 +87,8 @@ void Lexer::lex(const char* position) {
                 position += 1;
             break;
         }
+        case '\0':
+            break;
 
         case '(':
             position += 1;
@@ -168,7 +175,6 @@ void Lexer::lex(const char* position) {
             if (position[0] == '@') {
                 position += 1;
                 labels.push_back(readWord(position));
-                VERIFY(position[0] == ':');
             }
             position = skipSpaces(position);
             if (position[0] == '\r') {
@@ -184,6 +190,12 @@ void Lexer::lex(const char* position) {
             break;
         }
         uint32_t indent = position - lineBegin;
+        if (position[0] == '\0') {
+            for ([[maybe_unused]] auto& entry : scopeStack)
+                tokens.push_back({ TokenKind::EndScope });
+            scopeStack.clear();
+            return;
+        }
         if (indent > scopeStack.back().indent) {
             tokens.push_back({ TokenKind::BeginScope });
             scopeStack.push_back({ .indent = indent });
@@ -224,6 +236,10 @@ struct TokenStream {
 
     const Token& tok() const { return *token; }
     TokenKind tokKind() const { return token->kind(); }
+
+    static TokenStream makeRoot(Token* stream) {
+        return TokenStream(stream);
+    }
 
     TokenStream(TokenStream& parent)
         : parent(&parent) {
@@ -274,6 +290,10 @@ struct TokenStream {
     [[noreturn]] void error(std::string message) {
         throw ParserException(std::move(message));
     }
+
+private:
+    explicit TokenStream(Token* stream) // root constructor
+        : parent(nullptr), child(nullptr), token(stream) { }
 };
 
 struct FunctionParser {
@@ -313,7 +333,10 @@ struct FunctionParser {
         uint32_t valueBits : 31;
     };
 
-    void parse(TokenStream s) {
+    explicit FunctionParser(ir::Function& f)
+        : ir(f) { }
+
+    void parse(TokenStream& s) {
         VERIFY(s.tokKind() == TokenKind::Identifier);
         VERIFY(s.tok().word() == words["fn"]);
         s.advance();
@@ -321,6 +344,9 @@ struct FunctionParser {
         if (s.tokKind() != TokenKind::GlobalName)
             s.error("Expected global name after 'fn'");
         Word fnName = s.tok().word();
+        s.advance();
+        if (s.tokKind() != TokenKind::LeftParen)
+            s.error("Expected '(' after function name");
         s.advance();
         if (s.tokKind() != TokenKind::RightParen) {
             for (;;) {
@@ -341,11 +367,8 @@ struct FunctionParser {
         VERIFY(s.tokKind() == TokenKind::RightParen);
         s.advance();
 
-        if (s.tokKind() != TokenKind::Colon)
-            s.error("Expected ':' after function parameters");
-        s.advance();
         if (s.tokKind() != TokenKind::BeginScope)
-            s.error("Expected function body after ':'");
+            s.error("Expected function body");
         parseInstructions(s);
     }
 
@@ -559,7 +582,7 @@ struct FunctionParser {
                     s.error("Expected label after '.from'");
                 ir::CodePos parentPos = getLabel(s);
                 s.advance();
-                if (ir.inst(labelPos).opcode != ir::Opcode::Phi)
+                if (ir.opcodeAt(labelPos) != ir::Opcode::Phi)
                     s.error("'.from' requires a phi instruction");
                 ir::PhiParentList parents = ir.parents(labelPos);
                 for (int_t i = 0; i < parents.size(); i++) {
@@ -572,12 +595,13 @@ struct FunctionParser {
                 s.error("Invalid identifier after label");
             }
         }
-        case TokenKind::LocalName:
+        case TokenKind::LocalName: {
             auto local = locals.get(s.tok().word());
             if (!local.has_value())
                 s.error("Local must be defined before use");
             s.advance();
             return local.value();
+        }
         case TokenKind::GlobalName:
             VERIFY_NOT_REACHED(); // TODO
         case TokenKind::Identifier: {
@@ -636,7 +660,7 @@ struct FunctionParser {
 
         VERIFY(!info->isResolved());
         for (const auto& use : unresolvedLabels[info->unresolvedIndex()].uses) {
-            switch (ir.inst(use.instruction).opcode) {
+            switch (ir.opcodeAt(use.instruction)) {
             case ir::Opcode::Jump:
                 VERIFY(use.index == 0);
                 ir.setJumpTarget(use.instruction, pos);
@@ -663,5 +687,78 @@ struct FunctionParser {
     LookupTable<ir::Expr> locals;
     std::vector<UnresolvedLabel> unresolvedLabels;
 };
+
+ir::Function parseForTest(const char* source) {
+    Lexer lexer;
+    lexer.lex(source);
+    ir::Function result;
+    FunctionParser parser { result };
+    auto s = TokenStream::makeRoot(lexer.tokens.data());
+    VERIFY(s.tokKind() == TokenKind::BeginScope);
+    s.advance();
+    while (s.tokKind() == TokenKind::ContinueScope)
+        s.advance();
+    parser.parse(s);
+    return result;
+}
+
+TEST(VerifyLanguage, ParseFunctionDefinition) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c)
+    store $a <- $b
+    store $a <- $b
+    store $a <- $b
+    store $a <- $b
+    store $a <- $b
+)");
+    EXPECT_EQ(fn.parameterCount(), 3);
+    EXPECT_EQ(fn.here().id(), 5);
+}
+
+TEST(VerifyLanguage, ParseStore) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b)
+    store $a <- $b
+)");
+    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.here().id(), 1);
+    ir::CodePos storePos(0);
+    EXPECT_EQ(fn.getStore(storePos).loc, ir::Expr(ir::ExprKind::FunctionParameter, 0));
+    EXPECT_EQ(fn.getStore(storePos).value, ir::Expr(ir::ExprKind::FunctionParameter, 1));
+}
+
+TEST(VerifyLanguage, ParseBranchAndPhi) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b)
+@entry
+    jump @before
+@before
+    phi @entry, @branch
+@branch
+    branch $a = $b, @before, @after
+@after
+    phi @branch
+)");
+    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.here().id(), 4);
+    ir::CodePos jumpPos(0);
+    ir::CodePos phi1Pos(1);
+    ir::CodePos branchPos(2);
+    ir::CodePos phi2Pos(3);
+
+    EXPECT_EQ(fn.getJump(jumpPos).target, phi1Pos);
+
+    EXPECT_EQ(fn.parents(phi1Pos).size(), 2);
+    EXPECT_EQ(fn.parentPosition(fn.parents(phi1Pos).at(0)), jumpPos);
+    EXPECT_EQ(fn.parentPosition(fn.parents(phi1Pos).at(1)), branchPos);
+
+    EXPECT_EQ(fn.getEquality(fn.getBranch(branchPos).cond).left, ir::Expr(ir::ExprKind::FunctionParameter, 0));
+    EXPECT_EQ(fn.getEquality(fn.getBranch(branchPos).cond).right, ir::Expr(ir::ExprKind::FunctionParameter, 1));
+    EXPECT_EQ(fn.getBranch(branchPos).ifTrue, phi1Pos);
+    EXPECT_EQ(fn.getBranch(branchPos).ifFalse, phi2Pos);
+
+    EXPECT_EQ(fn.parents(phi2Pos).size(), 1);
+    EXPECT_EQ(fn.parentPosition(fn.parents(phi2Pos).at(0)), branchPos);
+}
 
 }

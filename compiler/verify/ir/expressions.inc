@@ -11,7 +11,7 @@
 COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
 COMPOUND_EXPR(Load, Expr, MemoryLoc loc, RelativeCodePos pos)
 COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ExprList args)
-INLINE_EXPR(FunctionParameter, Expr, uint32_t parameterIndex)
+INLINE_EXPR(FunctionParameter, Expr, uint32_t)
 
 INLINE_EXPR(BooleanLiteral, Bool, bool)
 INLINE_EXPR(PositionActive, Bool, CodePos)

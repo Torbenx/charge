@@ -41,8 +41,18 @@ static T fromArray(const arr& in) {
         m_expressions.push_back(toArray<function_detail::compound_expr<ExprKind::name>>(val));       \
         return (sortType)Expr(ExprKind::name, id);                                                   \
     }
-
 #include <verify/ir/expressions.inc>
+
+#define INSTRUCTION(name, args...)                                                                                  \
+    void Function::add##name(const function_detail::instruction_data<Opcode::name>& data) {                         \
+        m_instructions.push_back({ Opcode::name, toArray<function_detail::instruction_data<Opcode::name>>(data) }); \
+    }                                                                                                               \
+    function_detail::instruction_data<Opcode::name> Function::get##name(CodePos pos) const {                        \
+        const Inst& inst = instRef(pos);                                                                            \
+        VERIFY(inst.opcode == Opcode::name);                                                                        \
+        return fromArray<function_detail::instruction_data<Opcode::name>>(inst.data);                               \
+    }
+#include <verify/ir/instructions.inc>
 
 void Function::setJumpTarget(CodePos jumpInst, CodePos target) {
     using data_t = function_detail::instruction_data<Opcode::Jump>;
@@ -78,13 +88,6 @@ void Function::setParent(CodePos phiInst, int_t index, CodePos parent) {
     auto data = fromArray<data_t>(inst.data);
     VERIFY(index >= 0 && index < data.parents.size());
     m_phiParents[data.parents.m_offset + (uint32_t)index] = parent;
-}
-
-PhiParentList Function::parents(CodePos phiInst) const {
-    using data_t = function_detail::instruction_data<Opcode::Phi>;
-    const auto& in = inst(phiInst);
-    VERIFY(in.opcode == Opcode::Phi);
-    return fromArray<data_t>(in.data).parents;
 }
 
 }

@@ -1,11 +1,11 @@
 fn #add1($x, $ret)
-@entry:
+@entry
     pre %x_type: $x.type = #int()
     pre %ret_type: $ret.type = #int()
     pre %x_gt0: $x.load@entry >= 0
-@store_ret:
+@store_ret
     store $ret <- $x.load@entry + 1
-@exit:
+@exit
     post %ret_gt1: $ret.load@exit >= 1 by sat:
         clause %x_gt0
         clause $ret != $ret or $ret.load@exit = $x.load@entry + 1 by load_store@store_ret
@@ -15,13 +15,13 @@ fn #add1($x, $ret)
             or $x.load@entry < 0 by int_farkas 1 -1 -1
 
 fn #copyIfInt($T, $x, $ret)
-@entry:
+@entry
     pre %T_type: $T.type = #type()
     pre %x_type: $x.type = $T.load@entry
     pre %ret_type: $ret.type = #int()
-@T_branch:
+@T_branch
     branch $T.load@entry = #int(), @if_true, @if_false
-@if_true:
+@if_true
     phi @T_branch
     prove %x_type_int: !@if_true.active or $x.type = #int() by sat:
         clause !@if_true.active or @if_true.from@T_branch by phi_enumerate
@@ -29,19 +29,19 @@ fn #copyIfInt($T, $x, $ret)
         clause %x_type
         clause $x.type != $T.load@entry or $T.load@entry != #int() or $x.type = #int() by eq:transitive
     store $ret <- $x.load@entry
-@true_to_exit:
+@true_to_exit
     jump @exit
-@if_false:
+@if_false
     phi @T_branch
     store $ret <- 0
-@false_to_exit:
+@false_to_exit
     jump @exit
-@exit:
+@exit
     phi @true_to_exit, @false_to_exit
 
 
 fn #f($n, $ret)
-@entry:
+@entry
     pre %n_type: $n.type = #int()
     pre %ret_type: $ret.type = #int()
     pre %n_gt0: $n.load@entry > 0
@@ -49,11 +49,11 @@ fn #f($n, $ret)
 @counter_alloca
     alloca $counter: #int()
     prove %counter_type: $counter.type = #int() by alloca_type@counter_alloca
-@init_counter:
+@init_counter
     store $counter <- 0
-@entry_jump:
+@entry_jump
     jump @loop_head
-@loop_head:
+@loop_head
     phi @entry_jump, @loop_branch
     prove %counter_init_0: !@loop_head.from@entry_jump or $counter.load@loop_head = 0 by sat:
         clause $counter.load@loop_head = $counter.load@entry_jump by phi_load@loop_head
@@ -68,19 +68,19 @@ fn #f($n, $ret)
         clause !@loop_head.from@loop_branch or {@loop_head.from@loop_branch}:%counter_le_n
         clause $counter.load@loop_head != 0 or $n.load@entry <= 0 or $counter.load@loop_head > $n.load@entry by int_farkas -1 -1 1
         clause !@loop_head.active or @loop_head.from@entry_jump or @loop_head.from@loop_branch by phi_enumerate@loop_head
-@counter_update:
+@counter_update
     store $counter <- $counter.load@counter_update + 1
-@ret_update:
+@ret_update
     store $ret <- $ret.load@ret_update + $counter.load@ret_update
-@after_ret_update:
+@after_ret_update
     prove %sum: $ret.load@after_ret_update * 2 = $counter.load@ret_update * ($counter.load@ret_update + 1) by sat:
         clause $ret.load@ret_update * 2 = ($counter.load@ret_update - 1) * $counter.load@ret_update by sorry
         clause $ret.load@after_ret_update != $ret.load@ret_update + $counter.load@ret_update
             or $ret.load@ret_update * 2 != ($counter.load@ret_update - 1) * $counter.load@ret_update
             or $ret.load@after_ret_update * 2 = $counter.load@ret_update * ($counter.load@ret_update + 1) by linear_combination 2 1
-@loop_branch:
+@loop_branch
     branch $counter.load@loop_branch < $n.load@loop_branch, @loop_head, @exit
-@exit:
+@exit
     phi @loop_branch
     prove %n_unchanged: $n.load@loop_branch = $n.load@entry by sorry
     prove %counter_eq_n: $counter.load@exit = $n.load@entry by sorry

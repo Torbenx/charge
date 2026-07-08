@@ -105,7 +105,7 @@ namespace {
     }
 }
 
-TEST(Check, MergeLists) {
+TEST(VerifyBackend, MergeLists) {
     auto mergeUnmerge = [](flat_set orgA, flat_set b) {
         auto a = orgA;
         mergeInto(a, b);

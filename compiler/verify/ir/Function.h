@@ -43,13 +43,9 @@ struct Function {
     FnHandle repr(Fn expr);
 
     CodePos here() const { return CodePos((uint32_t)m_instructions.size()); }
+    Opcode opcodeAt(CodePos pos) const { return instRef(pos).opcode; }
 
     Sort sortOf(Expr) const;
-
-    const auto& inst(CodePos pos) const {
-        VERIFY(pos.id() < m_instructions.size());
-        return m_instructions[pos.id()];
-    }
 
     Expr addParameter(Sort sort) {
         Expr ret = Expr(ExprKind::FunctionParameter, parameterCount());
@@ -85,8 +81,9 @@ struct Function {
     sortType add##name(const function_detail::compound_expr<ExprKind::name>&);
 #include <verify/ir/expressions.inc>
 
-#define INSTRUCTION(name, ...) \
-    void add##name(const function_detail::instruction_data<Opcode::name>&);
+#define INSTRUCTION(name, ...)                                              \
+    void add##name(const function_detail::instruction_data<Opcode::name>&); \
+    function_detail::instruction_data<Opcode::name> get##name(CodePos pos) const;
 #include <verify/ir/instructions.inc>
 
     void setJumpTarget(CodePos jumpInst, CodePos target);
@@ -94,7 +91,7 @@ struct Function {
     void setBranchFalseTarget(CodePos branchInst, CodePos target);
     void setParent(CodePos phiInst, int_t index, CodePos parent);
 
-    PhiParentList parents(CodePos phiInst) const;
+    PhiParentList parents(CodePos phiInst) const { return getPhi(phiInst).parents; }
 
     CodePos parentPosition(PhiParent parent) const {
         VERIFY(parent.id() < m_phiParents.size());
@@ -111,6 +108,10 @@ private:
     };
 
     Inst& instRef(CodePos pos) {
+        VERIFY(pos.id() < m_instructions.size());
+        return m_instructions[pos.id()];
+    }
+    const Inst& instRef(CodePos pos) const {
         VERIFY(pos.id() < m_instructions.size());
         return m_instructions[pos.id()];
     }

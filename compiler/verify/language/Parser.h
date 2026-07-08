@@ -16,6 +16,9 @@ inline constexpr ConstWordStringTable words {
     "jump",
     "branch",
     "phi",
+    "true",
+    "false",
+    "load",
 };
 
 struct ParserException : std::exception {
@@ -42,6 +45,9 @@ struct LookupTable {
     }
 
     std::optional<T> insertOrUpdate(Word name, T value) {
+        if (m_table.empty())
+            m_table.initializeFromEmpty();
+
         auto result = m_table.findWord(name);
         auto& entry = m_table.entries[result.bucket];
         if (!result.found) {
