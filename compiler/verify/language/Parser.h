@@ -59,21 +59,4 @@ struct LookupTable {
     WordTable m_table;
 };
 
-enum class LocalKind {
-    Parameter,
-    LocalMemoryLocation,
-    Alias,
-};
-
-struct Local {
-    Local(LocalKind kind, uint32_t id)
-        : kindBits(std::to_underlying(kind)), idBits(id) { }
-
-    LocalKind kind() const { return (LocalKind)kindBits; }
-    uint32_t id() const { return idBits; }
-
-    uint32_t kindBits : 8;
-    uint32_t idBits : 24;
-};
-
 }

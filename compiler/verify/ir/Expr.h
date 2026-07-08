@@ -152,6 +152,8 @@ struct CodePos : SmallHandle {
 inline constexpr CodePos INVALID_CODE_POS = CodePos(limits::max);
 
 struct RelativeCodePos {
+    RelativeCodePos(CodePos pos)
+        : RelativeCodePos(RelativePosKind::Simple, pos.id()) { }
     RelativeCodePos(RelativePosKind kind, uint32_t data)
         : kindBits(std::to_underlying(kind)), dataBits(data) { }
 
@@ -217,7 +219,7 @@ struct Bool : Expr {
     explicit Bool(Expr e)
         : Expr(e) { }
     explicit Bool(bool literal)
-        : Expr(ExprKind::FalseLiteral, 0) { boolNegatedBit = literal; }
+        : Expr(ExprKind::BooleanLiteral, 0) { boolNegatedBit = literal; }
 
     Bool operator!() const {
         Bool copy = *this;

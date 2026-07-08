@@ -32,6 +32,9 @@ enum class TokenKind : uint8_t {
     Comma,
     Point,
     LeftArrow,
+    Exclaim,
+    ExclaimEqual,
+    Equal,
 };
 
 struct Token {
@@ -100,6 +103,16 @@ void Lexer::lex(const char* position) {
             position += 1;
             tokens.push_back({ TokenKind::Point });
             continue;
+        case '!':
+            if (position[1] == '=') {
+                position += 2;
+                tokens.push_back({ TokenKind::ExclaimEqual });
+                continue;
+            } else {
+                position += 1;
+                tokens.push_back({ TokenKind::Exclaim });
+                continue;
+            }
         case '<':
             if (position[1] == '-') {
                 position += 2;
@@ -108,6 +121,10 @@ void Lexer::lex(const char* position) {
             } else {
                 VERIFY_NOT_REACHED();
             }
+        case '=':
+            position += 1;
+            tokens.push_back({ TokenKind::Equal });
+            continue;
 
         case '$':
             position += 1;
@@ -305,23 +322,24 @@ struct FunctionParser {
             s.error("Expected global name after 'fn'");
         Word fnName = s.tok().word();
         s.advance();
-        int_t parameterCount = 0;
-        for (;;) {
-            if (s.tokKind() != TokenKind::LocalName)
-                s.error("Expected parameter name");
-            locals.insert(s.tok().word(), Local(LocalKind::Parameter, parameterCount));
-            s.advance();
-            parameterCount += 1;
-            if (s.tokKind() == TokenKind::Comma) {
+        if (s.tokKind() != TokenKind::RightParen) {
+            for (;;) {
+                if (s.tokKind() != TokenKind::LocalName)
+                    s.error("Expected parameter name");
+                locals.insert(s.tok().word(), ir.addParameter(ir::Sort::MemoryLoc));
                 s.advance();
-                continue;
-            } else if (s.tokKind() == TokenKind::RightParen) {
-                s.advance();
-                break;
-            } else {
-                s.error("Unexpected token after parameter");
+                if (s.tokKind() == TokenKind::Comma) {
+                    s.advance();
+                    continue;
+                } else if (s.tokKind() == TokenKind::RightParen) {
+                    break;
+                } else {
+                    s.error("Unexpected token after parameter");
+                }
             }
         }
+        VERIFY(s.tokKind() == TokenKind::RightParen);
+        s.advance();
 
         if (s.tokKind() != TokenKind::Colon)
             s.error("Expected ':' after function parameters");
@@ -398,6 +416,7 @@ struct FunctionParser {
                 }
             }
         }
+        VERIFY(s.tokKind() == TokenKind::RightParen);
         s.advance();
         ir.addCall({ .target = target, .args = ir.makeExprList(args) });
     }
@@ -455,58 +474,125 @@ struct FunctionParser {
     }
 
     template<typename T>
-    T parseExpression(TokenStream& s) {
-        return (T)parseExpression(s);
+    T sortCast(ir::Expr e) {
+        return (T)e;
     }
 
     ir::Expr parseExpression(TokenStream& s) {
-        std::optional<ir::Expr> e;
-        for (;;) {
-            switch (s.tokKind()) {
-            case TokenKind::BeginScope:
-                s.consumeScopeInline();
-                continue;
-            case TokenKind::ContinueScope:
-            case TokenKind::EndScope:
-                if (!e.has_value())
-                    s.error("Unexpected end of expression");
-                return e.value();
-            case TokenKind::LabelName: {
-                ir::CodePos labelPos = getLabel(s);
+        return parseBinaryExpr(s);
+    }
+
+    template<typename T>
+    T parseExpression(TokenStream& s) {
+        return sortCast<T>(parseExpression(s));
+    }
+
+    ir::Expr parseBinaryExpr(TokenStream& s) {
+        ir::Expr left = parseUnaryExpr(s);
+        if (s.tokKind() == TokenKind::Equal) {
+            s.advance();
+            ir::Expr right = parseUnaryExpr(s);
+            return ir.addEquality({ left, right });
+        } else if (s.tokKind() == TokenKind::ExclaimEqual) {
+            s.advance();
+            ir::Expr right = parseUnaryExpr(s);
+            return !ir.addEquality({ left, right });
+        } else {
+            return left;
+        }
+    }
+
+    ir::Expr parseUnaryExpr(TokenStream& s) {
+        if (s.tokKind() == TokenKind::Exclaim) {
+            return !sortCast<ir::Bool>(parseUnaryExpr(s));
+        } else {
+            return parsePostfixExpr(s);
+        }
+    }
+
+    ir::Expr parsePostfixExpr(TokenStream& s) {
+        ir::Expr base = parsePrimaryExpression(s);
+        while (s.tokKind() == TokenKind::Point) {
+            s.advance();
+            if (s.tokKind() == TokenKind::Identifier) {
+                Word id = s.tok().word();
                 s.advance();
-                if (s.tokKind() != TokenKind::Point)
-                    s.error("Expected '.' after label");
-                s.advance();
-                if (s.tokKind() != TokenKind::Identifier)
-                    s.error("Expected identifier after label");
-                if (s.tok().word() == words["active"]) {
-                    s.advance();
-                    return ir::Expr::makePositionActive(labelPos);
-                } else if (s.tok().word() == words["from"]) {
-                    s.advance();
+                if (id == words["load"]) {
                     if (s.tokKind() != TokenKind::LabelName)
-                        s.error("Expected label after '.from'");
-                    ir::CodePos parentPos = getLabel(s);
-                    s.advance();
-                    if (ir.inst(labelPos).opcode != ir::Opcode::Phi)
-                        s.error("'.from' requires a phi instruction");
-                    ir::PhiParentList parents = ir.parents(labelPos);
-                    for (int_t i = 0; i < parents.size(); i++) {
-                        ir::PhiParent parent = parents.at(i);
-                        if (ir.parentPosition(parent) == parentPos)
-                            return ir::Expr::makeParentEdgeTaken(parent);
-                    }
-                    s.error("Label is not a parent of the referenced phi");
+                        s.error("Expected label name after load");
+                    base = ir.addLoad({ sortCast<ir::MemoryLoc>(base), getLabel(s) });
+                    continue;
                 } else {
-                    s.error("Invalid identifier after label");
+                    s.error("Unexpected identifier in postfix expression");
                 }
+            } else {
+                s.error("Unexpected token after '.'");
             }
-            case TokenKind::GlobalName:
-            case TokenKind::LocalName:
-                VERIFY_NOT_REACHED(); // TODO
-            default:
-                s.error("Expected expression");
+        }
+        return base;
+    }
+
+    ir::Expr parsePrimaryExpression(TokenStream& s) {
+        switch (s.tokKind()) {
+        case TokenKind::LeftParen: {
+            s.advance();
+            ir::Expr e = parseExpression(s);
+            if (s.tokKind() != TokenKind::RightParen)
+                s.error("Expected ')' after expression");
+            s.advance();
+            return e;
+        }
+        case TokenKind::LabelName: {
+            ir::CodePos labelPos = getLabel(s);
+            s.advance();
+            if (s.tokKind() != TokenKind::Point)
+                s.error("Expected '.' after label");
+            s.advance();
+            if (s.tokKind() != TokenKind::Identifier)
+                s.error("Expected identifier after label");
+            if (s.tok().word() == words["active"]) {
+                s.advance();
+                return ir::Expr::makePositionActive(labelPos);
+            } else if (s.tok().word() == words["from"]) {
+                s.advance();
+                if (s.tokKind() != TokenKind::LabelName)
+                    s.error("Expected label after '.from'");
+                ir::CodePos parentPos = getLabel(s);
+                s.advance();
+                if (ir.inst(labelPos).opcode != ir::Opcode::Phi)
+                    s.error("'.from' requires a phi instruction");
+                ir::PhiParentList parents = ir.parents(labelPos);
+                for (int_t i = 0; i < parents.size(); i++) {
+                    ir::PhiParent parent = parents.at(i);
+                    if (ir.parentPosition(parent) == parentPos)
+                        return ir::Expr::makeParentEdgeTaken(parent);
+                }
+                s.error("Label is not a parent of the referenced phi");
+            } else {
+                s.error("Invalid identifier after label");
             }
+        }
+        case TokenKind::LocalName:
+            auto local = locals.get(s.tok().word());
+            if (!local.has_value())
+                s.error("Local must be defined before use");
+            s.advance();
+            return local.value();
+        case TokenKind::GlobalName:
+            VERIFY_NOT_REACHED(); // TODO
+        case TokenKind::Identifier: {
+            Word id = s.tok().word();
+            s.advance();
+            if (id == words["false"]) {
+                return ir::Expr::makeBooleanLiteral(false);
+            } else if (id == words["true"]) {
+                return ir::Expr::makeBooleanLiteral(true);
+            } else {
+                s.error("Invalid identifier for expression");
+            }
+        }
+        default:
+            s.error("Expected expression");
         }
     }
 
@@ -574,7 +660,7 @@ struct FunctionParser {
     ir::Function& ir;
     LookupTable<ir::Theorem> theorems;
     LookupTable<LabelInfo> labels;
-    LookupTable<Local> locals;
+    LookupTable<ir::Expr> locals;
     std::vector<UnresolvedLabel> unresolvedLabels;
 };
 

@@ -51,6 +51,14 @@ struct Function {
         return m_instructions[pos.id()];
     }
 
+    Expr addParameter(Sort sort) {
+        Expr ret = Expr(ExprKind::FunctionParameter, parameterCount());
+        m_parameters.push_back({ sort });
+        return ret;
+    }
+
+    int_t parameterCount() const { return m_parameters.size(); }
+
     Bool prop(Theorem t) const {
         VERIFY(t.id() < m_theorems.size());
         return m_theorems[t.id()].prop;
@@ -118,6 +126,10 @@ private:
         CodePos simplePos;
     };
 
+    struct ParameterData {
+        Sort sort;
+    };
+
     template<typename T>
     static ListBase makeListInternal(std::vector<T>& vec, std::span<const T> list) {
         uint32_t offset = vec.size();
@@ -137,6 +149,7 @@ private:
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;
     std::vector<CodePos> m_phiParents;
+    std::vector<ParameterData> m_parameters;
 };
 
 }
