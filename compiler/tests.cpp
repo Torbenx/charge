@@ -221,6 +221,19 @@ struct EnumValueExpr : CheckExpr {
     }
 };
 
+struct ErrorExpr : CheckExpr {
+    std::unique_ptr<CheckExpr> typeExpr;
+
+    explicit ErrorExpr(std::unique_ptr<CheckExpr> typeExpr)
+        : typeExpr(std::move(typeExpr)) { }
+
+    void check(Context& ctx, ProgramHandle progHandle, Constant value) const override {
+        VERIFY(value.kind() == ConstantKind::CopyOfError);
+        auto errorExpression = ctx.program(progHandle)->getErrorExpression(value.copiedError());
+        typeExpr->check(ctx, progHandle, errorExpression.type);
+    }
+};
+
 struct CopyOfOpenGlobalExpr : CheckExpr {
     std::unique_ptr<CheckExpr> globalExpr;
 
@@ -342,6 +355,12 @@ struct CheckExprParser {
                 auto valueName = readId();
                 consume(")");
                 return std::make_unique<EnumValueExpr>(std::move(typeExpr), context.tokenBuffer.wordTable.get(valueName));
+            }
+            if (id == "error") {
+                consume("(");
+                auto typeExpr = parse();
+                consume(")");
+                return std::make_unique<ErrorExpr>(std::move(typeExpr));
             }
             if (id == "copyOfOpenGlobal") {
                 consume("(");

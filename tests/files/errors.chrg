@@ -13,6 +13,7 @@ struct SelfTypeErrors: {
 }
 
 // expect-error StaticVariableDeclarationWithoutInitializer
+// expect-value @error(X)
 static noInit: X;
 
 namespace FnImpl: {
@@ -52,6 +53,7 @@ fn f2(self = Fn()) -> X: { }
 fn f3(self: Fn) -> X: { }
 
 // expect-error FunctionWithoutExplicitReturnType
+// expect-return-type @error(type)
 fn f4(): { }
 
 }
@@ -59,6 +61,7 @@ fn f4(): { }
 namespace OpenReturnType: {
 
 // expect-error OpenReturnTypeOnNonTemplateFunction
+// expect-return-type @error(type)
 fn f1() -> return_type: { }
 
 }
@@ -140,23 +143,29 @@ namespace Parameterize: {
 
 struct S1: { }
 // expect-error ParameterizeBaseIsNotATemplate
+// expect-value @error(@error(type))
 static g1 = S1{X};
 
 template(T: type) struct S2: { }
 // expect-error ParameterizeBaseIsAlreadyParameterized
+// expect-value @error(@error(type))
 static g2 = S2{X}{X};
 
 // expect-error ParameterizeBaseNotSupported
+// expect-value @error(@error(type))
 static g3 = X(){X};
 
 // expect-error ParameterizeWithTooManyArguments
+// expect-value Parameterize::S2{X}
 static g4 = S2{X, X};
 
 // expect-error ParameterizeArgumentNameMismatch
+// expect-value Parameterize::S2{X}
 static g5 = S2{T1: X};
 
 template(T1: type, T2: type) static r1 = X();
 // expect-error ParameterizeIncomplete
+// expect-value @error(@error(type))
 static g6 = r1{X};
 
 }
@@ -165,10 +174,12 @@ namespace CallTarget: {
 
 struct S1: { }
 // expect-error CallTargetNotSupported
+// expect-value @error(@error(type))
 static g2 = S1()();
 
 template(T: type) fn f1() -> X: { }
 // expect-error CallTargetTemplateArgumentDeductionIncomplete
+// expect-value @error(@error(type))
 static g3 = f1();
 
 }
@@ -178,35 +189,44 @@ struct Lookup: {
 member: X;
 fn function() -> X: { }
 // expect-error UnqualifiedLookupFoundMember
+// expect-return-type member_ptr{Lookup, X}
 fn f1() => member;
 
 // expect-error UnqualifiedLookupFailed
+// expect-return-type @error(type)
 fn f2() => unknown;
 
 //; TODO: expect-error UnqualifiedLookupFailed
 fn f2x() -> X: { { let x = X; } x; }
 
 // expect-error StaticLookupFailed
+// expect-return-type @error(type)
 fn f3() => Lookup::unknown;
 
 // expect-error StaticLookupFailed
+// expect-return-type @error(type)
 fn f3x() => function::unknown;
 
 // expect-error StaticLookupBaseExpressionNotSupported
+// expect-return-type @error(type)
 fn f4() => X()::foo;
 
 static r1 = X();
 // expect-error StaticLookupBaseConstantNotSupported
+// expect-return-type @error(type)
 fn f5() => r1::foo;
 
 // expect-error MemberLookupFailed
+// expect-return-type @error(type)
 fn f6(self) => .unknown;
 
 // expect-error MemberLookupResultNotSupported
+// expect-return-type @error(type)
 fn f7(self) => .r1;
 
 fn fref(self) -> X: { }
 // expect-error MemberLookupFunctionResultNotImmediatelyCalled
+// expect-return-type @error(type)
 fn f8(self) => .fref;
 
 }
@@ -215,6 +235,7 @@ struct MemberFunction: {
 
 fn fr1() -> X: { }
 // expect-error MemberFunctionCallTargetHasNoSelfParameter
+// expect-return-type @error(type)
 fn f1(self) => .fr1();
 
 //; expect-error MemberFunctionCallSelfParameterTypeMismatch
@@ -222,6 +243,7 @@ fn f1(self) => .fr1();
 
 template(T: type) fn fr2(self) -> X: { }
 // expect-error MemberFunctionCallTargetTemplateArgumentDeductionIncomplete
+// expect-return-type @error(type)
 fn f2(self) => .fr2();
 
 }
@@ -229,9 +251,11 @@ fn f2(self) => .fr2();
 namespace SelfLookup: {
 
 // expect-error SelfParameterLookupFailed
+// expect-value @error(@error(type))
 static g1 = self;
 
 // expect-error SelfTypeTemplateParameterLookupFailed
+// expect-value @error(type)
 static g2 = self_type;
 
 }
@@ -239,6 +263,7 @@ static g2 = self_type;
 namespace Init: {
 
 // expect-error InitializeTypeMismatch
+// expect-value @error(type)
 static g1: type = X();
 
 fn fr1(x: unique X) -> X: { }
