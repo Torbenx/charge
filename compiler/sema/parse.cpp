@@ -446,7 +446,6 @@ void Generator::visitFunctionParametersAndBody() {
                 if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt) {
                     error<errors::SelfFunctionParameterWithExplicitType>();
                     // Recovery: Drop the expression
-                    advance();
                     visitExpression();
                     dropTopExpression();
                 }
@@ -713,6 +712,8 @@ void Generator::visitStatement() {
             // Recovery: Drop expression
             dropTopExpression();
         }
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        advance();
     } else if (tok->kind() == Token::DiscardStmt) {
         SourceLocation location = tok->location();
         advance();
@@ -727,6 +728,8 @@ void Generator::visitStatement() {
             // Recovery: Drop expression
             dropTopExpression();
         }
+        VERIFY(tok->kind() == Token::ExpressionStmt);
+        advance();
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
@@ -838,9 +841,13 @@ std::optional<DeductionState> Generator::processPostfixExpr() {
                 generateCallExpr(std::move(deductionState.value()));
                 deductionState.reset();
             } else {
+                // Recovery: Drop the call argument list and produce an error expression
                 VERIFY(tok->kind() == Token::CallExpr);
                 advance();
                 dropRemainingArguments();
+                VERIFY(tok->kind() == Token::EmptyNode);
+                advance();
+                emitExpression({}, makeErrorExpressionOfErrorType());
             }
         } else if (tok->kind() == Token::StaticAccessExpr) {
             resolveDeductionState();

@@ -344,14 +344,23 @@ std::optional<DeductionState> Generator::beginParameterize(Constant baseValue) {
 // Error recovery is caller responsibility
 std::optional<DeductionState> Generator::generateParameterizeExpr() {
     Expression baseResult = topExpression();
-    if (!baseResult.isConstant()) {
-        error<errors::ParameterizeBaseNotSupported>();
-        return std::nullopt;
+    std::optional<DeductionState> stateOpt;
+    if (baseResult.isConstant()) {
+        takeTopExpression();
+        stateOpt = beginParameterize(baseResult.constant());
+    } else {
+        dropTopExpression();
     }
-    takeTopExpression();
-    std::optional<DeductionState> stateOpt = beginParameterize(baseResult.constant());
+
     if (!stateOpt.has_value()) {
         error<errors::ParameterizeBaseNotSupported>();
+        // Recovery: Drop the argument list and produce an error expression
+        VERIFY(tok->kind() == Token::Parameterize);
+        advance();
+        dropRemainingArguments();
+        VERIFY(tok->kind() == Token::EmptyNode);
+        advance();
+        emitExpression({}, makeErrorExpressionOfErrorType());
         return std::nullopt;
     }
 
@@ -660,7 +669,8 @@ void Generator::generateStaticAccessExpr() {
     auto maybeBaseValue = expressionToConstantNoNewComputedConstants();
     if (!maybeBaseValue.has_value()) {
         error<errors::StaticLookupBaseExpressionNotSupported>();
-        // Recovery: Error expression
+        // Recovery: Drop the base expression and produce an error expression
+        dropTopExpression();
         emitExpression(tok, makeErrorExpressionOfErrorType());
         return;
     }
@@ -713,7 +723,8 @@ void Generator::generateMemberAccessExpr() {
     auto result = internalLookup(baseProgram(baseType).value(), name);
     if (!result.value.has_value()) {
         error<errors::MemberLookupFailed>();
-        // Recovery: Error expression
+        // Recovery: Drop the base expression and produce an error expression
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
@@ -729,7 +740,9 @@ void Generator::generateMemberAccessExpr() {
     if (result.value->kind() != DeclarationValueKind::Program) {
         // Not a member and not a member function
         error<errors::MemberLookupResultNotSupported>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
@@ -738,7 +751,9 @@ void Generator::generateMemberAccessExpr() {
     if (context.program(progHandle)->kind() != ProgramKind::Function) {
         // Not a member and not a member function
         error<errors::MemberLookupResultNotSupported>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
@@ -752,21 +767,27 @@ void Generator::generateMemberAccessExpr() {
 
     if (fnProg->functionParameters.size() == 0) {
         error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
     const auto& firstFnParameter = fnProg->functionParameters.front();
     if (firstFnParameter.name() != parse::words["self"]) {
         error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
     auto selfTypeMatchRecovery = staticMatch(state, firstFnParameter.type(), baseType);
     if (selfTypeMatchRecovery.has_value()) {
         error<errors::MemberFunctionCallSelfParameterTypeMismatch>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
@@ -780,7 +801,9 @@ void Generator::generateMemberAccessExpr() {
 
     if (tok->kind() != Token::CallExpr) {
         error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
-        // Recovery: Error expression
+        // Recovery: Restore and drop the stashed self expression, then produce an error expression
+        unstashTopExpression(std::move(selfExprStash));
+        dropTopExpression();
         emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
         return;
     }
