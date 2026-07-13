@@ -430,6 +430,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     sema::Context context;
     std::vector<parse::RecoveredError> recoveredErrors;
     CommandQueue commandQueue;
+    std::optional<SemanticError> firstError;
 
     TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
         : context { imports, source } { context.errorHandler = this; }
@@ -602,19 +603,15 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     void handleSemanticCommand(Word word, parse::WhitespaceInfo whitespace, std::string_view& comment) {
         sema::ProgramHandle programHandle = context.firstDeclarationAfter(whitespace.location()).value();
         sema::Program* program = context.program(programHandle);
-        std::optional<SemanticError> semanticError;
-        try {
-            sema::Generator::signatureCheck(context, programHandle);
-        } catch (const SemanticError& semaError) {
-            semanticError = semaError;
-        }
+        firstError.reset();
+        sema::Generator::signatureCheck(context, programHandle);
 
         if (word == words["expect-error"]) {
             int_t i = 0;
             for (; i < (int_t)comment.size() && isBulkIdentifierChar(comment[i]); i++) { }
             auto expectedError = comment.substr(0, i);
-            if (semanticError.has_value()) {
-                EXPECT_EQ(semanticError.value().name, expectedError);
+            if (firstError.has_value()) {
+                EXPECT_EQ(firstError.value().name, expectedError);
             } else {
                 program->dump(context);
                 FAIL() << "No error occured while expecting " << expectedError << " on line " << whitespace.lineNumber();
@@ -627,12 +624,12 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
         // dbgln("-------------------------------");
         // program->dump(context);
 
-        if (semanticError.has_value()) {
-            auto* errorProg = context.program(semanticError->prog);
+        if (firstError.has_value()) {
+            auto* errorProg = context.program(firstError->prog);
             Word name = (errorProg->isImpl() ? context.program(errorProg->baseProgram(errorProg->selfConstant()).value()) : errorProg)->name();
-            FAIL() << "unexpected semantic error " << semanticError->name << " in "
+            FAIL() << "unexpected semantic error " << firstError->name << " in "
                 << (errorProg->isImpl() ? "impl of " : "") << context.tokenBuffer.wordTable.view(name)
-                << " near line " << semanticError->location.lineNumber();
+                << " near line " << firstError->location.lineNumber();
             return;
         }
 
@@ -651,9 +648,8 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     }
 
     void handleError(sema::Generator& g, sema::ErrorBase& err) override {
-        if (g.hasTopExpression())
-            g.takeTopExpression().release();
-        throw SemanticError { err.name(), g.programHandle, g.tok->location() };
+        if (!firstError.has_value())
+            firstError = SemanticError { err.name(), g.programHandle, g.tok->location() };
     }
 
     Command popCommand(Word cause) {
