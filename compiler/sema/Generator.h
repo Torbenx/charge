@@ -305,8 +305,10 @@ struct Generator : Util {
     };
     StashedExpression stashTopExpression();
     void unstashTopExpression(StashedExpression);
+    bool hasTopExpression() const { return currentExpression != INVALID_EXPRESSION; }
     Expression topExpression();
     OwnedExpression takeTopExpression();
+    void dropTopExpression();
 
     LocalScope beginLocalScope(SourceLocation);
     void endLocalScope(LocalScope scope, SourceLocation);
@@ -353,13 +355,21 @@ struct Generator : Util {
     void visitPostfixExpr();
     std::optional<DeductionState> processPostfixExpr();
 
+    int_t dropRemainingArguments();
+
     static void signatureCheck(Context& context, ProgramHandle progHandle);
 
     FoldBase asFoldBase(Constant value);
     std::optional<FoldBase> tryAsFoldBase(Constant value);
     Constant fold(Constant base, ExternConstant v);
     Constant fold(FoldBase base, ExternConstant v);
-    bool staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
+    //! Matches the \p pValue against \p aValue and fills \p state accordingly
+    /*!
+    When an error occurs returns a replacement value for \p aValue that would match correctly.
+    In that case \p state is filled as if it would have matched against that value.
+    The calling function is responsible for generating an appropiate error message.
+    */
+    [[nodiscard]] std::optional<Constant> staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue);
 
     Type originType(Constant memberPointer);
     Type memberType(Constant memberPointer);
@@ -382,6 +392,8 @@ struct Generator : Util {
     Type makeOpenReturnType(Constant value);
     Constant makeParameterize(const DeductionState& state);
     Constant makeParameterize(ProgramHandle base, std::span<const Constant> arguments);
+    Constant makeErrorParameterize(ProgramHandle base);
+    Expression makeErrorExpressionOfErrorType(Constant expressionCategory = Constant(ExpressionCategory::UniqueReference));
     Type typeOfNonDependentProgram(Constant value);
     Type typeOfNonDependentProgram(FoldBase base);
 
@@ -390,9 +402,9 @@ struct Generator : Util {
     Expression generateDeclarationLiteral(DeclarationValue rawValue, std::optional<Type> parent);
     Expression generateProgramLiteral(ProgramHandle progHandle, std::span<const Constant> args);
     void addParameterizeArguments(DeductionState& state, int_t firstPrameterIndex);
-    std::optional<DeductionState> tryBeginParameterize(Constant base);
+    std::optional<DeductionState> beginParameterize(Constant base);
     std::optional<DeductionState> generateParameterizeExpr();
-    DeductionState resolveCallTarget(std::span<const Word> arugmentNames);
+    std::optional<DeductionState> resolveCallTarget(std::span<const Word> arugmentNames);
     void generateCallExpr(DeductionState base);
     template<std::ranges::random_access_range R>
     std::vector<Expression> generateCallArguments(DeductionState& state, bool withSelfArgument, R parameters);

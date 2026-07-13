@@ -140,6 +140,9 @@ struct Dumper {
             return formatConstant(v.returnTypeOf()) + "::return_type";
         case ConstantKind::CopyOfParameterToReferenceCategory:
             return "toReferenceCategory(" + formatConstant(v.originalExpressionCategory()) + ")";
+        case ConstantKind::CopyOfError:
+            result += "error";
+            break;
         default:
             VERIFY_NOT_REACHED();
         }
@@ -177,6 +180,9 @@ struct Dumper {
         }
         case ExpressionKind::Call:
             result += "call";
+            break;
+        case ExpressionKind::Error:
+            result += "error";
             break;
         default:
             VERIFY_NOT_REACHED();

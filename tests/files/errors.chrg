@@ -156,7 +156,7 @@ static g4 = S2{X, X};
 static g5 = S2{T1: X};
 
 template(T1: type, T2: type) static r1 = X();
-// expect-error ParameterizeOfGlobalIncomplete
+// expect-error ParameterizeIncomplete
 static g6 = r1{X};
 
 }
@@ -176,6 +176,7 @@ static g3 = f1();
 struct Lookup: {
 
 member: X;
+fn function() -> X: { }
 // expect-error UnqualifiedLookupFoundMember
 fn f1() => member;
 
@@ -187,6 +188,9 @@ fn f2x() -> X: { { let x = X; } x; }
 
 // expect-error StaticLookupFailed
 fn f3() => Lookup::unknown;
+
+// expect-error StaticLookupFailed
+fn f3x() => function::unknown;
 
 // expect-error StaticLookupBaseExpressionNotSupported
 fn f4() => X()::foo;

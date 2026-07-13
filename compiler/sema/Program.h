@@ -131,6 +131,11 @@ struct MemberExpression {
     Constant memberPointer;
 };
 
+struct ErrorExpression {
+    Type type;
+    Constant category;
+};
+
 enum class ProgramStatus : uint8_t {
     Unchecked,
     SignatureCheckInProgress,
@@ -220,10 +225,10 @@ struct Program {
         , m_parent(parent) { }
 
     Constant addComputedConstant(Context&, ComputedConstant);
-    Constant addParameterize(Context& context, Parameterize parameterize);
-    Constant addRemoteComputedConstant(Context& context, RemoteComputation);
-    Constant addMemberPointer(Context& context, MemberPointer pointer);
-    Constant addEnumValue(Context& context, EnumValue value);
+    Constant addParameterize(Context&, Parameterize parameterize);
+    Constant addRemoteComputedConstant(Context&, RemoteComputation);
+    Constant addMemberPointer(Context&, MemberPointer pointer);
+    Constant addEnumValue(Context&, EnumValue value);
 
     ComputedConstant getComputedConstant(ExternConstant value) const {
         VERIFY(value.kind() == ConstantKind::Computed);
@@ -271,6 +276,17 @@ struct Program {
     Call getCall(Expression e) {
         VERIFY(e.kind() == ExpressionKind::Call);
         return Call::fromData(calls.at(e.id()));
+    }
+
+    Expression addErrorExpression(ErrorExpression);
+    Constant addErrorConstant(Type type);
+    ErrorExpression getErrorExpression(Expression value) {
+        VERIFY(value.kind() == ExpressionKind::Error);
+        VERIFY(value.id() < errors.size());
+        return errors[value.id()];
+    }
+    ExternConstant getErrorType(ExternConstant value) {
+        return getErrorExpression(Constant(value).copiedError()).type;
     }
 
     SourceLocation declarationLocation() const { return m_fields.location(); }
@@ -378,6 +394,7 @@ public:
     std::vector<ComputedConstantData> computations;
     std::vector<MemberExpression> memberExpressions;
     std::vector<CallData> calls;
+    std::vector<ErrorExpression> errors;
 
 protected:
     static constexpr uint32_t INVALID_SUBCLASS_DATA = limits::max;
@@ -389,7 +406,7 @@ protected:
 
     friend struct Dumper;
 };
-static_assert(sizeof(Program) == 288);
+static_assert(sizeof(Program) == 312);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -724,7 +741,7 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 336);
+static_assert(sizeof(ProgramUnion) == 360);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

@@ -43,7 +43,7 @@ struct ParameterizeBaseIsAlreadyParameterized { };
 struct ParameterizeBaseNotSupported { };
 struct ParameterizeWithTooManyArguments { };
 struct ParameterizeArgumentNameMismatch { };
-struct ParameterizeOfGlobalIncomplete { };
+struct ParameterizeIncomplete { };
 
 struct CallTargetNotSupported { };
 struct CallTargetTemplateArgumentDeductionIncomplete { };

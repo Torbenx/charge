@@ -32,6 +32,7 @@ enum class VariableKind : uint8_t {
     Generic,
 };
 
+struct Expression;
 struct Constant;
 struct FunctionProgram;
 
@@ -95,6 +96,8 @@ enum class ConstantKind : uint8_t {
     CopyOfOpenGlobal$Parameterize, // non-dependent
     OpenReturnType$Self,
     OpenReturnType$Parameterize, // non-dependent
+
+    CopyOfError,
 };
 struct Constant {
     constexpr Constant(ConstantKind kind, uint32_t id)
@@ -151,6 +154,7 @@ struct Constant {
             return Constant(ConstantKind::Parameterize, id());
         VERIFY_NOT_REACHED();
     }
+    constexpr Expression copiedError() const;
     constexpr Constant returnTypeOf() const {
         if (kind() == ConstantKind::OpenReturnType$Self)
             return Constant(ConstantKind::Self, id());
@@ -283,6 +287,8 @@ enum class ExpressionKind : uint8_t {
     ReferenceReference,
     MemberExpression,
     Call,
+
+    Error,
 };
 
 struct Expression {
@@ -306,7 +312,7 @@ struct Expression {
         : idBits(constant.idBits), kindBits(constant.kindBits) { }
 
     constexpr ExpressionKind kind() const { return (ExpressionKind)kindBits; }
-    constexpr int_t id() const { return idBits; }
+    constexpr uint32_t id() const { return idBits; }
 
     constexpr bool isConstant() const { return kind() < ExpressionKind::FirstNonConstantKind; }
     constexpr Constant constant() const {
@@ -329,6 +335,10 @@ struct Expression {
     constexpr Constant copyTemplateParameter() const {
         VERIFY(kind() == ExpressionKind::TemplateParameterReference);
         return Constant(ConstantKind::CopyOfParameter, id());
+    }
+    Constant copyError() const {
+        VERIFY(kind() == ExpressionKind::Error);
+        return Constant(ConstantKind::CopyOfError, id());
     }
     constexpr int_t referenceIndex() const {
         VERIFY(kind() == ExpressionKind::ReferenceReference);
@@ -357,6 +367,9 @@ struct Expression {
     uint32_t idBits : (32 - CONSTANT_KIND_BITS);
     uint32_t kindBits : CONSTANT_KIND_BITS;
 };
+constexpr Expression Constant::copiedError() const {
+    return Expression(ExpressionKind::Error, id());
+}
 
 inline constexpr Expression INVALID_EXPRESSION = Expression(INVALID_CONSTANT);
 

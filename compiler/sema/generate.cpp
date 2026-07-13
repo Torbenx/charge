@@ -18,13 +18,23 @@ void Generator::unstashTopExpression(StashedExpression e) {
 }
 
 Expression Generator::topExpression() {
+    VERIFY(currentExpression != INVALID_EXPRESSION);
     return currentExpression;
 }
 
 OwnedExpression Generator::takeTopExpression() {
+    VERIFY(currentExpression != INVALID_EXPRESSION);
     VERIFY(!expressionStack.empty());
     expressionStack.pop_back();
     return std::move(currentExpression);
+}
+
+void Generator::dropTopExpression() {
+    if (topExpression().isInstructionResult()) {
+        [[maybe_unused]] Constant c = expressionToConstant(std::nullopt);
+    } else {
+        [[maybe_unused]] Expression e = takeTopExpression();
+    }
 }
 
 void Generator::emitExpression(std::optional<TokenInfo*> token, OwnedExpression e) {
@@ -84,7 +94,8 @@ std::optional<Constant> Generator::findImplForOpenProgram(Constant value) {
     std::optional<Constant> implMatch;
     for (auto implProg : context.implsOf(baseProg)) {
         DeductionState state(context, implProg);
-        if (staticMatch(state, state.program->selfConstant(), value)) {
+        auto recoveryValue = staticMatch(state, state.program->selfConstant(), value);
+        if (!recoveryValue.has_value()) {
             if (state.isComplete() && state.equalities.size() == 0) {
                 VERIFY(!implMatch.has_value());
                 implMatch = makeParameterize(state);
@@ -137,6 +148,26 @@ Constant Generator::makeParameterize(ProgramHandle base, std::span<const Constan
     if (arguments.empty())
         return Constant(base);
     return program->addParameterize(context, { base, arguments });
+}
+
+Constant Generator::makeErrorParameterize(ProgramHandle progHandle) {
+    DeductionState state(context, progHandle);
+    const auto& parameters = state.program->parameters;
+    for (int_t i = 0; i < (int_t)parameters.size(); i++) {
+        if (parameters[i].implicit())
+            continue;
+        Type errorArgumentType = verifyType(program->addErrorConstant(builtins::type_type));
+        auto typeMatchRecovery = staticMatch(state, parameters[i].type, errorArgumentType);
+        VERIFY(!typeMatchRecovery.has_value());
+        state.explicitArgument(i, program->addErrorConstant(errorArgumentType));
+    }
+    VERIFY(state.isComplete());
+    return makeParameterize(state);
+}
+
+Expression Generator::makeErrorExpressionOfErrorType(Constant expressionCategory) {
+    Type type = verifyType(program->addErrorConstant(builtins::type_type));
+    return program->addErrorExpression({ type, expressionCategory });
 }
 
 Constant Generator::inheriteParameters(DeclarationValue parent) {
@@ -227,12 +258,17 @@ std::optional<DeductionState> Generator::resolveImplicitImplTarget() {
 
         auto parameter = program->parameters[parameterIndex];
         auto implParameter = implOfProg->parameters[implParameterIndex];
-        if (parameter.name != implParameter.name)
+        if (parameter.name != implParameter.name) {
             error<errors::ImplicitImplTemplateParameterNameMismatch>();
-        bool match = staticMatch(state, implParameter.type, (Constant)parameter.type);
-        if (!match)
+            // Recovery: Ignore error and hope for the best
+        }
+        auto typeMatchRecovery = staticMatch(state, implParameter.type, (Constant)parameter.type);
+        if (typeMatchRecovery.has_value()) {
             error<errors::ImplicitImplTemplateParameterTypeMismatch>();
-        state.explicitArgument(implParameterIndex, Constant(ConstantKind::CopyOfParameter, parameterIndex));
+            return std::nullopt;
+        } else {
+            state.explicitArgument(implParameterIndex, Constant(ConstantKind::CopyOfParameter, parameterIndex));
+        }
         // TODO: What about the initializer?
     }
 
@@ -249,77 +285,89 @@ void Generator::addParameterizeArguments(DeductionState& state, int_t firstParam
     int_t pIndex = firstParameterIndex;
     int_t aIndex = 0;
     for (; tok->kind() == Token::CallArgument; aIndex++, pIndex++) {
-        TokenInfo* callArgumentToken = tok;
-        advance();
-
         // Find next explicit parameter
         while (pIndex < parameterCount && state.program->parameters[pIndex].implicit())
             pIndex += 1;
-        if (pIndex == parameterCount)
+        if (pIndex == parameterCount) {
             error<errors::ParameterizeWithTooManyArguments>();
+            // Recovery: Drop remaining arguments
+            aIndex += dropRemainingArguments();
+            break;
+        }
         const auto& parameter = state.program->parameters[pIndex];
-        if (argumentNames[aIndex].empty() || parameter.name == argumentNames[aIndex]) {
-            visitExpression();
-            initialize(callArgumentToken, state, Constant(ExpressionCategory::Value), parameter.type);
-            state.explicitArgument(pIndex, expressionToConstant(callArgumentToken));
-        } else
+        if (!argumentNames[aIndex].empty() && parameter.name != argumentNames[aIndex]) {
             error<errors::ParameterizeArgumentNameMismatch>();
+            // Recovery: Ignore error and hope for the best
+        }
+        TokenInfo* callArgumentToken = tok;
+        advance();
+        visitExpression();
+        initialize(callArgumentToken, state, Constant(ExpressionCategory::Value), parameter.type);
+        state.explicitArgument(pIndex, expressionToConstant(callArgumentToken));
     }
     VERIFY(aIndex == (int_t)argumentNames.size());
     VERIFY(tok->kind() == Token::EmptyNode);
     advance();
 }
 
-std::optional<DeductionState> Generator::tryBeginParameterize(Constant baseValue) {
-    std::optional<DeductionState> stateOpt;
+// Error recovery is caller responsibility
+std::optional<DeductionState> Generator::beginParameterize(Constant baseValue) {
     if (baseValue.kind() == ConstantKind::Program) {
         Program* baseProg = context.program(baseValue.program());
-        if (!baseProg->isTemplate())
+        if (!baseProg->isTemplate()) {
             error<errors::ParameterizeBaseIsNotATemplate>();
+            return std::nullopt;
+        }
         VERIFY(baseProg->inheritedParameterCount == 0);
-        stateOpt.emplace(context, baseValue.program());
-    }
-    if (baseValue.kind() == ConstantKind::Parameterize) {
+        return DeductionState(context, baseValue.program());
+    } else if (baseValue.kind() == ConstantKind::Parameterize) {
         auto basePara = program->getParameterize(baseValue);
         Program* baseProg = context.program(basePara.base);
-        if (!baseProg->isTemplate())
+        if (!baseProg->isTemplate()) {
             error<errors::ParameterizeBaseIsNotATemplate>();
-        if (basePara.arguments.size() > baseProg->inheritedParameterCount)
+            return std::nullopt;
+        }
+        if (basePara.arguments.size() > baseProg->inheritedParameterCount) {
             error<errors::ParameterizeBaseIsAlreadyParameterized>();
+            return std::nullopt;
+        }
         VERIFY(basePara.arguments.size() == baseProg->inheritedParameterCount);
-        stateOpt.emplace(context, basePara.base);
+        DeductionState state(context, basePara.base);
         for (int_t i = 0; i < (int_t)baseProg->inheritedParameterCount; i++)
-            stateOpt->explicitArgument(i, basePara.arguments[i]);
+            state.explicitArgument(i, basePara.arguments[i]);
+        return state;
+    } else {
+        return std::nullopt;
     }
-    return stateOpt;
 }
 
+// Error recovery is caller responsibility
 std::optional<DeductionState> Generator::generateParameterizeExpr() {
-    std::optional<DeductionState> stateOpt;
     Expression baseResult = topExpression();
-    if (baseResult.isConstant()) {
-        stateOpt = tryBeginParameterize(baseResult.constant());
-        takeTopExpression();
+    if (!baseResult.isConstant()) {
+        error<errors::ParameterizeBaseNotSupported>();
+        return std::nullopt;
     }
+    takeTopExpression();
+    std::optional<DeductionState> stateOpt = beginParameterize(baseResult.constant());
     if (!stateOpt.has_value()) {
         error<errors::ParameterizeBaseNotSupported>();
-        VERIFY_NOT_REACHED();
+        return std::nullopt;
     }
 
     auto& state = *stateOpt;
     addParameterizeArguments(state, state.program->inheritedParameterCount);
 
     if (state.program->kind() == ProgramKind::Global) {
-        if (!state.isComplete()) {
-            error<errors::ParameterizeOfGlobalIncomplete>();
+        if (state.isComplete()) {
+            emitExpression({}, makeGlobalReference(makeParameterize(state)));
+            stateOpt.reset();
         }
-        emitExpression({}, makeGlobalReference(makeParameterize(state)));
-        stateOpt.reset();
     }
     return stateOpt;
 }
 
-DeductionState Generator::resolveCallTarget(std::span<const Word> argumentNames) {
+std::optional<DeductionState> Generator::resolveCallTarget(std::span<const Word> argumentNames) {
     Expression baseResult = topExpression();
 
     // Resolve function aliases
@@ -354,8 +402,10 @@ DeductionState Generator::resolveCallTarget(std::span<const Word> argumentNames)
             return state;
         }
     }
+
+    dropTopExpression();
     error<errors::CallTargetNotSupported>();
-    VERIFY_NOT_REACHED();
+    return std::nullopt;
 }
 
 void Generator::generateCallExpr(DeductionState state) {
@@ -367,13 +417,17 @@ void Generator::generateCallExpr(DeductionState state) {
 
         auto arguments = visit<callParameters>(state.program, [this, &state](auto parameters) { return generateCallArguments(state, false, parameters); });
 
-        if (!state.isComplete())
+        if (state.isComplete()) {
+            Constant callTarget = makeParameterize(state.programHandle, state.arguments);
+            emitCall(callToken, callTarget, std::move(arguments));
+        } else {
             error<errors::CallTargetTemplateArgumentDeductionIncomplete>();
-        Constant callTarget = makeParameterize(state.programHandle, state.arguments);
-        emitCall(callToken, callTarget, std::move(arguments));
-        return;
+            // Recovery: Error expression
+            emitExpression(callToken, makeErrorExpressionOfErrorType());
+        }
+    } else {
+        VERIFY_NOT_REACHED();
     }
-    VERIFY_NOT_REACHED();
 }
 
 template<std::ranges::random_access_range R>
@@ -570,10 +624,17 @@ void Generator::generateIdentifierExpr() {
                 continue;
             auto result = internalLookup(typeProg.value(), name);
             if (result.value.has_value()) {
-                if (result.value->kind() == DeclarationValueKind::Member)
+                if (result.value->kind() == DeclarationValueKind::Member) {
                     // Member should be looked up with .member or ::member
                     error<errors::UnqualifiedLookupFoundMember>();
-                emitExpression(tok, generateDeclarationLiteral(std::move(result), type));
+                    // Recovery: Make a member pointer
+                    // TODO: Making a member access would be better at it is far more common
+                    result.extendMemberIndices();
+                    auto memberPointer = generateMemberPointer(type, result.memberIndices);
+                    emitExpression(tok, program->addMemberPointer(context, memberPointer));
+                } else {
+                    emitExpression(tok, generateDeclarationLiteral(std::move(result), type));
+                }
                 return;
             }
             auto base = asFoldBase(type);
@@ -590,13 +651,19 @@ void Generator::generateIdentifierExpr() {
         }
     }
     error<errors::UnqualifiedLookupFailed>();
+    // Recovery: Error expression
+    emitExpression(tok, makeErrorExpressionOfErrorType());
 }
 
 void Generator::generateStaticAccessExpr() {
     Word name = tok->data1<parse::DataKind::Word>();
     auto maybeBaseValue = expressionToConstantNoNewComputedConstants();
-    if (!maybeBaseValue.has_value())
+    if (!maybeBaseValue.has_value()) {
         error<errors::StaticLookupBaseExpressionNotSupported>();
+        // Recovery: Error expression
+        emitExpression(tok, makeErrorExpressionOfErrorType());
+        return;
+    }
 
     Constant baseValue = maybeBaseValue.value();
     if (baseValue.kind() == ConstantKind::Namespace) {
@@ -608,9 +675,11 @@ void Generator::generateStaticAccessExpr() {
         FoldBase base = asFoldBase(baseValue);
         if (base.program->kind() == ProgramKind::Struct || base.program->kind() == ProgramKind::Enum) {
             auto result = internalLookup(base.programHandle, name);
-            if (!result.value.has_value())
+            if (!result.value.has_value()) {
                 error<errors::StaticLookupFailed>();
-            if (result.value->kind() == DeclarationValueKind::Member) {
+                // Recovery: Error expression
+                emitExpression(tok, makeErrorExpressionOfErrorType());
+            } else if (result.value->kind() == DeclarationValueKind::Member) {
                 result.extendMemberIndices();
                 auto memberPointer = generateMemberPointer(verifyType(baseValue), result.memberIndices);
                 emitExpression(tok, program->addMemberPointer(context, memberPointer));
@@ -618,10 +687,20 @@ void Generator::generateStaticAccessExpr() {
                 emitExpression(tok, generateDeclarationLiteral(std::move(result), verifyType(baseValue)));
             }
             return;
+        } else if (base.program->kind() == ProgramKind::Function) {
+            if (name == parse::words["return_type"]) {
+                emitExpression(tok, fold(base, cast<FunctionProgram>(base.program)->returnType()));
+            } else {
+                error<errors::StaticLookupFailed>();
+                // Recovery: Error expression
+                emitExpression(tok, makeErrorExpressionOfErrorType());
+            }
+            return;
         }
     }
     error<errors::StaticLookupBaseConstantNotSupported>();
-    VERIFY_NOT_REACHED();
+    // Recovery: Error expression
+    emitExpression(tok, makeErrorExpressionOfErrorType());
 }
 
 void Generator::generateMemberAccessExpr() {
@@ -632,8 +711,12 @@ void Generator::generateMemberAccessExpr() {
     Type baseType = resultType(topExpression());
     Word name = memberAccessToken->data1<parse::DataKind::Word>();
     auto result = internalLookup(baseProgram(baseType).value(), name);
-    if (!result.value.has_value())
+    if (!result.value.has_value()) {
         error<errors::MemberLookupFailed>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     if (result.value->kind() == DeclarationValueKind::Member) {
         result.extendMemberIndices();
         auto memberPointer = generateMemberPointer(baseType, result.memberIndices);
@@ -643,12 +726,22 @@ void Generator::generateMemberAccessExpr() {
     }
 
     auto selfExprStash = stashTopExpression();
-    if (result.value->kind() != DeclarationValueKind::Program)
+    if (result.value->kind() != DeclarationValueKind::Program) {
+        // Not a member and not a member function
         error<errors::MemberLookupResultNotSupported>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     auto progHandle = result.value->program();
     signatureCheck(context, progHandle);
-    if (context.program(progHandle)->kind() != ProgramKind::Function)
+    if (context.program(progHandle)->kind() != ProgramKind::Function) {
+        // Not a member and not a member function
         error<errors::MemberLookupResultNotSupported>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     auto* fnProg = cast<FunctionProgram>(context.program(progHandle));
 
     DeductionState state(context, progHandle);
@@ -657,14 +750,26 @@ void Generator::generateMemberAccessExpr() {
     for (int_t i = 0; i < (int_t)fnProg->inheritedParameterCount; i++)
         state.explicitArgument(i, inheritedArguments[i]);
 
-    if (fnProg->functionParameters.size() == 0)
+    if (fnProg->functionParameters.size() == 0) {
         error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     const auto& firstFnParameter = fnProg->functionParameters.front();
-    if (firstFnParameter.name() != parse::words["self"])
+    if (firstFnParameter.name() != parse::words["self"]) {
         error<errors::MemberFunctionCallTargetHasNoSelfParameter>();
-    bool selfTypeMatch = staticMatch(state, firstFnParameter.type(), baseType);
-    if (!selfTypeMatch)
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
+    auto selfTypeMatchRecovery = staticMatch(state, firstFnParameter.type(), baseType);
+    if (selfTypeMatchRecovery.has_value()) {
         error<errors::MemberFunctionCallSelfParameterTypeMismatch>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
 
     if (tok->kind() == Token::Parameterize) {
         int_t firstTemplateParameter = fnProg->inheritedParameterCount;
@@ -673,16 +778,24 @@ void Generator::generateMemberAccessExpr() {
         addParameterizeArguments(state, firstTemplateParameter);
     }
 
-    if (tok->kind() != Token::CallExpr)
+    if (tok->kind() != Token::CallExpr) {
         error<errors::MemberLookupFunctionResultNotImmediatelyCalled>();
+        // Recovery: Error expression
+        emitExpression(memberAccessToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     TokenInfo* callToken = tok;
     auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));
 
-    if (!state.isComplete())
+    if (!state.isComplete()) {
         error<errors::MemberFunctionCallTargetTemplateArgumentDeductionIncomplete>();
+        // Recovery: Error expression
+        emitExpression(callToken, makeErrorExpressionOfErrorType());
+        return;
+    }
     Constant callTarget = makeParameterize(state.programHandle, state.arguments);
     memberAccessToken->setData2<parse::DataKind::Expression>(Expression(callTarget));
     emitCall(callToken, callTarget, std::move(callArguments));
@@ -703,7 +816,8 @@ Expression Generator::lookupSelfParameter() {
         }
     }
     error<errors::SelfParameterLookupFailed>();
-    VERIFY_NOT_REACHED();
+    // Recovery: Error expression
+    return makeErrorExpressionOfErrorType();
 }
 
 Type Generator::lookupSelfType() {
@@ -726,7 +840,8 @@ Type Generator::lookupSelfType() {
         }
     }
     error<errors::SelfTypeTemplateParameterLookupFailed>();
-    VERIFY_NOT_REACHED();
+    // Recovery: Error constant
+    return verifyType(program->addErrorConstant(builtins::type_type));
 }
 
 std::optional<Constant> Generator::copyAsConstant(Expression expr) {
@@ -746,6 +861,8 @@ std::optional<Constant> Generator::copyAsConstant(Expression expr) {
             return std::nullopt;
         }
     }
+    case ExpressionKind::Error:
+        return expr.copyError();
     default:
         return std::nullopt;
     }
@@ -775,6 +892,8 @@ Constant Generator::valueExpressionToConstant() {
     if (topExpression().isConstant())
         return takeTopExpression().constant();
     VERIFY(categoryOf(topExpression()) == Constant(ExpressionCategory::Value));
+    if (topExpression().kind() == ExpressionKind::Error)
+        return takeTopExpression().copyError();
 
     VERIFY(expressionStack.size() >= 2);
     VERIFY(expressionStack.back().endOffset == instructionScratch.size());
@@ -823,13 +942,29 @@ void Generator::contextualToExpressionCategory(std::optional<TokenInfo*> implici
 
 void Generator::initialize(std::optional<TokenInfo*> implicitActionToken, DeductionState& state, ExternConstant expectedCategoryConstant, ExternConstant expectedType) {
     auto expr = topExpression();
-    bool sameType = staticMatch(state, expectedType, resultType(expr));
-    if (!sameType)
-        error<errors::InitializeTypeMismatch>();
     auto inputCategoryConstant = categoryOf(expr);
+    // Figure out the category to use in case of a type mismatch
+    Constant categoryReplacement = INVALID_CONSTANT;
+    if (expectedCategoryConstant.kind() == ConstantKind::ExpressionCategoryLiteral) {
+        categoryReplacement = (Constant)expectedCategoryConstant;
+    } else {
+        auto matchRecovery = staticMatch(state, expectedCategoryConstant, inputCategoryConstant);
+        VERIFY(!matchRecovery.has_value()); // The only way to get a mismatch is when both sides are literals, which is handled below.
+        categoryReplacement = inputCategoryConstant;
+    }
+
+    auto inputType = resultType(expr);
+    std::optional<Constant> typeMatchRecovery = staticMatch(state, expectedType, inputType);
+    if (typeMatchRecovery.has_value()) {
+        error<errors::InitializeTypeMismatch>();
+        // Recovery: Intialize with error expression
+        dropTopExpression();
+        emitExpression(implicitActionToken, program->addErrorExpression({ verifyType(typeMatchRecovery.value()), categoryReplacement }));
+        return;
+    }
+
     if (expectedCategoryConstant.kind() != ConstantKind::ExpressionCategoryLiteral) {
-        bool match = staticMatch(state, expectedCategoryConstant, inputCategoryConstant);
-        VERIFY(match); // The only way to get a mismatch is when both sides are literals, which is handled below.
+        // Match is done above, just return here
         return;
     }
 
@@ -838,20 +973,20 @@ void Generator::initialize(std::optional<TokenInfo*> implicitActionToken, Deduct
     auto expectedCategory = Constant(expectedCategoryConstant).expressionCategory();
     if (expectedCategory == ExpressionCategory::Value) {
         toValueExpression(implicitActionToken);
-    } else {
-        if (inputCategory == ExpressionCategory::Value)
-            // initializing a reference with a value requires making temporary
-            error<errors::InitializeOfReferenceWithValue>();
-
-        if (expectedCategory != inputCategory) {
-            // only down casts allowed
-            if (expectedCategory == ExpressionCategory::SharedReference || expectedCategory == ExpressionCategory::ConstUniqueReference) {
-                if (inputCategory != ExpressionCategory::UniqueReference)
-                    error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
-            } else {
-                if (expectedCategory != ExpressionCategory::ConstSharedReference)
-                    error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
-            }
+    } else if (inputCategory == ExpressionCategory::Value) {
+        // Initializing a reference with a value requires making temporary
+        error<errors::InitializeOfReferenceWithValue>();
+        // Recovery: Initialize with error expression
+        dropTopExpression();
+        emitExpression(implicitActionToken, program->addErrorExpression({ inputType, Constant(expectedCategory) }));
+    } else if (inputCategory != expectedCategory) {
+        // Only down casts allowed. For recovery accept the invalid initialization.
+        if (expectedCategory == ExpressionCategory::SharedReference || expectedCategory == ExpressionCategory::ConstUniqueReference) {
+            if (inputCategory != ExpressionCategory::UniqueReference)
+                error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
+        } else {
+            if (expectedCategory != ExpressionCategory::ConstSharedReference)
+                error<errors::InitializeOfReferenceIsNotReferenceDowncast>();
         }
     }
 }
@@ -877,7 +1012,7 @@ std::optional<FoldBase> Generator::tryAsFoldBase(Constant base) {
 }
 
 // pValue and aValue must be known to have the same type
-bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue) {
+std::optional<Constant> Generator::staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue) {
     if (pValue == builtins::self_constant)
         pValue = state.program->selfConstant(); // Will always be a parameterize or program constant
 
@@ -891,7 +1026,7 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
             //       This would require either a separate compare function or recursion with some weird DeductionState.
             state.equalities.add(context, programHandle, state.programHandle, { pValue, aValue });
         }
-        return true;
+        return std::nullopt;
     }
 
     if (pValue.kind() == ConstantKind::Computed || pValue.kind() == ConstantKind::RemoteComputed
@@ -902,69 +1037,110 @@ bool Generator::staticMatch(DeductionState& state, ExternConstant pValue, Consta
         || aValue.kind() == ConstantKind::OpenReturnType$Self || aValue.kind() == ConstantKind::OpenReturnType$Parameterize
         || pValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
         || aValue.kind() == ConstantKind::CopyOfParameterToReferenceCategory
+        || pValue.kind() == ConstantKind::CopyOfError
+        || aValue.kind() == ConstantKind::CopyOfError
         || aValue.kind() == ConstantKind::CopyOfParameter) {
         // TODO: check that the parameter-side value does not contain any non-explicit arguments
         state.equalities.add(context, programHandle, state.programHandle, { pValue, aValue });
-        return true;
+        return std::nullopt;
     }
 
-    auto comparePrograms = [this, &state](ProgramHandle pProg, ProgramHandle aProg) {
-        return context.translate(state.module, pProg) == aProg;
+    auto comparePrograms = [this, &state](ProgramHandle pProg, ProgramHandle aProg) -> std::optional<Constant> {
+        ProgramHandle translated = context.translate(state.module, pProg);
+        if (translated == aProg)
+            return std::nullopt;
+        else
+            return Constant(translated);
     };
-    auto compareParameterize = [this, &comparePrograms, &state](ExternConstant pValue, Constant aValue) {
+    auto compareParameterize = [this, &comparePrograms, &state](ExternConstant pValue, Constant aValue) -> std::optional<Constant> {
         auto pPara = state.program->getParameterize(pValue);
         auto aPara = program->getParameterize(aValue);
-        if (!comparePrograms(pPara.base, aPara.base))
-            return false;
+        if (auto recoverProg = comparePrograms(pPara.base, aPara.base); recoverProg.has_value())
+            return makeErrorParameterize(recoverProg.value().program());
         VERIFY(pPara.arguments.size() == aPara.arguments.size());
+        std::vector<Constant> recoverArgs;
+        auto copyArgsUpTo = [&recoverArgs, &aPara](int_t size) {
+            while ((int_t)recoverArgs.size() < size)
+                recoverArgs.push_back(aPara.arguments[recoverArgs.size()]);
+        };
         for (int_t i = 0; i < (int_t)pPara.arguments.size(); i++) {
-            if (!staticMatch(state, pPara.arguments[i], aPara.arguments[i]))
-                return false;
+            if (auto recoverArg = staticMatch(state, pPara.arguments[i], aPara.arguments[i]); recoverArg.has_value()) {
+                copyArgsUpTo(i);
+                recoverArgs.push_back(recoverArg.value());
+            }
         }
-        return true;
+        if (recoverArgs.empty())
+            return std::nullopt;
+        copyArgsUpTo(aPara.arguments.size());
+        return makeParameterize(aPara.base, recoverArgs);
+    };
+    auto matchWithErrorValue = [this, &state, aValue, pValue]() {
+        // The types must be the same as a precondition
+        Constant recoverValue = program->addErrorConstant(typeOf(aValue));
+        state.equalities.add(context, programHandle, state.programHandle, { pValue, recoverValue });
+        return recoverValue;
     };
 
-    if (pValue.kind() != aValue.kind())
-        return false;
+    if (pValue.kind() != aValue.kind()) {
+        return matchWithErrorValue();
+    }
     switch (pValue.kind()) {
     case ConstantKind::Program:
         return comparePrograms(Constant(pValue).program(), aValue.program());
-    case ConstantKind::Namespace:
-        return context.translate(state.module, Constant(pValue).nsHandle()) == aValue.nsHandle();
+    case ConstantKind::Namespace: {
+        NamespaceHandle translated = context.translate(state.module, Constant(pValue).nsHandle());
+        if (translated == aValue.nsHandle())
+            return std::nullopt;
+        else
+            return Constant(translated);
+    }
     case ConstantKind::TemplateSignature$Program:
         return comparePrograms(Constant(pValue).templateSignatureProgram(), aValue.templateSignatureProgram()); // TODO: different programs can have the same signature
     case ConstantKind::FunctionSignature$Program:
         return comparePrograms(Constant(pValue).functionSignatureProgram(), aValue.functionSignatureProgram()); // TODO: different programs can have the same signature
     case ConstantKind::TemplateSignature$Parameterize:
-        return compareParameterize(Constant(pValue).templateSignatureBaseConstant(), aValue.templateSignatureBaseConstant());
+        return compareParameterize(Constant(pValue).templateSignatureBaseConstant(), aValue.templateSignatureBaseConstant())
+            .transform([this](Constant c) { return makeTemplateSignature(c); });
     case ConstantKind::FunctionSignature$Parameterize:
         // TODO: different programs can have the same signature
-        return compareParameterize(Constant(pValue).functionSignatureBaseConstant(), aValue.functionSignatureBaseConstant());
+        return compareParameterize(Constant(pValue).functionSignatureBaseConstant(), aValue.functionSignatureBaseConstant())
+            .transform([this](Constant c) { return makeFunctionSignature(c); });
     case ConstantKind::Parameterize:
         return compareParameterize(pValue, aValue);
     case ConstantKind::MemberPointer: {
         auto pMember = state.program->getMemberPointer(pValue);
         auto aMember = program->getMemberPointer(aValue);
         if (pMember.elements.size() != aMember.elements.size())
-            return false;
+            return matchWithErrorValue();
+        // TODO: This could be recovered better
         for (int_t i = 0; i < (int_t)aMember.elements.size(); i++) {
-            if (!staticMatch(state, pMember.elements[i].structImpl, aMember.elements[i].structImpl))
-                return false;
+            auto implMatchRecovery = staticMatch(state, pMember.elements[i].structImpl, aMember.elements[i].structImpl);
+            if (implMatchRecovery.has_value())
+                return matchWithErrorValue();
             if (pMember.elements[i].memberIndex != aMember.elements[i].memberIndex)
-                return false;
+                return matchWithErrorValue();
         }
-        return true;
+        return std::nullopt;
     }
     case ConstantKind::EnumValue: {
         // The types must be the same as a precondition
         auto pEnumValue = state.program->getEnumValue(pValue);
         auto aEnumValue = program->getEnumValue(aValue);
-        return pEnumValue.valueIndex == aEnumValue.valueIndex;
+        if (pEnumValue.valueIndex == aEnumValue.valueIndex)
+            return std::nullopt;
+        else
+            return program->addEnumValue(context, { aEnumValue.enumType, pEnumValue.valueIndex });
     }
     case ConstantKind::BooleanLiteral:
-        return Constant(pValue).booleanValue() == aValue.booleanValue();
+        if (Constant(pValue).booleanValue() == aValue.booleanValue())
+            return std::nullopt;
+        else
+            return (Constant)pValue;
     case ConstantKind::ExpressionCategoryLiteral:
-        return Constant(pValue).expressionCategory() == aValue.expressionCategory();
+        if (Constant(pValue).expressionCategory() == aValue.expressionCategory())
+            return std::nullopt;
+        else
+            return (Constant)pValue;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -1032,6 +1208,11 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
         return (Constant)v;
     case ConstantKind::ExpressionCategoryLiteral:
         return (Constant)v;
+    case ConstantKind::CopyOfError: {
+        // TODO: It may be worth while to add a CopyOfRemoteError kind such that errors can be uniquely identified.
+        auto error = base.program->getErrorExpression(Constant(v).copiedError());
+        return program->addErrorExpression({ verifyType(fold(base, error.type)), fold(base, error.category) }).copyError();
+    }
     default:
         VERIFY_NOT_REACHED();
     }
@@ -1169,6 +1350,8 @@ Constant Generator::categoryOf(Expression expr) {
         return categoryOf(program->getMemberExpression(expr).base);
     case ExpressionKind::Call:
         return program->getCall(expr).resultCategory;
+    case ExpressionKind::Error:
+        return program->getErrorExpression(expr).category;
     default:
         VERIFY(expr.isConstant());
         return Constant(ExpressionCategory::Value);
@@ -1227,6 +1410,9 @@ Type Generator::typeOf(Constant value) {
             return typeOfNonDependentProgram(value);
         return makeTemplateIdFor(value);
     }
+    case ConstantKind::CopyOfError: {
+        return verifyType((Constant)program->getErrorType(value));
+    }
     default:
         VERIFY_NOT_REACHED();
     }
@@ -1257,6 +1443,8 @@ Type Generator::resultType(Expression expr) {
     }
     case ExpressionKind::Call:
         return program->getCall(expr).returnType;
+    case ExpressionKind::Error:
+        return program->getErrorExpression(expr).type;
     default:
         VERIFY_NOT_REACHED();
     }

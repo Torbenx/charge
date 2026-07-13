@@ -1,6 +1,5 @@
 #pragma once
 
-#include <sema/SimpleErrorHandler.h>
 #include <server/LanguageServerProtocol.h>
 #include <server/SemaContext.h>
 
@@ -128,6 +127,12 @@ struct Server {
         }
     };
 
+    struct SemaErrorHandler : sema::ErrorHandler {
+        void handleError(sema::Generator&, sema::ErrorBase&) override {
+            // TODO: Errors ignored
+        }
+    };
+
     FileInfo& fileInfo(const path& filePath);
     void updateSource(FileInfo& info);
     void clientOpenedFile(const path& filePath, std::string fullSource);
@@ -140,7 +145,7 @@ struct Server {
     std::vector<RequestInfo> m_openRequests;
     std::vector<std::unique_ptr<Method>> m_methods;
     std::unordered_set<FileInfo, FileInfoHash, FileInfoEqual> m_fileCache;
-    sema::SimpleErrorHandler semaErrorHandler;
+    SemaErrorHandler semaErrorHandler;
 
     int_t remainingContentSize = 0;
     std::string inputBuffer;

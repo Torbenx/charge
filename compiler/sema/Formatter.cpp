@@ -143,6 +143,10 @@ void Formatter::formatConstant(Constant c) {
         formatProgramBare(c.program(), {});
         return;
     }
+    case ConstantKind::CopyOfError: {
+        output += "error_value";
+        return;
+    }
     default:
         VERIFY_NOT_REACHED();
     }

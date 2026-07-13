@@ -19,6 +19,4 @@ target_sources(${PROJECT_NAME}
     Scope.h
     Util.cpp
     Util.h
-    SimpleErrorHandler.cpp
-    SimpleErrorHandler.h
 )

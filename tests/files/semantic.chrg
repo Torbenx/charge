@@ -413,10 +413,15 @@ static examineOpenGlobalImpl1 = openGlobalImplTest{X};
 // expect-value @copyOfOpenGlobal(openGlobalImplTest{A})
 static examineOpenGlobalImpl2 = openGlobalImplTest{A};
 
-template(T: type)
-fn openReturnType() -> return_type: { }
+template(T: type) fn openReturnType() -> return_type: { }
 // expect-type @openReturnType(openReturnType{X})
 static examineOpenReturnType = openReturnType{X}();
+// expect-value @openReturnType(openReturnType{X})
+static examineOpenReturnType2 = openReturnType{X}::return_type;
+
+template(T: type) fn fixedReturnType() -> T: { }
+// expect-value X
+static examineFixedReturnType = fixedReturnType{X}::return_type;
 
 // expect-type bool
 static examineLogicalNotExplicit = logical_not(true);

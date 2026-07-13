@@ -90,4 +90,14 @@ Expression Program::addCall(CallData c) {
     return Expression(ExpressionKind::Call, id);
 }
 
+Expression Program::addErrorExpression(ErrorExpression e) {
+    auto id = errors.size();
+    errors.emplace_back(std::move(e));
+    return Expression(ExpressionKind::Error, id);
+}
+
+Constant Program::addErrorConstant(Type type) {
+    return addErrorExpression({ type, Constant(ExpressionCategory::Value) }).copyError();
+}
+
 }

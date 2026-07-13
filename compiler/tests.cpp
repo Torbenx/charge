@@ -418,6 +418,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     struct SemanticError {
         std::string name;
         sema::ProgramHandle prog;
+        SourceLocation location;
     };
 
     static constexpr auto words = ConstWordStringTable(
@@ -627,7 +628,11 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
         // program->dump(context);
 
         if (semanticError.has_value()) {
-            FAIL() << "unexpected semantic error " << semanticError->name << " in " << context.tokenBuffer.wordTable.view(context.program(semanticError->prog)->name());
+            auto* errorProg = context.program(semanticError->prog);
+            Word name = (errorProg->isImpl() ? context.program(errorProg->baseProgram(errorProg->selfConstant()).value()) : errorProg)->name();
+            FAIL() << "unexpected semantic error " << semanticError->name << " in "
+                << (errorProg->isImpl() ? "impl of " : "") << context.tokenBuffer.wordTable.view(name)
+                << " near line " << semanticError->location.lineNumber();
             return;
         }
 
@@ -646,8 +651,9 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     }
 
     void handleError(sema::Generator& g, sema::ErrorBase& err) override {
-        g.takeTopExpression().release();
-        throw SemanticError { err.name(), g.programHandle };
+        if (g.hasTopExpression())
+            g.takeTopExpression().release();
+        throw SemanticError { err.name(), g.programHandle, g.tok->location() };
     }
 
     Command popCommand(Word cause) {

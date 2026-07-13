@@ -3,7 +3,25 @@
 #include <sema/Generator.h>
 #include <sema/errors.h>
 
+#include <cxxabi.h>
+
 namespace sema {
+
+std::string ErrorBase::name() const {
+    size_t inOutBufferSize = 0;
+    int outStatus = 0;
+    char* nameBuf = abi::__cxa_demangle(mangledName(), nullptr, &inOutBufferSize, &outStatus);
+    VERIFY(nameBuf != nullptr);
+
+    std::string_view name(nameBuf);
+    static constexpr std::string_view prefix = "sema::errors::";
+    VERIFY(name.starts_with(prefix));
+    name = name.substr(prefix.length());
+
+    std::string result(name);
+    std::free(nameBuf);
+    return result;
+}
 
 Generator::Generator(Context& context, ProgramHandle handle)
     : Util(context, handle) { }
@@ -108,10 +126,20 @@ void Generator::visitTemplateParameters() {
         std::optional<Constant> defaultValue;
         if (name == parse::words["self_type"]) {
             // TODO: Allow default argument
-            if (tok->kind() == Token::VariableType)
+            if (tok->kind() == Token::VariableType) {
                 error<errors::SelfTypeTemplateParameterWithExplicitType>();
-            if (tok->kind() == Token::AssignStmt)
+                // Recovery: Drop the expression
+                advance();
+                visitExpression();
+                dropTopExpression();
+            }
+            if (tok->kind() == Token::AssignStmt) {
                 error<errors::SelfTypeTemplateParameterWithDefaultArgument>();
+                // Recovery: Drop the expression
+                advance();
+                visitExpression();
+                dropTopExpression();
+            }
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
             type = builtins::type_type;
@@ -247,13 +275,14 @@ void Generator::visitStaticVariableImplDeclaration() {
     auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::DeduceLocally, false);
     VERIFY(info.category.kind() == VariableKind::Let);
     program->setType(info.type);
-    if (info.hasInitializer)
-        // TODO: Constants are required to be the same when copied.
-        //       For global objects this restriction is not necessary.
+    // Impls must always have an initializer even when they are open.
+    if (info.hasInitializer) {
         globalProgram->setInitializer(valueExpressionToConstant());
-    else
-        // TODO: Open globals should not need an initializer
+    } else {
         error<errors::StaticVariableDeclarationWithoutInitializer>();
+        // Recovery: Initialize with error constant
+        globalProgram->setInitializer(program->addErrorConstant(info.type));
+    }
 
     checkStaticVariableImplDeclaration(implOf);
 }
@@ -268,13 +297,16 @@ void Generator::visitStaticVariableDeclaration() {
     auto info = visitVariableTypeAndInitializer(ImplicitParameterMode::DeduceLocally, false);
     VERIFY(info.category.kind() == VariableKind::Let);
     program->setType(info.type);
-    if (info.hasInitializer)
+    if (info.hasInitializer) {
         // TODO: Constants are required to be the same when copied.
         //       For global objects this restriction is not necessary.
         globalProgram->setInitializer(valueExpressionToConstant());
-    else
+    } else {
         // TODO: Open globals should not need an initializer
         error<errors::StaticVariableDeclarationWithoutInitializer>();
+        // Recovery: Initialize with error constant
+        globalProgram->setInitializer(program->addErrorConstant(info.type));
+    }
 
     if (auto state = resolveImplicitImplTarget(); state.has_value()) {
         checkStaticVariableImplDeclaration(makeParameterize(state.value()));
@@ -290,11 +322,15 @@ void Generator::checkStaticVariableImplDeclaration(Constant implOf) {
     auto* baseProg = cast<GlobalProgram>(base.program);
     auto* implProg = cast<GlobalProgram>(program);
 
+    // Errors here don't need to be recovered because they don't prevet further analysis.
+    // TODO: But we should probably mark the impl as invalid somehow and not add it to the impl table.
+
     if (baseProg->globalKind() != GlobalKind::OpenLet)
         error<errors::GlobalImplTargetNotOpen>();
 
     auto state = DeductionState::fromFoldBase(base);
-    if (!staticMatch(state, baseProg->type(), (Constant)implProg->type()))
+    auto typeMatchRecovery = staticMatch(state, baseProg->type(), (Constant)implProg->type());
+    if (typeMatchRecovery.has_value())
         error<errors::GlobalImplTypeMismatch>();
 
     context.completeSignatureCheck(programHandle, true, implOf);
@@ -303,23 +339,24 @@ void Generator::checkStaticVariableImplDeclaration(Constant implOf) {
 void Generator::visitFunctionImplDeclaration() {
     VERIFY(tok->kind() == Token::FunctionImplDecl);
     advance();
-    auto state = processPostfixExpr();
-    if (!state.has_value()) {
-        auto implOf = expressionToConstantNoNewComputedConstants();
-        if (implOf.has_value()) {
+    auto state = [this] -> std::optional<DeductionState> {
+        if (auto state = processPostfixExpr(); state.has_value())
+            return std::move(state).value();
+        if (auto implOf = expressionToConstantNoNewComputedConstants(); implOf.has_value()) {
             if (auto base = tryAsFoldBase(implOf.value()); base.has_value())
-                state = DeductionState::fromFoldBase(base.value());
-            else if (auto stateOpt = tryBeginParameterize(implOf.value()); stateOpt.has_value())
-                state = stateOpt;
+                return DeductionState::fromFoldBase(base.value());
+            else if (auto state = beginParameterize(implOf.value()); state.has_value())
+                return state;
         }
-    }
+        error<errors::ExplicitImplExpressionNotSupported>();
+        // No recovery, impl check will be skipped
+        return std::nullopt;
+    }();
 
     visitFunctionParametersAndBody();
 
     if (state.has_value())
         checkFunctionImplDeclaration(state.value());
-    else
-        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitFunctionDeclaration() {
@@ -339,31 +376,35 @@ void Generator::checkFunctionImplDeclaration(DeductionState state) {
     auto* implProgram = cast<FunctionProgram>(program);
     auto* baseProg = cast<FunctionProgram>(state.program);
 
-    if (implProgram->functionParameters.size() != baseProg->functionParameters.size())
-        error<errors::FunctionImplFunctionParameterCountMismatch>();
-    VERIFY(implProgram->functionParameters.size() == baseProg->functionParameters.size());
-    for (int_t index = 0; index < (int_t)implProgram->functionParameters.size(); index++) {
-        const auto& baseParameter = baseProg->functionParameters[index];
-        const auto& implParameter = implProgram->functionParameters[index];
-        if (baseParameter.name() != implParameter.name())
-            error<errors::FunctionImplFunctionParameterNameMismatch>();
-        if (baseParameter.kind() != implParameter.kind())
-            error<errors::FunctionImplFunctionParameterKindMismatch>();
-        if (baseParameter.kind() == VariableKind::Generic) {
-            bool categoriesMatch = staticMatch(state, baseParameter.category().genericCategory(), implParameter.category().genericCategory());
-            if (!categoriesMatch)
-                error<errors::FunctionImplFunctionParameterGenericCategoryMismatch>();
+    // Errors here don't need to be recovered because they don't prevet further analysis.
+    // TODO: But we should probably mark the impl as invalid somehow and not add it to the impl table.
+
+    if (implProgram->functionParameters.size() == baseProg->functionParameters.size()) {
+        for (int_t index = 0; index < (int_t)implProgram->functionParameters.size(); index++) {
+            const auto& baseParameter = baseProg->functionParameters[index];
+            const auto& implParameter = implProgram->functionParameters[index];
+            if (baseParameter.name() != implParameter.name())
+                error<errors::FunctionImplFunctionParameterNameMismatch>();
+            if (baseParameter.kind() != implParameter.kind())
+                error<errors::FunctionImplFunctionParameterKindMismatch>();
+            if (baseParameter.kind() == VariableKind::Generic) {
+                auto categoryMatchRecovery = staticMatch(state, baseParameter.category().genericCategory(), implParameter.category().genericCategory());
+                if (categoryMatchRecovery.has_value())
+                    error<errors::FunctionImplFunctionParameterGenericCategoryMismatch>();
+            }
+
+            auto typeMatchRecovery = staticMatch(state, baseParameter.type(), implParameter.type());
+            if (typeMatchRecovery.has_value())
+                error<errors::FunctionImplFunctionParameterTypeMismatch>();
+
+            // TODO: What about the initializer?
         }
-
-        bool typesMatch = staticMatch(state, baseParameter.type(), implParameter.type());
-        if (!typesMatch)
-            error<errors::FunctionImplFunctionParameterTypeMismatch>();
-
-        // TODO: What about the initializer?
+    } else {
+        error<errors::FunctionImplFunctionParameterCountMismatch>();
     }
 
-    bool match = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
-    if (!match)
+    auto returnTypeRecovery = staticMatch(state, baseProg->returnType(), (Constant)implProgram->returnType());
+    if (returnTypeRecovery.has_value())
         error<errors::FunctionImplReturnTypeMismatch>();
 
     VERIFY(state.isComplete());
@@ -377,8 +418,12 @@ void Generator::visitFunctionParametersAndBody() {
     lookupStack.push_back(LookupContext::forLocal(this));
 
     auto addFunctionParameter = [&](VariableDeclaration info) {
-        if (info.hasInitializer)
+        if (info.hasInitializer) {
+            // TODO: Support default arguments
             error<errors::FunctionParameterWithDefaultArgument>();
+            // Recovery: Drop expression
+            dropTopExpression();
+        }
         VERIFY(fnProgram->functionParameters.size() == localState.parameterActiveMask.size());
         int_t parameterIndex = fnProgram->functionParameters.size();
         localState.parameterActiveMask.push_back(true);
@@ -398,13 +443,23 @@ void Generator::visitFunctionParametersAndBody() {
             if (tok->kind() == Token::VariableType) {
                 category = visitVariableTypeToken(isVar);
 
-                if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt)
+                if (tok->kind() != Token::AssignStmt && tok->kind() != Token::ExpressionStmt) {
                     error<errors::SelfFunctionParameterWithExplicitType>();
+                    // Recovery: Drop the expression
+                    advance();
+                    visitExpression();
+                    dropTopExpression();
+                }
             }
 
             // TODO: Allow default argument?
-            if (tok->kind() == Token::AssignStmt)
+            if (tok->kind() == Token::AssignStmt) {
                 error<errors::SelfFunctionParameterWithDefaultArgument>();
+                // Recovery: Drop the expression
+                advance();
+                visitExpression();
+                dropTopExpression();
+            }
             VERIFY(tok->kind() == Token::ExpressionStmt);
             advance();
 
@@ -446,9 +501,13 @@ void Generator::visitFunctionParametersAndBody() {
             if (tok->kind() == Token::IdentifierExpr && tok->data1<parse::DataKind::Word>() == parse::words["return_type"]) {
                 advance();
                 VERIFY(tok->kind() == Token::FunctionBody);
-                if (!program->isTemplate())
+                if (program->isTemplate()) {
+                    program->setType(makeOpenReturnType(builtins::self_constant));
+                } else {
                     error<errors::OpenReturnTypeOnNonTemplateFunction>();
-                program->setType(makeOpenReturnType(builtins::self_constant));
+                    // Recovery: Return error type
+                    program->setType(verifyType(program->addErrorConstant(builtins::type_type)));
+                }
             } else {
                 visitExpression();
                 contextualToType(arrowToken);
@@ -457,6 +516,8 @@ void Generator::visitFunctionParametersAndBody() {
         } else {
             // TODO: Implement return type deduction
             error<errors::FunctionWithoutExplicitReturnType>();
+            // Recovery: Use error type as return type
+            program->setType(verifyType(program->addErrorConstant(builtins::type_type)));
         }
         VERIFY(tok->kind() == Token::FunctionBody);
         auto bodyScopeInst = emitBlockScope(tok->location());
@@ -476,13 +537,15 @@ void Generator::visitStructImplDeclaration() {
     advance();
     visitExpression();
     auto implOf = expressionToConstantNoNewComputedConstants();
+    if (!implOf.has_value()) {
+        error<errors::ExplicitImplExpressionNotSupported>();
+        // No recovery, impl check will be skipped
+    }
 
     visitStructMembers();
 
     if (implOf.has_value())
         checkStructImplDeclaration(implOf.value());
-    else
-        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitStructDeclaration() {
@@ -503,17 +566,23 @@ void Generator::checkStructImplDeclaration(Constant implOf) {
     auto* implProgram = cast<StructProgram>(program);
     auto* baseProg = cast<StructProgram>(state.program);
 
-    if (implProgram->members.size() < baseProg->members.size())
+    // Errors here don't need to be recovered because they don't prevet further analysis.
+    // TODO: But we should probably mark the impl as invalid somehow and not add it to the impl table.
+
+    if (implProgram->members.size() >= baseProg->members.size()) {
+        for (int_t index = 0; index < (int_t)baseProg->members.size(); index++) {
+            const auto& baseMember = baseProg->members[index];
+            const auto& implMember = implProgram->members[index];
+            if (implMember.isBase() != baseMember.isBase())
+                error<errors::StructImplMemberIsBaseMismatch>();
+            if (implMember.name() != baseMember.name())
+                error<errors::StructImplMemberNameMismatch>();
+            auto typeMatchRecovery = staticMatch(state, baseMember.type(), (Constant)implMember.type());
+            if (typeMatchRecovery.has_value())
+                error<errors::StructImplMemberTypeMismatch>();
+        }
+    } else {
         error<errors::StructImplToFewMembers>();
-    for (int_t index = 0; index < (int_t)baseProg->members.size(); index++) {
-        const auto& baseMember = baseProg->members[index];
-        const auto& implMember = implProgram->members[index];
-        if (implMember.isBase() != baseMember.isBase())
-            error<errors::StructImplMemberIsBaseMismatch>();
-        if (implMember.name() != baseMember.name())
-            error<errors::StructImplMemberNameMismatch>();
-        if (!staticMatch(state, baseMember.type(), (Constant)implMember.type()))
-            error<errors::StructImplMemberTypeMismatch>();
     }
     // TODO: Do more checks
 
@@ -538,19 +607,22 @@ void Generator::visitStructMembers() {
         TokenInfo* memberToken = tok;
         advance();
 
-        TokenInfo* implicitActionToken = nullptr;
         if (member.isBase()) {
-            implicitActionToken = memberToken;
-        } else {
-            if (tok->kind() != Token::VariableType)
-                error<errors::MemberDeclarationWithoutExplicitType>();
+            visitExpression();
+            contextualToType(memberToken);
+            member.setType(verifyType(expressionToConstant(memberToken)));
+        } else if (tok->kind() == Token::VariableType) {
             VERIFY(tok->data1<parse::DataKind::VariableKind>() == VariableKind::Let);
-            implicitActionToken = tok;
+            auto* implicitActionToken = tok;
             advance();
+            visitExpression();
+            contextualToType(implicitActionToken);
+            member.setType(verifyType(expressionToConstant(implicitActionToken)));
+        } else {
+            error<errors::MemberDeclarationWithoutExplicitType>();
+            // Recovery: Use error type as member type
+            member.setType(verifyType(program->addErrorConstant(builtins::type_type)));
         }
-        visitExpression();
-        contextualToType(implicitActionToken);
-        member.setType(verifyType(expressionToConstant(implicitActionToken)));
     }
 
     tok = savedTok;
@@ -561,13 +633,15 @@ void Generator::visitEnumImplDeclaration() {
     advance();
     visitExpression();
     auto implOf = expressionToConstantNoNewComputedConstants();
+    if (!implOf.has_value()) {
+        error<errors::ExplicitImplExpressionNotSupported>();
+        // No recovery, impl check will be skipped
+    }
 
     visitEnumValues();
 
     if (implOf.has_value())
         checkEnumImplDeclaration(implOf.value());
-    else
-        error<errors::ExplicitImplExpressionNotSupported>();
 }
 
 void Generator::visitEnumDeclaration() {
@@ -634,8 +708,11 @@ void Generator::visitStatement() {
             auto expr = takeTopExpression();
             localState.setActive(expr, false);
             emitDeactivate(location, expr);
-        } else
+        } else {
             error<errors::DestoryTargetNotALocalVariable>();
+            // Recovery: Drop expression
+            dropTopExpression();
+        }
     } else if (tok->kind() == Token::DiscardStmt) {
         SourceLocation location = tok->location();
         advance();
@@ -645,8 +722,11 @@ void Generator::visitStatement() {
             auto expr = takeTopExpression();
             localState.setActive(expr, false);
             emitDeactivate(location, expr);
-        } else
+        } else {
             error<errors::DiscardTargetNotALocalReference>();
+            // Recovery: Drop expression
+            dropTopExpression();
+        }
     } else {
         visitExpression();
         if (tok->kind() == Token::IfStmt) {
@@ -714,8 +794,15 @@ void Generator::visitUnaryExpr() {
 
 void Generator::visitPostfixExpr() {
     auto deductionState = processPostfixExpr();
-    if (deductionState.has_value())
-        emitExpression({}, makeParameterize(deductionState.value()));
+    if (deductionState.has_value()) {
+        if (deductionState->isComplete()) {
+            emitExpression({}, makeParameterize(deductionState.value()));
+        } else {
+            error<errors::ParameterizeIncomplete>();
+            // Recovery: Error expression
+            emitExpression({}, makeErrorExpressionOfErrorType());
+        }
+    }
 }
 
 std::optional<DeductionState> Generator::processPostfixExpr() {
@@ -747,8 +834,14 @@ std::optional<DeductionState> Generator::processPostfixExpr() {
             if (!deductionState.has_value()) {
                 deductionState = resolveCallTarget(context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>()));
             }
-            generateCallExpr(std::move(deductionState.value()));
-            deductionState.reset();
+            if (deductionState.has_value()) {
+                generateCallExpr(std::move(deductionState.value()));
+                deductionState.reset();
+            } else {
+                VERIFY(tok->kind() == Token::CallExpr);
+                advance();
+                dropRemainingArguments();
+            }
         } else if (tok->kind() == Token::StaticAccessExpr) {
             resolveDeductionState();
             generateStaticAccessExpr();
@@ -761,6 +854,18 @@ std::optional<DeductionState> Generator::processPostfixExpr() {
         }
     }
     return deductionState;
+}
+
+int_t Generator::dropRemainingArguments() {
+    int_t count = 0;
+    while (tok->kind() == Token::CallArgument) {
+        advance();
+        visitExpression();
+        dropTopExpression();
+        count += 1;
+    }
+    VERIFY(tok->kind() == Token::EmptyNode);
+    return count;
 }
 
 }
