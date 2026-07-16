@@ -175,6 +175,8 @@ void Lexer::lex(const char* position) {
             if (position[0] == '@') {
                 position += 1;
                 labels.push_back(readWord(position));
+                VERIFY(position[0] == ':');
+                position += 1;
             }
             position = skipSpaces(position);
             if (position[0] == '\r') {
@@ -840,13 +842,13 @@ fn #test($a, $b):
 TEST(VerifyLanguage, ParseBranchAndPhi) {
     ir::Function fn = parseForTest(R"(
 fn #test($a, $b):
-@entry
+@entry:
     jump @before
-@before
+@before:
     phi @entry, @branch
-@branch
+@branch:
     branch $a = $b, @before, @after
-@after
+@after:
     phi @branch
 )");
     EXPECT_EQ(fn.parameterCount(), 2);
