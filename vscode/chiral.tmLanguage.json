@@ -1,0 +1,51 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Chiral",
+	"patterns": [
+		{
+			"include": "#labels"
+		},
+		{
+			"include": "#locals"
+		},
+		{
+			"include": "#globals"
+		},
+		{
+			"include": "#theorems"
+		},
+		{
+			"include": "#numbers"
+		},
+		{
+			"include": "#keywords"
+		}
+	],
+	"repository": {
+		"labels": {
+			"match": "@[A-Za-z0-9_]*",
+			"name": "entity.name.function.label.chiral"
+		},
+		"locals": {
+			"match": "\\$[A-Za-z0-9_]*",
+			"name": "variable.other.local.chiral"
+		},
+		"globals": {
+			"match": "#[A-Za-z0-9_]*",
+			"name": "entity.name.type.global.chiral"
+		},
+		"theorems": {
+			"match": "%[A-Za-z0-9_]*",
+			"name": "constant.other.theorem.chiral"
+		},
+		"numbers": {
+			"match": "\\b[0-9]+\\b",
+			"name": "constant.numeric.chiral"
+		},
+		"keywords": {
+			"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
+			"name": "keyword.other.chiral"
+		}
+	},
+	"scopeName": "source.chiral"
+}

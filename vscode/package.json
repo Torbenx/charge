@@ -15,12 +15,21 @@
       "id": "charge",
       "aliases": ["Charge", "charge"],
       "extensions": [".chrg", ".charge"],
-      "configuration": "./language-configuration.json"
+      "configuration": "./charge-configuration.json"
+    }, {
+      "id": "chiral",
+      "aliases": ["Chiral", "chiral"],
+      "extensions": [".chiral"],
+      "configuration": "./chiral-configuration.json"
     }],
     "grammars": [{
       "language": "charge",
       "scopeName": "source.charge",
       "path": "./charge.tmLanguage.json"
+    }, {
+      "language": "chiral",
+      "scopeName": "source.chiral",
+      "path": "./chiral.tmLanguage.json"
     }]
   },
   "scripts": {
