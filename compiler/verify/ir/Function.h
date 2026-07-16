@@ -39,7 +39,6 @@ struct instruction_data;
 namespace verify::ir {
 
 struct SmtParameters { };
-struct PreconditionParameters { };
 struct SatProof { };
 struct IntFarkasProof {
     std::vector<int32_t> coeff;
@@ -84,8 +83,15 @@ struct Function {
         m_theorems[t.id()].proof = p;
     }
 
+    Theorem addPreCondition(Bool prop, CodePos pos) {
+        Theorem result(m_theorems.size());
+        m_theorems.push_back({ prop, pos, Proof(Tactic::Precondition, m_preConditions.size()) });
+        m_preConditions.push_back(result);
+        return result;
+    }
+
     void addPostCondition(Theorem t) {
-        m_postconditions.push_back(t);
+        m_postConditions.push_back(t);
     }
 
     ExprList makeExprList(std::span<const Expr> list) {
@@ -179,7 +185,8 @@ private:
     std::vector<Expr> m_expressionLists;
     std::vector<CodePos> m_phiParents;
     std::vector<ParameterData> m_parameters;
-    std::vector<Theorem> m_postconditions;
+    std::vector<Theorem> m_preConditions;
+    std::vector<Theorem> m_postConditions;
 
 #define COMPLEX_TACTIC(name, type) std::vector<type> m_proofs##name;
 #include <verify/ir/tactics.inc>

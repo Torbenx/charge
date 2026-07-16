@@ -16,7 +16,7 @@ SIMPLE_TACTIC(Sorry)
 // Proves generic propositions by running an SMT style solver against them
 COMPLEX_TACTIC(SmtSolve, SmtParameters)
 
-COMPLEX_TACTIC(Precondition, PreconditionParameters)
+TACTIC(Precondition)
 
 // Proves generic propositions P by showing that !P is incompatible with a set of proven clauses
 COMPLEX_TACTIC(Sat, SatProof)
@@ -49,6 +49,9 @@ SIMPLE_TACTIC(PhiActivate)
 
 // !@phi.from@label or @label.active
 SIMPLE_TACTIC(PhiActiveBackward)
+
+// @phi.from@label or x.load@phi = x.load@label
+SIMPLE_TACTIC(PhiLoad)
 
 // For @jump: jump @phi proves !@jump.active or @phi.from@jump
 SIMPLE_TACTIC(JumpActiveForward)

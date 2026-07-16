@@ -8,8 +8,8 @@ fn #add1($x, $ret):
 @exit:
     post %ret_gt1: $ret.load@exit >= 1 by sat:
         clause %x_gt0
-        clause $ret != $ret or $ret.load@exit = $x.load@entry + 1 by load_store@store_ret
-        clause $ret = $ret by eq:reflexiv
+        clause $ret != $ret or $ret.load@exit = $x.load@entry + 1 by load_store
+        clause $ret = $ret by eq_reflexive
         clause $ret.load@exit >= 1
             or $ret.load@exit != $x.load@entry + 1
             or $x.load@entry < 0 by int_farkas 1 -1 -1
@@ -25,9 +25,9 @@ fn #copyIfInt($T, $x, $ret):
     phi @T_branch
     prove %x_type_int: !@if_true.active or $x.type = #int() by sat:
         clause !@if_true.active or @if_true.from@T_branch by phi_enumerate
-        clause $T.load@entry = #int() or !@if_true.from@T_branch by branch_decision@T_branch
+        clause $T.load@entry = #int() or !@if_true.from@T_branch by branch_decision
         clause %x_type
-        clause $x.type != $T.load@entry or $T.load@entry != #int() or $x.type = #int() by eq:transitive
+        clause $x.type != $T.load@entry or $T.load@entry != #int() or $x.type = #int() by eq_transitive
     store $ret <- $x.load@entry
 @true_to_exit:
     jump @exit
@@ -48,7 +48,7 @@ fn #f($n, $ret):
     store $ret <- 0
 @counter_alloca:
     alloca $counter: #int()
-    prove %counter_type: $counter.type = #int() by alloca_type@counter_alloca
+    prove %counter_type: $counter.type = #int() by alloca_type
 @init_counter:
     store $counter <- 0
 @entry_jump:
@@ -56,18 +56,18 @@ fn #f($n, $ret):
 @loop_head:
     phi @entry_jump, @loop_branch
     prove %counter_init_0: !@loop_head.from@entry_jump or $counter.load@loop_head = 0 by sat:
-        clause $counter.load@loop_head = $counter.load@entry_jump by phi_load@loop_head
-        clause $counter != $counter or $counter.load@entry_jump = 0 by load_store@init_counter
-        clause $counter = $counter by eq:reflexiv
+        clause $counter.load@loop_head = $counter.load@entry_jump by phi_load
+        clause $counter != $counter or $counter.load@entry_jump = 0 by load_store
+        clause $counter = $counter by eq_reflexive
         clause $counter.load@loop_head != $counter.load@entry_jump
             or $counter.load@entry_jump != 0
-            or $counter.load@loop_head = 0 by eq:transitive
+            or $counter.load@loop_head = 0 by eq_transitive
     prove %counter_le_n: !@loop_head.active or $counter.load@loop_head < $n.load@entry by sat:
         clause %counter_init_0
         clause %n_gt0
         clause !@loop_head.from@loop_branch or {@loop_head.from@loop_branch}:%counter_le_n
         clause $counter.load@loop_head != 0 or $n.load@entry <= 0 or $counter.load@loop_head > $n.load@entry by int_farkas -1 -1 1
-        clause !@loop_head.active or @loop_head.from@entry_jump or @loop_head.from@loop_branch by phi_enumerate@loop_head
+        clause !@loop_head.active or @loop_head.from@entry_jump or @loop_head.from@loop_branch by phi_enumerate
 @counter_update:
     store $counter <- $counter.load@counter_update + 1
 @ret_update:
@@ -87,12 +87,12 @@ fn #f($n, $ret):
     post %total_sum: !@exit.active or $ret.load@exit * 2 = $n.load@entry * ($n.load@entry + 1) by sat:
         clause %sum
         clause %n_unchanged
-        clause !@exit.active or @exit.from@loop_branch by phi_enumerate@exit
-        clause !@exit.from@loop_branch or $ret.load@exit = $ret.load@loop_branch by phi_load@exit
-        clause $ret.load@loop_branch = $ret.load@after_ret_update by eq:reflexiv
+        clause !@exit.active or @exit.from@loop_branch by phi_enumerate
+        clause !@exit.from@loop_branch or $ret.load@exit = $ret.load@loop_branch by phi_load
+        clause $ret.load@loop_branch = $ret.load@after_ret_update by eq_reflexive
         clause $ret.load@exit != $ret.load@loop_branch
             or $ret.load@loop_branch != $ret.load@after_ret_update
-            or $ret.load@exit = $ret.load@after_ret_update by eq:transitive
+            or $ret.load@exit = $ret.load@after_ret_update by eq_transitive
         clause $ret.load@after_ret_update * 2 != $counter.load@ret_update * ($counter.load@ret_update + 1)
             or $ret.load@exit != $ret.load@after_ret_update
             or $counter.load@ret_update * ($counter.load@ret_update + 1) != $n.load@entry * ($n.load@entry + 1)

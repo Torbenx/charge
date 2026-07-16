@@ -19,6 +19,23 @@ inline constexpr ConstWordStringTable words {
     "true",
     "false",
     "load",
+    "pre",
+    "post",
+    "prove",
+    "by",
+    "sat",
+    "sorry",
+    "eq_reflexive",
+    "eq_transitive",
+    "load_store",
+    "skip_store",
+    "phi_enumerate",
+    "phi_exclusivity",
+    "phi_activate",
+    "phi_active_backward",
+    "jump_active_forward",
+    "branch_active_forward",
+    "branch_decision",
 };
 
 struct ParserException : std::exception {

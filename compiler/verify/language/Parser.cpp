@@ -256,10 +256,13 @@ struct TokenStream {
             invalid = true;
         if (parent != nullptr) {
             VERIFY(parent->child == this);
-            parent->token = token;
             parent->child = nullptr;
-            parent->invalid = invalid;
-            parent->advance();
+            if (invalid) {
+                parent->invalid = true;
+            } else {
+                parent->token = token;
+                parent->advance();
+            }
         }
     }
 
@@ -406,6 +409,12 @@ struct FunctionParser {
                     parseBranch(s);
                 } else if (id == words["phi"]) {
                     parsePhi(s);
+                } else if (id == words["pre"]) {
+                    parseTheorem(s, true);
+                } else if (id == words["post"]) {
+                    ir.addPostCondition(parseTheorem(s, false));
+                } else if (id == words["prove"]) {
+                    parseTheorem(s, false);
                 } else {
                     s.error("Unknown instruction");
                 }
@@ -506,6 +515,64 @@ struct FunctionParser {
             break;
         }
         ir.addPhi({ .parents = ir.makePhiParentList(parents) });
+    }
+
+    ir::Theorem parseTheorem(TokenStream& s, bool isPreCondition) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        s.advance();
+        Word name;
+        if (s.tokKind() == TokenKind::TheoremName) {
+            name = s.tok().word();
+            s.advance();
+            if (s.tokKind() != TokenKind::Colon)
+                s.error("Expected ':' after theorem name");
+            s.advance();
+        }
+        ir::Bool prop = parseExpression<ir::Bool>(s);
+        ir::Theorem theorem = isPreCondition
+            ? ir.addPreCondition(prop, ir.here())
+            : ir.addTheorem(prop, ir.here(), parseProof(s));
+        if (!name.empty())
+            theorems.insert(name, theorem);
+        return theorem;
+    }
+
+    ir::Proof parseProof(TokenStream& s) {
+        if (s.tokKind() != TokenKind::Identifier && s.tok().word() != words["by"])
+            s.error("Expect 'by' after theorem");
+        s.advance();
+        if (s.tokKind() != TokenKind::Identifier)
+            s.error("Expected tactic name after 'by'");
+        Word id = s.tok().word();
+        s.advance();
+
+        if (id == words["sorry"]) {
+            return ir::Proof::makeSorry();
+        } else if (id == words["eq_reflexive"]) {
+            return ir::Proof::makeEqualityReflexive();
+        } else if (id == words["eq_transitive"]) {
+            return ir::Proof::makeEqualityTransitive();
+        } else if (id == words["load_store"]) {
+            return ir::Proof::makeLoadStore();
+        } else if (id == words["skip_store"]) {
+            return ir::Proof::makeSkipStore();
+        } else if (id == words["phi_enumerate"]) {
+            return ir::Proof::makePhiEnumerate();
+        } else if (id == words["phi_exclusivity"]) {
+            return ir::Proof::makePhiExclusivity();
+        } else if (id == words["phi_activate"]) {
+            return ir::Proof::makePhiActivate();
+        } else if (id == words["phi_active_backward"]) {
+            return ir::Proof::makePhiActiveBackward();
+        } else if (id == words["jump_active_forward"]) {
+            return ir::Proof::makeJumpActiveForward();
+        } else if (id == words["branch_active_forward"]) {
+            return ir::Proof::makeBranchActiveForward();
+        } else if (id == words["branch_decision"]) {
+            return ir::Proof::makeBranchDecision();
+        } else {
+            s.error("Unknown tactic");
+        }
     }
 
     template<typename T>
@@ -805,6 +872,37 @@ fn #test($a, $b, $c):
     testExpr(ir::CodePos(3));
     testExpr(ir::CodePos(4));
     testExpr(ir::CodePos(5));
+}
+
+TEST(VerifyLanguage, ParseTheorems) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    pre %a_eq_b: $a = $b
+    prove %reflex: $a = $a by eq_reflexive
+    prove %transitive: $a != $b by eq_transitive
+    prove %sorry_thm: $a = $b by sorry
+    prove %ls: $a = $b by load_store
+)");
+    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.here().id(), 0);
+
+    ir::Theorem preTheorem(0);
+    EXPECT_EQ(fn.position(preTheorem), ir::CodePos(0));
+    EXPECT_EQ(fn.proof(preTheorem).tactic(), ir::Tactic::Precondition);
+    EXPECT_EQ(fn.getEquality(fn.prop(preTheorem)).left, ir::Expr(ir::ExprKind::FunctionParameter, 0));
+    EXPECT_EQ(fn.getEquality(fn.prop(preTheorem)).right, ir::Expr(ir::ExprKind::FunctionParameter, 1));
+
+    ir::Theorem reflexTheorem(1);
+    EXPECT_EQ(fn.proof(reflexTheorem).tactic(), ir::Tactic::EqualityReflexive);
+
+    ir::Theorem transitiveTheorem(2);
+    EXPECT_EQ(fn.proof(transitiveTheorem).tactic(), ir::Tactic::EqualityTransitive);
+
+    ir::Theorem sorryTheorem(3);
+    EXPECT_EQ(fn.proof(sorryTheorem).tactic(), ir::Tactic::Sorry);
+
+    ir::Theorem loadStoreTheorem(4);
+    EXPECT_EQ(fn.proof(loadStoreTheorem).tactic(), ir::Tactic::LoadStore);
 }
 
 }
