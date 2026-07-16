@@ -27,59 +27,15 @@ enum class Opcode : uint8_t {
 };
 
 enum class Tactic : uint8_t {
-    // Temporary placeholder for a missing proof
-    Sorry,
-
-    // Proves generic propositions by running an SMT style solver against them
-    SmtSolve,
-
-    // Proves generic propositions P by showing that !P is incompatible with a set of proven clauses
-    Sat,
-
-    // Proves propositions of the form x = x
-    EqualityReflexive,
-
-    // Proves propositions of the form x_1 != x_2 or x_2 != x_3 or ... or x_(n-1) != x_n or x_1 = x_n
-    EqualityTransitive,
-
-    // Proves the disjunction of linear integer formulars by means of Farkas lemma
-    IntFarkas,
-
-    // For a store store_target <- store_value proves x != store_target or x.load@after_store = store_value
-    LoadStore,
-
-    // For a store to store_target proves x = store_target or x.load@after_store = x.load@before_store
-    SkipStore,
-
-    // Proves that for an active phi one of its edges is taken
-    // For @phi: phi @a @b @c this proves !@phi.active or @phi.from@a or @phi.from@b or @phi.from@c
-    PhiEnumerate,
-
-    // Proves that phi parents are mutually exlusive
-    // !@phi.from@a or !@phi.from@b for all pairs of parents @a, @b
-    PhiExclusivity,
-
-    // !@phi.from@a or @phi.active for all parents @a
-    PhiActivate,
-
-    // !@phi.from@label or @label.active
-    PhiActiveBackward,
-
-    // For @jump: jump @phi proves !@jump.active or @phi.from@jump
-    JumpActiveForward,
-
-    // For @branch: branch cond, @if_true, @if_false
-    // !@branch.active or !cond or @if_true.from@branch
-    // !@branch.active or cond or @if_false.from@branch
-    BranchActiveForward,
-
-    // For @branch: branch cond, @if_true, @if_false
-    // !@if_true.from@branch or cond
-    // !@if_false.from@branch or !cond
-    BranchDecision,
+#define TACTIC(name) name,
+#include <verify/ir/tactics.inc>
 };
 
 struct Proof {
+#define SIMPLE_TACTIC(name) \
+    static Proof make##name() { return Proof(Tactic::name, 0); }
+#include <verify/ir/tactics.inc>
+
     Proof(Tactic tactic, uint32_t id)
         : tacticBits(std::to_underlying(tactic)), idBits(id) { }
 

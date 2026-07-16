@@ -54,6 +54,14 @@ static T fromArray(const arr& in) {
     }
 #include <verify/ir/instructions.inc>
 
+#define COMPLEX_TACTIC(name, type)                         \
+    Proof Function::add##name(type proofData) {            \
+        Proof result(Tactic::name, m_proofs##name.size()); \
+        m_proofs##name.emplace_back(std::move(proofData)); \
+        return result;                                     \
+    }
+#include <verify/ir/tactics.inc>
+
 void Function::setJumpTarget(CodePos jumpInst, CodePos target) {
     using data_t = function_detail::instruction_data<Opcode::Jump>;
     Inst& inst = instRef(jumpInst);

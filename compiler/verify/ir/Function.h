@@ -38,6 +38,13 @@ struct instruction_data;
 
 namespace verify::ir {
 
+struct SmtParameters { };
+struct PreconditionParameters { };
+struct SatProof { };
+struct IntFarkasProof {
+    std::vector<int32_t> coeff;
+};
+
 struct Function {
 
     FnHandle repr(Fn expr);
@@ -67,6 +74,19 @@ struct Function {
         VERIFY(t.id() < m_theorems.size());
         return m_theorems[t.id()].pos;
     }
+    Theorem addTheorem(Bool prop, CodePos pos, Proof proof = Proof::makeSorry()) {
+        Theorem result(m_theorems.size());
+        m_theorems.push_back({ prop, pos, proof });
+        return result;
+    }
+    void setProof(Theorem t, Proof p) {
+        VERIFY(t.id() < m_theorems.size());
+        m_theorems[t.id()].proof = p;
+    }
+
+    void addPostCondition(Theorem t) {
+        m_postconditions.push_back(t);
+    }
 
     ExprList makeExprList(std::span<const Expr> list) {
         return (ExprList)makeListInternal(m_expressionLists, list);
@@ -85,6 +105,14 @@ struct Function {
     void add##name(const function_detail::instruction_data<Opcode::name>&); \
     function_detail::instruction_data<Opcode::name> get##name(CodePos pos) const;
 #include <verify/ir/instructions.inc>
+
+#define COMPLEX_TACTIC(name, type)                  \
+    Proof add##name(type proofData);                \
+    const type& get##name(Proof proof) const {      \
+        VERIFY(proof.id() < m_proofs##name.size()); \
+        return m_proofs##name[proof.id()];          \
+    }
+#include <verify/ir/tactics.inc>
 
     void setJumpTarget(CodePos jumpInst, CodePos target);
     void setBranchTrueTarget(CodePos branchInst, CodePos target);
@@ -118,8 +146,8 @@ private:
 
     struct TheoremData {
         Bool prop;
-        Proof proof;
         CodePos pos;
+        Proof proof;
     };
 
     struct RelativePosData {
@@ -151,6 +179,10 @@ private:
     std::vector<Expr> m_expressionLists;
     std::vector<CodePos> m_phiParents;
     std::vector<ParameterData> m_parameters;
+    std::vector<Theorem> m_postconditions;
+
+#define COMPLEX_TACTIC(name, type) std::vector<type> m_proofs##name;
+#include <verify/ir/tactics.inc>
 };
 
 }
