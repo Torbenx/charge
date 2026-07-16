@@ -14,7 +14,7 @@ static bool isBulkNameCharacter(char c) {
     return ('A' <= c && c <= 'Z')
         || ('a' <= c && c <= 'z')
         || ('0' <= c && c <= '9')
-        || c == '_' || c == ':';
+        || c == '_';
 }
 
 enum class TokenKind : uint8_t {
@@ -374,6 +374,9 @@ struct FunctionParser {
             }
         }
         VERIFY(s.tokKind() == TokenKind::RightParen);
+        s.advance();
+
+        VERIFY(s.tokKind() == TokenKind::Colon);
         s.advanceWithNoScopeChanges();
 
         if (s.tokKind() != TokenKind::BeginScope)
@@ -713,7 +716,7 @@ ir::Function parseForTest(const char* source) {
 
 TEST(VerifyLanguage, ParseFunctionDefinition) {
     ir::Function fn = parseForTest(R"(
-fn #test($a, $b, $c)
+fn #test($a, $b, $c):
     store $a <- $b
     store $a <- $b
     store $a <- $b
@@ -726,7 +729,7 @@ fn #test($a, $b, $c)
 
 TEST(VerifyLanguage, ParseStore) {
     ir::Function fn = parseForTest(R"(
-fn #test($a, $b)
+fn #test($a, $b):
     store $a <- $b
 )");
     EXPECT_EQ(fn.parameterCount(), 2);
@@ -738,7 +741,7 @@ fn #test($a, $b)
 
 TEST(VerifyLanguage, ParseBranchAndPhi) {
     ir::Function fn = parseForTest(R"(
-fn #test($a, $b)
+fn #test($a, $b):
 @entry
     jump @before
 @before
@@ -772,7 +775,7 @@ fn #test($a, $b)
 
 TEST(VerifyLanguage, ParseMultilineExpression) {
     ir::Function fn = parseForTest(R"(
-fn #test($a, $b, $c)
+fn #test($a, $b, $c):
     store $a <- $b = $c
     store $a <- $b
         = $c

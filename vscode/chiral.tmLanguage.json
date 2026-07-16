@@ -23,19 +23,19 @@
 	],
 	"repository": {
 		"labels": {
-			"match": "@[A-Za-z0-9_]*",
+			"match": "@[A-Za-z0-9_:]*[A-Za-z0-9_]",
 			"name": "entity.name.function.label.chiral"
 		},
 		"locals": {
-			"match": "\\$[A-Za-z0-9_]*",
+			"match": "\\$[A-Za-z0-9_:]*[A-Za-z0-9_]",
 			"name": "variable.other.local.chiral"
 		},
 		"globals": {
-			"match": "#[A-Za-z0-9_]*",
+			"match": "#[A-Za-z0-9_:]*[A-Za-z0-9_]",
 			"name": "entity.name.type.global.chiral"
 		},
 		"theorems": {
-			"match": "%[A-Za-z0-9_]*",
+			"match": "%[A-Za-z0-9_:]*[A-Za-z0-9_]",
 			"name": "constant.other.theorem.chiral"
 		},
 		"numbers": {
@@ -43,7 +43,7 @@
 			"name": "constant.numeric.chiral"
 		},
 		"keywords": {
-			"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
+			"match": "\\b[A-Za-z0-9_:]*[A-Za-z0-9_]\\b",
 			"name": "keyword.other.chiral"
 		}
 	},
