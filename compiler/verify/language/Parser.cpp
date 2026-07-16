@@ -548,6 +548,11 @@ struct FunctionParser {
 
         if (id == words["sorry"]) {
             return ir::Proof::makeSorry();
+        } else if (id == words["sat"]) {
+            if (s.tokKind() != TokenKind::Colon)
+                s.error("Expected ':' after 'sat'");
+            s.advanceWithNoScopeChanges();
+            return ir.addSat({ parseSatClauses(s) });
         } else if (id == words["eq_reflexive"]) {
             return ir::Proof::makeEqualityReflexive();
         } else if (id == words["eq_transitive"]) {
@@ -572,6 +577,32 @@ struct FunctionParser {
             return ir::Proof::makeBranchDecision();
         } else {
             s.error("Unknown tactic");
+        }
+    }
+
+    std::vector<ir::SatProof::Clause> parseSatClauses(TokenStream s) {
+        std::vector<ir::SatProof::Clause> clauses;
+        for (;;) {
+            switch (s.tokKind()) {
+            case TokenKind::EndScope:
+                return clauses;
+            case TokenKind::ContinueScope:
+                if (!s.tok().word().empty())
+                    s.error("Invalid label location");
+                s.advance();
+                continue;
+            case TokenKind::Identifier: {
+                if (s.tok().word() != words["clause"])
+                    s.error("Expected clause");
+                s.advance();
+                ir::Bool prop = parseExpression<ir::Bool>(s);
+                ir::Proof proof = parseProof(s);
+                clauses.push_back({ prop, proof });
+                continue;
+            }
+            default:
+                s.error("Expected clause");
+            }
         }
     }
 
@@ -881,7 +912,7 @@ fn #test($a, $b):
     prove %reflex: $a = $a by eq_reflexive
     prove %transitive: $a != $b by eq_transitive
     prove %sorry_thm: $a = $b by sorry
-    prove %ls: $a = $b by load_store
+    prove $a = $b by load_store
 )");
     EXPECT_EQ(fn.parameterCount(), 2);
     EXPECT_EQ(fn.here().id(), 0);
@@ -903,6 +934,29 @@ fn #test($a, $b):
 
     ir::Theorem loadStoreTheorem(4);
     EXPECT_EQ(fn.proof(loadStoreTheorem).tactic(), ir::Tactic::LoadStore);
+}
+
+TEST(VerifyLanguage, ParseSatProof) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    prove true by sat:
+        clause $a = $a by eq_reflexive
+        clause $b = $b by eq_reflexive
+)");
+    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.here().id(), 0);
+
+    ir::Theorem satTheorem(0);
+    EXPECT_EQ(fn.position(satTheorem), ir::CodePos(0));
+    EXPECT_EQ(fn.proof(satTheorem).tactic(), ir::Tactic::Sat);
+    EXPECT_EQ(fn.prop(satTheorem), ir::Expr::makeBooleanLiteral(true));
+    auto& proof = fn.getSat(fn.proof(satTheorem));
+    EXPECT_EQ(proof.clauses.size(), 2);
+
+    EXPECT_EQ(proof.clauses[0].prop.kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(proof.clauses[0].proof.tactic(), ir::Tactic::EqualityReflexive);
+    EXPECT_EQ(proof.clauses[1].prop.kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(proof.clauses[1].proof.tactic(), ir::Tactic::EqualityReflexive);
 }
 
 }

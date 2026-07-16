@@ -22,6 +22,7 @@ inline constexpr ConstWordStringTable words {
     "pre",
     "post",
     "prove",
+    "clause",
     "by",
     "sat",
     "sorry",

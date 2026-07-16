@@ -39,7 +39,13 @@ struct instruction_data;
 namespace verify::ir {
 
 struct SmtParameters { };
-struct SatProof { };
+struct SatProof {
+    struct Clause {
+        Bool prop;
+        Proof proof;
+    };
+    std::vector<Clause> clauses;
+};
 struct IntFarkasProof {
     std::vector<int32_t> coeff;
 };
