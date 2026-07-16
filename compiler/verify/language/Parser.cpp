@@ -233,6 +233,7 @@ struct TokenStream {
     TokenStream* child = nullptr;
     Token* token = nullptr;
     uint32_t inlineDepth = 0;
+    bool invalid = false;
 
     const Token& tok() const { return *token; }
     TokenKind tokKind() const { return token->kind(); }
@@ -243,6 +244,7 @@ struct TokenStream {
 
     TokenStream(TokenStream& parent)
         : parent(&parent) {
+        VERIFY(!parent.invalid);
         VERIFY(parent.tokKind() == TokenKind::BeginScope);
         token = parent.token + 1;
         parent.child = this;
@@ -250,40 +252,47 @@ struct TokenStream {
 
     ~TokenStream() {
         VERIFY(child == nullptr);
+        if (tokKind() != TokenKind::EndScope)
+            invalid = true;
         if (parent != nullptr) {
             VERIFY(parent->child == this);
-            VERIFY(tokKind() == TokenKind::EndScope);
             parent->token = token;
             parent->child = nullptr;
+            parent->invalid = invalid;
             parent->advance();
         }
     }
 
-    void consumeScopeInline() {
+    void advanceWithNoScopeChanges() {
         VERIFY(child == nullptr);
-        VERIFY(tokKind() == TokenKind::BeginScope);
+        VERIFY(!invalid);
         token += 1;
-        inlineDepth += 1;
     }
 
     void advance() {
         VERIFY(child == nullptr);
+        VERIFY(!invalid);
         token += 1;
-        if (inlineDepth > 0) {
-            for (;;) {
-                if (tokKind() == TokenKind::ContinueScope) {
+        for (;;) {
+            if (tokKind() == TokenKind::BeginScope) {
+                inlineDepth += 1;
+                token += 1;
+                continue;
+            } else if (tokKind() == TokenKind::ContinueScope) {
+                if (inlineDepth > 0) {
                     if (!tok().word().empty())
                         error("Invalid label location");
                     token += 1;
                     continue;
-                } else if (tokKind() == TokenKind::EndScope) {
+                }
+            } else if (tokKind() == TokenKind::EndScope) {
+                if (inlineDepth > 0) {
                     token += 1;
                     inlineDepth -= 1;
-                    if (inlineDepth > 0)
-                        continue;
+                    continue;
                 }
-                break;
             }
+            break;
         }
     }
 
@@ -365,7 +374,7 @@ struct FunctionParser {
             }
         }
         VERIFY(s.tokKind() == TokenKind::RightParen);
-        s.advance();
+        s.advanceWithNoScopeChanges();
 
         if (s.tokKind() != TokenKind::BeginScope)
             s.error("Expected function body");
@@ -759,6 +768,40 @@ fn #test($a, $b)
 
     EXPECT_EQ(fn.parents(phi2Pos).size(), 1);
     EXPECT_EQ(fn.parentPosition(fn.parents(phi2Pos).at(0)), branchPos);
+}
+
+TEST(VerifyLanguage, ParseMultilineExpression) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c)
+    store $a <- $b = $c
+    store $a <- $b
+        = $c
+    store $a <- $b =
+        $c
+    store $a
+        <- $b = $c
+    store
+        $a <- $b = $c
+    store
+        $a
+        <-
+            $b
+        =
+            $c
+)");
+    auto testExpr = [&fn](ir::CodePos pos) {
+        EXPECT_EQ(fn.getStore(pos).loc, ir::Expr(ir::ExprKind::FunctionParameter, 0));
+        EXPECT_EQ(fn.getEquality((ir::Bool)fn.getStore(pos).value).left, ir::Expr(ir::ExprKind::FunctionParameter, 1));
+        EXPECT_EQ(fn.getEquality((ir::Bool)fn.getStore(pos).value).right, ir::Expr(ir::ExprKind::FunctionParameter, 2));
+    };
+    EXPECT_EQ(fn.parameterCount(), 3);
+    EXPECT_EQ(fn.here().id(), 6);
+    testExpr(ir::CodePos(0));
+    testExpr(ir::CodePos(1));
+    testExpr(ir::CodePos(2));
+    testExpr(ir::CodePos(3));
+    testExpr(ir::CodePos(4));
+    testExpr(ir::CodePos(5));
 }
 
 }
