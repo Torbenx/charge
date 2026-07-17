@@ -118,6 +118,9 @@ enum class LexerToken : uint8_t {
     EqualGreater, // =>
     LessEqualGreater, // <=>
     MinusGreater, // ->
+    CharacterLiteral,
+    NumericLiteral,
+    Identifier,
     Assert, // assert
     Break, // break
     Catch, // catch
@@ -149,8 +152,6 @@ enum class LexerToken : uint8_t {
     Template, // template
     Trait, // trait
     Virtual, // virtual
-    Identifier,
-    Literal,
     EOS,
 
     FirstKeyword = Assert,

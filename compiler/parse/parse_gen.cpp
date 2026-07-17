@@ -168,8 +168,10 @@ std::string_view nameString(LexerToken token) {
         return "Virtual";
     case LexerToken::Identifier:
         return "Identifier";
-    case LexerToken::Literal:
-        return "Literal";
+    case LexerToken::CharacterLiteral:
+        return "CharacterLiteral";
+    case LexerToken::NumericLiteral:
+        return "NumericLiteral";
     case LexerToken::EOS:
         return "EOS";
     case LexerToken::Invalid:
@@ -481,7 +483,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return {};
     }
     case State::Expression: {
-        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Tilde, LexerToken::Plus, LexerToken::Minus, LexerToken::PlusPlus, LexerToken::MinusMinus, LexerToken::Star, LexerToken::Point, LexerToken::LeftParen, LexerToken::If, LexerToken::Identifier, LexerToken::Literal };
+        static constexpr std::array r = { LexerToken::Exclaim, LexerToken::Tilde, LexerToken::Plus, LexerToken::Minus, LexerToken::PlusPlus, LexerToken::MinusMinus, LexerToken::Star, LexerToken::Point, LexerToken::LeftParen, LexerToken::If, LexerToken::Identifier, LexerToken::CharacterLiteral, LexerToken::NumericLiteral };
         return r;
     }
     case State::AfterExpression: {

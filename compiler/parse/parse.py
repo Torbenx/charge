@@ -107,8 +107,11 @@ def stateCppName(name):
 def identifierCppName():
     return "Identifier"
 
-def literalCppName():
-    return "Literal"
+def characterLiteralCppName():
+    return "CharacterLiteral"
+
+def numericLiteralCppName():
+    return "NumericLiteral"
 
 indentationStep = ' ' * 4
 
@@ -151,11 +154,17 @@ class IdentifierCase(Case):
     def cppName(self):
         return identifierCppName()
 
-class LiteralCase(Case):
+class CharacterLiteralCase(Case):
     def __init__(self, instructions):
         super().__init__(instructions)
     def cppName(self):
-        return literalCppName()
+        return characterLiteralCppName()
+
+class NumericLiteralCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+    def cppName(self):
+        return numericLiteralCppName()
 
 class ThenCase(Case):
     def __init__(self, instructions):
@@ -363,9 +372,15 @@ class State:
     def hasWordCase(self):
         return self.identifierCase() or self.keywordCases() or self.specialIdentifierCases()
 
-    def literalCase(self) -> LiteralCase | None:
+    def characterLiteralCase(self) -> CharacterLiteralCase | None:
         for c in self.cases:
-            if type(c) is LiteralCase:
+            if type(c) is CharacterLiteralCase:
+                return c
+        return None
+
+    def numericLiteralCase(self) -> NumericLiteralCase | None:
+        for c in self.cases:
+            if type(c) is NumericLiteralCase:
                 return c
         return None
 
@@ -492,10 +507,14 @@ class Parser:
                 self.advanceLine()
                 instructions = self.parseInstructions()
                 cases.append(IdentifierCase(instructions))
-            elif caseKind == "literal":
+            elif caseKind == "characterLiteral":
                 self.advanceLine()
                 instructions = self.parseInstructions()
-                cases.append(LiteralCase(instructions))
+                cases.append(CharacterLiteralCase(instructions))
+            elif caseKind == "numericLiteral":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(NumericLiteralCase(instructions))
             elif caseKind == "then":
                 self.advanceLine()
                 instructions = self.parseInstructions()
@@ -914,7 +933,7 @@ def generateSwitchState(state):
         with indent():
             line("tokEnd += 1;")
         line("} while (tokEnd[0] >= '0' && tokEnd[0] <= '9');")
-        recurse(state, lambda s: s.literalCase(), lambda case: generateCaseBody(case))
+        recurse(state, lambda s: s.numericLiteralCase(), lambda case: generateCaseBody(case))
     line("}")
 
     # character literal
@@ -923,7 +942,7 @@ def generateSwitchState(state):
         line("tokEnd = skipToEndOfCharacterLiteral(tokEnd);")
         line("VERIFY(tokEnd[0] == '\\'');")
         line("tokEnd += 1;")
-        recurse(state, lambda s: s.literalCase(), lambda case: generateCaseBody(case))
+        recurse(state, lambda s: s.characterLiteralCase(), lambda case: generateCaseBody(case))
     line("}")
 
     # end
@@ -1164,7 +1183,7 @@ generatedLines = []
 allCases  = [PunctuationCase(p, [LexTokenInstruction()]) for p in punctuations]
 allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in keywords]
 allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in specialIdentifiers]
-allCases += [IdentifierCase([LexTokenInstruction()]), LiteralCase([LexTokenInstruction()])]
+allCases += [IdentifierCase([LexTokenInstruction()]), CharacterLiteralCase([LexTokenInstruction()]), NumericLiteralCase([LexTokenInstruction()])]
 allCases += [EndCase([LexTokenInstruction()])]
 lexState = State("SwitchState", "lex", "error", [], allCases)
 lexState.origins = [NextInstruction("blub")]
@@ -1239,10 +1258,11 @@ line("enum class LexerToken : uint8_t {")
 with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + ", // " + punc)
+    line(characterLiteralCppName() + ",")
+    line(numericLiteralCppName() + ",")
+    line(identifierCppName() + ",")
     for keyword in keywords + specialIdentifiers:
         line(keywordCppName(keyword) + ", // " + keyword)
-    line(identifierCppName() + ",")
-    line(literalCppName() + ",")
     line("EOS,")
     lineNoIndent()
     line("FirstKeyword = " + keywordCppName(keywords[0])+ ",")
@@ -1306,9 +1326,12 @@ with indent():
     line("case LexerToken::" + identifierCppName() + ":")
     with indent():
         line("return \"" + identifierCppName() + "\";")
-    line("case LexerToken::" + literalCppName() + ":")
+    line("case LexerToken::" + characterLiteralCppName() + ":")
     with indent():
-        line("return \"" + literalCppName() + "\";")
+        line("return \"" + characterLiteralCppName() + "\";")
+    line("case LexerToken::" + numericLiteralCppName() + ":")
+    with indent():
+        line("return \"" + numericLiteralCppName() + "\";")
     line("case LexerToken::EOS:")
     with indent():
         line("return \"EOS\";")

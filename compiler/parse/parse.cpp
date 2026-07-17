@@ -715,14 +715,14 @@ lex$retry:
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // lexToken
-        return LexerToken::Literal;
+        return LexerToken::NumericLiteral;
     }
     case '\'': {
         tokEnd = skipToEndOfCharacterLiteral(tokEnd);
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
         // lexToken
-        return LexerToken::Literal;
+        return LexerToken::CharacterLiteral;
     }
     case '\0':
         // lexToken
@@ -1397,8 +1397,8 @@ LABEL_MAYBE_UNUSED expression$as_then:
         do {
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -1407,8 +1407,8 @@ LABEL_MAYBE_UNUSED expression$as_then:
         tokEnd = skipToEndOfCharacterLiteral(tokEnd);
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -3120,8 +3120,8 @@ LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -3137,8 +3137,8 @@ LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -3946,8 +3946,8 @@ LABEL_MAYBE_UNUSED argument$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -3962,8 +3962,8 @@ LABEL_MAYBE_UNUSED argument$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -4410,8 +4410,8 @@ LABEL_MAYBE_UNUSED check_designated_argument$as_then:
             tokEnd += 1;
         } while (tokEnd[0] >= '0' && tokEnd[0] <= '9');
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -4421,8 +4421,8 @@ LABEL_MAYBE_UNUSED check_designated_argument$as_then:
         VERIFY(tokEnd[0] == '\'');
         tokEnd += 1;
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -6202,8 +6202,8 @@ LABEL_MAYBE_UNUSED first_argument_paren$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -6221,8 +6221,8 @@ LABEL_MAYBE_UNUSED first_argument_paren$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -7095,8 +7095,8 @@ LABEL_MAYBE_UNUSED first_argument_square$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -7114,8 +7114,8 @@ LABEL_MAYBE_UNUSED first_argument_square$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -7988,8 +7988,8 @@ LABEL_MAYBE_UNUSED first_argument_brace$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -8007,8 +8007,8 @@ LABEL_MAYBE_UNUSED first_argument_brace$as_then:
         emitToken(TokenKind::CallArgument, tokBegin, 0, output);
         // -> check_designated_argument
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -8743,8 +8743,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -8756,8 +8756,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
         // pushScope ScopeKind::LeftExpr
         scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -9703,8 +9703,8 @@ LABEL_MAYBE_UNUSED variable_type$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -9716,8 +9716,8 @@ LABEL_MAYBE_UNUSED variable_type$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -10347,8 +10347,8 @@ LABEL_MAYBE_UNUSED after_variable_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -10360,8 +10360,8 @@ LABEL_MAYBE_UNUSED after_variable_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -10997,8 +10997,8 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -11011,8 +11011,8 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -11685,8 +11685,8 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -11699,8 +11699,8 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -12373,8 +12373,8 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::NumericLiteralExpr
+        carriedEmitTokenKind = TokenKind::NumericLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -12387,8 +12387,8 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
         // -> expression
-        // emitToken TokenKind::LiteralExpr
-        carriedEmitTokenKind = TokenKind::LiteralExpr;
+        // emitToken TokenKind::CharacterLiteralExpr
+        carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;

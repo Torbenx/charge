@@ -45,8 +45,11 @@ SwitchState expression() then error
     identifier
         emitToken TokenKind::IdentifierExpr
         next after_expression
-    literal
-        emitToken TokenKind::LiteralExpr
+    characterLiteral
+        emitToken TokenKind::CharacterLiteralExpr
+        next after_expression
+    numericLiteral
+        emitToken TokenKind::NumericLiteralExpr
         next after_expression
 
 SwitchState after_expression() then error
