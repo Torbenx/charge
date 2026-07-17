@@ -342,7 +342,7 @@ struct RecoveryState {
         for (;;) {
             const auto& node = allNodes[nodeIdx];
             int_t parentIdx = node.parentNode;
-            if (parentIdx == (int_t)std::numeric_limits<uint32_t>::max())
+            if (parentIdx == (int_t)(uint32_t)limits::max)
                 break;
             const auto& parent = allNodes[parentIdx];
             result.push_back(ReturnElement {
@@ -462,8 +462,8 @@ std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const Sav
             continue;
         }
 
-        int_t maxPrevPos = std::numeric_limits<int_t>::lowest();
-        int_t minNextPos = std::numeric_limits<int_t>::max();
+        int_t maxPrevPos = limits::min;
+        int_t minNextPos = limits::max;
         for (int_t pathId = 0; pathId < (int_t)paths.size(); pathId++) {
             const auto& path = paths[pathId];
             auto it = errorIts[pathId];

@@ -26,7 +26,7 @@ enum class TheoryId : uint8_t {
 #include <verify/backend/theories.inc>
 
     COUNT,
-    Invalid = std::numeric_limits<uint8_t>::max()
+    Invalid = (uint8_t)limits::max
 };
 
 std::string_view nameString(TheoryId);

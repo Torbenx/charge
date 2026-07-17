@@ -50,7 +50,7 @@ struct UninterpretedEquality {
 
     void newPair(Solver&, PairHandle);
 
-    void forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit = std::numeric_limits<uint32_t>::max());
+    void forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit = (uint32_t)limits::max);
     void forEachEqualValue(Value value, auto&& callback);
 
     Value rewrite(Value v) { return infoFor(v).root; }

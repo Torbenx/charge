@@ -26,9 +26,9 @@ inline std::optional<file_time> lastWriteTime(const path& filePath) {
 }
 
 struct RequestHandle {
-    uint32_t value = std::numeric_limits<uint32_t>::max();
+    uint32_t value = limits::max;
 
-    constexpr bool valid() const { return value != std::numeric_limits<uint32_t>::max(); }
+    constexpr bool valid() const { return value != (uint32_t)limits::max; }
 };
 
 std::string readFile(const path& file);

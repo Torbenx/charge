@@ -1,8 +1,8 @@
 #pragma once
 
 #ifdef __INTELLISENSE__
-    #pragma diag_suppress 28
-    #pragma diag_suppress 3133
+#pragma diag_suppress 28
+#pragma diag_suppress 3133
 #endif
 
 #include <log.h>
@@ -10,11 +10,11 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
-#include <memory>
 
 using int_t = std::ptrdiff_t;
 template<int_t... Is>
@@ -58,7 +58,36 @@ struct max_t {
     }
 };
 
+struct min_t {
+    consteval operator uint8_t() const {
+        return std::numeric_limits<uint8_t>::min();
+    }
+    consteval operator uint16_t() const {
+        return std::numeric_limits<uint16_t>::min();
+    }
+    consteval operator uint32_t() const {
+        return std::numeric_limits<uint32_t>::min();
+    }
+    consteval operator uint64_t() const {
+        return std::numeric_limits<uint64_t>::min();
+    }
+
+    consteval operator int8_t() const {
+        return std::numeric_limits<int8_t>::min();
+    }
+    consteval operator int16_t() const {
+        return std::numeric_limits<int16_t>::min();
+    }
+    consteval operator int32_t() const {
+        return std::numeric_limits<int32_t>::min();
+    }
+    consteval operator int64_t() const {
+        return std::numeric_limits<int64_t>::min();
+    }
+};
+
 inline constexpr max_t max = {};
+inline constexpr min_t min = {};
 
 }
 
@@ -227,8 +256,8 @@ struct relative_pointer {
     constexpr relative_pointer(Source* source, Target* target) {
         if (target != nullptr) {
             int_t offset = (reinterpret_cast<std::byte*>(target) - reinterpret_cast<std::byte*>(source));
-            VERIFY(offset >= std::numeric_limits<relative_offset_type>::min()
-                && offset <= std::numeric_limits<relative_offset_type>::max());
+            VERIFY(offset >= (relative_offset_type)limits::min
+                && offset <= (relative_offset_type)limits::max);
             aligned_relative_offset = (relative_offset_type)offset;
         }
     }

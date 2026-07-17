@@ -38,7 +38,7 @@ struct Instruction {
             Expression value;
         } initialize;
         struct {
-            uint32_t bodySize = std::numeric_limits<uint32_t>::max();
+            uint32_t bodySize = limits::max;
             ScopeData u;
         } scope;
 

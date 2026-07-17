@@ -37,10 +37,10 @@ int32_t Parser::consumeInteger() {
     }
     skipWhitespace();
     if (negate) {
-        VERIFY(-value >= (int64_t)std::numeric_limits<int32_t>::min());
+        VERIFY(-value >= (int32_t)limits::min);
         return -value;
     } else {
-        VERIFY(value <= (int64_t)std::numeric_limits<int32_t>::max());
+        VERIFY(value <= (int32_t)limits::max);
         return value;
     }
 }

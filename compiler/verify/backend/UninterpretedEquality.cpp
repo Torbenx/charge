@@ -309,7 +309,7 @@ void UninterpretedEquality::path(Solver& solver, Value a, Value b, ClauseBuilder
         return;
 
     auto tracePos = [this](Value val) -> int_t {
-        return infoFor(val).tracePosition.value_or(TracePosition { std::numeric_limits<uint32_t>::max() }).index;
+        return infoFor(val).tracePosition.value_or(TracePosition { limits::max }).index;
     };
 
     int_t aIndex = tracePos(a);

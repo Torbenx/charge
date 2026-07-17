@@ -5,7 +5,7 @@
 
 struct TreeLabel {
     //! Returns the label for the root node
-    static TreeLabel rootLabel() { return TreeLabel(std::numeric_limits<uint32_t>::max() >> 1); }
+    static TreeLabel rootLabel() { return TreeLabel((uint32_t)limits::max >> 1); }
 
     //! Returns the label for left or right child of this node
     [[nodiscard]] TreeLabel extend(bool right) const {
