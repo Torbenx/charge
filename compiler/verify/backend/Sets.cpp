@@ -245,7 +245,14 @@ void Sets::decideTrue(Solver& solver, ElementId element, Containment lit) {
 }
 
 bool Sets::assignedTrue(Solver& solver, ElementId element, Containment lit) {
-    return solver.assignedTrue(mapToBool(solver, element, lit));
+    auto maybeBool = tryToBool(solver, element, lit);
+    if (!maybeBool.has_value())
+        return false;
+    return solver.assignedTrue(maybeBool.value());
+}
+
+bool Sets::assignedEmpty(Solver& solver, Value set) {
+    return assignedTrue(solver, forAllElement(), !in(set));
 }
 
 void Sets::propagateElementAssignment(Solver& solver, BooleanValue lit) {
@@ -433,6 +440,16 @@ BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment lite
         maybeBool = solver.impl().newBoolean(params.elementInSetTheory);
         inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
     }
+    return literal.contained() ? maybeBool.value() : !maybeBool.value();
+}
+
+std::optional<BooleanValue> Sets::tryToBool(Solver&, ElementId element, Containment literal) {
+    auto& inSetLiterals = setInfos[literal.set()].elementInSetLiterals;
+    if (inSetLiterals.size() <= element.id())
+        return std::nullopt;
+    auto maybeBool = inSetLiterals[element.id()];
+    if (!maybeBool.has_value())
+        return std::nullopt;
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
 }
 

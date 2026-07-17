@@ -86,7 +86,6 @@ struct Sets {
     void propagateElementAssignment(Solver&, BooleanValue);
     void unapplyElementAssignment(Solver&, BooleanValue);
     void propagateEquality(Solver&, PairHandle);
-    void propagateIsEmpty(Solver&, BooleanValue);
 
     bool testReason(Solver&, BooleanValue, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
@@ -97,6 +96,8 @@ struct Sets {
     }
     void assignTrue(Solver&, ElementId, Containment, const Reason&);
     void decideTrue(Solver&, ElementId, Containment);
+
+    bool assignedEmpty(Solver& solver, Value);
 
     ElementId newElement(Solver& solver);
 
@@ -202,6 +203,7 @@ private:
     }
 
     BooleanValue mapToBool(Solver&, ElementId, Containment);
+    std::optional<BooleanValue> tryToBool(Solver&, ElementId, Containment);
     std::pair<ElementId, Containment> mapFromBool(BooleanValue);
 
     SetsParams params;
