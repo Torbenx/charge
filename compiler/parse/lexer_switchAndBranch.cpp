@@ -1,6 +1,6 @@
 namespace parse {
 
-const char* lexOld(const char* sourcePosition, std::vector<LexerToken>& output) {
+const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToken>& output) {
     using Token = LexerToken;
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
@@ -25,7 +25,7 @@ const char* lexOld(const char* sourcePosition, std::vector<LexerToken>& output) 
             continue;
         }
         case '\'': {
-            tok = Token::Literal;
+            tok = Token::CharacterLiteral;
             sourcePosition += 1;
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
@@ -92,7 +92,7 @@ const char* lexOld(const char* sourcePosition, std::vector<LexerToken>& output) 
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
-            tok = Token::Literal;
+            tok = Token::NumericLiteral;
             // TODO: implement parsing num literals
             for (;;) {
                 char c = sourcePosition[0];
