@@ -274,7 +274,7 @@ SwitchState after_expression() then error
         emitToken TokenKind::AssignStmt
         next expression
 
-SwitchState comma_after_expression_in_arguments() then argument
+LinearState comma_after_expression_in_arguments() then argument
     keyword else
         next comma_else
 
@@ -309,36 +309,36 @@ LinearState comma_else() then error
         emitToken TokenKind::CommaElseExpr
         next expression
 
-SwitchState argument() then check_designated_argument
+LinearState argument() then check_designated_argument
     then
         callArgument
         emitToken TokenKind::CallArgument
-SwitchState check_designated_argument() then expression
+LinearState check_designated_argument() then expression
     identifier
         argumentName = this_identifier
         emitToken TokenKind::IdentifierExpr
         next maybe_designated_argument
-SwitchState maybe_designated_argument(argumentName) then after_expression
+LinearState maybe_designated_argument(argumentName) then after_expression
     punctuation :
         updateCallArgument argumentName
         discardLastToken
         next expression
 
-SwitchState first_argument_paren() then argument
+LinearState first_argument_paren() then argument
     punctuation )
         endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Paren
-SwitchState first_argument_square() then argument
+LinearState first_argument_square() then argument
     punctuation ]
         endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     then
         pushScope ScopeKind::Square
-SwitchState first_argument_brace() then argument
+LinearState first_argument_brace() then argument
     punctuation }
         endCall
         emitToken TokenKind::EmptyNode
@@ -461,7 +461,7 @@ LinearState after_variable_declaration_id() then error
         popScope ScopeKind::Parameter
         emitToken TokenKind::ExpressionStmt
         next after_parameters
-SwitchState variable_type() then expression
+LinearState variable_type() then expression
     keyword unique
         updateData sema::VariableKind::UniqueReference
         next after_variable_unique_modifier
@@ -478,7 +478,7 @@ SwitchState variable_type() then expression
         next impl_expression
     then
         pushScope ScopeKind::VariableType
-SwitchState after_variable_modifier() then expression
+LinearState after_variable_modifier() then expression
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt
@@ -497,15 +497,15 @@ SwitchState after_variable_modifier() then expression
         next after_parameters
     then
         pushScope ScopeKind::VariableType
-SwitchState after_variable_unique_modifier() then after_variable_modifier
+LinearState after_variable_unique_modifier() then after_variable_modifier
     keyword const
         updateData sema::VariableKind::ConstUniqueReference
         next after_variable_modifier
-SwitchState after_variable_shared_modifier() then after_variable_modifier
+LinearState after_variable_shared_modifier() then after_variable_modifier
     keyword const
         updateData sema::VariableKind::ConstSharedReference
         next after_variable_modifier
-SwitchState after_variable_const_modifier() then after_variable_modifier
+LinearState after_variable_const_modifier() then after_variable_modifier
     keyword shared
         next after_variable_modifier
     keyword unique
