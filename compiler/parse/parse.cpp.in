@@ -769,4 +769,6 @@ SourceLocation Parser::location(sema::Context& context) const {
 
 }
 
-#include "lexer_for_benchmark.cpp"
+#include "lexer_switchAndBranch.cpp"
+#include "lexer_table2Char.cpp"
+#include "lexer_tablePattern.cpp"

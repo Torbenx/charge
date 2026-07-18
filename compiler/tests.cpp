@@ -717,14 +717,17 @@ TEST(Charge, TokenSpelling) {
 
 using Clock = std::chrono::high_resolution_clock;
 
+static constexpr int BENCHMARK_REPEATS = 1;
+static constexpr auto BENCHMARK_FILE = COMPILER_TEST_DIR "_old/parser_benchmark.chrg.in";
+
 TEST(Charge, BenchmarkSema) {
     namespace fs = std::filesystem;
-    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    fs::path file { BENCHMARK_FILE };
     ASSERT_TRUE(fs::is_regular_file(file));
 
     auto sourceBuffer = server::readFile(file);
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
         sema::Context context({}, sourceBuffer);
         parse::Parser parser(sourceBuffer);
         parser.parse(context);
@@ -735,31 +738,31 @@ TEST(Charge, BenchmarkSema) {
 
 TEST(Charge, BenchmarkSimple) {
     namespace fs = std::filesystem;
-    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    fs::path file { BENCHMARK_FILE };
     ASSERT_TRUE(fs::is_regular_file(file));
 
     auto sourceBuffer = server::readFile(file);
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
         parse::SimpleOutput output(sourceBuffer);
         parse::SimpleParser parser(sourceBuffer);
         auto start = Clock::now();
         parser.parse(output);
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.tokenBuffer.tokens.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokenBuffer.tokens.size() << " semantic tokens.\n";
         ASSERT_TRUE(parser.done());
     }
 }
 
 TEST(Charge, BenchmarkNoOutput) {
     namespace fs = std::filesystem;
-    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    fs::path file { BENCHMARK_FILE };
     ASSERT_TRUE(fs::is_regular_file(file));
 
     auto sourceBuffer = server::readFile(file);
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
 
         parse::NoOutput output;
         parse::SimpleParser parser(sourceBuffer);
@@ -767,24 +770,67 @@ TEST(Charge, BenchmarkNoOutput) {
         parser.parse(output);
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced no tokens.\n";
+        std::cout << " and visited " << parser.parsedTokens() << " tokens.\n";
         ASSERT_TRUE(parser.done());
     }
 }
 
-namespace parse { const char* lexOld(const char* sourcePosition, std::vector<LexerToken>& output); }
+namespace parse {
+    const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToken>& output);
+    const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& output);
+    const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>& output);
+}
 
-TEST(Charge, BenchmarkLexer) {
+TEST(Charge, BenchmarkLexerSwitchAndBranch) {
     namespace fs = std::filesystem;
-    fs::path file { COMPILER_TEST_DIR "_old/parser_benchmark.chrg" };
+    fs::path file { BENCHMARK_FILE };
     ASSERT_TRUE(fs::is_regular_file(file));
 
     auto sourceBuffer = server::readFile(file);
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
         std::vector<parse::LexerToken> output;
         auto start = Clock::now();
-        const char* finalPos = parse::lexOld(sourceBuffer.data(), output);
+        const char* finalPos = nullptr;
+        finalPos = parse::lexSwitchAndBranch(sourceBuffer.data(), output);
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.size() << " tokens.\n";
+        ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
+    }
+}
+
+TEST(Charge, BenchmarkLexerTablePattern) {
+    namespace fs = std::filesystem;
+    fs::path file { BENCHMARK_FILE };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
+        std::vector<parse::LexerToken> output;
+        auto start = Clock::now();
+        const char* finalPos = nullptr;
+        finalPos = parse::lexTablePattern(sourceBuffer.data(), output);
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.size() << " tokens.\n";
+        ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
+    }
+}
+
+TEST(Charge, BenchmarkLexerTable2Char) {
+    namespace fs = std::filesystem;
+    fs::path file { BENCHMARK_FILE };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
+        std::vector<parse::LexerToken> output;
+        auto start = Clock::now();
+        const char* finalPos = nullptr;
+        finalPos = parse::lexTable2Char(sourceBuffer.data(), output);
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced " << output.size() << " tokens.\n";
