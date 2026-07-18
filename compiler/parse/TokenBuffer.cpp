@@ -12,7 +12,9 @@ TokenBuffer::TokenBuffer(std::string_view source)
 std::string_view TokenBuffer::tokenSpelling(TokenInfo info) const {
     LexerToken lexToken = lexerToken(info.kind());
     // TODO: Support literals
-    if (lexToken == LexerToken::Identifier) {
+    if (lexToken == LexerToken::Invalid) {
+        return "";
+    } else if (lexToken == LexerToken::Identifier) {
         return wordTable.view(info.data1<DataKind::Word>());
     } else {
         return fixedSpelling(lexToken);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <EnumTable.h>
 #include <parse/IdentifierTable.h>
 
 namespace parse {
@@ -153,6 +154,10 @@ enum class LexerToken : uint8_t {
     Trait, // trait
     Virtual, // virtual
     EOS,
+    COUNT,
+
+    FirstPunctuation = LeftParen,
+    LastPunctuation = MinusGreater,
 
     FirstKeyword = Assert,
     LastKeyword = While,
@@ -163,13 +168,98 @@ enum class LexerToken : uint8_t {
     Invalid = 255
 };
 std::string_view nameString(LexerToken);
-std::string_view fixedSpelling(LexerToken);
 constexpr bool isKeyword(LexerToken token) {
     return LexerToken::FirstKeyword <= token && token <= LexerToken::LastKeyword;
 }
 constexpr bool isSpecialIdentifier(LexerToken token) {
     return LexerToken::FirstSpecialIdentifier <= token && token <= LexerToken::LastSpecialIdentifier;
 }
+
+inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {
+    "",
+    {
+        { LexerToken::LeftParen, "(" },
+        { LexerToken::RightParen, ")" },
+        { LexerToken::LeftSquare, "[" },
+        { LexerToken::RightSquare, "]" },
+        { LexerToken::LeftBrace, "{" },
+        { LexerToken::RightBrace, "}" },
+        { LexerToken::Exclaim, "!" },
+        { LexerToken::Tilde, "~" },
+        { LexerToken::PlusPlus, "++" },
+        { LexerToken::MinusMinus, "--" },
+        { LexerToken::Plus, "+" },
+        { LexerToken::Minus, "-" },
+        { LexerToken::Star, "*" },
+        { LexerToken::Amp, "&" },
+        { LexerToken::Hat, "^" },
+        { LexerToken::Vert, "|" },
+        { LexerToken::Slash, "/" },
+        { LexerToken::Percent, "%" },
+        { LexerToken::LessLess, "<<" },
+        { LexerToken::GreaterGreater, ">>" },
+        { LexerToken::AmpAmp, "&&" },
+        { LexerToken::VertVert, "||" },
+        { LexerToken::ExclaimEqual, "!=" },
+        { LexerToken::EqualEqual, "==" },
+        { LexerToken::Less, "<" },
+        { LexerToken::LessEqual, "<=" },
+        { LexerToken::Greater, ">" },
+        { LexerToken::GreaterEqual, ">=" },
+        { LexerToken::Equal, "=" },
+        { LexerToken::PlusEqual, "+=" },
+        { LexerToken::MinusEqual, "-=" },
+        { LexerToken::StarEqual, "*=" },
+        { LexerToken::AmpEqual, "&=" },
+        { LexerToken::HatEqual, "^=" },
+        { LexerToken::VertEqual, "|=" },
+        { LexerToken::SlashEqual, "/=" },
+        { LexerToken::PercentEqual, "%=" },
+        { LexerToken::LessLessEqual, "<<=" },
+        { LexerToken::GreaterGreaterEqual, ">>=" },
+        { LexerToken::AmpAmpEqual, "&&=" },
+        { LexerToken::VertVertEqual, "||=" },
+        { LexerToken::Comma, "," },
+        { LexerToken::Point, "." },
+        { LexerToken::Colon, ":" },
+        { LexerToken::ColonColon, "::" },
+        { LexerToken::SemiColon, ";" },
+        { LexerToken::EqualGreater, "=>" },
+        { LexerToken::LessEqualGreater, "<=>" },
+        { LexerToken::MinusGreater, "->" },
+        { LexerToken::Assert, "assert" },
+        { LexerToken::Break, "break" },
+        { LexerToken::Catch, "catch" },
+        { LexerToken::Const, "const" },
+        { LexerToken::Continue, "continue" },
+        { LexerToken::Destroy, "destroy" },
+        { LexerToken::Discard, "discard" },
+        { LexerToken::Do, "do" },
+        { LexerToken::Elif, "elif" },
+        { LexerToken::Else, "else" },
+        { LexerToken::For, "for" },
+        { LexerToken::If, "if" },
+        { LexerToken::Impl, "impl" },
+        { LexerToken::Let, "let" },
+        { LexerToken::Return, "return" },
+        { LexerToken::Shared, "shared" },
+        { LexerToken::Static, "static" },
+        { LexerToken::Try, "try" },
+        { LexerToken::Unique, "unique" },
+        { LexerToken::Var, "var" },
+        { LexerToken::While, "while" },
+        { LexerToken::Enum, "enum" },
+        { LexerToken::Fn, "fn" },
+        { LexerToken::Base, "base" },
+        { LexerToken::Incomplete, "incomplete" },
+        { LexerToken::Namespace, "namespace" },
+        { LexerToken::Open, "open" },
+        { LexerToken::Struct, "struct" },
+        { LexerToken::Template, "template" },
+        { LexerToken::Trait, "trait" },
+        { LexerToken::Virtual, "virtual" },
+    },
+};
 
 enum class State : uint8_t {
     Start,

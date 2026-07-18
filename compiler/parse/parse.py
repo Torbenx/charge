@@ -1237,6 +1237,7 @@ generatedLines = []
 outputIndentation = 0
 lineNoIndent("#pragma once")
 lineNoIndent()
+lineNoIndent("#include <EnumTable.h>")
 lineNoIndent("#include <parse/IdentifierTable.h>")
 lineNoIndent()
 line("namespace parse {")
@@ -1264,6 +1265,10 @@ with indent():
     for keyword in keywords + specialIdentifiers:
         line(keywordCppName(keyword) + ", // " + keyword)
     line("EOS,")
+    line("COUNT,")
+    lineNoIndent()
+    line("FirstPunctuation = " + punctuationCppName(punctuationTokens[0]) + ",")
+    line("LastPunctuation = " + punctuationCppName(punctuationTokens[-1]) + ",")
     lineNoIndent()
     line("FirstKeyword = " + keywordCppName(keywords[0])+ ",")
     line("LastKeyword = " + keywordCppName(keywords[-1])+ ",")
@@ -1274,7 +1279,6 @@ with indent():
     line("Invalid = 255")
 line("};")
 line("std::string_view nameString(LexerToken);")
-line("std::string_view fixedSpelling(LexerToken);")
 line("constexpr bool isKeyword(LexerToken token) {")
 with indent():
     line("return LexerToken::FirstKeyword <= token && token <= LexerToken::LastKeyword;")
@@ -1283,6 +1287,19 @@ line("constexpr bool isSpecialIdentifier(LexerToken token) {")
 with indent():
     line("return LexerToken::FirstSpecialIdentifier <= token && token <= LexerToken::LastSpecialIdentifier;")
 line("}")
+lineNoIndent()
+
+line("inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {")
+with indent():
+    line("\"\",")
+    line("{")
+    with indent():
+        for punc in punctuationTokens:
+            line("{ LexerToken::" + punctuationCppName(punc) + ", \"" + punc + "\" },")
+        for keyword in keywords + specialIdentifiers:
+            line("{ LexerToken::" + keywordCppName(keyword) + ", \"" + keyword + "\" },")
+    line("},")
+line("};")
 lineNoIndent()
 
 line("enum class State : uint8_t {")
@@ -1341,24 +1358,6 @@ with indent():
     line("default:")
     with indent():
         line("VERIFY_NOT_REACHED();")
-    line("}")
-line("}")
-lineNoIndent()
-
-line("std::string_view fixedSpelling(LexerToken token) {")
-with indent():
-    line("switch(token) {")
-    for punc in punctuationTokens:
-        line("case LexerToken::" + punctuationCppName(punc) + ":")
-        with indent():
-            line("return \"" + punc + "\";")
-    for keyword in keywords + specialIdentifiers:
-        line("case LexerToken::" + keywordCppName(keyword) + ":")
-        with indent():
-            line("return \"" + keyword + "\";")
-    line("default:")
-    with indent():
-        line("return {};")
     line("}")
 line("}")
 lineNoIndent()
