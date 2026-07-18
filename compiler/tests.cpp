@@ -17,6 +17,33 @@
 #include <ranges>
 #include <vector>
 
+struct PerfEnable {
+    PerfEnable() {
+        char* ctlFdStr = std::getenv("PERF_CTL_FD");
+        char* ackFdStr = std::getenv("PERF_ACK_FD");
+        if (ctlFdStr != nullptr && ackFdStr != nullptr) {
+            ctlFd = std::atoi(ctlFdStr);
+            ackFd = std::atoi(ackFdStr);
+        }
+        if (ctlFd != 0 && ackFd != 0)  {
+            write(ctlFd, "enable", 7);
+            std::array<char, 5> result = {};
+            VERIFY(read(ackFd, result.data(), 5) == 5);
+        }
+    }
+
+    ~PerfEnable() {
+        if (ctlFd != 0 && ackFd != 0) {
+            write(ctlFd, "disable", 8);
+            std::array<char, 5> result = {};
+            VERIFY(read(ackFd, result.data(), 5) == 5);
+        }
+    }
+
+    int ctlFd = 0;
+    int ackFd = 0;
+};
+
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -730,7 +757,10 @@ TEST(Charge, BenchmarkSema) {
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
         sema::Context context({}, sourceBuffer);
         parse::Parser parser(sourceBuffer);
-        parser.parse(context);
+        {
+            PerfEnable enable;
+            parser.parse(context);
+        }
         ASSERT_TRUE(parser.done());
         ASSERT_TRUE(context.m_scopeStack.size() == 1);
     }
@@ -747,7 +777,10 @@ TEST(Charge, BenchmarkSimple) {
         parse::SimpleOutput output(sourceBuffer);
         parse::SimpleParser parser(sourceBuffer);
         auto start = Clock::now();
-        parser.parse(output);
+        {
+            PerfEnable enable;
+            parser.parse(output);
+        }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced " << output.tokenBuffer.tokens.size() << " semantic tokens.\n";
@@ -767,7 +800,10 @@ TEST(Charge, BenchmarkNoOutput) {
         parse::NoOutput output;
         parse::SimpleParser parser(sourceBuffer);
         auto start = Clock::now();
-        parser.parse(output);
+        {
+            PerfEnable enable;
+            parser.parse(output);
+        }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and visited " << parser.parsedTokens() << " tokens.\n";
@@ -792,7 +828,10 @@ TEST(Charge, BenchmarkLexerSwitchAndBranch) {
         std::vector<parse::LexerToken> output;
         auto start = Clock::now();
         const char* finalPos = nullptr;
-        finalPos = parse::lexSwitchAndBranch(sourceBuffer.data(), output);
+        {
+            PerfEnable enable;
+            finalPos = parse::lexSwitchAndBranch(sourceBuffer.data(), output);
+        }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced " << output.size() << " tokens.\n";
@@ -811,7 +850,10 @@ TEST(Charge, BenchmarkLexerTablePattern) {
         std::vector<parse::LexerToken> output;
         auto start = Clock::now();
         const char* finalPos = nullptr;
-        finalPos = parse::lexTablePattern(sourceBuffer.data(), output);
+        {
+            PerfEnable enable;
+            finalPos = parse::lexTablePattern(sourceBuffer.data(), output);
+        }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced " << output.size() << " tokens.\n";
@@ -830,7 +872,10 @@ TEST(Charge, BenchmarkLexerTable2Char) {
         std::vector<parse::LexerToken> output;
         auto start = Clock::now();
         const char* finalPos = nullptr;
-        finalPos = parse::lexTable2Char(sourceBuffer.data(), output);
+        {
+            PerfEnable enable;
+            finalPos = parse::lexTable2Char(sourceBuffer.data(), output);
+        }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
         std::cout << " and produced " << output.size() << " tokens.\n";
