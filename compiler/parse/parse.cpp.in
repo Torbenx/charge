@@ -198,6 +198,9 @@ struct WordAndPosition {
     Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
+static bool isIdentifierKeywordOrSpecial(Word word) {
+    return word.id() < FIRST_REGULAR_IDENTIFIER_WORD_ID;
+}
 struct WordMask {
     int_t shiftBits;
 
@@ -255,6 +258,9 @@ struct TokenAndPosition {
 }
 [[nodiscard]] static TokenAndPosition readWord(const char* position, SimpleOutput&) {
     return readWord(position, NoOutput());
+}
+static bool isIdentifierKeywordOrSpecial(LexerToken token) {
+    return token != LexerToken::Identifier;
 }
 constexpr LexerToken toSwitchValue(LexerToken token) { return token; }
 template<std::same_as<LexerToken> T>

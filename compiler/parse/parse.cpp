@@ -198,6 +198,9 @@ struct WordAndPosition {
     Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
     return { position, word };
 }
+static bool isIdentifierKeywordOrSpecial(Word word) {
+    return word.id() < FIRST_REGULAR_IDENTIFIER_WORD_ID;
+}
 struct WordMask {
     int_t shiftBits;
 
@@ -255,6 +258,9 @@ struct TokenAndPosition {
 }
 [[nodiscard]] static TokenAndPosition readWord(const char* position, SimpleOutput&) {
     return readWord(position, NoOutput());
+}
+static bool isIdentifierKeywordOrSpecial(LexerToken token) {
+    return token != LexerToken::Identifier;
 }
 constexpr LexerToken toSwitchValue(LexerToken token) { return token; }
 template<std::same_as<LexerToken> T>
@@ -795,7 +801,7 @@ LABEL_MAYBE_UNUSED lex$word_case_with_read:
         this_identifier = wordAndPos.word;
     }
 LABEL_MAYBE_UNUSED lex$word_case:
-    if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+    if (isIdentifierKeywordOrSpecial(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
         case toCaseValue<identifier_t>(LexerToken::Assert, "assert"):
             // lexToken
@@ -1484,7 +1490,7 @@ LABEL_MAYBE_UNUSED expression$word_case_with_read:
         this_identifier = wordAndPos.word;
     }
 LABEL_MAYBE_UNUSED expression$word_case:
-    if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+    if (isIdentifierKeywordOrSpecial(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
         case toCaseValue<identifier_t>(LexerToken::If, "if"):
             // pushScope ScopeKind::IfExpr
@@ -2483,7 +2489,7 @@ LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED comma_after_expression_in_arguments$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Else, "else"):
                 // next comma_else
@@ -2597,7 +2603,7 @@ LABEL_MAYBE_UNUSED check_designated_argument$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED check_designated_argument$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
                 // -> expression
@@ -2740,7 +2746,7 @@ LABEL_MAYBE_UNUSED member_access$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED member_access$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -2775,7 +2781,7 @@ LABEL_MAYBE_UNUSED static_access$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED static_access$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -3462,7 +3468,7 @@ LABEL_MAYBE_UNUSED statement$word_case_with_read:
         this_identifier = wordAndPos.word;
     }
 LABEL_MAYBE_UNUSED statement$word_case:
-    if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+    if (isIdentifierKeywordOrSpecial(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
         case toCaseValue<identifier_t>(LexerToken::Destroy, "destroy"):
             // pushScope ScopeKind::RightExpr
@@ -3534,7 +3540,7 @@ LABEL_MAYBE_UNUSED let_statement$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED let_statement$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -3569,7 +3575,7 @@ LABEL_MAYBE_UNUSED var_statement$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED var_statement$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -3633,7 +3639,7 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED check_else_branch$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Destroy, "destroy"):
                 // -> statement
@@ -3867,7 +3873,7 @@ LABEL_MAYBE_UNUSED variable_type$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED variable_type$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Const, "const"):
                 // updateData sema::VariableKind::ConstSharedReference
@@ -3999,7 +4005,7 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED after_variable_unique_modifier$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Const, "const"):
                 // updateData sema::VariableKind::ConstUniqueReference
@@ -4052,7 +4058,7 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED after_variable_shared_modifier$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Const, "const"):
                 // updateData sema::VariableKind::ConstSharedReference
@@ -4105,7 +4111,7 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED after_variable_const_modifier$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
                 // -> after_variable_modifier
@@ -4224,7 +4230,7 @@ LABEL_MAYBE_UNUSED parameter$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED parameter$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Var, "var"):
                 // next var_parameter
@@ -4262,7 +4268,7 @@ LABEL_MAYBE_UNUSED var_parameter$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED var_parameter$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -4309,7 +4315,7 @@ LABEL_MAYBE_UNUSED impl_expression$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED impl_expression$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -4443,7 +4449,7 @@ LABEL_MAYBE_UNUSED impl_access_expression$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED impl_access_expression$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -4517,7 +4523,7 @@ LABEL_MAYBE_UNUSED namespace_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED namespace_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Static, "static"):
                 // -> templated_declaration
@@ -4605,7 +4611,7 @@ LABEL_MAYBE_UNUSED namespace_declaration_id$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED namespace_declaration_id$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -4677,7 +4683,7 @@ LABEL_MAYBE_UNUSED templated_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED templated_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Static, "static"):
                 // rememberDeclarationBegin
@@ -4756,7 +4762,7 @@ LABEL_MAYBE_UNUSED templated_declaration_with_attributes$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED templated_declaration_with_attributes$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Static, "static"):
                 // next after_static
@@ -4851,7 +4857,7 @@ LABEL_MAYBE_UNUSED function_declaration_id$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED function_declaration_id$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Impl, "impl"):
                 // commitImplDeclaration DeclarationKind::Function
@@ -4966,7 +4972,7 @@ LABEL_MAYBE_UNUSED struct_declaration_id$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED struct_declaration_id$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Impl, "impl"):
                 // commitImplDeclaration DeclarationKind::Struct
@@ -5054,7 +5060,7 @@ LABEL_MAYBE_UNUSED member_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED member_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Static, "static"):
                 // -> templated_declaration
@@ -5156,7 +5162,7 @@ LABEL_MAYBE_UNUSED enum_declaration_id$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED enum_declaration_id$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Impl, "impl"):
                 // commitImplDeclaration DeclarationKind::Enum
@@ -5244,7 +5250,7 @@ LABEL_MAYBE_UNUSED enum_value_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED enum_value_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Static, "static"):
                 // -> templated_declaration
@@ -5371,7 +5377,7 @@ LABEL_MAYBE_UNUSED after_static$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED after_static$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::Impl, "impl"):
                 // commitImplDeclaration DeclarationKind::StaticVariable
@@ -5426,7 +5432,7 @@ LABEL_MAYBE_UNUSED static_var_variable_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED static_var_variable_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {
@@ -5465,7 +5471,7 @@ LABEL_MAYBE_UNUSED static_open_variable_declaration$as_then:
             this_identifier = wordAndPos.word;
         }
     LABEL_MAYBE_UNUSED static_open_variable_declaration$word_case:
-        if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             default:
                 if (isKeyword(this_identifier)) {

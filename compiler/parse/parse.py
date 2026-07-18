@@ -811,7 +811,7 @@ def generateWordCase(state):
                 keywords.add(c.keyword)
             for c in then.specialIdentifierCases():
                 specialIds.add(c.identifier)
-    line("if (isKeyword(this_identifier) || isSpecialIdentifier(this_identifier)) {")
+    line("if (isIdentifierKeywordOrSpecial(this_identifier)) {")
     with indent():
         line("switch (toSwitchValue(this_identifier)) {")
         with indent():
