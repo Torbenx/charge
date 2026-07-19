@@ -18,86 +18,86 @@ std::string_view nameString(LexerToken token) {
         return "LeftBrace";
     case LexerToken::RightBrace:
         return "RightBrace";
-    case LexerToken::Exclaim:
-        return "Exclaim";
     case LexerToken::Tilde:
         return "Tilde";
-    case LexerToken::PlusPlus:
-        return "PlusPlus";
-    case LexerToken::MinusMinus:
-        return "MinusMinus";
-    case LexerToken::Plus:
-        return "Plus";
-    case LexerToken::Minus:
-        return "Minus";
-    case LexerToken::Star:
-        return "Star";
-    case LexerToken::Amp:
-        return "Amp";
-    case LexerToken::Hat:
-        return "Hat";
-    case LexerToken::Vert:
-        return "Vert";
-    case LexerToken::Slash:
-        return "Slash";
-    case LexerToken::Percent:
-        return "Percent";
-    case LexerToken::LessLess:
-        return "LessLess";
-    case LexerToken::GreaterGreater:
-        return "GreaterGreater";
-    case LexerToken::AmpAmp:
-        return "AmpAmp";
-    case LexerToken::VertVert:
-        return "VertVert";
-    case LexerToken::ExclaimEqual:
-        return "ExclaimEqual";
-    case LexerToken::EqualEqual:
-        return "EqualEqual";
-    case LexerToken::Less:
-        return "Less";
-    case LexerToken::LessEqual:
-        return "LessEqual";
-    case LexerToken::Greater:
-        return "Greater";
-    case LexerToken::GreaterEqual:
-        return "GreaterEqual";
-    case LexerToken::Equal:
-        return "Equal";
-    case LexerToken::PlusEqual:
-        return "PlusEqual";
-    case LexerToken::MinusEqual:
-        return "MinusEqual";
-    case LexerToken::StarEqual:
-        return "StarEqual";
-    case LexerToken::AmpEqual:
-        return "AmpEqual";
-    case LexerToken::HatEqual:
-        return "HatEqual";
-    case LexerToken::VertEqual:
-        return "VertEqual";
-    case LexerToken::SlashEqual:
-        return "SlashEqual";
-    case LexerToken::PercentEqual:
-        return "PercentEqual";
-    case LexerToken::LessLessEqual:
-        return "LessLessEqual";
-    case LexerToken::GreaterGreaterEqual:
-        return "GreaterGreaterEqual";
-    case LexerToken::AmpAmpEqual:
-        return "AmpAmpEqual";
-    case LexerToken::VertVertEqual:
-        return "VertVertEqual";
     case LexerToken::Comma:
         return "Comma";
     case LexerToken::Point:
         return "Point";
+    case LexerToken::SemiColon:
+        return "SemiColon";
     case LexerToken::Colon:
         return "Colon";
     case LexerToken::ColonColon:
         return "ColonColon";
-    case LexerToken::SemiColon:
-        return "SemiColon";
+    case LexerToken::Amp:
+        return "Amp";
+    case LexerToken::Vert:
+        return "Vert";
+    case LexerToken::Less:
+        return "Less";
+    case LexerToken::Greater:
+        return "Greater";
+    case LexerToken::Plus:
+        return "Plus";
+    case LexerToken::Minus:
+        return "Minus";
+    case LexerToken::Hat:
+        return "Hat";
+    case LexerToken::Star:
+        return "Star";
+    case LexerToken::Percent:
+        return "Percent";
+    case LexerToken::Slash:
+        return "Slash";
+    case LexerToken::Exclaim:
+        return "Exclaim";
+    case LexerToken::AmpAmp:
+        return "AmpAmp";
+    case LexerToken::VertVert:
+        return "VertVert";
+    case LexerToken::LessLess:
+        return "LessLess";
+    case LexerToken::GreaterGreater:
+        return "GreaterGreater";
+    case LexerToken::PlusPlus:
+        return "PlusPlus";
+    case LexerToken::MinusMinus:
+        return "MinusMinus";
+    case LexerToken::AmpEqual:
+        return "AmpEqual";
+    case LexerToken::VertEqual:
+        return "VertEqual";
+    case LexerToken::LessEqual:
+        return "LessEqual";
+    case LexerToken::GreaterEqual:
+        return "GreaterEqual";
+    case LexerToken::PlusEqual:
+        return "PlusEqual";
+    case LexerToken::MinusEqual:
+        return "MinusEqual";
+    case LexerToken::HatEqual:
+        return "HatEqual";
+    case LexerToken::StarEqual:
+        return "StarEqual";
+    case LexerToken::PercentEqual:
+        return "PercentEqual";
+    case LexerToken::SlashEqual:
+        return "SlashEqual";
+    case LexerToken::ExclaimEqual:
+        return "ExclaimEqual";
+    case LexerToken::AmpAmpEqual:
+        return "AmpAmpEqual";
+    case LexerToken::VertVertEqual:
+        return "VertVertEqual";
+    case LexerToken::LessLessEqual:
+        return "LessLessEqual";
+    case LexerToken::GreaterGreaterEqual:
+        return "GreaterGreaterEqual";
+    case LexerToken::Equal:
+        return "Equal";
+    case LexerToken::EqualEqual:
+        return "EqualEqual";
     case LexerToken::EqualGreater:
         return "EqualGreater";
     case LexerToken::LessEqualGreater:

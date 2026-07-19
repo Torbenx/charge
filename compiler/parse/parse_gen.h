@@ -80,46 +80,46 @@ enum class LexerToken : uint8_t {
     RightSquare, // ]
     LeftBrace, // {
     RightBrace, // }
-    Exclaim, // !
     Tilde, // ~
-    PlusPlus, // ++
-    MinusMinus, // --
-    Plus, // +
-    Minus, // -
-    Star, // *
-    Amp, // &
-    Hat, // ^
-    Vert, // |
-    Slash, // /
-    Percent, // %
-    LessLess, // <<
-    GreaterGreater, // >>
-    AmpAmp, // &&
-    VertVert, // ||
-    ExclaimEqual, // !=
-    EqualEqual, // ==
-    Less, // <
-    LessEqual, // <=
-    Greater, // >
-    GreaterEqual, // >=
-    Equal, // =
-    PlusEqual, // +=
-    MinusEqual, // -=
-    StarEqual, // *=
-    AmpEqual, // &=
-    HatEqual, // ^=
-    VertEqual, // |=
-    SlashEqual, // /=
-    PercentEqual, // %=
-    LessLessEqual, // <<=
-    GreaterGreaterEqual, // >>=
-    AmpAmpEqual, // &&=
-    VertVertEqual, // ||=
     Comma, // ,
     Point, // .
+    SemiColon, // ;
     Colon, // :
     ColonColon, // ::
-    SemiColon, // ;
+    Amp, // &
+    Vert, // |
+    Less, // <
+    Greater, // >
+    Plus, // +
+    Minus, // -
+    Hat, // ^
+    Star, // *
+    Percent, // %
+    Slash, // /
+    Exclaim, // !
+    AmpAmp, // &&
+    VertVert, // ||
+    LessLess, // <<
+    GreaterGreater, // >>
+    PlusPlus, // ++
+    MinusMinus, // --
+    AmpEqual, // &=
+    VertEqual, // |=
+    LessEqual, // <=
+    GreaterEqual, // >=
+    PlusEqual, // +=
+    MinusEqual, // -=
+    HatEqual, // ^=
+    StarEqual, // *=
+    PercentEqual, // %=
+    SlashEqual, // /=
+    ExclaimEqual, // !=
+    AmpAmpEqual, // &&=
+    VertVertEqual, // ||=
+    LessLessEqual, // <<=
+    GreaterGreaterEqual, // >>=
+    Equal, // =
+    EqualEqual, // ==
     EqualGreater, // =>
     LessEqualGreater, // <=>
     MinusGreater, // ->
@@ -193,46 +193,46 @@ inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {
         { LexerToken::RightSquare, "]" },
         { LexerToken::LeftBrace, "{" },
         { LexerToken::RightBrace, "}" },
-        { LexerToken::Exclaim, "!" },
         { LexerToken::Tilde, "~" },
-        { LexerToken::PlusPlus, "++" },
-        { LexerToken::MinusMinus, "--" },
-        { LexerToken::Plus, "+" },
-        { LexerToken::Minus, "-" },
-        { LexerToken::Star, "*" },
-        { LexerToken::Amp, "&" },
-        { LexerToken::Hat, "^" },
-        { LexerToken::Vert, "|" },
-        { LexerToken::Slash, "/" },
-        { LexerToken::Percent, "%" },
-        { LexerToken::LessLess, "<<" },
-        { LexerToken::GreaterGreater, ">>" },
-        { LexerToken::AmpAmp, "&&" },
-        { LexerToken::VertVert, "||" },
-        { LexerToken::ExclaimEqual, "!=" },
-        { LexerToken::EqualEqual, "==" },
-        { LexerToken::Less, "<" },
-        { LexerToken::LessEqual, "<=" },
-        { LexerToken::Greater, ">" },
-        { LexerToken::GreaterEqual, ">=" },
-        { LexerToken::Equal, "=" },
-        { LexerToken::PlusEqual, "+=" },
-        { LexerToken::MinusEqual, "-=" },
-        { LexerToken::StarEqual, "*=" },
-        { LexerToken::AmpEqual, "&=" },
-        { LexerToken::HatEqual, "^=" },
-        { LexerToken::VertEqual, "|=" },
-        { LexerToken::SlashEqual, "/=" },
-        { LexerToken::PercentEqual, "%=" },
-        { LexerToken::LessLessEqual, "<<=" },
-        { LexerToken::GreaterGreaterEqual, ">>=" },
-        { LexerToken::AmpAmpEqual, "&&=" },
-        { LexerToken::VertVertEqual, "||=" },
         { LexerToken::Comma, "," },
         { LexerToken::Point, "." },
+        { LexerToken::SemiColon, ";" },
         { LexerToken::Colon, ":" },
         { LexerToken::ColonColon, "::" },
-        { LexerToken::SemiColon, ";" },
+        { LexerToken::Amp, "&" },
+        { LexerToken::Vert, "|" },
+        { LexerToken::Less, "<" },
+        { LexerToken::Greater, ">" },
+        { LexerToken::Plus, "+" },
+        { LexerToken::Minus, "-" },
+        { LexerToken::Hat, "^" },
+        { LexerToken::Star, "*" },
+        { LexerToken::Percent, "%" },
+        { LexerToken::Slash, "/" },
+        { LexerToken::Exclaim, "!" },
+        { LexerToken::AmpAmp, "&&" },
+        { LexerToken::VertVert, "||" },
+        { LexerToken::LessLess, "<<" },
+        { LexerToken::GreaterGreater, ">>" },
+        { LexerToken::PlusPlus, "++" },
+        { LexerToken::MinusMinus, "--" },
+        { LexerToken::AmpEqual, "&=" },
+        { LexerToken::VertEqual, "|=" },
+        { LexerToken::LessEqual, "<=" },
+        { LexerToken::GreaterEqual, ">=" },
+        { LexerToken::PlusEqual, "+=" },
+        { LexerToken::MinusEqual, "-=" },
+        { LexerToken::HatEqual, "^=" },
+        { LexerToken::StarEqual, "*=" },
+        { LexerToken::PercentEqual, "%=" },
+        { LexerToken::SlashEqual, "/=" },
+        { LexerToken::ExclaimEqual, "!=" },
+        { LexerToken::AmpAmpEqual, "&&=" },
+        { LexerToken::VertVertEqual, "||=" },
+        { LexerToken::LessLessEqual, "<<=" },
+        { LexerToken::GreaterGreaterEqual, ">>=" },
+        { LexerToken::Equal, "=" },
+        { LexerToken::EqualEqual, "==" },
         { LexerToken::EqualGreater, "=>" },
         { LexerToken::LessEqualGreater, "<=>" },
         { LexerToken::MinusGreater, "->" },
