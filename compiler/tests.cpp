@@ -816,6 +816,7 @@ namespace parse {
     const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& output);
     const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>& output);
     const char* lexTableHybrid(const char* sourcePosition, std::vector<LexerToken>& output);
+    const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken>& output);
 }
 
 TEST(Charge, BenchmarkLexerSwitchAndBranch) {
@@ -902,6 +903,29 @@ TEST(Charge, BenchmarkLexerTableHybrid) {
         {
             PerfEnable enable;
             finalPos = parse::lexTableHybrid(sourceBuffer.data(), output);
+        }
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.size() << " tokens.\n";
+        ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
+    }
+}
+
+TEST(Charge, BenchmarkLexerSwitchAndTable) {
+    namespace fs = std::filesystem;
+    fs::path file { BENCHMARK_FILE };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
+        std::vector<parse::LexerToken> output;
+        output.reserve(4000);
+        auto start = Clock::now();
+        const char* finalPos = nullptr;
+        {
+            PerfEnable enable;
+            finalPos = parse::lexSwitchAndTable(sourceBuffer.data(), output);
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);

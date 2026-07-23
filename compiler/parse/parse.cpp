@@ -6771,3 +6771,4 @@ SourceLocation Parser::location(sema::Context& context) const {
 #include "lexer_table2Char.cpp"
 #include "lexer_tablePattern.cpp"
 #include "lexer_hybrid.cpp"
+#include "lexer_switchAndTable.cpp"
