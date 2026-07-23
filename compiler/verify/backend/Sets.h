@@ -80,7 +80,7 @@ struct Sets {
     BooleanValue makeEquality(PairHandle pair) {
         return { params.equalityTheory, pair.pairId() * 2 };
     }
-    BooleanValue makeIsEmpty(Solver& solver, Value value);
+    BooleanValue isEmpty(Solver& solver, Value value);
     void newPair(Solver&, PairHandle);
 
     void propagateElementAssignment(Solver&, BooleanValue);
@@ -99,9 +99,14 @@ struct Sets {
 
     bool assignedEmpty(Solver& solver, Value);
 
+    BooleanValue mapToBool(Solver&, ElementId, Containment);
+    std::optional<BooleanValue> tryToBool(Solver&, ElementId, Containment);
+    std::pair<ElementId, Containment> mapFromBool(BooleanValue);
+
     ElementId newElement(Solver& solver);
 
     Value emptySet() { return Value(params.emptySetTheory, 0); }
+    ValueKind setKind() const { return params.setKind; }
 
     Value union_(Solver&, std::span<const Value>);
     Value union_(Solver& solver, std::initializer_list<Value> vals) {
@@ -201,10 +206,6 @@ private:
     LiteralInfo& infoFor(Containment lit) {
         return setInfos[lit.set()].literalInfos[lit.contained()];
     }
-
-    BooleanValue mapToBool(Solver&, ElementId, Containment);
-    std::optional<BooleanValue> tryToBool(Solver&, ElementId, Containment);
-    std::pair<ElementId, Containment> mapFromBool(BooleanValue);
 
     SetsParams params;
 

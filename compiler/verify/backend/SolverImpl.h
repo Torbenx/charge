@@ -4,10 +4,11 @@
 #include <verify/backend/DataManager.h>
 #include <verify/backend/Members.h>
 #include <verify/backend/PairSet.h>
-#include <verify/backend/UninterpretedEquality.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/UninterpretedEquality.h>
+#include <verify/backend/SingletonSets.h>
 
 #include <ReverseMemberPointer.h>
 
@@ -36,6 +37,10 @@ struct SolverImpl : Solver, SatCore::Interface {
     template<TheoryId theory>
     uint64_t pairLabelOf(Value v);
 
+    Sets& setTheory(ValueKind);
+    void propagateSetContainment(Sets&, Sets::ElementId, Sets::Containment);
+    bool setAlwaysNonEmpty(Value);
+
     // The initialization order here matters:
 
     // Initialize members with trivial ctors
@@ -60,6 +65,7 @@ struct SolverImpl : Solver, SatCore::Interface {
     Members members;
 
     Sets uninterpConstantSets;
+    SingletonSets uninterpConstantSingletons;
 };
 
 inline SolverImpl& Solver::impl() {

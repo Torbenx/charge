@@ -116,7 +116,19 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
         if (!solver.assignedFalse(lit))
             mask |= literalMask(index);
     }
-    VERIFY(mask != 0);
+    if (mask == 0) {
+        // This breaks our invariances of having always at least one bit set.
+        // We can rely on this because the conflicts themselves are never propagated.
+        // To recover the invariance we glue the conflict clause to a an empty one,
+        // the glue variable will be initially unassigned have its bit set.
+        // TODO: What when clause.size() == MAX_CLAUSE_SIZE
+        VERIFY(clause.size() < MAX_CLAUSE_SIZE);
+        BooleanValue glue = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
+        occMap[glue].push_back({ (uint32_t)clause.size(), (uint32_t)clauseIndex });
+        mask |= literalMask(clause.size());
+        clause.push_back(glue);
+        solver.assignTrue(!glue, makeReason<ReasonKind::Always>({}));
+    }
     clauses.emplace_back(std::move(clause));
     clauseMasks.push_back(mask);
     if (std::popcount(mask) == 1) {

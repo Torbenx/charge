@@ -18,6 +18,8 @@ target_sources(${PROJECT_NAME}
     Sets.cpp
     Sets.h
     SetTests.cpp
+    SingletonSets.cpp
+    SingletonSets.h
     Solver.cpp
     Solver.h
     SolverImpl.h

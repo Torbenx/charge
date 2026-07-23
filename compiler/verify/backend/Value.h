@@ -1,6 +1,6 @@
 #pragma once
 
-#include <types.h>
+#include <EnumTable.h>
 
 #include <utility>
 
@@ -31,16 +31,10 @@ enum class TheoryId : uint8_t {
 
 std::string_view nameString(TheoryId);
 
-constexpr ValueKind kindOf(TheoryId theory) {
-    switch (theory) {
-#define THEORY(name, valueKind) \
-    case TheoryId::name:        \
-        return ValueKind::valueKind;
+inline constexpr EnumTable<TheoryId, ValueKind> kindOf = {
+#define THEORY(name, valueKind) { TheoryId::name, ValueKind::valueKind },
 #include <verify/backend/theories.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
+};
 
 struct Value {
     constexpr Value(TheoryId theory, uint32_t id)
@@ -164,6 +158,32 @@ private:
     uint32_t kindBits : 7;
     uint32_t idBits : 24;
 };
+
+constexpr ValueKind pairValueKind(TheoryId pairTheory) {
+    static constexpr EnumTable<TheoryId, ValueKind> kinds = {
+        ValueKind::COUNT,
+        {
+#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) { TheoryId::name, ValueKind::pairValueKind },
+#include <verify/backend/theories.inc>
+        }
+    };
+    auto val = kinds(pairTheory);
+    VERIFY(val < ValueKind::COUNT);
+    return val;
+}
+
+constexpr uint8_t valuesPerPair(TheoryId pairTheory) {
+    static constexpr EnumTable<TheoryId, uint8_t> vals = {
+        limits::max,
+        {
+#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) { TheoryId::name, valuesPerPair },
+#include <verify/backend/theories.inc>
+        }
+    };
+    auto val = vals(pairTheory);
+    VERIFY(val != (uint8_t)limits::max);
+    return val;
+}
 
 template<TheoryId theory>
 PairHandle decodePairTheoryValue(Value v) {

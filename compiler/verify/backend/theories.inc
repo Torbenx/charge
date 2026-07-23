@@ -43,6 +43,8 @@ THEORY(AuxUninterpretedConstants, UninterpretedConstant)
 
 SET_THEORY(UninterpretedConstantSet, uninterpConstantSets)
 THEORY(AuxUninterpretedConstantSets, UninterpretedConstantSet)
+THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
+REASON(UninterpretedConstantInSingleton, InSingletonReason, false, uninterpConstantSingletons)
 
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)

@@ -27,11 +27,11 @@ Sets::Sets(Solver& solver, const SetsParams& params)
 
     Value empty = solver.impl().newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
-    solver.assignTrue(makeIsEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
+    solver.assignTrue(isEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
     VERIFY(solver.impl().sat.propagate());
 }
 
-BooleanValue Sets::makeIsEmpty(Solver& solver, Value set) {
+BooleanValue Sets::isEmpty(Solver& solver, Value set) {
     return mapToBool(solver, forAllElement(), !in(set));
 }
 
@@ -41,8 +41,8 @@ void Sets::newPair(Solver& solver, PairHandle pair) {
     auto [a, b] = solver.at(pair);
     solver.addClause({
         makeEquality(pair),
-        !makeIsEmpty(solver, subset(solver, { a }, { b })),
-        !makeIsEmpty(solver, subset(solver, { b }, { a })),
+        !isEmpty(solver, subset(solver, { a }, { b })),
+        !isEmpty(solver, subset(solver, { b }, { a })),
     });
     setInfos[a].equalities.push_back({ pair, b });
     setInfos[b].equalities.push_back({ pair, a });
@@ -226,9 +226,9 @@ void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
         VERIFY(setClause.size() >= 2);
         if (setClause.size() == 2) {
             VERIFY(!setClause[1].contained());
-            replacementLiterals.push_back(makeIsEmpty(solver, setClause[1].set()));
+            replacementLiterals.push_back(isEmpty(solver, setClause[1].set()));
         } else {
-            replacementLiterals.push_back(makeIsEmpty(solver, addClause(solver, std::move(setClause))));
+            replacementLiterals.push_back(isEmpty(solver, addClause(solver, std::move(setClause))));
         }
     }
 
@@ -327,6 +327,9 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         Containment otherCont(otherSet, literal.contained());
         assignTrue(solver, element, otherCont, makeReason(params.equalityToElementReason, { pair, literal }));
     }
+
+    // Set theory propagation
+    solver.impl().propagateSetContainment(*this, element, literal);
 }
 
 void Sets::unapplyContainment(Solver&, ElementId element, Containment literal) {
@@ -437,8 +440,12 @@ BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment lite
     }
     std::optional<BooleanValue>& maybeBool = inSetLiterals[element.id()];
     if (!maybeBool.has_value()) {
-        maybeBool = solver.impl().newBoolean(params.elementInSetTheory);
-        inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
+        if (element == forAllElement() && solver.impl().setAlwaysNonEmpty(literal.set())) {
+            maybeBool = true_literal;
+        } else {
+            maybeBool = solver.impl().newBoolean(params.elementInSetTheory);
+            inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
+        }
     }
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
 }

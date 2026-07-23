@@ -16,7 +16,14 @@ SolverImpl::SolverImpl()
     , builtinTrueFalse(*this)
     , uninterpConstantEquality(*this, theory_params::eqUninterpretedConstant)
     , members(*this)
-    , uninterpConstantSets(*this, theory_params::setsUninterpretedConstantSet) { }
+    , uninterpConstantSets(*this, theory_params::setsUninterpretedConstantSet)
+    , uninterpConstantSingletons(*this,
+          {
+              .elementKind = ValueKind::UninterpretedConstant,
+              .setKind = ValueKind::UninterpretedConstantSet,
+              .singletonTheory = TheoryId::UninterpretedConstantSingletonSets,
+              .inSingletonReason = makeTypedReasonKind<ReasonKind::UninterpretedConstantInSingleton>(),
+          }) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     BooleanValue b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -86,18 +93,21 @@ void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.newDecisionLevel(impl);
     impl.members.newDecisionLevel(impl);
+    impl.uninterpConstantSingletons.newDecisionLevel(impl);
 }
 
 void SatCore::Interface::onBeginBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.beginBacktrack(impl);
     impl.members.beginBacktrack(impl);
+    impl.uninterpConstantSingletons.beginBacktrack(impl);
 }
 
 void SatCore::Interface::onEndBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.endBacktrack(impl);
     impl.members.endBacktrack(impl);
+    impl.uninterpConstantSingletons.endBacktrack(impl);
 }
 
 bool SatCore::Interface::testReason(Literal lit, const Reason& reason) {
@@ -184,6 +194,38 @@ void SatCore::Interface::learnClause(std::vector<BooleanValue> clause) {
     impl.addClause(std::move(clause));
 }
 
+// ------------------------------ Sets ------------------------------
+
+Sets& SolverImpl::setTheory(ValueKind kind) {
+    static constexpr auto table = [] {
+        std::array<Sets SolverImpl::*, std::to_underlying(ValueKind::COUNT)> result;
+        result.fill(nullptr);
+#define SET_THEORY(valueKind, memberName) result[std::to_underlying(ValueKind::valueKind)] = &SolverImpl::memberName;
+#include <verify/backend/theories.inc>
+        return result;
+    }();
+    return (*this).*(table[std::to_underlying(kind)]);
+}
+
+void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::Containment containment) {
+    switch (containment.set().theory()) {
+    case TheoryId::UninterpretedConstantSingletonSets:
+        uninterpConstantSingletons.propagateContainment(*this, element, containment);
+        break;
+    default:
+        break;
+    }
+}
+
+bool SolverImpl::setAlwaysNonEmpty(Value set) {
+    switch (kindOf(set.theory())) {
+    case ValueKind::UninterpretedConstantSet:
+        return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
+    default:
+        return false;
+    }
+}
+
 // ------------------------ Clauses forwards ------------------------
 
 static bool simplifyClause(Solver& solver, std::vector<BooleanValue>& clause) {
@@ -205,7 +247,8 @@ static bool simplifyClause(Solver& solver, std::vector<BooleanValue>& clause) {
 }
 
 void Solver::addClause(std::vector<BooleanValue> clause) {
-    impl().uninterpConstantSets.refineClause(*this, clause);
+#define SET_THEORY(valueKind, memberName) impl().memberName.refineClause(*this, clause);
+#include <verify/backend/theories.inc>
 
     if (simplifyClause(*this, clause))
         return;
@@ -215,7 +258,7 @@ void Solver::addClause(std::vector<BooleanValue> clause) {
         return;
     }
 
-    impl().clauses.addClause(*this, clause);
+    impl().clauses.addClause(*this, std::move(clause));
 }
 
 void Solver::addClause(const ClauseBuilder& builder) {
@@ -263,9 +306,13 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         return ms.compositeLabel((Member)a) <=> ms.compositeLabel((Member)b);
     }
 
+    case TheoryId::UninterpretedConstantSingletonSets: {
+        auto& singletons = impl().uninterpConstantSingletons;
+        return rewriteOrder(singletons.element(a), singletons.element(b));
+    }
     case TheoryId::UninterpretedConstantSetElementInSet:
     case TheoryId::UninterpretedConstantSetExpressions:
-        // Ordering is not important since not rewriting is done
+        // Ordering is not important since no rewriting is done
         return a.id() <=> b.id();
 
 #define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair)                                     \
@@ -309,12 +356,22 @@ void SolverImpl::onNewPair(PairHandle handle) {
     }
 #include <verify/backend/theories.inc>
 
+    auto [a, b] = at(handle);
     if (handle.valueKind() == ValueKind::UninterpretedConstant) {
+        // Note: This is a lot of stuff to add eagerly, maybe this can be reduced in the future.
         uninterpConstantEquality.newPair(*this, handle);
+        BooleanValue elementEq = equality(handle);
+        BooleanValue singletonEq = equality(uninterpConstantSingletons.singleton(*this, a), uninterpConstantSingletons.singleton(*this, b));
+        addClause({ elementEq, !singletonEq });
+        addClause({ !elementEq, singletonEq });
     } else if (handle.valueKind() == ValueKind::Member) {
         members.newPair(*this, handle);
     } else if (handle.valueKind() == ValueKind::UninterpretedConstantSet) {
         uninterpConstantSets.newPair(*this, handle);
+        if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
+            // The onNewPair() call for the element equality will automatically create the equivalence clauses.
+            [[maybe_unused]] BooleanValue elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
+        }
     }
 }
 
@@ -465,7 +522,7 @@ BooleanValue Solver::equality(PairHandle handle) {
     } else if (handle.valueKind() == ValueKind::UninterpretedConstantSet) {
         if (handle.specialPair()) {
             // Encodes emptySet == b which is equivalent to b being empty
-            return impl().uninterpConstantSets.makeIsEmpty(*this, handle.encodedValue());
+            return impl().uninterpConstantSets.isEmpty(*this, handle.encodedValue());
         }
         return impl().uninterpConstantSets.makeEquality(handle);
     } else {
