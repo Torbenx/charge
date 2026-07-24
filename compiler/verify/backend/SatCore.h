@@ -51,7 +51,7 @@ struct DecisionData {
 };
 
 struct SatCore {
-    using Literal = BooleanValue;
+    using Literal = Bool;
 
     struct LiteralInfo {
         std::optional<TracePosition> firstReason;
@@ -80,7 +80,7 @@ struct SatCore {
         void propagateAssignment(Literal);
         void unapplyAssignment(Literal);
 
-        void learnClause(std::vector<BooleanValue>);
+        void learnClause(std::vector<Bool>);
     };
 
     ClauseBuilder beginClause() {

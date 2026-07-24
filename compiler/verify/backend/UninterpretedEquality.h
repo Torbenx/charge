@@ -6,7 +6,7 @@
 namespace verify::backend {
 
 struct UninterpretedEqualityParams {
-    ValueKind valueKind;
+    Sort sort;
     TheoryId theory;
     TypedReasonKind<EmptyReasonData> equalityReason;
     TypedReasonKind<DisequalityReason> disequalityReason;
@@ -15,13 +15,13 @@ struct UninterpretedEqualityParams {
 
 namespace theory_params {
 
-#define UNINTERPRETED_EQUALITY_THEORY(valueKind, memberName)                       \
-    inline constexpr UninterpretedEqualityParams eq##valueKind = {                 \
-        ValueKind::valueKind,                                                      \
-        TheoryId::valueKind##Equality,                                             \
-        makeTypedReasonKind<ReasonKind::valueKind##Equality>(),                    \
-        makeTypedReasonKind<ReasonKind::valueKind##Disequality>(),                 \
-        makeTypedReasonKind<ReasonKind::valueKind##DisequalityByAlwaysDisequal>(), \
+#define UNINTERPRETED_EQUALITY_THEORY(sort, memberName)                       \
+    inline constexpr UninterpretedEqualityParams eq##sort = {                 \
+        Sort::sort,                                                           \
+        TheoryId::sort##Equality,                                             \
+        makeTypedReasonKind<ReasonKind::sort##Equality>(),                    \
+        makeTypedReasonKind<ReasonKind::sort##Disequality>(),                 \
+        makeTypedReasonKind<ReasonKind::sort##DisequalityByAlwaysDisequal>(), \
     };
 #include <verify/backend/theories.inc>
 
@@ -30,11 +30,11 @@ namespace theory_params {
 struct UninterpretedEquality {
     UninterpretedEquality(Solver&, const UninterpretedEqualityParams&);
 
-    BooleanValue makeEquality(PairHandle pair) const {
+    Bool makeEquality(PairHandle pair) const {
         return { params.theory, pair.pairId() * 2 };
     }
-    PairHandle pairOf(BooleanValue equality) const {
-        return { params.valueKind, equality.id() / 2 };
+    PairHandle pairOf(Bool equality) const {
+        return { params.sort, equality.id() / 2 };
     }
 
     void propagateEqual(Solver& solver, PairHandle eqPair);
@@ -42,8 +42,8 @@ struct UninterpretedEquality {
 
     void checkInvariances(Solver&);
 
-    bool testReason(Solver&, BooleanValue, const Reason&);
-    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+    bool testReason(Solver&, Bool, const Reason&);
+    ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
     void newDecisionLevel(Solver&);
     void beginBacktrack(Solver&);
     void endBacktrack(Solver&);
@@ -114,7 +114,7 @@ private:
 
     UninterpretedEqualityParams params;
 
-    KindData<EqualityInfo> equalityInfos;
+    SortData<EqualityInfo> equalityInfos;
 
     std::vector<EqualityTraceEntry> equalityTrace;
     std::vector<DisequalityTraceEntry> disequalityTrace;

@@ -40,8 +40,8 @@ struct DataManager {
         std::byte* pointer = nullptr;
     };
 
-    struct KindDataInfo : CommonDataInfo {
-        KindDataBase* base = nullptr;
+    struct SortDataInfo : CommonDataInfo {
+        SortDataBase* base = nullptr;
         std::byte** table = nullptr;
     };
 
@@ -51,13 +51,13 @@ struct DataManager {
         std::vector<TheoryDataInfo> datas = {};
     };
 
-    struct ValueKindInfo {
-        std::vector<KindDataInfo> datas = {};
+    struct SortInfo {
+        std::vector<SortDataInfo> datas = {};
     };
 
-    ValueKindInfo& at(ValueKind kind) {
-        VERIFY(kind < ValueKind::COUNT);
-        return kinds[std::to_underlying(kind)];
+    SortInfo& at(Sort sort) {
+        VERIFY(sort < Sort::COUNT);
+        return sorts[std::to_underlying(sort)];
     }
 
     TheoryInfo& at(TheoryId id) {
@@ -68,10 +68,10 @@ struct DataManager {
     DataManager();
     Value newValue(TheoryId, int_t count);
     void registerTheoryData(TheoryDataBase&, TheoryId, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
-    void registerKindData(KindDataBase&, ValueKind, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
+    void registerSortData(SortDataBase&, Sort, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
     ~DataManager();
 
-    std::array<ValueKindInfo, std::to_underlying(ValueKind::COUNT)> kinds;
+    std::array<SortInfo, std::to_underlying(Sort::COUNT)> sorts;
     std::array<TheoryInfo, std::to_underlying(TheoryId::COUNT)> theories;
 };
 

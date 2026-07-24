@@ -10,7 +10,7 @@ struct SolverImpl;
 struct SatCore;
 struct Solver;
 
-enum class ValueKind : uint8_t {
+enum class Sort : uint8_t {
     Boolean,
     UninterpretedConstant,
     UninterpretedConstantSet,
@@ -22,7 +22,7 @@ enum class ValueKind : uint8_t {
 };
 
 enum class TheoryId : uint8_t {
-#define THEORY(name, valueKind) name,
+#define THEORY(name, sort) name,
 #include <verify/backend/theories.inc>
 
     COUNT,
@@ -31,8 +31,8 @@ enum class TheoryId : uint8_t {
 
 std::string_view nameString(TheoryId);
 
-inline constexpr EnumTable<TheoryId, ValueKind> kindOf = {
-#define THEORY(name, valueKind) { TheoryId::name, ValueKind::valueKind },
+inline constexpr EnumTable<TheoryId, Sort> sortOf = {
+#define THEORY(name, sort) { TheoryId::name, Sort::sort },
 #include <verify/backend/theories.inc>
 };
 
@@ -54,26 +54,26 @@ inline constexpr Value INVALID_VALUE = { TheoryId::Invalid, (uint32_t)limits::ma
 In the literature on boolean satisfiability this would be called a literal.
 For each literal X there exist the complementary literal NOT X.
 */
-struct BooleanValue : Value {
+struct Bool : Value {
     using Value::Value;
-    constexpr explicit BooleanValue(Value v)
+    constexpr explicit Bool(Value v)
         : Value(v) { }
 
-    constexpr BooleanValue operator!() const {
-        return BooleanValue(theory(), id() ^ 1u);
+    constexpr Bool operator!() const {
+        return Bool(theory(), id() ^ 1u);
     }
 
     constexpr bool negated() const {
         return (id() & 1u) != 0;
     }
 
-    constexpr BooleanValue baseValue() const {
-        return BooleanValue(theory(), id() & ~1u);
+    constexpr Bool baseValue() const {
+        return Bool(theory(), id() & ~1u);
     }
 };
 
-inline constexpr BooleanValue true_literal = BooleanValue(TheoryId::TrueFalse, 0);
-inline constexpr BooleanValue false_literal = BooleanValue(TheoryId::TrueFalse, 1);
+inline constexpr Bool true_literal = Bool(TheoryId::TrueFalse, 0);
+inline constexpr Bool false_literal = Bool(TheoryId::TrueFalse, 1);
 
 struct Member : Value {
     using Value::Value;
@@ -88,7 +88,7 @@ struct Member : Value {
 inline constexpr Member identity_member = Member(TheoryId::CompositeMembers, 0);
 
 struct ClauseAndIndex {
-    std::span<const BooleanValue> clause;
+    std::span<const Bool> clause;
     int_t forceLiteralIndex = 0;
 };
 
@@ -97,7 +97,7 @@ struct ClauseBuilder {
 
     explicit ClauseBuilder(uint32_t clauseId)
         : clauseId(clauseId) { }
-    bool add(Solver&, BooleanValue);
+    bool add(Solver&, Bool);
 };
 
 //! Represents an unordered pair of values
@@ -120,15 +120,15 @@ struct PairHandle {
     static constexpr PairHandle makeSpecialPair(Value value) {
         return PairHandle(value);
     }
-    constexpr PairHandle(ValueKind kind, uint32_t id)
-        : specialBit(0), kindBits(std::to_underlying(kind)), idBits(id) { }
+    constexpr PairHandle(Sort sort, uint32_t id)
+        : specialBit(0), sortBits(std::to_underlying(sort)), idBits(id) { }
 
     bool specialPair() const { return specialBit; }
-    ValueKind valueKind() const {
+    Sort sort() const {
         if (specialPair())
-            return kindOf((TheoryId)kindBits);
+            return sortOf((TheoryId)sortBits);
         else
-            return (ValueKind)kindBits;
+            return (Sort)sortBits;
     }
     uint32_t pairId() const {
         VERIFY(!specialPair());
@@ -136,15 +136,15 @@ struct PairHandle {
     }
     Value encodedValue() const {
         VERIFY(specialPair());
-        return Value((TheoryId)kindBits, idBits);
+        return Value((TheoryId)sortBits, idBits);
     }
 
     static PairHandle decodeFromValue(Value v) {
-        return { kindOf(v.theory()), v.id() };
+        return { sortOf(v.theory()), v.id() };
     }
     Value encodeToValue(TheoryId theory) const {
         VERIFY(!specialPair());
-        VERIFY(valueKind() == kindOf(theory));
+        VERIFY(sort() == sortOf(theory));
         return Value(theory, pairId());
     }
 
@@ -152,23 +152,23 @@ struct PairHandle {
 
 private:
     constexpr explicit PairHandle(Value value)
-        : specialBit(1), kindBits(std::to_underlying(value.theory())), idBits(value.id()) { }
+        : specialBit(1), sortBits(std::to_underlying(value.theory())), idBits(value.id()) { }
 
     uint32_t specialBit : 1;
-    uint32_t kindBits : 7;
+    uint32_t sortBits : 7;
     uint32_t idBits : 24;
 };
 
-constexpr ValueKind pairValueKind(TheoryId pairTheory) {
-    static constexpr EnumTable<TheoryId, ValueKind> kinds = {
-        ValueKind::COUNT,
+constexpr Sort pairSort(TheoryId pairTheory) {
+    static constexpr EnumTable<TheoryId, Sort> sorts = {
+        Sort::COUNT,
         {
-#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) { TheoryId::name, ValueKind::pairValueKind },
+#define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) { TheoryId::name, Sort::pairSort },
 #include <verify/backend/theories.inc>
         }
     };
-    auto val = kinds(pairTheory);
-    VERIFY(val < ValueKind::COUNT);
+    auto val = sorts(pairTheory);
+    VERIFY(val < Sort::COUNT);
     return val;
 }
 
@@ -176,7 +176,7 @@ constexpr uint8_t valuesPerPair(TheoryId pairTheory) {
     static constexpr EnumTable<TheoryId, uint8_t> vals = {
         limits::max,
         {
-#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) { TheoryId::name, valuesPerPair },
+#define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) { TheoryId::name, valuesPerPair },
 #include <verify/backend/theories.inc>
         }
     };
@@ -187,10 +187,10 @@ constexpr uint8_t valuesPerPair(TheoryId pairTheory) {
 
 template<TheoryId theory>
 PairHandle decodePairTheoryValue(Value v) {
-#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) \
-    if constexpr (theory == TheoryId::name) {                            \
-        VERIFY(v.theory() == theory);                                    \
-        return { ValueKind::pairValueKind, v.id() / valuesPerPair };     \
+#define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) \
+    if constexpr (theory == TheoryId::name) {                  \
+        VERIFY(v.theory() == theory);                          \
+        return { Sort::pairSort, v.id() / valuesPerPair };     \
     } else
 #include <verify/backend/theories.inc>
     {
@@ -202,10 +202,10 @@ PairHandle decodePairTheoryValue(Value v) {
 template<TheoryId theory>
 Value encodePairTheoryValue(PairHandle h) {
     VERIFY(!h.specialPair());
-#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) \
-    if constexpr (theory == TheoryId::name) {                            \
-        VERIFY(h.valueKind() == ValueKind::pairValueKind);               \
-        return { theory, h.pairId() * valuesPerPair };                   \
+#define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) \
+    if constexpr (theory == TheoryId::name) {                  \
+        VERIFY(h.sort() == Sort::pairSort);                    \
+        return { theory, h.pairId() * valuesPerPair };         \
     } else
 #include <verify/backend/theories.inc>
     {

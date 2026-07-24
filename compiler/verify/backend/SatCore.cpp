@@ -13,7 +13,7 @@ SatCore::LiteralInfo& SatCore::Interface::infoFor(Literal lit) {
     return impl.literalInfos[lit];
 }
 
-bool ClauseBuilder::add(Solver& solver, BooleanValue val) {
+bool ClauseBuilder::add(Solver& solver, Bool val) {
     return solver.impl().sat.addToClause(*this, val);
 }
 
@@ -152,7 +152,7 @@ bool SatCore::propagate() {
     return true;
 }
 
-std::pair<std::vector<std::vector<BooleanValue>>, bool> SatCore::tryLearn(Conflict conflict) {
+std::pair<std::vector<std::vector<Bool>>, bool> SatCore::tryLearn(Conflict conflict) {
     VERIFY(conflicts.empty());
     VERIFY(!subTrace.empty());
     SubTraceEntry conflictDecision = subTrace.front();

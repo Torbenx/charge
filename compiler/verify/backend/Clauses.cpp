@@ -5,19 +5,19 @@
 namespace verify::backend {
 
 Clauses::Clauses(Solver& solver)
-    : occMap(solver, ValueKind::Boolean) { }
+    : occMap(solver, Sort::Boolean) { }
 
-bool Clauses::testReason(Solver&, BooleanValue, const Reason& reason) {
+bool Clauses::testReason(Solver&, Bool, const Reason& reason) {
     int_t clauseIndex = reason.get<ReasonKind::Clause>().clauseIndex;
     return std::popcount(clauseMasks[clauseIndex]) == 1;
 }
 
-ClauseAndIndex Clauses::reasonToClause(Solver&, BooleanValue, const Reason& reason) {
+ClauseAndIndex Clauses::reasonToClause(Solver&, Bool, const Reason& reason) {
     auto data = reason.get<ReasonKind::Clause>();
     return { clauses[data.clauseIndex], data.literalIndex };
 }
 
-void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
+void Clauses::propagateAssignment(Solver& solver, Bool literal) {
     // VERIFY(info.assignedFalse());
     // VERIFY(!literalTheory.getInfo(literalTheory.negate(literal)).assignedFalse());
 
@@ -50,7 +50,7 @@ void Clauses::propagateAssignment(Solver& solver, BooleanValue literal) {
     }
 }
 
-void Clauses::unapplyAssignment(Solver&, BooleanValue literal) {
+void Clauses::unapplyAssignment(Solver&, Bool literal) {
     for (auto occ : occMap[!literal]) {
         auto& clauseMask = clauseMasks[occ.clauseIndex];
         auto mask = literalMask(occ.literalIndex);
@@ -58,7 +58,7 @@ void Clauses::unapplyAssignment(Solver&, BooleanValue literal) {
     }
 }
 
-void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
+void Clauses::addClause(Solver& solver, std::vector<Bool> clause) {
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE * (MAX_CLAUSE_SIZE - 1));
     if ((int_t)clause.size() <= MAX_CLAUSE_SIZE) {
         addClauseInternal(solver, std::move(clause));
@@ -73,21 +73,21 @@ void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
     // dbgprint("clause: "); dumpClause(clause);
 
     int_t takenCount = 0;
-    auto take = [&](std::vector<BooleanValue>& into, int_t n) {
+    auto take = [&](std::vector<Bool>& into, int_t n) {
         VERIFY((int_t)clause.size() > takenCount);
         n = std::min(n, (int_t)clause.size() - takenCount);
         for (int_t i = 0; i < n; i++)
             into.push_back(clause[takenCount++]);
     };
 
-    std::vector<BooleanValue> primaryClause;
+    std::vector<Bool> primaryClause;
     primaryClause.reserve(MAX_CLAUSE_SIZE);
     take(primaryClause, MAX_CLAUSE_SIZE - extraClauses);
 
     for (int_t i = 0; i < extraClauses; i++) {
-        std::vector<BooleanValue> extraClause;
+        std::vector<Bool> extraClause;
         extraClause.reserve(MAX_CLAUSE_SIZE);
-        BooleanValue glueLit = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
+        Bool glueLit = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
         primaryClause.push_back(glueLit);
         extraClause.push_back(!glueLit);
         take(extraClause, MAX_CLAUSE_SIZE - 1);
@@ -103,7 +103,7 @@ void Clauses::addClause(Solver& solver, std::vector<BooleanValue> clause) {
     VERIFY(takenCount == (int_t)clause.size());
 }
 
-void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause) {
+void Clauses::addClauseInternal(Solver& solver, std::vector<Bool> clause) {
     VERIFY(!clause.empty());
     VERIFY((int_t)clause.size() <= MAX_CLAUSE_SIZE);
     VERIFY(clauses.size() == clauseMasks.size());
@@ -111,7 +111,7 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
     clause_mask_t mask = 0;
     for (int_t index = 0; index < (int_t)clause.size(); index++) {
         LiteralOccurrence occ { (uint32_t)index, (uint32_t)clauseIndex };
-        BooleanValue lit = clause[index];
+        Bool lit = clause[index];
         occMap[lit].push_back(occ);
         if (!solver.assignedFalse(lit))
             mask |= literalMask(index);
@@ -123,7 +123,7 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
         // the glue variable will be initially unassigned have its bit set.
         // TODO: What when clause.size() == MAX_CLAUSE_SIZE
         VERIFY(clause.size() < MAX_CLAUSE_SIZE);
-        BooleanValue glue = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
+        Bool glue = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
         occMap[glue].push_back({ (uint32_t)clause.size(), (uint32_t)clauseIndex });
         mask |= literalMask(clause.size());
         clause.push_back(glue);
@@ -141,8 +141,8 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<BooleanValue> clause
 bool Clauses::checkAssignment(Solver& solver) {
     for (const auto& clause : clauses) {
         bool foundTrue = false;
-        std::optional<BooleanValue> unassignedGlueLiteral;
-        for (BooleanValue lit : clause) {
+        std::optional<Bool> unassignedGlueLiteral;
+        for (Bool lit : clause) {
             if (solver.assignedTrue(lit)) {
                 foundTrue = true;
                 break;

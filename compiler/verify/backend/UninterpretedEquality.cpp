@@ -141,7 +141,7 @@ struct DisequalityReason : private PackedReason<DisequalPair, uint32_t> {
 };
 
 UninterpretedEquality::UninterpretedEquality(Solver& solver, const UninterpretedEqualityParams& params)
-    : params(params), equalityInfos(solver, params.valueKind) { }
+    : params(params), equalityInfos(solver, params.sort) { }
 
 void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     auto [source, target] = solver.at(eqPair);
@@ -171,7 +171,7 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
             assignEqual(solver, edge.pair);
 
         forEachCommonElement(infoFor(otherRoot).disequalities, targetDiseq, [this, &solver, &edge](int_t diseqId) {
-            assignDisequal(solver, edge.pair, PairHandle(params.valueKind, diseqId));
+            assignDisequal(solver, edge.pair, PairHandle(params.sort, diseqId));
         });
     }
     for (auto edge : targetEdges) {
@@ -184,7 +184,7 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
             assignDisequalByAlwaysDisequal(solver, edge.pair, sourceInfo.root, otherRoot);
         } else {
             forEachCommonElement(otherRootInfo.disequalities, sourceDiseq, [this, &solver, &edge](int_t diseqId) {
-                assignDisequal(solver, edge.pair, PairHandle(params.valueKind, diseqId));
+                assignDisequal(solver, edge.pair, PairHandle(params.sort, diseqId));
             });
         }
     }
@@ -264,7 +264,7 @@ void UninterpretedEquality::assignDisequalByAlwaysDisequal(Solver& solver, PairH
 }
 
 void UninterpretedEquality::newPair(Solver& solver, PairHandle pair) {
-    VERIFY(pair.valueKind() == params.valueKind);
+    VERIFY(pair.sort() == params.sort);
     auto [source, target] = solver.at(pair);
     addEdge(source, target, pair);
     addEdge(target, source, pair);
@@ -280,7 +280,7 @@ void UninterpretedEquality::newPair(Solver& solver, PairHandle pair) {
             assignDisequalByAlwaysDisequal(solver, pair, sourceInfo.root, targetInfo.root);
         } else {
             forEachCommonElement(sourceRootInfo.disequalities, targetRootInfo.disequalities, [this, &solver, pair](int_t diseqId) {
-                assignDisequal(solver, pair, PairHandle(params.valueKind, diseqId));
+                assignDisequal(solver, pair, PairHandle(params.sort, diseqId));
             });
         }
     }
@@ -333,7 +333,7 @@ void UninterpretedEquality::path(Solver& solver, Value a, Value b, ClauseBuilder
     }
 }
 
-bool UninterpretedEquality::testReason(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+bool UninterpretedEquality::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     if (reason.kind() == params.equalityReason) {
         auto [source, target] = solver.at(pairOf(assignedLiteral));
         return connected(source, target);
@@ -341,7 +341,7 @@ bool UninterpretedEquality::testReason(Solver& solver, BooleanValue assignedLite
 
     // disequality
     DisequalityReason data = reason.getData<DisequalityReason>();
-    if (reason.kind() == params.disequalityReason && !solver.assignedFalse(makeEquality(PairHandle(params.valueKind, data.pairId()))))
+    if (reason.kind() == params.disequalityReason && !solver.assignedFalse(makeEquality(PairHandle(params.sort, data.pairId()))))
         return false;
 
     auto [impliedA, impliedB] = solver.at(pairOf(assignedLiteral));
@@ -349,7 +349,7 @@ bool UninterpretedEquality::testReason(Solver& solver, BooleanValue assignedLite
     return connected(impliedA, originalA) && connected(impliedB, originalB);
 }
 
-ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     auto result = solver.beginClause();
 
     if (reason.kind() == params.equalityReason) {
@@ -365,7 +365,7 @@ ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, BooleanValu
     result.add(solver, assignedLiteral);
     auto data = reason.getData<DisequalityReason>();
     if (reason.kind() == params.disequalityReason)
-        result.add(solver, makeEquality(PairHandle(params.valueKind, data.pairId())));
+        result.add(solver, makeEquality(PairHandle(params.sort, data.pairId())));
 
     auto [impliedA, impliedB] = solver.at(pairOf(assignedLiteral));
     auto [originalA, originalB] = data.diseqPair();
@@ -458,7 +458,7 @@ void UninterpretedEquality::checkInvariances(Solver& solver) {
         }
     };
     for (int_t eqId = 0; eqId < solver.booleanCount(params.theory); eqId++) {
-        auto [source, target] = solver.at(PairHandle(params.valueKind, eqId));
+        auto [source, target] = solver.at(PairHandle(params.sort, eqId));
         checkValue(source);
         checkValue(target);
     }

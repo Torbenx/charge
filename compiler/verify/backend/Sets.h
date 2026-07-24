@@ -9,7 +9,7 @@
 namespace verify::backend {
 
 struct SetsParams {
-    ValueKind setKind;
+    Sort setSort;
     TheoryId expressionTheory;
     TheoryId emptySetTheory;
     TheoryId equalityTheory;
@@ -23,18 +23,18 @@ struct SetsParams {
 
 namespace theory_params {
 
-#define SET_THEORY(valueKind, memberName)                                \
-    inline constexpr SetsParams sets##valueKind = {                      \
-        ValueKind::valueKind,                                            \
-        TheoryId::valueKind##Expressions,                                \
-        TheoryId::valueKind##EmptySet,                                   \
-        TheoryId::valueKind##Equality,                                   \
-        TheoryId::valueKind##ElementInSet,                               \
-        makeTypedReasonKind<ReasonKind::valueKind##ClauseDefToExpr>(),   \
-        makeTypedReasonKind<ReasonKind::valueKind##ClauseExprToDef>(),   \
-        makeTypedReasonKind<ReasonKind::valueKind##ClauseExhaustive>(),  \
-        makeTypedReasonKind<ReasonKind::valueKind##EqualityToElement>(), \
-        makeTypedReasonKind<ReasonKind::valueKind##ForAllDistribute>(),  \
+#define SET_THEORY(sort, memberName)                                \
+    inline constexpr SetsParams sets##sort = {                      \
+        Sort::sort,                                                 \
+        TheoryId::sort##Expressions,                                \
+        TheoryId::sort##EmptySet,                                   \
+        TheoryId::sort##Equality,                                   \
+        TheoryId::sort##ElementInSet,                               \
+        makeTypedReasonKind<ReasonKind::sort##ClauseDefToExpr>(),   \
+        makeTypedReasonKind<ReasonKind::sort##ClauseExprToDef>(),   \
+        makeTypedReasonKind<ReasonKind::sort##ClauseExhaustive>(),  \
+        makeTypedReasonKind<ReasonKind::sort##EqualityToElement>(), \
+        makeTypedReasonKind<ReasonKind::sort##ForAllDistribute>(),  \
     };
 #include <verify/backend/theories.inc>
 
@@ -77,18 +77,18 @@ struct Sets {
 
     Sets(Solver&, const SetsParams&);
 
-    BooleanValue makeEquality(PairHandle pair) {
+    Bool makeEquality(PairHandle pair) {
         return { params.equalityTheory, pair.pairId() * 2 };
     }
-    BooleanValue isEmpty(Solver& solver, Value value);
+    Bool isEmpty(Solver& solver, Value value);
     void newPair(Solver&, PairHandle);
 
-    void propagateElementAssignment(Solver&, BooleanValue);
-    void unapplyElementAssignment(Solver&, BooleanValue);
+    void propagateElementAssignment(Solver&, Bool);
+    void unapplyElementAssignment(Solver&, Bool);
     void propagateEquality(Solver&, PairHandle);
 
-    bool testReason(Solver&, BooleanValue, const Reason&);
-    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+    bool testReason(Solver&, Bool, const Reason&);
+    ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
 
     bool assignedTrue(Solver&, ElementId, Containment);
     bool assignedFalse(Solver& solver, ElementId element, Containment literal) {
@@ -99,14 +99,14 @@ struct Sets {
 
     bool assignedEmpty(Solver& solver, Value);
 
-    BooleanValue mapToBool(Solver&, ElementId, Containment);
-    std::optional<BooleanValue> tryToBool(Solver&, ElementId, Containment);
-    std::pair<ElementId, Containment> mapFromBool(BooleanValue);
+    Bool mapToBool(Solver&, ElementId, Containment);
+    std::optional<Bool> tryToBool(Solver&, ElementId, Containment);
+    std::pair<ElementId, Containment> mapFromBool(Bool);
 
     ElementId newElement(Solver& solver);
 
     Value emptySet() { return Value(params.emptySetTheory, 0); }
-    ValueKind setKind() const { return params.setKind; }
+    Sort setSort() const { return params.setSort; }
 
     Value union_(Solver&, std::span<const Value>);
     Value union_(Solver& solver, std::initializer_list<Value> vals) {
@@ -132,7 +132,7 @@ struct Sets {
         return subset(solver, { intersection.begin(), intersection.end() }, { minus.begin(), minus.end() });
     }
 
-    void refineClause(Solver&, std::vector<BooleanValue>& clause);
+    void refineClause(Solver&, std::vector<Bool>& clause);
 
 private:
     struct ElementInfo {
@@ -156,9 +156,9 @@ private:
 
     struct SetInfo {
         std::array<LiteralInfo, 2> literalInfos = {};
-        std::optional<BooleanValue> isEmptyLiteral;
+        std::optional<Bool> isEmptyLiteral;
         std::vector<EqualityInfo> equalities;
-        std::vector<std::optional<BooleanValue>> elementInSetLiterals;
+        std::vector<std::optional<Bool>> elementInSetLiterals;
     };
 
     struct ElementInInfo {
@@ -245,7 +245,7 @@ private:
 
     std::vector<ElementInfo> elements;
 
-    KindData<SetInfo> setInfos;
+    SortData<SetInfo> setInfos;
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
 };
 

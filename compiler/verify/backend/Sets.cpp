@@ -19,7 +19,7 @@ struct SetEqualityToElemData {
 
 Sets::Sets(Solver& solver, const SetsParams& params)
     : params(params)
-    , setInfos(solver, params.setKind)
+    , setInfos(solver, params.setSort)
     , inSetInfos(solver, params.elementInSetTheory) {
     VERIFY(clauses.empty());
     elements.emplace_back();
@@ -31,13 +31,13 @@ Sets::Sets(Solver& solver, const SetsParams& params)
     VERIFY(solver.impl().sat.propagate());
 }
 
-BooleanValue Sets::isEmpty(Solver& solver, Value set) {
+Bool Sets::isEmpty(Solver& solver, Value set) {
     return mapToBool(solver, forAllElement(), !in(set));
 }
 
 void Sets::newPair(Solver& solver, PairHandle pair) {
     VERIFY(!pair.specialPair());
-    VERIFY(pair.valueKind() == params.setKind);
+    VERIFY(pair.sort() == params.setSort);
     auto [a, b] = solver.at(pair);
     solver.addClause({
         makeEquality(pair),
@@ -71,7 +71,7 @@ Value Sets::union_(Solver& solver, std::span<const Value> sets) {
         }
     };
     for (Value set : sets) {
-        VERIFY(kindOf(set.theory()) == params.setKind);
+        VERIFY(sortOf(set.theory()) == params.setSort);
         if (set != emptySet())
             addSet(set);
     }
@@ -191,16 +191,16 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
     return expressionValue;
 }
 
-void Sets::refineClause(Solver& solver, std::vector<BooleanValue>& boolClause) {
-    auto setLits = std::ranges::partition(boolClause, [this](BooleanValue lit) {
+void Sets::refineClause(Solver& solver, std::vector<Bool>& boolClause) {
+    auto setLits = std::ranges::partition(boolClause, [this](Bool lit) {
         return lit.theory() != params.elementInSetTheory || inSetInfos[lit].element == forAllElement();
     });
     if (setLits.empty())
         return;
 
     // Generate set expressions, a separate one for each element
-    std::vector<BooleanValue> replacementLiterals;
-    std::ranges::sort(setLits, std::less(), [this](BooleanValue lit) { return inSetInfos[lit].element.id(); });
+    std::vector<Bool> replacementLiterals;
+    std::ranges::sort(setLits, std::less(), [this](Bool lit) { return inSetInfos[lit].element.id(); });
     for (auto it = setLits.begin(); it != setLits.end();) {
         std::vector<Containment> setClause;
         Value resultSet = Value(params.expressionTheory, clauses.size());
@@ -255,7 +255,7 @@ bool Sets::assignedEmpty(Solver& solver, Value set) {
     return assignedTrue(solver, forAllElement(), !in(set));
 }
 
-void Sets::propagateElementAssignment(Solver& solver, BooleanValue lit) {
+void Sets::propagateElementAssignment(Solver& solver, Bool lit) {
     auto [element, cont] = mapFromBool(lit);
     if (element == forAllElement()) {
         if (!cont.contained()) {
@@ -269,7 +269,7 @@ void Sets::propagateElementAssignment(Solver& solver, BooleanValue lit) {
     }
 }
 
-void Sets::unapplyElementAssignment(Solver& solver, BooleanValue lit) {
+void Sets::unapplyElementAssignment(Solver& solver, Bool lit) {
     auto [element, cont] = mapFromBool(lit);
     if (element == forAllElement()) {
         if (!cont.contained())
@@ -346,8 +346,8 @@ void Sets::propagateEquality(Solver& solver, PairHandle pair) {
     auto [a, b] = solver.at(pair);
     for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
         ElementId element(elementId);
-        BooleanValue inA = mapToBool(solver, element, in(a));
-        BooleanValue inB = mapToBool(solver, element, in(b));
+        Bool inA = mapToBool(solver, element, in(a));
+        Bool inB = mapToBool(solver, element, in(b));
         if (solver.assignedTrue(inA))
             solver.assignTrue(inB, makeReason(params.equalityToElementReason, { pair, in(a) }));
         if (solver.assignedTrue(!inA))
@@ -371,7 +371,7 @@ Sets::ElementId Sets::newElement(Solver& solver) {
     }
 
     // Propagate empty sets
-    solver.forEachBoolean(params.elementInSetTheory, [&](BooleanValue boolLiteral) {
+    solver.forEachBoolean(params.elementInSetTheory, [&](Bool boolLiteral) {
         auto [literalElement, set] = inSetInfos[boolLiteral];
         if (literalElement == forAllElement() && solver.assignedFalse(boolLiteral)) {
             assignTrue(solver, element, !in(set), makeReason(params.forAllDistribute, {}));
@@ -381,7 +381,7 @@ Sets::ElementId Sets::newElement(Solver& solver) {
     return element;
 }
 
-bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
+bool Sets::testReason(Solver& solver, Bool boolLiteral, const Reason& reason) {
     auto [element, setLiteral] = mapFromBool(boolLiteral);
     if (reason.kind() == params.clauseDefToExprReason) {
         return assignedFalse(solver, element, reason.get(params.clauseDefToExprReason).def);
@@ -401,7 +401,7 @@ bool Sets::testReason(Solver& solver, BooleanValue boolLiteral, const Reason& re
     }
 }
 
-ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, const Reason& reason) {
+ClauseAndIndex Sets::reasonToClause(Solver& solver, Bool boolLiteral, const Reason& reason) {
     auto [element, setLiteral] = mapFromBool(boolLiteral);
     ClauseBuilder result = solver.beginClause();
     if (reason.kind() == params.clauseDefToExprReason) {
@@ -433,12 +433,12 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, BooleanValue boolLiteral, co
     }
 }
 
-BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment literal) {
+Bool Sets::mapToBool(Solver& solver, ElementId element, Containment literal) {
     auto& inSetLiterals = setInfos[literal.set()].elementInSetLiterals;
     if (inSetLiterals.size() <= element.id()) {
         inSetLiterals.resize(element.id() + 1);
     }
-    std::optional<BooleanValue>& maybeBool = inSetLiterals[element.id()];
+    std::optional<Bool>& maybeBool = inSetLiterals[element.id()];
     if (!maybeBool.has_value()) {
         if (element == forAllElement() && solver.impl().setAlwaysNonEmpty(literal.set())) {
             maybeBool = true_literal;
@@ -450,7 +450,7 @@ BooleanValue Sets::mapToBool(Solver& solver, ElementId element, Containment lite
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
 }
 
-std::optional<BooleanValue> Sets::tryToBool(Solver&, ElementId element, Containment literal) {
+std::optional<Bool> Sets::tryToBool(Solver&, ElementId element, Containment literal) {
     auto& inSetLiterals = setInfos[literal.set()].elementInSetLiterals;
     if (inSetLiterals.size() <= element.id())
         return std::nullopt;
@@ -460,7 +460,7 @@ std::optional<BooleanValue> Sets::tryToBool(Solver&, ElementId element, Containm
     return literal.contained() ? maybeBool.value() : !maybeBool.value();
 }
 
-std::pair<Sets::ElementId, Sets::Containment> Sets::mapFromBool(BooleanValue lit) {
+std::pair<Sets::ElementId, Sets::Containment> Sets::mapFromBool(Bool lit) {
     VERIFY(lit.theory() == params.elementInSetTheory);
     auto [element, set] = inSetInfos[lit];
     return { element, lit.negated() ? !in(set) : in(set) };

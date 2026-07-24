@@ -9,10 +9,10 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
     auto& sets = solver.uninterpConstantSets;
     Value emptySet = sets.emptySet();
 
-    BooleanValue emptySetIsEmpty = sets.isEmpty(solver, emptySet);
+    Bool emptySetIsEmpty = sets.isEmpty(solver, emptySet);
     EXPECT_TRUE(solver.alwaysTrue(emptySetIsEmpty));
 
-    BooleanValue emptySetEqEmptySet = solver.equality(emptySet, emptySet);
+    Bool emptySetEqEmptySet = solver.equality(emptySet, emptySet);
     EXPECT_TRUE(solver.alwaysTrue(emptySetEqEmptySet));
 
     auto element = sets.newElement(solver);
@@ -29,7 +29,7 @@ TEST(VerifyBackend, SetsEqualityPropagation1) {
     Value ab = sets.union_(solver, { a, b });
     Value ac = sets.union_(solver, { a, c });
     solver.addClause({ solver.equality(b, c) });
-    BooleanValue eq = solver.equality(ab, ac);
+    Bool eq = solver.equality(ab, ac);
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     auto e = sets.newElement(solver);
@@ -67,7 +67,7 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
     Value ab = sets.union_(solver, { a, b });
     Value ac = sets.union_(solver, { a, c });
     solver.addClause({ solver.equality(b, c) });
-    BooleanValue eq = solver.equality(ab, ac);
+    Bool eq = solver.equality(ab, ac);
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     auto e = sets.newElement(solver);
@@ -104,7 +104,7 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
     Value uab = sets.union_(solver, { a, b });
     Value uac = sets.union_(solver, { a, c });
     Value rhs = sets.intersection(solver, { uab, uac });
-    BooleanValue eq = solver.equality(lhs, rhs);
+    Bool eq = solver.equality(lhs, rhs);
 
     EXPECT_FALSE(solver.assignedTrue(eq));
 
@@ -146,7 +146,7 @@ TEST(VerifyBackend, SetsProveDisequal) {
     solver.addClause({ sets.isEmpty(solver, sets.intersection(solver, { a, c })) });
     solver.addClause({ sets.isEmpty(solver, sets.intersection(solver, { b, c })) });
     solver.addClause({ !sets.isEmpty(solver, c) });
-    BooleanValue eq = solver.equality(sets.union_(solver, { a, c }), b);
+    Bool eq = solver.equality(sets.union_(solver, { a, c }), b);
     solver.sat.propagate();
 
     EXPECT_FALSE(solver.assignedFalse(eq));
@@ -176,7 +176,7 @@ TEST(VerifyBackend, SetsUnionOfEqualSets) {
     Value a = solver.newAuxUninterpretedConstantSet();
     Value b = solver.newAuxUninterpretedConstantSet();
     Value u = sets.union_(solver, { a, b });
-    BooleanValue eq = solver.equality(u, a);
+    Bool eq = solver.equality(u, a);
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -209,9 +209,8 @@ TEST(VerifyBackend, SetsSingletons) {
     Value a = solver.uninterpConstantSingletons.singleton(solver, aValue);
     Value b = solver.uninterpConstantSingletons.singleton(solver, bValue);
     Value u = sets.union_(solver, { a, b });
-    BooleanValue valueEq = solver.equality(aValue, bValue);
-    BooleanValue singletonEq = solver.equality(a, b);
-    BooleanValue eq = solver.equality(u, a);
+    Bool valueEq = solver.equality(aValue, bValue);
+    Bool eq = solver.equality(u, a);
     solver.sat.propagate();
 
     auto e = sets.newElement(solver);

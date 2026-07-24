@@ -6,8 +6,8 @@
 namespace verify::backend {
 
 struct SingletonSetsParams {
-    ValueKind elementKind;
-    ValueKind setKind;
+    Sort elementSort;
+    Sort setSort;
     TheoryId singletonTheory;
     TypedReasonKind<InSingletonReason> inSingletonReason;
 };
@@ -23,8 +23,8 @@ struct SingletonSets {
 
     void propagateContainment(Solver&, Sets::ElementId, Sets::Containment);
 
-    bool testReason(Solver&, BooleanValue, const Reason&);
-    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+    bool testReason(Solver&, Bool, const Reason&);
+    ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
 
     void newDecisionLevel(Solver&);
     void beginBacktrack(Solver&);
@@ -57,7 +57,7 @@ private:
 
     std::vector<ElementState> elementStates;
 
-    KindData<ElementInfo> elementInfos;
+    SortData<ElementInfo> elementInfos;
     TheoryData<SingletonInfo> singletonInfos;
 };
 

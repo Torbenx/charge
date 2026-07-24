@@ -176,7 +176,7 @@ void Members::assignDisequal(Solver& solver, PairHandle handle) {
 
 void Members::updatePair(Solver& solver, PairHandle handle) {
     VERIFY(dirtyRewrites.empty());
-    BooleanValue equality(encodePairTheoryValue<TheoryId::MemberEquality>(handle));
+    Bool equality(encodePairTheoryValue<TheoryId::MemberEquality>(handle));
     if (pairs[equality].assignedOrRewritten())
         return;
 
@@ -281,7 +281,7 @@ void Members::grind(Solver& solver) {
     }
 }
 
-bool Members::testReason(Solver&, BooleanValue assignedLiteral, const Reason& reason) {
+bool Members::testReason(Solver&, Bool assignedLiteral, const Reason& reason) {
     auto& pairInfo = pairs[assignedLiteral];
     if (reason.kind() == ReasonKind::MemberEquality) {
         return pairInfo.equality.has_value();
@@ -311,7 +311,7 @@ void Members::explainRewrite(Solver& solver, Member m, ClauseBuilder& clause) {
     }
 }
 
-ClauseAndIndex Members::reasonToClause(Solver& solver, BooleanValue assignedLiteral, const Reason& reason) {
+ClauseAndIndex Members::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     PairHandle pair = pairOf(assignedLiteral);
     auto [a, b] = solver.at(pair);
     ClauseBuilder clause = solver.beginClause();

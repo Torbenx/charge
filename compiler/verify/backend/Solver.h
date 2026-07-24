@@ -14,17 +14,17 @@ struct Solver {
 
     int_t currentDecisionLevel() const;
     void backtrack(int_t targetLevel);
-    bool assignedTrue(BooleanValue lit);
-    bool assignedFalse(BooleanValue lit);
-    void decideTrue(BooleanValue literal);
-    void assignTrue(BooleanValue trueLit, const Reason& reason);
-    bool alwaysTrue(BooleanValue);
-    bool alwaysFalse(BooleanValue v) { return alwaysTrue(!v); }
+    bool assignedTrue(Bool lit);
+    bool assignedFalse(Bool lit);
+    void decideTrue(Bool literal);
+    void assignTrue(Bool trueLit, const Reason& reason);
+    bool alwaysTrue(Bool);
+    bool alwaysFalse(Bool v) { return alwaysTrue(!v); }
 
     ClauseBuilder beginClause();
-    std::span<const BooleanValue> viewClause(const ClauseBuilder&);
+    std::span<const Bool> viewClause(const ClauseBuilder&);
     void addClause(const ClauseBuilder& builder);
-    void addClause(std::vector<BooleanValue> clause);
+    void addClause(std::vector<Bool> clause);
 
     int_t valueCount(TheoryId);
     int_t booleanCount(TheoryId);
@@ -42,11 +42,11 @@ struct Solver {
     PairHandle findPair(Pair); // Must be already oriented
     Pair at(PairHandle);
 
-    BooleanValue equality(Value, Value);
-    BooleanValue equality(PairHandle);
+    Bool equality(Value, Value);
+    Bool equality(PairHandle);
     bool assignedEqual(Value, Value);
 
-    BooleanValue newAuxBooleanVariable();
+    Bool newAuxBooleanVariable();
     Value newAuxUninterpretedConstant();
     Member newAuxMemberVariable();
     Value newAuxUninterpretedConstantSet();

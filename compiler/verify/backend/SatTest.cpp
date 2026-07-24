@@ -92,16 +92,16 @@ struct CnfParser {
 };
 
 struct VarSearch {
-    std::optional<BooleanValue> findUnassignedLiteral(Solver& solver) {
+    std::optional<Bool> findUnassignedLiteral(Solver& solver) {
         for (int_t i = find; i < solver.booleanCount(TheoryId::AuxBooleanVariables); i++) {
-            auto lit = BooleanValue(TheoryId::AuxBooleanVariables, i * 2);
+            auto lit = Bool(TheoryId::AuxBooleanVariables, i * 2);
             if (solver.assignedTrue(lit) || solver.assignedFalse(lit))
                 continue;
             find = i;
             return !lit;
         }
         for (int_t i = 0; i < find; i++) {
-            auto lit = BooleanValue(TheoryId::AuxBooleanVariables, i * 2);
+            auto lit = Bool(TheoryId::AuxBooleanVariables, i * 2);
             if (solver.assignedTrue(lit) || solver.assignedFalse(lit))
                 continue;
             find = i;
@@ -122,9 +122,9 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     for (int_t varId = 1; varId <= parser.variableCount; varId++)
         VERIFY(solver.newAuxBooleanVariable().id() == varId * 2);
     for (const auto& clause : parser.cnf) {
-        std::vector<BooleanValue> outClause;
+        std::vector<Bool> outClause;
         for (int_t i = 0; i < (int_t)clause.size(); i++) {
-            auto lit = BooleanValue(TheoryId::AuxBooleanVariables, std::abs(clause[i]) * 2);
+            auto lit = Bool(TheoryId::AuxBooleanVariables, std::abs(clause[i]) * 2);
             outClause.push_back(clause[i] > 0 ? lit : !lit);
         }
         solver.clauses.addClause(solver, std::move(outClause));
@@ -152,7 +152,7 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     VERIFY(solver.clauses.checkAssignment(solver));
     std::vector<bool> assignment;
     for (int_t varId = 1; varId <= parser.variableCount; varId++) {
-        auto lit = BooleanValue(TheoryId::AuxBooleanVariables, varId * 2);
+        auto lit = Bool(TheoryId::AuxBooleanVariables, varId * 2);
         if (solver.assignedTrue(lit))
             assignment.push_back(true);
         else if (solver.assignedFalse(lit))

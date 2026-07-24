@@ -9,7 +9,7 @@ TEST(VerifyBackend, EqualityBasic) {
     Value v1 = solver.newAuxUninterpretedConstant();
     Value v2 = solver.newAuxUninterpretedConstant();
 
-    BooleanValue e12 = solver.equality(v1, v2);
+    Bool e12 = solver.equality(v1, v2);
     EXPECT_FALSE(solver.assignedEqual(v1, v2));
 
     solver.decideTrue(e12);
@@ -25,9 +25,9 @@ TEST(VerifyBackend, EqualityTreePath2) {
     Value v2 = solver.newAuxUninterpretedConstant();
     Value v3 = solver.newAuxUninterpretedConstant();
 
-    BooleanValue e12 = solver.equality(v1, v2);
-    BooleanValue e13 = solver.equality(v1, v3);
-    BooleanValue e23 = solver.equality(v2, v3);
+    Bool e12 = solver.equality(v1, v2);
+    Bool e13 = solver.equality(v1, v3);
+    Bool e23 = solver.equality(v2, v3);
     solver.decideTrue(e12);
     solver.sat.propagate();
     solver.decideTrue(e13);
@@ -49,9 +49,9 @@ TEST(VerifyBackend, EqualityTreePath3) {
     Value v2 = solver.newAuxUninterpretedConstant();
     Value v3 = solver.newAuxUninterpretedConstant();
 
-    BooleanValue e13 = solver.equality(v1, v3);
-    BooleanValue e23 = solver.equality(v2, v3);
-    BooleanValue e12 = solver.equality(v1, v2);
+    Bool e13 = solver.equality(v1, v3);
+    Bool e23 = solver.equality(v2, v3);
+    Bool e12 = solver.equality(v1, v2);
     solver.decideTrue(e13);
     solver.sat.propagate();
     solver.decideTrue(e23);
@@ -83,7 +83,7 @@ TEST(VerifyBackend, EqualityTreePath4) {
     solver.decideTrue(solver.equality(vals[0][2], vals[0][3]));
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedEqual(vals[0][0], vals[0][3]));
-    BooleanValue e00_03 = solver.equality(vals[0][0], vals[0][3]);
+    Bool e00_03 = solver.equality(vals[0][0], vals[0][3]);
     {
         auto [clause, forcedIndex] = solver.sat.justifyAssignment(e00_03);
         EXPECT_EQ(clause.size(), 4);
@@ -105,8 +105,8 @@ TEST(VerifyBackend, EqualityTreePath4) {
 
     EXPECT_TRUE(solver.assignedEqual(vals[3][0], vals[3][3]));
     EXPECT_TRUE(solver.assignedEqual(vals[3][2], vals[3][3]));
-    BooleanValue e30_33 = solver.equality(vals[3][0], vals[3][3]);
-    BooleanValue e32_33 = solver.equality(vals[3][2], vals[3][3]);
+    Bool e30_33 = solver.equality(vals[3][0], vals[3][3]);
+    Bool e32_33 = solver.equality(vals[3][2], vals[3][3]);
     EXPECT_FALSE(solver.assignedTrue(e30_33));
     EXPECT_FALSE(solver.assignedTrue(e32_33));
     solver.sat.propagate();
@@ -172,7 +172,7 @@ TEST(VerifyBackend, EqualityPropagation1) {
 
 TEST(VerifyBackend, EqualityPropagation2) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBooleanVariable();
+    Bool c = solver.newAuxBooleanVariable();
     Value s = solver.newAuxUninterpretedConstant();
     Value t1 = solver.newAuxUninterpretedConstant();
     Value t2 = solver.newAuxUninterpretedConstant();
@@ -186,7 +186,7 @@ TEST(VerifyBackend, EqualityPropagation2) {
 
 TEST(VerifyBackend, DisequalityPropagation1) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBooleanVariable();
+    Bool c = solver.newAuxBooleanVariable();
     Value s = solver.newAuxUninterpretedConstant();
     Value t1 = solver.newAuxUninterpretedConstant();
     Value t2 = solver.newAuxUninterpretedConstant();
@@ -199,7 +199,7 @@ TEST(VerifyBackend, DisequalityPropagation1) {
 
 TEST(VerifyBackend, DisequalityPropagation2) {
     SolverImpl solver;
-    BooleanValue c = solver.newAuxBooleanVariable();
+    Bool c = solver.newAuxBooleanVariable();
     Value s = solver.newAuxUninterpretedConstant();
     Value t1 = solver.newAuxUninterpretedConstant();
     Value t2 = solver.newAuxUninterpretedConstant();
@@ -281,7 +281,7 @@ TEST(VerifyBackend, DisequalityOfParentAppliesToNewEdgeAddedOnChild) {
     solver.sat.propagate();
     EXPECT_FALSE(solver.sat.hasConflicts());
 
-    BooleanValue e23 = solver.equality(v2, v3);
+    Bool e23 = solver.equality(v2, v3);
     EXPECT_TRUE(solver.infoFor(!e23).tentativelyTrue());
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedFalse(e23));
@@ -294,8 +294,8 @@ TEST(VerifyBackend, OutOfOrderRevertedDisequalities) {
     Value v3 = solver.newAuxUninterpretedConstant();
     solver.sat.propagate();
 
-    BooleanValue e13 = solver.equality(v1, v3);
-    BooleanValue e23 = solver.equality(v2, v3);
+    Bool e13 = solver.equality(v1, v3);
+    Bool e23 = solver.equality(v2, v3);
 
     solver.decideTrue(solver.equality(v1, v2));
     solver.sat.propagate();
@@ -329,11 +329,11 @@ TEST(VerifyBackend, OutOfOrderRevertedDisequalitiyReasons) {
     Value v3 = solver.newAuxUninterpretedConstant();
     solver.sat.propagate();
 
-    BooleanValue e01 = solver.equality(v0, v1);
-    BooleanValue e02 = solver.equality(v0, v2);
-    BooleanValue e03 = solver.equality(v0, v3);
-    BooleanValue e13 = solver.equality(v1, v3);
-    BooleanValue e23 = solver.equality(v2, v3);
+    Bool e01 = solver.equality(v0, v1);
+    Bool e02 = solver.equality(v0, v2);
+    Bool e03 = solver.equality(v0, v3);
+    Bool e13 = solver.equality(v1, v3);
+    Bool e23 = solver.equality(v2, v3);
 
     solver.decideTrue(e01);
     solver.sat.propagate();
@@ -399,14 +399,14 @@ TEST(VerifyBackend, OutOfOrderRevertedDisequalitiyReasonsInterleavedTrace) {
     Value v2 = solver.newAuxUninterpretedConstant();
     Value v3 = solver.newAuxUninterpretedConstant();
 
-    BooleanValue b0 = solver.newAuxBooleanVariable();
-    BooleanValue b1 = solver.newAuxBooleanVariable();
+    Bool b0 = solver.newAuxBooleanVariable();
+    Bool b1 = solver.newAuxBooleanVariable();
 
-    BooleanValue e01 = solver.equality(v0, v1);
-    BooleanValue e02 = solver.equality(v0, v2);
-    BooleanValue e03 = solver.equality(v0, v3);
-    BooleanValue e13 = solver.equality(v1, v3);
-    BooleanValue e23 = solver.equality(v2, v3);
+    Bool e01 = solver.equality(v0, v1);
+    Bool e02 = solver.equality(v0, v2);
+    Bool e03 = solver.equality(v0, v3);
+    Bool e13 = solver.equality(v1, v3);
+    Bool e23 = solver.equality(v2, v3);
 
     solver.addClause({ b0, b1, !e13 });
     solver.addClause({ b0, !e23 });
@@ -479,7 +479,7 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     solver.backtrack(0);
     solver.sat.propagate();
 
-    BooleanValue e12 = solver.equality(v1, v2);
+    Bool e12 = solver.equality(v1, v2);
     solver.sat.propagate();
     EXPECT_FALSE(solver.assignedFalse(e12));
 }

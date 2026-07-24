@@ -61,12 +61,12 @@ void DataManager::registerTheoryData(TheoryDataBase& data, TheoryId theory, int_
     data.m_pointer = dataInfo.pointer;
 }
 
-KindDataBase::KindDataBase(Solver& solver, ValueKind kind, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
-    solver.impl().data.registerKindData(*this, kind, elementSize, groupSize, initFunction, destroyFunction);
+SortDataBase::SortDataBase(Solver& solver, Sort sort, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    solver.impl().data.registerSortData(*this, sort, elementSize, groupSize, initFunction, destroyFunction);
 }
 
-void DataManager::registerKindData(KindDataBase& data, ValueKind kind, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
-    auto& info = at(kind);
+void DataManager::registerSortData(SortDataBase& data, Sort sort, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
+    auto& info = at(sort);
     auto& dataInfo = info.datas.emplace_back(CommonDataInfo { elementSize, groupSize, initFunction, destroyFunction }, &data);
     VERIFY(data.m_table == nullptr);
     std::allocator<std::byte*> alloc;
@@ -74,7 +74,7 @@ void DataManager::registerKindData(KindDataBase& data, ValueKind kind, int_t ele
     std::uninitialized_fill_n(dataInfo.table, theories.size(), nullptr);
     for (int_t i = 0; i < (int_t)theories.size(); i++) {
         TheoryId theory = (TheoryId)i;
-        if (kindOf(theory) == kind) {
+        if (sortOf(theory) == sort) {
             dataInfo.table[i] = allocateAndFillData(theory, at(theory), dataInfo);
         }
     }
@@ -84,7 +84,7 @@ void DataManager::registerKindData(KindDataBase& data, ValueKind kind, int_t ele
 Value DataManager::newValue(TheoryId theory, int_t count) {
     VERIFY(count > 0);
     auto& theoryInfo = at(theory);
-    auto& kindInfo = at(kindOf(theory));
+    auto& sortInfo = at(sortOf(theory));
     int_t firstValueId = theoryInfo.valueCount;
     theoryInfo.valueCount += count;
     if (theoryInfo.valueCount > theoryInfo.dataCapacity) {
@@ -95,7 +95,7 @@ Value DataManager::newValue(TheoryId theory, int_t count) {
             moveData(dataInfo.pointer, dataInfo, oldCapacity, newCapacity);
             dataInfo.base->m_pointer = dataInfo.pointer;
         }
-        for (auto& dataInfo : kindInfo.datas) {
+        for (auto& dataInfo : sortInfo.datas) {
             moveData(dataInfo.table[std::to_underlying(theory)], dataInfo, oldCapacity, newCapacity);
         }
     }
@@ -103,7 +103,7 @@ Value DataManager::newValue(TheoryId theory, int_t count) {
         for (int_t i = 0; i < count; i++)
             initValue(dataInfo.pointer, dataInfo, Value(theory, firstValueId + i));
     }
-    for (auto& dataInfo : kindInfo.datas) {
+    for (auto& dataInfo : sortInfo.datas) {
         for (int_t i = 0; i < count; i++)
             initValue(dataInfo.table[std::to_underlying(theory)], dataInfo, Value(theory, firstValueId + i));
     }
@@ -113,7 +113,7 @@ Value DataManager::newValue(TheoryId theory, int_t count) {
 DataManager::DataManager() { }
 
 DataManager::~DataManager() {
-    // Note: We must not access the Theory/KindDataBase since they may already be deallocated.
+    // Note: We must not access the Theory/SortDataBase since they may already be deallocated.
     for (auto& theoryInfo : theories) {
         if (theoryInfo.dataCapacity == 0)
             continue;
@@ -122,8 +122,8 @@ DataManager::~DataManager() {
             deallocateAndDestroyData(dataInfo.pointer, theoryInfo, dataInfo);
         }
     }
-    for (auto& kindInfo : kinds) {
-        for (auto& dataInfo : kindInfo.datas) {
+    for (auto& sortInfo : sorts) {
+        for (auto& dataInfo : sortInfo.datas) {
             for (int_t i = 0; i < (int_t)theories.size(); i++) {
                 if (dataInfo.table[i] != nullptr) {
                     deallocateAndDestroyData(dataInfo.table[i], theories[i], dataInfo);

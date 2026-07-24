@@ -12,10 +12,10 @@ struct Members {
 
     std::vector<Member> rewrite(Member m);
 
-    static BooleanValue makeEquality(PairHandle handle) {
-        return (BooleanValue)encodePairTheoryValue<TheoryId::MemberEquality>(handle);
+    static Bool makeEquality(PairHandle handle) {
+        return (Bool)encodePairTheoryValue<TheoryId::MemberEquality>(handle);
     }
-    static PairHandle pairOf(BooleanValue equality) {
+    static PairHandle pairOf(Bool equality) {
         return decodePairTheoryValue<TheoryId::MemberEquality>(equality);
     }
 
@@ -34,8 +34,8 @@ struct Members {
     void newPair(Solver&, PairHandle);
     void propagateEqual(Solver&, PairHandle);
 
-    bool testReason(Solver&, BooleanValue, const Reason&);
-    ClauseAndIndex reasonToClause(Solver&, BooleanValue, const Reason&);
+    bool testReason(Solver&, Bool, const Reason&);
+    ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
 
     void newDecisionLevel(Solver&);
     void beginBacktrack(Solver&);
@@ -110,7 +110,7 @@ private:
 
     TheoryData<PairInfo, TheoryId::MemberEquality, 2> pairs;
     CompositeMembers compositeMembers;
-    KindData<VariableInfo, ValueKind::Member> variables;
+    SortData<VariableInfo, Sort::Member> variables;
     std::vector<RewriteTraceEntry> rewriteTrace;
     std::vector<PairHandle> assignedPairTrace;
     std::priority_queue<RewriteTracePosition> dirtyRewrites;

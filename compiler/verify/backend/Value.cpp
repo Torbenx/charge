@@ -5,8 +5,8 @@
 namespace verify::backend {
 
 std::string_view nameString(TheoryId theory) {
-#define THEORY(name, valueKind) \
-    case TheoryId::name:        \
+#define THEORY(name, sort) \
+    case TheoryId::name:   \
         return #name;
 
     switch (theory) {
@@ -18,8 +18,8 @@ std::string_view nameString(TheoryId theory) {
 }
 
 std::string_view nameString(ReasonKind kind) {
-#define REASON(name, ...) \
-    case ReasonKind::name:        \
+#define REASON(name, ...)  \
+    case ReasonKind::name: \
         return #name;
 
     switch (kind) {

@@ -23,14 +23,14 @@ struct Clauses {
     static clause_mask_t literalMask(int_t index) { return (clause_mask_t)1 << index; }
 
     Clauses(Solver& solver);
-    bool testReason(Solver&, BooleanValue assignedLiteral, const Reason& reason);
-    ClauseAndIndex reasonToClause(Solver&, BooleanValue assignedLiteral, const Reason& reason);
+    bool testReason(Solver&, Bool assignedLiteral, const Reason& reason);
+    ClauseAndIndex reasonToClause(Solver&, Bool assignedLiteral, const Reason& reason);
 
-    void propagateAssignment(Solver&, BooleanValue);
-    void unapplyAssignment(Solver&, BooleanValue);
+    void propagateAssignment(Solver&, Bool);
+    void unapplyAssignment(Solver&, Bool);
 
-    void addClause(Solver&, std::vector<BooleanValue> clause);
-    void addClauseInternal(Solver&, std::vector<BooleanValue> clause);
+    void addClause(Solver&, std::vector<Bool> clause);
+    void addClauseInternal(Solver&, std::vector<Bool> clause);
 
     //! Check if all clauses are satisfied by the current assignment
     /*
@@ -55,10 +55,10 @@ struct Clauses {
     std::vector<clause_mask_t> clauseMasks;
 
     //! The actual clauses, just arrays of literals
-    std::vector<std::vector<BooleanValue>> clauses;
+    std::vector<std::vector<Bool>> clauses;
 
     //! The occurrence map for each literal
-    KindData<std::vector<LiteralOccurrence>, ValueKind::Boolean> occMap;
+    SortData<std::vector<LiteralOccurrence>, Sort::Boolean> occMap;
 };
 
 }

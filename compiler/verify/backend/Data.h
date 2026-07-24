@@ -34,10 +34,10 @@ struct TheoryDataBase {
     std::byte* m_pointer = nullptr;
 };
 
-struct KindDataBase {
-    KindDataBase(Solver&, ValueKind, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
-    KindDataBase(const KindDataBase&) = delete;
-    KindDataBase(KindDataBase&&) = delete;
+struct SortDataBase {
+    SortDataBase(Solver&, Sort, int_t elementSize, int_t groupSize, DataInitializeFunction, DataDestroyFunction);
+    SortDataBase(const SortDataBase&) = delete;
+    SortDataBase(SortDataBase&&) = delete;
 
     std::byte* theoryData(TheoryId theory) const { return m_table[std::to_underlying(theory)]; }
 
@@ -57,12 +57,12 @@ struct TheoryData : private TheoryDataBase {
     }
 };
 
-template<typename T, ValueKind kind = ValueKind::COUNT>
-struct KindData : private KindDataBase {
-    KindData(Solver& solver) requires (kind < ValueKind::COUNT)
-        : KindData(solver, kind) { }
-    KindData(Solver& solver, ValueKind dynamicKind)
-        : KindDataBase(solver, dynamicKind, sizeof(T), 1, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
+template<typename T, Sort sort = Sort::COUNT>
+struct SortData : private SortDataBase {
+    SortData(Solver& solver) requires (sort < Sort::COUNT)
+        : SortData(solver, sort) { }
+    SortData(Solver& solver, Sort dynamicSort)
+        : SortDataBase(solver, dynamicSort, sizeof(T), 1, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
 
     T& operator[](Value v) const {
         return *(reinterpret_cast<T*>(theoryData(v.theory())) + v.id());

@@ -20,13 +20,13 @@ struct InSingletonReason : private PackedReason<AggPair, uint32_t> {
 
 SingletonSets::SingletonSets(Solver& solver, const SingletonSetsParams& params)
     : params(params)
-    , elementInfos(solver, params.elementKind)
+    , elementInfos(solver, params.elementSort)
     , singletonInfos(solver, params.singletonTheory) {
-    VERIFY(kindOf(params.singletonTheory) == params.setKind);
+    VERIFY(sortOf(params.singletonTheory) == params.setSort);
 }
 
 Value SingletonSets::singleton(Solver& solver, Value element) {
-    VERIFY(kindOf(element.theory()) == params.elementKind);
+    VERIFY(sortOf(element.theory()) == params.elementSort);
     auto& info = elementInfos[element];
     if (!info.singletonSet.has_value()) {
         Value set = solver.impl().newValue(params.singletonTheory);
@@ -51,7 +51,7 @@ void SingletonSets::propagateContainment(Solver& solver, Sets::ElementId element
     }
 }
 
-bool SingletonSets::testReason(Solver& solver, BooleanValue, const Reason& reason) {
+bool SingletonSets::testReason(Solver& solver, Bool, const Reason& reason) {
     Sets& sets = this->sets(solver);
     auto data = reason.get(params.inSingletonReason);
     auto [setA, setB] = data.sets();
@@ -59,7 +59,7 @@ bool SingletonSets::testReason(Solver& solver, BooleanValue, const Reason& reaso
         && sets.assignedTrue(solver, data.element(), Sets::in(setB));
 }
 
-ClauseAndIndex SingletonSets::reasonToClause(Solver& solver, BooleanValue equality, const Reason& reason) {
+ClauseAndIndex SingletonSets::reasonToClause(Solver& solver, Bool equality, const Reason& reason) {
     Sets& sets = this->sets(solver);
     auto data = reason.get(params.inSingletonReason);
     auto [setA, setB] = data.sets();
@@ -82,6 +82,6 @@ void SingletonSets::beginBacktrack(Solver& solver) {
 
 void SingletonSets::endBacktrack(Solver&) { }
 
-Sets& SingletonSets::sets(Solver& solver) { return solver.impl().setTheory(params.setKind); }
+Sets& SingletonSets::sets(Solver& solver) { return solver.impl().setTheory(params.setSort); }
 
 }

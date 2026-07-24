@@ -1,5 +1,5 @@
 #ifndef THEORY
-#define THEORY(name, valueKind)
+#define THEORY(name, sort)
 #endif
 
 #ifndef REASON
@@ -7,28 +7,28 @@
 #endif
 
 #ifndef PAIR_THEORY
-#define PAIR_THEORY(name, theoryValueKind, pairValueKind, valuesPerPair) THEORY(name, theoryValueKind)
+#define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) THEORY(name, theorySort)
 #endif
 
 #ifndef UNINTERPRETED_EQUALITY_THEORY
-#define UNINTERPRETED_EQUALITY_THEORY(valueKind, memberName)            \
-    PAIR_THEORY(valueKind##Equality, Boolean, valueKind, 2)             \
-    REASON(valueKind##Equality, EmptyReasonData, true, memberName)      \
-    REASON(valueKind##Disequality, DisequalityReason, true, memberName) \
-    REASON(valueKind##DisequalityByAlwaysDisequal, DisequalityReason, true, memberName)
+#define UNINTERPRETED_EQUALITY_THEORY(sort, memberName)                \
+    PAIR_THEORY(sort##Equality, Boolean, sort, 2)                      \
+    REASON(sort##Equality, EmptyReasonData, true, memberName)          \
+    REASON(sort##Disequality, DisequalityReason, true, memberName)     \
+    REASON(sort##DisequalityByAlwaysDisequal, DisequalityReason, true, memberName)
 #endif
 
 #ifndef SET_THEORY
-#define SET_THEORY(valueKind, memberName)                                          \
-    PAIR_THEORY(valueKind##Equality, Boolean, valueKind, 2)                        \
-    THEORY(valueKind##ElementInSet, Boolean)                                       \
-    THEORY(valueKind##EmptySet, valueKind)                                         \
-    THEORY(valueKind##Expressions, valueKind)                                      \
-    REASON(valueKind##ClauseDefToExpr, SetClauseDefData, true, memberName)         \
-    REASON(valueKind##ClauseExprToDef, SetClauseDefData, true, memberName)         \
-    REASON(valueKind##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
-    REASON(valueKind##EqualityToElement, SetEqualityToElemData, false, memberName) \
-    REASON(valueKind##ForAllDistribute, EmptyReasonData, false, memberName)
+#define SET_THEORY(sort, memberName)                                          \
+    PAIR_THEORY(sort##Equality, Boolean, sort, 2)                             \
+    THEORY(sort##ElementInSet, Boolean)                                       \
+    THEORY(sort##EmptySet, sort)                                              \
+    THEORY(sort##Expressions, sort)                                           \
+    REASON(sort##ClauseDefToExpr, SetClauseDefData, true, memberName)         \
+    REASON(sort##ClauseExprToDef, SetClauseDefData, true, memberName)         \
+    REASON(sort##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
+    REASON(sort##EqualityToElement, SetEqualityToElemData, false, memberName) \
+    REASON(sort##ForAllDistribute, EmptyReasonData, false, memberName)
 #endif
 
 THEORY(TrueFalse, Boolean)

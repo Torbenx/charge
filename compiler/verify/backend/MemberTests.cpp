@@ -14,9 +14,9 @@ TEST(VerifyBackend, MembersBasic1) {
     Member v1 = solver.newAuxMemberVariable();
     Member v2 = solver.newAuxMemberVariable();
 
-    BooleanValue eq1 = solver.equality(v1, solver.composeMembers({ l1, l2 }));
-    BooleanValue eq2 = solver.equality(solver.composeMembers({ l1, v2 }), solver.composeMembers({ v1, l3 }));
-    BooleanValue eq3 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
+    Bool eq1 = solver.equality(v1, solver.composeMembers({ l1, l2 }));
+    Bool eq2 = solver.equality(solver.composeMembers({ l1, v2 }), solver.composeMembers({ v1, l3 }));
+    Bool eq3 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
 
     {
         solver.decideTrue(eq1);
@@ -82,8 +82,8 @@ TEST(VerifyBackend, MembersRewriteUpdate) {
     Member v1 = solver.newAuxMemberVariable();
     Member v2 = solver.newAuxMemberVariable();
 
-    BooleanValue eq1 = solver.equality(v1, solver.composeMembers({ l1, v2 }));
-    BooleanValue eq2 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
+    Bool eq1 = solver.equality(v1, solver.composeMembers({ l1, v2 }));
+    Bool eq2 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
 
     solver.decideTrue(eq1);
     solver.sat.propagate();
@@ -99,9 +99,9 @@ TEST(VerifyBackend, MembersIdentityRewrite) {
     Member v2 = solver.newAuxMemberVariable();
     Member l1 = newLiteral(solver);
 
-    BooleanValue eq0 = solver.equality(solver.composeMembers({ v1, v2 }), l1);
-    BooleanValue eq1 = solver.equality(v1, l1);
-    BooleanValue eq2 = solver.equality(v2, identity_member);
+    Bool eq0 = solver.equality(solver.composeMembers({ v1, v2 }), l1);
+    Bool eq1 = solver.equality(v1, l1);
+    Bool eq2 = solver.equality(v2, identity_member);
 
     solver.decideTrue(eq0);
     solver.sat.propagate();
@@ -133,10 +133,10 @@ TEST(VerifyBackend, MembersSubExpr) {
     Member v3 = solver.newAuxMemberVariable();
     Member l1 = newLiteral(solver);
 
-    BooleanValue eq0 = solver.equality(solver.composeMembers({ v1, v2, v3 }), l1);
-    BooleanValue eq1 = solver.equality(v1, identity_member);
-    BooleanValue eq2 = solver.equality(v2, l1);
-    BooleanValue eq3 = solver.equality(v3, identity_member);
+    Bool eq0 = solver.equality(solver.composeMembers({ v1, v2, v3 }), l1);
+    Bool eq1 = solver.equality(v1, identity_member);
+    Bool eq2 = solver.equality(v2, l1);
+    Bool eq3 = solver.equality(v3, identity_member);
 
     solver.decideTrue(eq0);
     solver.sat.propagate();
@@ -156,9 +156,9 @@ TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
     Member l2 = newLiteral(solver);
     Member l3 = newLiteral(solver);
 
-    BooleanValue eq1 = solver.equality(v0, solver.composeMembers({ l1, v1 }));
-    BooleanValue eq2 = solver.equality(v0, solver.composeMembers({ v2, l2 }));
-    BooleanValue eq3 = solver.equality(v0, l3);
+    Bool eq1 = solver.equality(v0, solver.composeMembers({ l1, v1 }));
+    Bool eq2 = solver.equality(v0, solver.composeMembers({ v2, l2 }));
+    Bool eq3 = solver.equality(v0, l3);
 
     // assign eq1
     solver.decideTrue(eq1);
