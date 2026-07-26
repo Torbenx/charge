@@ -6,4 +6,5 @@ target_sources(${PROJECT_NAME}
     Expr.h
     Function.cpp
     Function.h
+    FunctionTests.cpp
 )

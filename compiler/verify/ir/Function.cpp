@@ -6,6 +6,9 @@ using arr = std::array<uint32_t, 3>;
 
 template<typename T>
 static arr toArray(const T& in) {
+    // The unused words are zeroed below and the expressions are compared as a whole, so the
+    // representation must not contain any padding bits.
+    static_assert(std::has_unique_object_representations_v<T>);
     if constexpr (sizeof(T) == 3 * sizeof(uint32_t)) {
         return std::bit_cast<arr>(in);
     } else if constexpr (sizeof(T) == 2 * sizeof(uint32_t)) {
@@ -30,6 +33,40 @@ static T fromArray(const arr& in) {
     }
 }
 
+bool Function::ExprHashEqual::operator()(const ExprLookup& a, const ExprEntry& b) const {
+    return a.kind == b.expr.kind() && a.data == a.function->m_expressions[b.expr.idBits];
+}
+
+static size_t hashExpr(ExprKind kind, const arr& data) {
+    size_t hash = std::to_underlying(kind);
+    for (uint32_t word : data)
+        hash_combine(hash, word);
+    return hash;
+}
+
+/*!
+Expressions are uniqued by their kind and their kind erased data. Since all handles appearing
+in the data are themselves unique, comparing the data words is enough to identify an expression.
+
+TODO: Relative code positions are only compared bitwise, so 'Load' expressions on complex
+positions with equal contents are not yet recognized as equal. The positions themselves will
+have to be uniqued to fix that.
+TODO: The same applies to expression lists, which are not uniqued yet either.
+*/
+Expr Function::addExprInternal(ExprKind kind, expr_arr data) {
+    size_t hash = hashExpr(kind, data);
+    auto it = m_expressionSet.find(ExprLookup { hash, kind, data, this });
+    if (it != m_expressionSet.end())
+        return it->expr;
+
+    uint32_t id = m_expressions.size();
+    VERIFY(id == Expr(kind, id).id());
+    m_expressions.push_back(data);
+    Expr result(kind, id);
+    m_expressionSet.emplace(ExprEntry { result, hash });
+    return result;
+}
+
 #define COMPOUND_EXPR(name, sortType, args...)                                                       \
     function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {         \
         VERIFY(key.kind() == ExprKind::name);                                                        \
@@ -37,9 +74,8 @@ static T fromArray(const arr& in) {
     }                                                                                                \
                                                                                                      \
     sortType Function::add##name(const function_detail::compound_expr<ExprKind::name>& val) {        \
-        uint32_t id = m_expressions.size();                                                          \
-        m_expressions.push_back(toArray<function_detail::compound_expr<ExprKind::name>>(val));       \
-        return (sortType)Expr(ExprKind::name, id);                                                   \
+        return (sortType)addExprInternal(ExprKind::name,                                             \
+            toArray<function_detail::compound_expr<ExprKind::name>>(val));                           \
     }
 #include <verify/ir/expressions.inc>
 

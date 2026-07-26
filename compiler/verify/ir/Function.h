@@ -2,6 +2,8 @@
 
 #include <verify/ir/Expr.h>
 
+#include <unordered_set>
+
 namespace verify::ir::function_detail {
 
 template<ExprKind kind>
@@ -142,6 +144,44 @@ private:
     using expr_arr = std::array<uint32_t, 3>;
     using inst_arr = std::array<uint32_t, 3>;
 
+    //! Identifies a compound expression that is already present in 'm_expressions'
+    /*!
+    The kind is part of the handle and the id indexes 'm_expressions', so the entry
+    does not need to store any of the expression data itself. The hash is cached
+    because rehashing must be possible without access to the owning function.
+    */
+    struct ExprEntry {
+        Expr expr;
+        size_t hash;
+    };
+
+    //! Transparent lookup key for a compound expression that has not been added yet
+    struct ExprLookup {
+        size_t hash;
+        ExprKind kind;
+        expr_arr data;
+        const Function* function;
+    };
+
+    struct ExprHash {
+        using is_transparent = void;
+
+        size_t operator()(const ExprEntry& entry) const { return entry.hash; }
+        size_t operator()(const ExprLookup& lookup) const { return lookup.hash; }
+    };
+
+    struct ExprHashEqual {
+        using is_transparent = void;
+
+        //! Entries are only ever inserted after a failed lookup, so they are known to be
+        //! distinct and comparing the handles is sufficient here.
+        bool operator()(const ExprEntry& a, const ExprEntry& b) const { return a.expr == b.expr; }
+        bool operator()(const ExprLookup& a, const ExprEntry& b) const;
+        bool operator()(const ExprEntry& a, const ExprLookup& b) const { return (*this)(b, a); }
+    };
+
+    Expr addExprInternal(ExprKind kind, expr_arr data);
+
     struct Inst {
         Opcode opcode;
         inst_arr data;
@@ -186,6 +226,7 @@ private:
 
     std::vector<Inst> m_instructions;
     std::vector<expr_arr> m_expressions;
+    std::unordered_set<ExprEntry, ExprHash, ExprHashEqual> m_expressionSet;
     std::vector<TheoremData> m_theorems;
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;

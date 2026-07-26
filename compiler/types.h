@@ -28,6 +28,11 @@ constexpr size_t alignmentCeil(size_t in, size_t alignment) {
     return (in + alignment - 1) & ~(alignment - 1);
 }
 
+// https://www.boost.org/doc/libs/1_34_1/doc/html/boost/hash_combine.html
+constexpr void hash_combine(size_t& seed, size_t hash_value) {
+    seed ^= hash_value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
 namespace limits {
 
 struct max_t {

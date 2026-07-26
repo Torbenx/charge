@@ -961,4 +961,52 @@ fn #test($a, $b):
     EXPECT_EQ(proof.clauses[1].proof.tactic(), ir::Tactic::EqualityReflexive);
 }
 
+TEST(VerifyLanguage, ParseUniqueExpressions) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    store $a <- $b = $c
+    store $a <- $b = $c
+    store $a <- $c = $b
+    store $a <- $b = $b
+    store $a <- ($b = $c) = ($b = $c)
+)");
+    EXPECT_EQ(fn.parameterCount(), 3);
+    EXPECT_EQ(fn.here().id(), 5);
+
+    // Writing the same expression twice must not create a second expression
+    ir::Expr bEqC = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, bEqC);
+
+    // The operands and their order are part of the identity of the expression
+    EXPECT_NE(fn.getStore(ir::CodePos(2)).value, bEqC);
+    EXPECT_NE(fn.getStore(ir::CodePos(3)).value, bEqC);
+
+    // Nested expressions are uniqued as well
+    auto nested = fn.getEquality((ir::Bool)fn.getStore(ir::CodePos(4)).value);
+    EXPECT_EQ(nested.left, bEqC);
+    EXPECT_EQ(nested.right, bEqC);
+}
+
+TEST(VerifyLanguage, ParseEqualityNegation) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    store $a <- $a = $b
+    store $a <- $a != $b
+)");
+    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.here().id(), 2);
+
+    ir::Bool equal = (ir::Bool)fn.getStore(ir::CodePos(0)).value;
+    ir::Bool notEqual = (ir::Bool)fn.getStore(ir::CodePos(1)).value;
+
+    // '!=' reuses the expression of '=' and only differs in the negation bit of the handle
+    EXPECT_EQ(equal.kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(notEqual.kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(equal.id(), notEqual.id());
+    EXPECT_EQ((uint32_t)equal.boolNegatedBit, 0u);
+    EXPECT_EQ((uint32_t)notEqual.boolNegatedBit, 1u);
+    EXPECT_NE(equal, notEqual);
+    EXPECT_EQ(!equal, notEqual);
+}
+
 }

@@ -129,11 +129,6 @@ bool Sets::ClauseHashEqual::operator()(const HashLookup& a, const HashEntry& b) 
     return std::ranges::equal(std::views::drop(a.sets.clauses[b.expr.id()], 1), std::views::drop(a.clause, 1));
 }
 
-// https://www.boost.org/doc/libs/1_34_1/doc/html/boost/hash_combine.html
-static void hash_combine(size_t& seed, size_t hash_value) {
-    seed ^= hash_value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-
 static size_t hashClause(std::span<const Sets::Containment> clause) {
     size_t hash = 0xabcdef01;
     for (auto c : std::views::drop(clause, 1))
