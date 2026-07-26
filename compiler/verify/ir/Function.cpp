@@ -91,6 +91,27 @@ ExprList Function::makeExprList(std::span<const Expr> list) {
     return result;
 }
 
+std::optional<Theorem> Function::findTheorem(Bool prop) const {
+    auto it = m_theoremByProp.find(prop);
+    if (it == m_theoremByProp.end())
+        return std::nullopt;
+    return it->second;
+}
+
+//! Theorems are uniqued by their proposition, so a proposition must not be proven twice
+Theorem Function::addTheorem(Bool prop, CodePos pos, Proof proof) {
+    auto [it, inserted] = m_theoremByProp.try_emplace(prop, Theorem(m_theorems.size()));
+    VERIFY(inserted);
+    m_theorems.push_back({ prop, pos, proof });
+    return it->second;
+}
+
+Theorem Function::addPreCondition(Bool prop, CodePos pos) {
+    Theorem result = addTheorem(prop, pos, Proof(Tactic::Precondition, m_preConditions.size()));
+    m_preConditions.push_back(result);
+    return result;
+}
+
 #define COMPOUND_EXPR(name, sortType, args...)                                                       \
     function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {         \
         VERIFY(key.kind() == ExprKind::name);                                                        \

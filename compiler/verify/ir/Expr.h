@@ -219,3 +219,8 @@ struct MemoryLoc : Expr {
 #include <verify/ir/expressions.inc>
 
 }
+
+template<std::derived_from<verify::ir::SmallHandle> T>
+struct optional_traits<T> {
+    static constexpr T empty_value = T(limits::max);
+};

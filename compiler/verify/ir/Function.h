@@ -2,6 +2,7 @@
 
 #include <verify/ir/Expr.h>
 
+#include <unordered_map>
 #include <unordered_set>
 
 namespace verify::ir::function_detail {
@@ -81,22 +82,18 @@ struct Function {
         VERIFY(t.id() < m_theorems.size());
         return m_theorems[t.id()].pos;
     }
-    Theorem addTheorem(Bool prop, CodePos pos, Proof proof = Proof::makeSorry()) {
-        Theorem result(m_theorems.size());
-        m_theorems.push_back({ prop, pos, proof });
-        return result;
-    }
+    std::optional<Theorem> findTheorem(Bool prop) const;
+
+    //! Adds a theorem for a proposition that is not proven yet
+    Theorem addTheorem(Bool prop, CodePos pos, Proof proof = Proof::makeSorry());
+
+    //! The proposition of a theorem never changes, so only the proof may be replaced
     void setProof(Theorem t, Proof p) {
         VERIFY(t.id() < m_theorems.size());
         m_theorems[t.id()].proof = p;
     }
 
-    Theorem addPreCondition(Bool prop, CodePos pos) {
-        Theorem result(m_theorems.size());
-        m_theorems.push_back({ prop, pos, Proof(Tactic::Precondition, m_preConditions.size()) });
-        m_preConditions.push_back(result);
-        return result;
-    }
+    Theorem addPreCondition(Bool prop, CodePos pos);
 
     void addPostCondition(Theorem t) {
         m_postConditions.push_back(t);
@@ -215,6 +212,19 @@ private:
         bool operator()(const ExprListEntry& a, const ExprListLookup& b) const { return (*this)(b, a); }
     };
 
+    //! Hashes the proposition of a theorem
+    /*!
+    Propositions are uniqued expressions, so the handle can be hashed and compared directly
+    and no further information has to be kept next to it.
+    */
+    struct PropHash {
+        size_t operator()(Bool prop) const {
+            size_t hash = 0;
+            hash_combine(hash, std::bit_cast<uint32_t>((Expr)prop));
+            return hash;
+        }
+    };
+
     struct Inst {
         Opcode opcode;
         inst_arr data;
@@ -261,6 +271,8 @@ private:
     std::vector<expr_arr> m_expressions;
     std::unordered_set<ExprEntry, ExprHash, ExprHashEqual> m_expressionSet;
     std::vector<TheoremData> m_theorems;
+    //! Only stays valid because the proposition of a theorem is never changed
+    std::unordered_map<Bool, Theorem, PropHash> m_theoremByProp;
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;
     std::unordered_set<ExprListEntry, ExprListHash, ExprListHashEqual> m_expressionListSet;

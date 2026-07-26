@@ -531,6 +531,8 @@ struct FunctionParser {
             s.advance();
         }
         ir::Bool prop = parseExpression<ir::Bool>(s);
+        if (ir.findTheorem(prop).has_value())
+            s.error("Proposition was already stated by another theorem");
         ir::Theorem theorem = isPreCondition
             ? ir.addPreCondition(prop, ir.here())
             : ir.addTheorem(prop, ir.here(), parseProof(s));
@@ -909,14 +911,14 @@ fn #test($a, $b, $c):
 
 TEST(VerifyLanguage, ParseTheorems) {
     ir::Function fn = parseForTest(R"(
-fn #test($a, $b):
+fn #test($a, $b, $c):
     pre %a_eq_b: $a = $b
     prove %reflex: $a = $a by eq_reflexive
     prove %transitive: $a != $b by eq_transitive
-    prove %sorry_thm: $a = $b by sorry
-    prove $a = $b by load_store
+    prove %sorry_thm: $a = $c by sorry
+    prove $b = $c by load_store
 )");
-    EXPECT_EQ(fn.parameterCount(), 2);
+    EXPECT_EQ(fn.parameterCount(), 3);
     EXPECT_EQ(fn.here().id(), 0);
 
     ir::Theorem preTheorem(0);
@@ -936,6 +938,32 @@ fn #test($a, $b):
 
     ir::Theorem loadStoreTheorem(4);
     EXPECT_EQ(fn.proof(loadStoreTheorem).tactic(), ir::Tactic::LoadStore);
+}
+
+TEST(VerifyLanguage, ParseDuplicateTheorems) {
+    // Theorems are uniqued by their proposition, so proving one twice is an error
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    prove $a = $b by sorry
+    prove $a = $b by load_store
+)"),
+        ParserException);
+
+    // Preconditions share the same propositions as the other theorems
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    pre %a_eq_b: $a = $b
+    prove $a = $b by load_store
+)"),
+        ParserException);
+
+    // A proposition and its negation are distinct
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    prove $a = $b by sorry
+    prove $a != $b by sorry
+)");
+    EXPECT_EQ(fn.prop(ir::Theorem(0)), !fn.prop(ir::Theorem(1)));
 }
 
 TEST(VerifyLanguage, ParseSatProof) {

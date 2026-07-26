@@ -86,6 +86,42 @@ TEST(VerifyIR, UniqueExpressionsWithLists) {
     EXPECT_NE(fn.addPureScalarReturn({ target, fn.makeExprList(reversed) }), call);
 }
 
+TEST(VerifyIR, FindTheorem) {
+    Function fn;
+    Expr a = fn.addParameter(Sort::MemoryLoc);
+    Expr b = fn.addParameter(Sort::MemoryLoc);
+    Bool aEqB = fn.addEquality({ a, b });
+    Bool aEqA = fn.addEquality({ a, a });
+
+    EXPECT_FALSE(fn.findTheorem(aEqB).has_value());
+
+    Theorem theorem = fn.addTheorem(aEqB, CodePos(0));
+    EXPECT_EQ(fn.findTheorem(aEqB).value(), theorem);
+    EXPECT_EQ(fn.prop(theorem), aEqB);
+    EXPECT_EQ(fn.proof(theorem).tactic(), Tactic::Sorry);
+
+    // A proposition and its negation are proven by separate theorems
+    EXPECT_FALSE(fn.findTheorem(!aEqB).has_value());
+    Theorem negated = fn.addTheorem(!aEqB, CodePos(0));
+    EXPECT_NE(negated, theorem);
+    EXPECT_EQ(fn.findTheorem(!aEqB).value(), negated);
+    EXPECT_EQ(fn.findTheorem(aEqB).value(), theorem);
+
+    EXPECT_FALSE(fn.findTheorem(aEqA).has_value());
+}
+
+TEST(VerifyIR, FindPreCondition) {
+    Function fn;
+    Expr a = fn.addParameter(Sort::MemoryLoc);
+    Expr b = fn.addParameter(Sort::MemoryLoc);
+    Bool aEqB = fn.addEquality({ a, b });
+
+    // Preconditions are uniqued together with the other theorems
+    Theorem precondition = fn.addPreCondition(aEqB, CodePos(0));
+    EXPECT_EQ(fn.findTheorem(aEqB).value(), precondition);
+    EXPECT_EQ(fn.proof(precondition).tactic(), Tactic::Precondition);
+}
+
 TEST(VerifyIR, UniqueExpressionsRespectNegation) {
     Function fn;
     Bool cond = Expr::makePositionActive(CodePos(0));
