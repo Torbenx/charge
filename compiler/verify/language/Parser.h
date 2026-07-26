@@ -37,6 +37,8 @@ inline constexpr ConstWordStringTable words {
     "jump_active_forward",
     "branch_active_forward",
     "branch_decision",
+#define SORT(name, snake_case) "loadable_" #snake_case,
+#include <verify/ir/sorts.inc>
 };
 
 struct ParserException : std::exception {

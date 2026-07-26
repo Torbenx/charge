@@ -110,6 +110,22 @@ struct Function {
     sortType add##name(const function_detail::compound_expr<ExprKind::name>&);
 #include <verify/ir/expressions.inc>
 
+    //! Loads of all sorts share the same data, so they can be accessed without knowing the sort
+    struct LoadData {
+        MemoryLoc loc;
+        RelativeCodePos pos;
+    };
+    LoadData getLoad(Expr) const;
+    Expr addLoad(Sort, const LoadData&);
+
+    //! The same holds for the 'Loadable' propositions, which only store their location
+    MemoryLoc getLoadableLocation(Expr) const;
+    Bool addLoadable(Sort, MemoryLoc);
+    std::optional<Bool> findLoadable(Sort, MemoryLoc) const;
+
+    //! Returns the sort a location may be loaded with according to its 'Loadable' theorems
+    std::optional<Sort> loadableSort(MemoryLoc) const;
+
 #define INSTRUCTION(name, ...)                                              \
     void add##name(const function_detail::instruction_data<Opcode::name>&); \
     function_detail::instruction_data<Opcode::name> get##name(CodePos pos) const;
@@ -176,6 +192,15 @@ private:
     };
 
     Expr addExprInternal(ExprKind kind, expr_arr data);
+    std::optional<Expr> findExprInternal(ExprKind kind, expr_arr data) const;
+
+    //! Determines the sort of a single expression kind
+    /*!
+    All kinds but 'FunctionParameter' and 'PureScalarReturn' have the sort they are
+    declared with in 'expressions.inc'.
+    */
+    template<ExprKind kind, typename SortType>
+    Sort sortOfKind(Expr) const;
 
     //! Identifies an expression list that is already present in 'm_expressionLists'
     /*!

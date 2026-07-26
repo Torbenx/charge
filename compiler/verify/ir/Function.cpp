@@ -68,6 +68,77 @@ Expr Function::addExprInternal(ExprKind kind, expr_arr data) {
     return result;
 }
 
+std::optional<Expr> Function::findExprInternal(ExprKind kind, expr_arr data) const {
+    auto it = m_expressionSet.find(ExprLookup { hashExpr(kind, data), kind, data, this });
+    if (it == m_expressionSet.end())
+        return std::nullopt;
+    return it->expr;
+}
+
+template<ExprKind kind, typename SortType>
+Sort Function::sortOfKind(Expr expr) const {
+    if constexpr (kind == ExprKind::FunctionParameter) {
+        VERIFY(expr.id() < m_parameters.size());
+        return m_parameters[expr.id()].sort;
+    } else if constexpr (kind == ExprKind::PureScalarReturn) {
+        // TODO: This requires the signature of the called function
+        VERIFY_NOT_REACHED();
+    } else {
+        return SortType::sort;
+    }
+}
+
+Sort Function::sortOf(Expr expr) const {
+    switch (expr.kind()) {
+#define EXPR(name, sortType) \
+    case ExprKind::name:     \
+        return sortOfKind<ExprKind::name, sortType>(expr);
+#include <verify/ir/expressions.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Function::LoadData Function::getLoad(Expr expr) const {
+    VERIFY(isLoad(expr.kind()));
+    return fromArray<LoadData>(m_expressions[expr.idBits]);
+}
+
+Expr Function::addLoad(Sort sort, const LoadData& data) {
+    return addExprInternal(loadKind(sort), toArray<LoadData>(data));
+}
+
+//! The data of every 'Loadable' expression, independent of its sort
+using loadable_data = function_detail::compound_expr<ExprKind::LoadableBool>;
+
+MemoryLoc Function::getLoadableLocation(Expr expr) const {
+    VERIFY(isLoadable(expr.kind()));
+    return fromArray<loadable_data>(m_expressions[expr.idBits]).loc;
+}
+
+Bool Function::addLoadable(Sort sort, MemoryLoc loc) {
+    return Bool(addExprInternal(loadableKind(sort), toArray<loadable_data>({ loc })));
+}
+
+std::optional<Bool> Function::findLoadable(Sort sort, MemoryLoc loc) const {
+    std::optional<Expr> expr = findExprInternal(loadableKind(sort), toArray<loadable_data>({ loc }));
+    if (!expr.has_value())
+        return std::nullopt;
+    return Bool(*expr);
+}
+
+std::optional<Sort> Function::loadableSort(MemoryLoc loc) const {
+    // TODO: A location with several 'Loadable' theorems is contradictory and has to be
+    // rejected when the function is checked. Until then the first sort found is used.
+    for (int_t i = 0; i < std::to_underlying(Sort::COUNT); i++) {
+        Sort sort = (Sort)i;
+        std::optional<Bool> loadable = findLoadable(sort, loc);
+        if (loadable.has_value() && findTheorem(*loadable).has_value())
+            return sort;
+    }
+    return std::nullopt;
+}
+
 bool Function::ExprListHashEqual::operator()(const ExprListLookup& a, const ExprListEntry& b) const {
     return std::ranges::equal(a.list, viewInternal(a.function->m_expressionLists, b.list));
 }

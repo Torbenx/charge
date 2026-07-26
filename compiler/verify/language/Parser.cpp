@@ -651,22 +651,35 @@ struct FunctionParser {
         ir::Expr base = parsePrimaryExpression(s);
         while (s.tokKind() == TokenKind::Point) {
             s.advance();
-            if (s.tokKind() == TokenKind::Identifier) {
-                Word id = s.tok().word();
-                s.advance();
-                if (id == words["load"]) {
-                    if (s.tokKind() != TokenKind::LabelName)
-                        s.error("Expected label name after load");
-                    base = ir.addLoad({ sortCast<ir::MemoryLoc>(base), getLabel(s) });
-                    continue;
-                } else {
-                    s.error("Unexpected identifier in postfix expression");
-                }
-            } else {
+            if (s.tokKind() != TokenKind::Identifier)
                 s.error("Unexpected token after '.'");
+            Word id = s.tok().word();
+            s.advance();
+            if (id == words["load"]) {
+                base = parseLoad(s, sortCast<ir::MemoryLoc>(base));
+                continue;
             }
+#define SORT(name, snake_case)                                          \
+    if (id == words["loadable_" #snake_case]) {                         \
+        base = ir.addLoadable##name({ sortCast<ir::MemoryLoc>(base) }); \
+        continue;                                                       \
+    }
+#include <verify/ir/sorts.inc>
+            s.error("Unexpected identifier in postfix expression");
         }
         return base;
+    }
+
+    //! The sort of a load is inferred from the 'loadable' theorem of the loaded location
+    ir::Expr parseLoad(TokenStream& s, ir::MemoryLoc loc) {
+        if (s.tokKind() != TokenKind::LabelName)
+            s.error("Expected label name after load");
+        std::optional<ir::Sort> sort = ir.loadableSort(loc);
+        if (!sort.has_value())
+            s.error("The loaded location must be proven loadable before it is loaded");
+        ir::CodePos pos = getLabel(s);
+        s.advance();
+        return ir.addLoad(*sort, { loc, pos });
     }
 
     ir::Expr parsePrimaryExpression(TokenStream& s) {
@@ -938,6 +951,30 @@ fn #test($a, $b, $c):
 
     ir::Theorem loadStoreTheorem(4);
     EXPECT_EQ(fn.proof(loadStoreTheorem).tactic(), ir::Tactic::LoadStore);
+}
+
+TEST(VerifyLanguage, ParseLoad) {
+    // The sort of a load is not spelled out, it follows from the 'loadable' theorem
+    ir::Function fn = parseForTest(R"(
+fn #test($x, $y):
+@entry:
+    pre %x_loadable: $x.loadable_memory_loc
+    store $y <- $x.load@entry
+)");
+    EXPECT_EQ(fn.here().id(), 1);
+
+    ir::Expr value = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(value.kind(), ir::ExprKind::LoadMemoryLoc);
+    EXPECT_EQ(fn.sortOf(value), ir::Sort::MemoryLoc);
+    EXPECT_EQ(fn.getLoad(value).loc, ir::Expr(ir::ExprKind::FunctionParameter, 0));
+
+    // A load of a location that was never proven loadable cannot be given a sort
+    EXPECT_THROW(parseForTest(R"(
+fn #test($x, $y):
+@entry:
+    store $y <- $x.load@entry
+)"),
+        ParserException);
 }
 
 TEST(VerifyLanguage, ParseDuplicateTheorems) {

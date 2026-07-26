@@ -8,18 +8,62 @@
 namespace verify::ir {
 
 enum class Sort : uint8_t {
-    Bool,
-    Fn,
-    Type,
-    Member,
-    MemoryDecl,
-    MemoryLoc,
+#define SORT(name, snake_case) name,
+#include <verify/ir/sorts.inc>
+    COUNT,
 };
 
 enum class ExprKind : uint8_t {
 #define EXPR(kind, ...) kind,
 #include <verify/ir/expressions.inc>
 };
+
+//! The expressions of all sorts that only differ in the sort they are declared with
+/*!
+Loads and their 'Loadable' propositions exist once per sort. Since all of them store the
+same data they can be created and inspected without knowing the sort at compile time.
+*/
+inline bool isLoad(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case) case ExprKind::Load##name:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool isLoadable(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case) case ExprKind::Loadable##name:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline ExprKind loadKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case) \
+    case Sort::name:           \
+        return ExprKind::Load##name;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+inline ExprKind loadableKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case) \
+    case Sort::name:           \
+        return ExprKind::Loadable##name;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 
 enum class Opcode : uint8_t {
 #define INSTRUCTION(name, ...) name,
