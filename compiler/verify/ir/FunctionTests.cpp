@@ -47,6 +47,45 @@ TEST(VerifyIR, UniqueExpressionsOfDifferentKinds) {
     EXPECT_EQ(fn.addMemberContains({ left, right }), contains);
 }
 
+static bool sameList(ExprList a, ExprList b) {
+    return a.m_offset == b.m_offset && a.m_size == b.m_size;
+}
+
+TEST(VerifyIR, UniqueExpressionLists) {
+    Function fn;
+    Expr a = fn.addParameter(Sort::MemoryLoc);
+    Expr b = fn.addParameter(Sort::MemoryLoc);
+
+    std::array<Expr, 2> ab { a, b };
+    std::array<Expr, 2> ba { b, a };
+    std::array<Expr, 1> justA { a };
+
+    ExprList abList = fn.makeExprList(ab);
+    EXPECT_EQ(abList.size(), 2);
+    EXPECT_TRUE(sameList(fn.makeExprList(ab), abList));
+
+    // Order and length are part of the identity of a list
+    EXPECT_FALSE(sameList(fn.makeExprList(ba), abList));
+    EXPECT_FALSE(sameList(fn.makeExprList(justA), abList));
+
+    ExprList emptyList = fn.makeExprList(std::span<const Expr> {});
+    EXPECT_EQ(emptyList.size(), 0);
+    EXPECT_TRUE(sameList(fn.makeExprList(std::span<const Expr> {}), emptyList));
+    EXPECT_FALSE(sameList(emptyList, abList));
+}
+
+TEST(VerifyIR, UniqueExpressionsWithLists) {
+    Function fn;
+    Fn target(fn.addParameter(Sort::Fn));
+    std::array<Expr, 2> args { fn.addParameter(Sort::MemoryLoc), fn.addParameter(Sort::MemoryLoc) };
+    std::array<Expr, 2> reversed { args[1], args[0] };
+
+    // Uniquing the list is what allows the expression containing it to be uniqued
+    Expr call = fn.addPureScalarReturn({ target, fn.makeExprList(args) });
+    EXPECT_EQ(fn.addPureScalarReturn({ target, fn.makeExprList(args) }), call);
+    EXPECT_NE(fn.addPureScalarReturn({ target, fn.makeExprList(reversed) }), call);
+}
+
 TEST(VerifyIR, UniqueExpressionsRespectNegation) {
     Function fn;
     Bool cond = Expr::makePositionActive(CodePos(0));

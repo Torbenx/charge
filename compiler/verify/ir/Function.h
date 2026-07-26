@@ -102,9 +102,7 @@ struct Function {
         m_postConditions.push_back(t);
     }
 
-    ExprList makeExprList(std::span<const Expr> list) {
-        return (ExprList)makeListInternal(m_expressionLists, list);
-    }
+    ExprList makeExprList(std::span<const Expr> list);
 
     PhiParentList makePhiParentList(std::span<const CodePos> list) {
         return (PhiParentList)makeListInternal(m_phiParents, list);
@@ -182,6 +180,41 @@ private:
 
     Expr addExprInternal(ExprKind kind, expr_arr data);
 
+    //! Identifies an expression list that is already present in 'm_expressionLists'
+    /*!
+    The handle contains the offset and the size, so as for 'ExprEntry' the contents do
+    not have to be repeated here and the hash is cached for rehashing.
+    */
+    struct ExprListEntry {
+        ExprList list;
+        size_t hash;
+    };
+
+    //! Transparent lookup key for an expression list that has not been added yet
+    struct ExprListLookup {
+        size_t hash;
+        std::span<const Expr> list;
+        const Function* function;
+    };
+
+    struct ExprListHash {
+        using is_transparent = void;
+
+        size_t operator()(const ExprListEntry& entry) const { return entry.hash; }
+        size_t operator()(const ExprListLookup& lookup) const { return lookup.hash; }
+    };
+
+    struct ExprListHashEqual {
+        using is_transparent = void;
+
+        //! As for 'ExprHashEqual' entries are only inserted after a failed lookup
+        bool operator()(const ExprListEntry& a, const ExprListEntry& b) const {
+            return a.list.m_offset == b.list.m_offset && a.list.m_size == b.list.m_size;
+        }
+        bool operator()(const ExprListLookup& a, const ExprListEntry& b) const;
+        bool operator()(const ExprListEntry& a, const ExprListLookup& b) const { return (*this)(b, a); }
+    };
+
     struct Inst {
         Opcode opcode;
         inst_arr data;
@@ -230,6 +263,7 @@ private:
     std::vector<TheoremData> m_theorems;
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;
+    std::unordered_set<ExprListEntry, ExprListHash, ExprListHashEqual> m_expressionListSet;
     std::vector<CodePos> m_phiParents;
     std::vector<ParameterData> m_parameters;
     std::vector<Theorem> m_preConditions;

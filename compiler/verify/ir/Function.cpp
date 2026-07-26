@@ -1,5 +1,7 @@
 #include <verify/ir/Function.h>
 
+#include <algorithm>
+
 namespace verify::ir {
 
 using arr = std::array<uint32_t, 3>;
@@ -51,7 +53,6 @@ in the data are themselves unique, comparing the data words is enough to identif
 TODO: Relative code positions are only compared bitwise, so 'Load' expressions on complex
 positions with equal contents are not yet recognized as equal. The positions themselves will
 have to be uniqued to fix that.
-TODO: The same applies to expression lists, which are not uniqued yet either.
 */
 Expr Function::addExprInternal(ExprKind kind, expr_arr data) {
     size_t hash = hashExpr(kind, data);
@@ -64,6 +65,29 @@ Expr Function::addExprInternal(ExprKind kind, expr_arr data) {
     m_expressions.push_back(data);
     Expr result(kind, id);
     m_expressionSet.emplace(ExprEntry { result, hash });
+    return result;
+}
+
+bool Function::ExprListHashEqual::operator()(const ExprListLookup& a, const ExprListEntry& b) const {
+    return std::ranges::equal(a.list, viewInternal(a.function->m_expressionLists, b.list));
+}
+
+static size_t hashExprList(std::span<const Expr> list) {
+    size_t hash = list.size();
+    for (Expr expr : list)
+        hash_combine(hash, std::bit_cast<uint32_t>(expr));
+    return hash;
+}
+
+//! Expression lists are uniqued by their contents so that expressions containing them can be uniqued too
+ExprList Function::makeExprList(std::span<const Expr> list) {
+    size_t hash = hashExprList(list);
+    auto it = m_expressionListSet.find(ExprListLookup { hash, list, this });
+    if (it != m_expressionListSet.end())
+        return it->list;
+
+    ExprList result = (ExprList)makeListInternal(m_expressionLists, list);
+    m_expressionListSet.emplace(ExprListEntry { result, hash });
     return result;
 }
 

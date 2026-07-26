@@ -987,6 +987,32 @@ fn #test($a, $b, $c):
     EXPECT_EQ(nested.right, bEqC);
 }
 
+TEST(VerifyLanguage, ParseUniqueCallArguments) {
+    ir::Function fn = parseForTest(R"(
+fn #test($f, $a, $b):
+    call $f($a, $b)
+    call $f($a, $b)
+    call $f($b, $a)
+    call $f()
+    call $f()
+)");
+    EXPECT_EQ(fn.parameterCount(), 3);
+    EXPECT_EQ(fn.here().id(), 5);
+
+    auto args = [&fn](uint32_t pos) { return fn.getCall(ir::CodePos(pos)).args; };
+    auto sameList = [](ir::ExprList a, ir::ExprList b) {
+        return a.m_offset == b.m_offset && a.m_size == b.m_size;
+    };
+
+    // Identical argument lists are shared between the calls
+    EXPECT_EQ(args(0).size(), 2);
+    EXPECT_TRUE(sameList(args(1), args(0)));
+    EXPECT_FALSE(sameList(args(2), args(0)));
+
+    EXPECT_EQ(args(3).size(), 0);
+    EXPECT_TRUE(sameList(args(4), args(3)));
+}
+
 TEST(VerifyLanguage, ParseEqualityNegation) {
     ir::Function fn = parseForTest(R"(
 fn #test($a, $b):
