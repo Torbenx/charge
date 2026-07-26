@@ -1,0 +1,176 @@
+#include <verify/ir/check.h>
+
+namespace verify::ir {
+
+//! Stands in for any member of 'T' during aggregate initialization
+/*!
+The conversion to 'T' itself has to be excluded, otherwise initializing an aggregate with a
+single member would be ambiguous with copying it.
+*/
+template<typename T>
+struct AnyMember {
+    template<typename U>
+        requires(!std::same_as<T, std::remove_cvref_t<U>>)
+    operator U() const;
+};
+
+//! Calls 'callback' for every member of an aggregate
+/*!
+The number of members is the largest number of initializers the aggregate accepts. The larger
+counts have to be tried first because an aggregate does not accept fewer initializers than it
+has members when the remaining members cannot be value initialized.
+*/
+template<typename T, typename Callback>
+static void forEachMember(const T& value, Callback&& callback) {
+    if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {}, AnyMember<T> {} }; }) {
+        const auto& [a, b, c] = value;
+        callback(a);
+        callback(b);
+        callback(c);
+    } else if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {} }; }) {
+        const auto& [a, b] = value;
+        callback(a);
+        callback(b);
+    } else if constexpr (requires { T { AnyMember<T> {} }; }) {
+        const auto& [a] = value;
+        callback(a);
+    } else {
+        static_assert(false, "Only aggregates with one to three members are supported");
+    }
+}
+
+//! Collects the results of all checks performed on a single function
+struct FunctionChecker {
+    explicit FunctionChecker(Function& function)
+        : function(function) { }
+
+    FunctionCheckReport check();
+
+    //! Checks that the arguments of every expression have the declared sort
+    void checkExpressionSorts();
+
+    //! Checks that the arguments of every instruction have the declared sort
+    void checkInstructionSorts();
+
+    template<typename Data>
+    bool argumentSortsMatch(const Data&);
+
+    template<ExprKind kind, typename Data>
+    void checkSortsOfKind(Expr, const Data&);
+
+    //! Checks that the proof of every theorem establishes its proposition
+    void checkProofs();
+
+    //! Checks that the preconditions of every expression and instruction are proven by a theorem
+    void checkPreconditions();
+
+    Function& function;
+    FunctionCheckReport report;
+};
+
+FunctionCheckReport FunctionChecker::check() {
+    checkExpressionSorts();
+    checkInstructionSorts();
+    checkProofs();
+    checkPreconditions();
+    return std::move(report);
+}
+
+/*!
+The sort an argument must have is the sort of the expression type it is declared with in
+'expressions.inc' and 'instructions.inc'. Arguments that are declared as a plain 'Expr' accept
+any sort and arguments that are not expressions at all have no sort to check.
+*/
+template<typename Data>
+bool FunctionChecker::argumentSortsMatch(const Data& data) {
+    bool valid = true;
+    forEachMember(data, [&](const auto& member) {
+        using member_t = std::remove_cvref_t<decltype(member)>;
+        if constexpr (requires { member_t::sort; }) {
+            if (function.sortOf(member) != member_t::sort)
+                valid = false;
+        }
+    });
+    return valid;
+}
+
+template<ExprKind kind, typename Data>
+void FunctionChecker::checkSortsOfKind(Expr expr, const Data& data) {
+    if constexpr (kind == ExprKind::Equality) {
+        // An equality accepts any sort as long as both of its sides agree
+        if (function.sortOf(data.left) != function.sortOf(data.right))
+            report.malformedExpressions.push_back(expr);
+    } else if (!argumentSortsMatch(data)) {
+        report.malformedExpressions.push_back(expr);
+    }
+}
+
+void FunctionChecker::checkExpressionSorts() {
+    for (Expr expr : function.expressions()) {
+        switch (expr.kind()) {
+            // Only compound expressions are enumerated, the inline ones carry no arguments
+#define COMPOUND_EXPR(name, sortType, args...)                                      \
+    case ExprKind::name:                                                            \
+        checkSortsOfKind<ExprKind::name>(expr, function.get##name((sortType)expr)); \
+        break;
+#include <verify/ir/expressions.inc>
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+}
+
+void FunctionChecker::checkInstructionSorts() {
+    for (uint32_t id = 0; id < function.here().id(); id++) {
+        CodePos pos(id);
+        bool valid = true;
+        switch (function.opcodeAt(pos)) {
+#define INSTRUCTION(name, args...)                           \
+    case Opcode::name:                                       \
+        valid = argumentSortsMatch(function.get##name(pos)); \
+        break;
+#include <verify/ir/instructions.inc>
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        if (!valid)
+            report.malformedInstructions.push_back(pos);
+    }
+}
+
+void FunctionChecker::checkProofs() {
+    // TODO
+}
+
+/*!
+Reading a memory location and writing to it both require it to hold a value of the sort that is
+read or written, which is what the 'Loadable' proposition states.
+
+Adding the propositions here appends to the expressions of the function, which is safe while the
+loads are enumerated because the range of the enumeration is fixed when it begins.
+*/
+void FunctionChecker::checkPreconditions() {
+    for (Expr expr : function.expressions()) {
+        if (!isLoad(expr.kind()))
+            continue;
+        Bool precondition = function.addLoadable(function.sortOf(expr), function.getLoad(expr).loc);
+        if (!function.findTheorem(precondition).has_value())
+            report.invalidExpressions.push_back({ expr, precondition });
+    }
+
+    for (uint32_t id = 0; id < function.here().id(); id++) {
+        CodePos pos(id);
+        if (function.opcodeAt(pos) != Opcode::Store)
+            continue;
+        auto store = function.getStore(pos);
+        Bool precondition = function.addLoadable(function.sortOf(store.value), store.loc);
+        if (!function.findTheorem(precondition).has_value())
+            report.invalidInstructions.push_back({ pos, precondition });
+    }
+}
+
+FunctionCheckReport check(Function& function) {
+    return FunctionChecker(function).check();
+}
+
+}

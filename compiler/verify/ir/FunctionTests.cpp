@@ -86,6 +86,26 @@ TEST(VerifyIR, UniqueExpressionsWithLists) {
     EXPECT_NE(fn.addPureScalarReturn({ target, fn.makeExprList(reversed) }), call);
 }
 
+TEST(VerifyIR, EnumerateExpressions) {
+    Function fn;
+    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+
+    // Parameters are inline expressions and are not part of the enumeration
+    EXPECT_EQ(fn.expressionCount(), 0);
+    EXPECT_TRUE(std::ranges::empty(fn.expressions()));
+
+    std::vector<Expr> added {
+        fn.addMemoryLocType({ loc }),
+        fn.addLoadType({ loc, CodePos(0) }),
+        fn.addEquality({ loc, loc }),
+    };
+    // Adding a known expression again must not enumerate it twice
+    fn.addMemoryLocType({ loc });
+
+    EXPECT_EQ(fn.expressionCount(), 3);
+    EXPECT_TRUE(std::ranges::equal(fn.expressions(), added));
+}
+
 TEST(VerifyIR, SortOfExpressions) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));

@@ -36,7 +36,7 @@ static T fromArray(const arr& in) {
 }
 
 bool Function::ExprHashEqual::operator()(const ExprLookup& a, const ExprEntry& b) const {
-    return a.kind == b.expr.kind() && a.data == a.function->m_expressions[b.expr.idBits];
+    return a.kind == b.expr.kind() && a.data == a.function->m_expressions[b.expr.idBits].data;
 }
 
 static size_t hashExpr(ExprKind kind, const arr& data) {
@@ -62,7 +62,7 @@ Expr Function::addExprInternal(ExprKind kind, expr_arr data) {
 
     uint32_t id = m_expressions.size();
     VERIFY(id == Expr(kind, id).id());
-    m_expressions.push_back(data);
+    m_expressions.push_back({ kind, data });
     Expr result(kind, id);
     m_expressionSet.emplace(ExprEntry { result, hash });
     return result;
@@ -101,7 +101,7 @@ Sort Function::sortOf(Expr expr) const {
 
 Function::LoadData Function::getLoad(Expr expr) const {
     VERIFY(isLoad(expr.kind()));
-    return fromArray<LoadData>(m_expressions[expr.idBits]);
+    return fromArray<LoadData>(m_expressions[expr.idBits].data);
 }
 
 Expr Function::addLoad(Sort sort, const LoadData& data) {
@@ -113,7 +113,7 @@ using loadable_data = function_detail::compound_expr<ExprKind::LoadableBool>;
 
 MemoryLoc Function::getLoadableLocation(Expr expr) const {
     VERIFY(isLoadable(expr.kind()));
-    return fromArray<loadable_data>(m_expressions[expr.idBits]).loc;
+    return fromArray<loadable_data>(m_expressions[expr.idBits].data).loc;
 }
 
 Bool Function::addLoadable(Sort sort, MemoryLoc loc) {
@@ -183,15 +183,15 @@ Theorem Function::addPreCondition(Bool prop, CodePos pos) {
     return result;
 }
 
-#define COMPOUND_EXPR(name, sortType, args...)                                                       \
-    function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {         \
-        VERIFY(key.kind() == ExprKind::name);                                                        \
-        return fromArray<function_detail::compound_expr<ExprKind::name>>(m_expressions[key.idBits]); \
-    }                                                                                                \
-                                                                                                     \
-    sortType Function::add##name(const function_detail::compound_expr<ExprKind::name>& val) {        \
-        return (sortType)addExprInternal(ExprKind::name,                                             \
-            toArray<function_detail::compound_expr<ExprKind::name>>(val));                           \
+#define COMPOUND_EXPR(name, sortType, args...)                                                            \
+    function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {              \
+        VERIFY(key.kind() == ExprKind::name);                                                             \
+        return fromArray<function_detail::compound_expr<ExprKind::name>>(m_expressions[key.idBits].data); \
+    }                                                                                                     \
+                                                                                                          \
+    sortType Function::add##name(const function_detail::compound_expr<ExprKind::name>& val) {             \
+        return (sortType)addExprInternal(ExprKind::name,                                                  \
+            toArray<function_detail::compound_expr<ExprKind::name>>(val));                                \
     }
 #include <verify/ir/expressions.inc>
 

@@ -110,6 +110,14 @@ struct Function {
     sortType add##name(const function_detail::compound_expr<ExprKind::name>&);
 #include <verify/ir/expressions.inc>
 
+    int_t expressionCount() const { return m_expressions.size(); }
+
+    //! All compound expressions of the function in the order they were added
+    auto expressions() const {
+        return std::views::iota(0u, (uint32_t)m_expressions.size())
+            | std::views::transform([this](uint32_t id) { return Expr(m_expressions[id].kind, id); });
+    }
+
     //! Loads of all sorts share the same data, so they can be accessed without knowing the sort
     struct LoadData {
         MemoryLoc loc;
@@ -250,6 +258,12 @@ private:
         }
     };
 
+    //! The kind is kept next to the data so that the expressions can be enumerated
+    struct ExprData {
+        ExprKind kind;
+        expr_arr data;
+    };
+
     struct Inst {
         Opcode opcode;
         inst_arr data;
@@ -293,7 +307,7 @@ private:
     }
 
     std::vector<Inst> m_instructions;
-    std::vector<expr_arr> m_expressions;
+    std::vector<ExprData> m_expressions;
     std::unordered_set<ExprEntry, ExprHash, ExprHashEqual> m_expressionSet;
     std::vector<TheoremData> m_theorems;
     //! Only stays valid because the proposition of a theorem is never changed
