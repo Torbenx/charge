@@ -37,7 +37,8 @@ inline constexpr ConstWordStringTable words {
     "jump_active_forward",
     "branch_active_forward",
     "branch_decision",
-#define SORT(name, snake_case) "loadable_" #snake_case,
+    "type",
+#define SORT(name, snake_case) #snake_case "_scalar",
 #include <verify/ir/sorts.inc>
 };
 

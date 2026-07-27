@@ -16,7 +16,7 @@ TEST(VerifyIR, CheckExpressionSorts) {
 
     fn.addMemoryLocType({ loc });
     fn.addMemoryLocMember({ loc });
-    fn.addLoadType({ loc, CodePos(0) });
+    fn.addTypeLoad({ loc, CodePos(0) });
     EXPECT_TRUE(check(fn).malformedExpressions.empty());
 
     // 'MemoryLocType' expects a location, not a type
@@ -30,11 +30,11 @@ TEST(VerifyIR, CheckExpressionSortsOfLoads) {
     Type type(fn.addParameter(Sort::Type));
 
     // The sort a load produces is unrelated to the sort of the location it loads from
-    fn.addLoadBool({ loc, CodePos(0) });
-    fn.addLoadMemoryLoc({ loc, CodePos(0) });
+    fn.addBoolLoad({ loc, CodePos(0) });
+    fn.addMemoryLocLoad({ loc, CodePos(0) });
     EXPECT_TRUE(check(fn).malformedExpressions.empty());
 
-    Expr wrongLocation = fn.addLoadBool({ MemoryLoc(type), CodePos(0) });
+    Expr wrongLocation = fn.addBoolLoad({ MemoryLoc(type), CodePos(0) });
     EXPECT_EQ(check(fn).malformedExpressions, std::vector<Expr> { wrongLocation });
 }
 
@@ -67,26 +67,29 @@ TEST(VerifyIR, CheckInstructionSortsWithoutArguments) {
 TEST(VerifyIR, CheckLoadPrecondition) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+    Type locType = fn.addMemoryLocType({ loc });
     MemoryLoc other(fn.addParameter(Sort::MemoryLoc));
+    Type otherType = fn.addMemoryLocType({ other });
 
-    Expr load = fn.addLoadType({ loc, CodePos(0) });
+    Expr load = fn.addTypeLoad({ loc, CodePos(0) });
     auto report = check(fn);
     ASSERT_EQ(report.invalidExpressions.size(), 1u);
     EXPECT_EQ(report.invalidExpressions[0].expr, load);
-    EXPECT_EQ(report.invalidExpressions[0].precondition, fn.addLoadable(Sort::Type, loc));
+    EXPECT_EQ(report.invalidExpressions[0].precondition, fn.addScalarType({ locType, Sort::Type }));
 
     // The proposition has to hold for the loaded location and the loaded sort
-    fn.addTheorem(fn.addLoadable(Sort::Bool, loc), CodePos(0));
-    fn.addTheorem(fn.addLoadable(Sort::Type, other), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Bool }), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ otherType, Sort::Type }), CodePos(0));
     EXPECT_EQ(check(fn).invalidExpressions.size(), 1u);
 
-    fn.addTheorem(fn.addLoadable(Sort::Type, loc), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0));
     EXPECT_TRUE(check(fn).invalidExpressions.empty());
 }
 
 TEST(VerifyIR, CheckStorePrecondition) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+    Type locType = fn.addMemoryLocType({ loc });
     Type value(fn.addParameter(Sort::Type));
 
     // A store requires the location to hold the sort of the stored value
@@ -94,9 +97,9 @@ TEST(VerifyIR, CheckStorePrecondition) {
     auto report = check(fn);
     ASSERT_EQ(report.invalidInstructions.size(), 1u);
     EXPECT_EQ(report.invalidInstructions[0].pos, CodePos(0));
-    EXPECT_EQ(report.invalidInstructions[0].precondition, fn.addLoadable(Sort::Type, loc));
+    EXPECT_EQ(report.invalidInstructions[0].precondition, fn.addScalarType({ locType, Sort::Type }));
 
-    fn.addTheorem(fn.addLoadable(Sort::Type, loc), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0));
     EXPECT_TRUE(check(fn).invalidInstructions.empty());
 }
 

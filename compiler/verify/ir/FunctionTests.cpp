@@ -96,7 +96,7 @@ TEST(VerifyIR, EnumerateExpressions) {
 
     std::vector<Expr> added {
         fn.addMemoryLocType({ loc }),
-        fn.addLoadType({ loc, CodePos(0) }),
+        fn.addTypeLoad({ loc, CodePos(0) }),
         fn.addEquality({ loc, loc }),
     };
     // Adding a known expression again must not enumerate it twice
@@ -127,13 +127,13 @@ TEST(VerifyIR, SortOfLoads) {
     RelativeCodePos pos = CodePos(0);
 
     // Every load carries its sort in its kind
-    EXPECT_EQ(fn.sortOf(fn.addLoadBool({ loc, pos })), Sort::Bool);
-    EXPECT_EQ(fn.sortOf(fn.addLoadType({ loc, pos })), Sort::Type);
-    EXPECT_EQ(fn.sortOf(fn.addLoadMemoryLoc({ loc, pos })), Sort::MemoryLoc);
+    EXPECT_EQ(fn.sortOf(fn.addBoolLoad({ loc, pos })), Sort::Bool);
+    EXPECT_EQ(fn.sortOf(fn.addTypeLoad({ loc, pos })), Sort::Type);
+    EXPECT_EQ(fn.sortOf(fn.addMemoryLocLoad({ loc, pos })), Sort::MemoryLoc);
 
     // Loads of different sorts stay distinct even though their data is identical
-    Expr boolLoad = fn.addLoadBool({ loc, pos });
-    Expr typeLoad = fn.addLoadType({ loc, pos });
+    Expr boolLoad = fn.addBoolLoad({ loc, pos });
+    Expr typeLoad = fn.addTypeLoad({ loc, pos });
     EXPECT_NE(boolLoad, typeLoad);
     EXPECT_NE(boolLoad.id(), typeLoad.id());
 
@@ -143,29 +143,22 @@ TEST(VerifyIR, SortOfLoads) {
     EXPECT_EQ(fn.getLoad(typeLoad).loc, loc);
 }
 
-TEST(VerifyIR, LoadableSort) {
+TEST(VerifyIR, ScalarSort) {
     Function fn;
-    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
-    MemoryLoc other(fn.addParameter(Sort::MemoryLoc));
+    Type type(fn.addParameter(Sort::Type));
+    Type other(fn.addParameter(Sort::Type));
 
-    // A 'Loadable' expression alone says nothing, only a theorem for it does
-    Bool loadable = fn.addLoadableType({ loc });
-    EXPECT_FALSE(fn.loadableSort(loc).has_value());
+    // A 'scalarType' expression alone says nothing, only a theorem for it does
+    Bool scalarType = fn.addScalarType({ type, Sort::Type });
+    EXPECT_FALSE(fn.scalarSort(type).has_value());
 
-    fn.addTheorem(loadable, CodePos(0));
-    EXPECT_EQ(fn.loadableSort(loc).value(), Sort::Type);
-    EXPECT_FALSE(fn.loadableSort(other).has_value());
+    fn.addTheorem(scalarType, CodePos(0));
+    EXPECT_EQ(fn.scalarSort(type).value(), Sort::Type);
+    EXPECT_FALSE(fn.scalarSort(other).has_value());
 
-    // The sort of a 'Loadable' can be chosen at runtime
-    EXPECT_EQ(fn.addLoadable(Sort::Type, loc), loadable);
-    EXPECT_EQ(fn.findLoadable(Sort::Type, loc).value(), loadable);
-    EXPECT_TRUE(isLoadable(loadable.kind()));
-    EXPECT_FALSE(isLoadable(ExprKind::LoadType));
-    EXPECT_EQ(fn.getLoadableLocation(loadable), loc);
-
-    // Looking a 'Loadable' up must not create it
-    EXPECT_FALSE(fn.findLoadable(Sort::Bool, loc).has_value());
-    EXPECT_FALSE(fn.loadableSort(loc).value() == Sort::Bool);
+    // Looking a 'ScalarType' up must not create it
+    EXPECT_FALSE(fn.findScalarType({ type, Sort::Bool }).has_value());
+    EXPECT_FALSE(fn.scalarSort(type).value() == Sort::Bool);
 }
 
 TEST(VerifyIR, FindTheorem) {

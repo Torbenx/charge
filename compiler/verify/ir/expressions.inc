@@ -11,12 +11,10 @@
 COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
 
 // There is one load per sort so that the sort of a load is known from its kind alone
-#define SORT(name, snake_case) COMPOUND_EXPR(Load##name, name, MemoryLoc loc, RelativeCodePos pos)
+#define SORT(name, snake_case) COMPOUND_EXPR(name##Load, name, MemoryLoc loc, RelativeCodePos pos)
 #include <verify/ir/sorts.inc>
 
-// States that a memory location may be loaded with a given sort
-#define SORT(name, snake_case) COMPOUND_EXPR(Loadable##name, Bool, MemoryLoc loc)
-#include <verify/ir/sorts.inc>
+COMPOUND_EXPR(ScalarType, Bool, Type type, Sort sort, Padding<3> _padding = {})
 
 COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ExprList args)
 INLINE_EXPR(FunctionParameter, Expr, uint32_t)

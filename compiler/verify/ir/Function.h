@@ -7,6 +7,14 @@
 
 namespace verify::ir::function_detail {
 
+//! An \p bytes sized struct guaranteed to contain zeros
+template<int_t bytes>
+struct Padding {
+    constexpr Padding() { storage.fill((std::byte)0); }
+private:
+    std::array<std::byte, bytes> storage;
+};
+
 template<ExprKind kind>
 struct compound_expr;
 
@@ -105,8 +113,9 @@ struct Function {
         return (PhiParentList)makeListInternal(m_phiParents, list);
     }
 
-#define COMPOUND_EXPR(name, sortType, args...)                                \
-    function_detail::compound_expr<ExprKind::name> get##name(sortType) const; \
+#define COMPOUND_EXPR(name, sortType, args...)                                                       \
+    function_detail::compound_expr<ExprKind::name> get##name(sortType) const;                        \
+    std::optional<sortType> find##name(const function_detail::compound_expr<ExprKind::name>&) const; \
     sortType add##name(const function_detail::compound_expr<ExprKind::name>&);
 #include <verify/ir/expressions.inc>
 
@@ -126,13 +135,9 @@ struct Function {
     LoadData getLoad(Expr) const;
     Expr addLoad(Sort, const LoadData&);
 
-    //! The same holds for the 'Loadable' propositions, which only store their location
-    MemoryLoc getLoadableLocation(Expr) const;
-    Bool addLoadable(Sort, MemoryLoc);
-    std::optional<Bool> findLoadable(Sort, MemoryLoc) const;
-
-    //! Returns the sort a location may be loaded with according to its 'Loadable' theorems
-    std::optional<Sort> loadableSort(MemoryLoc) const;
+    std::optional<Sort> scalarSort(Type) const;
+    //! Returns the sort a location may be loaded with according to its type
+    std::optional<Sort> scalarSort(MemoryLoc) const;
 
 #define INSTRUCTION(name, ...)                                              \
     void add##name(const function_detail::instruction_data<Opcode::name>&); \

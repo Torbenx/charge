@@ -659,10 +659,14 @@ struct FunctionParser {
                 base = parseLoad(s, sortCast<ir::MemoryLoc>(base));
                 continue;
             }
-#define SORT(name, snake_case)                                          \
-    if (id == words["loadable_" #snake_case]) {                         \
-        base = ir.addLoadable##name({ sortCast<ir::MemoryLoc>(base) }); \
-        continue;                                                       \
+            if (id == words["type"]) {
+                base = ir.addMemoryLocType({ sortCast<ir::MemoryLoc>(base) });
+                continue;
+            }
+#define SORT(name, snake_case)                                                 \
+    if (id == words[#snake_case "_scalar"]) {                                  \
+        base = ir.addScalarType({ sortCast<ir::Type>(base), ir::Sort::name }); \
+        continue;                                                              \
     }
 #include <verify/ir/sorts.inc>
             s.error("Unexpected identifier in postfix expression");
@@ -670,13 +674,13 @@ struct FunctionParser {
         return base;
     }
 
-    //! The sort of a load is inferred from the 'loadable' theorem of the loaded location
+    //! The sort of a load is inferred from a 'scalarType' theorem of the loaded location
     ir::Expr parseLoad(TokenStream& s, ir::MemoryLoc loc) {
         if (s.tokKind() != TokenKind::LabelName)
             s.error("Expected label name after load");
-        std::optional<ir::Sort> sort = ir.loadableSort(loc);
+        std::optional<ir::Sort> sort = ir.scalarSort(loc);
         if (!sort.has_value())
-            s.error("The loaded location must be proven loadable before it is loaded");
+            s.error("The loaded location must be proven scalar before it is loaded");
         ir::CodePos pos = getLabel(s);
         s.advance();
         return ir.addLoad(*sort, { loc, pos });
@@ -954,21 +958,21 @@ fn #test($a, $b, $c):
 }
 
 TEST(VerifyLanguage, ParseLoad) {
-    // The sort of a load is not spelled out, it follows from the 'loadable' theorem
+    // The sort of a load is not spelled out, it follows from the 'scalarType' theorem
     ir::Function fn = parseForTest(R"(
 fn #test($x, $y):
 @entry:
-    pre %x_loadable: $x.loadable_memory_loc
+    pre %x_scalar: $x.type.memory_loc_scalar
     store $y <- $x.load@entry
 )");
     EXPECT_EQ(fn.here().id(), 1);
 
     ir::Expr value = fn.getStore(ir::CodePos(0)).value;
-    EXPECT_EQ(value.kind(), ir::ExprKind::LoadMemoryLoc);
+    EXPECT_EQ(value.kind(), ir::ExprKind::MemoryLocLoad);
     EXPECT_EQ(fn.sortOf(value), ir::Sort::MemoryLoc);
     EXPECT_EQ(fn.getLoad(value).loc, ir::Expr(ir::ExprKind::FunctionParameter, 0));
 
-    // A load of a location that was never proven loadable cannot be given a sort
+    // A load of a location that was never proven scalar cannot be given a sort
     EXPECT_THROW(parseForTest(R"(
 fn #test($x, $y):
 @entry:

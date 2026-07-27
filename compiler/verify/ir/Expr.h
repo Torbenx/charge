@@ -20,22 +20,12 @@ enum class ExprKind : uint8_t {
 
 //! The expressions of all sorts that only differ in the sort they are declared with
 /*!
-Loads and their 'Loadable' propositions exist once per sort. Since all of them store the
-same data they can be created and inspected without knowing the sort at compile time.
+Loads exist once per sort. Since all of them store the same data they can be created
+and inspected without knowing the sort at compile time.
 */
 inline bool isLoad(ExprKind kind) {
     switch (kind) {
-#define SORT(name, snake_case) case ExprKind::Load##name:
-#include <verify/ir/sorts.inc>
-        return true;
-    default:
-        return false;
-    }
-}
-
-inline bool isLoadable(ExprKind kind) {
-    switch (kind) {
-#define SORT(name, snake_case) case ExprKind::Loadable##name:
+#define SORT(name, snake_case) case ExprKind::name##Load:
 #include <verify/ir/sorts.inc>
         return true;
     default:
@@ -47,18 +37,7 @@ inline ExprKind loadKind(Sort sort) {
     switch (sort) {
 #define SORT(name, snake_case) \
     case Sort::name:           \
-        return ExprKind::Load##name;
-#include <verify/ir/sorts.inc>
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-inline ExprKind loadableKind(Sort sort) {
-    switch (sort) {
-#define SORT(name, snake_case) \
-    case Sort::name:           \
-        return ExprKind::Loadable##name;
+        return ExprKind::name##Load;
 #include <verify/ir/sorts.inc>
     default:
         VERIFY_NOT_REACHED();

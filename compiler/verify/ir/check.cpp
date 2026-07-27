@@ -142,18 +142,13 @@ void FunctionChecker::checkProofs() {
     // TODO
 }
 
-/*!
-Reading a memory location and writing to it both require it to hold a value of the sort that is
-read or written, which is what the 'Loadable' proposition states.
-
-Adding the propositions here appends to the expressions of the function, which is safe while the
-loads are enumerated because the range of the enumeration is fixed when it begins.
-*/
 void FunctionChecker::checkPreconditions() {
+    // Note: This loop may add more expressions which will not be checked themselves
     for (Expr expr : function.expressions()) {
         if (!isLoad(expr.kind()))
             continue;
-        Bool precondition = function.addLoadable(function.sortOf(expr), function.getLoad(expr).loc);
+        Type locationType = function.addMemoryLocType({ function.getLoad(expr).loc });
+        Bool precondition = function.addScalarType({ locationType, function.sortOf(expr) });
         if (!function.findTheorem(precondition).has_value())
             report.invalidExpressions.push_back({ expr, precondition });
     }
@@ -163,7 +158,8 @@ void FunctionChecker::checkPreconditions() {
         if (function.opcodeAt(pos) != Opcode::Store)
             continue;
         auto store = function.getStore(pos);
-        Bool precondition = function.addLoadable(function.sortOf(store.value), store.loc);
+        Type locationType = function.addMemoryLocType({ store.loc });
+        Bool precondition = function.addScalarType({ locationType, function.sortOf(store.value) });
         if (!function.findTheorem(precondition).has_value())
             report.invalidInstructions.push_back({ pos, precondition });
     }

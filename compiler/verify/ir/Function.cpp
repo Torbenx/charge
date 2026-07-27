@@ -108,32 +108,18 @@ Expr Function::addLoad(Sort sort, const LoadData& data) {
     return addExprInternal(loadKind(sort), toArray<LoadData>(data));
 }
 
-//! The data of every 'Loadable' expression, independent of its sort
-using loadable_data = function_detail::compound_expr<ExprKind::LoadableBool>;
-
-MemoryLoc Function::getLoadableLocation(Expr expr) const {
-    VERIFY(isLoadable(expr.kind()));
-    return fromArray<loadable_data>(m_expressions[expr.idBits].data).loc;
-}
-
-Bool Function::addLoadable(Sort sort, MemoryLoc loc) {
-    return Bool(addExprInternal(loadableKind(sort), toArray<loadable_data>({ loc })));
-}
-
-std::optional<Bool> Function::findLoadable(Sort sort, MemoryLoc loc) const {
-    std::optional<Expr> expr = findExprInternal(loadableKind(sort), toArray<loadable_data>({ loc }));
-    if (!expr.has_value())
+std::optional<Sort> Function::scalarSort(MemoryLoc loc) const {
+    std::optional<Type> locType = findMemoryLocType({ loc });
+    if (!locType.has_value())
         return std::nullopt;
-    return Bool(*expr);
+    return scalarSort(*locType);
 }
 
-std::optional<Sort> Function::loadableSort(MemoryLoc loc) const {
-    // TODO: A location with several 'Loadable' theorems is contradictory and has to be
-    // rejected when the function is checked. Until then the first sort found is used.
+std::optional<Sort> Function::scalarSort(Type type) const {
     for (int_t i = 0; i < std::to_underlying(Sort::COUNT); i++) {
         Sort sort = (Sort)i;
-        std::optional<Bool> loadable = findLoadable(sort, loc);
-        if (loadable.has_value() && findTheorem(*loadable).has_value())
+        std::optional<Bool> isScalar = findScalarType({ type, sort });
+        if (isScalar.has_value() && findTheorem(*isScalar).has_value())
             return sort;
     }
     return std::nullopt;
@@ -183,15 +169,23 @@ Theorem Function::addPreCondition(Bool prop, CodePos pos) {
     return result;
 }
 
-#define COMPOUND_EXPR(name, sortType, args...)                                                            \
-    function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {              \
-        VERIFY(key.kind() == ExprKind::name);                                                             \
-        return fromArray<function_detail::compound_expr<ExprKind::name>>(m_expressions[key.idBits].data); \
-    }                                                                                                     \
-                                                                                                          \
-    sortType Function::add##name(const function_detail::compound_expr<ExprKind::name>& val) {             \
-        return (sortType)addExprInternal(ExprKind::name,                                                  \
-            toArray<function_detail::compound_expr<ExprKind::name>>(val));                                \
+#define COMPOUND_EXPR(name, sortType, args...)                                                                      \
+    function_detail::compound_expr<ExprKind::name> Function::get##name(sortType key) const {                        \
+        VERIFY(key.kind() == ExprKind::name);                                                                       \
+        return fromArray<function_detail::compound_expr<ExprKind::name>>(m_expressions[key.idBits].data);           \
+    }                                                                                                               \
+                                                                                                                    \
+    std::optional<sortType> Function::find##name(const function_detail::compound_expr<ExprKind::name>& val) const { \
+        auto opt = findExprInternal(ExprKind::name,                                                                 \
+            toArray<function_detail::compound_expr<ExprKind::name>>(val));                                          \
+        if (opt.has_value())                                                                                        \
+            return (sortType)opt.value();                                                                           \
+        return std::nullopt;                                                                                        \
+    }                                                                                                               \
+                                                                                                                    \
+    sortType Function::add##name(const function_detail::compound_expr<ExprKind::name>& val) {                       \
+        return (sortType)addExprInternal(ExprKind::name,                                                            \
+            toArray<function_detail::compound_expr<ExprKind::name>>(val));                                          \
     }
 #include <verify/ir/expressions.inc>
 
