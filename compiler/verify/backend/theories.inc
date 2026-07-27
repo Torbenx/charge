@@ -46,6 +46,11 @@ THEORY(AuxUninterpretedConstantSets, UninterpretedConstantSet)
 THEORY(UninterpretedConstantSingletonSets, UninterpretedConstantSet)
 REASON(UninterpretedConstantInSingleton, InSingletonReason, false, uninterpConstantSingletons)
 
+THEORY(AuxMemoryDeclarationVariables, MemoryDeclaration)
+
+SET_THEORY(MemoryLocationSet, memorySets)
+THEORY(MemoryLocationSets, MemoryLocationSet)
+
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)
 THEORY(AuxMemberVariables, Member)

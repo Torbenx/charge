@@ -50,6 +50,7 @@ struct Solver {
     Value newAuxUninterpretedConstant();
     Member newAuxMemberVariable();
     Value newAuxUninterpretedConstantSet();
+    MemoryDeclaration newAuxMemoryDeclarationVariable();
 
     /*! \brief Return whether \p a and \p b are always disequal
 

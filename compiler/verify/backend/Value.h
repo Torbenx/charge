@@ -15,8 +15,9 @@ enum class Sort : uint8_t {
     UninterpretedConstant,
     UninterpretedConstantSet,
     Member,
+    MemoryDeclaration,
+    MemoryLocationSet,
     // Type,
-    // MemoryDeclaration,
 
     COUNT,
 };
@@ -85,7 +86,29 @@ struct Member : Value {
     bool variable() const { return !literal() && !composite(); }
 };
 
+struct MemoryDeclaration : Value {
+    using Value::Value;
+    constexpr explicit MemoryDeclaration(Value v)
+        : Value(v) { }
+};
+
 inline constexpr Member identity_member = Member(TheoryId::CompositeMembers, 0);
+
+//! A memory location, i.e. the member \p member of the memory declaration \p declaration
+/*!
+Memory locations do not have a sort of their own in the backend, a location only exists as this
+pair or as the set of the locations of scalar type it is composed of.
+*/
+struct MemoryLocation {
+    MemoryLocation(MemoryDeclaration declaration, Member member = identity_member)
+        : declaration(declaration)
+        , member(member) { }
+
+    bool operator==(const MemoryLocation&) const = default;
+
+    MemoryDeclaration declaration;
+    Member member;
+};
 
 struct ClauseAndIndex {
     std::span<const Bool> clause;

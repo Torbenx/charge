@@ -40,6 +40,16 @@ namespace theory_params {
 
 }
 
+constexpr bool isSetSort(Sort value) {
+    switch (value) {
+#define SET_THEORY(sort, memberName) case Sort::sort:
+#include <verify/backend/theories.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
 struct Sets {
     struct ElementId {
         explicit ElementId(uint32_t id)

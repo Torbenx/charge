@@ -23,7 +23,9 @@ SolverImpl::SolverImpl()
               .setSort = Sort::UninterpretedConstantSet,
               .singletonTheory = TheoryId::UninterpretedConstantSingletonSets,
               .inSingletonReason = makeTypedReasonKind<ReasonKind::UninterpretedConstantInSingleton>(),
-          }) { }
+          })
+    , memorySets(*this, theory_params::setsMemoryLocationSet)
+    , memoryLocationSets(*this) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     Bool b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -298,7 +300,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::MemberLiterals:
     case TheoryId::AuxMemberVariables:
     case TheoryId::AuxUninterpretedConstantSets:
-    case TheoryId::UninterpretedConstantSetEmptySet:
+    case TheoryId::AuxMemoryDeclarationVariables:
         return a.id() <=> b.id();
 
     case TheoryId::CompositeMembers: {
@@ -310,10 +312,23 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         auto& singletons = impl().uninterpConstantSingletons;
         return rewriteOrder(singletons.element(a), singletons.element(b));
     }
-    case TheoryId::UninterpretedConstantSetElementInSet:
-    case TheoryId::UninterpretedConstantSetExpressions:
-        // Ordering is not important since no rewriting is done
+    case TheoryId::MemoryLocationSets: {
+        auto& locations = impl().memoryLocationSets;
+        MemoryLocation locA = locations.locationOf(a);
+        MemoryLocation locB = locations.locationOf(b);
+        auto declarationOrdering = rewriteOrder(locA.declaration, locB.declaration);
+        if (declarationOrdering != 0)
+            return declarationOrdering;
+        return rewriteOrder(locA.member, locB.member);
+    }
+
+    // Ordering is not important for these since no rewriting is done
+#define SET_THEORY(sort, memberName)   \
+    case TheoryId::sort##EmptySet:     \
+    case TheoryId::sort##ElementInSet: \
+    case TheoryId::sort##Expressions:  \
         return a.id() <=> b.id();
+#include <verify/backend/theories.inc>
 
 #define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair)                                               \
     case TheoryId::name: {                                                                                   \
@@ -356,18 +371,19 @@ void SolverImpl::onNewPair(PairHandle handle) {
     }
 #include <verify/backend/theories.inc>
 
+    Sort sort = handle.sort();
     auto [a, b] = at(handle);
-    if (handle.sort() == Sort::UninterpretedConstant) {
+    if (sort == Sort::UninterpretedConstant) {
         // Note: This is a lot of stuff to add eagerly, maybe this can be reduced in the future.
         uninterpConstantEquality.newPair(*this, handle);
         Bool elementEq = equality(handle);
         Bool singletonEq = equality(uninterpConstantSingletons.singleton(*this, a), uninterpConstantSingletons.singleton(*this, b));
         addClause({ elementEq, !singletonEq });
         addClause({ !elementEq, singletonEq });
-    } else if (handle.sort() == Sort::Member) {
+    } else if (sort == Sort::Member) {
         members.newPair(*this, handle);
-    } else if (handle.sort() == Sort::UninterpretedConstantSet) {
-        uninterpConstantSets.newPair(*this, handle);
+    } else if (isSetSort(sort)) {
+        setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
             [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
@@ -412,8 +428,8 @@ PairHandle Solver::findPair(Value a, Value b) {
         }
         if (a == true_literal)
             return PairHandle::makeSpecialPair(b);
-    } else if (sort == Sort::UninterpretedConstantSet) {
-        Value emptySet = impl().uninterpConstantSets.emptySet();
+    } else if (isSetSort(sort)) {
+        Value emptySet = impl().setTheory(sort).emptySet();
         if (a == emptySet)
             return PairHandle::makeSpecialPair(b);
     }
@@ -449,8 +465,8 @@ Pair Solver::at(PairHandle handle) {
         Sort sort = sortOf(b.theory());
         if (sort == Sort::Boolean)
             return { true_literal, b };
-        else if (sort == Sort::UninterpretedConstantSet)
-            return { impl().uninterpConstantSets.emptySet(), b };
+        else if (isSetSort(sort))
+            return { impl().setTheory(sort).emptySet(), b };
         else
             VERIFY_NOT_REACHED();
     }
@@ -519,12 +535,13 @@ Bool Solver::equality(PairHandle handle) {
     } else if (handle.sort() == Sort::Member) {
         VERIFY(!handle.specialPair());
         return impl().members.makeEquality(handle);
-    } else if (handle.sort() == Sort::UninterpretedConstantSet) {
+    } else if (isSetSort(handle.sort())) {
+        Sets& sets = impl().setTheory(handle.sort());
         if (handle.specialPair()) {
             // Encodes emptySet == b which is equivalent to b being empty
-            return impl().uninterpConstantSets.isEmpty(*this, handle.encodedValue());
+            return sets.isEmpty(*this, handle.encodedValue());
         }
-        return impl().uninterpConstantSets.makeEquality(handle);
+        return sets.makeEquality(handle);
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -571,6 +588,10 @@ Value Solver::newAuxUninterpretedConstantSet() {
 
 Member Solver::newAuxMemberVariable() {
     return (Member)impl().newValue(TheoryId::AuxMemberVariables);
+}
+
+MemoryDeclaration Solver::newAuxMemoryDeclarationVariable() {
+    return (MemoryDeclaration)impl().newValue(TheoryId::AuxMemoryDeclarationVariables);
 }
 
 }

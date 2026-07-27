@@ -10,6 +10,9 @@ target_sources(${PROJECT_NAME}
     Members.cpp
     Members.h
     MemberTests.cpp
+    MemoryLocationSets.cpp
+    MemoryLocationSets.h
+    MemoryTests.cpp
     PairSet.h
     Reason.h
     SatCore.cpp
