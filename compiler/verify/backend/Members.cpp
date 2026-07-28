@@ -88,25 +88,45 @@ std::strong_ordering Members::rewriteOrder(Solver& solver, std::span<const Membe
     return std::strong_ordering::equal;
 }
 
-std::vector<Member> Members::rewrite(Member m) {
-    if (m.literal())
-        return { m };
-    if (!m.composite())
-        return infoFor(m).currentRewrite;
+void Members::appendRewrite(Member m, std::vector<Member>& out) {
+    if (m.literal()) {
+        out.push_back(m);
+        return;
+    }
+    if (!m.composite()) {
+        auto& varInfo = infoFor(m);
+        out.insert(out.end(), varInfo.currentRewrite.begin(), varInfo.currentRewrite.end());
+        return;
+    }
 
-    std::vector<Member> result;
     for (Member mp : compositeMember(m)) {
         if (mp.literal()) {
-            result.push_back(mp);
+            out.push_back(mp);
         } else {
             auto& varInfo = infoFor(mp);
-            result.insert(result.end(), varInfo.currentRewrite.begin(), varInfo.currentRewrite.end());
+            out.insert(out.end(), varInfo.currentRewrite.begin(), varInfo.currentRewrite.end());
         }
     }
+}
+
+std::vector<Member> Members::rewrite(Member m) {
+    std::vector<Member> result;
+    appendRewrite(m, result);
     return result;
 }
 
+void Members::clearChangedVariables() {
+    for (Member m : changedVariablesLog)
+        infoFor(m).inChangeLog = false;
+    changedVariablesLog.clear();
+}
+
 void Members::markUsesAsDirty(VariableInfo& varInfo) {
+    if (!varInfo.inChangeLog) {
+        varInfo.inChangeLog = true;
+        changedVariablesLog.push_back(varInfo.self);
+    }
+
     for (RewriteTracePosition use : varInfo.rewriteUses) {
         VERIFY(!varInfo.tracePos.has_value() || use < varInfo.tracePos.value());
         dirtyRewrites.push(use);

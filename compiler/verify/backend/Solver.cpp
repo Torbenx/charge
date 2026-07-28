@@ -95,6 +95,7 @@ void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.newDecisionLevel(impl);
     impl.members.newDecisionLevel(impl);
+    impl.memoryLocationSets.newDecisionLevel(impl);
     impl.uninterpConstantSingletons.newDecisionLevel(impl);
 }
 
@@ -102,6 +103,8 @@ void SatCore::Interface::onBeginBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.beginBacktrack(impl);
     impl.members.beginBacktrack(impl);
+    // Must run after members so that the prefix index observes the restored rewrites
+    impl.memoryLocationSets.beginBacktrack(impl);
     impl.uninterpConstantSingletons.beginBacktrack(impl);
 }
 
@@ -109,6 +112,7 @@ void SatCore::Interface::onEndBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.endBacktrack(impl);
     impl.members.endBacktrack(impl);
+    impl.memoryLocationSets.endBacktrack(impl);
     impl.uninterpConstantSingletons.endBacktrack(impl);
 }
 
@@ -165,8 +169,10 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
 
     case TheoryId::MemberEquality: {
         PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
-        if (!lit.negated())
+        if (!lit.negated()) {
             impl.members.propagateEqual(impl, pair);
+            impl.memoryLocationSets.propagateRewrites(impl);
+        }
         break;
     }
     default:
@@ -213,6 +219,9 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
     switch (containment.set().theory()) {
     case TheoryId::UninterpretedConstantSingletonSets:
         uninterpConstantSingletons.propagateContainment(*this, element, containment);
+        break;
+    case TheoryId::MemoryLocationSets:
+        memoryLocationSets.propagateContainment(*this, element, containment);
         break;
     default:
         break;
@@ -382,6 +391,7 @@ void SolverImpl::onNewPair(PairHandle handle) {
         addClause({ !elementEq, singletonEq });
     } else if (sort == Sort::Member) {
         members.newPair(*this, handle);
+        memoryLocationSets.propagateRewrites(*this);
     } else if (isSetSort(sort)) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {

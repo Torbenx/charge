@@ -11,6 +11,20 @@ struct Members {
     Members(Solver&);
 
     std::vector<Member> rewrite(Member m);
+    //! Append the normal form of \p m to \p out
+    void appendRewrite(Member m, std::vector<Member>& out);
+
+    //! The variables whose expansion changed since the last call to clearChangedVariables()
+    /*!
+    This is the notification channel for structures that index member expressions, such as
+    MemberPrefixes. It is filled while rewrites are applied and also while they are reverted during
+    a backtrack, and it is only meaningful once the theory is quiescent, i.e. after grind() or after
+    beginBacktrack() has returned.
+    */
+    std::span<const Member> changedVariables() const { return changedVariablesLog; }
+    void clearChangedVariables();
+
+    void explainRewrite(Solver&, Member m, ClauseBuilder& clause);
 
     static Bool makeEquality(PairHandle handle) {
         return (Bool)encodePairTheoryValue<TheoryId::MemberEquality>(handle);
@@ -51,9 +65,12 @@ private:
         std::vector<Member> currentRewrite;
         std::vector<RewriteTracePosition> rewriteUses;
         std::vector<PairHandle> pairUses;
+        Member self;
+        bool inChangeLog = false;
 
         VariableInfo(Value m)
-            : currentRewrite { (Member)m } { }
+            : currentRewrite { (Member)m }
+            , self((Member)m) { }
 
         bool hasRewrite() const { return tracePos.has_value(); }
     };
@@ -101,8 +118,6 @@ private:
     void updatePair(Solver&, PairHandle);
     void grind(Solver&);
 
-    void explainRewrite(Solver&, Member m, ClauseBuilder& clause);
-
     VariableInfo& infoFor(Member m) {
         VERIFY(m.variable());
         return variables[m];
@@ -117,6 +132,7 @@ private:
     std::priority_queue<PairHandle, std::vector<PairHandle>, PairHandleCompare> dirtyPairs;
     std::vector<uint32_t> rewriteDecisionPoints;
     std::vector<uint32_t> assignedPairDecisionPoints;
+    std::vector<Member> changedVariablesLog;
 };
 
 }

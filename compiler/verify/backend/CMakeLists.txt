@@ -7,6 +7,9 @@ target_sources(${PROJECT_NAME}
     DataManager.cpp
     DataManager.h
     EqualityTests.cpp
+    MemberPrefixes.cpp
+    MemberPrefixes.h
+    MemberPrefixTests.cpp
     Members.cpp
     Members.h
     MemberTests.cpp

@@ -62,6 +62,8 @@ REASON(Clause, LiteralOccurrence, true, clauses)
 REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
+REASON(MemberPrefixHit, MemberPrefixHitData, false, memoryLocationSets)
+
 #undef REASON
 #undef THEORY
 #undef PAIR_THEORY
