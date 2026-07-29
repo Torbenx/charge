@@ -278,18 +278,7 @@ bool SatCore::analyzeConflicts() {
     };
 
     for (;;) {
-        Conflict drivingConflict = conflicts.back();
-
-        auto removeResolvedConflcits = [&] {
-            while (!conflicts.empty()) {
-                if (doesConflictPersist(conflicts.back())) {
-                    // Remember the last conflict that persisted
-                    drivingConflict = conflicts.back();
-                    return;
-                }
-                conflicts.pop_back();
-            }
-        };
+        Conflict drivingConflict = conflicts.front();
 
         // Backtrack until all conflicts are resolved
         for (;;) {
@@ -297,9 +286,16 @@ bool SatCore::analyzeConflicts() {
                 return false;
 
             beginBacktrack(currentDecisionLevel());
-            removeResolvedConflcits();
+
+            // Note: We have to remove all conflicts that no longer hold. Their reasons may contain
+            //       handles to data that is removed by endBacktrack(). As an invariance we only
+            //       require that reasons remain valid until the endBacktrack() that matches the
+            //       beginBacktrack() call where they stopped being forcing.
+            std::erase_if(conflicts, [&](const Conflict& c) { return !doesConflictPersist(c); });
             if (conflicts.empty())
                 break;
+            drivingConflict = conflicts.front();
+
             endBacktrack();
         }
 
