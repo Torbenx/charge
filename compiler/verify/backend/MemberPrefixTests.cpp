@@ -126,19 +126,15 @@ TEST(VerifyBackend, MemoryPrefixConflictByRewrite) {
     f.solver.sat.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
-    // The equality is the last decision the conflict depends on, so it is what gets reverted. Note
-    // that it is not forced to be false: Sets::refineClause() replaces the two containment literals
-    // of the learned clause by the emptiness of a set expression, which generalizes the clause from
-    // this element to all of them.
+    // The equality is the last decision the conflict depends on, so it is what gets reverted, and
+    // the learned clause forces it to be false. Note that Sets::refineClause() first replaces the
+    // two containment literals of that clause by the emptiness of a set expression, which
+    // generalizes it from this element to all of them. The clause only stays asserting because the
+    // element is a witness that the expression is not empty.
     f.resolveConflicts();
-    EXPECT_FALSE(f.solver.assignedTrue(eq));
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
     EXPECT_TRUE(f.assignedIn(f.location({ v1, l2 })));
     EXPECT_TRUE(f.assignedNotIn(f.location(l1)));
-
-    // Deciding it again must conflict again
-    f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
-    EXPECT_TRUE(f.hasConflicts());
 }
 
 TEST(VerifyBackend, MemoryPrefixConflictByIdentityRewrite) {

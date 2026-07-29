@@ -20,6 +20,53 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
     EXPECT_TRUE(sets.assignedTrue(solver, element, !Sets::in(emptySet)));
 }
 
+TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+
+    Bool empty = sets.isEmpty(solver, a);
+    EXPECT_FALSE(solver.assignedTrue(empty));
+    EXPECT_FALSE(solver.assignedFalse(empty));
+
+    int_t level = solver.currentDecisionLevel();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_TRUE(solver.assignedFalse(empty));
+
+    // Reverting the containment takes the witness and with it the non-emptiness away again
+    solver.sat.beginBacktrack(level + 1);
+    solver.sat.endBacktrack();
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedTrue(empty));
+    EXPECT_FALSE(solver.assignedFalse(empty));
+}
+
+TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+
+    // The emptiness forces the element out, which is the forall distribution
+    solver.decideTrue(sets.isEmpty(solver, a));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_TRUE(sets.assignedFalse(solver, e, Sets::in(a)));
+    solver.backtrack(0);
+    solver.sat.propagate();
+
+    // And the other way around the element forces the set to be non empty
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_TRUE(solver.assignedFalse(sets.isEmpty(solver, a)));
+}
+
 TEST(VerifyBackend, SetsEqualityPropagation1) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
@@ -252,7 +299,6 @@ TEST(VerifyBackend, SetsSingletons) {
     solver.sat.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(valueEq));
-
 }
 
 }

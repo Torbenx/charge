@@ -28,7 +28,8 @@
     REASON(sort##ClauseExprToDef, SetClauseDefData, true, memberName)         \
     REASON(sort##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
     REASON(sort##EqualityToElement, SetEqualityToElemData, false, memberName) \
-    REASON(sort##ForAllDistribute, EmptyReasonData, false, memberName)
+    REASON(sort##ForAllDistribute, EmptyReasonData, true, memberName)         \
+    REASON(sort##ForAllWitness, SetForAllWitnessData, true, memberName)
 #endif
 
 THEORY(TrueFalse, Boolean)

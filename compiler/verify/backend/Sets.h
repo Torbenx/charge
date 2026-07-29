@@ -19,6 +19,7 @@ struct SetsParams {
     TypedReasonKind<LiteralOccurrence> clauseExhaustiveReason;
     TypedReasonKind<SetEqualityToElemData> equalityToElementReason;
     TypedReasonKind<EmptyReasonData> forAllDistribute;
+    TypedReasonKind<SetForAllWitnessData> forAllWitness;
 };
 
 namespace theory_params {
@@ -35,6 +36,7 @@ namespace theory_params {
         makeTypedReasonKind<ReasonKind::sort##ClauseExhaustive>(),  \
         makeTypedReasonKind<ReasonKind::sort##EqualityToElement>(), \
         makeTypedReasonKind<ReasonKind::sort##ForAllDistribute>(),  \
+        makeTypedReasonKind<ReasonKind::sort##ForAllWitness>(),     \
     };
 #include <verify/backend/theories.inc>
 

@@ -17,6 +17,11 @@ struct SetEqualityToElemData {
     Sets::Containment source;
 };
 
+//! The element whose containment witnesses that a set is not empty
+struct SetForAllWitnessData {
+    uint32_t element;
+};
+
 Sets::Sets(Solver& solver, const SetsParams& params)
     : params(params)
     , setInfos(solver, params.setSort)
@@ -275,6 +280,13 @@ void Sets::unapplyElementAssignment(Solver& solver, Bool lit) {
 }
 
 void Sets::propagateContainment(Solver& solver, ElementId element, Containment literal) {
+    if (element != forAllElement() && literal.contained()) {
+        // An element in the set witnesses that the set is not empty. This is the direction opposite
+        // to forAllDistribute, and having both means the theory propagates the implication between
+        // the containment of an element and the emptiness of the set in both directions.
+        assignTrue(solver, forAllElement(), literal, makeReason(params.forAllWitness, { .element = element.id() }));
+    }
+
     for (auto occ : infoFor(literal).occurrences) {
         const auto& clause = clauses[occ.clauseIndex];
         if (occ.literalIndex == 0) {
@@ -391,6 +403,9 @@ bool Sets::testReason(Solver& solver, Bool boolLiteral, const Reason& reason) {
             && assignedTrue(solver, element, source);
     } else if (reason.kind() == params.forAllDistribute) {
         return assignedTrue(solver, forAllElement(), setLiteral);
+    } else if (reason.kind() == params.forAllWitness) {
+        auto witness = ElementId(reason.get(params.forAllWitness).element);
+        return assignedTrue(solver, witness, setLiteral);
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -422,6 +437,11 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, Bool boolLiteral, const Reas
     } else if (reason.kind() == params.forAllDistribute) {
         result.add(solver, boolLiteral);
         result.add(solver, !mapToBool(solver, forAllElement(), setLiteral));
+        return { solver.viewClause(result), 0 };
+    } else if (reason.kind() == params.forAllWitness) {
+        auto witness = ElementId(reason.get(params.forAllWitness).element);
+        result.add(solver, boolLiteral);
+        result.add(solver, !mapToBool(solver, witness, setLiteral));
         return { solver.viewClause(result), 0 };
     } else {
         VERIFY_NOT_REACHED();
