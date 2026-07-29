@@ -301,4 +301,100 @@ TEST(VerifyBackend, SetsSingletons) {
     EXPECT_TRUE(solver.assignedTrue(valueEq));
 }
 
+TEST(VerifyBackend, SetsExaustiveOnNewSet) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+
+    sets.decideTrue(solver, e, !Sets::in(a));
+    solver.sat.propagate();
+    sets.decideTrue(solver, e, !Sets::in(b));
+    solver.sat.propagate();
+
+    Value u = sets.union_(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_TRUE(sets.assignedFalse(solver, e, Sets::in(u)));
+}
+
+TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    solver.decideTrue(sets.isEmpty(solver, a));
+    solver.sat.propagate();
+    solver.decideTrue(sets.isEmpty(solver, b));
+    solver.sat.propagate();
+
+    Value u = sets.union_(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, u)));
+}
+
+TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    solver.decideTrue(!sets.isEmpty(solver, a));
+    solver.sat.propagate();
+    solver.decideTrue(!sets.isEmpty(solver, b));
+    solver.sat.propagate();
+
+    Value i = sets.intersection(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, i)));
+}
+
+TEST(VerifyBackend, SetsExprToDefOnNewSet) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+
+    Value u = sets.union_(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(u)));
+}
+
+TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    solver.decideTrue(sets.isEmpty(solver, a));
+    solver.sat.propagate();
+
+    Value i = sets.intersection(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, i)));
+}
+
+TEST(VerifyBackend, SetsExprToDefOnNewSetPositiveIgnoredOnForAllElement) {
+    SolverImpl solver;
+    auto& sets = solver.uninterpConstantSets;
+    Value a = solver.newAuxUninterpretedConstantSet();
+    Value b = solver.newAuxUninterpretedConstantSet();
+
+    solver.decideTrue(!sets.isEmpty(solver, a));
+    solver.sat.propagate();
+
+    Value u = sets.union_(solver, { a, b });
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, u)));
+}
+
 }

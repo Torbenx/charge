@@ -18,18 +18,21 @@
     REASON(sort##DisequalityByAlwaysDisequal, DisequalityReason, true, memberName)
 #endif
 
+// Important: For Sets::refineClause() to work correctly it needs to see all the clauses.
+// So all reasons involving ElementInSet literals need to marked as not fully propagating
+// otherwise they maybe elided from clause learning.
 #ifndef SET_THEORY
 #define SET_THEORY(sort, memberName)                                          \
     PAIR_THEORY(sort##Equality, Boolean, sort, 2)                             \
     THEORY(sort##ElementInSet, Boolean)                                       \
     THEORY(sort##EmptySet, sort)                                              \
     THEORY(sort##Expressions, sort)                                           \
-    REASON(sort##ClauseDefToExpr, SetClauseDefData, true, memberName)         \
-    REASON(sort##ClauseExprToDef, SetClauseDefData, true, memberName)         \
-    REASON(sort##ClauseExhaustive, LiteralOccurrence, true, memberName)       \
+    REASON(sort##ClauseDefToExpr, SetClauseDefData, false, memberName)        \
+    REASON(sort##ClauseExprToDef, SetClauseDefData, false, memberName)        \
+    REASON(sort##ClauseExhaustive, LiteralOccurrence, false, memberName)      \
     REASON(sort##EqualityToElement, SetEqualityToElemData, false, memberName) \
-    REASON(sort##ForAllDistribute, EmptyReasonData, true, memberName)         \
-    REASON(sort##ForAllWitness, SetForAllWitnessData, true, memberName)
+    REASON(sort##ForAllDistribute, EmptyReasonData, false, memberName)        \
+    REASON(sort##ForAllWitness, SetForAllWitnessData, false, memberName)
 #endif
 
 THEORY(TrueFalse, Boolean)

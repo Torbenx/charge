@@ -170,20 +170,33 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
 
     for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
         ElementId element(elementId);
+        auto assignedTrueForClauses = [&](Bool inSetLiteral) {
+            // The clauses of the forAllElement() should only see assignment of the form !in(set).
+            if (element == forAllElement() && !inSetLiteral.negated())
+                return false;
+            return solver.assignedTrue(inSetLiteral);
+        };
+
         auto& masks = elements[element.id()].clauseMasks;
         VERIFY(masks.size() == clauses.size() - 1);
+        clause_mask_t newMask = Clauses::literalMask(clause.size()) - 1;
         // The first literal is for the just constructed set and cannot be assigned
-        clause_mask_t newMask = Clauses::literalMask(0);
         for (int_t literalIndex = 1; literalIndex < (int_t)clause.size(); literalIndex++) {
-            if (!assignedFalse(solver, element, clause[literalIndex]))
-                newMask |= Clauses::literalMask(literalIndex);
+            Containment literal = clause[literalIndex];
+            std::optional<Bool> boolLiteral = tryToBool(solver, element, literal);
+            if (!boolLiteral.has_value())
+                continue;
+            if (assignedTrueForClauses(!*boolLiteral))
+                newMask &= ~Clauses::literalMask(literalIndex);
+            if (assignedTrueForClauses(*boolLiteral))
+                assignTrue(solver, element, !clause.front(), makeReason(params.clauseExprToDefReason, { .def = !clause.front(), .expr = !literal }));
         }
         masks.push_back(newMask);
         int popcnt = std::popcount(newMask);
         VERIFY(popcnt >= 1);
         if (popcnt == 1) {
             VERIFY(newMask == Clauses::literalMask(0));
-            assignTrue(solver, element, clause[0],
+            assignTrue(solver, element, clause.front(),
                 makeReason(params.clauseExhaustiveReason, { .literalIndex = 0, .clauseIndex = expressionValue.id() }));
         }
     }
@@ -280,7 +293,8 @@ void Sets::unapplyElementAssignment(Solver& solver, Bool lit) {
 }
 
 void Sets::propagateContainment(Solver& solver, ElementId element, Containment literal) {
-    if (element != forAllElement() && literal.contained()) {
+    if (literal.contained()) {
+        VERIFY(element != forAllElement());
         // An element in the set witnesses that the set is not empty. This is the direction opposite
         // to forAllDistribute, and having both means the theory propagates the implication between
         // the containment of an element and the emptiness of the set in both directions.
