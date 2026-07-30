@@ -436,6 +436,14 @@ void SolverImpl::onNewPair(PairHandle handle) {
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
             [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
+        } else if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
+            MemoryLocation locationA = memoryLocationSets.locationOf(a);
+            MemoryLocation locationB = memoryLocationSets.locationOf(b);
+            Bool setEq = equality(handle);
+            Bool declarationEq = equality(locationA.declaration, locationB.declaration);
+            Bool memberEq = equality(locationA.member, locationB.member);
+            // Note: The other direction does not always hold because when both sets are empty they would also be equal.
+            addClause({ setEq, !declarationEq, !memberEq });
         }
     }
 }

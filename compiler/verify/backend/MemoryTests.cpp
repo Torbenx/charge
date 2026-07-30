@@ -47,6 +47,83 @@ TEST(VerifyBackend, MemoryLocationSetsLookup) {
     }
 }
 
+TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
+    SolverImpl solver;
+    auto& sets = solver.memorySets;
+    auto& locationSets = solver.memoryLocationSets;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    Member m = solver.newAuxMemberVariable();
+
+    Value a = locationSets.set(solver, d1, m);
+    Value b = locationSets.set(solver, d2, m);
+    Bool setEquality = solver.equality(a, b);
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+
+    solver.decideTrue(solver.equality(d1, d2));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+
+    // The two pairs describe the same location, so the sets of that location are the same and so is
+    // everything that is known about them
+    EXPECT_TRUE(solver.assignedTrue(setEquality));
+    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
+}
+
+TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
+    SolverImpl solver;
+    auto& sets = solver.memorySets;
+    auto& locationSets = solver.memoryLocationSets;
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+
+    Value a = locationSets.set(solver, d, m1);
+    Value b = locationSets.set(solver, d, m2);
+    Bool setEquality = solver.equality(a, b);
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+
+    // The member of a location decides it just as much as its declaration does
+    solver.decideTrue(solver.equality(m1, m2));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+
+    EXPECT_TRUE(solver.assignedTrue(setEquality));
+    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
+}
+
+TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
+    SolverImpl solver;
+    auto& locationSets = solver.memoryLocationSets;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+
+    Value a = locationSets.set(solver, d1, m1);
+    Value b = locationSets.set(solver, d2, m2);
+    Bool setEquality = solver.equality(a, b);
+    solver.sat.propagate();
+
+    // One half of the location being the same says nothing about the sets
+    solver.decideTrue(solver.equality(m1, m2));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedTrue(setEquality));
+    EXPECT_FALSE(solver.assignedFalse(setEquality));
+
+    solver.decideTrue(solver.equality(d1, d2));
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedTrue(setEquality));
+}
+
 TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     // Location sets are ordinary sets, so the set theory reasoning applies to them
     SolverImpl solver;
