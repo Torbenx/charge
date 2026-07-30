@@ -72,8 +72,11 @@ REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
 REASON(MemberPrefixHit, MemberPrefixHitData, false, memoryLocationSets)
+REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocationSets)
 
 USE_KIND(Test, useTest)
+USE_KIND(MemoryLocationSetRepresentative, memoryLocationSets)
+USE_KIND(MemoryLocationSetPendingContainment, memoryLocationSets)
 
 #undef REASON
 #undef USE_KIND

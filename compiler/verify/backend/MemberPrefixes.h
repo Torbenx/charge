@@ -67,20 +67,18 @@ struct MemberPrefixes {
 
     explicit MemberPrefixes(Solver&);
 
-    //! Add \p expression to the set A of \p element
+    //! Add \p expression to the set A or B of \p element
     /*!
     A prefix relation found between the two sets is an immediate conflict, so this assigns
     false_literal with a MemberPrefixHit reason as soon as one is detected. The owner of the
     structure is expected to turn that reason into a clause, using \p payload to recover whatever it
     needs to explain why the expression is in the set.
+    When payload.contained() is true this is path otherwise it is a prefix candiate.
     */
-    WordId addPath(Solver&, ElementId, Member expression, Value payload);
-    //! Add \p expression to the set B of \p element
-    WordId addPrefixCandidate(Solver&, ElementId, Member expression, Value payload);
+    WordId addWord(Solver&, ElementId, Member expression, Sets::Containment payload);
 
     ElementId elementOf(WordId w) const { return words[w.id()].element; }
-    Value payloadOf(WordId w) const { return words[w.id()].payload; }
-    bool isPath(WordId w) const { return words[w.id()].isPath; }
+    Sets::Containment payloadOf(WordId w) const { return words[w.id()].payload; }
 
     //! Returns whether \p prefix is currently a prefix of \p path
     /*!
@@ -127,9 +125,8 @@ private:
     struct WordInfo {
         ElementId element;
         Member expression; //!< The expression as it was registered, never rewritten in place
-        Value payload; //!< Opaque data of the owner, see addPath()
-        bool isPath;
-        bool registered = true;
+        Sets::Containment payload; //!< Opaque data of the owner, see addPath()
+        bool isPath() const { return payload.contained(); };
         bool dirty = false;
 
         //! The trie nodes for every prefix of the normal form, starting with the element root
@@ -154,8 +151,6 @@ private:
         */
         std::vector<Member> watchedVariables = {};
     };
-
-    WordId addWord(Solver&, ElementId, Member expression, Value payload, bool isPath);
 
     uint32_t childNode(uint32_t parent, Member letter);
 
@@ -190,16 +185,15 @@ private:
     std::vector<uint32_t> elementRoots;
 
     std::vector<WordInfo> words;
-    //! Number of registered words at each decision level
-    /*!
-    Words are appended to \ref words in registration order, so this doubles as the registration
-    trace. The entries above the target level are unregistered in beginBacktrack() but only dropped
-    in endBacktrack(), so that they remain available while assignments are being justified.
-    */
     std::vector<uint32_t> wordDecisionPoints;
+    size_t backtrackedWordCount = limits::max;
+
+    bool backtracking() const { return backtrackedWordCount != (decltype(backtrackedWordCount))limits::max; }
+    bool isBacktracked(WordId word) const { return (size_t)word.id() >= backtrackedWordCount; }
 
     SortData<std::vector<WordId>, Sort::Member> variableUses;
 
+    // Temporary buffers used inside single function to avoid repeated allocations
     std::vector<WordId> dirtyWords;
     std::vector<Member> normalFormBuffer;
 };

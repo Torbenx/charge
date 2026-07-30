@@ -117,6 +117,13 @@ struct Sets {
 
     ElementId newElement(Solver& solver);
 
+    //! A virtual element to represent emptyness
+    /*!
+    The literal `forAllElement() not in set` is used for `isEmpty(set)`. Assignments of the from
+    `forAllElement() in set` or `!isEmpty(set)` will not be propagated internally or externally.
+    */
+    ElementId forAllElement() const { return ElementId(0); }
+
     Value emptySet() { return Value(params.emptySetTheory, 0); }
     Sort setSort() const { return params.setSort; }
 
@@ -204,8 +211,6 @@ private:
         }
         bool operator()(const HashLookup& a, const HashEntry& b) const;
     };
-
-    ElementId forAllElement() const { return ElementId(0); }
 
     bool unionExpression(Value) const;
     bool subsetExpression(Value) const;

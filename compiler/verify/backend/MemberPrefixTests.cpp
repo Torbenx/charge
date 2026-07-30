@@ -12,6 +12,8 @@ namespace {
     struct Fixture {
         SolverImpl solver;
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
+        //! A second declaration, unrelated to \ref declaration until they are decided to be equal
+        MemoryDeclaration otherDeclaration = solver.newAuxMemoryDeclarationVariable();
         Sets::ElementId element = newElement();
 
         Sets::ElementId newElement() {
@@ -25,6 +27,23 @@ namespace {
         }
         Value location(std::initializer_list<Member> members) {
             return location(solver.composeMembers(members));
+        }
+
+        Value otherLocation(Member member) {
+            return solver.memoryLocationSets.set(solver, otherDeclaration, member);
+        }
+        Value otherLocation(std::initializer_list<Member> members) {
+            return otherLocation(solver.composeMembers(members));
+        }
+
+        Bool declarationEquality() { return solver.equality(declaration, otherDeclaration); }
+
+        //! Decide that the two declarations are the same and propagate
+        void decideDeclarationsEqual() {
+            solver.decideTrue(declarationEquality());
+            solver.sat.propagate();
+            if (!solver.sat.hasConflicts())
+                solver.memoryLocationSets.checkInvariances(solver);
         }
 
         //! Decide that \p element is contained in \p set and propagate
@@ -478,22 +497,117 @@ TEST(VerifyBackend, MemoryPrefixEmptySetIsACandidate) {
     EXPECT_TRUE(f.hasConflicts());
 }
 
-//! A prefix relation between the locations of two different declarations is not a contradiction
-/*!
-Disabled until MemoryLocationSets::propagateContainment() takes the declaration of a location into
-account, see the TODO there. Until then every declaration shares an element of the index, so the
-word of an unrelated declaration produces a hit.
-*/
-TEST(VerifyBackend, DISABLED_MemoryPrefixDistinctDeclarations) {
+TEST(VerifyBackend, MemoryPrefixDistinctDeclarations) {
     Fixture f;
-    MemoryDeclaration other = f.solver.newAuxMemoryDeclarationVariable();
     Member l1 = newLiteral(f.solver);
     Member l2 = newLiteral(f.solver);
 
-    // l1 of 'other' says nothing about l1.l2 of 'declaration'
-    f.decideNotIn(f.solver.memoryLocationSets.set(f.solver, other, l1));
+    // A prefix relation between the locations of two declarations is not a contradiction: l1 of the
+    // one says nothing about l1.l2 of the other
+    f.decideNotIn(f.otherLocation(l1));
     f.decideIn(f.location({ l1, l2 }));
     EXPECT_FALSE(f.hasConflicts());
+
+    // And neither is it the other way around. This needs an element of its own, because an element
+    // of a location of both declarations would make them equal.
+    Sets::ElementId other = f.newElement();
+    f.decideNotIn(other, f.location(l2));
+    f.decideIn(other, f.otherLocation({ l2, l1 }));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixDeclarationsJoinedAtTheRepresentative) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+
+    // The containing location is the representative of the element, so joining the declarations
+    // moves its declaration and the excluded location is only reported by the use of the
+    // representative
+    f.decideNotIn(f.location(l1));
+    f.decideIn(f.otherLocation({ l1, l2 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixDeclarationsJoinedAtTheContainment) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+
+    // Here the representative keeps its declaration, so the excluded location is the one that is
+    // moved and it is reported by the use of its own pending containment
+    f.decideIn(f.location({ l1, l2 }));
+    f.decideNotIn(f.otherLocation(l1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixContainmentIsDeferredUntilItsDeclarationIsJoined) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+    Member l3 = newLiteral(f.solver);
+
+    // The element is in l3 and not in l1 of the representing declaration
+    f.decideIn(f.location(l3));
+    f.decideNotIn(f.location(l1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // Being in l1.l2 of the other declaration equates the two, which is only propagated after this
+    // containment was handled. So it has to be deferred until then to be compared with l1 at all.
+    f.decideIn(f.otherLocation({ l1, l2 }));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixDeclarationsSharingAnElementAreEqual) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+
+    // Distinct declarations describe distinct memory, so an element of a location of each of them
+    // means they are the same declaration
+    f.decideIn(f.location(l1));
+    EXPECT_FALSE(f.solver.assignedTrue(f.declarationEquality()));
+
+    f.decideIn(f.otherLocation(l2));
+    EXPECT_FALSE(f.hasConflicts());
+    EXPECT_TRUE(f.solver.assignedTrue(f.declarationEquality()));
+}
+
+TEST(VerifyBackend, MemoryPrefixSharedElementConflictsWithDisequalDeclarations) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+
+    f.solver.addClause({ !f.declarationEquality() });
+    f.solver.sat.propagate();
+
+    // The declarations cannot be equal, so no element can be in a location of both
+    f.decideIn(f.location(l1));
+    f.decideIn(f.otherLocation(l2));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixDeclarationEqualityIsPartOfTheConflict) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+
+    f.decideIn(f.location({ l1, l2 }));
+    f.decideNotIn(f.otherLocation(l1));
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+
+    // The hit only holds while the declarations are equal, so resolving it excludes that and the
+    // words of the joined declaration are gone again
+    f.resolveConflicts();
+    EXPECT_FALSE(f.hasConflicts());
+    EXPECT_TRUE(f.solver.assignedFalse(f.declarationEquality()));
 }
 
 }

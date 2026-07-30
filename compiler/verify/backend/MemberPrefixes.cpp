@@ -59,7 +59,7 @@ void MemberPrefixes::attach(Solver& solver, WordId w, bool raiseConflicts) {
     WordInfo& info = words[w.id()];
     VERIFY(info.occurrenceIndices.empty());
 
-    if (info.isPath) {
+    if (info.isPath()) {
         // A path occupies every prefix of its normal form, so that a prefix candidate ending in any
         // of those nodes is detected there, and so that a witness is available at every node.
         info.occurrenceIndices.reserve(info.path.size());
@@ -100,7 +100,7 @@ void MemberPrefixes::detach(WordId w) {
         list.pop_back();
     };
 
-    if (info.isPath) {
+    if (info.isPath()) {
         VERIFY(info.occurrenceIndices.size() == info.path.size());
         for (int_t k = info.path.size() - 1; k >= 0; k--) {
             uint32_t node = info.path[k];
@@ -119,7 +119,7 @@ void MemberPrefixes::detach(WordId w) {
     info.path.clear();
 }
 
-MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element, Member expression, Value payload, bool isPath) {
+MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element, Member expression, Sets::Containment payload) {
     while (element.id() >= elementRoots.size()) {
         uint32_t root = nodes.size();
         nodes.push_back({ .parent = NIL, .letter = (Member)INVALID_VALUE, .element = ElementId(elementRoots.size()), .depth = 0 });
@@ -127,7 +127,7 @@ MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element
     }
 
     WordId w(words.size());
-    words.push_back({ .element = element, .expression = expression, .payload = payload, .isPath = isPath });
+    words.push_back({ .element = element, .expression = expression, .payload = payload });
 
     std::vector<Member> variables;
     collectVariables(solver, expression, variables);
@@ -140,20 +140,12 @@ MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element
     return w;
 }
 
-MemberPrefixes::WordId MemberPrefixes::addPath(Solver& solver, ElementId element, Member expression, Value payload) {
-    return addWord(solver, element, expression, payload, true);
-}
-
-MemberPrefixes::WordId MemberPrefixes::addPrefixCandidate(Solver& solver, ElementId element, Member expression, Value payload) {
-    return addWord(solver, element, expression, payload, false);
-}
-
 bool MemberPrefixes::isPrefixOf(WordId prefix, WordId path) const {
+    if (isBacktracked(prefix) || isBacktracked(path))
+        return false;
     const WordInfo& prefixInfo = words[prefix.id()];
     const WordInfo& pathInfo = words[path.id()];
     VERIFY(prefixInfo.element == pathInfo.element);
-    if (!prefixInfo.registered || !pathInfo.registered)
-        return false;
     // Because a node is identified with the word it spells, comparing the single node at the
     // length of the prefix decides the whole prefix relation.
     if (pathInfo.path.size() < prefixInfo.path.size())
@@ -172,11 +164,12 @@ void MemberPrefixes::explainPrefix(Solver& solver, WordId prefix, WordId path, C
 }
 
 void MemberPrefixes::updateRewrites(Solver& solver, bool raiseConflicts) {
+    VERIFY(dirtyWords.empty());
     auto& members = solver.impl().members;
     for (Member v : members.changedVariables()) {
         for (WordId w : variableUses[v]) {
             WordInfo& info = words[w.id()];
-            if (!info.registered || info.dirty)
+            if (info.dirty)
                 continue;
             info.dirty = true;
             dirtyWords.push_back(w);
@@ -188,8 +181,6 @@ void MemberPrefixes::updateRewrites(Solver& solver, bool raiseConflicts) {
         WordInfo& info = words[w.id()];
         VERIFY(info.dirty);
         info.dirty = false;
-        if (!info.registered)
-            continue;
         detach(w);
         buildPath(solver, w);
         attach(solver, w, raiseConflicts);
@@ -205,12 +196,11 @@ void MemberPrefixes::newDecisionLevel(Solver& solver) {
 void MemberPrefixes::beginBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
     int_t targetSize = wordDecisionPoints[lastLevelToRevert];
+    backtrackedWordCount = targetSize;
 
     for (int_t i = (int_t)words.size() - 1; i >= targetSize; i--) {
         WordInfo& info = words[i];
-        VERIFY(info.registered);
         detach(WordId(i));
-        info.registered = false;
         for (Member v : info.watchedVariables) {
             auto& uses = variableUses[v];
             VERIFY(uses.back() == WordId(i));
@@ -223,11 +213,14 @@ void MemberPrefixes::beginBacktrack(Solver& solver) {
 
 void MemberPrefixes::endBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
+    VERIFY(backtrackedWordCount == wordDecisionPoints[lastLevelToRevert]);
+    backtrackedWordCount = limits::max;
     words.erase(words.begin() + wordDecisionPoints[lastLevelToRevert], words.end());
     wordDecisionPoints.resize(lastLevelToRevert);
 }
 
 void MemberPrefixes::checkInvariances(Solver& solver) {
+    VERIFY(!backtracking());
     // The words of a level are appended after its decision point, so the points only grow
     VERIFY((int_t)wordDecisionPoints.size() == solver.currentDecisionLevel() + 1);
     VERIFY(std::ranges::is_sorted(wordDecisionPoints));
@@ -243,13 +236,13 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
 
         for (uint32_t i = 0; i < n.aOccurrences.size(); i++) {
             const WordInfo& info = words[n.aOccurrences[i].id()];
-            VERIFY(info.isPath && info.registered);
+            VERIFY(info.isPath());
             VERIFY(info.path[n.depth] == node);
             VERIFY(info.occurrenceIndices[n.depth] == i);
         }
         for (uint32_t i = 0; i < n.bTerminals.size(); i++) {
             const WordInfo& info = words[n.bTerminals[i].id()];
-            VERIFY(!info.isPath && info.registered);
+            VERIFY(!info.isPath());
             VERIFY(info.path.back() == node);
             VERIFY(info.occurrenceIndices[0] == i);
         }
@@ -263,10 +256,6 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
         const WordInfo& info = words[i];
         // The flag only lives for the duration of updateRewrites()
         VERIFY(!info.dirty);
-        if (!info.registered) {
-            VERIFY(info.path.empty() && info.occurrenceIndices.empty());
-            continue;
-        }
         std::vector<Member> normalForm;
         solver.impl().members.appendRewrite(info.expression, normalForm);
         VERIFY(info.path.size() == normalForm.size() + 1);

@@ -19,7 +19,7 @@ struct SetEqualityToElemData {
 
 //! The element whose containment witnesses that a set is not empty
 struct SetForAllWitnessData {
-    uint32_t element;
+    Sets::ElementId element;
 };
 
 Sets::Sets(Solver& solver, const SetsParams& params)
@@ -298,7 +298,7 @@ void Sets::propagateContainment(Solver& solver, ElementId element, Containment l
         // An element in the set witnesses that the set is not empty. This is the direction opposite
         // to forAllDistribute, and having both means the theory propagates the implication between
         // the containment of an element and the emptiness of the set in both directions.
-        assignTrue(solver, forAllElement(), literal, makeReason(params.forAllWitness, { .element = element.id() }));
+        assignTrue(solver, forAllElement(), literal, makeReason(params.forAllWitness, { .element = element }));
     }
 
     for (auto occ : infoFor(literal).occurrences) {
@@ -418,7 +418,7 @@ bool Sets::testReason(Solver& solver, Bool boolLiteral, const Reason& reason) {
     } else if (reason.kind() == params.forAllDistribute) {
         return assignedTrue(solver, forAllElement(), setLiteral);
     } else if (reason.kind() == params.forAllWitness) {
-        auto witness = ElementId(reason.get(params.forAllWitness).element);
+        auto witness = reason.get(params.forAllWitness).element;
         return assignedTrue(solver, witness, setLiteral);
     } else {
         VERIFY_NOT_REACHED();
@@ -453,7 +453,7 @@ ClauseAndIndex Sets::reasonToClause(Solver& solver, Bool boolLiteral, const Reas
         result.add(solver, !mapToBool(solver, forAllElement(), setLiteral));
         return { solver.viewClause(result), 0 };
     } else if (reason.kind() == params.forAllWitness) {
-        auto witness = ElementId(reason.get(params.forAllWitness).element);
+        auto witness = reason.get(params.forAllWitness).element;
         result.add(solver, boolLiteral);
         result.add(solver, !mapToBool(solver, witness, setLiteral));
         return { solver.viewClause(result), 0 };

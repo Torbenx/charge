@@ -175,7 +175,7 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
         PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
         if (!lit.negated()) {
             impl.members.propagateEqual(impl, pair);
-            impl.memoryLocationSets.propagateRewrites(impl);
+            impl.memoryLocationSets.propagateMemberRewrites(impl);
         }
         break;
     }
@@ -410,7 +410,7 @@ void SolverImpl::onNewPair(PairHandle handle) {
         addClause({ !elementEq, singletonEq });
     } else if (sort == Sort::Member) {
         members.newPair(*this, handle);
-        memoryLocationSets.propagateRewrites(*this);
+        memoryLocationSets.propagateMemberRewrites(*this);
     } else if (sort == Sort::MemoryDeclaration) {
         memoryDeclarationEquality.newPair(*this, handle);
     } else if (isSetSort(sort)) {
