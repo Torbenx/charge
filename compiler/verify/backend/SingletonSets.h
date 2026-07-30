@@ -1,7 +1,7 @@
 #pragma once
 
-#include <verify/backend/Solver.h>
 #include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 namespace verify::backend {
 
@@ -30,6 +30,8 @@ struct SingletonSets {
     void beginBacktrack(Solver&);
     void endBacktrack(Solver&);
 
+    void checkInvariances(Solver&);
+
 private:
     struct ElementInfo {
         ElementInfo() = default;
@@ -41,7 +43,6 @@ private:
     };
     struct ElementState {
         std::optional<Value> singleton;
-        uint32_t decisionLevel = limits::max; // only meaningful when 'singleton' has a value
     };
 
     Sets& sets(Solver& solver);
@@ -56,6 +57,9 @@ private:
     SingletonSetsParams params;
 
     std::vector<ElementState> elementStates;
+
+    std::vector<Sets::ElementId> singletonTrace;
+    std::vector<uint32_t> singletonDecisionPoints;
 
     SortData<ElementInfo> elementInfos;
     TheoryData<SingletonInfo> singletonInfos;

@@ -2,6 +2,8 @@
 
 #include <verify/backend/SolverImpl.h>
 
+#include <algorithm>
+
 namespace verify::backend {
 
 namespace {
@@ -41,10 +43,8 @@ void SingletonSets::propagateContainment(Solver& solver, Sets::ElementId element
         return;
     auto& state = stateOf(element);
     if (!state.singleton.has_value()) {
-        int_t decisionLevel = solver.currentDecisionLevel();
-        VERIFY(decisionLevel >= 0); // No positive set assignments are made without a decision
         state.singleton = cont.set();
-        state.decisionLevel = (uint32_t)decisionLevel;
+        singletonTrace.push_back(element);
     } else {
         solver.assignTrue(solver.equality(state.singleton.value(), cont.set()),
             makeReason(params.inSingletonReason, { element, state.singleton.value(), cont.set() }));
@@ -70,17 +70,40 @@ ClauseAndIndex SingletonSets::reasonToClause(Solver& solver, Bool equality, cons
     return { solver.viewClause(clause), 0 };
 }
 
-void SingletonSets::newDecisionLevel(Solver&) { }
+void SingletonSets::newDecisionLevel(Solver& solver) {
+    singletonDecisionPoints.push_back(singletonTrace.size());
+    VERIFY((int_t)singletonDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+}
 
 void SingletonSets::beginBacktrack(Solver& solver) {
-    int_t decisionLevel = solver.currentDecisionLevel();
-    for (auto& state : elementStates) {
-        if ((int_t)state.decisionLevel > decisionLevel)
-            state.singleton.reset();
+    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
+    int_t targetSize = singletonDecisionPoints[lastLevelToRevert];
+    while ((int_t)singletonTrace.size() > targetSize) {
+        stateOf(singletonTrace.back()).singleton.reset();
+        singletonTrace.pop_back();
     }
+    singletonDecisionPoints.resize(lastLevelToRevert);
 }
 
 void SingletonSets::endBacktrack(Solver&) { }
+
+void SingletonSets::checkInvariances(Solver& solver) {
+    // The entries of a level are appended after its decision point, so the points only grow
+    VERIFY((int_t)singletonDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    VERIFY(std::ranges::is_sorted(singletonDecisionPoints));
+    VERIFY(singletonDecisionPoints.empty() || singletonDecisionPoints.back() <= singletonTrace.size());
+
+    // An element has a singleton exactly when it is on the trace, and it is on it only once
+    std::vector<bool> onTrace;
+    onTrace.resize(elementStates.size());
+    for (Sets::ElementId element : singletonTrace) {
+        VERIFY(element.id() < onTrace.size());
+        VERIFY(!onTrace[element.id()]);
+        onTrace[element.id()] = true;
+    }
+    for (int_t i = 0; i < (int_t)elementStates.size(); i++)
+        VERIFY(elementStates[i].singleton.has_value() == onTrace[i]);
+}
 
 Sets& SingletonSets::sets(Solver& solver) { return solver.impl().setTheory(params.setSort); }
 
