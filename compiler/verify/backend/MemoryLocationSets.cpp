@@ -37,10 +37,6 @@ Value MemoryLocationSets::set(Solver& solver, MemoryLocation location) {
     return newSet;
 }
 
-UninterpretedEquality& MemoryLocationSets::declarations(Solver& solver) {
-    return solver.impl().memoryDeclarationEquality;
-}
-
 Sets& MemoryLocationSets::memorySets(Solver& solver) {
     return solver.impl().memorySets;
 }
@@ -53,7 +49,7 @@ bool MemoryLocationSets::joinedRepresentative(Solver& solver, const ElementState
     if (!state.representative.has_value())
         return false;
     MemoryDeclaration representative = locationOf(state.representative.value()).declaration;
-    return declarations(solver).rewrite(representative) == declarations(solver).rewrite(declaration);
+    return solver.assignedEqual(representative, declaration);
 }
 
 void MemoryLocationSets::addWord(Solver& solver, ElementId element, Containment cont) {
@@ -69,8 +65,7 @@ void MemoryLocationSets::addPending(Solver& solver, ElementId element, Containme
     // The declaration may be joined to the one of the representative from either side, so both are
     // watched. Only the tree that is linked below the other one is notified, so exactly one of the
     // two uses reports the join.
-    declarations(solver).addUse(solver, locationOf(cont.set()).declaration,
-        Use(UseKind::MemoryLocationSetPendingContainment, index));
+    solver.addUse(locationOf(cont.set()).declaration, Use(UseKind::MemoryLocationSetPendingContainment, index));
 }
 
 void MemoryLocationSets::promotePending(Solver& solver, const ElementState& state, uint32_t index) {
@@ -117,8 +112,7 @@ void MemoryLocationSets::propagateContainment(Solver& solver, ElementId element,
 
             // The declarations of the pending containments are compared against this one, so any of
             // them may be joined when its representative changes
-            declarations(solver).addUse(solver, location.declaration,
-                Use(UseKind::MemoryLocationSetRepresentative, element.id()));
+            solver.addUse(location.declaration, Use(UseKind::MemoryLocationSetRepresentative, element.id()));
         } else {
             // Distinct declarations describe distinct memory, so an element of both locations means
             // that the declarations are the same
@@ -149,6 +143,10 @@ void MemoryLocationSets::propagateRewrite(Solver& solver, Use use) {
         // The representative moved, which may have joined any of the pending declarations
         promotePendingOf(solver, ElementId(use.id()));
         break;
+    case UseKind::MemberPrefixWord:
+        // The normal form of the member of a location changed
+        prefixes.propagateRewrite(solver, use);
+        break;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -165,7 +163,7 @@ bool MemoryLocationSets::testReason(Solver& solver, Bool assignedLiteral, const 
     VERIFY(assignedLiteral == false_literal);
     auto data = reason.get<ReasonKind::MemberPrefixHit>();
     // The locations are only comparable as long as they belong to the same declaration
-    return declarations(solver).rewrite(declarationOf(data.prefix)) == declarations(solver).rewrite(declarationOf(data.path))
+    return solver.assignedEqual(declarationOf(data.prefix), declarationOf(data.path))
         && prefixes.isPrefixOf(data.prefix, data.path)
         && solver.assignedTrue(containmentOf(solver, data.prefix))
         && solver.assignedTrue(containmentOf(solver, data.path));
@@ -195,7 +193,7 @@ ClauseAndIndex MemoryLocationSets::reasonToClause(Solver& solver, Bool assignedL
     clause.add(solver, !containmentOf(solver, data.path));
     prefixes.explainPrefix(solver, data.prefix, data.path, clause);
     // The subset relation only holds within one declaration
-    declarations(solver).explainEqual(solver, declarationOf(data.prefix), declarationOf(data.path), clause);
+    solver.impl().memoryDeclarationEquality.explainEqual(solver, declarationOf(data.prefix), declarationOf(data.path), clause);
     return { solver.viewClause(clause), 0 };
 }
 

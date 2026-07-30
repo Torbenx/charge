@@ -6,8 +6,7 @@
 
 namespace verify::backend {
 
-MemberPrefixes::MemberPrefixes(Solver& solver)
-    : variableUses(solver) { }
+MemberPrefixes::MemberPrefixes(Solver&) { }
 
 uint32_t MemberPrefixes::childNode(uint32_t parent, Member letter) {
     auto [it, inserted] = edges.try_emplace(Edge { parent, letter }, (uint32_t)nodes.size());
@@ -19,25 +18,6 @@ uint32_t MemberPrefixes::childNode(uint32_t parent, Member letter) {
             .depth = parentNode.depth + 1 });
     }
     return it->second;
-}
-
-void MemberPrefixes::collectVariables(Solver& solver, Member expression, std::vector<Member>& out) {
-    out.clear();
-    auto add = [&](Member m) {
-        if (!m.literal())
-            out.push_back(m);
-    };
-    if (expression.composite()) {
-        for (Member m : solver.impl().members.compositeMember(expression))
-            add(m);
-    } else {
-        add(expression);
-    }
-
-    std::ranges::sort(out, [](Member a, Member b) {
-        return std::pair(std::to_underlying(a.theory()), a.id()) < std::pair(std::to_underlying(b.theory()), b.id());
-    });
-    out.erase(std::ranges::unique(out).begin(), out.end());
 }
 
 void MemberPrefixes::buildPath(Solver& solver, WordId w) {
@@ -129,11 +109,7 @@ MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element
     WordId w(words.size());
     words.push_back({ .element = element, .expression = expression, .payload = payload });
 
-    std::vector<Member> variables;
-    collectVariables(solver, expression, variables);
-    for (Member v : variables)
-        variableUses[v].push_back(w);
-    words[w.id()].watchedVariables = std::move(variables);
+    solver.addUse(expression, Use(UseKind::MemberPrefixWord, w.id()));
 
     buildPath(solver, w);
     attach(solver, w, true);
@@ -163,34 +139,24 @@ void MemberPrefixes::explainPrefix(Solver& solver, WordId prefix, WordId path, C
     members.explainRewrite(solver, words[path.id()].expression, clause);
 }
 
-void MemberPrefixes::updateRewrites(Solver& solver, bool raiseConflicts) {
-    VERIFY(dirtyWords.empty());
-    auto& members = solver.impl().members;
-    for (Member v : members.changedVariables()) {
-        for (WordId w : variableUses[v]) {
-            WordInfo& info = words[w.id()];
-            if (info.dirty)
-                continue;
-            info.dirty = true;
-            dirtyWords.push_back(w);
-        }
-    }
-    members.clearChangedVariables();
+void MemberPrefixes::propagateRewrite(Solver& solver, Use use) {
+    // Only growing rewrites are notified about, so this never runs while the assignments are being
+    // reverted and a conflict found here is a real one
+    VERIFY(!backtracking());
+    VERIFY(use.kind() == UseKind::MemberPrefixWord);
+    WordId w = WordId(use.id());
 
-    for (WordId w : dirtyWords) {
-        WordInfo& info = words[w.id()];
-        VERIFY(info.dirty);
-        info.dirty = false;
-        detach(w);
-        buildPath(solver, w);
-        attach(solver, w, raiseConflicts);
-    }
-    dirtyWords.clear();
+    rebuiltTrace.push_back(w);
+    detach(w);
+    buildPath(solver, w);
+    attach(solver, w, true);
 }
 
 void MemberPrefixes::newDecisionLevel(Solver& solver) {
     wordDecisionPoints.push_back(words.size());
+    rebuiltDecisionPoints.push_back(rebuiltTrace.size());
     VERIFY((int_t)wordDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    VERIFY((int_t)rebuiltDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
 void MemberPrefixes::beginBacktrack(Solver& solver) {
@@ -198,17 +164,27 @@ void MemberPrefixes::beginBacktrack(Solver& solver) {
     int_t targetSize = wordDecisionPoints[lastLevelToRevert];
     backtrackedWordCount = targetSize;
 
-    for (int_t i = (int_t)words.size() - 1; i >= targetSize; i--) {
-        WordInfo& info = words[i];
+    for (int_t i = (int_t)words.size() - 1; i >= targetSize; i--)
         detach(WordId(i));
-        for (Member v : info.watchedVariables) {
-            auto& uses = variableUses[v];
-            VERIFY(uses.back() == WordId(i));
-            uses.pop_back();
-        }
-    }
 
-    updateRewrites(solver, false);
+    // Members reverted the rewrites of these levels before this was called, so the normal form a
+    // word goes back to is recomputed from it, see \ref rebuilds. Recomputing is idempotent, so a
+    // word recorded several times needs no special treatment.
+    int_t rebuiltTargetSize = rebuiltDecisionPoints[lastLevelToRevert];
+    while ((int_t)rebuiltTrace.size() > rebuiltTargetSize) {
+        WordId w = rebuiltTrace.back();
+        rebuiltTrace.pop_back();
+        // The word was unregistered above, its normal form no longer matters
+        if (isBacktracked(w))
+            continue;
+
+        detach(w);
+        buildPath(solver, w);
+        // Reverting a rewrite can only destroy prefix relations, see \ref monotonicity, so there is
+        // nothing to raise here. Which is required, the assignments are still being reverted.
+        attach(solver, w, false);
+    }
+    rebuiltDecisionPoints.resize(lastLevelToRevert);
 }
 
 void MemberPrefixes::endBacktrack(Solver& solver) {
@@ -221,10 +197,19 @@ void MemberPrefixes::endBacktrack(Solver& solver) {
 
 void MemberPrefixes::checkInvariances(Solver& solver) {
     VERIFY(!backtracking());
-    // The words of a level are appended after its decision point, so the points only grow
-    VERIFY((int_t)wordDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    VERIFY(std::ranges::is_sorted(wordDecisionPoints));
-    VERIFY(wordDecisionPoints.empty() || wordDecisionPoints.back() <= words.size());
+    // The entries of a level are appended after its decision point, so the points only grow
+    auto checkDecisionPoints = [&solver](const std::vector<uint32_t>& points, size_t traceSize) {
+        VERIFY((int_t)points.size() == solver.currentDecisionLevel() + 1);
+        VERIFY(std::ranges::is_sorted(points));
+        VERIFY(points.empty() || points.back() <= traceSize);
+    };
+    checkDecisionPoints(wordDecisionPoints, words.size());
+    checkDecisionPoints(rebuiltDecisionPoints, rebuiltTrace.size());
+
+    // A word is rebuilt at the level it was registered at or above, so a rebuild is never left
+    // behind by the backtrack that unregistered its word
+    for (WordId w : rebuiltTrace)
+        VERIFY(w.id() < words.size());
 
     for (uint32_t node = 0; node < nodes.size(); node++) {
         const Node& n = nodes[node];
@@ -248,14 +233,10 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
         }
     }
 
-    // The uses a registered word is expected to have, in registration order because beginBacktrack()
-    // relies on being able to pop them from the back
-    std::unordered_map<uint32_t, std::vector<WordId>> expectedUses;
-
     for (uint32_t i = 0; i < words.size(); i++) {
         const WordInfo& info = words[i];
-        // The flag only lives for the duration of updateRewrites()
-        VERIFY(!info.dirty);
+        // The path spells the normal form of the expression, so anything else here means that a
+        // notification of the use registered for the word was missed
         std::vector<Member> normalForm;
         solver.impl().members.appendRewrite(info.expression, normalForm);
         VERIFY(info.path.size() == normalForm.size() + 1);
@@ -264,27 +245,6 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
             VERIFY(nodes[info.path[k + 1]].letter == normalForm[k]);
             VERIFY(nodes[info.path[k + 1]].parent == info.path[k]);
         }
-
-        VERIFY(std::ranges::is_sorted(info.watchedVariables, {}, [](Member m) {
-            return std::pair(std::to_underlying(m.theory()), m.id());
-        }));
-        for (Member v : info.watchedVariables)
-            expectedUses[std::bit_cast<uint32_t>((Value)v)].push_back(WordId(i));
-    }
-
-    // Every member value has exactly the uses of the registered words watching it, so no use of an
-    // unregistered word may have been left behind
-    for (int_t theoryId = 0; theoryId < std::to_underlying(TheoryId::COUNT); theoryId++) {
-        TheoryId theory = (TheoryId)theoryId;
-        if (sortOf(theory) != Sort::Member)
-            continue;
-        solver.forEachValue(theory, [&](Value v) {
-            auto it = expectedUses.find(std::bit_cast<uint32_t>(v));
-            std::span<const WordId> expected;
-            if (it != expectedUses.end())
-                expected = it->second;
-            VERIFY(std::ranges::equal(variableUses[v], expected));
-        });
     }
 }
 

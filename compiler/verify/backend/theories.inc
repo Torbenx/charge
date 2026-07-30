@@ -77,6 +77,7 @@ REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocatio
 USE_KIND(Test, useTest)
 USE_KIND(MemoryLocationSetRepresentative, memoryLocationSets)
 USE_KIND(MemoryLocationSetPendingContainment, memoryLocationSets)
+USE_KIND(MemberPrefixWord, memoryLocationSets)
 
 #undef REASON
 #undef USE_KIND

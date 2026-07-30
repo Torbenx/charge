@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <queue>
+#include <unordered_map>
 
 namespace verify::backend {
 
@@ -115,16 +116,60 @@ std::vector<Member> Members::rewrite(Member m) {
     return result;
 }
 
-void Members::clearChangedVariables() {
-    for (Member m : changedVariablesLog)
-        infoFor(m).inChangeLog = false;
-    changedVariablesLog.clear();
+void Members::addUse(Solver&, Value value, Use use) {
+    VERIFY(sortOf(value.theory()) == Sort::Member);
+    Member expression = (Member)value;
+    auto registerFor = [this, use](Member m) {
+        infoFor(m).uses.push_back(use);
+        useTrace.push_back({ m, use });
+    };
+
+    if (!expression.composite()) {
+        if (!expression.literal())
+            registerFor(expression);
+        return;
+    }
+
+    auto letters = compositeMember(expression);
+    for (int_t i = 0; i < (int_t)letters.size(); i++) {
+        Member m = letters[i];
+        if (m.literal())
+            continue;
+        // A variable may occur several times in the expression, but one registration is enough
+        auto seen = letters.first(i);
+        if (std::ranges::find(seen, m) != seen.end())
+            continue;
+        registerFor(m);
+    }
 }
 
-void Members::markUsesAsDirty(VariableInfo& varInfo) {
-    if (!varInfo.inChangeLog) {
-        varInfo.inChangeLog = true;
-        changedVariablesLog.push_back(varInfo.self);
+void Members::sendRewrites(Solver& solver) {
+    VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
+
+    std::vector<Use> uses;
+    for (Member m : externalPropagationQueue) {
+        auto& varInfo = infoFor(m);
+        VERIFY(varInfo.queuedForExternalPropagation);
+        varInfo.queuedForExternalPropagation = false;
+        uses.insert(uses.end(), varInfo.uses.begin(), varInfo.uses.end());
+    }
+    externalPropagationQueue.clear();
+
+    // A use is added once per variable in the target expression. If multiple variables
+    // change in the same update we can end up with duplicates here.
+    std::ranges::sort(uses, {}, [](Use use) { return std::bit_cast<uint32_t>(use); });
+    uses.erase(std::ranges::unique(uses).begin(), uses.end());
+
+    // Note: A notification may register new uses and apply further rewrites, which is why the
+    //       change log is already emptied and the batch is held in a local.
+    for (Use use : uses)
+        solver.impl().propagateRewrite(use);
+}
+
+void Members::markUsesAsDirty(VariableInfo& varInfo, bool externalPropagation) {
+    if (externalPropagation && !varInfo.queuedForExternalPropagation) {
+        varInfo.queuedForExternalPropagation = true;
+        externalPropagationQueue.push_back(varInfo.self);
     }
 
     for (RewriteTracePosition use : varInfo.rewriteUses) {
@@ -148,7 +193,7 @@ void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> exp
     varInfo.currentRewrite = expression;
     varInfo.rewriteExpression = std::move(expression);
     varInfo.tracePos = tracePos;
-    markUsesAsDirty(varInfo);
+    markUsesAsDirty(varInfo, true);
 }
 
 void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
@@ -159,12 +204,12 @@ void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
         varInfo.currentRewrite.clear();
         varInfo.rewriteExpression.clear();
         varInfo.tracePos = tracePos;
-        markUsesAsDirty(varInfo);
+        markUsesAsDirty(varInfo, true);
     }
     rewriteTrace.push_back({ std::move(targets), pair });
 }
 
-void Members::updateRewrite(VariableInfo& varInfo) {
+void Members::updateRewrite(VariableInfo& varInfo, bool externalPropagation) {
     auto& rw = varInfo.currentRewrite;
     rw.clear();
     for (Member m : varInfo.rewriteExpression) {
@@ -175,7 +220,7 @@ void Members::updateRewrite(VariableInfo& varInfo) {
             rw.insert(rw.end(), otherVarInfo.currentRewrite.begin(), otherVarInfo.currentRewrite.end());
         }
     }
-    markUsesAsDirty(varInfo);
+    markUsesAsDirty(varInfo, externalPropagation);
 }
 
 void Members::assignEqual(Solver& solver, PairHandle handle) {
@@ -272,7 +317,7 @@ void Members::propagateEqual(Solver& solver, PairHandle pair) {
     grind(solver);
 }
 
-void Members::updateRewrites() {
+void Members::updateRewrites(bool externalPropagation) {
     while (!dirtyRewrites.empty()) {
         RewriteTracePosition rwPos = dirtyRewrites.top();
         do {
@@ -280,16 +325,16 @@ void Members::updateRewrites() {
         } while (!dirtyRewrites.empty() && dirtyRewrites.top() == rwPos);
         // Only non-identity rewrites can be dirty and always have a single target
         VERIFY(rewriteTrace[rwPos.index].targets.size() == 1);
-        updateRewrite(infoFor(rewriteTrace[rwPos.index].targets.front()));
+        updateRewrite(infoFor(rewriteTrace[rwPos.index].targets.front()), externalPropagation);
     }
 }
 
 void Members::grind(Solver& solver) {
     for (;;) {
-        updateRewrites();
+        updateRewrites(true);
 
         if (dirtyPairs.empty())
-            return;
+            break;
 
         // TODO: The processing order here can affect which rewrites are selected
         //       so it may be worth to use a more stable ordering based on the rewrite order.
@@ -299,6 +344,7 @@ void Members::grind(Solver& solver) {
         } while (!dirtyPairs.empty() && dirtyPairs.top() == handle);
         updatePair(solver, handle);
     }
+    sendRewrites(solver);
 }
 
 bool Members::testReason(Solver&, Bool assignedLiteral, const Reason& reason) {
@@ -353,13 +399,30 @@ void Members::newDecisionLevel(Solver& solver) {
     VERIFY((int_t)rewriteDecisionPoints.size() == solver.currentDecisionLevel() + 1);
     assignedPairDecisionPoints.push_back(assignedPairTrace.size());
     VERIFY((int_t)assignedPairDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    useDecisionPoints.push_back(useTrace.size());
+    VERIFY((int_t)useDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
 void Members::beginBacktrack(Solver& solver) {
     VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
+    // Everything that was applied has been notified about before the backtrack was started
+    VERIFY(externalPropagationQueue.empty());
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
     int_t rwTargetSize = rewriteDecisionPoints[lastLevelToRevert];
     int_t eqTargetSize = assignedPairDecisionPoints[lastLevelToRevert];
+
+    // The uses were appended in registration order, so the ones of the reverted levels are the tail
+    // of the list of their variable
+    int_t useTargetSize = useDecisionPoints[lastLevelToRevert];
+    while ((int_t)useTrace.size() > useTargetSize) {
+        auto [variable, use] = useTrace.back();
+        auto& uses = infoFor(variable).uses;
+        VERIFY(!uses.empty());
+        VERIFY(uses.back() == use);
+        uses.pop_back();
+        useTrace.pop_back();
+    }
+    useDecisionPoints.resize(lastLevelToRevert);
 
     for (int_t i = rewriteTrace.size() - 1; i >= rwTargetSize; i--) {
         auto& [targets, rwPair] = rewriteTrace[i];
@@ -374,7 +437,7 @@ void Members::beginBacktrack(Solver& solver) {
                     otherVarInfo.rewriteUses.pop_back();
                 }
             }
-            markUsesAsDirty(varInfo);
+            markUsesAsDirty(varInfo, false);
         }
         auto& pairInfo = pairs[makeEquality(rwPair)];
         VERIFY(pairInfo.rewrite == RewriteTracePosition(i));
@@ -393,7 +456,7 @@ void Members::beginBacktrack(Solver& solver) {
     while (!dirtyRewrites.empty() && (int_t)dirtyRewrites.top().index >= rwTargetSize) {
         dirtyRewrites.pop();
     }
-    updateRewrites();
+    updateRewrites(false);
     // No new information should become available as result of the backtrack
     // so there is no need to update the pairs.
     decltype(dirtyPairs) emptyDirtyPairs;
@@ -410,6 +473,65 @@ void Members::endBacktrack(Solver& solver) {
     }
     rewriteTrace.erase(rewriteTrace.begin() + rwTargetSize, rewriteTrace.end());
     rewriteDecisionPoints.resize(lastLevelToRevert);
+}
+
+void Members::checkInvariances(Solver& solver) {
+    // The theory is only quiescent while there is nothing left to update and every change was
+    // notified about
+    VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
+    VERIFY(externalPropagationQueue.empty());
+
+    // The entries of a level are appended after its decision point, so the points only grow
+    auto checkDecisionPoints = [&solver](const std::vector<uint32_t>& points, size_t traceSize) {
+        VERIFY((int_t)points.size() == solver.currentDecisionLevel() + 1);
+        VERIFY(std::ranges::is_sorted(points));
+        VERIFY(points.empty() || points.back() <= traceSize);
+    };
+    checkDecisionPoints(rewriteDecisionPoints, rewriteTrace.size());
+    checkDecisionPoints(assignedPairDecisionPoints, assignedPairTrace.size());
+    checkDecisionPoints(useDecisionPoints, useTrace.size());
+
+    // The uses a variable is expected to have, in registration order because beginBacktrack() relies
+    // on being able to pop them from the back
+    std::unordered_map<uint32_t, std::vector<Use>> expectedUses;
+    for (auto [variable, use] : useTrace)
+        expectedUses[std::bit_cast<uint32_t>((Value)variable)].push_back(use);
+
+    for (int_t theoryId = 0; theoryId < std::to_underlying(TheoryId::COUNT); theoryId++) {
+        TheoryId theory = (TheoryId)theoryId;
+        if (sortOf(theory) != Sort::Member)
+            continue;
+
+        solver.forEachValue(theory, [this, &expectedUses](Value v) {
+            Member m(v);
+            if (!m.variable())
+                return;
+
+            const VariableInfo& varInfo = infoFor(m);
+            VERIFY(varInfo.self == m);
+            // The flag only lives between a change and the notifications made for it
+            VERIFY(!varInfo.queuedForExternalPropagation);
+
+            // A variable expands to the expansion of its rewrite expression, or to itself as long
+            // as it has no rewrite. So anything else here means that an update was missed.
+            std::vector<Member> expansion;
+            if (varInfo.hasRewrite()) {
+                for (Member e : varInfo.rewriteExpression)
+                    appendRewrite(e, expansion);
+            } else {
+                expansion.push_back(m);
+            }
+            VERIFY(varInfo.currentRewrite == expansion);
+
+            // Every variable has exactly the uses registered for it, so no use of a reverted level
+            // may have been left behind
+            auto it = expectedUses.find(std::bit_cast<uint32_t>(v));
+            std::span<const Use> expected;
+            if (it != expectedUses.end())
+                expected = it->second;
+            VERIFY(std::ranges::equal(varInfo.uses, expected));
+        });
+    }
 }
 
 }

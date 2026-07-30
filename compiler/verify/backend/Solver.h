@@ -2,6 +2,7 @@
 
 #include <verify/backend/Data.h>
 #include <verify/backend/Reason.h>
+#include <verify/backend/Use.h>
 #include <verify/backend/Value.h>
 
 namespace verify::backend {
@@ -45,6 +46,8 @@ struct Solver {
     Bool equality(Value, Value);
     Bool equality(PairHandle);
     bool assignedEqual(Value, Value);
+
+    void addUse(Value, Use);
 
     Bool newAuxBooleanVariable();
     Value newAuxUninterpretedConstant();

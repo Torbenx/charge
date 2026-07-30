@@ -103,19 +103,23 @@ void SatCore::Interface::onNewDecisionLevel() {
 
 void SatCore::Interface::onBeginBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
+    // The theories producing rewrites must backtrack before their consumers
+    // such that they can observe the backtracked state.
     impl.uninterpConstantEquality.beginBacktrack(impl);
     impl.memoryDeclarationEquality.beginBacktrack(impl);
     impl.members.beginBacktrack(impl);
-    // Must run after members so that the prefix index observes the restored rewrites
+
     impl.memoryLocationSets.beginBacktrack(impl);
     impl.uninterpConstantSingletons.beginBacktrack(impl);
 }
 
 void SatCore::Interface::onEndBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
+
     impl.uninterpConstantEquality.endBacktrack(impl);
     impl.memoryDeclarationEquality.endBacktrack(impl);
     impl.members.endBacktrack(impl);
+
     impl.memoryLocationSets.endBacktrack(impl);
     impl.uninterpConstantSingletons.endBacktrack(impl);
 }
@@ -175,7 +179,6 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
         PairHandle pair = decodePairTheoryValue<TheoryId::MemberEquality>(lit);
         if (!lit.negated()) {
             impl.members.propagateEqual(impl, pair);
-            impl.memoryLocationSets.propagateMemberRewrites(impl);
         }
         break;
     }
@@ -207,6 +210,22 @@ void SatCore::Interface::learnClause(std::vector<Bool> clause) {
 }
 
 // ------------------------------ Uses ------------------------------
+
+void Solver::addUse(Value value, Use use) {
+    switch (sortOf(value.theory())) {
+    case Sort::UninterpretedConstant:
+        impl().uninterpConstantEquality.addUse(*this, value, use);
+        break;
+    case Sort::MemoryDeclaration:
+        impl().memoryDeclarationEquality.addUse(*this, value, use);
+        break;
+    case Sort::Member:
+        impl().members.addUse(*this, value, use);
+        break;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 
 void SolverImpl::propagateRewrite(Use use) {
 #define USE_KIND(name, implMember)        \
@@ -410,7 +429,6 @@ void SolverImpl::onNewPair(PairHandle handle) {
         addClause({ !elementEq, singletonEq });
     } else if (sort == Sort::Member) {
         members.newPair(*this, handle);
-        memoryLocationSets.propagateMemberRewrites(*this);
     } else if (sort == Sort::MemoryDeclaration) {
         memoryDeclarationEquality.newPair(*this, handle);
     } else if (isSetSort(sort)) {

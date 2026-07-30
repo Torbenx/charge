@@ -2,6 +2,7 @@
 
 #include <FlatTreeSet.h>
 #include <verify/backend/SatCore.h>
+#include <verify/backend/Use.h>
 
 #include <queue>
 
@@ -14,15 +15,7 @@ struct Members {
     //! Append the normal form of \p m to \p out
     void appendRewrite(Member m, std::vector<Member>& out);
 
-    //! The variables whose expansion changed since the last call to clearChangedVariables()
-    /*!
-    This is the notification channel for structures that index member expressions, such as
-    MemberPrefixes. It is filled while rewrites are applied and also while they are reverted during
-    a backtrack, and it is only meaningful once the theory is quiescent, i.e. after grind() or after
-    beginBacktrack() has returned.
-    */
-    std::span<const Member> changedVariables() const { return changedVariablesLog; }
-    void clearChangedVariables();
+    void addUse(Solver&, Value expression, Use use);
 
     void explainRewrite(Solver&, Member m, ClauseBuilder& clause);
 
@@ -55,6 +48,9 @@ struct Members {
     void beginBacktrack(Solver&);
     void endBacktrack(Solver&);
 
+    //! Explicitly check that the invariances of the structure hold
+    void checkInvariances(Solver&);
+
 private:
     using RewriteTracePosition = TracePosition;
     using AssignedPairTracePosition = TracePosition;
@@ -65,8 +61,9 @@ private:
         std::vector<Member> currentRewrite;
         std::vector<RewriteTracePosition> rewriteUses;
         std::vector<PairHandle> pairUses;
+        std::vector<Use> uses; //!< The uses registered for this variable, in registration order
         Member self;
-        bool inChangeLog = false;
+        bool queuedForExternalPropagation = false;
 
         VariableInfo(Value m)
             : currentRewrite { (Member)m }
@@ -78,6 +75,11 @@ private:
     struct RewriteTraceEntry {
         std::vector<Member> targets;
         PairHandle rewritePair;
+    };
+
+    struct UseTraceEntry {
+        Member variable;
+        Use use;
     };
 
     struct PairInfo {
@@ -106,12 +108,13 @@ private:
     static void reduce(std::vector<Member>& a, std::vector<Member>& b);
 
     void addUses(Member m, PairHandle);
+    void sendRewrites(Solver&);
 
-    void markUsesAsDirty(VariableInfo&);
+    void markUsesAsDirty(VariableInfo& varInfo, bool externalPropagation);
     void addRewrite(Member target, PairHandle pair, std::vector<Member> expression);
     void addIdentityRewrite(std::vector<Member> targets, PairHandle pair);
-    void updateRewrite(VariableInfo&);
-    void updateRewrites();
+    void updateRewrite(VariableInfo&, bool externalPropagation);
+    void updateRewrites(bool externalPropagation);
 
     void assignEqual(Solver&, PairHandle);
     void assignDisequal(Solver&, PairHandle);
@@ -128,11 +131,13 @@ private:
     SortData<VariableInfo, Sort::Member> variables;
     std::vector<RewriteTraceEntry> rewriteTrace;
     std::vector<PairHandle> assignedPairTrace;
+    std::vector<UseTraceEntry> useTrace;
     std::priority_queue<RewriteTracePosition> dirtyRewrites;
     std::priority_queue<PairHandle, std::vector<PairHandle>, PairHandleCompare> dirtyPairs;
     std::vector<uint32_t> rewriteDecisionPoints;
     std::vector<uint32_t> assignedPairDecisionPoints;
-    std::vector<Member> changedVariablesLog;
+    std::vector<uint32_t> useDecisionPoints;
+    std::vector<Member> externalPropagationQueue;
 };
 
 }

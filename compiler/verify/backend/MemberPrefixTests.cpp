@@ -38,12 +38,26 @@ namespace {
 
         Bool declarationEquality() { return solver.equality(declaration, otherDeclaration); }
 
+        //! Check the index together with the theory whose rewrites it follows
+        void checkInvariances() {
+            solver.memoryLocationSets.checkInvariances(solver);
+            solver.members.checkInvariances(solver);
+        }
+
+        //! Decide that the member \p a is the member \p b and propagate
+        void decideMembersEqual(Member a, Member b) {
+            solver.decideTrue(solver.equality(a, b));
+            solver.sat.propagate();
+            if (!solver.sat.hasConflicts())
+                checkInvariances();
+        }
+
         //! Decide that the two declarations are the same and propagate
         void decideDeclarationsEqual() {
             solver.decideTrue(declarationEquality());
             solver.sat.propagate();
             if (!solver.sat.hasConflicts())
-                solver.memoryLocationSets.checkInvariances(solver);
+                checkInvariances();
         }
 
         //! Decide that \p element is contained in \p set and propagate
@@ -52,7 +66,7 @@ namespace {
             solver.memorySets.decideTrue(solver, e, Sets::Containment(set, contained));
             solver.sat.propagate();
             if (!solver.sat.hasConflicts())
-                solver.memoryLocationSets.checkInvariances(solver);
+                checkInvariances();
         }
         void decideNotIn(Value set) { decideIn(set, false); }
         void decideNotIn(Sets::ElementId e, Value set) { decideIn(e, set, false); }
@@ -67,7 +81,7 @@ namespace {
             EXPECT_TRUE(solver.sat.hasConflicts());
             EXPECT_TRUE(solver.sat.analyzeConflicts());
             solver.sat.propagate();
-            solver.memoryLocationSets.checkInvariances(solver);
+            checkInvariances();
         }
     };
 
@@ -221,12 +235,60 @@ TEST(VerifyBackend, MemoryPrefixRewriteIsBacktracked) {
     // Reverting the rewrite by hand must leave the index without a conflict again
     f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
     f.solver.sat.endBacktrack();
-    f.solver.memoryLocationSets.checkInvariances(f.solver);
+    f.checkInvariances();
     EXPECT_FALSE(f.solver.assignedTrue(eq));
 
     // And the very same rewrite must conflict again when it is reapplied
     f.solver.decideTrue(eq);
     f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixRewriteOfOneLevelIsBacktracked) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+
+    // A word that is rebuilt at two levels, so that reverting only the second one has to leave it
+    // at the normal form of the first
+    f.decideIn(f.location({ v1, v2 }));
+    f.decideMembersEqual(v1, l1);
+    int_t levelBetweenRewrites = f.solver.currentDecisionLevel();
+    f.decideMembersEqual(v2, l2);
+
+    f.solver.sat.beginBacktrack(levelBetweenRewrites + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+
+    // The word is l1.v2 now, so the location l1 above it is still excluded by it
+    f.decideNotIn(f.location(l1));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, MemoryPrefixRewriteOfAnUnregisteredWordIsBacktracked) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member l2 = newLiteral(f.solver);
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // A candidate that survives the backtrack below
+    f.decideNotIn(f.location({ l1, l2 }));
+    int_t levelBeforeWord = f.solver.currentDecisionLevel();
+
+    f.decideIn(f.location({ v1, l2 }));
+    // The rebuild of the word is recorded above the level the word itself was registered at, so the
+    // backtrack has to drop it without bringing the unregistered word back
+    f.decideMembersEqual(v1, l2);
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.solver.sat.beginBacktrack(levelBeforeWord + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+
+    // The candidate must still be found above a path registered afterwards
+    f.decideIn(f.location({ l1, l2, l2 }));
     EXPECT_TRUE(f.hasConflicts());
 }
 
@@ -243,7 +305,7 @@ TEST(VerifyBackend, MemoryPrefixContainmentIsBacktracked) {
     // Reverting the containment must unregister its location from the index
     f.solver.sat.beginBacktrack(levelBeforeInclusion + 1);
     f.solver.sat.endBacktrack();
-    f.solver.memoryLocationSets.checkInvariances(f.solver);
+    f.checkInvariances();
     EXPECT_FALSE(f.assignedIn(f.location({ l1, l2 })));
 
     // A different location below the excluded one must still be detected afterwards
@@ -435,7 +497,7 @@ TEST(VerifyBackend, MemoryPrefixSharedNodesAreDetachedCorrectly) {
     // Drop the last four again, leaving the first one on the shared nodes
     f.solver.sat.beginBacktrack(level + 1);
     f.solver.sat.endBacktrack();
-    f.solver.memoryLocationSets.checkInvariances(f.solver);
+    f.checkInvariances();
     EXPECT_TRUE(f.assignedIn(f.location({ l1 })));
     EXPECT_FALSE(f.assignedIn(f.location({ l1, l2 })));
 
@@ -466,6 +528,27 @@ TEST(VerifyBackend, MemoryPrefixBothWordsRewrittenAtOnce) {
     EXPECT_FALSE(f.solver.assignedTrue(eq));
 }
 
+TEST(VerifyBackend, MemoryPrefixWordWatchingSeveralVariables) {
+    Fixture f;
+    Member l1 = newLiteral(f.solver);
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+
+    f.decideNotIn(f.location({ v1, v2, l1 }));
+    f.decideIn(f.location(l1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // Both variables become the identity in one go, so the word is notified for two of the
+    // variables it watches while its normal form only changes once
+    f.decideMembersEqual(f.solver.composeMembers({ v1, v2 }), identity_member);
+    EXPECT_TRUE(f.solver.members.rewrite(v1).empty());
+    EXPECT_TRUE(f.solver.members.rewrite(v2).empty());
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_FALSE(f.solver.assignedTrue(f.solver.equality(f.solver.composeMembers({ v1, v2 }), identity_member)));
+}
+
 TEST(VerifyBackend, MemoryPrefixElementRootsGrowLate) {
     Fixture f;
     Member l1 = newLiteral(f.solver);
@@ -491,7 +574,7 @@ TEST(VerifyBackend, MemoryPrefixEmptySetIsACandidate) {
     f.solver.addClause({ f.solver.equality(f.location(l1), f.solver.memorySets.emptySet()) });
     f.solver.sat.propagate();
     EXPECT_FALSE(f.hasConflicts());
-    f.solver.memoryLocationSets.checkInvariances(f.solver);
+    f.checkInvariances();
 
     f.decideIn(f.location({ l1, l2 }));
     EXPECT_TRUE(f.hasConflicts());

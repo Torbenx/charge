@@ -50,6 +50,18 @@ Applying a rewrite is applying a substitution, and u being a prefix of v implies
 prefix of sigma(v) for every substitution sigma. Hence rewriting can only create prefix relations
 and backtracking can only destroy them. The structure relies on this: it never has to rediscover a
 relation while unwinding, which is what SatCore requires of a theory during a backtrack.
+
+\section rebuilds Following the rewrites
+
+A word is registered for the whole life of its decision level, but the normal form it is filed
+under is that of the rewrites of the moment. Growing rewrites arrive as the notification
+propagateRewrite(), reverted ones do not, see \ref Use, so the words a backtrack invalidates are
+recovered from \ref rebuiltTrace: a word is on it exactly for the levels at which it was rebuilt, so
+the words to rebuild again are the ones recorded above the decision point of the backtrack. Their
+normal form is simply recomputed, because Members has restored it by then.
+
+A rewrite that was already applied when a word was registered needs no entry: it is of a level at or
+below the one of the word, so a backtrack reverting it also unregisters the word.
 */
 struct MemberPrefixes {
     using ElementId = Sets::ElementId;
@@ -87,14 +99,16 @@ struct MemberPrefixes {
     bool isPrefixOf(WordId prefix, WordId path) const;
     void explainPrefix(Solver&, WordId prefix, WordId path, ClauseBuilder& clause);
 
-    //! Bring the index up to date with the rewrites applied by the Members theory
+    //! Bring the word \p w up to date with the rewrites applied by the Members theory
     /*!
-    Must be called whenever Members has reached a quiescent state, i.e. after each grind().
+    This is the notification of the use registered for the word by addWord(), so Members only calls
+    it when the normal form of the word really changed. Reverting a rewrite is not notified about,
+    see \ref rebuilds.
     */
-    void propagateRewrites(Solver& solver) { updateRewrites(solver, true); }
+    void propagateRewrite(Solver&, Use);
 
     void newDecisionLevel(Solver&);
-    //! Unregister the words of the reverted levels and bring the remaining ones up to date
+    //! Unregister the words of the reverted levels and rebuild the ones the backtrack changed
     /*!
     The unregistered words are kept around until endBacktrack() so that a reason naming them can
     still be turned into a clause while the assignments are being justified.
@@ -127,7 +141,6 @@ private:
         Member expression; //!< The expression as it was registered, never rewritten in place
         Sets::Containment payload; //!< Opaque data of the owner, see addPath()
         bool isPath() const { return payload.contained(); };
-        bool dirty = false;
 
         //! The trie nodes for every prefix of the normal form, starting with the element root
         /*!
@@ -143,20 +156,10 @@ private:
         entry for the terminal node.
         */
         std::vector<uint32_t> occurrenceIndices = {};
-
-        //! The distinct variables occurring in \ref expression, sorted
-        /*!
-        The normal form can only change when one of these gets a new rewrite, because Members marks
-        a variable as changed whenever the expansion of any variable it depends on changes.
-        */
-        std::vector<Member> watchedVariables = {};
     };
 
     uint32_t childNode(uint32_t parent, Member letter);
 
-    void collectVariables(Solver&, Member expression, std::vector<Member>& out);
-
-    void updateRewrites(Solver&, bool raiseConflicts);
     void buildPath(Solver&, WordId);
     void attach(Solver&, WordId, bool raiseConflicts);
     void detach(WordId);
@@ -186,15 +189,15 @@ private:
 
     std::vector<WordInfo> words;
     std::vector<uint32_t> wordDecisionPoints;
+    //! The words whose path was rebuilt, in the order they were rebuilt, see \ref rebuilds
+    std::vector<WordId> rebuiltTrace;
+    std::vector<uint32_t> rebuiltDecisionPoints; //!< Trace sizes at the respective decision levels
     size_t backtrackedWordCount = limits::max;
 
     bool backtracking() const { return backtrackedWordCount != (decltype(backtrackedWordCount))limits::max; }
     bool isBacktracked(WordId word) const { return (size_t)word.id() >= backtrackedWordCount; }
 
-    SortData<std::vector<WordId>, Sort::Member> variableUses;
-
-    // Temporary buffers used inside single function to avoid repeated allocations
-    std::vector<WordId> dirtyWords;
+    // Temporary buffer used inside a single function to avoid repeated allocations
     std::vector<Member> normalFormBuffer;
 };
 

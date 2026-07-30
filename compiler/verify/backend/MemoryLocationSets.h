@@ -67,7 +67,6 @@ struct MemoryLocationSets {
 
     void propagateContainment(Solver&, ElementId, Sets::Containment);
     void propagateRewrite(Solver&, Use);
-    void propagateMemberRewrites(Solver& solver) { prefixes.propagateRewrites(solver); }
 
     bool testReason(Solver&, Bool, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
@@ -117,7 +116,6 @@ private:
         return locationOf(prefixes.payloadOf(word).set()).declaration;
     }
 
-    UninterpretedEquality& declarations(Solver&);
     Sets& memorySets(Solver&);
 
     ElementState& stateOf(ElementId element) {

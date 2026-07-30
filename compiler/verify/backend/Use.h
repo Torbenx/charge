@@ -17,7 +17,10 @@ std::string_view nameString(UseKind);
 
 //! Represents the use of value that can be rewritten
 /*!
-
+A use is registered with the theory owning the value, see Members::addUse() and
+UninterpretedEquality::addUse(), and is notified through SolverImpl::propagateRewrite() whenever the
+normal form of that value changes.
+Note that a notification is only made while rewrites are applied, not when a backtrack reverts them.
 */
 struct Use {
     static constexpr uint32_t MAX_ID = (1u << 24) - 1u;
