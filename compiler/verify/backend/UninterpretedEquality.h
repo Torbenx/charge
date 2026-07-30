@@ -2,6 +2,9 @@
 
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/Use.h>
+
+#include <variant>
 
 namespace verify::backend {
 
@@ -50,6 +53,14 @@ struct UninterpretedEquality {
 
     void newPair(Solver&, PairHandle);
 
+    void addUse(Solver&, Value value, Use use);
+
+    //! Justify that \p a and \p b are equal by adding the negated equalities of a connecting path
+    /*!
+    The values must be connected or the same value.
+    */
+    void explainEqual(Solver& solver, Value a, Value b, ClauseBuilder& clause) { path(solver, a, b, clause); }
+
     void forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit = (uint32_t)limits::max);
     void forEachEqualValue(Value value, auto&& callback);
 
@@ -81,10 +92,18 @@ private:
         Value root;
         int32_t treeOffset = -1; //!< Offset in root's tree
         uint32_t edgesOffset = 0; //!< Offset of this values edges in root's edges
+        uint32_t usesOffset = 0; //!< Offset of this values uses in root's uses
         std::optional<TracePosition> tracePosition; //!< Position of the trace entry where this value ceased to be a root.
         std::vector<TreeNode> tree;
         std::vector<Edge> edges;
         std::vector<uint32_t> disequalities; //!< Sorted list of disequalities this node is a part of
+
+        //! The uses registered for the values of this tree
+        /*!
+        A new use is only ever appended to the back of the list of the current root.
+        That is enough because a use never outlives the links that placed it in this tree.
+        */
+        std::vector<Use> uses;
     };
 
     bool connected(Value a, Value b) {
@@ -112,13 +131,18 @@ private:
         PairHandle diseqPair;
     };
 
+    struct UseTraceEntry {
+        Value value;
+        Use use;
+    };
+
     UninterpretedEqualityParams params;
 
     SortData<EqualityInfo> equalityInfos;
 
-    std::vector<EqualityTraceEntry> equalityTrace;
+    std::vector<std::variant<EqualityTraceEntry, UseTraceEntry>> equalityUseTrace;
     std::vector<DisequalityTraceEntry> disequalityTrace;
-    std::vector<uint32_t> equalityDecisionPoints; //!< Trace sizes at the respective decision levels
+    std::vector<uint32_t> equalityUseDecisionPoints; //!< Trace sizes at the respective decision levels
     std::vector<uint32_t> disequalityDecisionPoints; //!< Trace sizes at the respective decision levels
 };
 
@@ -132,7 +156,7 @@ inline void UninterpretedEquality::forEachParentOf(Value value, auto&& callback,
         uint32_t index = valueInfo.tracePosition->index;
         if (index >= traceSizeLimit)
             break;
-        value = equalityTrace[index].roots.source;
+        value = std::get<EqualityTraceEntry>(equalityUseTrace[index]).roots.source;
     }
 }
 

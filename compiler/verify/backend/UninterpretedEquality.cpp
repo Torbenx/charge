@@ -1,6 +1,11 @@
 #include <verify/backend/UninterpretedEquality.h>
 
+#include <verify/backend/SolverImpl.h>
+
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <unordered_map>
 
 namespace verify::backend {
 
@@ -153,12 +158,15 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     auto& sourceTree = sourceRootInfo.tree;
     auto& sourceEdges = sourceRootInfo.edges;
     auto& sourceDiseq = sourceRootInfo.disequalities;
+    auto& sourceUses = sourceRootInfo.uses;
 
     const auto& targetInfo = infoFor(target);
-    auto& targetRootInfo = infoFor(targetInfo.root); // Careful: targetRootInfo and targetInfo may alias
+    Value targetRoot = targetInfo.root; // Careful: targetRootInfo and targetInfo may alias
+    auto& targetRootInfo = infoFor(targetRoot);
     const auto& targetTree = targetRootInfo.tree;
     const auto& targetEdges = targetRootInfo.edges;
     const auto& targetDiseq = targetRootInfo.disequalities;
+    const auto& targetUses = targetRootInfo.uses;
 
     // Detect when after this link
     // a) both sides of an edge will belong to the same tree, or
@@ -190,8 +198,8 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     }
     mergeInto(sourceDiseq, targetDiseq);
 
-    TracePosition tracePosition { (uint32_t)equalityTrace.size() };
-    equalityTrace.push_back({ Pair { source, target }, Pair { sourceRootInfo.root, targetRootInfo.root } });
+    TracePosition tracePosition { (uint32_t)equalityUseTrace.size() };
+    equalityUseTrace.push_back(EqualityTraceEntry { { source, target }, { sourceRootInfo.root, targetRootInfo.root } });
 
     int_t oldSourceTreeSize = sourceTree.size();
     sourceTree.push_back({ targetInfo.root });
@@ -200,16 +208,28 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     int_t oldSourceEdgeCount = sourceEdges.size();
     sourceEdges.insert(sourceEdges.end(), targetEdges.begin(), targetEdges.end());
 
+    // The target keeps its own copy, so that reverting this link is a truncation of the source, see
+    // EqualityInfo::uses.
+    int_t oldSourceUseCount = sourceUses.size();
+    sourceUses.insert(sourceUses.end(), targetUses.begin(), targetUses.end());
+
     targetRootInfo.root = sourceInfo.root;
     targetRootInfo.treeOffset = oldSourceTreeSize;
     targetRootInfo.edgesOffset += oldSourceEdgeCount;
+    targetRootInfo.usesOffset += oldSourceUseCount;
     targetRootInfo.tracePosition = tracePosition;
     for (int_t i = 0; i < (int_t)targetTree.size(); i++) {
         auto& info = infoFor(targetTree[i].value);
         info.root = sourceInfo.root;
         info.treeOffset = oldSourceTreeSize + 1 + i;
         info.edgesOffset += oldSourceEdgeCount;
+        info.usesOffset += oldSourceUseCount;
     }
+
+    // Note: The callback may create values, which invalidates references into the equality infos.
+    std::span<const Use> targetUsesView = targetRootInfo.uses;
+    for (auto use : targetUsesView)
+        solver.impl().propagateRewrite(use);
 }
 
 void UninterpretedEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {
@@ -286,6 +306,12 @@ void UninterpretedEquality::newPair(Solver& solver, PairHandle pair) {
     }
 }
 
+void UninterpretedEquality::addUse(Solver&, Value value, Use use) {
+    VERIFY(sortOf(value.theory()) == params.sort);
+    infoFor(infoFor(value).root).uses.push_back(use);
+    equalityUseTrace.push_back(UseTraceEntry { value, use });
+}
+
 void UninterpretedEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
     const auto& valueInfo = infoFor(value);
     int_t valueIndex = valueInfo.treeOffset;
@@ -322,7 +348,7 @@ void UninterpretedEquality::path(Solver& solver, Value a, Value b, ClauseBuilder
             std::swap(a, b);
         }
 
-        const auto& entry = equalityTrace[aIndex];
+        const auto& entry = std::get<EqualityTraceEntry>(equalityUseTrace[aIndex]);
         aIndex = tracePos(entry.roots.source);
         if (aIndex == bIndex) {
             result.add(solver, !makeEquality(solver.findPair(entry.link)));
@@ -376,34 +402,49 @@ ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, Bool assign
 }
 
 void UninterpretedEquality::newDecisionLevel(Solver& solver) {
-    equalityDecisionPoints.push_back(equalityTrace.size());
+    equalityUseDecisionPoints.push_back(equalityUseTrace.size());
     disequalityDecisionPoints.push_back(disequalityTrace.size());
-    VERIFY((int_t)equalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    VERIFY((int_t)equalityUseDecisionPoints.size() == solver.currentDecisionLevel() + 1);
     VERIFY((int_t)disequalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
 void UninterpretedEquality::beginBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t eqTargetSize = equalityDecisionPoints[lastLevelToRevert];
-    for (int_t i = equalityTrace.size() - 1; i >= eqTargetSize; i--) {
-        auto [link, roots] = equalityTrace[i];
+    int_t eqUseTargetSize = equalityUseDecisionPoints[lastLevelToRevert];
+    for (int_t i = equalityUseTrace.size() - 1; i >= eqUseTargetSize; i--) {
+        if (std::holds_alternative<EqualityTraceEntry>(equalityUseTrace[i])) {
+            auto [link, roots] = std::get<EqualityTraceEntry>(equalityUseTrace[i]);
 
-        auto& sourceRootInfo = infoFor(roots.source);
-        auto& targetRootInfo = infoFor(roots.target);
-        VERIFY(targetRootInfo.root == roots.source);
-        sourceRootInfo.tree.erase(sourceRootInfo.tree.begin() + targetRootInfo.treeOffset, sourceRootInfo.tree.end());
-        sourceRootInfo.edges.erase(sourceRootInfo.edges.begin() + targetRootInfo.edgesOffset, sourceRootInfo.edges.end());
-        unmergeFrom(sourceRootInfo.disequalities, targetRootInfo.disequalities);
-        int_t newEdgesSize = sourceRootInfo.edges.size();
+            auto& sourceRootInfo = infoFor(roots.source);
+            auto& targetRootInfo = infoFor(roots.target);
+            VERIFY(targetRootInfo.root == roots.source);
+            VERIFY((int_t)sourceRootInfo.tree.size() == targetRootInfo.treeOffset + 1 + (int_t)targetRootInfo.tree.size());
+            sourceRootInfo.tree.erase(sourceRootInfo.tree.begin() + targetRootInfo.treeOffset, sourceRootInfo.tree.end());
+            VERIFY(sourceRootInfo.edges.size() == targetRootInfo.edgesOffset + targetRootInfo.edges.size());
+            sourceRootInfo.edges.erase(sourceRootInfo.edges.begin() + targetRootInfo.edgesOffset, sourceRootInfo.edges.end());
+            VERIFY(sourceRootInfo.uses.size() == targetRootInfo.usesOffset + targetRootInfo.uses.size());
+            sourceRootInfo.uses.erase(sourceRootInfo.uses.begin() + targetRootInfo.usesOffset, sourceRootInfo.uses.end());
+            unmergeFrom(sourceRootInfo.disequalities, targetRootInfo.disequalities);
+            int_t newEdgesSize = sourceRootInfo.edges.size();
+            int_t newUsesSize = sourceRootInfo.uses.size();
 
-        targetRootInfo.root = roots.target;
-        targetRootInfo.treeOffset = -1;
-        targetRootInfo.edgesOffset = 0;
-        for (int_t i = 0; i < (int_t)targetRootInfo.tree.size(); i++) {
-            auto& info = infoFor(targetRootInfo.tree[i].value);
-            info.root = roots.target;
-            info.treeOffset = i;
-            info.edgesOffset -= newEdgesSize;
+            targetRootInfo.root = roots.target;
+            targetRootInfo.treeOffset = -1;
+            targetRootInfo.edgesOffset = 0;
+            targetRootInfo.usesOffset = 0;
+            for (int_t i = 0; i < (int_t)targetRootInfo.tree.size(); i++) {
+                auto& info = infoFor(targetRootInfo.tree[i].value);
+                info.root = roots.target;
+                info.treeOffset = i;
+                info.edgesOffset -= newEdgesSize;
+                info.usesOffset -= newUsesSize;
+            }
+        } else {
+            auto entry = std::get<UseTraceEntry>(equalityUseTrace[i]);
+            auto& uses = infoFor(infoFor(entry.value).root).uses;
+            VERIFY(!uses.empty());
+            VERIFY(uses.back() == entry.use);
+            uses.pop_back();
         }
     }
 
@@ -420,20 +461,21 @@ void UninterpretedEquality::beginBacktrack(Solver& solver) {
             VERIFY(*it == diseqPair.pairId());
             disequalities.erase(it);
         };
-        forEachParentOf(source, removeDisequality, eqTargetSize);
-        forEachParentOf(target, removeDisequality, eqTargetSize);
+        forEachParentOf(source, removeDisequality, eqUseTargetSize);
+        forEachParentOf(target, removeDisequality, eqUseTargetSize);
     }
     disequalityDecisionPoints.resize(lastLevelToRevert);
 }
 
 void UninterpretedEquality::endBacktrack(Solver& solver) {
     int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t targetSize = equalityDecisionPoints[lastLevelToRevert];
-    for (int_t i = targetSize; i < (int_t)equalityTrace.size(); i++) {
-        infoFor(equalityTrace[i].roots.target).tracePosition.reset();
+    int_t targetSize = equalityUseDecisionPoints[lastLevelToRevert];
+    for (int_t i = targetSize; i < (int_t)equalityUseTrace.size(); i++) {
+        if (std::holds_alternative<EqualityTraceEntry>(equalityUseTrace[i]))
+            infoFor(std::get<EqualityTraceEntry>(equalityUseTrace[i]).roots.target).tracePosition.reset();
     }
-    equalityTrace.erase(equalityTrace.begin() + targetSize, equalityTrace.end());
-    equalityDecisionPoints.resize(lastLevelToRevert);
+    equalityUseTrace.erase(equalityUseTrace.begin() + targetSize, equalityUseTrace.end());
+    equalityUseDecisionPoints.resize(lastLevelToRevert);
 }
 
 void UninterpretedEquality::checkInvariances(Solver& solver) {
@@ -445,7 +487,9 @@ void UninterpretedEquality::checkInvariances(Solver& solver) {
             VERIFY(!info.tracePosition.has_value());
         } else {
             VERIFY(rootInfo.tree[info.treeOffset].value == value);
-            VERIFY(value == equalityTrace[info.tracePosition->index].roots.target);
+            const auto& entry = equalityUseTrace[info.tracePosition->index];
+            VERIFY(std::holds_alternative<EqualityTraceEntry>(entry));
+            VERIFY(value == std::get<EqualityTraceEntry>(entry).roots.target);
         }
         VERIFY(std::equal(info.tree.begin(), info.tree.end(), rootInfo.tree.begin() + info.treeOffset + 1));
         VERIFY(std::equal(info.edges.begin(), info.edges.end(), rootInfo.edges.begin() + info.edgesOffset));

@@ -513,6 +513,191 @@ TEST(VerifyBackend, UseNotificationDispatch) {
     EXPECT_EQ(nameString(UseKind::Test), "Test");
 }
 
+namespace {
+
+    //! A set of memory declarations to register uses for
+    struct UseFixture {
+        SolverImpl solver;
+        MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+        MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+        MemoryDeclaration d3 = solver.newAuxMemoryDeclarationVariable();
+
+        UninterpretedEquality& equality() { return solver.memoryDeclarationEquality; }
+
+        //! Register a use identified by \p id for \p value
+        void addUse(Value value, uint32_t id) {
+            equality().addUse(solver, value, Use(UseKind::Test, id));
+        }
+
+        //! The ids the uses notified since the last call were registered with
+        std::vector<uint32_t> takeNotifiedIds() {
+            std::vector<uint32_t> result;
+            for (Use use : solver.useTest.rewrites) {
+                EXPECT_TRUE(use.kind() == UseKind::Test);
+                result.push_back(use.id());
+            }
+            solver.useTest.rewrites.clear();
+            return result;
+        }
+
+        void decideEqual(Value a, Value b) {
+            solver.decideTrue(solver.equality(a, b));
+            solver.sat.propagate();
+            equality().checkInvariances(solver);
+        }
+
+        void backtrack(int_t level) {
+            solver.backtrack(level);
+            solver.sat.propagate();
+            equality().checkInvariances(solver);
+        }
+
+        //! Start a decision level without touching any of the declarations
+        void newDecisionLevel() {
+            solver.decideTrue(solver.newAuxBooleanVariable());
+            solver.sat.propagate();
+        }
+    };
+
+}
+
+TEST(VerifyBackend, UseNotifiedWhenRepresentativeChanges) {
+    UseFixture f;
+    f.addUse(f.d1, 1);
+    f.addUse(f.d2, 2);
+
+    f.decideEqual(f.d1, f.d2);
+
+    // d1 stays the representative of the joined class, so only the use of d2 is notified
+    EXPECT_TRUE(f.equality().rewrite(f.d2) == (Value)f.d1);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 2 }));
+}
+
+TEST(VerifyBackend, UseNotifiedForEveryValueOfTheLinkedClass) {
+    UseFixture f;
+    f.addUse(f.d1, 1);
+    f.addUse(f.d2, 2);
+    f.addUse(f.d3, 3);
+
+    // d2 stays the representative here, so the use of d3 is the only one notified
+    f.decideEqual(f.d2, f.d3);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 3 }));
+
+    // Now the whole class of d2 is linked below d1, so both of its uses are notified
+    f.decideEqual(f.d1, f.d2);
+    auto notified = f.takeNotifiedIds();
+    std::ranges::sort(notified);
+    EXPECT_EQ(notified, std::vector<uint32_t>({ 2, 3 }));
+}
+
+TEST(VerifyBackend, UseIsNotConsumedByANotification) {
+    UseFixture f;
+    f.addUse(f.d3, 3);
+
+    f.decideEqual(f.d2, f.d3);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 3 }));
+
+    // The use still lives, so the next change of the representative notifies it again
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 3 }));
+}
+
+TEST(VerifyBackend, UseIsDiscardedByBacktracking) {
+    UseFixture f;
+    f.newDecisionLevel();
+    f.addUse(f.d2, 2);
+
+    f.backtrack(0);
+
+    // The use was registered at the reverted level, so linking d2 below d1 does not notify it
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_TRUE(f.takeNotifiedIds().empty());
+}
+
+TEST(VerifyBackend, UseSurvivesBacktrackingOfTheLinkThatMovedIt) {
+    UseFixture f;
+    f.addUse(f.d2, 2);
+
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 2 }));
+
+    // Reverting the link hands the use back to d2, so it is notified again when it is relinked
+    f.backtrack(0);
+    EXPECT_TRUE(f.equality().rewrite(f.d2) == (Value)f.d2);
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 2 }));
+}
+
+TEST(VerifyBackend, UseRegisteredAfterALinkOfTheSameLevel) {
+    UseFixture f;
+    f.decideEqual(f.d1, f.d2);
+    f.takeNotifiedIds();
+
+    // The use goes to the back of d1's list, behind the uses inherited from d2, so reverting the
+    // level has to discard it before it puts that tail back into d2
+    f.addUse(f.d1, 1);
+    f.equality().checkInvariances(f.solver);
+    f.backtrack(0);
+
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_TRUE(f.takeNotifiedIds().empty());
+}
+
+TEST(VerifyBackend, UseRegisteredBeforeALinkOfTheSameLevel) {
+    UseFixture f;
+    f.newDecisionLevel();
+    f.addUse(f.d1, 1);
+    f.addUse(f.d2, 2);
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 2 }));
+
+    // Reverting only the link leaves both uses in place
+    f.backtrack(1);
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 2 }));
+
+    // Reverting the level they were registered at discards them
+    f.backtrack(0);
+    f.decideEqual(f.d1, f.d2);
+    EXPECT_TRUE(f.takeNotifiedIds().empty());
+}
+
+TEST(VerifyBackend, UseOfANonRootValue) {
+    UseFixture f;
+    f.decideEqual(f.d1, f.d2);
+
+    // The use is registered for a value that is not a root, so it is kept on d1 and notified when
+    // the class of d1 is linked somewhere else
+    f.addUse(f.d2, 2);
+    f.decideEqual(f.d3, f.d1);
+    EXPECT_TRUE(f.equality().rewrite(f.d2) == (Value)f.d1);
+    EXPECT_TRUE(f.takeNotifiedIds().empty());
+
+    f.backtrack(1);
+    f.equality().checkInvariances(f.solver);
+}
+
+TEST(VerifyBackend, ExplainEqual) {
+    UseFixture f;
+    Bool e12 = f.solver.equality(f.d1, f.d2);
+    Bool e23 = f.solver.equality(f.d2, f.d3);
+    f.decideEqual(f.d1, f.d2);
+    f.decideEqual(f.d2, f.d3);
+
+    // The path connecting the two values is justified by the equalities of its links
+    auto clause = f.solver.beginClause();
+    f.equality().explainEqual(f.solver, f.d1, f.d3, clause);
+    auto literals = f.solver.viewClause(clause);
+    EXPECT_EQ(literals.size(), 2);
+    EXPECT_TRUE(std::find(literals.begin(), literals.end(), !e12) != literals.end());
+    EXPECT_TRUE(std::find(literals.begin(), literals.end(), !e23) != literals.end());
+
+    // Nothing has to be justified for a value and itself
+    auto sameClause = f.solver.beginClause();
+    f.equality().explainEqual(f.solver, f.d1, f.d1, sameClause);
+    EXPECT_TRUE(f.solver.viewClause(sameClause).empty());
+}
+
 TEST(VerifyBackend, MemoryDeclarationEqualityBasic) {
     SolverImpl solver;
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
