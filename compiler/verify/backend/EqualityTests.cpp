@@ -484,6 +484,104 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     EXPECT_FALSE(solver.assignedFalse(e12));
 }
 
+TEST(VerifyBackend, MemoryDeclarationEqualityBasic) {
+    SolverImpl solver;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+
+    Bool e12 = solver.equality(d1, d2);
+    EXPECT_FALSE(solver.assignedEqual(d1, d2));
+
+    solver.decideTrue(e12);
+    EXPECT_FALSE(solver.assignedEqual(d1, d2));
+
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedEqual(d1, d2));
+    solver.memoryDeclarationEquality.checkInvariances(solver);
+
+    solver.backtrack(0);
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedEqual(d1, d2));
+    solver.memoryDeclarationEquality.checkInvariances(solver);
+}
+
+TEST(VerifyBackend, MemoryDeclarationEqualityIsIndependentOfConstantEquality) {
+    // Both sorts are handled by their own instance of the theory, so the literals of the one must
+    // not be confused with those of the other
+    SolverImpl solver;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    Value v1 = solver.newAuxUninterpretedConstant();
+    Value v2 = solver.newAuxUninterpretedConstant();
+
+    Bool declarationEq = solver.equality(d1, d2);
+    Bool constantEq = solver.equality(v1, v2);
+    EXPECT_FALSE(declarationEq == constantEq);
+
+    solver.decideTrue(declarationEq);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedEqual(d1, d2));
+    EXPECT_FALSE(solver.assignedEqual(v1, v2));
+    solver.memoryDeclarationEquality.checkInvariances(solver);
+    solver.uninterpConstantEquality.checkInvariances(solver);
+}
+
+TEST(VerifyBackend, MemoryDeclarationEqualityPath) {
+    SolverImpl solver;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d3 = solver.newAuxMemoryDeclarationVariable();
+
+    Bool e12 = solver.equality(d1, d2);
+    Bool e13 = solver.equality(d1, d3);
+    Bool e23 = solver.equality(d2, d3);
+    solver.decideTrue(e12);
+    solver.sat.propagate();
+    solver.decideTrue(e13);
+    solver.sat.propagate();
+
+    // The implied equality is propagated and justified by the two that were decided
+    EXPECT_TRUE(solver.assignedTrue(e23));
+    EXPECT_TRUE(solver.assignedEqual(d2, d3));
+    solver.memoryDeclarationEquality.checkInvariances(solver);
+
+    auto [clause, forcedIndex] = solver.sat.justifyAssignment(e23);
+    EXPECT_EQ(clause.size(), 3);
+    EXPECT_EQ(clause[forcedIndex], e23);
+    EXPECT_TRUE(std::find(clause.begin(), clause.end(), !e12) != clause.end());
+    EXPECT_TRUE(std::find(clause.begin(), clause.end(), !e13) != clause.end());
+}
+
+TEST(VerifyBackend, MemoryDeclarationDisequalityPropagation) {
+    SolverImpl solver;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d3 = solver.newAuxMemoryDeclarationVariable();
+
+    solver.addClause({ solver.equality(d1, d2) });
+    solver.addClause({ !solver.equality(d1, d3) });
+    solver.sat.propagate();
+
+    // d1 == d2 and d1 != d3 make d2 and d3 disequal as well
+    Bool e23 = solver.equality(d2, d3);
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.assignedFalse(e23));
+    solver.memoryDeclarationEquality.checkInvariances(solver);
+}
+
+TEST(VerifyBackend, MemoryDeclarationEqualityConflict) {
+    SolverImpl solver;
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d3 = solver.newAuxMemoryDeclarationVariable();
+
+    solver.addClause({ solver.equality(d1, d2) });
+    solver.addClause({ solver.equality(d2, d3) });
+    solver.addClause({ !solver.equality(d1, d3) });
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.sat.hasConflicts());
+}
+
 TEST(VerifyBackend, BooleanEqual) {
     SolverImpl solver;
     auto a = solver.newAuxBooleanVariable();

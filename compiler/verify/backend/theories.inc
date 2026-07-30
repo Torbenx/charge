@@ -42,6 +42,7 @@ THEORY(AuxBooleanVariables, Boolean)
 PAIR_THEORY(BooleanEquality, Boolean, Boolean, 1)
 UNINTERPRETED_EQUALITY_THEORY(UninterpretedConstant, uninterpConstantEquality)
 PAIR_THEORY(MemberEquality, Boolean, Member, 2)
+UNINTERPRETED_EQUALITY_THEORY(MemoryDeclaration, memoryDeclarationEquality)
 
 THEORY(AuxUninterpretedConstants, UninterpretedConstant)
 

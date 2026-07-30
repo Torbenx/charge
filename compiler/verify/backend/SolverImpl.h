@@ -68,6 +68,8 @@ struct SolverImpl : Solver, SatCore::Interface {
     Sets uninterpConstantSets;
     SingletonSets uninterpConstantSingletons;
 
+    UninterpretedEquality memoryDeclarationEquality;
+
     Sets memorySets;
     MemoryLocationSets memoryLocationSets;
 };

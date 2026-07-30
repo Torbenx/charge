@@ -24,6 +24,7 @@ SolverImpl::SolverImpl()
               .singletonTheory = TheoryId::UninterpretedConstantSingletonSets,
               .inSingletonReason = makeTypedReasonKind<ReasonKind::UninterpretedConstantInSingleton>(),
           })
+    , memoryDeclarationEquality(*this, theory_params::eqMemoryDeclaration)
     , memorySets(*this, theory_params::setsMemoryLocationSet)
     , memoryLocationSets(*this) { }
 
@@ -94,6 +95,7 @@ std::span<const Bool> Solver::viewClause(const ClauseBuilder& builder) {
 void SatCore::Interface::onNewDecisionLevel() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.newDecisionLevel(impl);
+    impl.memoryDeclarationEquality.newDecisionLevel(impl);
     impl.members.newDecisionLevel(impl);
     impl.memoryLocationSets.newDecisionLevel(impl);
     impl.uninterpConstantSingletons.newDecisionLevel(impl);
@@ -102,6 +104,7 @@ void SatCore::Interface::onNewDecisionLevel() {
 void SatCore::Interface::onBeginBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.beginBacktrack(impl);
+    impl.memoryDeclarationEquality.beginBacktrack(impl);
     impl.members.beginBacktrack(impl);
     // Must run after members so that the prefix index observes the restored rewrites
     impl.memoryLocationSets.beginBacktrack(impl);
@@ -111,6 +114,7 @@ void SatCore::Interface::onBeginBacktrack() {
 void SatCore::Interface::onEndBacktrack() {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.uninterpConstantEquality.endBacktrack(impl);
+    impl.memoryDeclarationEquality.endBacktrack(impl);
     impl.members.endBacktrack(impl);
     impl.memoryLocationSets.endBacktrack(impl);
     impl.uninterpConstantSingletons.endBacktrack(impl);
@@ -392,6 +396,8 @@ void SolverImpl::onNewPair(PairHandle handle) {
     } else if (sort == Sort::Member) {
         members.newPair(*this, handle);
         memoryLocationSets.propagateRewrites(*this);
+    } else if (sort == Sort::MemoryDeclaration) {
+        memoryDeclarationEquality.newPair(*this, handle);
     } else if (isSetSort(sort)) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
@@ -545,6 +551,9 @@ Bool Solver::equality(PairHandle handle) {
     } else if (handle.sort() == Sort::Member) {
         VERIFY(!handle.specialPair());
         return impl().members.makeEquality(handle);
+    } else if (handle.sort() == Sort::MemoryDeclaration) {
+        VERIFY(!handle.specialPair());
+        return impl().memoryDeclarationEquality.makeEquality(handle);
     } else if (isSetSort(handle.sort())) {
         Sets& sets = impl().setTheory(handle.sort());
         if (handle.specialPair()) {
@@ -567,6 +576,8 @@ bool Solver::assignedEqual(Value a, Value b) {
         return impl().uninterpConstantEquality.rewrite(a) == impl().uninterpConstantEquality.rewrite(b);
     } else if (sort == Sort::Member) {
         return impl().members.rewrite((Member)a) == impl().members.rewrite((Member)b);
+    } else if (sort == Sort::MemoryDeclaration) {
+        return impl().memoryDeclarationEquality.rewrite(a) == impl().memoryDeclarationEquality.rewrite(b);
     } else {
         return assignedTrue(equality(a, b));
     }
