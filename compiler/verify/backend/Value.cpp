@@ -1,6 +1,7 @@
 #include <verify/backend/Value.h>
 
 #include <verify/backend/Reason.h>
+#include <verify/backend/Use.h>
 
 namespace verify::backend {
 
@@ -20,6 +21,19 @@ std::string_view nameString(TheoryId theory) {
 std::string_view nameString(ReasonKind kind) {
 #define REASON(name, ...)  \
     case ReasonKind::name: \
+        return #name;
+
+    switch (kind) {
+#include <verify/backend/theories.inc>
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+std::string_view nameString(UseKind kind) {
+#define USE_KIND(name, ...) \
+    case UseKind::name:     \
         return #name;
 
     switch (kind) {

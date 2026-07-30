@@ -206,6 +206,21 @@ void SatCore::Interface::learnClause(std::vector<Bool> clause) {
     impl.addClause(std::move(clause));
 }
 
+// ------------------------------ Uses ------------------------------
+
+void SolverImpl::propagateRewrite(Use use) {
+#define USE_KIND(name, implMember)        \
+    case UseKind::name:                   \
+        implMember.propagateRewrite(*this, use); \
+        break;
+    switch (use.kind()) {
+#include <verify/backend/theories.inc>
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 // ------------------------------ Sets ------------------------------
 
 Sets& SolverImpl::setTheory(Sort sort) {

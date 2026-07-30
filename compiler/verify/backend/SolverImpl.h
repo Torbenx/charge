@@ -2,14 +2,15 @@
 
 #include <verify/backend/Clauses.h>
 #include <verify/backend/DataManager.h>
-#include <verify/backend/MemoryLocationSets.h>
 #include <verify/backend/Members.h>
+#include <verify/backend/MemoryLocationSets.h>
 #include <verify/backend/PairSet.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Sets.h>
+#include <verify/backend/SingletonSets.h>
 #include <verify/backend/Solver.h>
 #include <verify/backend/UninterpretedEquality.h>
-#include <verify/backend/SingletonSets.h>
+#include <verify/backend/Use.h>
 
 #include <ReverseMemberPointer.h>
 
@@ -27,11 +28,20 @@ struct SolverImpl : Solver, SatCore::Interface {
         bool testReason(Solver&, Bool, const Reason&);
         ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
     };
+    //! Records the notifications of UseKind::Test, so that the mechanism itself can be tested
+    struct UseTest {
+        void propagateRewrite(Solver&, Use use) { rewrites.push_back(use); }
+
+        std::vector<Use> rewrites;
+    };
 
     SolverImpl();
 
     Value newValue(TheoryId);
     Bool newBoolean(TheoryId);
+
+    //! Propagate that the rewrite of the value referenced by \p use changed
+    void propagateRewrite(Use);
 
     void onNewBooleanPair(PairHandle);
     void onNewPair(PairHandle);
@@ -47,6 +57,7 @@ struct SolverImpl : Solver, SatCore::Interface {
     // Initialize members with trivial ctors
     AlwaysReason alwaysReason;
     DecisionReason decisionReason;
+    UseTest useTest;
 
     // DataManager must be initialized first, everything depends on it
     DataManager data;

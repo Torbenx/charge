@@ -32,6 +32,7 @@ target_sources(${PROJECT_NAME}
     Types.h
     UninterpretedEquality.cpp
     UninterpretedEquality.h
+    Use.h
     Value.cpp
     Value.h
 )

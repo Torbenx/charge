@@ -484,6 +484,35 @@ TEST(VerifyBackend, DisequalityCleanedUpInParents) {
     EXPECT_FALSE(solver.assignedFalse(e12));
 }
 
+TEST(VerifyBackend, UseHandle) {
+    Use use(UseKind::Test, 7);
+    EXPECT_TRUE(use.kind() == UseKind::Test);
+    EXPECT_EQ(use.id(), 7u);
+
+    EXPECT_TRUE(use == Use(UseKind::Test, 7));
+    EXPECT_FALSE(use == Use(UseKind::Test, 8));
+
+    // The id has to fit in the handle next to the kind
+    Use maxUse(UseKind::Test, Use::MAX_ID);
+    EXPECT_TRUE(maxUse.kind() == UseKind::Test);
+    EXPECT_EQ(maxUse.id(), Use::MAX_ID);
+}
+
+TEST(VerifyBackend, UseNotificationDispatch) {
+    SolverImpl solver;
+    EXPECT_TRUE(solver.useTest.rewrites.empty());
+
+    solver.propagateRewrite(Use(UseKind::Test, 3));
+    solver.propagateRewrite(Use(UseKind::Test, 5));
+
+    // The notifications reach the client the kind names, in the order they were made
+    EXPECT_EQ(solver.useTest.rewrites.size(), 2u);
+    EXPECT_TRUE(solver.useTest.rewrites[0] == Use(UseKind::Test, 3));
+    EXPECT_TRUE(solver.useTest.rewrites[1] == Use(UseKind::Test, 5));
+
+    EXPECT_EQ(nameString(UseKind::Test), "Test");
+}
+
 TEST(VerifyBackend, MemoryDeclarationEqualityBasic) {
     SolverImpl solver;
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();

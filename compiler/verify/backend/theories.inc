@@ -6,6 +6,10 @@
 #define REASON(name, data, fullyPropagating, implMember)
 #endif
 
+#ifndef USE_KIND
+#define USE_KIND(name, implMember)
+#endif
+
 #ifndef PAIR_THEORY
 #define PAIR_THEORY(name, theorySort, pairSort, valuesPerPair) THEORY(name, theorySort)
 #endif
@@ -69,7 +73,10 @@ REASON(MemberDisequality, EmptyReasonData, false, members)
 
 REASON(MemberPrefixHit, MemberPrefixHitData, false, memoryLocationSets)
 
+USE_KIND(Test, useTest)
+
 #undef REASON
+#undef USE_KIND
 #undef THEORY
 #undef PAIR_THEORY
 #undef UNINTERPRETED_EQUALITY_THEORY
