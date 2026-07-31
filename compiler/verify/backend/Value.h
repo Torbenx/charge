@@ -16,7 +16,7 @@ enum class Sort : uint8_t {
     UninterpretedConstantSet,
     Member,
     MemoryDeclaration,
-    MemoryLocationSet,
+    MemorySet,
     InvariantSet,
     // Type,
 

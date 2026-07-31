@@ -25,8 +25,8 @@ SolverImpl::SolverImpl()
               .inSingletonReason = makeTypedReasonKind<ReasonKind::UninterpretedConstantInSingleton>(),
           })
     , memoryDeclarationEquality(*this, theory_params::eqMemoryDeclaration)
-    , memorySets(*this, theory_params::setsMemoryLocationSet)
-    , memoryLocationSets(*this)
+    , memorySetsBaseTheory(*this, theory_params::setsMemorySet)
+    , memorySets(*this)
     , invariantSetsBaseTheory(*this, theory_params::setsInvariantSet)
     , invariantSets(*this) { }
 
@@ -100,7 +100,7 @@ void SatCore::Interface::onNewDecisionLevel() {
     impl.uninterpConstantEquality.newDecisionLevel(impl);
     impl.memoryDeclarationEquality.newDecisionLevel(impl);
     impl.members.newDecisionLevel(impl);
-    impl.memoryLocationSets.newDecisionLevel(impl);
+    impl.memorySets.newDecisionLevel(impl);
     impl.invariantSets.newDecisionLevel(impl);
     impl.uninterpConstantSingletons.newDecisionLevel(impl);
 }
@@ -113,7 +113,7 @@ void SatCore::Interface::onBeginBacktrack() {
     impl.memoryDeclarationEquality.beginBacktrack(impl);
     impl.members.beginBacktrack(impl);
 
-    impl.memoryLocationSets.beginBacktrack(impl);
+    impl.memorySets.beginBacktrack(impl);
     impl.invariantSets.beginBacktrack(impl);
     impl.uninterpConstantSingletons.beginBacktrack(impl);
 }
@@ -125,7 +125,7 @@ void SatCore::Interface::onEndBacktrack() {
     impl.memoryDeclarationEquality.endBacktrack(impl);
     impl.members.endBacktrack(impl);
 
-    impl.memoryLocationSets.endBacktrack(impl);
+    impl.memorySets.endBacktrack(impl);
     impl.invariantSets.endBacktrack(impl);
     impl.uninterpConstantSingletons.endBacktrack(impl);
 }
@@ -265,7 +265,7 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
         uninterpConstantSingletons.propagateContainment(*this, element, containment);
         break;
     case TheoryId::MemoryLocationSets:
-        memoryLocationSets.propagateContainment(*this, element, containment);
+        memorySets.propagateContainment(*this, element, containment);
         break;
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
@@ -378,7 +378,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         return rewriteOrder(singletons.element(a), singletons.element(b));
     }
     case TheoryId::MemoryLocationSets: {
-        auto& locations = impl().memoryLocationSets;
+        auto& locations = impl().memorySets;
         return locationOrder(*this, locations.locationOf(a), locations.locationOf(b));
     }
 
@@ -463,11 +463,11 @@ void SolverImpl::onNewPair(PairHandle handle) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
             [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
         }
-    } else if (sort == Sort::MemoryLocationSet) {
+    } else if (sort == Sort::MemorySet) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
-            MemoryLocation locationA = memoryLocationSets.locationOf(a);
-            MemoryLocation locationB = memoryLocationSets.locationOf(b);
+            MemoryLocation locationA = memorySets.locationOf(a);
+            MemoryLocation locationB = memorySets.locationOf(b);
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);

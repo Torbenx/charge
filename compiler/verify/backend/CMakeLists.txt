@@ -7,23 +7,22 @@ target_sources(${PROJECT_NAME}
     DataManager.cpp
     DataManager.h
     EqualityTests.cpp
-    InvariantPrefixes.cpp
-    InvariantPrefixes.h
     InvariantPrefixTests.cpp
     InvariantSets.cpp
     InvariantSets.h
     InvariantTests.cpp
-    MemberPrefixes.cpp
-    MemberPrefixes.h
     MemberPrefixTests.cpp
     Members.cpp
     Members.h
     MemberTests.cpp
-    MemoryLocationSets.cpp
     MemoryLocationSets.h
+    MemoryLocationSets.impl.h
+    MemorySets.cpp
+    MemorySets.h
     MemoryTests.cpp
     PairSet.h
     PrefixIndex.h
+    PrefixIndex.impl.h
     Reason.h
     SatCore.cpp
     SatCore.h

@@ -17,20 +17,20 @@ namespace {
         Sets::ElementId element = newElement();
 
         Sets::ElementId newElement() {
-            auto e = solver.memorySets.newElement(solver);
+            auto e = solver.memorySetsBaseTheory.newElement(solver);
             solver.sat.propagate();
             return e;
         }
 
         Value location(Member member) {
-            return solver.memoryLocationSets.set(solver, declaration, member);
+            return solver.memorySets.set(solver, declaration, member);
         }
         Value location(std::initializer_list<Member> members) {
             return location(solver.composeMembers(members));
         }
 
         Value otherLocation(Member member) {
-            return solver.memoryLocationSets.set(solver, otherDeclaration, member);
+            return solver.memorySets.set(solver, otherDeclaration, member);
         }
         Value otherLocation(std::initializer_list<Member> members) {
             return otherLocation(solver.composeMembers(members));
@@ -40,7 +40,7 @@ namespace {
 
         //! Check the index together with the theory whose rewrites it follows
         void checkInvariances() {
-            solver.memoryLocationSets.checkInvariances(solver);
+            solver.memorySets.checkInvariances(solver);
             solver.members.checkInvariances(solver);
         }
 
@@ -63,7 +63,7 @@ namespace {
         //! Decide that \p element is contained in \p set and propagate
         void decideIn(Value set, bool contained = true) { decideIn(element, set, contained); }
         void decideIn(Sets::ElementId e, Value set, bool contained = true) {
-            solver.memorySets.decideTrue(solver, e, Sets::Containment(set, contained));
+            solver.memorySetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
             solver.sat.propagate();
             if (!solver.sat.hasConflicts())
                 checkInvariances();
@@ -71,8 +71,8 @@ namespace {
         void decideNotIn(Value set) { decideIn(set, false); }
         void decideNotIn(Sets::ElementId e, Value set) { decideIn(e, set, false); }
 
-        bool assignedIn(Value set) { return solver.memorySets.assignedTrue(solver, element, Sets::in(set)); }
-        bool assignedNotIn(Value set) { return solver.memorySets.assignedFalse(solver, element, Sets::in(set)); }
+        bool assignedIn(Value set) { return solver.memorySetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
+        bool assignedNotIn(Value set) { return solver.memorySetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
 
         bool hasConflicts() const { return solver.sat.hasConflicts(); }
 
@@ -571,7 +571,7 @@ TEST(VerifyBackend, MemoryPrefixEmptySetIsACandidate) {
 
     // An empty location set is a containment of the forall element, which is distributed to the
     // real elements and becomes a candidate for them
-    f.solver.addClause({ f.solver.equality(f.location(l1), f.solver.memorySets.emptySet()) });
+    f.solver.addClause({ f.solver.equality(f.location(l1), f.solver.memorySetsBaseTheory.emptySet()) });
     f.solver.sat.propagate();
     EXPECT_FALSE(f.hasConflicts());
     f.checkInvariances();

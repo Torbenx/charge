@@ -1,6 +1,6 @@
 #pragma once
 
-#include <verify/backend/MemberPrefixes.h>
+#include <verify/backend/PrefixIndex.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
 #include <verify/backend/Trace.h>
@@ -11,26 +11,20 @@
 
 namespace verify::backend {
 
-//! The location sets described by a (declaration, member) pair
-/*!
-A value of this theory is the set of all locations of scalar type acessible from a memory location.
-Note that these sets are may not contain any elements at all.
-*/
+struct MemoryLocationSetsParams {
+    Sort setSort;
+    TypedReasonKind<SharedElementReason> declarationsShareElementReason;
+    UseKind pendingRewriteUse;
+    UseKind representativeRewriteUse;
+};
+
+template<typename Derived, typename PrefixImpl>
 struct MemoryLocationSets {
+    using Params = MemoryLocationSetsParams;
     using ElementId = Sets::ElementId;
     using Containment = Sets::Containment;
 
     MemoryLocationSets(Solver&);
-
-    Value set(Solver&, MemoryLocation location);
-    Value set(Solver& solver, MemoryDeclaration declaration, Member member) {
-        return set(solver, { declaration, member });
-    }
-
-    MemoryLocation locationOf(Value set) const {
-        VERIFY(set.theory() == TheoryId::MemoryLocationSets);
-        return setInfos[set].location;
-    }
 
     void propagateContainment(Solver&, ElementId, Sets::Containment);
     void propagateRewrite(Solver&, Use);
@@ -40,16 +34,13 @@ struct MemoryLocationSets {
 
     void newDecisionLevel(Solver&);
     void beginBacktrack(Solver&);
-    void endBacktrack(Solver& solver) { prefixes.endBacktrack(solver); }
+    void endBacktrack(Solver&);
+
+    Sets& baseTheory(Solver&);
 
     void checkInvariances(Solver&);
 
 private:
-    struct SetInfo {
-        SetInfo() = default;
-        MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
-    };
-
     //! A containment whose declaration is not (yet) equal to the representative
     struct PendingContainment {
         ElementId element;
@@ -65,12 +56,16 @@ private:
         std::vector<TracePosition> pendingPositions;
     };
 
-    Bool containmentOf(Solver&, MemberPrefixes::WordId);
-    MemoryDeclaration declarationOf(MemberPrefixes::WordId word) {
+    MemoryLocation locationOf(Value set) {
+        return derived().locationOf(set);
+    }
+    Bool containmentOf(Solver&, PrefixIndexWordId);
+    MemoryDeclaration declarationOf(PrefixIndexWordId word) {
         return locationOf(prefixes.containmentOf(word).set()).declaration;
     }
 
-    Sets& memorySets(Solver&);
+    static constexpr MemoryLocationSetsParams params();
+    Derived& derived() { return static_cast<Derived&>(*this); }
 
     ElementState& stateOf(ElementId element) {
         if (element.id() >= elementStates.size())
@@ -86,17 +81,13 @@ private:
     void promotePending(Solver&, const ElementState&, TracePosition);
     void promotePendingOf(Solver&, ElementId);
 
-    TheoryData<SetInfo, TheoryId::MemoryLocationSets> setInfos;
-    // Note: The location key could be obtained from the stored value
-    std::unordered_map<MemoryLocation, Value, MemoryLocationHash> sets;
-
     std::vector<ElementState> elementStates;
     //! The pending containments, referenced by \ref ElementState::pendingPositions
     Trace<PendingContainment> pending;
     Trace<ElementId> representativeTrace;
     Trace<TracePosition> promotionTrace;
 
-    MemberPrefixes prefixes;
+    PrefixIndex<PrefixImpl> prefixes;
 };
 
 }

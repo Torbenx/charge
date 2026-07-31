@@ -57,8 +57,8 @@ REASON(UninterpretedConstantInSingleton, InSingletonReason, false, uninterpConst
 
 THEORY(AuxMemoryDeclarationVariables, MemoryDeclaration)
 
-SET_THEORY(MemoryLocationSet, memorySets)
-THEORY(MemoryLocationSets, MemoryLocationSet)
+SET_THEORY(MemorySet, memorySetsBaseTheory)
+THEORY(MemoryLocationSets, MemorySet)
 
 SET_THEORY(InvariantSet, invariantSetsBaseTheory)
 THEORY(InclusiveLocationInvariantSets, InvariantSet)
@@ -76,17 +76,17 @@ REASON(Clause, LiteralOccurrence, true, clauses)
 REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
-REASON(MemberPrefixHit, PrefixHitData, false, memoryLocationSets)
-REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocationSets)
+REASON(MemberPrefixHit, PrefixHitData, false, memorySets)
+REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memorySets)
 
 REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
 REASON(InvariantLeafSetsShareElement, SharedElementReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
-USE_KIND(MemoryLocationSetRepresentative, memoryLocationSets)
-USE_KIND(MemoryLocationSetPendingContainment, memoryLocationSets)
-USE_KIND(MemberPrefixWord, memoryLocationSets)
+USE_KIND(MemorySetRepresentative, memorySets)
+USE_KIND(MemorySetPendingContainment, memorySets)
+USE_KIND(MemoryPrefixWord, memorySets)
 USE_KIND(InvariantSetRepresentative, invariantSets)
 USE_KIND(InvariantSetPendingContainment, invariantSets)
 USE_KIND(InvariantPrefixWord, invariantSets)

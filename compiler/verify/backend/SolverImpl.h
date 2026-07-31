@@ -4,7 +4,7 @@
 #include <verify/backend/DataManager.h>
 #include <verify/backend/InvariantSets.h>
 #include <verify/backend/Members.h>
-#include <verify/backend/MemoryLocationSets.h>
+#include <verify/backend/MemorySets.h>
 #include <verify/backend/PairSet.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Sets.h>
@@ -82,8 +82,8 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     UninterpretedEquality memoryDeclarationEquality;
 
-    Sets memorySets;
-    MemoryLocationSets memoryLocationSets;
+    Sets memorySetsBaseTheory;
+    MemorySets memorySets;
 
     Sets invariantSetsBaseTheory;
     InvariantSets invariantSets;

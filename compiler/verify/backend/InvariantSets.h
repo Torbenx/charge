@@ -1,7 +1,6 @@
 #pragma once
 
-#include <verify/backend/Data.h>
-#include <verify/backend/InvariantPrefixes.h>
+#include <verify/backend/MemoryLocationSets.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
 #include <verify/backend/Trace.h>
@@ -9,6 +8,107 @@
 #include <unordered_map>
 
 namespace verify::backend {
+
+//! A letter in the invariant prefix index
+/*!
+Every step into a member is preceded by a narrow, which is the step from a location to the leafs
+strictly below it, and an invariant letter is the step from a location to the invariant leaf.
+So the letters of a location with the member m1...mn are
+
+    inclusive:   narrow m1 ... narrow mn
+    exclusive:   narrow m1 ... narrow mn narrow
+    invariant I: narrow m1 ... narrow mn I
+
+Note: The leading narrow is requrired to correctly handle the empty path.
+*/
+struct InvariantLetter {
+    static constexpr TheoryId NARROW_SENTINEL_THEORY = TheoryId::COUNT;
+    static constexpr TheoryId INVARIANT_SENTINEL_THEORY = TheoryId(std::to_underlying(TheoryId::COUNT) + 1);
+    static_assert(NARROW_SENTINEL_THEORY >= TheoryId::COUNT);
+    static_assert(INVARIANT_SENTINEL_THEORY >= TheoryId::COUNT);
+    static_assert(NARROW_SENTINEL_THEORY != INVARIANT_SENTINEL_THEORY);
+    static_assert(INVARIANT_SENTINEL_THEORY != TheoryId::Invalid);
+
+    static constexpr InvariantLetter invalid() { return { (Member)INVALID_VALUE }; }
+    static constexpr InvariantLetter narrow() { return { Member(NARROW_SENTINEL_THEORY, limits::max) }; }
+    static constexpr InvariantLetter member(Member member) { return { member }; }
+    static constexpr InvariantLetter invariant(Invariant invariant) { return { Member(INVARIANT_SENTINEL_THEORY, invariant.id()) }; }
+
+    constexpr bool isNarrow() const { return *this == narrow(); }
+    constexpr bool isInvariant() const { return payload.theory() == INVARIANT_SENTINEL_THEORY; }
+    constexpr bool isMember() const { return payload.theory() < TheoryId::COUNT; }
+    constexpr Invariant invariant() const {
+        VERIFY(isInvariant());
+        return Invariant { payload.id() };
+    }
+    constexpr Member member() const {
+        VERIFY(isMember());
+        return payload;
+    }
+
+    bool operator==(const InvariantLetter&) const = default;
+
+    Member payload;
+};
+
+//! Either empty, narrow or an invariant
+struct InvariantWordSuffix {
+    static constexpr InvariantWordSuffix empty() { return { (uint32_t)limits::max }; }
+    static constexpr InvariantWordSuffix narrow() { return { (uint32_t)limits::max - 1u }; }
+    static constexpr InvariantWordSuffix invariant(Invariant invariant) { return { invariant.id() }; }
+
+    constexpr bool isEmpty() const { return *this == empty(); }
+    constexpr bool isNarrow() const { return *this == narrow(); }
+    constexpr bool isInvariant() const { return !isEmpty() && !isNarrow(); }
+    constexpr Invariant invariant() const {
+        VERIFY(isInvariant());
+        return Invariant { payload };
+    }
+
+    constexpr InvariantLetter toLetter() const {
+        VERIFY(!isEmpty());
+        if (isNarrow())
+            return InvariantLetter::narrow();
+        else
+            return InvariantLetter::invariant(invariant());
+    }
+
+    bool operator==(const InvariantWordSuffix&) const = default;
+
+    uint32_t payload;
+};
+
+//! Describes a word of the invariant prefix index
+struct InvariantWord {
+    static InvariantWord inclusive(Member member) { return { member, InvariantWordSuffix::empty() }; }
+    static InvariantWord exclusive(Member member) { return { member, InvariantWordSuffix::narrow() }; }
+    static InvariantWord leaf(Member member, Invariant invariant) {
+        return { member, InvariantWordSuffix::invariant(invariant) };
+    }
+
+    Member member;
+    InvariantWordSuffix suffix;
+};
+
+//! The prefix impl for invariant sets
+struct InvariantPrefixes {
+    using Letter = InvariantLetter;
+    using WordKey = InvariantWord;
+
+    static constexpr UseKind wordUse = UseKind::InvariantPrefixWord;
+    static constexpr TypedReasonKind<PrefixHitData> hitReason = makeTypedReasonKind<ReasonKind::InvariantPrefixHit>();
+    static constexpr InvariantLetter invalidLetter = InvariantLetter::invalid();
+
+    static size_t hashLetter(InvariantLetter letter) { return std::bit_cast<uint32_t>(letter.payload); }
+
+    Value watchedValue(InvariantWord word) const { return word.member; }
+    void appendLetters(Solver&, InvariantWord, std::vector<InvariantLetter>& out);
+    void explainLetters(Solver&, InvariantWord, ClauseBuilder&);
+
+private:
+    // Temporary buffer used inside a single function to avoid repeated allocations
+    std::vector<Member> memberBuffer;
+};
 
 //! The sets of invariants described by a memory location
 /*!
@@ -20,9 +120,15 @@ There are three kinds of sets:
 
 Note that these sets may not contain any elements at all, even the leaf sets.
 */
-struct InvariantSets {
-    using ElementId = Sets::ElementId;
-    using Containment = Sets::Containment;
+struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
+    static constexpr Params PARAMS = {
+        .setSort = Sort::InvariantSet,
+        .declarationsShareElementReason = makeTypedReasonKind<ReasonKind::InvariantDeclarationsShareElement>(),
+        .pendingRewriteUse = UseKind::InvariantSetPendingContainment,
+        .representativeRewriteUse = UseKind::InvariantSetRepresentative,
+    };
+
+    using Base = MemoryLocationSets<InvariantSets, InvariantPrefixes>;
 
     InvariantSets(Solver&);
 
@@ -63,15 +169,15 @@ struct InvariantSets {
         return setInfos[set].invariant.value();
     }
 
+    InvariantWord toWord(Value set) const;
+
     void propagateContainment(Solver&, ElementId, Containment);
-    void propagateRewrite(Solver&, Use);
 
     bool testReason(Solver&, Bool, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
 
     void newDecisionLevel(Solver&);
     void beginBacktrack(Solver&);
-    void endBacktrack(Solver& solver) { prefixes.endBacktrack(solver); }
 
     void checkInvariances(Solver&);
 
@@ -98,37 +204,14 @@ private:
         }
     };
 
+    struct ElementState {
+        std::optional<Value> leaf;
+    };
+
     // Note: The keys of these maps could be obtained from the stored values
     using LocationSets = std::unordered_map<MemoryLocation, Value, MemoryLocationHash>;
 
     Value locationSet(Solver&, LocationSets&, TheoryId, MemoryLocation);
-
-    //! A containment whose declaration is not (yet) equal to the representative
-    struct PendingContainment {
-        ElementId element;
-        Containment containment;
-        //! Becomes true when equality to the represnetative is detected
-        bool promoted = false;
-    };
-
-    struct ElementState {
-        //! The set of the first location found to contain the element
-        std::optional<Value> representative;
-        //! The first invariant leaf set found to contain the element
-        std::optional<Value> leaf;
-        //! The pending containments of this element, in increasing order
-        std::vector<TracePosition> pendingPositions;
-    };
-
-    Sets& baseTheory(Solver&);
-
-    Bool containmentOf(Solver&, InvariantPrefixes::WordId);
-    MemoryDeclaration declarationOf(InvariantPrefixes::WordId word) {
-        return locationOf(prefixes.containmentOf(word).set()).declaration;
-    }
-
-    //! Convert \p set to the word representation used by the prefix index
-    InvariantWord toWord(Value set) const;
 
     ElementState& stateOf(ElementId element) {
         if (element.id() >= elementStates.size())
@@ -136,13 +219,7 @@ private:
         return elementStates[element.id()];
     }
 
-    //! Whether \p declaration is equal to the representative declaration of the element
-    bool joinedRepresentative(Solver&, const ElementState&, MemoryDeclaration declaration);
-
-    void addWord(Solver&, ElementId, Containment);
-    void addPending(Solver&, ElementId, Containment);
-    void promotePending(Solver&, const ElementState&, TracePosition);
-    void promotePendingOf(Solver&, ElementId);
+    std::vector<ElementState> elementStates;
 
     SortData<SetInfo, Sort::InvariantSet> setInfos;
 
@@ -150,14 +227,7 @@ private:
     LocationSets exclusiveSets;
     std::unordered_map<LeafKey, Value, LeafHash> leafSets;
 
-    std::vector<ElementState> elementStates;
-    //! The pending containments, referenced by \ref ElementState::pendingPositions
-    Trace<PendingContainment> pending;
-    Trace<ElementId> representativeTrace;
     Trace<ElementId> leafTrace;
-    Trace<TracePosition> promotionTrace;
-
-    InvariantPrefixes prefixes;
 };
 
 }

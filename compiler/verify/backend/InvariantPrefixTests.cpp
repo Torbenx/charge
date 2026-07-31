@@ -11,7 +11,7 @@ namespace {
     //! An index the words are only spelled with, so that no word is registered in the trie
     struct Fixture {
         SolverImpl solver;
-        InvariantPrefixes prefixes { solver };
+        PrefixIndex<InvariantPrefixes> prefixes;
         Invariant i1 { 0 };
         Invariant i2 { 1 };
 
@@ -19,7 +19,7 @@ namespace {
 
         Letters spell(InvariantWord word) {
             Letters letters;
-            prefixes.appendLetters(solver, word, letters);
+            prefixes.impl.appendLetters(solver, word, letters);
             return letters;
         }
 
