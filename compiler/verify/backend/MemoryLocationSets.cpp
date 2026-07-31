@@ -58,17 +58,13 @@ void MemoryLocationSets::addWord(Solver& solver, ElementId element, Containment 
 }
 
 void MemoryLocationSets::addPending(Solver& solver, ElementId element, Containment cont) {
-    uint32_t index = pending.push({ .element = element, .containment = cont });
-    stateOf(element).pendingIndices.push_back(index);
-
-    // The declaration may be joined to the one of the representative from either side, so both are
-    // watched. Only the tree that is linked below the other one is notified, so exactly one of the
-    // two uses reports the join.
-    solver.addUse(locationOf(cont.set()).declaration, Use(UseKind::MemoryLocationSetPendingContainment, index));
+    TracePosition position = pending.push({ .element = element, .containment = cont });
+    stateOf(element).pendingPositions.push_back(position);
+    solver.addUse(locationOf(cont.set()).declaration, Use(UseKind::MemoryLocationSetPendingContainment, position.index));
 }
 
-void MemoryLocationSets::promotePending(Solver& solver, const ElementState& state, uint32_t index) {
-    PendingContainment& entry = pending[index];
+void MemoryLocationSets::promotePending(Solver& solver, const ElementState& state, TracePosition position) {
+    PendingContainment& entry = pending[position];
     if (entry.promoted)
         return;
     if (!joinedRepresentative(solver, state, locationOf(entry.containment.set()).declaration))
@@ -77,15 +73,14 @@ void MemoryLocationSets::promotePending(Solver& solver, const ElementState& stat
     // The link that joined the declarations is of the current decision level, so the word registered
     // here is unregistered again by the same backtrack that reverts the promotion.
     entry.promoted = true;
-    promotionTrace.push(index);
+    promotionTrace.push(position);
     addWord(solver, entry.element, entry.containment);
 }
 
 void MemoryLocationSets::promotePendingOf(Solver& solver, ElementId element) {
-    // Note: promotePending() does not add pending containments, so the indices are stable here
     const ElementState& state = stateOf(element);
-    for (int_t i = 0; i < (int_t)state.pendingIndices.size(); i++)
-        promotePending(solver, state, state.pendingIndices[i]);
+    for (TracePosition position : state.pendingPositions)
+        promotePending(solver, state, position);
 }
 
 void MemoryLocationSets::propagateContainment(Solver& solver, ElementId element, Sets::Containment containment) {
@@ -102,15 +97,9 @@ void MemoryLocationSets::propagateContainment(Solver& solver, ElementId element,
     if (containment.contained()) {
         if (!state.representative.has_value()) {
             VERIFY(solver.currentDecisionLevel() >= 0); // No positive set assignments are made without a decision
-            // The containment is propagated exactly once per decision level it is assigned at, so
-            // everything recorded here is reverted again by the same backtrack that reverts the
-            // assignment.
             state.representative = set;
             representativeTrace.push(element);
             newRepresentative = true;
-
-            // The declarations of the pending containments are compared against this one, so any of
-            // them may be joined when its representative changes
             solver.addUse(location.declaration, Use(UseKind::MemoryLocationSetRepresentative, element.id()));
         } else {
             // Distinct declarations describe distinct memory, so an element of both locations means
@@ -134,16 +123,14 @@ void MemoryLocationSets::propagateContainment(Solver& solver, ElementId element,
 void MemoryLocationSets::propagateRewrite(Solver& solver, Use use) {
     switch (use.kind()) {
     case UseKind::MemoryLocationSetPendingContainment: {
-        uint32_t index = use.id();
-        promotePending(solver, stateOf(pending[index].element), index);
+        TracePosition position { use.id() };
+        promotePending(solver, stateOf(pending[position].element), position);
         break;
     }
     case UseKind::MemoryLocationSetRepresentative:
-        // The representative moved, which may have joined any of the pending declarations
         promotePendingOf(solver, ElementId(use.id()));
         break;
     case UseKind::MemberPrefixWord:
-        // The normal form of the member of a location changed
         prefixes.propagateRewrite(solver, use);
         break;
     default:
@@ -209,16 +196,16 @@ void MemoryLocationSets::beginBacktrack(Solver& solver) {
     // A promotion is of the level of the link that joined the declarations, which is also the level
     // the word was registered at, so reverting the one reverts the other. The promotions have to go
     // first, they name the pending containments.
-    for (uint32_t index : promotionTrace.backtrackedReverse(solver))
-        pending[index].promoted = false;
+    for (TracePosition pendingPos : promotionTrace.backtrackedReverse(solver))
+        pending[pendingPos].promoted = false;
     promotionTrace.truncate(solver);
 
     // The uses naming these entries were registered at the same level, so they are already gone
-    for (uint32_t index : pending.backtrackedPositionsReverse(solver)) {
-        auto& indices = stateOf(pending[index].element).pendingIndices;
-        VERIFY(!indices.empty());
-        VERIFY(indices.back() == index);
-        indices.pop_back();
+    for (TracePosition pendingPos : pending.backtrackedPositionsReverse(solver)) {
+        auto& elementPending = stateOf(pending[pendingPos].element).pendingPositions;
+        VERIFY(!elementPending.empty());
+        VERIFY(elementPending.back() == pendingPos);
+        elementPending.pop_back();
     }
     pending.truncate(solver);
 
@@ -234,15 +221,15 @@ void MemoryLocationSets::checkInvariances(Solver& solver) {
     representativeTrace.checkInvariances(solver);
     promotionTrace.checkInvariances(solver);
 
-    std::vector<std::vector<uint32_t>> expectedIndices;
-    std::vector<uint32_t> expectedPromotions;
+    std::vector<std::vector<TracePosition>> expectedIndices;
+    std::vector<TracePosition> expectedPromotions;
     expectedIndices.resize(elementStates.size());
-    for (uint32_t index = 0; index < pending.size(); index++) {
-        const PendingContainment& entry = pending[index];
+    for (TracePosition pendingPos : pending.allPositions()) {
+        const PendingContainment& entry = pending[pendingPos];
         VERIFY(entry.element.id() < elementStates.size());
-        expectedIndices[entry.element.id()].push_back(index);
+        expectedIndices[entry.element.id()].push_back(pendingPos);
         if (entry.promoted)
-            expectedPromotions.push_back(index);
+            expectedPromotions.push_back(pendingPos);
 
         // A containment is registered exactly when its declaration is the one of the representative,
         // so anything else here means that a notification was missed
@@ -261,10 +248,10 @@ void MemoryLocationSets::checkInvariances(Solver& solver) {
 
     for (int_t i = 0; i < (int_t)elementStates.size(); i++) {
         VERIFY(elementStates[i].representative.has_value() == onTrace[i]);
-        VERIFY(elementStates[i].pendingIndices == expectedIndices[i]);
+        VERIFY(elementStates[i].pendingPositions == expectedIndices[i]);
     }
 
-    std::vector<uint32_t> promotions(promotionTrace.begin(), promotionTrace.end());
+    std::vector<TracePosition> promotions(promotionTrace.begin(), promotionTrace.end());
     std::ranges::sort(promotions);
     VERIFY(promotions == expectedPromotions);
 }
