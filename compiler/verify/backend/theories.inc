@@ -60,6 +60,11 @@ THEORY(AuxMemoryDeclarationVariables, MemoryDeclaration)
 SET_THEORY(MemoryLocationSet, memorySets)
 THEORY(MemoryLocationSets, MemoryLocationSet)
 
+SET_THEORY(InvariantSet, invariantSetsBaseTheory)
+THEORY(InclusiveLocationInvariantSets, InvariantSet)
+THEORY(ExclusiveLocationInvariantSets, InvariantSet)
+THEORY(LeafInvariantSets, InvariantSet)
+
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)
 THEORY(AuxMemberVariables, Member)

@@ -26,7 +26,9 @@ SolverImpl::SolverImpl()
           })
     , memoryDeclarationEquality(*this, theory_params::eqMemoryDeclaration)
     , memorySets(*this, theory_params::setsMemoryLocationSet)
-    , memoryLocationSets(*this) { }
+    , memoryLocationSets(*this)
+    , invariantSetsBaseTheory(*this, theory_params::setsInvariantSet)
+    , invariantSets(*this) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     Bool b = solver.impl().newBoolean(TheoryId::TrueFalse);
@@ -335,6 +337,13 @@ Member Solver::composeMembers(std::span<const Member> expr) {
 
 // -------------------------- Rewrite order -------------------------
 
+static std::strong_ordering locationOrder(Solver& solver, MemoryLocation a, MemoryLocation b) {
+    auto declarationOrdering = solver.rewriteOrder(a.declaration, b.declaration);
+    if (declarationOrdering != 0)
+        return declarationOrdering;
+    return solver.rewriteOrder(a.member, b.member);
+}
+
 std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     auto theoryOrdering = a.theory() <=> b.theory();
     if (theoryOrdering != 0)
@@ -362,12 +371,20 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     }
     case TheoryId::MemoryLocationSets: {
         auto& locations = impl().memoryLocationSets;
-        MemoryLocation locA = locations.locationOf(a);
-        MemoryLocation locB = locations.locationOf(b);
-        auto declarationOrdering = rewriteOrder(locA.declaration, locB.declaration);
-        if (declarationOrdering != 0)
-            return declarationOrdering;
-        return rewriteOrder(locA.member, locB.member);
+        return locationOrder(*this, locations.locationOf(a), locations.locationOf(b));
+    }
+
+    case TheoryId::InclusiveLocationInvariantSets:
+    case TheoryId::ExclusiveLocationInvariantSets: {
+        auto& invariants = impl().invariantSets;
+        return locationOrder(*this, invariants.locationOf(a), invariants.locationOf(b));
+    }
+    case TheoryId::LeafInvariantSets: {
+        auto& invariants = impl().invariantSets;
+        auto locationOrdering = locationOrder(*this, invariants.locationOf(a), invariants.locationOf(b));
+        if (locationOrdering != 0)
+            return locationOrdering;
+        return invariants.invariantOf(a).id() <=> invariants.invariantOf(b).id();
     }
 
     // Ordering is not important for these since no rewriting is done
@@ -445,6 +462,20 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool memberEq = equality(locationA.member, locationB.member);
             // Note: The other direction does not always hold because when both sets are empty they would also be equal.
             addClause({ setEq, !declarationEq, !memberEq });
+        } else if (InvariantSets::isInvariantSet(a) && a.theory() == b.theory()) {
+            // Two sets of the same kind hold the same leafs when they describe the same location,
+            // and a leaf set is described by its invariant on top of that.
+            bool sameInvariant = a.theory() != TheoryId::LeafInvariantSets
+                || invariantSets.invariantOf(a) == invariantSets.invariantOf(b);
+            if (sameInvariant) {
+                MemoryLocation locationA = invariantSets.locationOf(a);
+                MemoryLocation locationB = invariantSets.locationOf(b);
+                Bool setEq = equality(handle);
+                Bool declarationEq = equality(locationA.declaration, locationB.declaration);
+                Bool memberEq = equality(locationA.member, locationB.member);
+                // Note: The other direction does not always hold because when both sets are empty they would also be equal.
+                addClause({ setEq, !declarationEq, !memberEq });
+            }
         }
     }
 }

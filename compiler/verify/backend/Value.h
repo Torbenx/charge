@@ -17,6 +17,7 @@ enum class Sort : uint8_t {
     Member,
     MemoryDeclaration,
     MemoryLocationSet,
+    InvariantSet,
     // Type,
 
     COUNT,
@@ -108,6 +109,30 @@ struct MemoryLocation {
 
     MemoryDeclaration declaration;
     Member member;
+};
+
+struct MemoryLocationHash {
+    size_t operator()(MemoryLocation location) const {
+        size_t hash = 0;
+        hash_combine(hash, std::bit_cast<uint32_t>((Value)location.declaration));
+        hash_combine(hash, std::bit_cast<uint32_t>((Value)location.member));
+        return hash;
+    }
+};
+
+//! Identifies an invariants, which are statically known
+/*!
+The handle is unique across all types.
+*/
+struct Invariant {
+    constexpr explicit Invariant(uint32_t id)
+        : m_id(id) { }
+    constexpr uint32_t id() const { return m_id; }
+
+    bool operator==(const Invariant&) const = default;
+
+private:
+    uint32_t m_id;
 };
 
 struct ClauseAndIndex {
@@ -242,6 +267,10 @@ Value encodePairTheoryValue(PairHandle h) {
 template<std::derived_from<verify::backend::Value> T>
 struct optional_traits<T> {
     static constexpr T empty_value = T(verify::backend::INVALID_VALUE);
+};
+template<>
+struct optional_traits<verify::backend::Invariant> {
+    static constexpr verify::backend::Invariant empty_value = verify::backend::Invariant(limits::max);
 };
 template<>
 struct optional_traits<verify::backend::PairHandle> {

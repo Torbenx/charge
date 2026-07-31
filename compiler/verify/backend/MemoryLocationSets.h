@@ -65,15 +65,6 @@ private:
         std::vector<TracePosition> pendingPositions;
     };
 
-    struct LocationHash {
-        size_t operator()(MemoryLocation location) const {
-            size_t hash = 0;
-            hash_combine(hash, std::bit_cast<uint32_t>((Value)location.declaration));
-            hash_combine(hash, std::bit_cast<uint32_t>((Value)location.member));
-            return hash;
-        }
-    };
-
     Bool containmentOf(Solver&, MemberPrefixes::WordId);
     MemoryDeclaration declarationOf(MemberPrefixes::WordId word) {
         return locationOf(prefixes.containmentOf(word).set()).declaration;
@@ -97,7 +88,7 @@ private:
 
     TheoryData<SetInfo, TheoryId::MemoryLocationSets> setInfos;
     // Note: The location key could be obtained from the stored value
-    std::unordered_map<MemoryLocation, Value, LocationHash> sets;
+    std::unordered_map<MemoryLocation, Value, MemoryLocationHash> sets;
 
     std::vector<ElementState> elementStates;
     //! The pending containments, referenced by \ref ElementState::pendingPositions

@@ -2,6 +2,7 @@
 
 #include <verify/backend/Clauses.h>
 #include <verify/backend/DataManager.h>
+#include <verify/backend/InvariantSets.h>
 #include <verify/backend/Members.h>
 #include <verify/backend/MemoryLocationSets.h>
 #include <verify/backend/PairSet.h>
@@ -83,6 +84,9 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     Sets memorySets;
     MemoryLocationSets memoryLocationSets;
+
+    Sets invariantSetsBaseTheory;
+    InvariantSets invariantSets;
 };
 
 inline SolverImpl& Solver::impl() {
