@@ -146,6 +146,105 @@ TEST(VerifyBackend, InvariantLeafSetsNeedTheSameInvariant) {
     EXPECT_FALSE(solver.assignedTrue(otherInvariant));
 }
 
+TEST(VerifyBackend, InvariantLeafSetsHoldOneLeaf) {
+    SolverImpl solver;
+    auto& sets = solver.invariantSetsBaseTheory;
+    auto& invariantSets = solver.invariantSets;
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+    Invariant i(0);
+
+    Value a = invariantSets.leafSet(solver, d, m1, i);
+    Value b = invariantSets.leafSet(solver, d, m2, i);
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
+
+    // A leaf set holds nothing but the leaf of its invariant at its location, so a leaf of two of
+    // them is the same leaf and the locations of the two are the same as well
+    sets.decideTrue(solver, e, Sets::in(b));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_TRUE(solver.assignedTrue(solver.equality(a, b)));
+    EXPECT_TRUE(solver.assignedTrue(solver.equality(m1, m2)));
+}
+
+TEST(VerifyBackend, InvariantLeafSetsOfDistinctInvariantsAreDisjoint) {
+    SolverImpl solver;
+    auto& sets = solver.invariantSetsBaseTheory;
+    auto& invariantSets = solver.invariantSets;
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m = solver.newAuxMemberVariable();
+
+    Value a = invariantSets.leafSet(solver, d, m, Invariant(0));
+    Value b = invariantSets.leafSet(solver, d, m, Invariant(1));
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+
+    // The leafs of two invariants are distinct even at the same location, so no leaf is in both
+    sets.decideTrue(solver, e, Sets::in(b));
+    solver.sat.propagate();
+    EXPECT_TRUE(solver.sat.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantLeafSetsMayBeEmpty) {
+    SolverImpl solver;
+    auto& sets = solver.invariantSetsBaseTheory;
+    auto& invariantSets = solver.invariantSets;
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+
+    Value a = invariantSets.leafSet(solver, d, m1, Invariant(0));
+    Value b = invariantSets.leafSet(solver, d, m2, Invariant(1));
+
+    // An invariant does not have to hold at a location, so two leaf sets that hold nothing are the
+    // same set without their locations or invariants having anything to do with each other
+    solver.decideTrue(solver.equality(a, b));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, a)));
+    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, b)));
+    EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
+}
+
+TEST(VerifyBackend, InvariantLeafSetsAreBacktracked) {
+    SolverImpl solver;
+    auto& sets = solver.invariantSetsBaseTheory;
+    auto& invariantSets = solver.invariantSets;
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m = solver.newAuxMemberVariable();
+
+    Value a = invariantSets.leafSet(solver, d, m, Invariant(0));
+    Value b = invariantSets.leafSet(solver, d, m, Invariant(1));
+
+    auto e = sets.newElement(solver);
+    solver.sat.propagate();
+    int_t levelBeforeContainment = solver.currentDecisionLevel();
+    sets.decideTrue(solver, e, Sets::in(a));
+    solver.sat.propagate();
+
+    // Reverting the containment must forget the leaf set it was found in
+    solver.sat.beginBacktrack(levelBeforeContainment + 1);
+    solver.sat.endBacktrack();
+    invariantSets.checkInvariances(solver);
+    EXPECT_FALSE(sets.assignedTrue(solver, e, Sets::in(a)));
+
+    // So the leaf of another invariant is not compared against it anymore
+    sets.decideTrue(solver, e, Sets::in(b));
+    solver.sat.propagate();
+    EXPECT_FALSE(solver.sat.hasConflicts());
+    invariantSets.checkInvariances(solver);
+}
+
 TEST(VerifyBackend, InvariantSetsInSetTheory) {
     // Invariant sets are ordinary sets, so the set theory reasoning applies to them
     SolverImpl solver;

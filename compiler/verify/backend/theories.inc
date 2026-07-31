@@ -81,6 +81,7 @@ REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocatio
 
 REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
+REASON(InvariantLeafSetsShareElement, SharedElementReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
 USE_KIND(MemoryLocationSetRepresentative, memoryLocationSets)

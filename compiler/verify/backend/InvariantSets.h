@@ -114,6 +114,8 @@ private:
     struct ElementState {
         //! The set of the first location found to contain the element
         std::optional<Value> representative;
+        //! The first invariant leaf set found to contain the element
+        std::optional<Value> leaf;
         //! The pending containments of this element, in increasing order
         std::vector<TracePosition> pendingPositions;
     };
@@ -152,6 +154,7 @@ private:
     //! The pending containments, referenced by \ref ElementState::pendingPositions
     Trace<PendingContainment> pending;
     Trace<ElementId> representativeTrace;
+    Trace<ElementId> leafTrace;
     Trace<TracePosition> promotionTrace;
 
     InvariantPrefixes prefixes;

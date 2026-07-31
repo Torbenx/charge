@@ -457,12 +457,15 @@ void SolverImpl::onNewPair(PairHandle handle) {
         members.newPair(*this, handle);
     } else if (sort == Sort::MemoryDeclaration) {
         memoryDeclarationEquality.newPair(*this, handle);
-    } else if (isSetSort(sort)) {
+    } else if (sort == Sort::UninterpretedConstantSet) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
             [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
-        } else if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
+        }
+    } else if (sort == Sort::MemoryLocationSet) {
+        setTheory(sort).newPair(*this, handle);
+        if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
             MemoryLocation locationA = memoryLocationSets.locationOf(a);
             MemoryLocation locationB = memoryLocationSets.locationOf(b);
             Bool setEq = equality(handle);
@@ -470,21 +473,29 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool memberEq = equality(locationA.member, locationB.member);
             // Note: The other direction does not always hold because when both sets are empty they would also be equal.
             addClause({ setEq, !declarationEq, !memberEq });
-        } else if (InvariantSets::isInvariantSet(a) && a.theory() == b.theory()) {
+        }
+    } else if (sort == Sort::InvariantSet) {
+        setTheory(sort).newPair(*this, handle);
+        if (InvariantSets::isInvariantSet(a) && a.theory() == b.theory()) {
             // Two sets of the same kind hold the same leafs when they describe the same location,
             // and a leaf set is described by its invariant on top of that.
-            bool sameInvariant = a.theory() != TheoryId::LeafInvariantSets
-                || invariantSets.invariantOf(a) == invariantSets.invariantOf(b);
-            if (sameInvariant) {
+            TheoryId theory = a.theory();
+            Bool setEq = equality(handle);
+
+            if (theory == TheoryId::LeafInvariantSets && invariantSets.invariantOf(a) != invariantSets.invariantOf(b)) {
+                // Leaf sets of distinct invariances can only agree when empty
+                addClause({ !setEq, invariantSetsBaseTheory.isEmpty(*this, a) });
+            } else {
                 MemoryLocation locationA = invariantSets.locationOf(a);
                 MemoryLocation locationB = invariantSets.locationOf(b);
-                Bool setEq = equality(handle);
                 Bool declarationEq = equality(locationA.declaration, locationB.declaration);
                 Bool memberEq = equality(locationA.member, locationB.member);
                 // Note: The other direction does not always hold because when both sets are empty they would also be equal.
                 addClause({ setEq, !declarationEq, !memberEq });
             }
         }
+    } else if (isSetSort(sort)) {
+        setTheory(sort).newPair(*this, handle);
     }
 }
 
@@ -695,5 +706,4 @@ Member Solver::newAuxMemberVariable() {
 MemoryDeclaration Solver::newAuxMemoryDeclarationVariable() {
     return (MemoryDeclaration)impl().newValue(TheoryId::AuxMemoryDeclarationVariables);
 }
-
 }

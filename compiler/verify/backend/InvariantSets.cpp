@@ -126,6 +126,17 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
             solver.assignTrue(solver.equality(locationOf(representative).declaration, location.declaration),
                 makeReason<ReasonKind::InvariantDeclarationsShareElement>({ element, representative, set }));
         }
+
+        if (set.theory() == TheoryId::LeafInvariantSets) {
+            if (!state.leaf.has_value()) {
+                state.leaf = set;
+                leafTrace.push(element);
+            } else {
+                Value leaf = state.leaf.value();
+                solver.assignTrue(solver.equality(leaf, set),
+                    makeReason<ReasonKind::InvariantLeafSetsShareElement>({ element, leaf, set }));
+            }
+        }
     }
 
     if (joinedRepresentative(solver, state, location.declaration))
@@ -157,8 +168,10 @@ void InvariantSets::propagateRewrite(Solver& solver, Use use) {
 }
 
 bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::InvariantDeclarationsShareElement) {
-        auto data = reason.get<ReasonKind::InvariantDeclarationsShareElement>();
+    // Both conclusions are drawn from the same two containments, only what they say differs
+    if (reason.kind() == ReasonKind::InvariantDeclarationsShareElement
+        || reason.kind() == ReasonKind::InvariantLeafSetsShareElement) {
+        auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
         return baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setA))
             && baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setB));
@@ -174,8 +187,9 @@ bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reaso
 }
 
 ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::InvariantDeclarationsShareElement) {
-        auto data = reason.get<ReasonKind::InvariantDeclarationsShareElement>();
+    if (reason.kind() == ReasonKind::InvariantDeclarationsShareElement
+        || reason.kind() == ReasonKind::InvariantLeafSetsShareElement) {
+        auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
 
         ClauseBuilder clause = solver.beginClause();
@@ -205,6 +219,7 @@ void InvariantSets::newDecisionLevel(Solver& solver) {
     prefixes.newDecisionLevel(solver);
     pending.newDecisionLevel(solver);
     representativeTrace.newDecisionLevel(solver);
+    leafTrace.newDecisionLevel(solver);
     promotionTrace.newDecisionLevel(solver);
 }
 
@@ -230,6 +245,10 @@ void InvariantSets::beginBacktrack(Solver& solver) {
     for (ElementId element : representativeTrace.backtrackedReverse(solver))
         stateOf(element).representative.reset();
     representativeTrace.truncate(solver);
+
+    for (ElementId element : leafTrace.backtrackedReverse(solver))
+        stateOf(element).leaf.reset();
+    leafTrace.truncate(solver);
 }
 
 void InvariantSets::checkInvariances(Solver& solver) {
@@ -237,6 +256,7 @@ void InvariantSets::checkInvariances(Solver& solver) {
 
     pending.checkInvariances(solver);
     representativeTrace.checkInvariances(solver);
+    leafTrace.checkInvariances(solver);
     promotionTrace.checkInvariances(solver);
 
     std::vector<std::vector<TracePosition>> expectedIndices;
@@ -255,17 +275,25 @@ void InvariantSets::checkInvariances(Solver& solver) {
             == joinedRepresentative(solver, elementStates[entry.element.id()], locationOf(entry.containment.set()).declaration));
     }
 
-    // An element has a representative exactly when it is on the trace, and it is on it only once
-    std::vector<bool> onTrace;
-    onTrace.resize(elementStates.size());
-    for (ElementId element : representativeTrace) {
-        VERIFY(element.id() < onTrace.size());
-        VERIFY(!onTrace[element.id()]);
-        onTrace[element.id()] = true;
-    }
+    // An element has a representative exactly when it is on the trace, and it is on it only once.
+    // The same holds for the leaf set it was found in.
+    std::vector<bool> onRepresentativeTrace;
+    std::vector<bool> onLeafTrace;
+    onRepresentativeTrace.resize(elementStates.size());
+    onLeafTrace.resize(elementStates.size());
+    auto markOnTrace = [](std::vector<bool>& marks, ElementId element) {
+        VERIFY(element.id() < marks.size());
+        VERIFY(!marks[element.id()]);
+        marks[element.id()] = true;
+    };
+    for (ElementId element : representativeTrace)
+        markOnTrace(onRepresentativeTrace, element);
+    for (ElementId element : leafTrace)
+        markOnTrace(onLeafTrace, element);
 
     for (int_t i = 0; i < (int_t)elementStates.size(); i++) {
-        VERIFY(elementStates[i].representative.has_value() == onTrace[i]);
+        VERIFY(elementStates[i].representative.has_value() == onRepresentativeTrace[i]);
+        VERIFY(elementStates[i].leaf.has_value() == onLeafTrace[i]);
         VERIFY(elementStates[i].pendingPositions == expectedIndices[i]);
     }
 
