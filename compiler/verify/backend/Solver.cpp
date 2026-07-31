@@ -101,6 +101,7 @@ void SatCore::Interface::onNewDecisionLevel() {
     impl.memoryDeclarationEquality.newDecisionLevel(impl);
     impl.members.newDecisionLevel(impl);
     impl.memoryLocationSets.newDecisionLevel(impl);
+    impl.invariantSets.newDecisionLevel(impl);
     impl.uninterpConstantSingletons.newDecisionLevel(impl);
 }
 
@@ -113,6 +114,7 @@ void SatCore::Interface::onBeginBacktrack() {
     impl.members.beginBacktrack(impl);
 
     impl.memoryLocationSets.beginBacktrack(impl);
+    impl.invariantSets.beginBacktrack(impl);
     impl.uninterpConstantSingletons.beginBacktrack(impl);
 }
 
@@ -124,6 +126,7 @@ void SatCore::Interface::onEndBacktrack() {
     impl.members.endBacktrack(impl);
 
     impl.memoryLocationSets.endBacktrack(impl);
+    impl.invariantSets.endBacktrack(impl);
     impl.uninterpConstantSingletons.endBacktrack(impl);
 }
 
@@ -263,6 +266,11 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
         break;
     case TheoryId::MemoryLocationSets:
         memoryLocationSets.propagateContainment(*this, element, containment);
+        break;
+    case TheoryId::InclusiveLocationInvariantSets:
+    case TheoryId::ExclusiveLocationInvariantSets:
+    case TheoryId::LeafInvariantSets:
+        invariantSets.propagateContainment(*this, element, containment);
         break;
     default:
         break;

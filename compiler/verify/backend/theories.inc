@@ -79,10 +79,16 @@ REASON(MemberDisequality, EmptyReasonData, false, members)
 REASON(MemberPrefixHit, PrefixHitData, false, memoryLocationSets)
 REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocationSets)
 
+REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
+REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
+
 USE_KIND(Test, useTest)
 USE_KIND(MemoryLocationSetRepresentative, memoryLocationSets)
 USE_KIND(MemoryLocationSetPendingContainment, memoryLocationSets)
 USE_KIND(MemberPrefixWord, memoryLocationSets)
+USE_KIND(InvariantSetRepresentative, invariantSets)
+USE_KIND(InvariantSetPendingContainment, invariantSets)
+USE_KIND(InvariantPrefixWord, invariantSets)
 
 #undef REASON
 #undef USE_KIND

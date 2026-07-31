@@ -7,6 +7,9 @@ target_sources(${PROJECT_NAME}
     DataManager.cpp
     DataManager.h
     EqualityTests.cpp
+    InvariantPrefixes.cpp
+    InvariantPrefixes.h
+    InvariantPrefixTests.cpp
     InvariantSets.cpp
     InvariantSets.h
     InvariantTests.cpp

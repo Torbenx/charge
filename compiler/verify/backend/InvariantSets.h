@@ -1,8 +1,10 @@
 #pragma once
 
 #include <verify/backend/Data.h>
+#include <verify/backend/InvariantPrefixes.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/Trace.h>
 
 #include <unordered_map>
 
@@ -19,6 +21,9 @@ There are three kinds of sets:
 Note that these sets may not contain any elements at all, even the leaf sets.
 */
 struct InvariantSets {
+    using ElementId = Sets::ElementId;
+    using Containment = Sets::Containment;
+
     InvariantSets(Solver&);
 
     Value inclusiveSet(Solver&, MemoryLocation);
@@ -58,6 +63,18 @@ struct InvariantSets {
         return setInfos[set].invariant.value();
     }
 
+    void propagateContainment(Solver&, ElementId, Containment);
+    void propagateRewrite(Solver&, Use);
+
+    bool testReason(Solver&, Bool, const Reason&);
+    ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
+
+    void newDecisionLevel(Solver&);
+    void beginBacktrack(Solver&);
+    void endBacktrack(Solver& solver) { prefixes.endBacktrack(solver); }
+
+    void checkInvariances(Solver&);
+
 private:
     struct SetInfo {
         SetInfo() = default;
@@ -86,11 +103,58 @@ private:
 
     Value locationSet(Solver&, LocationSets&, TheoryId, MemoryLocation);
 
+    //! A containment whose declaration is not (yet) equal to the representative
+    struct PendingContainment {
+        ElementId element;
+        Containment containment;
+        //! Becomes true when equality to the represnetative is detected
+        bool promoted = false;
+    };
+
+    struct ElementState {
+        //! The set of the first location found to contain the element
+        std::optional<Value> representative;
+        //! The pending containments of this element, in increasing order
+        std::vector<TracePosition> pendingPositions;
+    };
+
+    Sets& baseTheory(Solver&);
+
+    Bool containmentOf(Solver&, InvariantPrefixes::WordId);
+    MemoryDeclaration declarationOf(InvariantPrefixes::WordId word) {
+        return locationOf(prefixes.containmentOf(word).set()).declaration;
+    }
+
+    //! Convert \p set to the word representation used by the prefix index
+    InvariantWord toWord(Value set) const;
+
+    ElementState& stateOf(ElementId element) {
+        if (element.id() >= elementStates.size())
+            elementStates.resize(element.id() + 1);
+        return elementStates[element.id()];
+    }
+
+    //! Whether \p declaration is equal to the representative declaration of the element
+    bool joinedRepresentative(Solver&, const ElementState&, MemoryDeclaration declaration);
+
+    void addWord(Solver&, ElementId, Containment);
+    void addPending(Solver&, ElementId, Containment);
+    void promotePending(Solver&, const ElementState&, TracePosition);
+    void promotePendingOf(Solver&, ElementId);
+
     SortData<SetInfo, Sort::InvariantSet> setInfos;
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
     std::unordered_map<LeafKey, Value, LeafHash> leafSets;
+
+    std::vector<ElementState> elementStates;
+    //! The pending containments, referenced by \ref ElementState::pendingPositions
+    Trace<PendingContainment> pending;
+    Trace<ElementId> representativeTrace;
+    Trace<TracePosition> promotionTrace;
+
+    InvariantPrefixes prefixes;
 };
 
 }

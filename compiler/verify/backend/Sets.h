@@ -266,4 +266,17 @@ private:
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
 };
 
+struct SharedElementSets {
+    Value setA;
+    Value setB;
+};
+
+struct SharedElementReason : private PackedReason<SharedElementSets, uint32_t> {
+    SharedElementReason(Sets::ElementId element, Value setA, Value setB)
+        : PackedReason({ setA, setB }, element.id()) { }
+
+    SharedElementSets sets() const { return data(); }
+    Sets::ElementId element() const { return Sets::ElementId(tag()); }
+};
+
 }

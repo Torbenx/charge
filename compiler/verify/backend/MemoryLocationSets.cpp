@@ -6,22 +6,6 @@
 
 namespace verify::backend {
 
-namespace {
-    struct SetPair {
-        Value setA;
-        Value setB;
-    };
-}
-
-//! An element contained in the sets of two locations, which makes their declarations equal
-struct SharedElementReason : private PackedReason<SetPair, uint32_t> {
-    SharedElementReason(Sets::ElementId element, Value setA, Value setB)
-        : PackedReason({ setA, setB }, element.id()) { }
-
-    SetPair sets() const { return data(); }
-    Sets::ElementId element() const { return Sets::ElementId(tag()); }
-};
-
 MemoryLocationSets::MemoryLocationSets(Solver& solver)
     : setInfos(solver)
     , prefixes(solver) { }
