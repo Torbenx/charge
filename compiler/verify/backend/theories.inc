@@ -71,7 +71,7 @@ REASON(Clause, LiteralOccurrence, true, clauses)
 REASON(MemberEquality, EmptyReasonData, false, members)
 REASON(MemberDisequality, EmptyReasonData, false, members)
 
-REASON(MemberPrefixHit, MemberPrefixHitData, false, memoryLocationSets)
+REASON(MemberPrefixHit, PrefixHitData, false, memoryLocationSets)
 REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memoryLocationSets)
 
 USE_KIND(Test, useTest)
