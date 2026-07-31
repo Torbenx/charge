@@ -1,48 +1,7 @@
 #pragma once
 
 #include <verify/backend/Solver.h>
-
-namespace verify::backend {
-
-struct TracePosition {
-    uint32_t index;
-
-    constexpr explicit TracePosition(uint32_t index)
-        : index(index) { }
-
-    auto operator<=>(const TracePosition&) const = default;
-    bool operator==(const TracePosition&) const = default;
-    TracePosition& operator++() {
-        index += 1;
-        return *this;
-    }
-    TracePosition operator++(int) {
-        TracePosition copy = *this;
-        index += 1;
-        return copy;
-    }
-    friend TracePosition operator+(TracePosition l, int_t r) {
-        return TracePosition(l.index + r);
-    }
-    friend TracePosition operator-(TracePosition l, int_t r) {
-        return TracePosition(l.index - r);
-    }
-    TracePosition& operator+=(int_t r) {
-        index += r;
-        return *this;
-    }
-    TracePosition& operator-=(int_t r) {
-        index -= r;
-        return *this;
-    }
-};
-
-}
-
-template<>
-struct optional_traits<verify::backend::TracePosition> {
-    static constexpr verify::backend::TracePosition empty_value = verify::backend::TracePosition(limits::max);
-};
+#include <verify/backend/Trace.h>
 
 namespace verify::backend {
 

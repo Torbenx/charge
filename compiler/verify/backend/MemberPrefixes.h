@@ -3,6 +3,7 @@
 #include <verify/backend/Data.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Sets.h>
+#include <verify/backend/Trace.h>
 
 #include <unordered_map>
 
@@ -40,8 +41,8 @@ struct MemberPrefixes {
     */
     WordId addWord(Solver&, Member expression, ElementId, Sets::Containment);
 
-    ElementId elementOf(WordId w) const { return words[w.id()].element; }
-    Sets::Containment containmentOf(WordId w) const { return words[w.id()].containment; }
+    ElementId elementOf(WordId w) const { return words[w].element; }
+    Sets::Containment containmentOf(WordId w) const { return words[w].containment; }
 
     //! Returns whether \p prefix is currently a prefix of \p path
     /*!
@@ -133,14 +134,13 @@ private:
     std::unordered_map<Edge, uint32_t, EdgeHash> edges; //!< Append-only, never unwound
     std::vector<uint32_t> elementRoots;
 
-    std::vector<WordInfo> words;
-    std::vector<uint32_t> wordDecisionPoints;
-    std::vector<WordId> rewriteTrace;
-    std::vector<uint32_t> rewriteDecisionPoints;
-    size_t backtrackedWordCount = limits::max;
+    Trace<WordInfo, WordId> words;
+    Trace<WordId> rewriteTrace;
+    //! The number of words that survive the backtrack in progress, see beginBacktrack()
+    uint32_t backtrackedWordCount = limits::max;
 
-    bool backtracking() const { return backtrackedWordCount != (decltype(backtrackedWordCount))limits::max; }
-    bool isBacktracked(WordId word) const { return (size_t)word.id() >= backtrackedWordCount; }
+    bool backtracking() const { return backtrackedWordCount != (uint32_t)limits::max; }
+    bool isBacktracked(WordId word) const { return word.id() >= backtrackedWordCount; }
 
     // Temporary buffer used inside a single function to avoid repeated allocations
     std::vector<Member> normalFormBuffer;

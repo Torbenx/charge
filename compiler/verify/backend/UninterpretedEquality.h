@@ -2,6 +2,7 @@
 
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/Trace.h>
 #include <verify/backend/Use.h>
 
 #include <variant>
@@ -61,7 +62,7 @@ struct UninterpretedEquality {
     */
     void explainEqual(Solver& solver, Value a, Value b, ClauseBuilder& clause) { path(solver, a, b, clause); }
 
-    void forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit = (uint32_t)limits::max);
+    void forEachParentOf(Value value, auto&& callback, TracePosition positionLimit = TracePosition(limits::max));
     void forEachEqualValue(Value value, auto&& callback);
 
     Value rewrite(Value v) { return infoFor(v).root; }
@@ -140,23 +141,21 @@ private:
 
     SortData<EqualityInfo> equalityInfos;
 
-    std::vector<std::variant<EqualityTraceEntry, UseTraceEntry>> equalityUseTrace;
-    std::vector<DisequalityTraceEntry> disequalityTrace;
-    std::vector<uint32_t> equalityUseDecisionPoints; //!< Trace sizes at the respective decision levels
-    std::vector<uint32_t> disequalityDecisionPoints; //!< Trace sizes at the respective decision levels
+    Trace<std::variant<EqualityTraceEntry, UseTraceEntry>> equalityUseTrace;
+    Trace<DisequalityTraceEntry> disequalityTrace;
 };
 
-inline void UninterpretedEquality::forEachParentOf(Value value, auto&& callback, uint32_t traceSizeLimit) {
+inline void UninterpretedEquality::forEachParentOf(Value value, auto&& callback, TracePosition positionLimit) {
     for (;;) {
         callback(value);
         const auto& valueInfo = infoFor(value);
         if (!valueInfo.tracePosition.has_value())
             break;
 
-        uint32_t index = valueInfo.tracePosition->index;
-        if (index >= traceSizeLimit)
+        TracePosition position = valueInfo.tracePosition.value();
+        if (position >= positionLimit)
             break;
-        value = std::get<EqualityTraceEntry>(equalityUseTrace[index]).roots.source;
+        value = std::get<EqualityTraceEntry>(equalityUseTrace[position]).roots.source;
     }
 }
 

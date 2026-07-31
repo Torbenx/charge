@@ -3,6 +3,7 @@
 #include <verify/backend/MemberPrefixes.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/Trace.h>
 #include <verify/backend/UninterpretedEquality.h>
 #include <verify/backend/Use.h>
 
@@ -137,14 +138,12 @@ private:
     std::unordered_map<MemoryLocation, Value, LocationHash> sets;
 
     std::vector<ElementState> elementStates;
-    std::vector<PendingContainment> pending;
+    //! The pending containments, indexed by the position they are named by in \ref ElementState::pendingIndices
+    Trace<PendingContainment, uint32_t> pending;
     //! The elements whose representative was recorded, in the order they were recorded
-    std::vector<ElementId> representativeTrace;
+    Trace<ElementId> representativeTrace;
     //! The pending containments that were promoted, in the order they were promoted
-    std::vector<uint32_t> promotionTrace;
-    std::vector<uint32_t> pendingDecisionPoints; //!< Trace sizes at the respective decision levels
-    std::vector<uint32_t> representativeDecisionPoints; //!< Trace sizes at the respective decision levels
-    std::vector<uint32_t> promotionDecisionPoints; //!< Trace sizes at the respective decision levels
+    Trace<uint32_t> promotionTrace;
 
     //! Detects the contradicting containments
     MemberPrefixes prefixes;

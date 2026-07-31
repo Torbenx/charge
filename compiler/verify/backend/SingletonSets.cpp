@@ -2,8 +2,6 @@
 
 #include <verify/backend/SolverImpl.h>
 
-#include <algorithm>
-
 namespace verify::backend {
 
 namespace {
@@ -44,7 +42,7 @@ void SingletonSets::propagateContainment(Solver& solver, Sets::ElementId element
     auto& state = stateOf(element);
     if (!state.singleton.has_value()) {
         state.singleton = cont.set();
-        singletonTrace.push_back(element);
+        singletonTrace.push(element);
     } else {
         solver.assignTrue(solver.equality(state.singleton.value(), cont.set()),
             makeReason(params.inSingletonReason, { element, state.singleton.value(), cont.set() }));
@@ -71,27 +69,19 @@ ClauseAndIndex SingletonSets::reasonToClause(Solver& solver, Bool equality, cons
 }
 
 void SingletonSets::newDecisionLevel(Solver& solver) {
-    singletonDecisionPoints.push_back(singletonTrace.size());
-    VERIFY((int_t)singletonDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    singletonTrace.newDecisionLevel(solver);
 }
 
 void SingletonSets::beginBacktrack(Solver& solver) {
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t targetSize = singletonDecisionPoints[lastLevelToRevert];
-    while ((int_t)singletonTrace.size() > targetSize) {
-        stateOf(singletonTrace.back()).singleton.reset();
-        singletonTrace.pop_back();
-    }
-    singletonDecisionPoints.resize(lastLevelToRevert);
+    for (Sets::ElementId element : singletonTrace.backtrackedReverse(solver))
+        stateOf(element).singleton.reset();
+    singletonTrace.truncate(solver);
 }
 
 void SingletonSets::endBacktrack(Solver&) { }
 
 void SingletonSets::checkInvariances(Solver& solver) {
-    // The entries of a level are appended after its decision point, so the points only grow
-    VERIFY((int_t)singletonDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    VERIFY(std::ranges::is_sorted(singletonDecisionPoints));
-    VERIFY(singletonDecisionPoints.empty() || singletonDecisionPoints.back() <= singletonTrace.size());
+    singletonTrace.checkInvariances(solver);
 
     // An element has a singleton exactly when it is on the trace, and it is on it only once
     std::vector<bool> onTrace;

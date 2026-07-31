@@ -121,7 +121,7 @@ void Members::addUse(Solver&, Value value, Use use) {
     Member expression = (Member)value;
     auto registerFor = [this, use](Member m) {
         infoFor(m).uses.push_back(use);
-        useTrace.push_back({ m, use });
+        useTrace.push({ m, use });
     };
 
     if (!expression.composite()) {
@@ -183,8 +183,7 @@ void Members::markUsesAsDirty(VariableInfo& varInfo, bool externalPropagation) {
 
 void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> expression) {
     auto& varInfo = infoFor(target);
-    RewriteTracePosition tracePos(rewriteTrace.size());
-    rewriteTrace.push_back({ { target }, pair });
+    RewriteTracePosition tracePos = rewriteTrace.push({ { target }, pair });
     pairs[makeEquality(pair)].rewrite = tracePos;
     for (Member m : expression) {
         if (!m.literal())
@@ -197,7 +196,7 @@ void Members::addRewrite(Member target, PairHandle pair, std::vector<Member> exp
 }
 
 void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
-    RewriteTracePosition tracePos(rewriteTrace.size());
+    RewriteTracePosition tracePos = rewriteTrace.nextPosition();
     pairs[makeEquality(pair)].rewrite = tracePos;
     for (Member target : targets) {
         auto& varInfo = infoFor(target);
@@ -206,7 +205,8 @@ void Members::addIdentityRewrite(std::vector<Member> targets, PairHandle pair) {
         varInfo.tracePos = tracePos;
         markUsesAsDirty(varInfo, true);
     }
-    rewriteTrace.push_back({ std::move(targets), pair });
+    RewriteTracePosition pushedPos = rewriteTrace.push({ std::move(targets), pair });
+    VERIFY(pushedPos == tracePos);
 }
 
 void Members::updateRewrite(VariableInfo& varInfo, bool externalPropagation) {
@@ -224,16 +224,14 @@ void Members::updateRewrite(VariableInfo& varInfo, bool externalPropagation) {
 }
 
 void Members::assignEqual(Solver& solver, PairHandle handle) {
-    AssignedPairTracePosition tracePos(assignedPairTrace.size());
-    assignedPairTrace.push_back(handle);
+    AssignedPairTracePosition tracePos = assignedPairTrace.push(handle);
     auto equality = makeEquality(handle);
     pairs[equality].equality = tracePos;
     solver.assignTrue(equality, makeReason<ReasonKind::MemberEquality>({}));
 }
 
 void Members::assignDisequal(Solver& solver, PairHandle handle) {
-    AssignedPairTracePosition tracePos(assignedPairTrace.size());
-    assignedPairTrace.push_back(handle);
+    AssignedPairTracePosition tracePos = assignedPairTrace.push(handle);
     auto equality = makeEquality(handle);
     pairs[equality].disequality = tracePos;
     solver.assignTrue(!equality, makeReason<ReasonKind::MemberDisequality>({}));
@@ -324,8 +322,8 @@ void Members::updateRewrites(bool externalPropagation) {
             dirtyRewrites.pop();
         } while (!dirtyRewrites.empty() && dirtyRewrites.top() == rwPos);
         // Only non-identity rewrites can be dirty and always have a single target
-        VERIFY(rewriteTrace[rwPos.index].targets.size() == 1);
-        updateRewrite(infoFor(rewriteTrace[rwPos.index].targets.front()), externalPropagation);
+        VERIFY(rewriteTrace[rwPos].targets.size() == 1);
+        updateRewrite(infoFor(rewriteTrace[rwPos].targets.front()), externalPropagation);
     }
 }
 
@@ -368,7 +366,7 @@ void Members::explainRewrite(Solver& solver, Member m, ClauseBuilder& clause) {
 
     auto& varInfo = infoFor(m);
     if (varInfo.tracePos.has_value()) {
-        auto& entry = rewriteTrace[varInfo.tracePos->index];
+        auto& entry = rewriteTrace[varInfo.tracePos.value()];
         if (clause.add(solver, !makeEquality(entry.rewritePair))) {
             Pair pair = solver.at(entry.rewritePair);
             explainRewrite(solver, (Member)pair.source, clause);
@@ -395,65 +393,56 @@ ClauseAndIndex Members::reasonToClause(Solver& solver, Bool assignedLiteral, con
 }
 
 void Members::newDecisionLevel(Solver& solver) {
-    rewriteDecisionPoints.push_back(rewriteTrace.size());
-    VERIFY((int_t)rewriteDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    assignedPairDecisionPoints.push_back(assignedPairTrace.size());
-    VERIFY((int_t)assignedPairDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    useDecisionPoints.push_back(useTrace.size());
-    VERIFY((int_t)useDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    rewriteTrace.newDecisionLevel(solver);
+    assignedPairTrace.newDecisionLevel(solver);
+    useTrace.newDecisionLevel(solver);
 }
 
 void Members::beginBacktrack(Solver& solver) {
     VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
     // Everything that was applied has been notified about before the backtrack was started
     VERIFY(externalPropagationQueue.empty());
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t rwTargetSize = rewriteDecisionPoints[lastLevelToRevert];
-    int_t eqTargetSize = assignedPairDecisionPoints[lastLevelToRevert];
+    RewriteTracePosition rwTarget = rewriteTrace.backtrackedBegin(solver);
 
     // The uses were appended in registration order, so the ones of the reverted levels are the tail
     // of the list of their variable
-    int_t useTargetSize = useDecisionPoints[lastLevelToRevert];
-    while ((int_t)useTrace.size() > useTargetSize) {
-        auto [variable, use] = useTrace.back();
+    for (auto [variable, use] : useTrace.backtrackedReverse(solver)) {
         auto& uses = infoFor(variable).uses;
         VERIFY(!uses.empty());
         VERIFY(uses.back() == use);
         uses.pop_back();
-        useTrace.pop_back();
     }
-    useDecisionPoints.resize(lastLevelToRevert);
+    useTrace.truncate(solver);
 
-    for (int_t i = rewriteTrace.size() - 1; i >= rwTargetSize; i--) {
-        auto& [targets, rwPair] = rewriteTrace[i];
+    for (RewriteTracePosition position : rewriteTrace.backtrackedPositionsReverse(solver)) {
+        auto& [targets, rwPair] = rewriteTrace[position];
         for (Member target : targets) {
             auto& varInfo = infoFor(target);
-            VERIFY(varInfo.tracePos == RewriteTracePosition(i));
+            VERIFY(varInfo.tracePos == position);
             varInfo.currentRewrite = { target };
             for (Member m : varInfo.rewriteExpression) {
                 if (!m.literal()) {
                     auto& otherVarInfo = infoFor(m);
-                    VERIFY(otherVarInfo.rewriteUses.back() == RewriteTracePosition(i));
+                    VERIFY(otherVarInfo.rewriteUses.back() == position);
                     otherVarInfo.rewriteUses.pop_back();
                 }
             }
             markUsesAsDirty(varInfo, false);
         }
         auto& pairInfo = pairs[makeEquality(rwPair)];
-        VERIFY(pairInfo.rewrite == RewriteTracePosition(i));
+        VERIFY(pairInfo.rewrite == position);
         pairInfo.rewrite.reset();
     }
 
-    for (int_t i = eqTargetSize; i < (int_t)assignedPairTrace.size(); i++) {
-        auto& pairInfo = pairs[encodePairTheoryValue<TheoryId::MemberEquality>(assignedPairTrace[i])];
-        VERIFY(pairInfo.equality == AssignedPairTracePosition(i) || pairInfo.disequality == AssignedPairTracePosition(i));
+    for (AssignedPairTracePosition position : assignedPairTrace.backtrackedPositionsChrono(solver)) {
+        auto& pairInfo = pairs[encodePairTheoryValue<TheoryId::MemberEquality>(assignedPairTrace[position])];
+        VERIFY(pairInfo.equality == position || pairInfo.disequality == position);
         pairInfo.equality.reset();
         pairInfo.disequality.reset();
     }
-    assignedPairTrace.erase(assignedPairTrace.begin() + eqTargetSize, assignedPairTrace.end());
-    assignedPairDecisionPoints.resize(lastLevelToRevert);
+    assignedPairTrace.truncate(solver);
 
-    while (!dirtyRewrites.empty() && (int_t)dirtyRewrites.top().index >= rwTargetSize) {
+    while (!dirtyRewrites.empty() && dirtyRewrites.top() >= rwTarget) {
         dirtyRewrites.pop();
     }
     updateRewrites(false);
@@ -464,15 +453,13 @@ void Members::beginBacktrack(Solver& solver) {
 }
 
 void Members::endBacktrack(Solver& solver) {
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t rwTargetSize = rewriteDecisionPoints[lastLevelToRevert];
-    for (int_t i = rwTargetSize; i < (int_t)rewriteTrace.size(); i++) {
-        for (Member target : rewriteTrace[i].targets) {
+    // The entries are only dropped here, a reason of a reverted assignment may still name them
+    for (const RewriteTraceEntry& entry : rewriteTrace.backtrackedChrono(solver)) {
+        for (Member target : entry.targets) {
             infoFor(target).tracePos.reset();
         }
     }
-    rewriteTrace.erase(rewriteTrace.begin() + rwTargetSize, rewriteTrace.end());
-    rewriteDecisionPoints.resize(lastLevelToRevert);
+    rewriteTrace.truncate(solver);
 }
 
 void Members::checkInvariances(Solver& solver) {
@@ -481,15 +468,9 @@ void Members::checkInvariances(Solver& solver) {
     VERIFY(dirtyRewrites.empty() && dirtyPairs.empty());
     VERIFY(externalPropagationQueue.empty());
 
-    // The entries of a level are appended after its decision point, so the points only grow
-    auto checkDecisionPoints = [&solver](const std::vector<uint32_t>& points, size_t traceSize) {
-        VERIFY((int_t)points.size() == solver.currentDecisionLevel() + 1);
-        VERIFY(std::ranges::is_sorted(points));
-        VERIFY(points.empty() || points.back() <= traceSize);
-    };
-    checkDecisionPoints(rewriteDecisionPoints, rewriteTrace.size());
-    checkDecisionPoints(assignedPairDecisionPoints, assignedPairTrace.size());
-    checkDecisionPoints(useDecisionPoints, useTrace.size());
+    rewriteTrace.checkInvariances(solver);
+    assignedPairTrace.checkInvariances(solver);
+    useTrace.checkInvariances(solver);
 
     // The uses a variable is expected to have, in registration order because beginBacktrack() relies
     // on being able to pop them from the back

@@ -198,8 +198,8 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     }
     mergeInto(sourceDiseq, targetDiseq);
 
-    TracePosition tracePosition { (uint32_t)equalityUseTrace.size() };
-    equalityUseTrace.push_back(EqualityTraceEntry { { source, target }, { sourceRootInfo.root, targetRootInfo.root } });
+    TracePosition tracePosition
+        = equalityUseTrace.push(EqualityTraceEntry { { source, target }, { sourceRootInfo.root, targetRootInfo.root } });
 
     int_t oldSourceTreeSize = sourceTree.size();
     sourceTree.push_back({ targetInfo.root });
@@ -249,7 +249,7 @@ void UninterpretedEquality::propagateDisequal(Solver& solver, PairHandle diseqPa
     forEachParentOf(source, addDisequality);
     forEachParentOf(target, addDisequality);
 
-    disequalityTrace.push_back({ diseqPair });
+    disequalityTrace.push({ diseqPair });
 
     Value root = infoFor(target).root;
     const auto& rootInfo = infoFor(root);
@@ -309,7 +309,7 @@ void UninterpretedEquality::newPair(Solver& solver, PairHandle pair) {
 void UninterpretedEquality::addUse(Solver&, Value value, Use use) {
     VERIFY(sortOf(value.theory()) == params.sort);
     infoFor(infoFor(value).root).uses.push_back(use);
-    equalityUseTrace.push_back(UseTraceEntry { value, use });
+    equalityUseTrace.push(UseTraceEntry { value, use });
 }
 
 void UninterpretedEquality::addEdge(Value value, Value otherValue, PairHandle pair) {
@@ -348,7 +348,7 @@ void UninterpretedEquality::path(Solver& solver, Value a, Value b, ClauseBuilder
             std::swap(a, b);
         }
 
-        const auto& entry = std::get<EqualityTraceEntry>(equalityUseTrace[aIndex]);
+        const auto& entry = std::get<EqualityTraceEntry>(equalityUseTrace[TracePosition(aIndex)]);
         aIndex = tracePos(entry.roots.source);
         if (aIndex == bIndex) {
             result.add(solver, !makeEquality(solver.findPair(entry.link)));
@@ -402,18 +402,15 @@ ClauseAndIndex UninterpretedEquality::reasonToClause(Solver& solver, Bool assign
 }
 
 void UninterpretedEquality::newDecisionLevel(Solver& solver) {
-    equalityUseDecisionPoints.push_back(equalityUseTrace.size());
-    disequalityDecisionPoints.push_back(disequalityTrace.size());
-    VERIFY((int_t)equalityUseDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    VERIFY((int_t)disequalityDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    equalityUseTrace.newDecisionLevel(solver);
+    disequalityTrace.newDecisionLevel(solver);
 }
 
 void UninterpretedEquality::beginBacktrack(Solver& solver) {
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t eqUseTargetSize = equalityUseDecisionPoints[lastLevelToRevert];
-    for (int_t i = equalityUseTrace.size() - 1; i >= eqUseTargetSize; i--) {
-        if (std::holds_alternative<EqualityTraceEntry>(equalityUseTrace[i])) {
-            auto [link, roots] = std::get<EqualityTraceEntry>(equalityUseTrace[i]);
+    TracePosition backtrackedBegin = equalityUseTrace.backtrackedBegin(solver);
+    for (const auto& traceEntry : equalityUseTrace.backtrackedReverse(solver)) {
+        if (std::holds_alternative<EqualityTraceEntry>(traceEntry)) {
+            auto [link, roots] = std::get<EqualityTraceEntry>(traceEntry);
 
             auto& sourceRootInfo = infoFor(roots.source);
             auto& targetRootInfo = infoFor(roots.target);
@@ -440,7 +437,7 @@ void UninterpretedEquality::beginBacktrack(Solver& solver) {
                 info.usesOffset -= newUsesSize;
             }
         } else {
-            auto entry = std::get<UseTraceEntry>(equalityUseTrace[i]);
+            auto entry = std::get<UseTraceEntry>(traceEntry);
             auto& uses = infoFor(infoFor(entry.value).root).uses;
             VERIFY(!uses.empty());
             VERIFY(uses.back() == entry.use);
@@ -448,10 +445,7 @@ void UninterpretedEquality::beginBacktrack(Solver& solver) {
         }
     }
 
-    int_t diseqTargetSize = disequalityDecisionPoints[lastLevelToRevert];
-    while ((int_t)disequalityTrace.size() > diseqTargetSize) {
-        auto [diseqPair] = disequalityTrace.back();
-        disequalityTrace.pop_back();
+    for (auto [diseqPair] : disequalityTrace.backtrackedReverse(solver)) {
         auto [source, target] = solver.at(diseqPair);
 
         auto removeDisequality = [this, diseqPair](Value parent) {
@@ -461,24 +455,25 @@ void UninterpretedEquality::beginBacktrack(Solver& solver) {
             VERIFY(*it == diseqPair.pairId());
             disequalities.erase(it);
         };
-        forEachParentOf(source, removeDisequality, eqUseTargetSize);
-        forEachParentOf(target, removeDisequality, eqUseTargetSize);
+        forEachParentOf(source, removeDisequality, backtrackedBegin);
+        forEachParentOf(target, removeDisequality, backtrackedBegin);
     }
-    disequalityDecisionPoints.resize(lastLevelToRevert);
+    disequalityTrace.truncate(solver);
 }
 
 void UninterpretedEquality::endBacktrack(Solver& solver) {
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-    int_t targetSize = equalityUseDecisionPoints[lastLevelToRevert];
-    for (int_t i = targetSize; i < (int_t)equalityUseTrace.size(); i++) {
-        if (std::holds_alternative<EqualityTraceEntry>(equalityUseTrace[i]))
-            infoFor(std::get<EqualityTraceEntry>(equalityUseTrace[i]).roots.target).tracePosition.reset();
+    // The entries are only dropped here, a reason of a reverted assignment may still name them
+    for (const auto& traceEntry : equalityUseTrace.backtrackedChrono(solver)) {
+        if (std::holds_alternative<EqualityTraceEntry>(traceEntry))
+            infoFor(std::get<EqualityTraceEntry>(traceEntry).roots.target).tracePosition.reset();
     }
-    equalityUseTrace.erase(equalityUseTrace.begin() + targetSize, equalityUseTrace.end());
-    equalityUseDecisionPoints.resize(lastLevelToRevert);
+    equalityUseTrace.truncate(solver);
 }
 
 void UninterpretedEquality::checkInvariances(Solver& solver) {
+    equalityUseTrace.checkInvariances(solver);
+    disequalityTrace.checkInvariances(solver);
+
     auto checkValue = [this](Value value) {
         const auto& info = infoFor(value);
         const auto& rootInfo = infoFor(info.root);
@@ -487,7 +482,7 @@ void UninterpretedEquality::checkInvariances(Solver& solver) {
             VERIFY(!info.tracePosition.has_value());
         } else {
             VERIFY(rootInfo.tree[info.treeOffset].value == value);
-            const auto& entry = equalityUseTrace[info.tracePosition->index];
+            const auto& entry = equalityUseTrace[info.tracePosition.value()];
             VERIFY(std::holds_alternative<EqualityTraceEntry>(entry));
             VERIFY(value == std::get<EqualityTraceEntry>(entry).roots.target);
         }

@@ -58,8 +58,7 @@ void MemoryLocationSets::addWord(Solver& solver, ElementId element, Containment 
 }
 
 void MemoryLocationSets::addPending(Solver& solver, ElementId element, Containment cont) {
-    uint32_t index = pending.size();
-    pending.push_back({ .element = element, .containment = cont });
+    uint32_t index = pending.push({ .element = element, .containment = cont });
     stateOf(element).pendingIndices.push_back(index);
 
     // The declaration may be joined to the one of the representative from either side, so both are
@@ -78,7 +77,7 @@ void MemoryLocationSets::promotePending(Solver& solver, const ElementState& stat
     // The link that joined the declarations is of the current decision level, so the word registered
     // here is unregistered again by the same backtrack that reverts the promotion.
     entry.promoted = true;
-    promotionTrace.push_back(index);
+    promotionTrace.push(index);
     addWord(solver, entry.element, entry.containment);
 }
 
@@ -107,7 +106,7 @@ void MemoryLocationSets::propagateContainment(Solver& solver, ElementId element,
             // everything recorded here is reverted again by the same backtrack that reverts the
             // assignment.
             state.representative = set;
-            representativeTrace.push_back(element);
+            representativeTrace.push(element);
             newRepresentative = true;
 
             // The declarations of the pending containments are compared against this one, so any of
@@ -199,57 +198,41 @@ ClauseAndIndex MemoryLocationSets::reasonToClause(Solver& solver, Bool assignedL
 
 void MemoryLocationSets::newDecisionLevel(Solver& solver) {
     prefixes.newDecisionLevel(solver);
-    pendingDecisionPoints.push_back(pending.size());
-    representativeDecisionPoints.push_back(representativeTrace.size());
-    promotionDecisionPoints.push_back(promotionTrace.size());
-    VERIFY((int_t)pendingDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    pending.newDecisionLevel(solver);
+    representativeTrace.newDecisionLevel(solver);
+    promotionTrace.newDecisionLevel(solver);
 }
 
 void MemoryLocationSets::beginBacktrack(Solver& solver) {
     prefixes.beginBacktrack(solver);
 
-    int_t lastLevelToRevert = solver.currentDecisionLevel() + 1;
-
     // A promotion is of the level of the link that joined the declarations, which is also the level
-    // the word was registered at, so reverting the one reverts the other
-    int_t promotionTargetSize = promotionDecisionPoints[lastLevelToRevert];
-    while ((int_t)promotionTrace.size() > promotionTargetSize) {
-        pending[promotionTrace.back()].promoted = false;
-        promotionTrace.pop_back();
-    }
-    promotionDecisionPoints.resize(lastLevelToRevert);
+    // the word was registered at, so reverting the one reverts the other. The promotions have to go
+    // first, they name the pending containments.
+    for (uint32_t index : promotionTrace.backtrackedReverse(solver))
+        pending[index].promoted = false;
+    promotionTrace.truncate(solver);
 
     // The uses naming these entries were registered at the same level, so they are already gone
-    int_t pendingTargetSize = pendingDecisionPoints[lastLevelToRevert];
-    while ((int_t)pending.size() > pendingTargetSize) {
-        auto& indices = stateOf(pending.back().element).pendingIndices;
+    for (uint32_t index : pending.backtrackedPositionsReverse(solver)) {
+        auto& indices = stateOf(pending[index].element).pendingIndices;
         VERIFY(!indices.empty());
-        VERIFY(indices.back() == pending.size() - 1);
+        VERIFY(indices.back() == index);
         indices.pop_back();
-        pending.pop_back();
     }
-    pendingDecisionPoints.resize(lastLevelToRevert);
+    pending.truncate(solver);
 
-    int_t representativeTargetSize = representativeDecisionPoints[lastLevelToRevert];
-    while ((int_t)representativeTrace.size() > representativeTargetSize) {
-        stateOf(representativeTrace.back()).representative.reset();
-        representativeTrace.pop_back();
-    }
-    representativeDecisionPoints.resize(lastLevelToRevert);
+    for (ElementId element : representativeTrace.backtrackedReverse(solver))
+        stateOf(element).representative.reset();
+    representativeTrace.truncate(solver);
 }
 
 void MemoryLocationSets::checkInvariances(Solver& solver) {
     prefixes.checkInvariances(solver);
 
-    // The entries of a level are appended after its decision point, so the points only grow
-    auto checkDecisionPoints = [&solver](const std::vector<uint32_t>& points, size_t traceSize) {
-        VERIFY((int_t)points.size() == solver.currentDecisionLevel() + 1);
-        VERIFY(std::ranges::is_sorted(points));
-        VERIFY(points.empty() || points.back() <= traceSize);
-    };
-    checkDecisionPoints(pendingDecisionPoints, pending.size());
-    checkDecisionPoints(representativeDecisionPoints, representativeTrace.size());
-    checkDecisionPoints(promotionDecisionPoints, promotionTrace.size());
+    pending.checkInvariances(solver);
+    representativeTrace.checkInvariances(solver);
+    promotionTrace.checkInvariances(solver);
 
     std::vector<std::vector<uint32_t>> expectedIndices;
     std::vector<uint32_t> expectedPromotions;
@@ -281,7 +264,7 @@ void MemoryLocationSets::checkInvariances(Solver& solver) {
         VERIFY(elementStates[i].pendingIndices == expectedIndices[i]);
     }
 
-    std::vector<uint32_t> promotions = promotionTrace;
+    std::vector<uint32_t> promotions(promotionTrace.begin(), promotionTrace.end());
     std::ranges::sort(promotions);
     VERIFY(promotions == expectedPromotions);
 }

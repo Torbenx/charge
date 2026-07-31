@@ -124,7 +124,7 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.sat.hasConflicts());
     solver.sat.analyzeConflicts();
-    solver.backtrack(0);
+    VERIFY(solver.currentDecisionLevel() == -1);
     solver.sat.propagate();
 
     EXPECT_FALSE(solver.assignedTrue(eq));
@@ -133,7 +133,7 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.sat.hasConflicts());
     solver.sat.analyzeConflicts();
-    solver.backtrack(0);
+    VERIFY(solver.currentDecisionLevel() == -1);
     solver.sat.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
@@ -162,7 +162,7 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.sat.hasConflicts());
     solver.sat.analyzeConflicts();
-    solver.backtrack(0);
+    VERIFY(solver.currentDecisionLevel() == -1);
     solver.sat.propagate();
 
     EXPECT_FALSE(solver.assignedTrue(eq));
@@ -177,7 +177,7 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
     solver.sat.propagate();
     EXPECT_TRUE(solver.sat.hasConflicts());
     solver.sat.analyzeConflicts();
-    solver.backtrack(0);
+    VERIFY(solver.currentDecisionLevel() == -1);
     solver.sat.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));

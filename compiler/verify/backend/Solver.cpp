@@ -65,6 +65,7 @@ int_t Solver::currentDecisionLevel() const {
     return impl().sat.currentDecisionLevel();
 }
 void Solver::backtrack(int_t targetLevel) {
+    VERIFY(targetLevel <= currentDecisionLevel());
     impl().sat.beginBacktrack(targetLevel);
     impl().sat.endBacktrack();
 }
@@ -228,8 +229,8 @@ void Solver::addUse(Value value, Use use) {
 }
 
 void SolverImpl::propagateRewrite(Use use) {
-#define USE_KIND(name, implMember)        \
-    case UseKind::name:                   \
+#define USE_KIND(name, implMember)               \
+    case UseKind::name:                          \
         implMember.propagateRewrite(*this, use); \
         break;
     switch (use.kind()) {

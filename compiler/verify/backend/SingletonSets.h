@@ -2,6 +2,7 @@
 
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
+#include <verify/backend/Trace.h>
 
 namespace verify::backend {
 
@@ -58,8 +59,7 @@ private:
 
     std::vector<ElementState> elementStates;
 
-    std::vector<Sets::ElementId> singletonTrace;
-    std::vector<uint32_t> singletonDecisionPoints;
+    Trace<Sets::ElementId> singletonTrace;
 
     SortData<ElementInfo> elementInfos;
     TheoryData<SingletonInfo> singletonInfos;

@@ -29,6 +29,7 @@ target_sources(${PROJECT_NAME}
     Solver.cpp
     Solver.h
     SolverImpl.h
+    Trace.h
     Types.h
     UninterpretedEquality.cpp
     UninterpretedEquality.h

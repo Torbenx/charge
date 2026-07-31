@@ -319,6 +319,7 @@ bool SatCore::analyzeConflicts() {
 void SatCore::beginBacktrack(int_t targetLevel) {
     VERIFY(!backtracking);
     VERIFY(targetLevel >= 0);
+    VERIFY(targetLevel <= currentDecisionLevel());
     backtracking = true;
     TracePosition position = decisions[targetLevel];
     decisions.erase(decisions.begin() + targetLevel, decisions.end());

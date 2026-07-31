@@ -2,6 +2,7 @@
 
 #include <FlatTreeSet.h>
 #include <verify/backend/SatCore.h>
+#include <verify/backend/Trace.h>
 #include <verify/backend/Use.h>
 
 #include <queue>
@@ -129,14 +130,11 @@ private:
     TheoryData<PairInfo, TheoryId::MemberEquality, 2> pairs;
     CompositeMembers compositeMembers;
     SortData<VariableInfo, Sort::Member> variables;
-    std::vector<RewriteTraceEntry> rewriteTrace;
-    std::vector<PairHandle> assignedPairTrace;
-    std::vector<UseTraceEntry> useTrace;
+    Trace<RewriteTraceEntry, RewriteTracePosition> rewriteTrace;
+    Trace<PairHandle, AssignedPairTracePosition> assignedPairTrace;
+    Trace<UseTraceEntry> useTrace;
     std::priority_queue<RewriteTracePosition> dirtyRewrites;
     std::priority_queue<PairHandle, std::vector<PairHandle>, PairHandleCompare> dirtyPairs;
-    std::vector<uint32_t> rewriteDecisionPoints;
-    std::vector<uint32_t> assignedPairDecisionPoints;
-    std::vector<uint32_t> useDecisionPoints;
     std::vector<Member> externalPropagationQueue;
 };
 
