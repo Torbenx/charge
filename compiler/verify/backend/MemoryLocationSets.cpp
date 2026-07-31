@@ -42,7 +42,7 @@ Sets& MemoryLocationSets::memorySets(Solver& solver) {
 }
 
 Bool MemoryLocationSets::containmentOf(Solver& solver, MemberPrefixes::WordId word) {
-    return memorySets(solver).mapToBool(solver, prefixes.elementOf(word), prefixes.payloadOf(word));
+    return memorySets(solver).mapToBool(solver, prefixes.elementOf(word), prefixes.containmentOf(word));
 }
 
 bool MemoryLocationSets::joinedRepresentative(Solver& solver, const ElementState& state, MemoryDeclaration declaration) {
@@ -54,7 +54,7 @@ bool MemoryLocationSets::joinedRepresentative(Solver& solver, const ElementState
 
 void MemoryLocationSets::addWord(Solver& solver, ElementId element, Containment cont) {
     Member member = locationOf(cont.set()).member;
-    prefixes.addWord(solver, element, member, cont);
+    prefixes.addWord(solver, member, element, cont);
 }
 
 void MemoryLocationSets::addPending(Solver& solver, ElementId element, Containment cont) {

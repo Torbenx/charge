@@ -12,10 +12,7 @@ uint32_t MemberPrefixes::childNode(uint32_t parent, Member letter) {
     auto [it, inserted] = edges.try_emplace(Edge { parent, letter }, (uint32_t)nodes.size());
     if (inserted) {
         const Node& parentNode = nodes[parent];
-        nodes.push_back({ .parent = parent,
-            .letter = letter,
-            .element = parentNode.element,
-            .depth = parentNode.depth + 1 });
+        nodes.push_back({ .letter = letter, .element = parentNode.element });
     }
     return it->second;
 }
@@ -83,11 +80,7 @@ void MemberPrefixes::detach(WordId w) {
     if (info.isPath()) {
         VERIFY(info.occurrenceIndices.size() == info.path.size());
         for (int_t k = info.path.size() - 1; k >= 0; k--) {
-            uint32_t node = info.path[k];
-            // The depth of a node is unique, so it is also the index into the path of every other
-            // path word occupying it.
-            VERIFY(nodeOf(node).depth == (uint32_t)k);
-            removeAt(nodeOf(node).aOccurrences, info.occurrenceIndices[k], k);
+            removeAt(nodeOf(info.path[k]).aOccurrences, info.occurrenceIndices[k], k);
         }
     } else {
         VERIFY(info.occurrenceIndices.size() == 1);
@@ -99,16 +92,15 @@ void MemberPrefixes::detach(WordId w) {
     info.path.clear();
 }
 
-MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, ElementId element, Member expression, Sets::Containment payload) {
+MemberPrefixes::WordId MemberPrefixes::addWord(Solver& solver, Member expression, ElementId element, Sets::Containment containment) {
     while (element.id() >= elementRoots.size()) {
         uint32_t root = nodes.size();
-        nodes.push_back({ .parent = NIL, .letter = (Member)INVALID_VALUE, .element = ElementId(elementRoots.size()), .depth = 0 });
+        nodes.push_back({ .letter = (Member)INVALID_VALUE, .element = ElementId(elementRoots.size()) });
         elementRoots.push_back(root);
     }
 
     WordId w(words.size());
-    words.push_back({ .element = element, .expression = expression, .payload = payload });
-
+    words.push_back({ .expression = expression, .element = element, .containment = containment });
     solver.addUse(expression, Use(UseKind::MemberPrefixWord, w.id()));
 
     buildPath(solver, w);
@@ -146,7 +138,7 @@ void MemberPrefixes::propagateRewrite(Solver& solver, Use use) {
     VERIFY(use.kind() == UseKind::MemberPrefixWord);
     WordId w = WordId(use.id());
 
-    rebuiltTrace.push_back(w);
+    rewriteTrace.push_back(w);
     detach(w);
     buildPath(solver, w);
     attach(solver, w, true);
@@ -154,9 +146,9 @@ void MemberPrefixes::propagateRewrite(Solver& solver, Use use) {
 
 void MemberPrefixes::newDecisionLevel(Solver& solver) {
     wordDecisionPoints.push_back(words.size());
-    rebuiltDecisionPoints.push_back(rebuiltTrace.size());
+    rewriteDecisionPoints.push_back(rewriteTrace.size());
     VERIFY((int_t)wordDecisionPoints.size() == solver.currentDecisionLevel() + 1);
-    VERIFY((int_t)rebuiltDecisionPoints.size() == solver.currentDecisionLevel() + 1);
+    VERIFY((int_t)rewriteDecisionPoints.size() == solver.currentDecisionLevel() + 1);
 }
 
 void MemberPrefixes::beginBacktrack(Solver& solver) {
@@ -167,13 +159,10 @@ void MemberPrefixes::beginBacktrack(Solver& solver) {
     for (int_t i = (int_t)words.size() - 1; i >= targetSize; i--)
         detach(WordId(i));
 
-    // Members reverted the rewrites of these levels before this was called, so the normal form a
-    // word goes back to is recomputed from it, see \ref rebuilds. Recomputing is idempotent, so a
-    // word recorded several times needs no special treatment.
-    int_t rebuiltTargetSize = rebuiltDecisionPoints[lastLevelToRevert];
-    while ((int_t)rebuiltTrace.size() > rebuiltTargetSize) {
-        WordId w = rebuiltTrace.back();
-        rebuiltTrace.pop_back();
+    int_t rewriteTargetSize = rewriteDecisionPoints[lastLevelToRevert];
+    while ((int_t)rewriteTrace.size() > rewriteTargetSize) {
+        WordId w = rewriteTrace.back();
+        rewriteTrace.pop_back();
         // The word was unregistered above, its normal form no longer matters
         if (isBacktracked(w))
             continue;
@@ -184,7 +173,7 @@ void MemberPrefixes::beginBacktrack(Solver& solver) {
         // nothing to raise here. Which is required, the assignments are still being reverted.
         attach(solver, w, false);
     }
-    rebuiltDecisionPoints.resize(lastLevelToRevert);
+    rewriteDecisionPoints.resize(lastLevelToRevert);
 }
 
 void MemberPrefixes::endBacktrack(Solver& solver) {
@@ -204,31 +193,26 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
         VERIFY(points.empty() || points.back() <= traceSize);
     };
     checkDecisionPoints(wordDecisionPoints, words.size());
-    checkDecisionPoints(rebuiltDecisionPoints, rebuiltTrace.size());
+    checkDecisionPoints(rewriteDecisionPoints, rewriteTrace.size());
 
-    // A word is rebuilt at the level it was registered at or above, so a rebuild is never left
-    // behind by the backtrack that unregistered its word
-    for (WordId w : rebuiltTrace)
+    for (WordId w : rewriteTrace)
         VERIFY(w.id() < words.size());
 
     for (uint32_t node = 0; node < nodes.size(); node++) {
         const Node& n = nodes[node];
-        if (n.parent != NIL) {
-            VERIFY(nodes[n.parent].element == n.element);
-            VERIFY(nodes[n.parent].depth + 1 == n.depth);
-            VERIFY(edges.at({ n.parent, n.letter }) == node);
-        }
 
         for (uint32_t i = 0; i < n.aOccurrences.size(); i++) {
             const WordInfo& info = words[n.aOccurrences[i].id()];
             VERIFY(info.isPath());
-            VERIFY(info.path[n.depth] == node);
-            VERIFY(info.occurrenceIndices[n.depth] == i);
+            auto it = std::ranges::find(info.path, node);
+            VERIFY(it != info.path.end());
+            VERIFY(info.occurrenceIndices[it - info.path.begin()] == i);
         }
         for (uint32_t i = 0; i < n.bTerminals.size(); i++) {
             const WordInfo& info = words[n.bTerminals[i].id()];
             VERIFY(!info.isPath());
             VERIFY(info.path.back() == node);
+            VERIFY(info.occurrenceIndices.size() == 1);
             VERIFY(info.occurrenceIndices[0] == i);
         }
     }
@@ -243,7 +227,6 @@ void MemberPrefixes::checkInvariances(Solver& solver) {
         VERIFY(info.path.front() == elementRoots[info.element.id()]);
         for (uint32_t k = 0; k < normalForm.size(); k++) {
             VERIFY(nodes[info.path[k + 1]].letter == normalForm[k]);
-            VERIFY(nodes[info.path[k + 1]].parent == info.path[k]);
         }
     }
 }

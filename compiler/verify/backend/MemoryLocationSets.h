@@ -113,7 +113,7 @@ private:
     Bool containmentOf(Solver&, MemberPrefixes::WordId);
     //! The declaration of the location a word of \ref prefixes was registered for
     MemoryDeclaration declarationOf(MemberPrefixes::WordId word) {
-        return locationOf(prefixes.payloadOf(word).set()).declaration;
+        return locationOf(prefixes.containmentOf(word).set()).declaration;
     }
 
     Sets& memorySets(Solver&);
