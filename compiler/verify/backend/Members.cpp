@@ -116,6 +116,13 @@ std::vector<Member> Members::rewrite(Member m) {
     return result;
 }
 
+std::span<const Member> Members::definingExpression(Member m) {
+    if (m.composite())
+        return compositeMember(m);
+    // Literals and variables are their own expression, VariableInfo::self provides the storage
+    return { &variables[m].self, 1 };
+}
+
 void Members::addUse(Solver&, Value value, Use use) {
     VERIFY(sortOf(value.theory()) == Sort::Member);
     Member expression = (Member)value;

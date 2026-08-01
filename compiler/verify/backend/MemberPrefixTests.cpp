@@ -6,7 +6,7 @@ namespace verify::backend {
 
 namespace {
 
-    Member newLiteral(Solver& solver) { return (Member)solver.impl().newValue(TheoryId::MemberLiterals); }
+    Member newLiteral(Solver& solver) { return solver.newMemberLiteral(); }
 
     //! A declaration with an element of the memory sets, i.e. one instance of the prefix index
     struct Fixture {

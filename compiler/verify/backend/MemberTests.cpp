@@ -4,7 +4,33 @@
 
 namespace verify::backend {
 
-static Member newLiteral(Solver& solver) { return (Member)solver.impl().newValue(TheoryId::MemberLiterals); }
+static Member newLiteral(Solver& solver) { return solver.newMemberLiteral(); }
+
+TEST(VerifyBackend, MembersDefiningExpression) {
+    SolverImpl solver;
+    Member l1 = newLiteral(solver);
+    Member l2 = newLiteral(solver);
+    Member v = solver.newAuxMemberVariable();
+    Member composite = solver.composeMembers({ l1, v, l2 });
+
+    auto expression = [&](Member m) {
+        auto expr = solver.members.definingExpression(m);
+        return std::vector<Member>(expr.begin(), expr.end());
+    };
+
+    // Literals and variables are their own expression, the identity is the empty one
+    EXPECT_EQ(expression(l1), std::vector<Member> { l1 });
+    EXPECT_EQ(expression(v), std::vector<Member> { v });
+    EXPECT_TRUE(expression(identity_member).empty());
+    EXPECT_EQ(expression(composite), (std::vector<Member> { l1, v, l2 }));
+
+    // The expression is the definition, so it is unaffected by rewrites
+    solver.decideTrue(solver.equality(v, l2));
+    solver.sat.propagate();
+    EXPECT_EQ(solver.members.rewrite(composite), (std::vector<Member> { l1, l2, l2 }));
+    EXPECT_EQ(expression(v), std::vector<Member> { v });
+    EXPECT_EQ(expression(composite), (std::vector<Member> { l1, v, l2 }));
+}
 
 TEST(VerifyBackend, MembersBasic1) {
     SolverImpl solver;

@@ -15,6 +15,8 @@ struct Members {
     std::vector<Member> rewrite(Member m);
     //! Append the normal form of \p m to \p out
     void appendRewrite(Member m, std::vector<Member>& out);
+    //! The expression \p m is defined by, without applying any rewrites
+    std::span<const Member> definingExpression(Member m);
 
     void addUse(Solver&, Value expression, Use use);
 

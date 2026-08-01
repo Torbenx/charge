@@ -63,8 +63,10 @@ struct SolverImpl : Solver, SatCore::Interface {
     // DataManager must be initialized first, everything depends on it
     DataManager data;
 
-    // Setup literal infos before SatCore
+    // Data instances cannot reach any theories but may be accessed by them
     SortData<SatCore::LiteralInfo, Sort::Boolean> literalInfos;
+    TheoryData<std::vector<Invariant>, TheoryId::MemberLiterals> memberLiteralInvariants;
+
     // Initialize SatCore and Clauses next, some theories may perform assignments during construction
     SatCore sat;
     Clauses clauses;

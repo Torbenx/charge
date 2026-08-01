@@ -55,6 +55,11 @@ struct Solver {
     Set newAuxUninterpretedConstantSet();
     MemoryDeclaration newAuxMemoryDeclarationVariable();
 
+    //! \p invariants are the invariants of the parent type that use the member
+    Member newMemberLiteral(std::vector<Invariant> invariants = {});
+    //! The invariants of the parent type that use the member literal
+    std::span<const Invariant> usingInvariants(Member literal);
+
     /*! \brief Return whether \p a and \p b are always disequal
 
     If \p a and \p b are always disequal any values less the either \p a or \p b must also be always

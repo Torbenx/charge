@@ -12,6 +12,7 @@ Solver::Solver() { }
 
 SolverImpl::SolverImpl()
     : literalInfos(*this, Sort::Boolean)
+    , memberLiteralInvariants(*this)
     , clauses(*this)
     , builtinTrueFalse(*this)
     , uninterpConstantEquality(*this, theory_params::eqUninterpretedConstant)
@@ -363,6 +364,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::TrueFalse:
     case TheoryId::ClauseGlueVariables:
     case TheoryId::AuxBooleanVariables:
+    case TheoryId::MemberConstraintBy:
     case TheoryId::AuxUninterpretedConstants:
     case TheoryId::MemberLiterals:
     case TheoryId::AuxMemberVariables:
@@ -615,6 +617,12 @@ bool Solver::alwaysDisequal(Value a, Value b) {
         if (a == !(Bool)b)
             return true;
         return false;
+    case Sort::Member:
+        // TODO: This must be expended, it currently doesn't compose correctly with rewriting:
+        //       a.l1 < l1, but l1 != l2 is detected and a.l1 != l2 is not.
+        if (a.theory() == TheoryId::MemberLiterals && b.theory() == TheoryId::MemberLiterals)
+            return a != b;
+        return false;
     case Sort::InvariantSet:
         if (a.theory() == TheoryId::InvariantSingletonSets && b.theory() == TheoryId::InvariantSingletonSets) {
             auto& isets = impl().invariantSets;
@@ -680,7 +688,7 @@ bool Solver::assignedEqual(Value a, Value b) {
     }
 }
 
-// ------------------------- Value factories ------------------------
+// ----------------------- Aux Value factories ----------------------
 
 Value SolverImpl::newValue(TheoryId theory) {
     return data.newValue(theory, 1);
@@ -711,4 +719,20 @@ Member Solver::newAuxMemberVariable() {
 MemoryDeclaration Solver::newAuxMemoryDeclarationVariable() {
     return (MemoryDeclaration)impl().newValue(TheoryId::AuxMemoryDeclarationVariables);
 }
+
+// -------------------- Member Literal factories --------------------
+
+Member Solver::newMemberLiteral(std::vector<Invariant> invariants) {
+    // Note: The invariants must not be modified after construction,
+    //       doing so will break the solver.
+    Member result = (Member)impl().newValue(TheoryId::MemberLiterals);
+    impl().memberLiteralInvariants[result] = std::move(invariants);
+    return result;
+}
+
+std::span<const Invariant> Solver::usingInvariants(Member literal) {
+    VERIFY(literal.theory() == TheoryId::MemberLiterals);
+    return impl().memberLiteralInvariants[literal];
+}
+
 }

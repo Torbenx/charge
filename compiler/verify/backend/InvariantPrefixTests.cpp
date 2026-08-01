@@ -15,7 +15,7 @@ namespace {
         Invariant i1 { 0 };
         Invariant i2 { 1 };
 
-        Member newLiteral() { return (Member)solver.newValue(TheoryId::MemberLiterals); }
+        Member newLiteral() { return solver.newMemberLiteral(); }
 
         Letters spell(InvariantWord word) {
             Letters letters;
@@ -51,7 +51,7 @@ namespace {
         Invariant i1 { 0 };
         Invariant i2 { 1 };
 
-        Member newLiteral() { return (Member)solver.newValue(TheoryId::MemberLiterals); }
+        Member newLiteral() { return solver.newMemberLiteral(); }
 
         Sets::ElementId newElement() {
             auto e = solver.invariantSetsBaseTheory.newElement(solver);
