@@ -269,7 +269,7 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
         break;
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
-    case TheoryId::LeafInvariantSets:
+    case TheoryId::InvariantSingletonSets:
         invariantSets.propagateContainment(*this, element, containment);
         break;
     default:
@@ -282,7 +282,7 @@ bool SolverImpl::alwaysNonEmpty(Set set) {
     case Sort::UninterpretedConstantSet:
         return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
     case Sort::InvariantSet:
-        return set.theory() == TheoryId::LeafInvariantSets;
+        return set.theory() == TheoryId::InvariantSingletonSets;
     default:
         return false;
     }
@@ -389,7 +389,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         auto& invariants = impl().invariantSets;
         return locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
     }
-    case TheoryId::LeafInvariantSets: {
+    case TheoryId::InvariantSingletonSets: {
         auto& invariants = impl().invariantSets;
         auto locationOrdering = locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
         if (locationOrdering != 0)
@@ -479,8 +479,6 @@ void SolverImpl::onNewPair(PairHandle handle) {
     } else if (sort == Sort::InvariantSet) {
         setTheory(sort).newPair(*this, handle);
         if (InvariantSets::isInvariantSet(a) && a.theory() == b.theory()) {
-            // Two sets of the same kind hold the same leafs when they describe the same location,
-            // and a leaf set is described by its invariant on top of that.
             TheoryId theory = a.theory();
             MemoryLocation locationA = invariantSets.locationOf((InvariantSet)a);
             MemoryLocation locationB = invariantSets.locationOf((InvariantSet)b);
@@ -489,7 +487,7 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool memberEq = equality(locationA.member, locationB.member);
             // Note: The other direction does not always hold because when both sets are empty they would also be equal.
             addClause({ setEq, !declarationEq, !memberEq });
-            if (theory == TheoryId::LeafInvariantSets) {
+            if (theory == TheoryId::InvariantSingletonSets) {
                 addClause({ !setEq, declarationEq });
                 addClause({ !setEq, memberEq });
             }
@@ -618,7 +616,7 @@ bool Solver::alwaysDisequal(Value a, Value b) {
             return true;
         return false;
     case Sort::InvariantSet:
-        if (a.theory() == TheoryId::LeafInvariantSets && b.theory() == TheoryId::LeafInvariantSets) {
+        if (a.theory() == TheoryId::InvariantSingletonSets && b.theory() == TheoryId::InvariantSingletonSets) {
             auto& isets = impl().invariantSets;
             if (isets.invariantOf((InvariantSet)a) != isets.invariantOf((InvariantSet)b))
                 return true;

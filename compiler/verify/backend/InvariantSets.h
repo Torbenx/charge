@@ -11,8 +11,8 @@ namespace verify::backend {
 
 //! A letter in the invariant prefix index
 /*!
-Every step into a member is preceded by a narrow, which is the step from a location to the leafs
-strictly below it, and an invariant letter is the step from a location to the invariant leaf.
+Every step into a member is preceded by a narrow, which is the step from a location to the invariants
+strictly below it, and an invariant letter is the step from a location to the invariant singleton.
 So the letters of a location with the member m1...mn are
 
     inclusive:   narrow m1 ... narrow mn
@@ -82,7 +82,7 @@ struct InvariantWordSuffix {
 struct InvariantWord {
     static InvariantWord inclusive(Member member) { return { member, InvariantWordSuffix::empty() }; }
     static InvariantWord exclusive(Member member) { return { member, InvariantWordSuffix::narrow() }; }
-    static InvariantWord leaf(Member member, Invariant invariant) {
+    static InvariantWord singleton(Member member, Invariant invariant) {
         return { member, InvariantWordSuffix::invariant(invariant) };
     }
 
@@ -112,13 +112,12 @@ private:
 
 //! The sets of invariants described by a memory location
 /*!
-A leaf of this theory is the instance of one invariant at one memory location.
 There are three kinds of sets:
 - An inclusive location set holds the invariants of its location and those of its members
 - An exclusive location set holds only the invariants of its members
-- An invariant leaf set holds a single invariant
+- An invariant singleton set holds a single invariant
 
-Note that these sets may not contain any elements at all, even the leaf sets.
+Note that the non-singleton sets may not contain any elements at all.
 */
 struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
     static constexpr Params PARAMS = {
@@ -143,9 +142,9 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         return exclusiveSet(solver, { declaration, member });
     }
 
-    InvariantSet leafSet(Solver&, MemoryLocation, Invariant);
-    InvariantSet leafSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
-        return leafSet(solver, { declaration, member }, invariant);
+    InvariantSet singletonSet(Solver&, MemoryLocation, Invariant);
+    InvariantSet singletonSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
+        return singletonSet(solver, { declaration, member }, invariant);
     }
 
     //! Whether \p value is one of the three kinds of sets of this theory
@@ -153,7 +152,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         switch (value.theory()) {
         case TheoryId::InclusiveLocationInvariantSets:
         case TheoryId::ExclusiveLocationInvariantSets:
-        case TheoryId::LeafInvariantSets:
+        case TheoryId::InvariantSingletonSets:
             return true;
         default:
             return false;
@@ -166,7 +165,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
     }
 
     Invariant invariantOf(InvariantSet set) const {
-        VERIFY(set.theory() == TheoryId::LeafInvariantSets);
+        VERIFY(set.theory() == TheoryId::InvariantSingletonSets);
         return setInfos[set].invariant.value();
     }
 
@@ -186,19 +185,19 @@ private:
     struct SetInfo {
         SetInfo() = default;
         MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
-        //! Holds the invariant for LeafInvariantSets
+        //! Holds the invariant for InvariantSingletonSets
         std::optional<Invariant> invariant;
     };
 
-    struct LeafKey {
+    struct SingletonKey {
         MemoryLocation location;
         Invariant invariant;
 
-        bool operator==(const LeafKey&) const = default;
+        bool operator==(const SingletonKey&) const = default;
     };
 
-    struct LeafHash {
-        size_t operator()(const LeafKey& key) const {
+    struct SingletonHash {
+        size_t operator()(const SingletonKey& key) const {
             size_t hash = MemoryLocationHash()(key.location);
             hash_combine(hash, key.invariant.id());
             return hash;
@@ -206,7 +205,7 @@ private:
     };
 
     struct ElementState {
-        std::optional<InvariantSet> leaf;
+        std::optional<InvariantSet> singleton;
     };
 
     // Note: The keys of these maps could be obtained from the stored values
@@ -226,9 +225,9 @@ private:
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
-    std::unordered_map<LeafKey, InvariantSet, LeafHash> leafSets;
+    std::unordered_map<SingletonKey, InvariantSet, SingletonHash> singletonSets;
 
-    Trace<ElementId> leafTrace;
+    Trace<ElementId> singletonTrace;
 };
 
 }

@@ -23,7 +23,7 @@ namespace {
             return letters;
         }
 
-        //! Whether the set of \p superset holds every leaf the set of \p subset holds
+        //! Whether the set of \p superset holds every singleton the set of \p subset holds
         /*!
         The words are ordered by the prefix relation, which is what the index detects hits with.
         */
@@ -63,14 +63,14 @@ namespace {
         InvariantSet inclusive(std::initializer_list<Member> members) { return inclusive(solver.composeMembers(members)); }
         InvariantSet exclusive(Member member) { return solver.invariantSets.exclusiveSet(solver, declaration, member); }
         InvariantSet exclusive(std::initializer_list<Member> members) { return exclusive(solver.composeMembers(members)); }
-        InvariantSet leaf(Member member, Invariant invariant) { return solver.invariantSets.leafSet(solver, declaration, member, invariant); }
-        InvariantSet leaf(std::initializer_list<Member> members, Invariant invariant) {
-            return leaf(solver.composeMembers(members), invariant);
+        InvariantSet singleton(Member member, Invariant invariant) { return solver.invariantSets.singletonSet(solver, declaration, member, invariant); }
+        InvariantSet singleton(std::initializer_list<Member> members, Invariant invariant) {
+            return singleton(solver.composeMembers(members), invariant);
         }
 
         InvariantSet otherInclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, otherDeclaration, member); }
-        InvariantSet otherLeaf(Member member, Invariant invariant) {
-            return solver.invariantSets.leafSet(solver, otherDeclaration, member, invariant);
+        InvariantSet otherSingleton(Member member, Invariant invariant) {
+            return solver.invariantSets.singletonSet(solver, otherDeclaration, member, invariant);
         }
 
         Bool declarationEquality() { return solver.equality(declaration, otherDeclaration); }
@@ -129,30 +129,30 @@ TEST(VerifyBackend, InvariantWordsAreSpelledWithNarrows) {
     // Every step into a member is preceded by a narrow, and the suffix tells the kinds apart
     EXPECT_EQ(f.spell(InvariantWord::inclusive(location)), (Letters { narrow, first, narrow, second }));
     EXPECT_EQ(f.spell(InvariantWord::exclusive(location)), (Letters { narrow, first, narrow, second, narrow }));
-    EXPECT_EQ(f.spell(InvariantWord::leaf(location, f.i1)),
+    EXPECT_EQ(f.spell(InvariantWord::singleton(location, f.i1)),
         (Letters { narrow, first, narrow, second, InvariantLetter::invariant(f.i1) }));
 
     // The whole declaration is the identity location, so its inclusive set is the empty word
     EXPECT_EQ(f.spell(InvariantWord::inclusive(identity_member)), (Letters {}));
     EXPECT_EQ(f.spell(InvariantWord::exclusive(identity_member)), (Letters { narrow }));
-    EXPECT_EQ(f.spell(InvariantWord::leaf(identity_member, f.i1)), (Letters { InvariantLetter::invariant(f.i1) }));
+    EXPECT_EQ(f.spell(InvariantWord::singleton(identity_member, f.i1)), (Letters { InvariantLetter::invariant(f.i1) }));
 }
 
 TEST(VerifyBackend, InvariantWordsOfOneLocation) {
     Fixture f;
     Member l1 = f.newLiteral();
 
-    // The inclusive set holds the leafs of the location itself and the ones below it
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::leaf(l1, f.i1)));
+    // The inclusive set holds the invariants of the location itself and the ones below it
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::singleton(l1, f.i1)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::exclusive(l1)));
 
-    // The exclusive set holds neither the leafs of the location nor its inclusive set
-    EXPECT_FALSE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::leaf(l1, f.i1)));
+    // The exclusive set holds neither the invariants of the location nor its inclusive set
+    EXPECT_FALSE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::singleton(l1, f.i1)));
     EXPECT_FALSE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::inclusive(l1)));
 
-    // The leafs of two invariants at one location are distinct, and every set holds itself
-    EXPECT_FALSE(f.holdsAllOf(InvariantWord::leaf(l1, f.i1), InvariantWord::leaf(l1, f.i2)));
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::leaf(l1, f.i1), InvariantWord::leaf(l1, f.i1)));
+    // The singletons of two invariants at one location are distinct, and every set holds itself
+    EXPECT_FALSE(f.holdsAllOf(InvariantWord::singleton(l1, f.i1), InvariantWord::singleton(l1, f.i2)));
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::singleton(l1, f.i1), InvariantWord::singleton(l1, f.i1)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::inclusive(l1)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::exclusive(l1)));
 }
@@ -166,12 +166,12 @@ TEST(VerifyBackend, InvariantWordsOfNestedLocations) {
     // A member of a location is below it, so the exclusive set holds everything of that member
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::inclusive(below)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::exclusive(below)));
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::leaf(below, f.i1)));
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(l1), InvariantWord::singleton(below, f.i1)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::inclusive(below)));
 
     // And nothing of the location above it
     EXPECT_FALSE(f.holdsAllOf(InvariantWord::inclusive(below), InvariantWord::inclusive(l1)));
-    EXPECT_FALSE(f.holdsAllOf(InvariantWord::inclusive(below), InvariantWord::leaf(l1, f.i1)));
+    EXPECT_FALSE(f.holdsAllOf(InvariantWord::inclusive(below), InvariantWord::singleton(l1, f.i1)));
 
     // The sets of two members of the same location are unrelated
     EXPECT_FALSE(f.holdsAllOf(InvariantWord::inclusive(l1), InvariantWord::inclusive(l2)));
@@ -184,15 +184,15 @@ TEST(VerifyBackend, InvariantWordsOfTheWholeDeclaration) {
 
     // The inclusive set of the identity location holds everything of the declaration
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(identity_member), InvariantWord::inclusive(l1)));
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(identity_member), InvariantWord::leaf(l1, f.i1)));
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(identity_member), InvariantWord::leaf(identity_member, f.i1)));
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(identity_member), InvariantWord::singleton(l1, f.i1)));
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::inclusive(identity_member), InvariantWord::singleton(identity_member, f.i1)));
 
-    // The exclusive one holds all of that except the leafs of the identity location itself. This is
+    // The exclusive one holds all of that except the invariants of the identity location itself. This is
     // what the leading narrow of every word is needed for.
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::inclusive(l1)));
     EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::exclusive(l1)));
-    EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::leaf(l1, f.i1)));
-    EXPECT_FALSE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::leaf(identity_member, f.i1)));
+    EXPECT_TRUE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::singleton(l1, f.i1)));
+    EXPECT_FALSE(f.holdsAllOf(InvariantWord::exclusive(identity_member), InvariantWord::singleton(identity_member, f.i1)));
 }
 
 TEST(VerifyBackend, InvariantWordsFollowRewrites) {
@@ -211,34 +211,34 @@ TEST(VerifyBackend, InvariantWordsFollowRewrites) {
     EXPECT_EQ(f.spell(InvariantWord::inclusive(v1)), f.spell(InvariantWord::inclusive(f.solver.composeMembers({ l1, l2 }))));
 }
 
-TEST(VerifyBackend, InvariantIndexInclusiveSetHoldsTheLeafsOfItsLocation) {
+TEST(VerifyBackend, InvariantIndexInclusiveSetHoldsTheInvariantsOfItsLocation) {
     IndexFixture f;
     Member l1 = f.newLiteral();
 
-    // The inclusive set of a location holds the leafs of the location itself
+    // The inclusive set of a location holds the invariants of the location itself
     f.decideNotIn(f.inclusive(l1));
     EXPECT_FALSE(f.hasConflicts());
-    f.decideIn(f.leaf(l1, f.i1));
+    f.decideIn(f.singleton(l1, f.i1));
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
-    EXPECT_TRUE(f.assignedNotIn(f.leaf(l1, f.i1)));
+    EXPECT_TRUE(f.assignedNotIn(f.singleton(l1, f.i1)));
 }
 
-TEST(VerifyBackend, InvariantIndexExclusiveSetSkipsTheLeafsOfItsLocation) {
+TEST(VerifyBackend, InvariantIndexExclusiveSetSkipsTheInvariantsOfItsLocation) {
     IndexFixture f;
     Member l1 = f.newLiteral();
     Member l2 = f.newLiteral();
 
     // The exclusive set of a location holds nothing of the location itself
     f.decideNotIn(f.exclusive(l1));
-    f.decideIn(f.leaf(l1, f.i1));
+    f.decideIn(f.singleton(l1, f.i1));
     EXPECT_FALSE(f.hasConflicts());
 
-    // but everything of its members. This needs an element of its own, a leaf is at one location.
+    // but everything of its members. This needs an element of its own, a singleton is at one location.
     Sets::ElementId other = f.newElement();
     f.decideNotIn(other, f.exclusive(l1));
-    f.decideIn(other, f.leaf({ l1, l2 }, f.i1));
+    f.decideIn(other, f.singleton({ l1, l2 }, f.i1));
     EXPECT_TRUE(f.hasConflicts());
 }
 
@@ -247,7 +247,7 @@ TEST(VerifyBackend, InvariantIndexExclusiveSetIsBelowTheInclusiveOne) {
     Member l1 = f.newLiteral();
     Member l2 = f.newLiteral();
 
-    // Excluding the leafs of a location excludes the ones of its members as well
+    // Excluding the invariants of a location excludes the ones of its members as well
     f.decideNotIn(f.inclusive(l1));
     f.decideIn(f.exclusive(l1));
     EXPECT_TRUE(f.hasConflicts());
@@ -264,17 +264,17 @@ TEST(VerifyBackend, InvariantIndexWholeDeclaration) {
     IndexFixture f;
     Member l1 = f.newLiteral();
 
-    // The exclusive set of the identity location holds the leafs of everything below it, which is
+    // The exclusive set of the identity location holds the invariants of everything below it, which is
     // what the leading narrow of every word is needed for
     f.decideNotIn(f.exclusive(identity_member));
-    f.decideIn(f.leaf(l1, f.i1));
+    f.decideIn(f.singleton(l1, f.i1));
     EXPECT_TRUE(f.hasConflicts());
     f.resolveConflicts();
 
     // but not the ones of the declaration itself
     Sets::ElementId other = f.newElement();
     f.decideNotIn(other, f.exclusive(identity_member));
-    f.decideIn(other, f.leaf(identity_member, f.i1));
+    f.decideIn(other, f.singleton(identity_member, f.i1));
     EXPECT_FALSE(f.hasConflicts());
 }
 
@@ -282,15 +282,15 @@ TEST(VerifyBackend, InvariantIndexDistinctInvariants) {
     IndexFixture f;
     Member l1 = f.newLiteral();
 
-    // The leafs of two invariants at one location are unrelated
-    f.decideNotIn(f.leaf(l1, f.i1));
-    f.decideIn(f.leaf(l1, f.i2));
+    // The singletons of two invariants at one location are unrelated
+    f.decideNotIn(f.singleton(l1, f.i1));
+    f.decideIn(f.singleton(l1, f.i2));
     EXPECT_FALSE(f.hasConflicts());
 
-    // A leaf set holds nothing but its own leaf, not even the ones below its location
+    // A singleton set holds nothing but its own singleton, not even the ones below its location
     Sets::ElementId other = f.newElement();
-    f.decideNotIn(other, f.leaf(l1, f.i1));
-    f.decideIn(other, f.leaf({ l1, l1 }, f.i1));
+    f.decideNotIn(other, f.singleton(l1, f.i1));
+    f.decideIn(other, f.singleton({ l1, l1 }, f.i1));
     EXPECT_FALSE(f.hasConflicts());
 }
 
@@ -304,7 +304,7 @@ TEST(VerifyBackend, InvariantIndexConflictByRewrite) {
     f.decideIn(f.inclusive(v1));
     EXPECT_FALSE(f.hasConflicts());
 
-    // v1 = l1.l2 moves the location below l1, where its leafs are the excluded ones
+    // v1 = l1.l2 moves the location below l1, where its invariants are the excluded ones
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l2 }));
     f.solver.decideTrue(eq);
     f.solver.sat.propagate();
@@ -320,10 +320,10 @@ TEST(VerifyBackend, InvariantIndexRewriteIsBacktracked) {
     Member v1 = f.solver.newAuxMemberVariable();
 
     f.decideNotIn(f.exclusive(l1));
-    f.decideIn(f.leaf(v1, f.i1));
+    f.decideIn(f.singleton(v1, f.i1));
     int_t levelBeforeRewrite = f.solver.currentDecisionLevel();
 
-    // v1 = l1.l1 puts the leaf below the excluded location
+    // v1 = l1.l1 puts the singleton below the excluded location
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l1 }));
     f.solver.decideTrue(eq);
     f.solver.sat.propagate();
@@ -346,9 +346,9 @@ TEST(VerifyBackend, InvariantIndexDistinctDeclarations) {
     Member l1 = f.newLiteral();
 
     // A prefix relation between the locations of two declarations is not a contradiction: the
-    // members of l1 of the one say nothing about the leafs of l1 of the other
+    // members of l1 of the one say nothing about the invariants of l1 of the other
     f.decideNotIn(f.otherInclusive(l1));
-    f.decideIn(f.leaf(l1, f.i1));
+    f.decideIn(f.singleton(l1, f.i1));
     EXPECT_FALSE(f.hasConflicts());
 
     // Until the two declarations turn out to be the same
@@ -361,16 +361,16 @@ TEST(VerifyBackend, InvariantIndexDistinctDeclarations) {
     EXPECT_TRUE(f.solver.assignedFalse(f.declarationEquality()));
 }
 
-TEST(VerifyBackend, InvariantIndexDeclarationsSharingALeafAreEqual) {
+TEST(VerifyBackend, InvariantIndexDeclarationsSharingAnInvariantAreEqual) {
     IndexFixture f;
     Member l1 = f.newLiteral();
 
-    // A leaf belongs to one memory declaration, so a leaf of a location of two of them means that
+    // A singleton belongs to one memory declaration, so a singleton of a location of two of them means that
     // those are the same declaration
     f.decideIn(f.inclusive(l1));
     EXPECT_FALSE(f.solver.assignedTrue(f.declarationEquality()));
 
-    f.decideIn(f.otherLeaf(l1, f.i1));
+    f.decideIn(f.otherSingleton(l1, f.i1));
     EXPECT_FALSE(f.hasConflicts());
     EXPECT_TRUE(f.solver.assignedTrue(f.declarationEquality()));
 }
@@ -385,9 +385,9 @@ TEST(VerifyBackend, InvariantIndexContainmentIsDeferredUntilItsDeclarationIsJoin
     f.decideNotIn(f.exclusive(l1));
     EXPECT_FALSE(f.hasConflicts());
 
-    // Being a leaf below l1 of the other declaration equates the two, which is only propagated after
+    // Being a singleton below l1 of the other declaration equates the two, which is only propagated after
     // this containment was handled. So it has to be deferred until then to be compared at all.
-    f.decideIn(f.otherLeaf(f.solver.composeMembers({ l1, l2 }), f.i1));
+    f.decideIn(f.otherSingleton(f.solver.composeMembers({ l1, l2 }), f.i1));
     EXPECT_TRUE(f.hasConflicts());
 }
 

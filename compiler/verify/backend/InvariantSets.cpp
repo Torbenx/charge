@@ -31,16 +31,16 @@ InvariantSet InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location
     return locationSet(solver, exclusiveSets, TheoryId::ExclusiveLocationInvariantSets, location);
 }
 
-InvariantSet InvariantSets::leafSet(Solver& solver, MemoryLocation location, Invariant invariant) {
-    LeafKey key { location, invariant };
-    auto it = leafSets.find(key);
-    if (it != leafSets.end())
+InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location, Invariant invariant) {
+    SingletonKey key { location, invariant };
+    auto it = singletonSets.find(key);
+    if (it != singletonSets.end())
         return it->second;
 
-    InvariantSet newSet = (InvariantSet)solver.impl().newValue(TheoryId::LeafInvariantSets);
+    InvariantSet newSet = (InvariantSet)solver.impl().newValue(TheoryId::InvariantSingletonSets);
     setInfos[newSet].location = location;
     setInfos[newSet].invariant = invariant;
-    leafSets.emplace(key, newSet);
+    singletonSets.emplace(key, newSet);
     return newSet;
 }
 
@@ -51,8 +51,8 @@ InvariantWord InvariantSets::toWord(InvariantSet set) const {
         return InvariantWord::inclusive(member);
     case TheoryId::ExclusiveLocationInvariantSets:
         return InvariantWord::exclusive(member);
-    case TheoryId::LeafInvariantSets:
-        return InvariantWord::leaf(member, invariantOf(set));
+    case TheoryId::InvariantSingletonSets:
+        return InvariantWord::singleton(member, invariantOf(set));
     default:
         VERIFY_NOT_REACHED();
     }
@@ -62,15 +62,15 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
     InvariantSet set = (InvariantSet)containment.set();
     VERIFY(isInvariantSet(set));
 
-    if (containment.contained() && set.theory() == TheoryId::LeafInvariantSets) {
+    if (containment.contained() && set.theory() == TheoryId::InvariantSingletonSets) {
         auto& state = stateOf(element);
-        if (!state.leaf.has_value()) {
-            state.leaf = set;
-            leafTrace.push(element);
+        if (!state.singleton.has_value()) {
+            state.singleton = set;
+            singletonTrace.push(element);
         } else {
-            InvariantSet leaf = state.leaf.value();
-            solver.assignTrue(solver.equality(leaf, set),
-                makeReason<ReasonKind::InvariantLeafSetsShareElement>({ element, leaf, set }));
+            InvariantSet singleton = state.singleton.value();
+            solver.assignTrue(solver.equality(singleton, set),
+                makeReason<ReasonKind::InvariantSingletonSetsShareElement>({ element, singleton, set }));
         }
     }
 
@@ -79,7 +79,7 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
 
 bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     // Both conclusions are drawn from the same two containments, only what they say differs
-    if (reason.kind() == ReasonKind::InvariantLeafSetsShareElement) {
+    if (reason.kind() == ReasonKind::InvariantSingletonSetsShareElement) {
         auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
         return baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setA))
@@ -90,7 +90,7 @@ bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reaso
 }
 
 ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::InvariantLeafSetsShareElement) {
+    if (reason.kind() == ReasonKind::InvariantSingletonSetsShareElement) {
         auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
 
@@ -106,32 +106,32 @@ ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLitera
 
 void InvariantSets::newDecisionLevel(Solver& solver) {
     Base::newDecisionLevel(solver);
-    leafTrace.newDecisionLevel(solver);
+    singletonTrace.newDecisionLevel(solver);
 }
 
 void InvariantSets::beginBacktrack(Solver& solver) {
     Base::beginBacktrack(solver);
-    for (ElementId element : leafTrace.backtrackedReverse(solver))
-        stateOf(element).leaf.reset();
-    leafTrace.truncate(solver);
+    for (ElementId element : singletonTrace.backtrackedReverse(solver))
+        stateOf(element).singleton.reset();
+    singletonTrace.truncate(solver);
 }
 
 void InvariantSets::checkInvariances(Solver& solver) {
-    leafTrace.checkInvariances(solver);
+    singletonTrace.checkInvariances(solver);
 
-    // An element has a leaf exactly when it is on the trace, and it is on it only once.
-    std::vector<bool> onLeafTrace;
-    onLeafTrace.resize(elementStates.size());
+    // An element has a singleton exactly when it is on the trace, and it is on it only once
+    std::vector<bool> onTrace;
+    onTrace.resize(elementStates.size());
     auto markOnTrace = [](std::vector<bool>& marks, ElementId element) {
         VERIFY(element.id() < marks.size());
         VERIFY(!marks[element.id()]);
         marks[element.id()] = true;
     };
-    for (ElementId element : leafTrace)
-        markOnTrace(onLeafTrace, element);
+    for (ElementId element : singletonTrace)
+        markOnTrace(onTrace, element);
 
     for (int_t i = 0; i < (int_t)elementStates.size(); i++) {
-        VERIFY(elementStates[i].leaf.has_value() == onLeafTrace[i]);
+        VERIFY(elementStates[i].singleton.has_value() == onTrace[i]);
     }
 }
 

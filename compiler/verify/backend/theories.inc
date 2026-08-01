@@ -63,7 +63,7 @@ THEORY(MemoryLocationSets, MemorySet)
 SET_THEORY(InvariantSet, invariantSetsBaseTheory)
 THEORY(InclusiveLocationInvariantSets, InvariantSet)
 THEORY(ExclusiveLocationInvariantSets, InvariantSet)
-THEORY(LeafInvariantSets, InvariantSet)
+THEORY(InvariantSingletonSets, InvariantSet)
 
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)
@@ -81,7 +81,7 @@ REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memorySets)
 
 REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
-REASON(InvariantLeafSetsShareElement, SharedElementReason, false, invariantSets)
+REASON(InvariantSingletonSetsShareElement, SharedElementReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
 USE_KIND(MemorySetRepresentative, memorySets)
