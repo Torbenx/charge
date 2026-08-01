@@ -13,12 +13,12 @@ TEST(VerifyBackend, InvariantSetsAreUniquePerLocation) {
     Invariant i1(0);
     Invariant i2(1);
 
-    Value whole = invariantSets.inclusiveSet(solver, d1, identity_member);
-    Value below = invariantSets.exclusiveSet(solver, d1, identity_member);
-    Value part = invariantSets.inclusiveSet(solver, d1, m);
-    Value other = invariantSets.inclusiveSet(solver, d2, identity_member);
-    Value leaf = invariantSets.leafSet(solver, d1, m, i1);
-    Value otherLeaf = invariantSets.leafSet(solver, d1, m, i2);
+    InvariantSet whole = invariantSets.inclusiveSet(solver, d1, identity_member);
+    InvariantSet below = invariantSets.exclusiveSet(solver, d1, identity_member);
+    InvariantSet part = invariantSets.inclusiveSet(solver, d1, m);
+    InvariantSet other = invariantSets.inclusiveSet(solver, d2, identity_member);
+    InvariantSet leaf = invariantSets.leafSet(solver, d1, m, i1);
+    InvariantSet otherLeaf = invariantSets.leafSet(solver, d1, m, i2);
 
     EXPECT_TRUE(whole == invariantSets.inclusiveSet(solver, d1, identity_member));
     EXPECT_TRUE(below == invariantSets.exclusiveSet(solver, d1, identity_member));
@@ -46,9 +46,9 @@ TEST(VerifyBackend, InvariantSetsLookup) {
     SolverImpl solver;
     auto& invariantSets = solver.invariantSets;
     std::vector<MemoryLocation> locations;
-    std::vector<Value> inclusive;
-    std::vector<Value> exclusive;
-    std::vector<Value> leafs;
+    std::vector<InvariantSet> inclusive;
+    std::vector<InvariantSet> exclusive;
+    std::vector<InvariantSet> leafs;
     for (int_t i = 0; i < 8; i++) {
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         for (int_t j = 0; j < 32; j++) {
@@ -82,8 +82,8 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    Value a = invariantSets.inclusiveSet(solver, d1, m1);
-    Value b = invariantSets.inclusiveSet(solver, d2, m2);
+    InvariantSet a = invariantSets.inclusiveSet(solver, d1, m1);
+    InvariantSet b = invariantSets.inclusiveSet(solver, d2, m2);
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
@@ -156,8 +156,8 @@ TEST(VerifyBackend, DISABLED_InvariantLeafSetsHoldOneLeaf) {
     Member m2 = solver.newAuxMemberVariable();
     Invariant i(0);
 
-    Value a = invariantSets.leafSet(solver, d, m1, i);
-    Value b = invariantSets.leafSet(solver, d, m2, i);
+    InvariantSet a = invariantSets.leafSet(solver, d, m1, i);
+    InvariantSet b = invariantSets.leafSet(solver, d, m2, i);
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -181,8 +181,8 @@ TEST(VerifyBackend, InvariantLeafSetsOfDistinctInvariantsAreDisjoint) {
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    Value a = invariantSets.leafSet(solver, d, m, Invariant(0));
-    Value b = invariantSets.leafSet(solver, d, m, Invariant(1));
+    InvariantSet a = invariantSets.leafSet(solver, d, m, Invariant(0));
+    InvariantSet b = invariantSets.leafSet(solver, d, m, Invariant(1));
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -204,8 +204,8 @@ TEST(VerifyBackend, InvariantLeafSetsMayBeEmpty) {
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    Value a = invariantSets.leafSet(solver, d, m1, Invariant(0));
-    Value b = invariantSets.leafSet(solver, d, m2, Invariant(1));
+    InvariantSet a = invariantSets.leafSet(solver, d, m1, Invariant(0));
+    InvariantSet b = invariantSets.leafSet(solver, d, m2, Invariant(1));
 
     // An invariant does not have to hold at a location, so two leaf sets that hold nothing are the
     // same set without their locations or invariants having anything to do with each other
@@ -224,8 +224,8 @@ TEST(VerifyBackend, InvariantLeafSetsAreBacktracked) {
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    Value a = invariantSets.leafSet(solver, d, m, Invariant(0));
-    Value b = invariantSets.leafSet(solver, d, m, Invariant(1));
+    InvariantSet a = invariantSets.leafSet(solver, d, m, Invariant(0));
+    InvariantSet b = invariantSets.leafSet(solver, d, m, Invariant(1));
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -255,9 +255,9 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
     Member m = solver.newAuxMemberVariable();
     Invariant i(0);
 
-    Value whole = invariantSets.inclusiveSet(solver, d, identity_member);
-    Value leaf = invariantSets.leafSet(solver, d, m, i);
-    Value u = sets.union_(solver, { whole, leaf });
+    InvariantSet whole = invariantSets.inclusiveSet(solver, d, identity_member);
+    InvariantSet leaf = invariantSets.leafSet(solver, d, m, i);
+    Set u = sets.union_(solver, { whole, leaf });
 
     Bool eq = solver.equality(u, whole);
     solver.sat.propagate();

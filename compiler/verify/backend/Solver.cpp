@@ -277,7 +277,7 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
     }
 }
 
-bool SolverImpl::setAlwaysNonEmpty(Value set) {
+bool SolverImpl::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
         return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
@@ -375,24 +375,24 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
 
     case TheoryId::UninterpretedConstantSingletonSets: {
         auto& singletons = impl().uninterpConstantSingletons;
-        return rewriteOrder(singletons.element(a), singletons.element(b));
+        return rewriteOrder(singletons.element((Set)a), singletons.element((Set)b));
     }
     case TheoryId::MemoryLocationSets: {
         auto& locations = impl().memorySets;
-        return locationOrder(*this, locations.locationOf(a), locations.locationOf(b));
+        return locationOrder(*this, locations.locationOf((MemorySet)a), locations.locationOf((MemorySet)b));
     }
 
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets: {
         auto& invariants = impl().invariantSets;
-        return locationOrder(*this, invariants.locationOf(a), invariants.locationOf(b));
+        return locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
     }
     case TheoryId::LeafInvariantSets: {
         auto& invariants = impl().invariantSets;
-        auto locationOrdering = locationOrder(*this, invariants.locationOf(a), invariants.locationOf(b));
+        auto locationOrdering = locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
         if (locationOrdering != 0)
             return locationOrdering;
-        return invariants.invariantOf(a).id() <=> invariants.invariantOf(b).id();
+        return invariants.invariantOf((InvariantSet)a).id() <=> invariants.invariantOf((InvariantSet)b).id();
     }
 
     // Ordering is not important for these since no rewriting is done
@@ -461,13 +461,13 @@ void SolverImpl::onNewPair(PairHandle handle) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
-            [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element(a), uninterpConstantSingletons.element(b));
+            [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element((Set)a), uninterpConstantSingletons.element((Set)b));
         }
     } else if (sort == Sort::MemorySet) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
-            MemoryLocation locationA = memorySets.locationOf(a);
-            MemoryLocation locationB = memorySets.locationOf(b);
+            MemoryLocation locationA = memorySets.locationOf((MemorySet)a);
+            MemoryLocation locationB = memorySets.locationOf((MemorySet)b);
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);
@@ -482,12 +482,12 @@ void SolverImpl::onNewPair(PairHandle handle) {
             TheoryId theory = a.theory();
             Bool setEq = equality(handle);
 
-            if (theory == TheoryId::LeafInvariantSets && invariantSets.invariantOf(a) != invariantSets.invariantOf(b)) {
+            if (theory == TheoryId::LeafInvariantSets && invariantSets.invariantOf((InvariantSet)a) != invariantSets.invariantOf((InvariantSet)b)) {
                 // Leaf sets of distinct invariances can only agree when empty
-                addClause({ !setEq, invariantSetsBaseTheory.isEmpty(*this, a) });
+                addClause({ !setEq, invariantSetsBaseTheory.isEmpty(*this, (Set)a) });
             } else {
-                MemoryLocation locationA = invariantSets.locationOf(a);
-                MemoryLocation locationB = invariantSets.locationOf(b);
+                MemoryLocation locationA = invariantSets.locationOf((InvariantSet)a);
+                MemoryLocation locationB = invariantSets.locationOf((InvariantSet)b);
                 Bool declarationEq = equality(locationA.declaration, locationB.declaration);
                 Bool memberEq = equality(locationA.member, locationB.member);
                 // Note: The other direction does not always hold because when both sets are empty they would also be equal.
@@ -537,7 +537,7 @@ PairHandle Solver::findPair(Value a, Value b) {
         if (a == true_literal)
             return PairHandle::makeSpecialPair(b);
     } else if (isSetSort(sort)) {
-        Value emptySet = impl().setTheory(sort).emptySet();
+        Set emptySet = impl().setTheory(sort).emptySet();
         if (a == emptySet)
             return PairHandle::makeSpecialPair(b);
     }
@@ -650,7 +650,7 @@ Bool Solver::equality(PairHandle handle) {
         Sets& sets = impl().setTheory(handle.sort());
         if (handle.specialPair()) {
             // Encodes emptySet == b which is equivalent to b being empty
-            return sets.isEmpty(*this, handle.encodedValue());
+            return sets.isEmpty(*this, (Set)handle.encodedValue());
         }
         return sets.makeEquality(handle);
     } else {
@@ -695,8 +695,8 @@ Value Solver::newAuxUninterpretedConstant() {
     return impl().newValue(TheoryId::AuxUninterpretedConstants);
 }
 
-Value Solver::newAuxUninterpretedConstantSet() {
-    return impl().newValue(TheoryId::AuxUninterpretedConstantSets);
+Set Solver::newAuxUninterpretedConstantSet() {
+    return (Set)impl().newValue(TheoryId::AuxUninterpretedConstantSets);
 }
 
 Member Solver::newAuxMemberVariable() {

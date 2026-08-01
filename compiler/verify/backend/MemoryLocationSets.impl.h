@@ -36,7 +36,7 @@ bool MemoryLocationSets<Derived, PrefixImpl>::joinedRepresentative(Solver& solve
 
 template<typename Derived, typename PrefixImpl>
 void MemoryLocationSets<Derived, PrefixImpl>::addWord(Solver& solver, ElementId element, Containment cont) {
-    prefixes.addWord(solver, derived().toWord(cont.set()), element, cont);
+    prefixes.addWord(solver, derived().toWord(setHandle(cont.set())), element, cont);
 }
 
 template<typename Derived, typename PrefixImpl>
@@ -70,7 +70,7 @@ void MemoryLocationSets<Derived, PrefixImpl>::promotePendingOf(Solver& solver, E
 
 template<typename Derived, typename PrefixImpl>
 void MemoryLocationSets<Derived, PrefixImpl>::propagateContainment(Solver& solver, ElementId element, Sets::Containment containment) {
-    Value set = containment.set();
+    Set set = containment.set();
 
     if (element == baseTheory(solver).forAllElement())
         return;
@@ -89,7 +89,7 @@ void MemoryLocationSets<Derived, PrefixImpl>::propagateContainment(Solver& solve
         } else {
             // Distinct declarations describe distinct memory, so an element of both locations means
             // that the declarations are the same
-            Value representative = state.representative.value();
+            Set representative = state.representative.value();
             solver.assignTrue(solver.equality(locationOf(representative).declaration, location.declaration),
                 makeReason<params().declarationsShareElementReason>({ element, representative, set }));
         }

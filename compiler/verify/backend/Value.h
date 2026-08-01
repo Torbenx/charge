@@ -97,8 +97,7 @@ inline constexpr Member identity_member = Member(TheoryId::CompositeMembers, 0);
 
 //! A memory location, i.e. the member \p member of the memory declaration \p declaration
 /*!
-Memory locations do not have a sort of their own in the backend, a location only exists as this
-pair or as the set of the locations of scalar type it is composed of.
+Memory locations do not have a sort of their own in the backend, a location only exists as this pair.
 */
 struct MemoryLocation {
     MemoryLocation(MemoryDeclaration declaration, Member member = identity_member)
@@ -118,6 +117,20 @@ struct MemoryLocationHash {
         hash_combine(hash, std::bit_cast<uint32_t>((Value)location.member));
         return hash;
     }
+};
+
+struct Set : Value {
+    using Value::Value;
+    constexpr explicit Set(Value v)
+        : Value(v) { }
+};
+
+struct MemorySet : Set {
+    using Set::Set;
+};
+
+struct InvariantSet : Set {
+    using Set::Set;
 };
 
 //! Identifies an invariants, which are statically known

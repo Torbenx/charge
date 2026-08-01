@@ -59,17 +59,17 @@ namespace {
             return e;
         }
 
-        Value inclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, declaration, member); }
-        Value inclusive(std::initializer_list<Member> members) { return inclusive(solver.composeMembers(members)); }
-        Value exclusive(Member member) { return solver.invariantSets.exclusiveSet(solver, declaration, member); }
-        Value exclusive(std::initializer_list<Member> members) { return exclusive(solver.composeMembers(members)); }
-        Value leaf(Member member, Invariant invariant) { return solver.invariantSets.leafSet(solver, declaration, member, invariant); }
-        Value leaf(std::initializer_list<Member> members, Invariant invariant) {
+        InvariantSet inclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, declaration, member); }
+        InvariantSet inclusive(std::initializer_list<Member> members) { return inclusive(solver.composeMembers(members)); }
+        InvariantSet exclusive(Member member) { return solver.invariantSets.exclusiveSet(solver, declaration, member); }
+        InvariantSet exclusive(std::initializer_list<Member> members) { return exclusive(solver.composeMembers(members)); }
+        InvariantSet leaf(Member member, Invariant invariant) { return solver.invariantSets.leafSet(solver, declaration, member, invariant); }
+        InvariantSet leaf(std::initializer_list<Member> members, Invariant invariant) {
             return leaf(solver.composeMembers(members), invariant);
         }
 
-        Value otherInclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, otherDeclaration, member); }
-        Value otherLeaf(Member member, Invariant invariant) {
+        InvariantSet otherInclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, otherDeclaration, member); }
+        InvariantSet otherLeaf(Member member, Invariant invariant) {
             return solver.invariantSets.leafSet(solver, otherDeclaration, member, invariant);
         }
 
@@ -82,15 +82,15 @@ namespace {
         }
 
         //! Decide that \p element is contained in \p set and propagate
-        void decideIn(Value set, bool contained = true) { decideIn(element, set, contained); }
-        void decideIn(Sets::ElementId e, Value set, bool contained = true) {
+        void decideIn(Set set, bool contained = true) { decideIn(element, set, contained); }
+        void decideIn(Sets::ElementId e, Set set, bool contained = true) {
             solver.invariantSetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
             solver.sat.propagate();
             if (!solver.sat.hasConflicts())
                 checkInvariances();
         }
-        void decideNotIn(Value set) { decideIn(set, false); }
-        void decideNotIn(Sets::ElementId e, Value set) { decideIn(e, set, false); }
+        void decideNotIn(Set set) { decideIn(set, false); }
+        void decideNotIn(Sets::ElementId e, Set set) { decideIn(e, set, false); }
 
         //! Decide that the two declarations are the same and propagate
         void decideDeclarationsEqual() {
@@ -100,8 +100,8 @@ namespace {
                 checkInvariances();
         }
 
-        bool assignedIn(Value set) { return solver.invariantSetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
-        bool assignedNotIn(Value set) { return solver.invariantSetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
+        bool assignedIn(Set set) { return solver.invariantSetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
+        bool assignedNotIn(Set set) { return solver.invariantSetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
 
         bool hasConflicts() const { return solver.sat.hasConflicts(); }
 

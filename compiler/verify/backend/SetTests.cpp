@@ -7,7 +7,7 @@ namespace verify::backend {
 TEST(VerifyBackend, SetsEmptySetBasics) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value emptySet = sets.emptySet();
+    Set emptySet = sets.emptySet();
 
     Bool emptySetIsEmpty = sets.isEmpty(solver, emptySet);
     EXPECT_TRUE(solver.alwaysTrue(emptySetIsEmpty));
@@ -23,7 +23,7 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
 TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
     auto e = sets.newElement(solver);
     solver.sat.propagate();
 
@@ -48,7 +48,7 @@ TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
 TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
     auto e = sets.newElement(solver);
     solver.sat.propagate();
 
@@ -70,11 +70,11 @@ TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
 TEST(VerifyBackend, SetsEqualityPropagation1) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
-    Value c = solver.newAuxUninterpretedConstantSet();
-    Value ab = sets.union_(solver, { a, b });
-    Value ac = sets.union_(solver, { a, c });
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
+    Set c = solver.newAuxUninterpretedConstantSet();
+    Set ab = sets.union_(solver, { a, b });
+    Set ac = sets.union_(solver, { a, c });
     solver.addClause({ solver.equality(b, c) });
     Bool eq = solver.equality(ab, ac);
     EXPECT_FALSE(solver.assignedTrue(eq));
@@ -108,11 +108,11 @@ TEST(VerifyBackend, SetsEqualityPropagation1) {
 TEST(VerifyBackend, SetsEqualityPropagation2) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
-    Value c = solver.newAuxUninterpretedConstantSet();
-    Value ab = sets.union_(solver, { a, b });
-    Value ac = sets.union_(solver, { a, c });
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
+    Set c = solver.newAuxUninterpretedConstantSet();
+    Set ab = sets.union_(solver, { a, b });
+    Set ac = sets.union_(solver, { a, c });
     solver.addClause({ solver.equality(b, c) });
     Bool eq = solver.equality(ab, ac);
     EXPECT_FALSE(solver.assignedTrue(eq));
@@ -142,15 +142,15 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
 TEST(VerifyBackend, SetsUnionInterDistribution) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
-    Value c = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
+    Set c = solver.newAuxUninterpretedConstantSet();
 
-    Value ibc = sets.intersection(solver, { b, c });
-    Value lhs = sets.union_(solver, { a, ibc });
-    Value uab = sets.union_(solver, { a, b });
-    Value uac = sets.union_(solver, { a, c });
-    Value rhs = sets.intersection(solver, { uab, uac });
+    Set ibc = sets.intersection(solver, { b, c });
+    Set lhs = sets.union_(solver, { a, ibc });
+    Set uab = sets.union_(solver, { a, b });
+    Set uac = sets.union_(solver, { a, c });
+    Set rhs = sets.intersection(solver, { uab, uac });
     Bool eq = solver.equality(lhs, rhs);
 
     EXPECT_FALSE(solver.assignedTrue(eq));
@@ -186,9 +186,9 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
 TEST(VerifyBackend, SetsProveDisequal) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
-    Value c = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
+    Set c = solver.newAuxUninterpretedConstantSet();
 
     solver.addClause({ sets.isEmpty(solver, sets.intersection(solver, { a, c })) });
     solver.addClause({ sets.isEmpty(solver, sets.intersection(solver, { b, c })) });
@@ -220,9 +220,9 @@ TEST(VerifyBackend, SetsUnionOfEqualSets) {
     // Prove that union(A, B) = A if A = B
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
-    Value u = sets.union_(solver, { a, b });
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
+    Set u = sets.union_(solver, { a, b });
     Bool eq = solver.equality(u, a);
 
     auto e = sets.newElement(solver);
@@ -253,9 +253,9 @@ TEST(VerifyBackend, SetsSingletons) {
     Value aValue = solver.newAuxUninterpretedConstant();
     Value bValue = solver.newAuxUninterpretedConstant();
 
-    Value a = solver.uninterpConstantSingletons.singleton(solver, aValue);
-    Value b = solver.uninterpConstantSingletons.singleton(solver, bValue);
-    Value u = sets.union_(solver, { a, b });
+    Set a = solver.uninterpConstantSingletons.singleton(solver, aValue);
+    Set b = solver.uninterpConstantSingletons.singleton(solver, bValue);
+    Set u = sets.union_(solver, { a, b });
     Bool valueEq = solver.equality(aValue, bValue);
     Bool eq = solver.equality(u, a);
     solver.sat.propagate();
@@ -304,8 +304,8 @@ TEST(VerifyBackend, SetsSingletons) {
 TEST(VerifyBackend, SetsExaustiveOnNewSet) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -315,7 +315,7 @@ TEST(VerifyBackend, SetsExaustiveOnNewSet) {
     sets.decideTrue(solver, e, !Sets::in(b));
     solver.sat.propagate();
 
-    Value u = sets.union_(solver, { a, b });
+    Set u = sets.union_(solver, { a, b });
     solver.sat.propagate();
     EXPECT_TRUE(sets.assignedFalse(solver, e, Sets::in(u)));
 }
@@ -323,15 +323,15 @@ TEST(VerifyBackend, SetsExaustiveOnNewSet) {
 TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(sets.isEmpty(solver, a));
     solver.sat.propagate();
     solver.decideTrue(sets.isEmpty(solver, b));
     solver.sat.propagate();
 
-    Value u = sets.union_(solver, { a, b });
+    Set u = sets.union_(solver, { a, b });
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, u)));
 }
@@ -339,15 +339,15 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
 TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(!sets.isEmpty(solver, a));
     solver.sat.propagate();
     solver.decideTrue(!sets.isEmpty(solver, b));
     solver.sat.propagate();
 
-    Value i = sets.intersection(solver, { a, b });
+    Set i = sets.intersection(solver, { a, b });
     solver.sat.propagate();
     EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, i)));
 }
@@ -355,8 +355,8 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
 TEST(VerifyBackend, SetsExprToDefOnNewSet) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     auto e = sets.newElement(solver);
     solver.sat.propagate();
@@ -364,7 +364,7 @@ TEST(VerifyBackend, SetsExprToDefOnNewSet) {
     sets.decideTrue(solver, e, Sets::in(a));
     solver.sat.propagate();
 
-    Value u = sets.union_(solver, { a, b });
+    Set u = sets.union_(solver, { a, b });
     solver.sat.propagate();
     EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(u)));
 }
@@ -372,13 +372,13 @@ TEST(VerifyBackend, SetsExprToDefOnNewSet) {
 TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(sets.isEmpty(solver, a));
     solver.sat.propagate();
 
-    Value i = sets.intersection(solver, { a, b });
+    Set i = sets.intersection(solver, { a, b });
     solver.sat.propagate();
     EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, i)));
 }
@@ -386,13 +386,13 @@ TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
 TEST(VerifyBackend, SetsExprToDefOnNewSetPositiveIgnoredOnForAllElement) {
     SolverImpl solver;
     auto& sets = solver.uninterpConstantSets;
-    Value a = solver.newAuxUninterpretedConstantSet();
-    Value b = solver.newAuxUninterpretedConstantSet();
+    Set a = solver.newAuxUninterpretedConstantSet();
+    Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(!sets.isEmpty(solver, a));
     solver.sat.propagate();
 
-    Value u = sets.union_(solver, { a, b });
+    Set u = sets.union_(solver, { a, b });
     solver.sat.propagate();
     EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, u)));
 }

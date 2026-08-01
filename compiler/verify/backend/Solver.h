@@ -52,7 +52,7 @@ struct Solver {
     Bool newAuxBooleanVariable();
     Value newAuxUninterpretedConstant();
     Member newAuxMemberVariable();
-    Value newAuxUninterpretedConstantSet();
+    Set newAuxUninterpretedConstantSet();
     MemoryDeclaration newAuxMemoryDeclarationVariable();
 
     /*! \brief Return whether \p a and \p b are always disequal

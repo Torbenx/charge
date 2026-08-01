@@ -129,21 +129,22 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
     };
 
     using Base = MemoryLocationSets<InvariantSets, InvariantPrefixes>;
+    using SetHandle = InvariantSet;
 
     InvariantSets(Solver&);
 
-    Value inclusiveSet(Solver&, MemoryLocation);
-    Value inclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
+    InvariantSet inclusiveSet(Solver&, MemoryLocation);
+    InvariantSet inclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
         return inclusiveSet(solver, { declaration, member });
     }
 
-    Value exclusiveSet(Solver&, MemoryLocation);
-    Value exclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
+    InvariantSet exclusiveSet(Solver&, MemoryLocation);
+    InvariantSet exclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
         return exclusiveSet(solver, { declaration, member });
     }
 
-    Value leafSet(Solver&, MemoryLocation, Invariant);
-    Value leafSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
+    InvariantSet leafSet(Solver&, MemoryLocation, Invariant);
+    InvariantSet leafSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
         return leafSet(solver, { declaration, member }, invariant);
     }
 
@@ -159,17 +160,17 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         }
     }
 
-    MemoryLocation locationOf(Value set) const {
+    MemoryLocation locationOf(InvariantSet set) const {
         VERIFY(isInvariantSet(set));
         return setInfos[set].location;
     }
 
-    Invariant invariantOf(Value set) const {
+    Invariant invariantOf(InvariantSet set) const {
         VERIFY(set.theory() == TheoryId::LeafInvariantSets);
         return setInfos[set].invariant.value();
     }
 
-    InvariantWord toWord(Value set) const;
+    InvariantWord toWord(InvariantSet set) const;
 
     void propagateContainment(Solver&, ElementId, Containment);
 
@@ -205,13 +206,13 @@ private:
     };
 
     struct ElementState {
-        std::optional<Value> leaf;
+        std::optional<InvariantSet> leaf;
     };
 
     // Note: The keys of these maps could be obtained from the stored values
-    using LocationSets = std::unordered_map<MemoryLocation, Value, MemoryLocationHash>;
+    using LocationSets = std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>;
 
-    Value locationSet(Solver&, LocationSets&, TheoryId, MemoryLocation);
+    InvariantSet locationSet(Solver&, LocationSets&, TheoryId, MemoryLocation);
 
     ElementState& stateOf(ElementId element) {
         if (element.id() >= elementStates.size())
@@ -225,7 +226,7 @@ private:
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
-    std::unordered_map<LeafKey, Value, LeafHash> leafSets;
+    std::unordered_map<LeafKey, InvariantSet, LeafHash> leafSets;
 
     Trace<ElementId> leafTrace;
 };

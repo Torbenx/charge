@@ -22,17 +22,17 @@ namespace {
             return e;
         }
 
-        Value location(Member member) {
+        MemorySet location(Member member) {
             return solver.memorySets.set(solver, declaration, member);
         }
-        Value location(std::initializer_list<Member> members) {
+        MemorySet location(std::initializer_list<Member> members) {
             return location(solver.composeMembers(members));
         }
 
-        Value otherLocation(Member member) {
+        MemorySet otherLocation(Member member) {
             return solver.memorySets.set(solver, otherDeclaration, member);
         }
-        Value otherLocation(std::initializer_list<Member> members) {
+        MemorySet otherLocation(std::initializer_list<Member> members) {
             return otherLocation(solver.composeMembers(members));
         }
 
@@ -61,18 +61,18 @@ namespace {
         }
 
         //! Decide that \p element is contained in \p set and propagate
-        void decideIn(Value set, bool contained = true) { decideIn(element, set, contained); }
-        void decideIn(Sets::ElementId e, Value set, bool contained = true) {
+        void decideIn(Set set, bool contained = true) { decideIn(element, set, contained); }
+        void decideIn(Sets::ElementId e, Set set, bool contained = true) {
             solver.memorySetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
             solver.sat.propagate();
             if (!solver.sat.hasConflicts())
                 checkInvariances();
         }
-        void decideNotIn(Value set) { decideIn(set, false); }
-        void decideNotIn(Sets::ElementId e, Value set) { decideIn(e, set, false); }
+        void decideNotIn(Set set) { decideIn(set, false); }
+        void decideNotIn(Sets::ElementId e, Set set) { decideIn(e, set, false); }
 
-        bool assignedIn(Value set) { return solver.memorySetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
-        bool assignedNotIn(Value set) { return solver.memorySetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
+        bool assignedIn(Set set) { return solver.memorySetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
+        bool assignedNotIn(Set set) { return solver.memorySetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
 
         bool hasConflicts() const { return solver.sat.hasConflicts(); }
 

@@ -11,6 +11,19 @@
 
 namespace verify::backend {
 
+struct SharedElementSets {
+    Set setA;
+    Set setB;
+};
+
+struct SharedElementReason : private PackedReason<SharedElementSets, uint32_t> {
+    SharedElementReason(Sets::ElementId element, Set setA, Set setB)
+        : PackedReason({ setA, setB }, element.id()) { }
+
+    SharedElementSets sets() const { return data(); }
+    Sets::ElementId element() const { return Sets::ElementId(tag()); }
+};
+
 struct MemoryLocationSetsParams {
     Sort setSort;
     TypedReasonKind<SharedElementReason> declarationsShareElementReason;
@@ -51,13 +64,15 @@ private:
 
     struct ElementState {
         //! The set of the first location found to contain the element
-        std::optional<Value> representative;
+        std::optional<Set> representative;
         //! The pending containments of this element, in increasing order
         std::vector<TracePosition> pendingPositions;
     };
 
-    MemoryLocation locationOf(Value set) {
-        return derived().locationOf(set);
+    static auto setHandle(Set set) { return typename Derived::SetHandle(set); }
+
+    MemoryLocation locationOf(Set set) {
+        return derived().locationOf(setHandle(set));
     }
     Bool containmentOf(Solver&, PrefixIndexWordId);
     MemoryDeclaration declarationOf(PrefixIndexWordId word) {

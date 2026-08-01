@@ -16,8 +16,8 @@ struct SingletonSetsParams {
 struct SingletonSets {
     SingletonSets(Solver&, const SingletonSetsParams&);
 
-    Value singleton(Solver&, Value);
-    Value element(Value singletonSet) {
+    Set singleton(Solver&, Value);
+    Value element(Set singletonSet) {
         VERIFY(singletonSet.theory() == params.singletonTheory);
         return singletonInfos[singletonSet].element;
     }
@@ -36,14 +36,14 @@ struct SingletonSets {
 private:
     struct ElementInfo {
         ElementInfo() = default;
-        std::optional<Value> singletonSet;
+        std::optional<Set> singletonSet;
     };
     struct SingletonInfo {
         SingletonInfo() = default;
         Value element = INVALID_VALUE;
     };
     struct ElementState {
-        std::optional<Value> singleton;
+        std::optional<Set> singleton;
     };
 
     Sets& sets(Solver& solver);

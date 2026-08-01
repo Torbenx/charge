@@ -31,19 +31,20 @@ struct MemorySets : MemoryLocationSets<MemorySets, MemberPrefixes> {
         .representativeRewriteUse = UseKind::MemorySetRepresentative,
     };
     using Base = MemoryLocationSets<MemorySets, MemberPrefixes>;
+    using SetHandle = MemorySet;
 
     MemorySets(Solver&);
 
-    Value set(Solver&, MemoryLocation location);
-    Value set(Solver& solver, MemoryDeclaration declaration, Member member) {
+    MemorySet set(Solver&, MemoryLocation location);
+    MemorySet set(Solver& solver, MemoryDeclaration declaration, Member member) {
         return set(solver, { declaration, member });
     }
 
-    MemoryLocation locationOf(Value set) const {
+    MemoryLocation locationOf(MemorySet set) const {
         VERIFY(set.theory() == TheoryId::MemoryLocationSets);
         return setInfos[set].location;
     }
-    Member toWord(Value set) { return locationOf(set).member; }
+    Member toWord(MemorySet set) { return locationOf(set).member; }
 
 private:
     struct SetInfo {
@@ -52,7 +53,7 @@ private:
     };
 
     // Note: The location key could be obtained from the stored value
-    std::unordered_map<MemoryLocation, Value, MemoryLocationHash> sets;
+    std::unordered_map<MemoryLocation, MemorySet, MemoryLocationHash> sets;
 
     TheoryData<SetInfo, TheoryId::MemoryLocationSets> setInfos;
 };

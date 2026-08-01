@@ -6,13 +6,13 @@ namespace verify::backend {
 
 namespace {
     struct AggPair {
-        Value setA;
-        Value setB;
+        Set setA;
+        Set setB;
     };
 }
 
 struct InSingletonReason : private PackedReason<AggPair, uint32_t> {
-    InSingletonReason(Sets::ElementId element, Value setA, Value setB)
+    InSingletonReason(Sets::ElementId element, Set setA, Set setB)
         : PackedReason({ setA, setB }, element.id()) { }
     AggPair sets() const { return data(); }
     Sets::ElementId element() const { return Sets::ElementId(tag()); }
@@ -25,11 +25,11 @@ SingletonSets::SingletonSets(Solver& solver, const SingletonSetsParams& params)
     VERIFY(sortOf(params.singletonTheory) == params.setSort);
 }
 
-Value SingletonSets::singleton(Solver& solver, Value element) {
+Set SingletonSets::singleton(Solver& solver, Value element) {
     VERIFY(sortOf(element.theory()) == params.elementSort);
     auto& info = elementInfos[element];
     if (!info.singletonSet.has_value()) {
-        Value set = solver.impl().newValue(params.singletonTheory);
+        Set set = (Set)solver.impl().newValue(params.singletonTheory);
         info.singletonSet = set;
         singletonInfos[set].element = element;
     }

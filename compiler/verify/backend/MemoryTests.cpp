@@ -11,9 +11,9 @@ TEST(VerifyBackend, MemoryLocationSetsAreUniquePerLocation) {
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    Value whole = memorySets.set(solver, d1, identity_member);
-    Value part = memorySets.set(solver, d1, m);
-    Value other = memorySets.set(solver, d2, identity_member);
+    MemorySet whole = memorySets.set(solver, d1, identity_member);
+    MemorySet part = memorySets.set(solver, d1, m);
+    MemorySet other = memorySets.set(solver, d2, identity_member);
 
     EXPECT_TRUE(whole == memorySets.set(solver, d1, identity_member));
     EXPECT_TRUE(part == memorySets.set(solver, d1, m));
@@ -31,7 +31,7 @@ TEST(VerifyBackend, MemoryLocationSetsLookup) {
     SolverImpl solver;
     auto& memorySets = solver.memorySets;
     std::vector<MemoryLocation> locations;
-    std::vector<Value> sets;
+    std::vector<MemorySet> sets;
     for (int_t i = 0; i < 8; i++) {
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         for (int_t j = 0; j < 32; j++) {
@@ -55,8 +55,8 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    Value a = memorySets.set(solver, d1, m);
-    Value b = memorySets.set(solver, d2, m);
+    MemorySet a = memorySets.set(solver, d1, m);
+    MemorySet b = memorySets.set(solver, d2, m);
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
@@ -82,8 +82,8 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    Value a = memorySets.set(solver, d, m1);
-    Value b = memorySets.set(solver, d, m2);
+    MemorySet a = memorySets.set(solver, d, m1);
+    MemorySet b = memorySets.set(solver, d, m2);
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
@@ -108,8 +108,8 @@ TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    Value a = memorySets.set(solver, d1, m1);
-    Value b = memorySets.set(solver, d2, m2);
+    MemorySet a = memorySets.set(solver, d1, m1);
+    MemorySet b = memorySets.set(solver, d2, m2);
     Bool setEquality = solver.equality(a, b);
     solver.sat.propagate();
 
@@ -132,9 +132,9 @@ TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    Value whole = memorySets.set(solver, d, identity_member);
-    Value part = memorySets.set(solver, d, m);
-    Value u = sets.union_(solver, { whole, part });
+    MemorySet whole = memorySets.set(solver, d, identity_member);
+    MemorySet part = memorySets.set(solver, d, m);
+    Set u = sets.union_(solver, { whole, part });
 
     Bool eq = solver.equality(u, whole);
     solver.sat.propagate();

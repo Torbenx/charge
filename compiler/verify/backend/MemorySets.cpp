@@ -9,12 +9,12 @@ template struct MemoryLocationSets<MemorySets, MemberPrefixes>;
 MemorySets::MemorySets(Solver& solver)
     : Base(solver), setInfos(solver) { }
 
-Value MemorySets::set(Solver& solver, MemoryLocation location) {
+MemorySet MemorySets::set(Solver& solver, MemoryLocation location) {
     auto it = sets.find(location);
     if (it != sets.end())
         return it->second;
 
-    Value newSet = solver.impl().newValue(TheoryId::MemoryLocationSets);
+    MemorySet newSet = (MemorySet)solver.impl().newValue(TheoryId::MemoryLocationSets);
     setInfos[newSet].location = location;
     sets.emplace(location, newSet);
     return newSet;

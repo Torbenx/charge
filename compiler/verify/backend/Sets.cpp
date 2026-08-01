@@ -30,20 +30,22 @@ Sets::Sets(Solver& solver, const SetsParams& params)
     elements.emplace_back();
     elements.back().clauseMasks.resize(0);
 
-    Value empty = solver.impl().newValue(params.emptySetTheory);
+    Set empty = (Set)solver.impl().newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
     solver.assignTrue(isEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
     VERIFY(solver.impl().sat.propagate());
 }
 
-Bool Sets::isEmpty(Solver& solver, Value set) {
+Bool Sets::isEmpty(Solver& solver, Set set) {
     return mapToBool(solver, forAllElement(), !in(set));
 }
 
 void Sets::newPair(Solver& solver, PairHandle pair) {
     VERIFY(!pair.specialPair());
     VERIFY(pair.sort() == params.setSort);
-    auto [a, b] = solver.at(pair);
+    auto [aValue, bValue] = solver.at(pair);
+    Set a = (Set)aValue;
+    Set b = (Set)bValue;
     solver.addClause({
         makeEquality(pair),
         !isEmpty(solver, subset(solver, { a }, { b })),
@@ -53,21 +55,21 @@ void Sets::newPair(Solver& solver, PairHandle pair) {
     setInfos[b].equalities.push_back({ pair, a });
 }
 
-bool Sets::unionExpression(Value value) const {
+bool Sets::unionExpression(Set value) const {
     return value.theory() == params.expressionTheory && !clauses[value.id()].front().contained();
 }
 
-bool Sets::subsetExpression(Value value) const {
+bool Sets::subsetExpression(Set value) const {
     return value.theory() == params.expressionTheory && clauses[value.id()].front().contained();
 }
 
-Value Sets::union_(Solver& solver, std::span<const Value> sets) {
+Set Sets::union_(Solver& solver, std::span<const Set> sets) {
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
-    Value result = Value(params.expressionTheory, id);
+    Set result = Set(params.expressionTheory, id);
     std::vector<Containment> clause;
     clause.push_back(!in(result));
-    auto addSet = [this, &clause, clauseAttempt](Value set) {
+    auto addSet = [this, &clause, clauseAttempt](Set set) {
         Containment literal = in(set);
         auto& info = infoFor(literal);
         if (info.inClause != clauseAttempt) {
@@ -75,7 +77,7 @@ Value Sets::union_(Solver& solver, std::span<const Value> sets) {
             info.inClause = clauseAttempt;
         }
     };
-    for (Value set : sets) {
+    for (Set set : sets) {
         VERIFY(sortOf(set.theory()) == params.setSort);
         if (set != emptySet())
             addSet(set);
@@ -89,11 +91,11 @@ Value Sets::union_(Solver& solver, std::span<const Value> sets) {
     }
 }
 
-Value Sets::subset(Solver& solver, std::span<const Value> intersection, std::span<const Value> minus) {
+Set Sets::subset(Solver& solver, std::span<const Set> intersection, std::span<const Set> minus) {
     VERIFY(intersection.size() >= 1);
     uint32_t id = clauses.size();
     uint32_t clauseAttempt = nextClauseAttempt++;
-    Value result = Value(params.expressionTheory, id);
+    Set result = Set(params.expressionTheory, id);
     std::vector<Containment> clause;
     clause.push_back(in(result));
     // For now assume no unions in 'intersection' and not subsets in 'minus'.
@@ -109,13 +111,13 @@ Value Sets::subset(Solver& solver, std::span<const Value> intersection, std::spa
         return true;
     };
 
-    for (Value set : intersection) {
+    for (Set set : intersection) {
         if (set == emptySet())
             return emptySet();
         if (!addSet(!in(set)))
             return emptySet();
     }
-    for (Value set : minus) {
+    for (Set set : minus) {
         if (set == emptySet())
             continue;
         if (!addSet(in(set)))
@@ -141,7 +143,7 @@ static size_t hashClause(std::span<const Sets::Containment> clause) {
     return hash;
 }
 
-Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
+Set Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
     VERIFY(inClause.size() >= 3);
     VERIFY(inClause.size() <= MAX_CLAUSE_SIZE);
     VERIFY((int_t)clauses.size() == solver.valueCount(params.expressionTheory));
@@ -151,7 +153,7 @@ Value Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
             return !a.contained();
         return solver.rewriteOrder(a.set(), b.set()) < 0;
     });
-    Value expressionValue(params.expressionTheory, clauses.size());
+    Set expressionValue(params.expressionTheory, clauses.size());
     size_t hash = hashClause(inClause);
     auto hashIt = clauseSet.find(HashLookup { hash, *this, inClause });
     if (hashIt != clauseSet.end()) {
@@ -216,7 +218,7 @@ void Sets::refineClause(Solver& solver, std::vector<Bool>& boolClause) {
     std::ranges::sort(setLits, std::less(), [this](Bool lit) { return inSetInfos[lit].element.id(); });
     for (auto it = setLits.begin(); it != setLits.end();) {
         std::vector<Containment> setClause;
-        Value resultSet = Value(params.expressionTheory, clauses.size());
+        Set resultSet = Set(params.expressionTheory, clauses.size());
         setClause.push_back(in(resultSet));
 
         auto [clauseElement, firstCont] = mapFromBool(*it);
@@ -264,7 +266,7 @@ bool Sets::assignedTrue(Solver& solver, ElementId element, Containment lit) {
     return solver.assignedTrue(maybeBool.value());
 }
 
-bool Sets::assignedEmpty(Solver& solver, Value set) {
+bool Sets::assignedEmpty(Solver& solver, Set set) {
     return assignedTrue(solver, forAllElement(), !in(set));
 }
 
@@ -364,7 +366,9 @@ void Sets::unapplyContainment(Solver&, ElementId element, Containment literal) {
 }
 
 void Sets::propagateEquality(Solver& solver, PairHandle pair) {
-    auto [a, b] = solver.at(pair);
+    auto [aValue, bValue] = solver.at(pair);
+    Set a = (Set)aValue;
+    Set b = (Set)bValue;
     for (int_t elementId = 0; elementId < (int_t)elements.size(); elementId++) {
         ElementId element(elementId);
         Bool inA = mapToBool(solver, element, in(a));
@@ -469,7 +473,7 @@ Bool Sets::mapToBool(Solver& solver, ElementId element, Containment literal) {
     }
     std::optional<Bool>& maybeBool = inSetLiterals[element.id()];
     if (!maybeBool.has_value()) {
-        if (element == forAllElement() && solver.impl().setAlwaysNonEmpty(literal.set())) {
+        if (element == forAllElement() && solver.impl().alwaysNonEmpty(literal.set())) {
             maybeBool = true_literal;
         } else {
             maybeBool = solver.impl().newBoolean(params.elementInSetTheory);

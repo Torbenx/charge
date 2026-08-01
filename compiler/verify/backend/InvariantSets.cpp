@@ -12,39 +12,39 @@ template struct MemoryLocationSets<InvariantSets, InvariantPrefixes>;
 InvariantSets::InvariantSets(Solver& solver)
     : Base(solver), setInfos(solver) { }
 
-Value InvariantSets::locationSet(Solver& solver, LocationSets& sets, TheoryId theory, MemoryLocation location) {
+InvariantSet InvariantSets::locationSet(Solver& solver, LocationSets& sets, TheoryId theory, MemoryLocation location) {
     auto it = sets.find(location);
     if (it != sets.end())
         return it->second;
 
-    Value newSet = solver.impl().newValue(theory);
+    InvariantSet newSet = (InvariantSet)solver.impl().newValue(theory);
     setInfos[newSet].location = location;
     sets.emplace(location, newSet);
     return newSet;
 }
 
-Value InvariantSets::inclusiveSet(Solver& solver, MemoryLocation location) {
+InvariantSet InvariantSets::inclusiveSet(Solver& solver, MemoryLocation location) {
     return locationSet(solver, inclusiveSets, TheoryId::InclusiveLocationInvariantSets, location);
 }
 
-Value InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location) {
+InvariantSet InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location) {
     return locationSet(solver, exclusiveSets, TheoryId::ExclusiveLocationInvariantSets, location);
 }
 
-Value InvariantSets::leafSet(Solver& solver, MemoryLocation location, Invariant invariant) {
+InvariantSet InvariantSets::leafSet(Solver& solver, MemoryLocation location, Invariant invariant) {
     LeafKey key { location, invariant };
     auto it = leafSets.find(key);
     if (it != leafSets.end())
         return it->second;
 
-    Value newSet = solver.impl().newValue(TheoryId::LeafInvariantSets);
+    InvariantSet newSet = (InvariantSet)solver.impl().newValue(TheoryId::LeafInvariantSets);
     setInfos[newSet].location = location;
     setInfos[newSet].invariant = invariant;
     leafSets.emplace(key, newSet);
     return newSet;
 }
 
-InvariantWord InvariantSets::toWord(Value set) const {
+InvariantWord InvariantSets::toWord(InvariantSet set) const {
     Member member = locationOf(set).member;
     switch (set.theory()) {
     case TheoryId::InclusiveLocationInvariantSets:
@@ -59,7 +59,7 @@ InvariantWord InvariantSets::toWord(Value set) const {
 }
 
 void InvariantSets::propagateContainment(Solver& solver, ElementId element, Containment containment) {
-    Value set = containment.set();
+    InvariantSet set = (InvariantSet)containment.set();
     VERIFY(isInvariantSet(set));
 
     if (containment.contained()) {
@@ -69,7 +69,7 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
                 state.leaf = set;
                 leafTrace.push(element);
             } else {
-                Value leaf = state.leaf.value();
+                InvariantSet leaf = state.leaf.value();
                 solver.assignTrue(solver.equality(leaf, set),
                     makeReason<ReasonKind::InvariantLeafSetsShareElement>({ element, leaf, set }));
             }

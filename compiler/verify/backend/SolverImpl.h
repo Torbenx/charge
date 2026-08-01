@@ -51,7 +51,7 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     Sets& setTheory(Sort);
     void propagateSetContainment(Sets&, Sets::ElementId, Sets::Containment);
-    bool setAlwaysNonEmpty(Value);
+    bool alwaysNonEmpty(Set);
 
     // The initialization order here matters:
 

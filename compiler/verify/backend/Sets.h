@@ -66,12 +66,12 @@ struct Sets {
 
     //! Represents an internal boolean literal of the form '(not) in set'
     struct Containment {
-        Containment(Value set, bool contained)
+        Containment(Set set, bool contained)
             : theoryBits(std::to_underlying(set.theory()))
             , idBits(set.id())
             , containedBit(contained) { }
 
-        Value set() const { return Value((TheoryId)theoryBits, idBits); }
+        Set set() const { return Set((TheoryId)theoryBits, idBits); }
         bool contained() const { return containedBit != 0u; }
         Containment operator!() const {
             Containment copy = *this;
@@ -85,14 +85,14 @@ struct Sets {
         uint32_t idBits : 24;
         uint32_t containedBit : 1;
     };
-    static Containment in(Value set) { return { set, true }; }
+    static Containment in(Set set) { return { set, true }; }
 
     Sets(Solver&, const SetsParams&);
 
     Bool makeEquality(PairHandle pair) {
         return { params.equalityTheory, pair.pairId() * 2 };
     }
-    Bool isEmpty(Solver& solver, Value value);
+    Bool isEmpty(Solver& solver, Set value);
     void newPair(Solver&, PairHandle);
 
     void propagateElementAssignment(Solver&, Bool);
@@ -109,7 +109,7 @@ struct Sets {
     void assignTrue(Solver&, ElementId, Containment, const Reason&);
     void decideTrue(Solver&, ElementId, Containment);
 
-    bool assignedEmpty(Solver& solver, Value);
+    bool assignedEmpty(Solver& solver, Set);
 
     Bool mapToBool(Solver&, ElementId, Containment);
     std::optional<Bool> tryToBool(Solver&, ElementId, Containment);
@@ -124,30 +124,30 @@ struct Sets {
     */
     ElementId forAllElement() const { return ElementId(0); }
 
-    Value emptySet() { return Value(params.emptySetTheory, 0); }
+    Set emptySet() { return Set(params.emptySetTheory, 0); }
     Sort setSort() const { return params.setSort; }
 
-    Value union_(Solver&, std::span<const Value>);
-    Value union_(Solver& solver, std::initializer_list<Value> vals) {
+    Set union_(Solver&, std::span<const Set>);
+    Set union_(Solver& solver, std::initializer_list<Set> vals) {
         return union_(solver, { vals.begin(), vals.end() });
     }
 
-    Value intersection(Solver& solver, std::span<const Value> vals) {
-        std::array<Value, 0> minusArr {};
+    Set intersection(Solver& solver, std::span<const Set> vals) {
+        std::array<Set, 0> minusArr {};
         return subset(solver, { vals.begin(), vals.end() }, minusArr);
     }
-    Value intersection(Solver& solver, std::initializer_list<Value> vals) {
+    Set intersection(Solver& solver, std::initializer_list<Set> vals) {
         return intersection(solver, { vals.begin(), vals.end() });
     }
 
-    Value setminus(Solver& solver, Value base, std::span<const Value> minus) {
-        std::array<Value, 1> baseArr { base };
+    Set setminus(Solver& solver, Set base, std::span<const Set> minus) {
+        std::array<Set, 1> baseArr { base };
         return subset(solver, baseArr, minus);
     }
-    Value setminus(Solver& solver, Value base, std::initializer_list<Value> minus) { return setminus(solver, base, { minus.begin(), minus.end() }); }
+    Set setminus(Solver& solver, Set base, std::initializer_list<Set> minus) { return setminus(solver, base, { minus.begin(), minus.end() }); }
 
-    Value subset(Solver&, std::span<const Value> intersection, std::span<const Value> minus);
-    Value subset(Solver& solver, std::initializer_list<Value> intersection, std::initializer_list<Value> minus) {
+    Set subset(Solver&, std::span<const Set> intersection, std::span<const Set> minus);
+    Set subset(Solver& solver, std::initializer_list<Set> intersection, std::initializer_list<Set> minus) {
         return subset(solver, { intersection.begin(), intersection.end() }, { minus.begin(), minus.end() });
     }
 
@@ -170,7 +170,7 @@ private:
 
     struct EqualityInfo {
         PairHandle pair;
-        Value otherSet;
+        Set otherSet;
     };
 
     struct SetInfo {
@@ -182,7 +182,7 @@ private:
 
     struct ElementInInfo {
         ElementId element = ElementId(limits::max);
-        Value set = INVALID_VALUE;
+        Set set = Set(INVALID_VALUE);
     };
 
     struct HashLookup {
@@ -192,7 +192,7 @@ private:
     };
 
     struct HashEntry {
-        Value expr;
+        Set expr;
         size_t hash;
     };
 
@@ -212,10 +212,10 @@ private:
         bool operator()(const HashLookup& a, const HashEntry& b) const;
     };
 
-    bool unionExpression(Value) const;
-    bool subsetExpression(Value) const;
+    bool unionExpression(Set) const;
+    bool subsetExpression(Set) const;
 
-    Value addClause(Solver&, std::vector<Containment>);
+    Set addClause(Solver&, std::vector<Containment>);
 
     void propagateContainment(Solver&, ElementId, Containment);
     void unapplyContainment(Solver&, ElementId, Containment);
@@ -264,19 +264,6 @@ private:
 
     SortData<SetInfo> setInfos;
     TheoryData<ElementInInfo, TheoryId::COUNT, 2> inSetInfos;
-};
-
-struct SharedElementSets {
-    Value setA;
-    Value setB;
-};
-
-struct SharedElementReason : private PackedReason<SharedElementSets, uint32_t> {
-    SharedElementReason(Sets::ElementId element, Value setA, Value setB)
-        : PackedReason({ setA, setB }, element.id()) { }
-
-    SharedElementSets sets() const { return data(); }
-    Sets::ElementId element() const { return Sets::ElementId(tag()); }
 };
 
 }
