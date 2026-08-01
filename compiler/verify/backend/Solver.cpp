@@ -281,6 +281,8 @@ bool SolverImpl::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
         return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
+    case Sort::InvariantSet:
+        return set.theory() == TheoryId::LeafInvariantSets;
     default:
         return false;
     }
@@ -480,18 +482,16 @@ void SolverImpl::onNewPair(PairHandle handle) {
             // Two sets of the same kind hold the same leafs when they describe the same location,
             // and a leaf set is described by its invariant on top of that.
             TheoryId theory = a.theory();
+            MemoryLocation locationA = invariantSets.locationOf((InvariantSet)a);
+            MemoryLocation locationB = invariantSets.locationOf((InvariantSet)b);
             Bool setEq = equality(handle);
-
-            if (theory == TheoryId::LeafInvariantSets && invariantSets.invariantOf((InvariantSet)a) != invariantSets.invariantOf((InvariantSet)b)) {
-                // Leaf sets of distinct invariances can only agree when empty
-                addClause({ !setEq, invariantSetsBaseTheory.isEmpty(*this, (Set)a) });
-            } else {
-                MemoryLocation locationA = invariantSets.locationOf((InvariantSet)a);
-                MemoryLocation locationB = invariantSets.locationOf((InvariantSet)b);
-                Bool declarationEq = equality(locationA.declaration, locationB.declaration);
-                Bool memberEq = equality(locationA.member, locationB.member);
-                // Note: The other direction does not always hold because when both sets are empty they would also be equal.
-                addClause({ setEq, !declarationEq, !memberEq });
+            Bool declarationEq = equality(locationA.declaration, locationB.declaration);
+            Bool memberEq = equality(locationA.member, locationB.member);
+            // Note: The other direction does not always hold because when both sets are empty they would also be equal.
+            addClause({ setEq, !declarationEq, !memberEq });
+            if (theory == TheoryId::LeafInvariantSets) {
+                addClause({ !setEq, declarationEq });
+                addClause({ !setEq, memberEq });
             }
         }
     } else if (isSetSort(sort)) {
@@ -616,6 +616,13 @@ bool Solver::alwaysDisequal(Value a, Value b) {
     case Sort::Boolean:
         if (a == !(Bool)b)
             return true;
+        return false;
+    case Sort::InvariantSet:
+        if (a.theory() == TheoryId::LeafInvariantSets && b.theory() == TheoryId::LeafInvariantSets) {
+            auto& isets = impl().invariantSets;
+            if (isets.invariantOf((InvariantSet)a) != isets.invariantOf((InvariantSet)b))
+                return true;
+        }
         return false;
     default:
         return false;

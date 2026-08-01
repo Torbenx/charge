@@ -62,17 +62,15 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
     InvariantSet set = (InvariantSet)containment.set();
     VERIFY(isInvariantSet(set));
 
-    if (containment.contained()) {
+    if (containment.contained() && set.theory() == TheoryId::LeafInvariantSets) {
         auto& state = stateOf(element);
-        if (set.theory() == TheoryId::LeafInvariantSets) {
-            if (!state.leaf.has_value()) {
-                state.leaf = set;
-                leafTrace.push(element);
-            } else {
-                InvariantSet leaf = state.leaf.value();
-                solver.assignTrue(solver.equality(leaf, set),
-                    makeReason<ReasonKind::InvariantLeafSetsShareElement>({ element, leaf, set }));
-            }
+        if (!state.leaf.has_value()) {
+            state.leaf = set;
+            leafTrace.push(element);
+        } else {
+            InvariantSet leaf = state.leaf.value();
+            solver.assignTrue(solver.equality(leaf, set),
+                makeReason<ReasonKind::InvariantLeafSetsShareElement>({ element, leaf, set }));
         }
     }
 

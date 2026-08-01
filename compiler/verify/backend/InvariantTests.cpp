@@ -146,8 +146,7 @@ TEST(VerifyBackend, InvariantLeafSetsNeedTheSameInvariant) {
     EXPECT_FALSE(solver.assignedTrue(otherInvariant));
 }
 
-// TODO: Missing some propagation
-TEST(VerifyBackend, DISABLED_InvariantLeafSetsHoldOneLeaf) {
+TEST(VerifyBackend, InvariantLeafSetsHoldOneLeaf) {
     SolverImpl solver;
     auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
@@ -196,9 +195,8 @@ TEST(VerifyBackend, InvariantLeafSetsOfDistinctInvariantsAreDisjoint) {
     EXPECT_TRUE(solver.sat.hasConflicts());
 }
 
-TEST(VerifyBackend, InvariantLeafSetsMayBeEmpty) {
+TEST(VerifyBackend, InvariantLeafSetsNeverEmpty) {
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -207,14 +205,7 @@ TEST(VerifyBackend, InvariantLeafSetsMayBeEmpty) {
     InvariantSet a = invariantSets.leafSet(solver, d, m1, Invariant(0));
     InvariantSet b = invariantSets.leafSet(solver, d, m2, Invariant(1));
 
-    // An invariant does not have to hold at a location, so two leaf sets that hold nothing are the
-    // same set without their locations or invariants having anything to do with each other
-    solver.decideTrue(solver.equality(a, b));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
-    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, a)));
-    EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, b)));
-    EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
+    EXPECT_TRUE(solver.alwaysDisequal(a, b));
 }
 
 TEST(VerifyBackend, InvariantLeafSetsAreBacktracked) {
