@@ -36,7 +36,10 @@ bool MemoryLocationSets<Derived, PrefixImpl>::joinedRepresentative(Solver& solve
 
 template<typename Derived, typename PrefixImpl>
 void MemoryLocationSets<Derived, PrefixImpl>::addWord(Solver& solver, ElementId element, Containment cont) {
-    prefixes.addWord(solver, derived().toWord(setHandle(cont.set())), element, cont);
+    // A set holds everything the sets of its members hold, so a containment is a path and an
+    // exclusion is a prefix candidate
+    PrefixRole role = cont.contained() ? PrefixRole::Path : PrefixRole::Candidate;
+    prefixes.addWord(solver, derived().toWord(setHandle(cont.set())), element, cont, role);
 }
 
 template<typename Derived, typename PrefixImpl>

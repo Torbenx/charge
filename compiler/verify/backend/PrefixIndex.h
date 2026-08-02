@@ -20,6 +20,11 @@ private:
     uint32_t m_id;
 };
 
+enum class PrefixRole : uint8_t {
+    Path,
+    Candidate,
+};
+
 struct PrefixHitData {
     PrefixIndexWordId prefix;
     PrefixIndexWordId path;
@@ -56,11 +61,8 @@ struct PrefixIndex {
     using WordId = PrefixIndexWordId;
     using ElementId = Sets::ElementId;
 
-    //! Add the word described by \p key to the set A or B of \p element
-    /*!
-    When containment.contained() is true this is path otherwise it is a prefix candiate.
-    */
-    WordId addWord(Solver&, WordKey key, ElementId element, Sets::Containment containment);
+    //! Add the word described by \p key to the set of \p element selected by \p role
+    WordId addWord(Solver&, WordKey key, ElementId element, Sets::Containment containment, PrefixRole role);
 
     WordKey keyOf(WordId w) const { return words[w].key; }
     ElementId elementOf(WordId w) const { return words[w].element; }
@@ -102,7 +104,8 @@ private:
         WordKey key; //!< The description the word is spelled from
         ElementId element;
         Sets::Containment containment;
-        bool isPath() const { return containment.contained(); };
+        PrefixRole role;
+        bool isPath() const { return role == PrefixRole::Path; };
 
         //! The trie nodes for every prefix of the spelling, starting with the element root
         /*!
@@ -135,6 +138,18 @@ private:
             return hash;
         }
     };
+
+    //! Whether a hit between \p prefixCandidate and \p path is a conflict
+    /*!
+    Two negative set containments can never cause a conflict (the element being in no set at all
+    is always a valid assignment). More pactically across all the prefix/path matches of invariant
+    sets the negative/negative containment cases are the only ones that are not a conflict
+    (see InvariantSetsPrefixCases.md). So not raising such conflicts here allows stuffing all of
+    these into one PrefixIndex.
+    */
+    bool raisesConflict(WordId prefixCandidate, WordId path) const {
+        return words[prefixCandidate].containment.contained() || words[path].containment.contained();
+    }
 
     uint32_t childNode(uint32_t parent, Letter letter);
 

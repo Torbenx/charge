@@ -5,14 +5,14 @@
 namespace verify::backend {
 
 template<typename Impl>
-PrefixIndexWordId PrefixIndex<Impl>::addWord(Solver& solver, WordKey key, ElementId element, Sets::Containment containment) {
+PrefixIndexWordId PrefixIndex<Impl>::addWord(Solver& solver, WordKey key, ElementId element, Sets::Containment containment, PrefixRole role) {
     while (element.id() >= elementRoots.size()) {
         uint32_t root = nodes.size();
         nodes.push_back({ .letter = Impl::invalidLetter, .element = ElementId(elementRoots.size()) });
         elementRoots.push_back(root);
     }
 
-    WordId w = words.push({ .key = key, .element = element, .containment = containment });
+    WordId w = words.push({ .key = key, .element = element, .containment = containment, .role = role });
     solver.addUse(impl.watchedValue(key), Use(Impl::wordUse, w.id()));
 
     buildPath(solver, w);
@@ -175,8 +175,10 @@ void PrefixIndex<Impl>::attach(Solver& solver, WordId w, bool raiseConflicts) {
             n.aOccurrences.push_back(w);
             if (raiseConflicts) {
                 // Every match is a separate conflict
-                for (WordId prefix : n.bTerminals)
-                    solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = prefix, .path = w }));
+                for (WordId prefix : n.bTerminals) {
+                    if (raisesConflict(prefix, w))
+                        solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = prefix, .path = w }));
+                }
             }
         }
     } else {
@@ -187,8 +189,10 @@ void PrefixIndex<Impl>::attach(Solver& solver, WordId w, bool raiseConflicts) {
         n.bTerminals.push_back(w);
         if (raiseConflicts) {
             // Every match is a separate conflict
-            for (WordId path : n.aOccurrences)
-                solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = w, .path = path }));
+            for (WordId path : n.aOccurrences) {
+                if (raisesConflict(w, path))
+                    solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = w, .path = path }));
+            }
         }
     }
 }
