@@ -270,6 +270,7 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
         break;
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
+    case TheoryId::PathInvariantSets:
     case TheoryId::InvariantSingletonSets:
         invariantSets.propagateContainment(*this, element, containment);
         break;
@@ -386,7 +387,8 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     }
 
     case TheoryId::InclusiveLocationInvariantSets:
-    case TheoryId::ExclusiveLocationInvariantSets: {
+    case TheoryId::ExclusiveLocationInvariantSets:
+    case TheoryId::PathInvariantSets: {
         auto& invariants = impl().invariantSets;
         return locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
     }

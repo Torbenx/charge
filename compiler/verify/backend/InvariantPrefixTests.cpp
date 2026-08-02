@@ -63,12 +63,16 @@ namespace {
         InvariantSet inclusive(std::initializer_list<Member> members) { return inclusive(solver.composeMembers(members)); }
         InvariantSet exclusive(Member member) { return solver.invariantSets.exclusiveSet(solver, declaration, member); }
         InvariantSet exclusive(std::initializer_list<Member> members) { return exclusive(solver.composeMembers(members)); }
+        InvariantSet path(Member member) { return solver.invariantSets.pathSet(solver, declaration, member); }
+        InvariantSet path(std::initializer_list<Member> members) { return path(solver.composeMembers(members)); }
         InvariantSet singleton(Member member, Invariant invariant) { return solver.invariantSets.singletonSet(solver, declaration, member, invariant); }
         InvariantSet singleton(std::initializer_list<Member> members, Invariant invariant) {
             return singleton(solver.composeMembers(members), invariant);
         }
 
         InvariantSet otherInclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, otherDeclaration, member); }
+        InvariantSet otherPath(Member member) { return solver.invariantSets.pathSet(solver, otherDeclaration, member); }
+        InvariantSet otherPath(std::initializer_list<Member> members) { return otherPath(solver.composeMembers(members)); }
         InvariantSet otherSingleton(Member member, Invariant invariant) {
             return solver.invariantSets.singletonSet(solver, otherDeclaration, member, invariant);
         }
@@ -102,6 +106,7 @@ namespace {
 
         bool assignedIn(Set set) { return solver.invariantSetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
         bool assignedNotIn(Set set) { return solver.invariantSetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
+        bool assignedEmpty(Set set) { return solver.invariantSetsBaseTheory.assignedEmpty(solver, set); }
 
         bool hasConflicts() const { return solver.sat.hasConflicts(); }
 
@@ -389,6 +394,220 @@ TEST(VerifyBackend, InvariantIndexContainmentIsDeferredUntilItsDeclarationIsJoin
     // this containment was handled. So it has to be deferred until then to be compared at all.
     f.decideIn(f.otherSingleton(f.solver.composeMembers({ l1, l2 }), f.i1));
     EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetHoldsTheInvariantsAboveItsLocation) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // The path set of a location holds the invariants of the locations strictly above it
+    f.decideNotIn(f.path({ l1, l2 }));
+    f.decideIn(f.singleton(l1, f.i1));
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.assignedNotIn(f.singleton(l1, f.i1)));
+
+    // and holding them is all the containment in it says
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.path({ l1, l2 }));
+    f.decideIn(other, f.singleton(l1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetSkipsTheInvariantsOfItsLocation) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // The path set of a location holds nothing of the location itself
+    f.decideIn(f.path(l1));
+    f.decideIn(f.singleton(l1, f.i1));
+    EXPECT_TRUE(f.hasConflicts());
+    f.resolveConflicts();
+
+    // and nothing of the locations below it either
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.path(l1));
+    f.decideIn(other, f.singleton({ l1, l2 }, f.i1));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetIsDisjointFromTheInclusiveOne) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // Nothing is both strictly above a location and at or below it. Note that both containments are
+    // positive here, a conflict shape that only the path sets have.
+    f.decideIn(f.path(l1));
+    f.decideIn(f.inclusive(l1));
+    EXPECT_TRUE(f.hasConflicts());
+    f.resolveConflicts();
+
+    // The same holds for every location below the one of the path set
+    Sets::ElementId below = f.newElement();
+    f.decideIn(below, f.path(l1));
+    f.decideIn(below, f.inclusive({ l1, l2 }));
+    EXPECT_TRUE(f.hasConflicts());
+    f.resolveConflicts();
+
+    // A location above it is exactly where the invariants of a path set are, so that is no conflict
+    Sets::ElementId above = f.newElement();
+    f.decideIn(above, f.path({ l1, l2 }));
+    f.decideIn(above, f.inclusive(l1));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetsGrowWithTheirLocation) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // A location below another one has everything on its path, plus the locations in between
+    f.decideIn(f.path(l1));
+    f.decideNotIn(f.path({ l1, l2 }));
+    EXPECT_TRUE(f.hasConflicts());
+    f.resolveConflicts();
+
+    // The other direction does not hold, those locations in between are what the higher one misses
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.path({ l1, l2 }));
+    f.decideNotIn(other, f.path(l1));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetOfTheWholeDeclaration) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+
+    InvariantSet whole = f.path(identity_member);
+    InvariantSet below = f.path(l1);
+    f.solver.sat.propagate();
+    EXPECT_FALSE(f.hasConflicts());
+
+    // No location is strictly above the declaration itself, so nothing is on its path
+    EXPECT_TRUE(f.assignedEmpty(whole));
+
+    // A location below it has one, even though which invariants are on it is still open
+    EXPECT_FALSE(f.assignedEmpty(below));
+
+    // The emptiness reaches the elements on its own, so an element is known to be off that path
+    // without needing a second set to place it anywhere
+    EXPECT_TRUE(f.assignedNotIn(whole));
+    EXPECT_FALSE(f.assignedNotIn(below));
+}
+
+TEST(VerifyBackend, InvariantIndexSingletonIsNotBelowItsOwnLocation) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // The exclusive set of a location skips the invariants of the location itself
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideIn(f.exclusive(l1));
+    EXPECT_TRUE(f.hasConflicts());
+    f.resolveConflicts();
+
+    // and a singleton is at one location, so no set of a location below it can hold it
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.singleton(l1, f.i1));
+    f.decideIn(other, f.inclusive({ l1, l2 }));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetConflictByRewrite) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.path(v1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // v1 = l1.l2 moves the location below l1, which puts the singleton on its path
+    Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l2 }));
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetRewriteIsBacktracked) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.path(v1));
+    int_t levelBeforeRewrite = f.solver.currentDecisionLevel();
+
+    // v1 = l1.l1 puts the singleton on the path of the excluded location
+    Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l1 }));
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    // Reverting the rewrite by hand must leave the index without a conflict again
+    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+    EXPECT_FALSE(f.solver.assignedTrue(eq));
+
+    // And the very same rewrite must conflict again when it is reapplied
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexPathSetDistinctDeclarations) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+
+    // The path of a location of one declaration says nothing about the invariants of another
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.otherPath({ l1, l2 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // Until the two declarations turn out to be the same
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+
+    // The hit only holds while they are equal, so resolving it excludes that
+    f.resolveConflicts();
+    EXPECT_FALSE(f.hasConflicts());
+    EXPECT_TRUE(f.solver.assignedFalse(f.declarationEquality()));
+}
+
+TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+    Member l3 = f.newLiteral();
+
+    // A word is only registered once the element has a containment naming the declaration it is
+    // compared in, so the exclusions need one to be in the index at all. The location of this one is
+    // unrelated to l1, so it is no part of what is tested below.
+    f.decideIn(f.singleton(l3, f.i1));
+
+    // The word of an inclusive set is a prefix of the word of a path set below it, so the two hit in
+    // the index. Being outside of both is no contradiction though, the element may just as well be
+    // at a location neither of the two reaches.
+    f.decideNotIn(f.inclusive(l1));
+    f.decideNotIn(f.path({ l1, l2 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // The word of the exclusive set is a prefix of that path word as well
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.singleton(l3, f.i1));
+    f.decideNotIn(other, f.exclusive(l1));
+    f.decideNotIn(other, f.path({ l1, l2 }));
+    EXPECT_FALSE(f.hasConflicts());
 }
 
 }

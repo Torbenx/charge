@@ -63,6 +63,7 @@ THEORY(MemoryLocationSets, MemorySet)
 SET_THEORY(InvariantSet, invariantSetsBaseTheory)
 THEORY(InclusiveLocationInvariantSets, InvariantSet)
 THEORY(ExclusiveLocationInvariantSets, InvariantSet)
+THEORY(PathInvariantSets, InvariantSet)
 THEORY(InvariantSingletonSets, InvariantSet)
 
 THEORY(MemberLiterals, Member)

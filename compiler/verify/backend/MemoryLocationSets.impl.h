@@ -160,9 +160,10 @@ ClauseAndIndex MemoryLocationSets<Derived, PrefixImpl>::reasonToClause(Solver& s
 
     ClauseBuilder clause = solver.beginClause();
     clause.add(solver, assignedLiteral);
-    // The member of the prefix is a prefix of the member of the path, which makes the set of the
-    // path a subset of the set of the prefix. So the element cannot be excluded from the one and
-    // contained in the other at the same time.
+    // The spelling of the prefix is a prefix of the spelling of the path, which relates their two
+    // sets: one of them is a subset of the other, or the two are disjoint. Which of those it is
+    // depends on the kinds of the sets, but in every case the two containments cannot hold at the
+    // same time, so negating both of them is the clause saying so.
     clause.add(solver, !containmentOf(solver, data.prefix));
     clause.add(solver, !containmentOf(solver, data.path));
     prefixes.explainPrefix(solver, data.prefix, data.path, clause);

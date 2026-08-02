@@ -31,6 +31,20 @@ InvariantSet InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location
     return locationSet(solver, exclusiveSets, TheoryId::ExclusiveLocationInvariantSets, location);
 }
 
+InvariantSet InvariantSets::pathSet(Solver& solver, MemoryLocation location) {
+    int_t oldCount = pathSets.size();
+    InvariantSet set = locationSet(solver, pathSets, TheoryId::PathInvariantSets, location);
+
+    // No location is strictly above the whole declaration, so its path set is the empty one. Without
+    // this the emptiness is only found once the element is known to be somewhere in the declaration.
+    // TODO: There may be problem with elements that are later rewritten to the identity which are
+    //       not caught here.
+    if ((int_t)pathSets.size() != oldCount && location.member == identity_member)
+        solver.addClause({ baseTheory(solver).isEmpty(solver, set) });
+
+    return set;
+}
+
 InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location, Invariant invariant) {
     SingletonKey key { location, invariant };
     auto it = singletonSets.find(key);
@@ -51,6 +65,10 @@ InvariantWord InvariantSets::toWord(InvariantSet set) const {
         return InvariantWord::inclusive(member);
     case TheoryId::ExclusiveLocationInvariantSets:
         return InvariantWord::exclusive(member);
+    case TheoryId::PathInvariantSets:
+        // A path set is spelled like the inclusive set of its location. That the two grow in
+        // opposite directions is carried by the roles of their words, not by their spelling.
+        return InvariantWord::inclusive(member);
     case TheoryId::InvariantSingletonSets:
         return InvariantWord::singleton(member, invariantOf(set));
     default:
@@ -59,9 +77,23 @@ InvariantWord InvariantSets::toWord(InvariantSet set) const {
 }
 
 void InvariantSets::addWords(Solver& solver, Prefixes& prefixes, ElementId element, Containment cont) {
-    // If an element is in a location set but not in the location set of some prefix of it, thats a conflict.
-    auto role = cont.contained() ? PrefixRole::Path : PrefixRole::Candidate;
-    prefixes.addWord(solver, toWord((InvariantSet)cont.set()), element, cont, role);
+    InvariantSet set = (InvariantSet)cont.set();
+    if (cont.set().theory() == TheoryId::PathInvariantSets) {
+        // If an element is not in the path to a location but is in some prefix of it, thats a conflict.
+        auto role = cont.contained() ? PrefixRole::Candidate : PrefixRole::Path;
+        prefixes.addWord(solver, toWord(set), element, cont, role);
+    } else {
+        // If an element is in a location set but not in the location set of some prefix of it, thats a conflict.
+        auto role = cont.contained() ? PrefixRole::Path : PrefixRole::Candidate;
+        prefixes.addWord(solver, toWord(set), element, cont, role);
+
+        if (cont.contained() && cont.set().theory() == TheoryId::InvariantSingletonSets) {
+            // The singleton is spelled like the exclusive set of its location a second time, which
+            // matches it with every set holding only invariants strictly below that location. All
+            // such matches are conflicts, see InvariantSetsPrefixCases.md.
+            prefixes.addWord(solver, InvariantWord::exclusive(locationOf(set).member), element, cont, PrefixRole::Candidate);
+        }
+    }
 }
 
 void InvariantSets::propagateContainment(Solver& solver, ElementId element, Containment containment) {

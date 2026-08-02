@@ -112,10 +112,14 @@ private:
 
 //! The sets of invariants described by a memory location
 /*!
-There are three kinds of sets:
+There are four kinds of sets:
 - An inclusive location set holds the invariants of its location and those of its members
 - An exclusive location set holds only the invariants of its members
+- A path location set holds the invariants of the locations strictly above its own
 - An invariant singleton set holds a single invariant
+
+The first two grow downwards with their location, the path sets grow upwards. The path set of
+the whole declaration is empty.
 
 Note that the non-singleton sets may not contain any elements at all.
 */
@@ -142,6 +146,11 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         return exclusiveSet(solver, { declaration, member });
     }
 
+    InvariantSet pathSet(Solver&, MemoryLocation);
+    InvariantSet pathSet(Solver& solver, MemoryDeclaration declaration, Member member) {
+        return pathSet(solver, { declaration, member });
+    }
+
     InvariantSet singletonSet(Solver&, MemoryLocation, Invariant);
     InvariantSet singletonSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
         return singletonSet(solver, { declaration, member }, invariant);
@@ -152,6 +161,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         switch (value.theory()) {
         case TheoryId::InclusiveLocationInvariantSets:
         case TheoryId::ExclusiveLocationInvariantSets:
+        case TheoryId::PathInvariantSets:
         case TheoryId::InvariantSingletonSets:
             return true;
         default:
@@ -226,6 +236,7 @@ private:
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
+    LocationSets pathSets;
     std::unordered_map<SingletonKey, InvariantSet, SingletonHash> singletonSets;
 
     Trace<ElementId> singletonTrace;
