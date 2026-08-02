@@ -364,7 +364,6 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::TrueFalse:
     case TheoryId::ClauseGlueVariables:
     case TheoryId::AuxBooleanVariables:
-    case TheoryId::MemberConstraintBy:
     case TheoryId::AuxUninterpretedConstants:
     case TheoryId::MemberLiterals:
     case TheoryId::AuxMemberVariables:
