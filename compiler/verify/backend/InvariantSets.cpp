@@ -58,6 +58,12 @@ InvariantWord InvariantSets::toWord(InvariantSet set) const {
     }
 }
 
+void InvariantSets::addWords(Solver& solver, Prefixes& prefixes, ElementId element, Containment cont) {
+    // If an element is in a location set but not in the location set of some prefix of it, thats a conflict.
+    auto role = cont.contained() ? PrefixRole::Path : PrefixRole::Candidate;
+    prefixes.addWord(solver, toWord((InvariantSet)cont.set()), element, cont, role);
+}
+
 void InvariantSets::propagateContainment(Solver& solver, ElementId element, Containment containment) {
     InvariantSet set = (InvariantSet)containment.set();
     VERIFY(isInvariantSet(set));

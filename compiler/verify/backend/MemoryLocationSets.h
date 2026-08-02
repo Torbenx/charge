@@ -36,6 +36,7 @@ struct MemoryLocationSets {
     using Params = MemoryLocationSetsParams;
     using ElementId = Sets::ElementId;
     using Containment = Sets::Containment;
+    using Prefixes = PrefixIndex<PrefixImpl>;
 
     MemoryLocationSets(Solver&);
 
@@ -102,7 +103,7 @@ private:
     Trace<ElementId> representativeTrace;
     Trace<TracePosition> promotionTrace;
 
-    PrefixIndex<PrefixImpl> prefixes;
+    Prefixes prefixes;
 };
 
 }

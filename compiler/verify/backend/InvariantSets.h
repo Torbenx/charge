@@ -170,6 +170,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
     }
 
     InvariantWord toWord(InvariantSet set) const;
+    void addWords(Solver&, Prefixes&, ElementId, Containment);
 
     void propagateContainment(Solver&, ElementId, Containment);
 
