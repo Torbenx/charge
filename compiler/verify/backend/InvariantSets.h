@@ -101,9 +101,13 @@ struct InvariantPrefixes {
 
     static size_t hashLetter(InvariantLetter letter) { return std::bit_cast<uint32_t>(letter.payload); }
 
+    static bool letterStable(InvariantLetter letter) { return letter.isMember() && letter.member().literal(); }
+
     Value watchedValue(InvariantWord word) const { return word.member; }
     void appendLetters(Solver&, InvariantWord, std::vector<InvariantLetter>& out);
     void explainLetters(Solver&, InvariantWord, ClauseBuilder&);
+
+    bool raisesConflict(PrefixHitSide<InvariantWord> prefix, PrefixHitSide<InvariantWord> path, bool strictPrefix) const;
 
 private:
     // Temporary buffer used inside a single function to avoid repeated allocations

@@ -17,10 +17,16 @@ struct MemberPrefixes {
     static constexpr Member invalidLetter = (Member)INVALID_VALUE;
 
     static size_t hashLetter(Member letter) { return std::bit_cast<uint32_t>((Value)letter); }
+    static bool letterStable(Member letter) { return letter.literal(); }
 
     Value watchedValue(Member expression) const { return expression; }
     void appendLetters(Solver&, Member expression, std::vector<Member>& out);
     void explainLetters(Solver&, Member expression, ClauseBuilder&);
+
+    bool raisesConflict(PrefixHitSide<Member>, PrefixHitSide<Member>, bool) const {
+        // All hits are genuine conflicts
+        return true;
+    }
 };
 
 struct MemorySets : MemoryLocationSets<MemorySets, MemberPrefixes> {

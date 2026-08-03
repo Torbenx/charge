@@ -173,6 +173,25 @@ void InvariantSets::checkInvariances(Solver& solver) {
     }
 }
 
+bool InvariantPrefixes::raisesConflict(PrefixHitSide<InvariantWord> prefix, PrefixHitSide<InvariantWord> path, bool strictPrefix) const {
+    // Two negative set containments can never cause a conflict (the element being in no set at all
+    // is always a valid assignment). More pactically across all the prefix/path matches of invariant
+    // sets the negative/negative containment cases are the only ones that are not a conflict
+    // (see InvariantSetsPrefixCases.md). So not raising such conflicts here allows stuffing all of
+    // these into one PrefixIndex.
+    if (!prefix.containment.contained() && !path.containment.contained())
+        return false;
+
+    // A word ending in a narrow describes the invariants strictly below its location and are used
+    // to match only those paths that are strictly longer in the current rewrite. However for the
+    // conflict to be sound the paths needs to be longer in *all* rewrites, which is what strictSuffix
+    // implements.
+    if (prefix.key.suffix.isNarrow() && !path.key.suffix.isNarrow())
+        return strictPrefix;
+
+    return true;
+}
+
 void InvariantPrefixes::appendLetters(Solver& solver, InvariantWord word, std::vector<InvariantLetter>& out) {
     memberBuffer.clear();
     solver.impl().members.appendRewrite(word.member, memberBuffer);

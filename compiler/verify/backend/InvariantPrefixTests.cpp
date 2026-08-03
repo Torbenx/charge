@@ -584,6 +584,69 @@ TEST(VerifyBackend, InvariantIndexPathSetDistinctDeclarations) {
     EXPECT_TRUE(f.solver.assignedFalse(f.declarationEquality()));
 }
 
+TEST(VerifyBackend, InvariantIndexAVariableSuffixIsNoStrictPrefix) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The word of the exclusive set of l1 is a prefix of the word of the inclusive set of l1.v1,
+    // but the two are only distinct locations as long as v1 is not the identity. So being an
+    // invariant of l1 itself, which is outside of the exclusive set, is no contradiction.
+    f.decideNotIn(f.exclusive(l1));
+    f.decideIn(f.inclusive({ l1, v1 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // The same holds for the singleton of an invariant of l1, which is where the location of a
+    // positive singleton is compared as the excluding one
+    Sets::ElementId other = f.newElement();
+    f.decideIn(other, f.singleton(l1, f.i1));
+    f.decideIn(other, f.inclusive({ l1, v1 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // and for a path set, which is the only case where the strict prefix is on the excluded side
+    Sets::ElementId onPath = f.newElement();
+    f.decideIn(onPath, f.singleton(l1, f.i1));
+    f.decideNotIn(onPath, f.path({ l1, v1 }));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexAVariableSuffixConflictsOnceItIsALocation) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member l2 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    f.decideNotIn(f.exclusive(l1));
+    f.decideIn(f.inclusive({ l1, v1 }));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // v1 = l2 makes l1.v1 a location that no rewrite can bring back up to l1, and only then are the
+    // invariants of l1.v1 among the ones the exclusive set of l1 holds
+    Bool eq = f.solver.equality(v1, l2);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.assignedNotIn(f.inclusive({ l1, v1 })));
+}
+
+TEST(VerifyBackend, InvariantIndexAVariableSuffixIsNoConflictWhenItIsTheIdentity) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // Rewriting v1 to the identity beforehand spells both words the same, which is the assignment
+    // the hit of the two would have excluded
+    f.solver.decideTrue(f.solver.equality(v1, identity_member));
+    f.solver.sat.propagate();
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.decideNotIn(f.exclusive(l1));
+    f.decideIn(f.inclusive({ l1, v1 }));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
 TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
     IndexFixture f;
     Member l1 = f.newLiteral();

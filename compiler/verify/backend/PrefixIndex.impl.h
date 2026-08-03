@@ -100,17 +100,17 @@ void PrefixIndex<Impl>::checkInvariances(Solver& solver) {
     for (WordId w : rewriteTrace)
         VERIFY(w.id() < words.size());
 
-    for (uint32_t node = 0; node < nodes.size(); node++) {
+    for (int_t node = 0; node < (int_t)nodes.size(); node++) {
         const Node& n = nodes[node];
 
-        for (uint32_t i = 0; i < n.aOccurrences.size(); i++) {
+        for (int_t i = 0; i < (int_t)n.aOccurrences.size(); i++) {
             const WordInfo& info = words[n.aOccurrences[i]];
             VERIFY(info.isPath());
             auto it = std::ranges::find(info.path, node);
             VERIFY(it != info.path.end());
             VERIFY(info.occurrenceIndices[it - info.path.begin()] == i);
         }
-        for (uint32_t i = 0; i < n.bTerminals.size(); i++) {
+        for (int_t i = 0; i < (int_t)n.bTerminals.size(); i++) {
             const WordInfo& info = words[n.bTerminals[i]];
             VERIFY(!info.isPath());
             VERIFY(info.path.back() == node);
@@ -127,8 +127,12 @@ void PrefixIndex<Impl>::checkInvariances(Solver& solver) {
         impl.appendLetters(solver, info.key, letters);
         VERIFY(info.path.size() == letters.size() + 1);
         VERIFY(info.path.front() == elementRoots[info.element.id()]);
-        for (uint32_t k = 0; k < letters.size(); k++) {
+        int_t stableLength = 0;
+        for (int_t k = 0; k < (int_t)letters.size(); k++) {
             VERIFY(nodes[info.path[k + 1]].letter == letters[k]);
+            if (Impl::letterStable(letters[k]))
+                stableLength += 1;
+            VERIFY(nodes[info.path[k + 1]].stableLength == stableLength);
         }
     }
 }
@@ -138,7 +142,9 @@ uint32_t PrefixIndex<Impl>::childNode(uint32_t parent, Letter letter) {
     auto [it, inserted] = edges.try_emplace(Edge { parent, letter }, (uint32_t)nodes.size());
     if (inserted) {
         const Node& parentNode = nodes[parent];
-        nodes.push_back({ .letter = letter, .element = parentNode.element });
+        nodes.push_back({ .letter = letter,
+            .element = parentNode.element,
+            .stableLength = parentNode.stableLength + (Impl::letterStable(letter) ? 1u : 0u) });
     }
     return it->second;
 }
