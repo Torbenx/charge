@@ -60,7 +60,7 @@ And the following member functions:
 - \c Value \c watchedValue(WordKey): the value whose rewrites the word follows
 - \c void \c appendLetters(Solver&, WordKey, std::vector<Letter>&): the current spelling of the word
 - \c void \c explainLetters(Solver&, WordKey, ClauseBuilder&): justify that spelling
-- \c bool \c raisesConflict(Hit prefix, Hit path, bool strictPrefix): whether a hit is a conflict
+- \c bool \c raisesConflict(Hit prefix, Hit path, bool strictPrefix) const: whether a hit is a conflict
 */
 template<typename Impl>
 struct PrefixIndex {
@@ -78,11 +78,17 @@ struct PrefixIndex {
     ElementId elementOf(WordId w) const { return words[w].element; }
     Sets::Containment containmentOf(WordId w) const { return words[w].containment; }
 
-    //! Returns whether \p prefix is currently a prefix of \p path
+    //! Returns whether \p prefix is currently a non-strict prefix of \p path
     /*!
     Both words must belong to the same element.
     */
     bool isPrefixOf(WordId prefix, WordId path) const;
+
+    //! Returns whether \p prefix and \p path are currently a conflict
+    /*!
+    Combines isPrefixOf() and raisesConflict(). Both words must belong to the same element.
+    */
+    bool isConflict(WordId prefix, WordId path) const;
 
     void explainPrefix(Solver&, WordId prefix, WordId path, ClauseBuilder& clause);
 
@@ -154,15 +160,8 @@ private:
         }
     };
 
-    //! Whether a hit between \p prefixCandidate and \p path is a conflict
-    bool raisesConflict(WordId prefixCandidate, WordId path) {
-        const WordInfo& prefixInfo = words[prefixCandidate];
-        const WordInfo& pathInfo = words[path];
-        return impl.raisesConflict(
-            Hit { prefixInfo.key, prefixInfo.containment },
-            Hit { pathInfo.key, pathInfo.containment },
-            isStrictPrefixOf(prefixInfo.path.back(), pathInfo.path.back()));
-    }
+    //! Whether a hit between \p prefix and \p path is a conflict
+    bool raisesConflict(WordId prefix, WordId path) const;
 
     //! Whether the word of \p pathNode stays longer than the one of \p prefixNode under any rewrite
     bool isStrictPrefixOf(uint32_t prefixNode, uint32_t pathNode) const {

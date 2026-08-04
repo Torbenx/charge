@@ -35,6 +35,21 @@ bool PrefixIndex<Impl>::isPrefixOf(WordId prefix, WordId path) const {
 }
 
 template<typename Impl>
+bool PrefixIndex<Impl>::raisesConflict(WordId prefix, WordId path) const {
+    const WordInfo& prefixInfo = words[prefix];
+    const WordInfo& pathInfo = words[path];
+    return impl.raisesConflict(
+        Hit { prefixInfo.key, prefixInfo.containment },
+        Hit { pathInfo.key, pathInfo.containment },
+        isStrictPrefixOf(prefixInfo.path.back(), pathInfo.path.back()));
+}
+
+template<typename Impl>
+bool PrefixIndex<Impl>::isConflict(WordId prefix, WordId path) const {
+    return isPrefixOf(prefix, path) && raisesConflict(prefix, path);
+}
+
+template<typename Impl>
 void PrefixIndex<Impl>::explainPrefix(Solver& solver, WordId prefix, WordId path, ClauseBuilder& clause) {
     // The prefix relation follows from the spellings of the two words alone, so whatever those
     // are derived from is all that has to be justified.

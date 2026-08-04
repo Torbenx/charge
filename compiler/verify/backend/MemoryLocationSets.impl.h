@@ -137,7 +137,7 @@ bool MemoryLocationSets<Derived, PrefixImpl>::testReason(Solver& solver, Bool as
     auto data = reason.get(PrefixImpl::hitReason);
     // The locations are only comparable as long as they belong to the same declaration
     return solver.assignedEqual(declarationOf(data.prefix), declarationOf(data.path))
-        && prefixes.isPrefixOf(data.prefix, data.path)
+        && prefixes.isConflict(data.prefix, data.path)
         && solver.assignedTrue(containmentOf(solver, data.prefix))
         && solver.assignedTrue(containmentOf(solver, data.path));
 }

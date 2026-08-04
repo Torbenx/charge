@@ -88,9 +88,11 @@ void InvariantSets::addWords(Solver& solver, Prefixes& prefixes, ElementId eleme
         prefixes.addWord(solver, toWord(set), element, cont, role);
 
         if (cont.contained() && cont.set().theory() == TheoryId::InvariantSingletonSets) {
-            // The singleton is spelled like the exclusive set of its location a second time, which
+            // The singleton is added as the exclusive word of its location a second time, which
             // matches it with every set holding only invariants strictly below that location. All
-            // such matches are conflicts, see InvariantSetsPrefixCases.md.
+            // such matches are conflicts, see InvariantSetsPrefixCases.md. Note that this word is a
+            // prefix of the singleton word added above, a hit of the containment with itself that
+            // is no conflict because the two spell the same location.
             prefixes.addWord(solver, InvariantWord::exclusive(locationOf(set).member), element, cont, PrefixRole::Candidate);
         }
     }
@@ -182,11 +184,11 @@ bool InvariantPrefixes::raisesConflict(PrefixHitSide<InvariantWord> prefix, Pref
     if (!prefix.containment.contained() && !path.containment.contained())
         return false;
 
-    // A word ending in a narrow describes the invariants strictly below its location and are used
-    // to match only those paths that are strictly longer in the current rewrite. However for the
-    // conflict to be sound the paths needs to be longer in *all* rewrites, which is what strictSuffix
-    // implements.
-    if (prefix.key.suffix.isNarrow() && !path.key.suffix.isNarrow())
+    // An exclusive word describes the invariants strictly below its location, so it only conflicts
+    // with the sets of the locations below that one. The conflict needs the path to stay longer in
+    // *all* rewrites, which is what strictPrefix decides. The exception is a path that is exclusive
+    // itself, which excludes its own location either way.
+    if (prefix.key.kind.isExclusive() && !path.key.kind.isExclusive())
         return strictPrefix;
 
     return true;
@@ -196,15 +198,13 @@ void InvariantPrefixes::appendLetters(Solver& solver, InvariantWord word, std::v
     memberBuffer.clear();
     solver.impl().members.appendRewrite(word.member, memberBuffer);
 
-    for (Member letter : memberBuffer) {
-        // Stepping into a member steps below the location first, which puts the exclusive set of a
-        // location above the sets of all of its members
-        out.push_back(InvariantLetter::narrow());
+    for (Member letter : memberBuffer)
         out.push_back(InvariantLetter::member(letter));
-    }
 
-    if (!word.suffix.isEmpty())
-        out.push_back(word.suffix.toLetter());
+    // The inclusive and the exclusive word of a location are spelled alike, only a singleton adds
+    // the letter that separates it from the sets of its own location
+    if (word.kind.isInvariant())
+        out.push_back(InvariantLetter::invariant(word.kind.invariant()));
 }
 
 void InvariantPrefixes::explainLetters(Solver& solver, InvariantWord word, ClauseBuilder& clause) {

@@ -11,30 +11,27 @@ namespace verify::backend {
 
 //! A letter in the invariant prefix index
 /*!
-Every step into a member is preceded by a narrow, which is the step from a location to the invariants
-strictly below it, and an invariant letter is the step from a location to the invariant singleton.
-So the letters of a location with the member m1...mn are
+A word is spelled with the members of its location, and an invariant letter is the step from a
+location to the invariant singleton. So the letters of a location with the members m1...mn are
 
-    inclusive:   narrow m1 ... narrow mn
-    exclusive:   narrow m1 ... narrow mn narrow
-    invariant I: narrow m1 ... narrow mn I
+    inclusive:   m1 ... mn
+    exclusive:   m1 ... mn
+    invariant I: m1 ... mn I
 
-Note: The leading narrow is requrired to correctly handle the empty path.
+The inclusive and the exclusive set of a location are spelled the same, what tells the two apart is
+the kind of their word. An exclusive word holds only the invariants strictly below its location, so
+its hits are conflicts only where the path stays strictly longer under every rewrite, which is what
+the strictPrefix flag of InvariantPrefixes::raisesConflict() decides.
 */
 struct InvariantLetter {
-    static constexpr TheoryId NARROW_SENTINEL_THEORY = TheoryId::COUNT;
-    static constexpr TheoryId INVARIANT_SENTINEL_THEORY = TheoryId(std::to_underlying(TheoryId::COUNT) + 1);
-    static_assert(NARROW_SENTINEL_THEORY >= TheoryId::COUNT);
+    static constexpr TheoryId INVARIANT_SENTINEL_THEORY = TheoryId::COUNT;
     static_assert(INVARIANT_SENTINEL_THEORY >= TheoryId::COUNT);
-    static_assert(NARROW_SENTINEL_THEORY != INVARIANT_SENTINEL_THEORY);
     static_assert(INVARIANT_SENTINEL_THEORY != TheoryId::Invalid);
 
     static constexpr InvariantLetter invalid() { return { (Member)INVALID_VALUE }; }
-    static constexpr InvariantLetter narrow() { return { Member(NARROW_SENTINEL_THEORY, limits::max) }; }
     static constexpr InvariantLetter member(Member member) { return { member }; }
     static constexpr InvariantLetter invariant(Invariant invariant) { return { Member(INVARIANT_SENTINEL_THEORY, invariant.id()) }; }
 
-    constexpr bool isNarrow() const { return *this == narrow(); }
     constexpr bool isInvariant() const { return payload.theory() == INVARIANT_SENTINEL_THEORY; }
     constexpr bool isMember() const { return payload.theory() < TheoryId::COUNT; }
     constexpr Invariant invariant() const {
@@ -51,43 +48,39 @@ struct InvariantLetter {
     Member payload;
 };
 
-//! Either empty, narrow or an invariant
-struct InvariantWordSuffix {
-    static constexpr InvariantWordSuffix empty() { return { (uint32_t)limits::max }; }
-    static constexpr InvariantWordSuffix narrow() { return { (uint32_t)limits::max - 1u }; }
-    static constexpr InvariantWordSuffix invariant(Invariant invariant) { return { invariant.id() }; }
+//! Which of the three kinds of set a word describes
+/*!
+Only the invariant kind contributes a letter, the other two are spelled from their member alone and
+are told apart by this kind at the hits of the index.
+*/
+struct InvariantWordKind {
+    static constexpr InvariantWordKind inclusive() { return { (uint32_t)limits::max }; }
+    static constexpr InvariantWordKind exclusive() { return { (uint32_t)limits::max - 1u }; }
+    static constexpr InvariantWordKind invariant(Invariant invariant) { return { invariant.id() }; }
 
-    constexpr bool isEmpty() const { return *this == empty(); }
-    constexpr bool isNarrow() const { return *this == narrow(); }
-    constexpr bool isInvariant() const { return !isEmpty() && !isNarrow(); }
+    constexpr bool isInclusive() const { return *this == inclusive(); }
+    constexpr bool isExclusive() const { return *this == exclusive(); }
+    constexpr bool isInvariant() const { return !isInclusive() && !isExclusive(); }
     constexpr Invariant invariant() const {
         VERIFY(isInvariant());
         return Invariant { payload };
     }
 
-    constexpr InvariantLetter toLetter() const {
-        VERIFY(!isEmpty());
-        if (isNarrow())
-            return InvariantLetter::narrow();
-        else
-            return InvariantLetter::invariant(invariant());
-    }
-
-    bool operator==(const InvariantWordSuffix&) const = default;
+    bool operator==(const InvariantWordKind&) const = default;
 
     uint32_t payload;
 };
 
 //! Describes a word of the invariant prefix index
 struct InvariantWord {
-    static InvariantWord inclusive(Member member) { return { member, InvariantWordSuffix::empty() }; }
-    static InvariantWord exclusive(Member member) { return { member, InvariantWordSuffix::narrow() }; }
+    static InvariantWord inclusive(Member member) { return { member, InvariantWordKind::inclusive() }; }
+    static InvariantWord exclusive(Member member) { return { member, InvariantWordKind::exclusive() }; }
     static InvariantWord singleton(Member member, Invariant invariant) {
-        return { member, InvariantWordSuffix::invariant(invariant) };
+        return { member, InvariantWordKind::invariant(invariant) };
     }
 
     Member member;
-    InvariantWordSuffix suffix;
+    InvariantWordKind kind;
 };
 
 //! The prefix impl for invariant sets
@@ -101,6 +94,14 @@ struct InvariantPrefixes {
 
     static size_t hashLetter(InvariantLetter letter) { return std::bit_cast<uint32_t>(letter.payload); }
 
+    //! Only a literal member is stable, a variable one can still be rewritten to the identity
+    /*!
+    An invariant letter must not count here even though no rewrite ever removes it: the strict
+    prefix it would make is one of an invariant, not one of a location, and the conflicts gated by
+    it need the location of the path to be strictly below the one of the prefix. Counting it would
+    for example put the singleton of an invariant of l1.v1.I strictly below l1 while v1 may still
+    turn out to be the identity.
+    */
     static bool letterStable(InvariantLetter letter) { return letter.isMember() && letter.member().literal(); }
 
     Value watchedValue(InvariantWord word) const { return word.member; }
