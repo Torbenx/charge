@@ -83,6 +83,7 @@ REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memorySets)
 REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
 REASON(InvariantSingletonSetsShareElement, SharedElementReason, false, invariantSets)
+REASON(InvariantSingletonToInclusive, SingletonToInclusiveReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
 USE_KIND(MemorySetRepresentative, memorySets)

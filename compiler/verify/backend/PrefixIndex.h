@@ -9,34 +9,6 @@
 
 namespace verify::backend {
 
-struct PrefixIndexWordId {
-    explicit PrefixIndexWordId(uint32_t id)
-        : m_id(id) { }
-    uint32_t id() const { return m_id; }
-
-    bool operator==(const PrefixIndexWordId&) const = default;
-
-private:
-    uint32_t m_id;
-};
-
-enum class PrefixRole : uint8_t {
-    Path,
-    Candidate,
-};
-
-struct PrefixHitData {
-    PrefixIndexWordId prefix;
-    PrefixIndexWordId path;
-};
-
-//! One side of a hit, all the index knows about a word
-template<typename WordKey>
-struct PrefixHitSide {
-    WordKey key;
-    Sets::Containment containment;
-};
-
 //! Detects prefix relations between two sets of words
 /*!
 The structure maintains a set A of paths and a set B of prefix candidates separately for any number
@@ -62,19 +34,42 @@ And the following member functions:
 - \c void \c explainLetters(Solver&, WordKey, ClauseBuilder&): justify that spelling
 - \c bool \c raisesConflict(Hit prefix, Hit path, bool strictPrefix) const: whether a hit is a conflict
 */
-template<typename Impl>
 struct PrefixIndex {
-    using Letter = typename Impl::Letter;
-    using WordKey = typename Impl::WordKey;
-    using Hit = PrefixHitSide<WordKey>;
+    struct Params {
+        TypedReasonKind<PrefixHitData> hitReason;
+        UseKind wordUse;
+    };
 
-    using WordId = PrefixIndexWordId;
+    struct WordId {
+        explicit WordId(uint32_t id)
+            : m_id(id) { }
+        uint32_t id() const { return m_id; }
+
+        bool operator==(const WordId&) const = default;
+
+    private:
+        uint32_t m_id;
+    };
+
+    enum class Role : uint8_t {
+        Prefix,
+        Path,
+    };
+
+    enum class SelfInclusion : uint8_t {
+        Inclusive,
+        Exclusive,
+    };
+
     using ElementId = Sets::ElementId;
 
-    //! Add the word described by \p key to the set of \p element selected by \p role
-    WordId addWord(Solver&, WordKey key, ElementId element, Sets::Containment containment, PrefixRole role);
+    PrefixIndex(const Params& params)
+        : m_params(params) { }
 
-    WordKey keyOf(WordId w) const { return words[w].key; }
+    //! Add the word described by \p key to the set of \p element selected by \p role
+    WordId addWord(Solver&, Member expression, ElementId element, Sets::Containment containment, Role role, SelfInclusion inclusion);
+
+    Member expressionOf(WordId w) { return words[w].expression; }
     ElementId elementOf(WordId w) const { return words[w].element; }
     Sets::Containment containmentOf(WordId w) const { return words[w].containment; }
 
@@ -100,18 +95,20 @@ struct PrefixIndex {
     void beginBacktrack(Solver&);
     void endBacktrack(Solver&);
 
+    const Params& params() const { return m_params; }
+
     //! Explicitly check that the invariances of the structure hold
     void checkInvariances(Solver&);
 
 private:
     struct Node {
-        Letter letter; //!< The last letter of the word spelled by this node
+        Member letter; //!< The last letter of the word spelled by this node
         ElementId element;
-        //! The number of letters of the word of this node that no rewrite can remove again
+        //! The number of literals in the word of this node
         /*!
-        Used to implement isStrictPrefixOf() in O(1).
+        Used to implement strict prefix detection in O(1).
         */
-        uint32_t stableLength = 0;
+        uint32_t literalCount = 0;
 
         //! The paths of the set A whose spelling has the word of this node as a prefix
         std::vector<WordId> aOccurrences = {};
@@ -122,11 +119,12 @@ private:
     };
 
     struct WordInfo {
-        WordKey key; //!< The description the word is spelled from
+        Member expression; //!< The description the word is spelled from
         ElementId element;
         Sets::Containment containment;
-        PrefixRole role;
-        bool isPath() const { return role == PrefixRole::Path; };
+        Role role;
+        SelfInclusion selfInclusion;
+        bool isPath() const { return role == Role::Path; };
 
         //! The trie nodes for every prefix of the spelling, starting with the element root
         /*!
@@ -146,7 +144,7 @@ private:
     //! The edge from a node to the child reached by appending a letter
     struct Edge {
         uint32_t parent;
-        Letter letter;
+        Member letter;
 
         bool operator==(const Edge&) const = default;
     };
@@ -155,7 +153,7 @@ private:
         size_t operator()(const Edge& edge) const {
             size_t hash = 0;
             hash_combine(hash, edge.parent);
-            hash_combine(hash, Impl::hashLetter(edge.letter));
+            hash_combine(hash, std::bit_cast<uint32_t>(edge.letter));
             return hash;
         }
     };
@@ -163,18 +161,15 @@ private:
     //! Whether a hit between \p prefix and \p path is a conflict
     bool raisesConflict(WordId prefix, WordId path) const;
 
-    //! Whether the word of \p pathNode stays longer than the one of \p prefixNode under any rewrite
-    bool isStrictPrefixOf(uint32_t prefixNode, uint32_t pathNode) const {
-        return nodes[pathNode].stableLength > nodes[prefixNode].stableLength;
-    }
-
-    uint32_t childNode(uint32_t parent, Letter letter);
+    uint32_t childNode(uint32_t parent, Member letter);
 
     void buildPath(Solver&, WordId);
     void attach(Solver&, WordId, bool raiseConflicts);
     void detach(WordId);
 
     Node& nodeOf(uint32_t node) { return nodes[node]; }
+
+    Params m_params;
 
     std::vector<Node> nodes; //!< Append-only, never unwound
     std::unordered_map<Edge, uint32_t, EdgeHash> edges; //!< Append-only, never unwound
@@ -189,10 +184,12 @@ private:
     bool isBacktracked(WordId word) const { return word.id() >= backtrackedWordCount; }
 
     // Temporary buffer used inside a single function to avoid repeated allocations
-    std::vector<Letter> letterBuffer;
+    std::vector<Member> normalFormBuffer;
+};
 
-public:
-    Impl impl;
+struct PrefixHitData {
+    PrefixIndex::WordId prefix;
+    PrefixIndex::WordId path;
 };
 
 }

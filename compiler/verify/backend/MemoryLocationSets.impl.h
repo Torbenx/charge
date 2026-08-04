@@ -1,53 +1,53 @@
 #pragma once
 
 #include <verify/backend/MemoryLocationSets.h>
-#include <verify/backend/PrefixIndex.impl.h>
 #include <verify/backend/SolverImpl.h>
 
 #include <algorithm>
 
 namespace verify::backend {
 
-template<typename Derived, typename PrefixImpl>
-MemoryLocationSets<Derived, PrefixImpl>::MemoryLocationSets(Solver&) { }
+template<typename Derived>
+MemoryLocationSets<Derived>::MemoryLocationSets(Solver&)
+    : prefixes(params().prefixParams) { }
 
-template<typename Derived, typename PrefixImpl>
-Sets& MemoryLocationSets<Derived, PrefixImpl>::baseTheory(Solver& solver) {
+template<typename Derived>
+Sets& MemoryLocationSets<Derived>::baseTheory(Solver& solver) {
     return solver.impl().setTheory(params().setSort);
 }
 
-template<typename Derived, typename PrefixImpl>
-constexpr MemoryLocationSetsParams MemoryLocationSets<Derived, PrefixImpl>::params() {
+template<typename Derived>
+constexpr MemoryLocationSetsParams MemoryLocationSets<Derived>::params() {
     return Derived::PARAMS;
 }
 
-template<typename Derived, typename PrefixImpl>
-Bool MemoryLocationSets<Derived, PrefixImpl>::containmentOf(Solver& solver, PrefixIndexWordId word) {
+template<typename Derived>
+Bool MemoryLocationSets<Derived>::containmentOf(Solver& solver, PrefixIndex::WordId word) {
     return baseTheory(solver).mapToBool(solver, prefixes.elementOf(word), prefixes.containmentOf(word));
 }
 
-template<typename Derived, typename PrefixImpl>
-bool MemoryLocationSets<Derived, PrefixImpl>::joinedRepresentative(Solver& solver, const ElementState& state, MemoryDeclaration declaration) {
+template<typename Derived>
+bool MemoryLocationSets<Derived>::joinedRepresentative(Solver& solver, const ElementState& state, MemoryDeclaration declaration) {
     if (!state.representative.has_value())
         return false;
     MemoryDeclaration representative = locationOf(state.representative.value()).declaration;
     return solver.assignedEqual(representative, declaration);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::addWord(Solver& solver, ElementId element, Containment cont) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::addWord(Solver& solver, ElementId element, Containment cont) {
     derived().addWords(solver, prefixes, element, cont);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::addPending(Solver& solver, ElementId element, Containment cont) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::addPending(Solver& solver, ElementId element, Containment cont) {
     TracePosition position = pending.push({ .element = element, .containment = cont });
     stateOf(element).pendingPositions.push_back(position);
     solver.addUse(locationOf(cont.set()).declaration, Use(params().pendingRewriteUse, position.index));
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::promotePending(Solver& solver, const ElementState& state, TracePosition position) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::promotePending(Solver& solver, const ElementState& state, TracePosition position) {
     PendingContainment& entry = pending[position];
     if (entry.promoted)
         return;
@@ -61,15 +61,15 @@ void MemoryLocationSets<Derived, PrefixImpl>::promotePending(Solver& solver, con
     addWord(solver, entry.element, entry.containment);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::promotePendingOf(Solver& solver, ElementId element) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::promotePendingOf(Solver& solver, ElementId element) {
     const ElementState& state = stateOf(element);
     for (TracePosition position : state.pendingPositions)
         promotePending(solver, state, position);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::propagateContainment(Solver& solver, ElementId element, Sets::Containment containment) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::propagateContainment(Solver& solver, ElementId element, Sets::Containment containment) {
     Set set = containment.set();
 
     if (element == baseTheory(solver).forAllElement())
@@ -105,27 +105,22 @@ void MemoryLocationSets<Derived, PrefixImpl>::propagateContainment(Solver& solve
         promotePendingOf(solver, element);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::propagateRewrite(Solver& solver, Use use) {
-    switch (use.kind()) {
-    case params().pendingRewriteUse: {
+template<typename Derived>
+void MemoryLocationSets<Derived>::propagateRewrite(Solver& solver, Use use) {
+    if (use.kind() == params().pendingRewriteUse) {
         TracePosition position { use.id() };
         promotePending(solver, stateOf(pending[position].element), position);
-        break;
-    }
-    case params().representativeRewriteUse:
+    } else if (use.kind() == params().representativeRewriteUse) {
         promotePendingOf(solver, ElementId(use.id()));
-        break;
-    case PrefixImpl::wordUse:
+    } else if (use.kind() == prefixes.params().wordUse) {
         prefixes.propagateRewrite(solver, use);
-        break;
-    default:
+    } else {
         VERIFY_NOT_REACHED();
     }
 }
 
-template<typename Derived, typename PrefixImpl>
-bool MemoryLocationSets<Derived, PrefixImpl>::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
+template<typename Derived>
+bool MemoryLocationSets<Derived>::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     if (reason.kind() == params().declarationsShareElementReason) {
         auto data = reason.get(params().declarationsShareElementReason);
         auto [setA, setB] = data.sets();
@@ -134,7 +129,7 @@ bool MemoryLocationSets<Derived, PrefixImpl>::testReason(Solver& solver, Bool as
     }
 
     VERIFY(assignedLiteral == false_literal);
-    auto data = reason.get(PrefixImpl::hitReason);
+    auto data = reason.get(prefixes.params().hitReason);
     // The locations are only comparable as long as they belong to the same declaration
     return solver.assignedEqual(declarationOf(data.prefix), declarationOf(data.path))
         && prefixes.isConflict(data.prefix, data.path)
@@ -142,8 +137,8 @@ bool MemoryLocationSets<Derived, PrefixImpl>::testReason(Solver& solver, Bool as
         && solver.assignedTrue(containmentOf(solver, data.path));
 }
 
-template<typename Derived, typename PrefixImpl>
-ClauseAndIndex MemoryLocationSets<Derived, PrefixImpl>::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
+template<typename Derived>
+ClauseAndIndex MemoryLocationSets<Derived>::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
     if (reason.kind() == params().declarationsShareElementReason) {
         auto data = reason.get(params().declarationsShareElementReason);
         auto [setA, setB] = data.sets();
@@ -156,7 +151,7 @@ ClauseAndIndex MemoryLocationSets<Derived, PrefixImpl>::reasonToClause(Solver& s
     }
 
     VERIFY(assignedLiteral == false_literal);
-    auto data = reason.get(PrefixImpl::hitReason);
+    auto data = reason.get(prefixes.params().hitReason);
 
     ClauseBuilder clause = solver.beginClause();
     clause.add(solver, assignedLiteral);
@@ -172,16 +167,16 @@ ClauseAndIndex MemoryLocationSets<Derived, PrefixImpl>::reasonToClause(Solver& s
     return { solver.viewClause(clause), 0 };
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::newDecisionLevel(Solver& solver) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::newDecisionLevel(Solver& solver) {
     prefixes.newDecisionLevel(solver);
     pending.newDecisionLevel(solver);
     representativeTrace.newDecisionLevel(solver);
     promotionTrace.newDecisionLevel(solver);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::beginBacktrack(Solver& solver) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::beginBacktrack(Solver& solver) {
     prefixes.beginBacktrack(solver);
 
     // A promotion is of the level of the link that joined the declarations, which is also the level
@@ -205,13 +200,13 @@ void MemoryLocationSets<Derived, PrefixImpl>::beginBacktrack(Solver& solver) {
     representativeTrace.truncate(solver);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::endBacktrack(Solver& solver) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::endBacktrack(Solver& solver) {
     prefixes.endBacktrack(solver);
 }
 
-template<typename Derived, typename PrefixImpl>
-void MemoryLocationSets<Derived, PrefixImpl>::checkInvariances(Solver& solver) {
+template<typename Derived>
+void MemoryLocationSets<Derived>::checkInvariances(Solver& solver) {
     prefixes.checkInvariances(solver);
 
     pending.checkInvariances(solver);

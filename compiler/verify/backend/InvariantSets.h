@@ -48,73 +48,6 @@ struct InvariantLetter {
     Member payload;
 };
 
-//! Which of the three kinds of set a word describes
-/*!
-Only the invariant kind contributes a letter, the other two are spelled from their member alone and
-are told apart by this kind at the hits of the index.
-*/
-struct InvariantWordKind {
-    static constexpr InvariantWordKind inclusive() { return { (uint32_t)limits::max }; }
-    static constexpr InvariantWordKind exclusive() { return { (uint32_t)limits::max - 1u }; }
-    static constexpr InvariantWordKind invariant(Invariant invariant) { return { invariant.id() }; }
-
-    constexpr bool isInclusive() const { return *this == inclusive(); }
-    constexpr bool isExclusive() const { return *this == exclusive(); }
-    constexpr bool isInvariant() const { return !isInclusive() && !isExclusive(); }
-    constexpr Invariant invariant() const {
-        VERIFY(isInvariant());
-        return Invariant { payload };
-    }
-
-    bool operator==(const InvariantWordKind&) const = default;
-
-    uint32_t payload;
-};
-
-//! Describes a word of the invariant prefix index
-struct InvariantWord {
-    static InvariantWord inclusive(Member member) { return { member, InvariantWordKind::inclusive() }; }
-    static InvariantWord exclusive(Member member) { return { member, InvariantWordKind::exclusive() }; }
-    static InvariantWord singleton(Member member, Invariant invariant) {
-        return { member, InvariantWordKind::invariant(invariant) };
-    }
-
-    Member member;
-    InvariantWordKind kind;
-};
-
-//! The prefix impl for invariant sets
-struct InvariantPrefixes {
-    using Letter = InvariantLetter;
-    using WordKey = InvariantWord;
-
-    static constexpr UseKind wordUse = UseKind::InvariantPrefixWord;
-    static constexpr TypedReasonKind<PrefixHitData> hitReason = makeTypedReasonKind<ReasonKind::InvariantPrefixHit>();
-    static constexpr InvariantLetter invalidLetter = InvariantLetter::invalid();
-
-    static size_t hashLetter(InvariantLetter letter) { return std::bit_cast<uint32_t>(letter.payload); }
-
-    //! Only a literal member is stable, a variable one can still be rewritten to the identity
-    /*!
-    An invariant letter must not count here even though no rewrite ever removes it: the strict
-    prefix it would make is one of an invariant, not one of a location, and the conflicts gated by
-    it need the location of the path to be strictly below the one of the prefix. Counting it would
-    for example put the singleton of an invariant of l1.v1.I strictly below l1 while v1 may still
-    turn out to be the identity.
-    */
-    static bool letterStable(InvariantLetter letter) { return letter.isMember() && letter.member().literal(); }
-
-    Value watchedValue(InvariantWord word) const { return word.member; }
-    void appendLetters(Solver&, InvariantWord, std::vector<InvariantLetter>& out);
-    void explainLetters(Solver&, InvariantWord, ClauseBuilder&);
-
-    bool raisesConflict(PrefixHitSide<InvariantWord> prefix, PrefixHitSide<InvariantWord> path, bool strictPrefix) const;
-
-private:
-    // Temporary buffer used inside a single function to avoid repeated allocations
-    std::vector<Member> memberBuffer;
-};
-
 //! The sets of invariants described by a memory location
 /*!
 There are four kinds of sets:
@@ -128,15 +61,19 @@ the whole declaration is empty.
 
 Note that the non-singleton sets may not contain any elements at all.
 */
-struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
+struct InvariantSets : MemoryLocationSets<InvariantSets> {
     static constexpr Params PARAMS = {
         .setSort = Sort::InvariantSet,
         .declarationsShareElementReason = makeTypedReasonKind<ReasonKind::InvariantDeclarationsShareElement>(),
         .pendingRewriteUse = UseKind::InvariantSetPendingContainment,
         .representativeRewriteUse = UseKind::InvariantSetRepresentative,
+        .prefixParams = {
+            .hitReason = makeTypedReasonKind<ReasonKind::InvariantPrefixHit>(),
+            .wordUse = UseKind::InvariantPrefixWord,
+        },
     };
 
-    using Base = MemoryLocationSets<InvariantSets, InvariantPrefixes>;
+    using Base = MemoryLocationSets<InvariantSets>;
     using SetHandle = InvariantSet;
 
     InvariantSets(Solver&);
@@ -184,8 +121,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets, InvariantPrefixes> {
         return setInfos[set].invariant.value();
     }
 
-    InvariantWord toWord(InvariantSet set) const;
-    void addWords(Solver&, Prefixes&, ElementId, Containment);
+    void addWords(Solver&, PrefixIndex&, ElementId, Containment);
 
     void propagateContainment(Solver&, ElementId, Containment);
 

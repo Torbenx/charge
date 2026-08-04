@@ -29,14 +29,14 @@ struct MemoryLocationSetsParams {
     TypedReasonKind<SharedElementReason> declarationsShareElementReason;
     UseKind pendingRewriteUse;
     UseKind representativeRewriteUse;
+    PrefixIndex::Params prefixParams;
 };
 
-template<typename Derived, typename PrefixImpl>
+template<typename Derived>
 struct MemoryLocationSets {
     using Params = MemoryLocationSetsParams;
     using ElementId = Sets::ElementId;
     using Containment = Sets::Containment;
-    using Prefixes = PrefixIndex<PrefixImpl>;
 
     MemoryLocationSets(Solver&);
 
@@ -75,8 +75,8 @@ private:
     MemoryLocation locationOf(Set set) {
         return derived().locationOf(setHandle(set));
     }
-    Bool containmentOf(Solver&, PrefixIndexWordId);
-    MemoryDeclaration declarationOf(PrefixIndexWordId word) {
+    Bool containmentOf(Solver&, PrefixIndex::WordId);
+    MemoryDeclaration declarationOf(PrefixIndex::WordId word) {
         return locationOf(prefixes.containmentOf(word).set()).declaration;
     }
 
@@ -103,7 +103,7 @@ private:
     Trace<ElementId> representativeTrace;
     Trace<TracePosition> promotionTrace;
 
-    Prefixes prefixes;
+    PrefixIndex prefixes;
 };
 
 }

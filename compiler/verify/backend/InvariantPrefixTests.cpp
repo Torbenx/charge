@@ -6,34 +6,14 @@ namespace verify::backend {
 
 namespace {
 
-    using Letters = std::vector<InvariantLetter>;
-
     //! An index the words are only spelled with, so that no word is registered in the trie
     struct Fixture {
         SolverImpl solver;
-        PrefixIndex<InvariantPrefixes> prefixes;
+        PrefixIndex prefixes;
         Invariant i1 { 0 };
         Invariant i2 { 1 };
 
         Member newLiteral() { return solver.newMemberLiteral(); }
-
-        Letters spell(InvariantWord word) {
-            Letters letters;
-            prefixes.impl.appendLetters(solver, word, letters);
-            return letters;
-        }
-
-        //! Whether the two words hit in the index, i.e. whether \p prefix is a prefix of \p path
-        /*!
-        The spelling decides the hits alone. Whether a hit is a conflict depends on the kinds of the
-        two words and on the strictness of the hit as well, which the index tests below cover.
-        */
-        bool matches(InvariantWord prefix, InvariantWord path) {
-            Letters prefixLetters = spell(prefix);
-            Letters pathLetters = spell(path);
-            return prefixLetters.size() <= pathLetters.size()
-                && std::equal(prefixLetters.begin(), prefixLetters.end(), pathLetters.begin());
-        }
 
         //! Decide that the member \p a is the member \p b and propagate
         void decideMembersEqual(Member a, Member b) {
@@ -121,101 +101,6 @@ namespace {
         }
     };
 
-}
-
-TEST(VerifyBackend, InvariantWordsAreSpelledWithMembers) {
-    Fixture f;
-    Member l1 = f.newLiteral();
-    Member l2 = f.newLiteral();
-    Member location = f.solver.composeMembers({ l1, l2 });
-
-    InvariantLetter first = InvariantLetter::member(l1);
-    InvariantLetter second = InvariantLetter::member(l2);
-
-    // A word is spelled from the members of its location, and only a singleton adds a letter of its
-    // own. So the inclusive and the exclusive word of a location are spelled the same.
-    EXPECT_EQ(f.spell(InvariantWord::inclusive(location)), (Letters { first, second }));
-    EXPECT_EQ(f.spell(InvariantWord::exclusive(location)), (Letters { first, second }));
-    EXPECT_EQ(f.spell(InvariantWord::singleton(location, f.i1)),
-        (Letters { first, second, InvariantLetter::invariant(f.i1) }));
-
-    // The whole declaration is the identity location, so its sets are spelled with the empty word
-    EXPECT_EQ(f.spell(InvariantWord::inclusive(identity_member)), (Letters {}));
-    EXPECT_EQ(f.spell(InvariantWord::exclusive(identity_member)), (Letters {}));
-    EXPECT_EQ(f.spell(InvariantWord::singleton(identity_member, f.i1)), (Letters { InvariantLetter::invariant(f.i1) }));
-}
-
-TEST(VerifyBackend, InvariantWordsOfOneLocation) {
-    Fixture f;
-    Member l1 = f.newLiteral();
-
-    // All the sets of one location match each other, the spelling does not separate them. Which of
-    // those matches is a conflict is decided at the hit, which the index tests below cover.
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(l1), InvariantWord::singleton(l1, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(l1), InvariantWord::exclusive(l1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::singleton(l1, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::inclusive(l1)));
-
-    // The singletons of two invariants at one location are distinct, and every word matches itself
-    EXPECT_FALSE(f.matches(InvariantWord::singleton(l1, f.i1), InvariantWord::singleton(l1, f.i2)));
-    EXPECT_TRUE(f.matches(InvariantWord::singleton(l1, f.i1), InvariantWord::singleton(l1, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(l1), InvariantWord::inclusive(l1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::exclusive(l1)));
-}
-
-TEST(VerifyBackend, InvariantWordsOfNestedLocations) {
-    Fixture f;
-    Member l1 = f.newLiteral();
-    Member l2 = f.newLiteral();
-    Member below = f.solver.composeMembers({ l1, l2 });
-
-    // A member of a location is below it, so the sets of that member all match the ones above
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::inclusive(below)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::exclusive(below)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::singleton(below, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(l1), InvariantWord::inclusive(below)));
-
-    // And nothing of the location above it
-    EXPECT_FALSE(f.matches(InvariantWord::inclusive(below), InvariantWord::inclusive(l1)));
-    EXPECT_FALSE(f.matches(InvariantWord::inclusive(below), InvariantWord::singleton(l1, f.i1)));
-
-    // The sets of two members of the same location are unrelated
-    EXPECT_FALSE(f.matches(InvariantWord::inclusive(l1), InvariantWord::inclusive(l2)));
-    EXPECT_FALSE(f.matches(InvariantWord::exclusive(l1), InvariantWord::inclusive(l2)));
-}
-
-TEST(VerifyBackend, InvariantWordsOfTheWholeDeclaration) {
-    Fixture f;
-    Member l1 = f.newLiteral();
-
-    // The identity location is spelled with the empty word, which is a prefix of every other one.
-    // So its sets match everything of the declaration, its own invariants included.
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(identity_member), InvariantWord::inclusive(l1)));
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(identity_member), InvariantWord::singleton(l1, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::inclusive(identity_member), InvariantWord::singleton(identity_member, f.i1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(identity_member), InvariantWord::inclusive(l1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(identity_member), InvariantWord::exclusive(l1)));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(identity_member), InvariantWord::singleton(l1, f.i1)));
-
-    // That the exclusive one skips the invariants of the identity location itself is left to the
-    // hit, see InvariantIndexWholeDeclaration
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(identity_member), InvariantWord::singleton(identity_member, f.i1)));
-}
-
-TEST(VerifyBackend, InvariantWordsFollowRewrites) {
-    Fixture f;
-    Member l1 = f.newLiteral();
-    Member l2 = f.newLiteral();
-    Member v1 = f.solver.newAuxMemberVariable();
-
-    // The words are spelled from the normal form of their member, so a location that is not related
-    // to another one yet
-    EXPECT_FALSE(f.matches(InvariantWord::exclusive(l1), InvariantWord::inclusive(v1)));
-
-    // becomes one below it once the variable is rewritten
-    f.decideMembersEqual(v1, f.solver.composeMembers({ l1, l2 }));
-    EXPECT_TRUE(f.matches(InvariantWord::exclusive(l1), InvariantWord::inclusive(v1)));
-    EXPECT_EQ(f.spell(InvariantWord::inclusive(v1)), f.spell(InvariantWord::inclusive(f.solver.composeMembers({ l1, l2 }))));
 }
 
 TEST(VerifyBackend, InvariantIndexInclusiveSetHoldsTheInvariantsOfItsLocation) {
@@ -693,6 +578,20 @@ TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
     f.decideNotIn(other, f.exclusive(l1));
     f.decideNotIn(other, f.path({ l1, l2 }));
     EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAfterRewrite) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    Bool eq = f.solver.equality(l1, v1);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
 }
 
 }

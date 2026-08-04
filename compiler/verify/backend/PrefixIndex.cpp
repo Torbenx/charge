@@ -1,27 +1,25 @@
-#pragma once
-
 #include <verify/backend/PrefixIndex.h>
+
+#include <verify/backend/SolverImpl.h>
 
 namespace verify::backend {
 
-template<typename Impl>
-PrefixIndexWordId PrefixIndex<Impl>::addWord(Solver& solver, WordKey key, ElementId element, Sets::Containment containment, PrefixRole role) {
+PrefixIndex::WordId PrefixIndex::addWord(Solver& solver, Member expression, ElementId element, Sets::Containment containment, Role role, SelfInclusion inclusion) {
     while (element.id() >= elementRoots.size()) {
         uint32_t root = nodes.size();
-        nodes.push_back({ .letter = Impl::invalidLetter, .element = ElementId(elementRoots.size()) });
+        nodes.push_back({ .letter = (Member)INVALID_VALUE, .element = ElementId(elementRoots.size()) });
         elementRoots.push_back(root);
     }
 
-    WordId w = words.push({ .key = key, .element = element, .containment = containment, .role = role });
-    solver.addUse(impl.watchedValue(key), Use(Impl::wordUse, w.id()));
+    WordId w = words.push({ .expression = expression, .element = element, .containment = containment, .role = role, .selfInclusion = inclusion });
+    solver.addUse(expression, Use(params().wordUse, w.id()));
 
     buildPath(solver, w);
     attach(solver, w, true);
     return w;
 }
 
-template<typename Impl>
-bool PrefixIndex<Impl>::isPrefixOf(WordId prefix, WordId path) const {
+bool PrefixIndex::isPrefixOf(WordId prefix, WordId path) const {
     if (isBacktracked(prefix) || isBacktracked(path))
         return false;
     const WordInfo& prefixInfo = words[prefix];
@@ -34,37 +32,43 @@ bool PrefixIndex<Impl>::isPrefixOf(WordId prefix, WordId path) const {
     return pathInfo.path[prefixInfo.path.size() - 1] == prefixInfo.path.back();
 }
 
-template<typename Impl>
-bool PrefixIndex<Impl>::raisesConflict(WordId prefix, WordId path) const {
+bool PrefixIndex::raisesConflict(WordId prefix, WordId path) const {
     const WordInfo& prefixInfo = words[prefix];
     const WordInfo& pathInfo = words[path];
-    return impl.raisesConflict(
-        Hit { prefixInfo.key, prefixInfo.containment },
-        Hit { pathInfo.key, pathInfo.containment },
-        isStrictPrefixOf(prefixInfo.path.back(), pathInfo.path.back()));
+
+    // Two negative set containments can never cause a conflict (the element being in no set at all
+    // is always a valid assignment). More pactically across all the prefix/path matches of invariant
+    // sets the negative/negative containment cases are the only ones that are not a conflict
+    // (see InvariantSetsPrefixCases.md). So not raising such conflicts here allows stuffing all of
+    // these into one PrefixIndex.
+    if (!prefixInfo.containment.contained() && !pathInfo.containment.contained())
+        return false;
+
+    // Require strict prefix when matching an exlusive prefix against and inclusive path.
+    if (prefixInfo.selfInclusion == SelfInclusion::Exclusive && pathInfo.selfInclusion == SelfInclusion::Inclusive)
+        return nodes[pathInfo.path.back()].literalCount > nodes[prefixInfo.path.back()].literalCount;
+
+    return true;
 }
 
-template<typename Impl>
-bool PrefixIndex<Impl>::isConflict(WordId prefix, WordId path) const {
+bool PrefixIndex::isConflict(WordId prefix, WordId path) const {
     return isPrefixOf(prefix, path) && raisesConflict(prefix, path);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::explainPrefix(Solver& solver, WordId prefix, WordId path, ClauseBuilder& clause) {
+void PrefixIndex::explainPrefix(Solver& solver, WordId prefix, WordId path, ClauseBuilder& clause) {
     // The prefix relation follows from the spellings of the two words alone, so whatever those
     // are derived from is all that has to be justified.
     // TODO: Only the letters covering the matched prefix of the path are needed, explaining the
     //       whole word is sound but produces a longer clause than necessary.
-    impl.explainLetters(solver, words[prefix].key, clause);
-    impl.explainLetters(solver, words[path].key, clause);
+    solver.impl().members.explainRewrite(solver, words[prefix].expression, clause);
+    solver.impl().members.explainRewrite(solver, words[path].expression, clause);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::propagateRewrite(Solver& solver, Use use) {
+void PrefixIndex::propagateRewrite(Solver& solver, Use use) {
     // Only growing rewrites are notified about, so this never runs while the assignments are
     // being reverted and a conflict found here is a real one
     VERIFY(!backtracking());
-    VERIFY(use.kind() == Impl::wordUse);
+    VERIFY(use.kind() == params().wordUse);
     WordId w = WordId(use.id());
 
     rewriteTrace.push(w);
@@ -73,14 +77,12 @@ void PrefixIndex<Impl>::propagateRewrite(Solver& solver, Use use) {
     attach(solver, w, true);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::newDecisionLevel(Solver& solver) {
+void PrefixIndex::newDecisionLevel(Solver& solver) {
     words.newDecisionLevel(solver);
     rewriteTrace.newDecisionLevel(solver);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::beginBacktrack(Solver& solver) {
+void PrefixIndex::beginBacktrack(Solver& solver) {
     backtrackedWordCount = words.backtrackedBegin(solver).id();
 
     for (WordId w : words.backtrackedPositionsReverse(solver))
@@ -99,15 +101,13 @@ void PrefixIndex<Impl>::beginBacktrack(Solver& solver) {
     rewriteTrace.truncate(solver);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::endBacktrack(Solver& solver) {
+void PrefixIndex::endBacktrack(Solver& solver) {
     VERIFY(backtrackedWordCount == words.backtrackedBegin(solver).id());
     backtrackedWordCount = limits::max;
     words.truncate(solver);
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::checkInvariances(Solver& solver) {
+void PrefixIndex::checkInvariances(Solver& solver) {
     VERIFY(!backtracking());
     words.checkInvariances(solver);
     rewriteTrace.checkInvariances(solver);
@@ -134,54 +134,51 @@ void PrefixIndex<Impl>::checkInvariances(Solver& solver) {
         }
     }
 
-    std::vector<Letter> letters;
+    std::vector<Member> letters;
     for (const WordInfo& info : words) {
         // The path spells the word, so anything else here means that a notification of the use
         // registered for it was missed
         letters.clear();
-        impl.appendLetters(solver, info.key, letters);
+        solver.impl().members.appendRewrite(info.expression, letters);
         VERIFY(info.path.size() == letters.size() + 1);
         VERIFY(info.path.front() == elementRoots[info.element.id()]);
-        int_t stableLength = 0;
+        int_t literalCount = 0;
         for (int_t k = 0; k < (int_t)letters.size(); k++) {
             VERIFY(nodes[info.path[k + 1]].letter == letters[k]);
-            if (Impl::letterStable(letters[k]))
-                stableLength += 1;
-            VERIFY(nodes[info.path[k + 1]].stableLength == stableLength);
+            if (letters[k].literal())
+                literalCount += 1;
+            VERIFY(nodes[info.path[k + 1]].literalCount == literalCount);
         }
     }
 }
 
-template<typename Impl>
-uint32_t PrefixIndex<Impl>::childNode(uint32_t parent, Letter letter) {
+uint32_t PrefixIndex::childNode(uint32_t parent, Member letter) {
     auto [it, inserted] = edges.try_emplace(Edge { parent, letter }, (uint32_t)nodes.size());
     if (inserted) {
         const Node& parentNode = nodes[parent];
         nodes.push_back({ .letter = letter,
             .element = parentNode.element,
-            .stableLength = parentNode.stableLength + (Impl::letterStable(letter) ? 1u : 0u) });
+            .literalCount = parentNode.literalCount + (letter.literal() ? 1u : 0u) });
     }
     return it->second;
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::buildPath(Solver& solver, WordId w) {
+void PrefixIndex::buildPath(Solver& solver, WordId w) {
     WordInfo& info = words[w];
     VERIFY(info.path.empty());
 
-    letterBuffer.clear();
-    impl.appendLetters(solver, info.key, letterBuffer);
+    normalFormBuffer.clear();
+    solver.impl().members.appendRewrite(info.expression, normalFormBuffer);
 
     uint32_t node = elementRoots[info.element.id()];
     info.path.push_back(node);
-    for (Letter letter : letterBuffer) {
+    for (Member letter : normalFormBuffer) {
         node = childNode(node, letter);
         info.path.push_back(node);
     }
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::attach(Solver& solver, WordId w, bool raiseConflicts) {
+void PrefixIndex::attach(Solver& solver, WordId w, bool raiseConflicts) {
     WordInfo& info = words[w];
     VERIFY(info.occurrenceIndices.empty());
 
@@ -198,7 +195,7 @@ void PrefixIndex<Impl>::attach(Solver& solver, WordId w, bool raiseConflicts) {
                 // Every match is a separate conflict
                 for (WordId prefix : n.bTerminals) {
                     if (raisesConflict(prefix, w))
-                        solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = prefix, .path = w }));
+                        solver.assignTrue(false_literal, makeReason(params().hitReason, { .prefix = prefix, .path = w }));
                 }
             }
         }
@@ -212,14 +209,13 @@ void PrefixIndex<Impl>::attach(Solver& solver, WordId w, bool raiseConflicts) {
             // Every match is a separate conflict
             for (WordId path : n.aOccurrences) {
                 if (raisesConflict(w, path))
-                    solver.assignTrue(false_literal, makeReason(Impl::hitReason, { .prefix = w, .path = path }));
+                    solver.assignTrue(false_literal, makeReason(params().hitReason, { .prefix = w, .path = path }));
             }
         }
     }
 }
 
-template<typename Impl>
-void PrefixIndex<Impl>::detach(WordId w) {
+void PrefixIndex::detach(WordId w) {
     WordInfo& info = words[w];
 
     auto removeAt = [&](std::vector<WordId>& list, uint32_t index, uint32_t indexSlot) {

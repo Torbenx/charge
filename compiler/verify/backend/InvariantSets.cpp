@@ -7,7 +7,12 @@
 
 namespace verify::backend {
 
-template struct MemoryLocationSets<InvariantSets, InvariantPrefixes>;
+template struct MemoryLocationSets<InvariantSets>;
+
+struct SingletonToInclusiveReason {
+    Sets::ElementId element;
+    InvariantSet singletonSet;
+};
 
 InvariantSets::InvariantSets(Solver& solver)
     : Base(solver), setInfos(solver) { }
@@ -58,44 +63,33 @@ InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location
     return newSet;
 }
 
-InvariantWord InvariantSets::toWord(InvariantSet set) const {
-    Member member = locationOf(set).member;
-    switch (set.theory()) {
+void InvariantSets::addWords(Solver& solver, PrefixIndex& prefixes, ElementId element, Containment cont) {
+    PrefixIndex::Role role;
+    PrefixIndex::SelfInclusion inclusion;
+    switch (cont.set().theory()) {
     case TheoryId::InclusiveLocationInvariantSets:
-        return InvariantWord::inclusive(member);
+        role = cont.contained() ? PrefixIndex::Role::Path : PrefixIndex::Role::Prefix;
+        inclusion = PrefixIndex::SelfInclusion::Inclusive;
+        break;
     case TheoryId::ExclusiveLocationInvariantSets:
-        return InvariantWord::exclusive(member);
+        role = cont.contained() ? PrefixIndex::Role::Path : PrefixIndex::Role::Prefix;
+        inclusion = PrefixIndex::SelfInclusion::Exclusive;
+        break;
     case TheoryId::PathInvariantSets:
-        // A path set is spelled like the inclusive set of its location. That the two grow in
-        // opposite directions is carried by the roles of their words, not by their spelling.
-        return InvariantWord::inclusive(member);
+        role = cont.contained() ? PrefixIndex::Role::Prefix : PrefixIndex::Role::Path;
+        inclusion = PrefixIndex::SelfInclusion::Inclusive;
+        break;
     case TheoryId::InvariantSingletonSets:
-        return InvariantWord::singleton(member, invariantOf(set));
+        if (!cont.contained())
+            return;
+        role = PrefixIndex::Role::Prefix;
+        inclusion = PrefixIndex::SelfInclusion::Exclusive;
+        break;
     default:
         VERIFY_NOT_REACHED();
     }
-}
-
-void InvariantSets::addWords(Solver& solver, Prefixes& prefixes, ElementId element, Containment cont) {
-    InvariantSet set = (InvariantSet)cont.set();
-    if (cont.set().theory() == TheoryId::PathInvariantSets) {
-        // If an element is not in the path to a location but is in some prefix of it, thats a conflict.
-        auto role = cont.contained() ? PrefixRole::Candidate : PrefixRole::Path;
-        prefixes.addWord(solver, toWord(set), element, cont, role);
-    } else {
-        // If an element is in a location set but not in the location set of some prefix of it, thats a conflict.
-        auto role = cont.contained() ? PrefixRole::Path : PrefixRole::Candidate;
-        prefixes.addWord(solver, toWord(set), element, cont, role);
-
-        if (cont.contained() && cont.set().theory() == TheoryId::InvariantSingletonSets) {
-            // The singleton is added as the exclusive word of its location a second time, which
-            // matches it with every set holding only invariants strictly below that location. All
-            // such matches are conflicts, see InvariantSetsPrefixCases.md. Note that this word is a
-            // prefix of the singleton word added above, a hit of the containment with itself that
-            // is no conflict because the two spell the same location.
-            prefixes.addWord(solver, InvariantWord::exclusive(locationOf(set).member), element, cont, PrefixRole::Candidate);
-        }
-    }
+    Member member = locationOf((InvariantSet)cont.set()).member;
+    prefixes.addWord(solver, member, element, cont, role, inclusion);
 }
 
 void InvariantSets::propagateContainment(Solver& solver, ElementId element, Containment containment) {
@@ -103,6 +97,11 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
     VERIFY(isInvariantSet(set));
 
     if (containment.contained() && set.theory() == TheoryId::InvariantSingletonSets) {
+        // in singletonSet(loc, I) => in inclusiveSet(loc)
+        baseTheory(solver).assignTrue(solver, element, Sets::in(inclusiveSet(solver, locationOf(set))),
+            makeReason<ReasonKind::InvariantSingletonToInclusive>({ element, (InvariantSet)containment.set() }));
+
+        // in singleton1 and in singleton2 => singleton1 = singleton2
         auto& state = stateOf(element);
         if (!state.singleton.has_value()) {
             state.singleton = set;
@@ -112,6 +111,9 @@ void InvariantSets::propagateContainment(Solver& solver, ElementId element, Cont
             solver.assignTrue(solver.equality(singleton, set),
                 makeReason<ReasonKind::InvariantSingletonSetsShareElement>({ element, singleton, set }));
         }
+
+        // TODO: Detect in singletonSet(loc1, I) and not in singletonSet(loc2, I) as conflict when
+        //       loc1 and loc2 are same in the current rewrite.
     }
 
     Base::propagateContainment(solver, element, containment);
@@ -124,6 +126,9 @@ bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reaso
         auto [setA, setB] = data.sets();
         return baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setA))
             && baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setB));
+    } else if (reason.kind() == ReasonKind::InvariantSingletonToInclusive) {
+        auto [element, singleton] = reason.get<ReasonKind::InvariantSingletonToInclusive>();
+        return baseTheory(solver).assignedTrue(solver, element, Sets::in(singleton));
     }
 
     return Base::testReason(solver, assignedLiteral, reason);
@@ -138,6 +143,12 @@ ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLitera
         clause.add(solver, assignedLiteral);
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), !Sets::in(setA)));
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), !Sets::in(setB)));
+        return { solver.viewClause(clause), 0 };
+    } else if (reason.kind() == ReasonKind::InvariantSingletonToInclusive) {
+        auto [element, singleton] = reason.get<ReasonKind::InvariantSingletonToInclusive>();
+        ClauseBuilder clause = solver.beginClause();
+        clause.add(solver, assignedLiteral);
+        clause.add(solver, baseTheory(solver).mapToBool(solver, element, !Sets::in(singleton)));
         return { solver.viewClause(clause), 0 };
     }
 
@@ -173,43 +184,6 @@ void InvariantSets::checkInvariances(Solver& solver) {
     for (int_t i = 0; i < (int_t)elementStates.size(); i++) {
         VERIFY(elementStates[i].singleton.has_value() == onTrace[i]);
     }
-}
-
-bool InvariantPrefixes::raisesConflict(PrefixHitSide<InvariantWord> prefix, PrefixHitSide<InvariantWord> path, bool strictPrefix) const {
-    // Two negative set containments can never cause a conflict (the element being in no set at all
-    // is always a valid assignment). More pactically across all the prefix/path matches of invariant
-    // sets the negative/negative containment cases are the only ones that are not a conflict
-    // (see InvariantSetsPrefixCases.md). So not raising such conflicts here allows stuffing all of
-    // these into one PrefixIndex.
-    if (!prefix.containment.contained() && !path.containment.contained())
-        return false;
-
-    // An exclusive word describes the invariants strictly below its location, so it only conflicts
-    // with the sets of the locations below that one. The conflict needs the path to stay longer in
-    // *all* rewrites, which is what strictPrefix decides. The exception is a path that is exclusive
-    // itself, which excludes its own location either way.
-    if (prefix.key.kind.isExclusive() && !path.key.kind.isExclusive())
-        return strictPrefix;
-
-    return true;
-}
-
-void InvariantPrefixes::appendLetters(Solver& solver, InvariantWord word, std::vector<InvariantLetter>& out) {
-    memberBuffer.clear();
-    solver.impl().members.appendRewrite(word.member, memberBuffer);
-
-    for (Member letter : memberBuffer)
-        out.push_back(InvariantLetter::member(letter));
-
-    // The inclusive and the exclusive word of a location are spelled alike, only a singleton adds
-    // the letter that separates it from the sets of its own location
-    if (word.kind.isInvariant())
-        out.push_back(InvariantLetter::invariant(word.kind.invariant()));
-}
-
-void InvariantPrefixes::explainLetters(Solver& solver, InvariantWord word, ClauseBuilder& clause) {
-    // Only the member of the location is rewritten
-    solver.impl().members.explainRewrite(solver, word.member, clause);
 }
 
 }
