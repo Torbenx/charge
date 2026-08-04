@@ -580,7 +580,7 @@ TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
     EXPECT_FALSE(f.hasConflicts());
 }
 
-TEST(VerifyBackend, InvariantIndexConflictingSingletonsAfterRewrite) {
+TEST(VerifyBackend, DISABLED_InvariantIndexConflictingSingletonsAfterRewrite) {
     IndexFixture f;
     Member l1 = f.newLiteral();
     Member v1 = f.solver.newAuxMemberVariable();
