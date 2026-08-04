@@ -135,6 +135,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
 
     void addWords(Solver&, PrefixIndex&, ElementId, Containment);
 
+    void propagateRewrite(Solver&, Use);
     void propagateContainment(Solver&, ElementId, Containment);
 
     bool testReason(Solver&, Bool, const Reason&);
@@ -172,20 +173,23 @@ private:
         }
     };
 
-    struct ElementState {
-        std::optional<InvariantSet> singleton;
+    struct SingletonIndex : KeyWatches<SingletonIndex, InvariantSet, InvariantSet> {
+        static constexpr KeyWatchesParams PARAMS = {
+            .keyUse = UseKind::InvariantSingletonKeyUse,
+            .watchUse = UseKind::InvariantSingletonWatchUse,
+        };
+
+        InvariantSets& invariantSets();
+        void addValueUses(Solver&, ElementId, InvariantSet, Use);
+        bool matches(Solver&, ElementId, InvariantSet key, InvariantSet watch);
+        void explainMatch(Solver&, ElementId, InvariantSet key, InvariantSet watch, ClauseBuilder& clause);
+        void onKeyMatch(Solver&, ElementId, InvariantSet key, InvariantSet watch);
     };
 
     // Note: The keys of these maps could be obtained from the stored values
     using LocationSets = std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>;
 
-    ElementState& stateOf(ElementId element) {
-        if (element.id() >= elementStates.size())
-            elementStates.resize(element.id() + 1);
-        return elementStates[element.id()];
-    }
-
-    std::vector<ElementState> elementStates;
+    SingletonIndex singletonIndex;
 
     TheoryData<LocationSetInfo, TheoryId::InclusiveLocationInvariantSets> inclusiveInfos;
     TheoryData<LocationSetInfo, TheoryId::ExclusiveLocationInvariantSets> exclusiveInfos;
@@ -196,8 +200,6 @@ private:
     LocationSets exclusiveSets;
     LocationSets pathSets;
     std::unordered_map<SingletonKey, InvariantSet, SingletonHash> singletonSets;
-
-    Trace<ElementId> singletonTrace;
 };
 
 }

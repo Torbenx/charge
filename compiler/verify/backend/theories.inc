@@ -84,6 +84,7 @@ REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
 REASON(InvariantSingletonSetsShareElement, SharedElementReason, false, invariantSets)
 REASON(InvariantSingletonToInclusive, SingletonToInclusiveReason, false, invariantSets)
+REASON(InvariantSingletonConflict, SharedElementReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
 USE_KIND(KeyWatchesTestKey, useTest)
@@ -94,6 +95,8 @@ USE_KIND(MemoryPrefixWord, memorySets)
 USE_KIND(InvariantSetRepresentative, invariantSets)
 USE_KIND(InvariantSetPendingContainment, invariantSets)
 USE_KIND(InvariantPrefixWord, invariantSets)
+USE_KIND(InvariantSingletonKeyUse, invariantSets)
+USE_KIND(InvariantSingletonWatchUse, invariantSets)
 
 #undef REASON
 #undef USE_KIND

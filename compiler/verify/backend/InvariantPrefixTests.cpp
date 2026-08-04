@@ -78,6 +78,14 @@ namespace {
         void decideNotIn(Set set) { decideIn(set, false); }
         void decideNotIn(Sets::ElementId e, Set set) { decideIn(e, set, false); }
 
+        //! Decide that the member \p a is the member \p b and propagate
+        void decideMembersEqual(Member a, Member b) {
+            solver.decideTrue(solver.equality(a, b));
+            solver.sat.propagate();
+            if (!solver.sat.hasConflicts())
+                checkInvariances();
+        }
+
         //! Decide that the two declarations are the same and propagate
         void decideDeclarationsEqual() {
             solver.decideTrue(declarationEquality());
@@ -580,7 +588,7 @@ TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
     EXPECT_FALSE(f.hasConflicts());
 }
 
-TEST(VerifyBackend, DISABLED_InvariantIndexConflictingSingletonsAfterRewrite) {
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAfterRewrite) {
     IndexFixture f;
     Member l1 = f.newLiteral();
     Member v1 = f.solver.newAuxMemberVariable();
@@ -592,6 +600,270 @@ TEST(VerifyBackend, DISABLED_InvariantIndexConflictingSingletonsAfterRewrite) {
     f.solver.decideTrue(eq);
     f.solver.sat.propagate();
     EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithTheExclusionFirst) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The exclusion arrives before the element is known to be in any singleton, so it has to wait
+    // for one to compare against instead of being dropped
+    f.decideNotIn(f.singleton(v1, f.i1));
+    f.decideIn(f.singleton(l1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    Bool eq = f.solver.equality(l1, v1);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithARewrittenKey) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The rewrite is on the side of the singleton the element is in this time, so the clause of the
+    // match has to name that one to be about the location the two share
+    f.decideIn(f.singleton(v1, f.i1));
+    f.decideNotIn(f.singleton(l1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    Bool eq = f.solver.equality(v1, l1);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsOfDistinctInvariants) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The singletons of two invariants are distinct sets even at one location, so being in the one
+    // and outside of the other stays consistent however the location is rewritten
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i2));
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.decideMembersEqual(l1, v1);
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsOfDistinctDeclarations) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+
+    // A singleton belongs to one declaration, so the exclusion of another one says nothing here
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.otherSingleton(l1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    // Until the two declarations turn out to be the same, which makes the two the same set
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+
+    // The match only holds while they are equal, so resolving it excludes that
+    f.resolveConflicts();
+    EXPECT_FALSE(f.hasConflicts());
+    EXPECT_TRUE(f.solver.assignedFalse(f.declarationEquality()));
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsNeedBothHalvesOfTheLocation) {
+    IndexFixture f;
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The members of the two locations are the same from the start, only the declarations are not
+    f.decideIn(f.singleton(v1, f.i1));
+    f.decideNotIn(f.otherSingleton(v1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.decideDeclarationsEqual();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAtAnAlreadyEqualLocation) {
+    IndexFixture f;
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+
+    // The locations are rewritten to the same one before either containment is known, so the match
+    // has to be found the moment the exclusion is added rather than on a later rewrite
+    f.decideMembersEqual(v1, v2);
+    f.decideIn(f.singleton(v1, f.i1));
+    f.decideNotIn(f.singleton(v2, f.i1));
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsCompareAgainstTheKeyOnly) {
+    IndexFixture f;
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+    Member v3 = f.solver.newAuxMemberVariable();
+
+    // The first singleton found is the key of the element, a second one only equates the locations
+    f.decideIn(f.singleton(v1, f.i1));
+    f.decideIn(f.singleton(v2, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+    EXPECT_TRUE(f.solver.assignedTrue(f.solver.equality(v1, v2)));
+
+    // So an exclusion that reaches the location of the second one reaches the key just as well
+    f.decideNotIn(f.singleton(v3, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+    f.decideMembersEqual(v3, v2);
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexExcludedSingletonsWithoutAKeyNeverConflict) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // Two locations the element is outside of say nothing about each other, even where they are the
+    // same location and hold the same invariant
+    f.decideNotIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i1));
+    f.decideMembersEqual(l1, v1);
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAreSeparatePerElement) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The exclusion belongs to another element than the singleton, so the two never meet
+    Sets::ElementId other = f.newElement();
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(other, f.singleton(v1, f.i1));
+    f.decideMembersEqual(l1, v1);
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAreBacktracked) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i1));
+    int_t levelBeforeRewrite = f.solver.currentDecisionLevel();
+
+    Bool eq = f.solver.equality(l1, v1);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    // Reverting the rewrite by hand must leave the index without a conflict again
+    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+    EXPECT_FALSE(f.solver.assignedTrue(eq));
+
+    // And the very same rewrite must be found to match anew when it is reapplied
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexExcludedSingletonsAreBacktracked) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    f.decideIn(f.singleton(l1, f.i1));
+    int_t levelBeforeExclusion = f.solver.currentDecisionLevel();
+    f.decideNotIn(f.singleton(v1, f.i1));
+
+    // Reverting the exclusion has to forget the watch it registered, so the rewrite that would have
+    // matched it finds nothing to compare anymore
+    f.solver.sat.beginBacktrack(levelBeforeExclusion + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+    EXPECT_FALSE(f.assignedNotIn(f.singleton(v1, f.i1)));
+
+    f.decideMembersEqual(l1, v1);
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexExcludedSingletonsOfSeveralElementsAreBacktracked) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+    Sets::ElementId other = f.newElement();
+
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideIn(other, f.singleton(l1, f.i1));
+    int_t levelBeforeExclusions = f.solver.currentDecisionLevel();
+
+    // The exclusions of the two elements are interleaved, so reverting them has to sort them back
+    // out per element rather than in the order they arrived in
+    f.decideNotIn(f.singleton(v1, f.i1));
+    f.decideNotIn(other, f.singleton(v2, f.i1));
+    f.decideNotIn(f.singleton(v2, f.i1));
+    f.decideNotIn(other, f.singleton(v1, f.i1));
+
+    f.solver.sat.beginBacktrack(levelBeforeExclusions + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+
+    // None of the exclusions is left, so neither location conflicts with the shared singleton
+    f.decideMembersEqual(v1, l1);
+    f.decideMembersEqual(v2, l1);
+    EXPECT_FALSE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithSeveralExclusions) {
+    IndexFixture f;
+    Member l1 = f.newLiteral();
+    Member v1 = f.solver.newAuxMemberVariable();
+    Member v2 = f.solver.newAuxMemberVariable();
+
+    // Every exclusion is compared against the key on its own, so either of the two rewrites conflicts
+    f.decideIn(f.singleton(l1, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i1));
+    f.decideNotIn(f.singleton(v2, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    int_t levelBeforeRewrite = f.solver.currentDecisionLevel();
+    f.decideMembersEqual(v2, l1);
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.sat.endBacktrack();
+    f.checkInvariances();
+
+    f.decideMembersEqual(v1, l1);
+    EXPECT_TRUE(f.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantIndexConflictingSingletonsAtTheIdentityLocation) {
+    IndexFixture f;
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    // The declaration itself is a location like any other, and the identity is the member spelling it
+    f.decideIn(f.singleton(identity_member, f.i1));
+    f.decideNotIn(f.singleton(v1, f.i1));
+    EXPECT_FALSE(f.hasConflicts());
+
+    Bool eq = f.solver.equality(v1, identity_member);
+    f.solver.decideTrue(eq);
+    f.solver.sat.propagate();
+    EXPECT_TRUE(f.hasConflicts());
+
+    f.resolveConflicts();
+    EXPECT_TRUE(f.solver.assignedFalse(eq));
 }
 
 }
