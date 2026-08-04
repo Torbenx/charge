@@ -1,9 +1,9 @@
 #pragma once
 
+#include <verify/backend/KeyWatches.h>
 #include <verify/backend/PrefixIndex.h>
 #include <verify/backend/Sets.h>
 #include <verify/backend/Solver.h>
-#include <verify/backend/Trace.h>
 #include <verify/backend/UninterpretedEquality.h>
 #include <verify/backend/Use.h>
 
@@ -27,9 +27,8 @@ struct SharedElementReason : private PackedReason<SharedElementSets, uint32_t> {
 struct MemoryLocationSetsParams {
     Sort setSort;
     TypedReasonKind<SharedElementReason> declarationsShareElementReason;
-    UseKind pendingRewriteUse;
-    UseKind representativeRewriteUse;
     PrefixIndex::Params prefixParams;
+    KeyWatchesParams watchesParams;
 };
 
 template<typename Derived>
@@ -55,19 +54,19 @@ struct MemoryLocationSets {
     void checkInvariances(Solver&);
 
 private:
-    //! A containment whose declaration is not (yet) equal to the representative
-    struct PendingContainment {
-        ElementId element;
-        Containment containment;
-        //! Becomes true when equality to the represnetative is detected
-        bool promoted = false;
-    };
+    //! Registers the words of the containments once they name the declaration of the representative
+    /*!
+    The key of an element is the set of its representative and its watches are the sets of all its
+    containments, both compared by the declarations of their locations.
+    */
+    struct PendingWatches : KeyWatches<PendingWatches, Containment, Containment> {
+        static constexpr KeyWatchesParams PARAMS = Derived::PARAMS.watchesParams;
 
-    struct ElementState {
-        //! The set of the first location found to contain the element
-        std::optional<Set> representative;
-        //! The pending containments of this element, in increasing order
-        std::vector<TracePosition> pendingPositions;
+        MemoryLocationSets& locationSets();
+
+        bool matches(Solver&, ElementId, Containment key, Containment watch);
+        void addValueUses(Solver&, ElementId, Containment watch, Use);
+        void onKeyMatch(Solver&, ElementId, Containment key, Containment watch);
     };
 
     static auto setHandle(Set set) { return typename Derived::SetHandle(set); }
@@ -83,25 +82,9 @@ private:
     static constexpr MemoryLocationSetsParams params();
     Derived& derived() { return static_cast<Derived&>(*this); }
 
-    ElementState& stateOf(ElementId element) {
-        if (element.id() >= elementStates.size())
-            elementStates.resize(element.id() + 1);
-        return elementStates[element.id()];
-    }
-
-    //! Whether \p declaration is equal to the representative declaration of the element
-    bool joinedRepresentative(Solver&, const ElementState&, MemoryDeclaration declaration);
-
     void addWord(Solver&, ElementId, Containment);
-    void addPending(Solver&, ElementId, Containment);
-    void promotePending(Solver&, const ElementState&, TracePosition);
-    void promotePendingOf(Solver&, ElementId);
 
-    std::vector<ElementState> elementStates;
-    //! The pending containments, referenced by \ref ElementState::pendingPositions
-    Trace<PendingContainment> pending;
-    Trace<ElementId> representativeTrace;
-    Trace<TracePosition> promotionTrace;
+    PendingWatches pendingWatches;
 
     PrefixIndex prefixes;
 };

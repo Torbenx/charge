@@ -65,11 +65,13 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     static constexpr Params PARAMS = {
         .setSort = Sort::InvariantSet,
         .declarationsShareElementReason = makeTypedReasonKind<ReasonKind::InvariantDeclarationsShareElement>(),
-        .pendingRewriteUse = UseKind::InvariantSetPendingContainment,
-        .representativeRewriteUse = UseKind::InvariantSetRepresentative,
         .prefixParams = {
             .hitReason = makeTypedReasonKind<ReasonKind::InvariantPrefixHit>(),
             .wordUse = UseKind::InvariantPrefixWord,
+        },
+        .watchesParams = {
+            .keyUse = UseKind::InvariantSetRepresentative,
+            .watchUse = UseKind::InvariantSetPendingContainment,
         },
     };
 

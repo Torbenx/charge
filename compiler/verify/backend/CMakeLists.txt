@@ -11,6 +11,9 @@ target_sources(${PROJECT_NAME}
     InvariantSets.cpp
     InvariantSets.h
     InvariantTests.cpp
+    KeyWatches.h
+    KeyWatches.impl.h
+    KeyWatchesTests.cpp
     MemberPrefixTests.cpp
     Members.cpp
     Members.h

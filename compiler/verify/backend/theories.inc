@@ -86,6 +86,8 @@ REASON(InvariantSingletonSetsShareElement, SharedElementReason, false, invariant
 REASON(InvariantSingletonToInclusive, SingletonToInclusiveReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
+USE_KIND(KeyWatchesTestKey, useTest)
+USE_KIND(KeyWatchesTestWatch, useTest)
 USE_KIND(MemorySetRepresentative, memorySets)
 USE_KIND(MemorySetPendingContainment, memorySets)
 USE_KIND(MemoryPrefixWord, memorySets)

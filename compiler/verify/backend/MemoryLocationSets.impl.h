@@ -1,9 +1,10 @@
 #pragma once
 
+#include <verify/backend/KeyWatches.impl.h>
 #include <verify/backend/MemoryLocationSets.h>
 #include <verify/backend/SolverImpl.h>
 
-#include <algorithm>
+#include <ReverseMemberPointer.h>
 
 namespace verify::backend {
 
@@ -27,45 +28,29 @@ Bool MemoryLocationSets<Derived>::containmentOf(Solver& solver, PrefixIndex::Wor
 }
 
 template<typename Derived>
-bool MemoryLocationSets<Derived>::joinedRepresentative(Solver& solver, const ElementState& state, MemoryDeclaration declaration) {
-    if (!state.representative.has_value())
-        return false;
-    MemoryDeclaration representative = locationOf(state.representative.value()).declaration;
-    return solver.assignedEqual(representative, declaration);
+MemoryLocationSets<Derived>& MemoryLocationSets<Derived>::PendingWatches::locationSets() {
+    return *ReverseMemberPointer<&MemoryLocationSets<Derived>::pendingWatches>::reverse(this);
+}
+
+template<typename Derived>
+bool MemoryLocationSets<Derived>::PendingWatches::matches(Solver& solver, ElementId, Containment key, Containment watch) {
+    MemoryLocationSets<Derived>& locations = locationSets();
+    return solver.assignedEqual(locations.locationOf(key.set()).declaration, locations.locationOf(watch.set()).declaration);
+}
+
+template<typename Derived>
+void MemoryLocationSets<Derived>::PendingWatches::addValueUses(Solver& solver, ElementId, Containment watch, Use use) {
+    solver.addUse(locationSets().locationOf(watch.set()).declaration, use);
+}
+
+template<typename Derived>
+void MemoryLocationSets<Derived>::PendingWatches::onKeyMatch(Solver& solver, ElementId element, Containment, Containment watch) {
+    locationSets().addWord(solver, element, watch);
 }
 
 template<typename Derived>
 void MemoryLocationSets<Derived>::addWord(Solver& solver, ElementId element, Containment cont) {
     derived().addWords(solver, prefixes, element, cont);
-}
-
-template<typename Derived>
-void MemoryLocationSets<Derived>::addPending(Solver& solver, ElementId element, Containment cont) {
-    TracePosition position = pending.push({ .element = element, .containment = cont });
-    stateOf(element).pendingPositions.push_back(position);
-    solver.addUse(locationOf(cont.set()).declaration, Use(params().pendingRewriteUse, position.index));
-}
-
-template<typename Derived>
-void MemoryLocationSets<Derived>::promotePending(Solver& solver, const ElementState& state, TracePosition position) {
-    PendingContainment& entry = pending[position];
-    if (entry.promoted)
-        return;
-    if (!joinedRepresentative(solver, state, locationOf(entry.containment.set()).declaration))
-        return;
-
-    // The link that joined the declarations is of the current decision level, so the word registered
-    // here is unregistered again by the same backtrack that reverts the promotion.
-    entry.promoted = true;
-    promotionTrace.push(position);
-    addWord(solver, entry.element, entry.containment);
-}
-
-template<typename Derived>
-void MemoryLocationSets<Derived>::promotePendingOf(Solver& solver, ElementId element) {
-    const ElementState& state = stateOf(element);
-    for (TracePosition position : state.pendingPositions)
-        promotePending(solver, state, position);
 }
 
 template<typename Derived>
@@ -75,48 +60,29 @@ void MemoryLocationSets<Derived>::propagateContainment(Solver& solver, ElementId
     if (element == baseTheory(solver).forAllElement())
         return;
 
-    MemoryLocation location = locationOf(set);
-    ElementState& state = stateOf(element);
-
-    bool newRepresentative = false;
     if (containment.contained()) {
-        if (!state.representative.has_value()) {
+        std::optional<Containment> key = pendingWatches.keyOf(element);
+        if (!key.has_value()) {
             VERIFY(solver.currentDecisionLevel() >= 0); // No positive set assignments are made without a decision
-            state.representative = set;
-            representativeTrace.push(element);
-            newRepresentative = true;
-            solver.addUse(location.declaration, Use(params().representativeRewriteUse, element.id()));
+            // The set of the first location found to contain the element is its representative, and
+            // the containments pending so far were all waiting for one to compare against
+            pendingWatches.setKey(solver, element, containment);
         } else {
             // Distinct declarations describe distinct memory, so an element of both locations means
             // that the declarations are the same
-            Set representative = state.representative.value();
-            solver.assignTrue(solver.equality(locationOf(representative).declaration, location.declaration),
-                makeReason<params().declarationsShareElementReason>({ element, representative, set }));
+            solver.assignTrue(solver.equality(locationOf(key->set()).declaration, locationOf(set).declaration),
+                makeReason<params().declarationsShareElementReason>({ element, key->set(), set }));
         }
     }
 
-    if (joinedRepresentative(solver, state, location.declaration))
-        addWord(solver, element, containment);
-    else
-        addPending(solver, element, containment);
-
-    // The pending containments were all waiting for a representative to compare against
-    if (newRepresentative)
-        promotePendingOf(solver, element);
+    pendingWatches.addWatch(solver, element, containment);
 }
 
 template<typename Derived>
 void MemoryLocationSets<Derived>::propagateRewrite(Solver& solver, Use use) {
-    if (use.kind() == params().pendingRewriteUse) {
-        TracePosition position { use.id() };
-        promotePending(solver, stateOf(pending[position].element), position);
-    } else if (use.kind() == params().representativeRewriteUse) {
-        promotePendingOf(solver, ElementId(use.id()));
-    } else if (use.kind() == prefixes.params().wordUse) {
+    pendingWatches.propagateRewrite(solver, use);
+    if (use.kind() == prefixes.params().wordUse)
         prefixes.propagateRewrite(solver, use);
-    } else {
-        VERIFY_NOT_REACHED();
-    }
 }
 
 template<typename Derived>
@@ -170,34 +136,13 @@ ClauseAndIndex MemoryLocationSets<Derived>::reasonToClause(Solver& solver, Bool 
 template<typename Derived>
 void MemoryLocationSets<Derived>::newDecisionLevel(Solver& solver) {
     prefixes.newDecisionLevel(solver);
-    pending.newDecisionLevel(solver);
-    representativeTrace.newDecisionLevel(solver);
-    promotionTrace.newDecisionLevel(solver);
+    pendingWatches.newDecisionLevel(solver);
 }
 
 template<typename Derived>
 void MemoryLocationSets<Derived>::beginBacktrack(Solver& solver) {
     prefixes.beginBacktrack(solver);
-
-    // A promotion is of the level of the link that joined the declarations, which is also the level
-    // the word was registered at, so reverting the one reverts the other. The promotions have to go
-    // first, they name the pending containments.
-    for (TracePosition pendingPos : promotionTrace.backtrackedReverse(solver))
-        pending[pendingPos].promoted = false;
-    promotionTrace.truncate(solver);
-
-    // The uses naming these entries were registered at the same level, so they are already gone
-    for (TracePosition pendingPos : pending.backtrackedPositionsReverse(solver)) {
-        auto& elementPending = stateOf(pending[pendingPos].element).pendingPositions;
-        VERIFY(!elementPending.empty());
-        VERIFY(elementPending.back() == pendingPos);
-        elementPending.pop_back();
-    }
-    pending.truncate(solver);
-
-    for (ElementId element : representativeTrace.backtrackedReverse(solver))
-        stateOf(element).representative.reset();
-    representativeTrace.truncate(solver);
+    pendingWatches.beginBacktrack(solver);
 }
 
 template<typename Derived>
@@ -208,44 +153,7 @@ void MemoryLocationSets<Derived>::endBacktrack(Solver& solver) {
 template<typename Derived>
 void MemoryLocationSets<Derived>::checkInvariances(Solver& solver) {
     prefixes.checkInvariances(solver);
-
-    pending.checkInvariances(solver);
-    representativeTrace.checkInvariances(solver);
-    promotionTrace.checkInvariances(solver);
-
-    std::vector<std::vector<TracePosition>> expectedIndices;
-    std::vector<TracePosition> expectedPromotions;
-    expectedIndices.resize(elementStates.size());
-    for (TracePosition pendingPos : pending.allPositions()) {
-        const PendingContainment& entry = pending[pendingPos];
-        VERIFY(entry.element.id() < elementStates.size());
-        expectedIndices[entry.element.id()].push_back(pendingPos);
-        if (entry.promoted)
-            expectedPromotions.push_back(pendingPos);
-
-        // A containment is registered exactly when its declaration is the one of the representative,
-        // so anything else here means that a notification was missed
-        VERIFY(entry.promoted
-            == joinedRepresentative(solver, elementStates[entry.element.id()], locationOf(entry.containment.set()).declaration));
-    }
-
-    // An element has a representative exactly when it is on the trace, and it is on it only once
-    std::vector<bool> onTrace;
-    onTrace.resize(elementStates.size());
-    for (ElementId element : representativeTrace) {
-        VERIFY(element.id() < onTrace.size());
-        VERIFY(!onTrace[element.id()]);
-        onTrace[element.id()] = true;
-    }
-
-    for (int_t i = 0; i < (int_t)elementStates.size(); i++) {
-        VERIFY(elementStates[i].representative.has_value() == onTrace[i]);
-        VERIFY(elementStates[i].pendingPositions == expectedIndices[i]);
-    }
-
-    std::vector<TracePosition> promotions(promotionTrace.begin(), promotionTrace.end());
-    std::ranges::sort(promotions);
-    VERIFY(promotions == expectedPromotions);
+    pendingWatches.checkInvariances(solver);
 }
 
 }

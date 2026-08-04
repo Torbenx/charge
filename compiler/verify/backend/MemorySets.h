@@ -8,11 +8,13 @@ struct MemorySets : MemoryLocationSets<MemorySets> {
     static constexpr Params PARAMS = {
         .setSort = Sort::MemorySet,
         .declarationsShareElementReason = makeTypedReasonKind<ReasonKind::MemoryDeclarationsShareElement>(),
-        .pendingRewriteUse = UseKind::MemorySetPendingContainment,
-        .representativeRewriteUse = UseKind::MemorySetRepresentative,
         .prefixParams = {
             .hitReason = makeTypedReasonKind<ReasonKind::MemberPrefixHit>(),
             .wordUse = UseKind::MemoryPrefixWord,
+        },
+        .watchesParams = {
+            .keyUse = UseKind::MemorySetRepresentative,
+            .watchUse = UseKind::MemorySetPendingContainment,
         },
     };
     using Base = MemoryLocationSets<MemorySets>;
