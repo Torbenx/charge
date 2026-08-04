@@ -15,30 +15,35 @@ struct SingletonToInclusiveReason {
 };
 
 InvariantSets::InvariantSets(Solver& solver)
-    : Base(solver), setInfos(solver) { }
+    : Base(solver), inclusiveInfos(solver), exclusiveInfos(solver), pathInfos(solver), singletonInfos(solver) { }
 
-InvariantSet InvariantSets::locationSet(Solver& solver, LocationSets& sets, TheoryId theory, MemoryLocation location) {
+template<typename Info, TheoryId theory>
+static InvariantSet locationSet(
+    Solver& solver,
+    std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>& sets,
+    TheoryData<Info, theory>& infos,
+    MemoryLocation location) {
     auto it = sets.find(location);
     if (it != sets.end())
         return it->second;
 
     InvariantSet newSet = (InvariantSet)solver.impl().newValue(theory);
-    setInfos[newSet].location = location;
+    infos[newSet].location = location;
     sets.emplace(location, newSet);
     return newSet;
 }
 
 InvariantSet InvariantSets::inclusiveSet(Solver& solver, MemoryLocation location) {
-    return locationSet(solver, inclusiveSets, TheoryId::InclusiveLocationInvariantSets, location);
+    return locationSet(solver, inclusiveSets, inclusiveInfos, location);
 }
 
 InvariantSet InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location) {
-    return locationSet(solver, exclusiveSets, TheoryId::ExclusiveLocationInvariantSets, location);
+    return locationSet(solver, exclusiveSets, exclusiveInfos, location);
 }
 
 InvariantSet InvariantSets::pathSet(Solver& solver, MemoryLocation location) {
     int_t oldCount = pathSets.size();
-    InvariantSet set = locationSet(solver, pathSets, TheoryId::PathInvariantSets, location);
+    InvariantSet set = locationSet(solver, pathSets, pathInfos, location);
 
     // No location is strictly above the whole declaration, so its path set is the empty one. Without
     // this the emptiness is only found once the element is known to be somewhere in the declaration.
@@ -57,8 +62,8 @@ InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location
         return it->second;
 
     InvariantSet newSet = (InvariantSet)solver.impl().newValue(TheoryId::InvariantSingletonSets);
-    setInfos[newSet].location = location;
-    setInfos[newSet].invariant = invariant;
+    singletonInfos[newSet].location = location;
+    singletonInfos[newSet].invariant = invariant;
     singletonSets.emplace(key, newSet);
     return newSet;
 }
@@ -168,6 +173,7 @@ void InvariantSets::beginBacktrack(Solver& solver) {
 }
 
 void InvariantSets::checkInvariances(Solver& solver) {
+    Base::checkInvariances(solver);
     singletonTrace.checkInvariances(solver);
 
     // An element has a singleton exactly when it is on the trace, and it is on it only once

@@ -112,13 +112,23 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     }
 
     MemoryLocation locationOf(InvariantSet set) const {
-        VERIFY(isInvariantSet(set));
-        return setInfos[set].location;
+        switch (set.theory()) {
+        case TheoryId::InclusiveLocationInvariantSets:
+            return inclusiveInfos[set].location;
+        case TheoryId::ExclusiveLocationInvariantSets:
+            return exclusiveInfos[set].location;
+        case TheoryId::PathInvariantSets:
+            return pathInfos[set].location;
+        case TheoryId::InvariantSingletonSets:
+            return singletonInfos[set].location;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 
     Invariant invariantOf(InvariantSet set) const {
         VERIFY(set.theory() == TheoryId::InvariantSingletonSets);
-        return setInfos[set].invariant.value();
+        return singletonInfos[set].invariant;
     }
 
     void addWords(Solver&, PrefixIndex&, ElementId, Containment);
@@ -134,11 +144,15 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     void checkInvariances(Solver&);
 
 private:
-    struct SetInfo {
-        SetInfo() = default;
+    struct LocationSetInfo {
+        LocationSetInfo() = default;
         MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
-        //! Holds the invariant for InvariantSingletonSets
-        std::optional<Invariant> invariant;
+    };
+
+    struct SingletonSetInfo {
+        SingletonSetInfo() = default;
+        MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
+        Invariant invariant { limits::max };
     };
 
     struct SingletonKey {
@@ -163,8 +177,6 @@ private:
     // Note: The keys of these maps could be obtained from the stored values
     using LocationSets = std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>;
 
-    InvariantSet locationSet(Solver&, LocationSets&, TheoryId, MemoryLocation);
-
     ElementState& stateOf(ElementId element) {
         if (element.id() >= elementStates.size())
             elementStates.resize(element.id() + 1);
@@ -173,7 +185,10 @@ private:
 
     std::vector<ElementState> elementStates;
 
-    SortData<SetInfo, Sort::InvariantSet> setInfos;
+    TheoryData<LocationSetInfo, TheoryId::InclusiveLocationInvariantSets> inclusiveInfos;
+    TheoryData<LocationSetInfo, TheoryId::ExclusiveLocationInvariantSets> exclusiveInfos;
+    TheoryData<LocationSetInfo, TheoryId::PathInvariantSets> pathInfos;
+    TheoryData<SingletonSetInfo, TheoryId::InvariantSingletonSets> singletonInfos;
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
