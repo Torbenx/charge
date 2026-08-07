@@ -27,8 +27,8 @@ uint32_t Members::CompositeMembers::get(Solver& solver, std::vector<Member> expr
     return Base::get(solver, expr);
 }
 
-std::strong_ordering Members::CompositeMembers::compare(Solver& solver, std::span<const Member> a, std::span<const Member> b) {
-    return members().rewriteOrder(solver, a, b);
+std::strong_ordering Members::CompositeMembers::compare(Solver& solver, std::span<const Member> a, const CompositeInfo& b) {
+    return members().rewriteOrder(solver, a, b.definition);
 }
 
 Members& Members::CompositeMembers::members() {
@@ -36,7 +36,8 @@ Members& Members::CompositeMembers::members() {
 }
 
 uint32_t Members::CompositeMembers::makeNode(Solver&, std::vector<Member> expr, TreeLabel label) {
-    return Base::makeNode(label, std::move(expr));
+    CompiledMemberString compiled(expr);
+    return Base::makeNode(label, { std::move(expr), std::move(compiled) });
 }
 
 Members::Members(Solver& solver)
@@ -71,6 +72,7 @@ Member Members::compose(Solver& solver, std::span<const Member> expr) {
     if (result.size() == 1)
         return result.front();
 
+    // TODO: We should guard against duplicate literals here
     int_t oldSize = compositeMembers.size();
     uint32_t id = compositeMembers.get(solver, std::move(result));
     if (compositeMembers.size() != oldSize) {
@@ -91,6 +93,25 @@ std::strong_ordering Members::rewriteOrder(Solver& solver, std::span<const Membe
             return solver.rewriteOrder(a[i], b[i]);
     }
     return std::strong_ordering::equal;
+}
+
+bool Members::canBeEqual(Solver&, Member a, Member b) {
+    if (!b.composite() && !a.composite()) {
+        if (a.literal() && b.literal())
+            return a == b;
+        // Either a or b is a variable
+        return true;
+    }
+
+    if (!a.composite())
+        std::swap(a, b);
+    const auto& aDef = compositeMembers.at(a.id()).compiledDefinition;
+    if (b.composite()) {
+        const auto& bDef = compositeMembers.at(b.id()).compiledDefinition;
+        return aDef.canBeEqual(bDef);
+    } else {
+        return aDef.canBeEqual(b);
+    }
 }
 
 void Members::appendRewrite(Member m, std::vector<Member>& out) {
@@ -124,6 +145,7 @@ std::span<const Member> Members::definingExpression(Member m) {
     if (m.composite())
         return compositeMember(m);
     // Literals and variables are their own expression, VariableInfo::self provides the storage
+    // TODO: This should use more stable storage
     return { &variables[m].self, 1 };
 }
 

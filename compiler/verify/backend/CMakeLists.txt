@@ -3,6 +3,8 @@ target_sources(${PROJECT_NAME}
     PRIVATE
     Clauses.cpp
     Clauses.h
+    CompiledMemberString.cpp
+    CompiledMemberString.h
     Data.h
     DataManager.cpp
     DataManager.h

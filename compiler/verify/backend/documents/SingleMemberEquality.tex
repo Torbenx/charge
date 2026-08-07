@@ -1,0 +1,194 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[english]{babel}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage{bm}
+\usepackage{pdfpages}
+\usepackage{mathtools}
+\usepackage{algpseudocode}
+
+\usepackage[left=25mm, right=25mm, top=25mm, bottom=\dimexpr\footskip+20mm\relax]{geometry}
+
+\hypersetup{
+	colorlinks=true,
+   	linkcolor=black,
+	citecolor=black,
+}
+
+\newcommand{\abs}[1]{\left\lvert#1\right\rvert}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\mtrp} {\mathsf{T}}
+\newcommand{\notimplies}{%
+  \mathrel{{\ooalign{\hidewidth$\not\phantom{=}$\hidewidth\cr$\implies$}}}}
+\newcommand{\shortimplies}{\Rightarrow}
+\newcommand{\shortiff}{\Leftrightarrow}
+
+\newtheorem{lemma}{Lemma}[section]
+\newtheorem{theorem}{Theorem}
+
+\newcommand{\C} {\mathbb{C}}
+\newcommand{\N} {\mathbb{N}}
+\newcommand{\Q} {\mathbb{Q}}
+\newcommand{\R} {\mathbb{R}}
+\newcommand{\Z} {\mathbb{Z}}
+
+
+\author{Torben Thaysen}
+\title{Satisfiability Of A Single Member Equality}
+
+\begin{document}
+\maketitle
+
+\section{Setup}
+The ground alphabet of members is some set of literals $L$, while the non-ground variables are $V$.
+A substitution $\sigma$ is a function $V \to (L \cup V)^*$ that acts on strings by substituting each variable in place, so $\sigma(e_1 v e_2) = \sigma(e_1) \sigma(v) \sigma(e_2)$. For a ground substitution the image is restricted to $L^*$. A (ground) substitution $\sigma$ is called proper for $s$ if $\sigma(s)$ contains no duplicate literals. A basic example of a ground substitution is $\ell: (L \cup V)^* \to L^*$ defined by sending all variables to the empty string $\varepsilon$.
+
+A model for the equality problem of two strings $s_1$, $s_2$ in $(L \cup V)^*$ is a proper ground substitution (for $s_1$ and $s_2$) where the strings become equal $\sigma(s_1) = \sigma(s_2)$. Since no proper substitution exists when a string already contains a duplicate literal we restrict ourselves to strings without duplicate literals.
+
+The main result is Theorem~\ref{thm:modelext} giving exact conditions for the existence of a model. Section~\ref{sec:ordering} has no application currently and is kept only for future reference.
+\section{Analysis}
+
+\newcommand{\Lmin}{L_\text{min}}
+\begin{lemma}[Minimal alphabet]\label{lem:minalp}
+Let $\Lmin$ be the set of all the distinct literals appearing in $s_1$ and $s_2$; then there exists a model iff there exists a model over $\Lmin$.
+\end{lemma}
+\begin{proof}
+For a satisfying model $\sigma$ define $\sigma_\text{min}$ by deleting all literals not in $\Lmin$ from the image. Then $\sigma_\text{min}(s_1) = \sigma_\text{min}(s_2)$ is obtained from $\sigma(s_1) = \sigma(s_2)$ by likewise deleting all literals not in $\Lmin$ from both sides, which does not change the result.
+\end{proof}
+
+\begin{lemma}[Duplicate variables]\label{lem:dupvars}
+If there exists a model then there also exists a model where all variables that occur more than once in total across $s_1$ and $s_2$ are sent to the empty string.
+\end{lemma}
+\begin{proof}
+If a variable occurs more than once in the same string any proper ground substitution must send it to the empty string. For the remaining case of a variable $v$ appearing exactly once in each string, properness for $s_1$ and $s_2$ dictates that the literals of $\sigma(v)$ are distinct from all literals appearing in $s_1$ or $s_2$. By Lemma~\ref{lem:minalp} such literals can be discarded.
+\end{proof}
+
+\begin{lemma}[Duplicate-free case]\label{lem:dupfree}
+If there are no duplicate literals and variables across $s_1$ and $s_2$ then there exists a model exactly unless:
+\begin{enumerate}
+\item $s_1$ and $s_2$ both start with a literal
+\item $s_1$ and $s_2$ both end with a literal
+\item $s_1$ contains no variables and $s_2$ contains a literal
+\item $s_2$ contains no variables and $s_1$ contains a literal
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+It is easy to see that if any of the four rules is true then no model can exist. It remains to show that a model exists if all conditions are false.
+
+First distinguish on whether $s_1$ and $s_2$ are empty. If $s_1 = s_2 = \varepsilon$ then all four rules are false and a model exists. When only one string is empty a model exists iff the other string contains no literals. This is exactly asserted by rules (3) and (4) while rules (1) and (2) are automatically false.
+
+For $s_1$ and $s_2$ both non-empty rules (1) and (2)imply that at least one of the two strings starts with a variable and at least one of them ends with a variable. If each string has at least one variable at its start or end then the problem must be of the form $\sigma(v_1 e_2) = \sigma(e_1 v_2)$ which is solved by $\sigma(v_1) = \ell(e_1)$, $\sigma(v_2) = \ell(e_2)$ and $\sigma(v) = \varepsilon$ for $v \neq v_1,v_2$.
+
+The remaining case is that one string (say $s_1$) has literals at its start and end position, so the other string (say $s_2$) must have variables at both. If $s_2$ contains a literal then by rule (3) $s_1$ must contain a variable. This gives the problem shape $\sigma(e_1 v_2 e_3) = \sigma(v_1 e_2 v_3)$ with solution $\sigma(v_i) = \ell(e_i)$ and $\sigma(v) = \varepsilon$ otherwise.
+When $s_2$ contains no literals then let $v_0$ be one of its variables and define $\sigma(v_0) = \ell(s_1)$ and $\sigma(v) = \varepsilon$ for $v \neq v_0$, which solves $\sigma(s_1) = \ell(s_1) = \sigma(s_2)$.
+\end{proof}
+
+\begin{theorem}\label{thm:modelext}
+There exists a model for $s_1$ and $s_2$ iff all literals shared between $s_1$ and $s_2$ appear in the same order in both strings and the matching (duplicate-free) parts before, between and after the shared literals meet the criterion of Lemma~\ref{lem:dupfree} after deleting all duplicate variables.
+\end{theorem}
+\begin{proof}
+No model can introduce a literal that already appears in $s_1$ or $s_2$ without introducing duplicates. So the only thing that can match a shared literal in $s_1$ is the same literal in $s_2$.
+And they can only be matched in order, justifying the first requirement.
+
+If all shared literals match in order the parts before, after and between them must also match. These parts do not contain duplicate literals by construction and duplicate variables can be removed without affecting the existence of a model by Lemma~\ref{lem:dupvars}. Lemma~\ref{lem:dupfree} gives the exact conditions for model existence of such strings.
+\end{proof}
+
+\section{Ordering}\label{sec:ordering}
+
+Define the following two string predicates:
+\begin{gather*}
+E(s_1, s_2) \coloneqq \exists \sigma \text{ proper ground substitution}: \sigma(s_1) = \sigma(s_2)
+\\
+E^*(s_1, s_2) \coloneqq \exists \sigma_1, \sigma_2 \text{ proper ground substitutions}: \sigma_1(s_1) = \sigma_2(s_2)
+\end{gather*}
+$E$ describes the existence of a model for the equality problem of $s_1$, $s_2$. $E^*$ describes the existence of such a model when shared variables between $s_1$ and $s_2$ are not taken into account. Obviously $E(s_1, s_2) \implies E^*(s_1, s_2)$.
+
+Next consider the ordering predicates:
+\begin{gather*}
+R(s_1, s_2) \coloneqq \forall q \in (L \cup V)^*: E(s_1, q) \shortimplies E(s_2, q)
+\\
+R^*(s_1, s_2) \coloneqq \forall q \in (L \cup V)^*: E^*(s_1, q) \shortimplies E^*(s_2, q)
+\end{gather*}
+
+\begin{lemma}[Partial order]
+$R$ and $R^*$ are partial orderings on strings modulo the equivalence relations $\sim$ and $\sim^*$ respectively, where
+\begin{gather*}
+s_1 \sim s_2 \coloneqq \forall q: E(s_1, q) \shortiff E(s_2, q)
+\\
+s_1 \sim^* s_2 \coloneqq \forall q: E^*(s_1, q) \shortiff E^*(s_2, q)
+\end{gather*}
+\end{lemma}
+\begin{proof}
+The properties $R(s, s)$, $R(s_1, s_2) \land R(s_2, s_1) \iff s_1 \sim s_2$ and $R(s_1, s_2) \land R(s_2, s_3) \implies R(s_1, s_3)$ fall out of the logical rules for implications.
+The same is true for $R^*$.
+\end{proof}
+
+\begin{lemma}
+$R^*(s_1, s_2) \notimplies R(s_1, s_2)$
+\end{lemma}
+\begin{proof}
+Consider $s_1 = l$ and $s_2 = v l$. $R^*(s_1, s_2)$ is true because from $\sigma_2(q) = \sigma_1(s_1) = l$ we have that $\sigma_1^\prime(v) = \ell(v)$ satisfies $\sigma_1^\prime(s_2) = \sigma_1^\prime(v l) = l = \sigma_2(q)$. However $R(s_1, s_2)$ is false because for $q = v$, $\sigma(s_1) = l = \sigma(v)$ is satisfiable but $\sigma(s_2) = \sigma(v l) = \sigma(v) = \sigma(q)$ is not.
+\end{proof}
+
+\newcommand{\I}{\mathcal{I}}
+
+\begin{lemma}[Ground tests]\label{lem:ground}
+Let $\I(s) \coloneqq \{\sigma(s) \mid \sigma \text{ proper ground substitution} \} \subseteq L^*$ be the (duplicate-free) instances of $s$. Then
+$w \in \I(s) \iff E(s, w) \iff E^*(s, w) $.
+\end{lemma}
+\begin{proof}
+$w$ contains no variables, so $\sigma(w) = w$ for every $\sigma$. Hence whether one
+substitution or two independent ones are used is immaterial: both $E(s,w)$ and
+$E^*(s,w)$ state exactly that some model $\sigma$ satisfies $\sigma(s) = w$.
+\end{proof}
+
+\begin{lemma}\label{lem:RimpliesSubset}
+If $R(s_1, s_2)$ or $R^*(s_1, s_2)$ then $\I(s_1) \subseteq \I(s_2)$.
+\end{lemma}
+\begin{proof}
+By using $R(s_1, s_2)$ or $R^*(s_1, s_2)$ with $q = w \in \I(s_1)$ we have
+\begin{equation*}
+w \in \I(s_1) \implies E^{(*)}(s_1, w) \implies E^{(*)}(s_2, w) \implies w \in \I(s_2).
+\end{equation*}
+\end{proof}
+
+\begin{lemma}[Characterisation of $R^*$]\label{lem:charRstar}
+$R^*(s_1, s_2) \iff \I(s_1) \subseteq \I(s_2)$.
+\end{lemma}
+\begin{proof}
+($\Rightarrow$) By Lemma~\ref{lem:RimpliesSubset}.
+($\Leftarrow$) Let $q$ be arbitrary with $E^*(s_1, q)$, witnessed by $\sigma_1, \sigma_2$
+with $w \coloneqq \sigma_1(s_1) = \sigma_2(q)$. From $w \in \I(s_1) \subseteq \I(s_2)$ it follows that there exists $\sigma_1^\prime$ with $\sigma_1^\prime(s_2) = w = \sigma_2(q)$, which is
+$E^*(s_2, q)$.
+\end{proof}
+
+\begin{lemma}[$R^*$ extends $R$]
+$R(s_1, s_2) \implies R^*(s_1, s_2)$.
+\end{lemma}
+\begin{proof}
+$R(s_1, s_2) \implies \I(s_1) \subseteq \I(s_2) \implies R^*(s_1, s_2)$
+\end{proof}
+
+\begin{lemma}[Substitutions]
+If $\rho: V \to (L \cup V)^*$ is a proper substitution for $s$ then $R^*(\rho(s), s)$.
+\end{lemma}
+\begin{proof}
+Let $q$ be arbitrary with $E^*(\rho(s), q)$ witnessed by $\sigma_1$ and $\sigma_2$. Then $\sigma_1^\prime(v) = \sigma_1(\rho(v))$ satisfies $\sigma_1^\prime(s) = \sigma_1(\rho(s)) = \sigma_2(q)$, which is $E^*(s, q)$.
+\end{proof}
+
+\begin{lemma}[Min property of $\ell$]
+If $s$ contains no duplicate literals then $\min_{w \in \I(s)} \abs{w} = \abs{\ell(s)}$.
+\end{lemma}
+\begin{proof}
+For any proper ground substitution $\sigma$, deleting all literals from its images can only make $\sigma(s)$ shorter, so $\abs{\sigma(s)} \geq \abs{\ell(s)}$ and $\min_{w \in \I(s)} \abs{w} = \min_{\sigma} \abs{\sigma(s)} \geq \abs{\ell(s)}$. But at the same time $\min_{w \in \I(s)} \abs{w} \leq \abs{\ell(s)}$ because $\ell(s) \in \I(s)$, as $\ell$ is itself a proper ground substitution for $s$.
+\end{proof}
+
+\begin{lemma}[$R^\ell$ extends $R^*$]
+Let $R^\ell(s_1, s_2) \coloneqq \abs{\ell(s_1)} \geq \abs{\ell(s_2)}$, then $R^*(s_1, s_2) \implies R^\ell(s_1, s_2)$.
+\end{lemma}
+\begin{proof}
+From $\ell(s_1) \in \I(s_1)$ and $\I(s_1) \subseteq \I(s_2)$ it follows that $\ell(s_1) \in \I(s_2)$ and that $\abs{\ell(s_1)} \geq \min_{w \in \I(s_2)} \abs{w} = \abs{\ell(s_2)}$.
+\end{proof}
+
+\end{document}

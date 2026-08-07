@@ -761,11 +761,7 @@ bool Solver::alwaysDisequal(Value a, Value b) {
             return true;
         return false;
     case Sort::Member:
-        // TODO: This must be expended, it currently doesn't compose correctly with rewriting:
-        //       a.l1 < l1, but l1 != l2 is detected and a.l1 != l2 is not.
-        if (a.theory() == TheoryId::MemberLiterals && b.theory() == TheoryId::MemberLiterals)
-            return a != b;
-        return false;
+        return !impl().members.canBeEqual(*this, (Member)a, (Member)b);
     case Sort::InvariantSet:
         if (a.theory() == TheoryId::InvariantSingletonSets && b.theory() == TheoryId::InvariantSingletonSets) {
             if (invariantOf((InvariantSet)a) != invariantOf((InvariantSet)b))

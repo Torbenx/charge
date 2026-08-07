@@ -1,6 +1,7 @@
 #pragma once
 
 #include <FlatTreeSet.h>
+#include <verify/backend/CompiledMemberString.h>
 #include <verify/backend/SatCore.h>
 #include <verify/backend/Trace.h>
 #include <verify/backend/Use.h>
@@ -32,7 +33,7 @@ struct Members {
     Member compose(Solver&, std::span<const Member> expr);
     std::span<const Member> compositeMember(Member m) {
         VERIFY(m.composite());
-        return compositeMembers.at(m.id());
+        return compositeMembers.at(m.id()).definition;
     }
     uint32_t compositeLabel(Member m) {
         VERIFY(m.composite());
@@ -40,6 +41,7 @@ struct Members {
     }
 
     std::strong_ordering rewriteOrder(Solver&, std::span<const Member> a, std::span<const Member> b);
+    bool canBeEqual(Solver&, Member a, Member b);
 
     void newPair(Solver&, PairHandle);
     void propagateEqual(Solver&, PairHandle);
@@ -95,14 +97,19 @@ private:
         }
     };
 
-    struct CompositeMembers : FlatTreeSetDetail::Base<CompositeMembers, std::vector<Member>> {
+    struct CompositeInfo {
+        std::vector<Member> definition;
+        CompiledMemberString compiledDefinition;
+    };
+
+    struct CompositeMembers : FlatTreeSetDetail::Base<CompositeMembers, CompositeInfo> {
         uint32_t get(Solver&, std::vector<Member>);
 
     private:
         friend Base;
         Members& members();
         uint32_t makeNode(Solver&, std::vector<Member>, TreeLabel);
-        std::strong_ordering compare(Solver&, std::span<const Member>, std::span<const Member>);
+        std::strong_ordering compare(Solver&, std::span<const Member>, const CompositeInfo&);
     };
 
     struct PairHandleCompare {

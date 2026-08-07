@@ -187,6 +187,7 @@ struct Solver {
 
     /*! \brief Return whether \p a and \p b are always disequal
 
+    For sorts using UninterpertedEquality this function must satisfy:
     If \p a and \p b are always disequal any values less the either \p a or \p b must also be always
     disequal to the other one (and this function must be able to detect this).
     */
