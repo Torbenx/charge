@@ -540,8 +540,8 @@ TEST(VerifyBackend, MemoryPrefixWordWatchingSeveralVariables) {
     // Both variables become the identity in one go, so the word is notified for two of the
     // variables it watches while its normal form only changes once
     f.decideMembersEqual(f.solver.composeMembers({ v1, v2 }), identity_member);
-    EXPECT_TRUE(f.solver.members.rewrite(v1).empty());
-    EXPECT_TRUE(f.solver.members.rewrite(v2).empty());
+    EXPECT_TRUE(f.solver.memberRewrite(v1).empty());
+    EXPECT_TRUE(f.solver.memberRewrite(v2).empty());
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();

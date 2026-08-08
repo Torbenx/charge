@@ -1,7 +1,5 @@
 #include <verify/backend/PrefixIndex.h>
 
-#include <verify/backend/SolverImpl.h>
-
 namespace verify::backend {
 
 PrefixIndex::WordId PrefixIndex::addWord(Solver& solver, Member expression, SetElement element, SetContainment containment, Role role, SelfInclusion inclusion) {
@@ -60,8 +58,8 @@ void PrefixIndex::explainPrefix(Solver& solver, WordId prefix, WordId path, Clau
     // are derived from is all that has to be justified.
     // TODO: Only the letters covering the matched prefix of the path are needed, explaining the
     //       whole word is sound but produces a longer clause than necessary.
-    solver.impl().members.explainRewrite(solver, words[prefix].expression, clause);
-    solver.impl().members.explainRewrite(solver, words[path].expression, clause);
+    solver.explainMemberRewrite(words[prefix].expression, clause);
+    solver.explainMemberRewrite(words[path].expression, clause);
 }
 
 void PrefixIndex::propagateRewrite(Solver& solver, Use use) {
@@ -139,7 +137,7 @@ void PrefixIndex::checkInvariances(Solver& solver) {
         // The path spells the word, so anything else here means that a notification of the use
         // registered for it was missed
         letters.clear();
-        solver.impl().members.appendRewrite(info.expression, letters);
+        solver.appendMemberRewrite(info.expression, letters);
         VERIFY(info.path.size() == letters.size() + 1);
         VERIFY(info.path.front() == elementRoots[info.element.id()]);
         int_t literalCount = 0;
@@ -168,7 +166,7 @@ void PrefixIndex::buildPath(Solver& solver, WordId w) {
     VERIFY(info.path.empty());
 
     normalFormBuffer.clear();
-    solver.impl().members.appendRewrite(info.expression, normalFormBuffer);
+    solver.appendMemberRewrite(info.expression, normalFormBuffer);
 
     uint32_t node = elementRoots[info.element.id()];
     info.path.push_back(node);

@@ -1,6 +1,6 @@
 #include <verify/backend/Members.h>
 
-#include <verify/backend/SolverImpl.h>
+#include <ReverseMemberPointer.h>
 
 #include <algorithm>
 #include <queue>
@@ -28,7 +28,11 @@ uint32_t Members::CompositeMembers::get(Solver& solver, std::vector<Member> expr
 }
 
 std::strong_ordering Members::CompositeMembers::compare(Solver& solver, std::span<const Member> a, std::span<const Member> b) {
-    return solver.impl().members.rewriteOrder(solver, a, b);
+    return members().rewriteOrder(solver, a, b);
+}
+
+Members& Members::CompositeMembers::members() {
+    return *ReverseMemberPointer<&Members::compositeMembers>::reverse(this);
 }
 
 uint32_t Members::CompositeMembers::makeNode(Solver&, std::vector<Member> expr, TreeLabel label) {

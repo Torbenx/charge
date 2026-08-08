@@ -27,7 +27,7 @@ TEST(VerifyBackend, MembersDefiningExpression) {
     // The expression is the definition, so it is unaffected by rewrites
     solver.decideTrue(solver.equality(v, l2));
     solver.propagate();
-    EXPECT_EQ(solver.members.rewrite(composite), (std::vector<Member> { l1, l2, l2 }));
+    EXPECT_EQ(solver.memberRewrite(composite), (std::vector<Member> { l1, l2, l2 }));
     EXPECT_EQ(expression(v), std::vector<Member> { v });
     EXPECT_EQ(expression(composite), (std::vector<Member> { l1, v, l2 }));
 }
@@ -51,16 +51,16 @@ TEST(VerifyBackend, MembersBasic1) {
         solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq3));
         std::vector<Member> expectedV1 { l1, l2 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { l2, l3 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
     {
         solver.decideTrue(eq2);
@@ -69,16 +69,16 @@ TEST(VerifyBackend, MembersBasic1) {
         solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq1));
         std::vector<Member> expectedV1 { l1, l2 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { l2, l3 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
     {
         solver.decideTrue(eq3);
@@ -87,16 +87,16 @@ TEST(VerifyBackend, MembersBasic1) {
         solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq2));
         std::vector<Member> expectedV1 { l1, l2 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { l2, l3 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
     {
         solver.backtrack(0);
         std::vector<Member> expectedV1 { v1 };
-        EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+        EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
         std::vector<Member> expectedV2 { v2 };
-        EXPECT_EQ(solver.members.rewrite(v2), expectedV2);
+        EXPECT_EQ(solver.memberRewrite(v2), expectedV2);
     }
 }
 
@@ -116,7 +116,7 @@ TEST(VerifyBackend, MembersRewriteUpdate) {
     solver.decideTrue(eq2);
     solver.propagate();
     std::vector<Member> expectedV1 { l1, l2, l3 };
-    EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
+    EXPECT_EQ(solver.memberRewrite(v1), expectedV1);
 }
 
 TEST(VerifyBackend, MembersIdentityRewrite) {
@@ -186,7 +186,7 @@ namespace {
 
         //! Register a use identified by \p id for \p expression
         void addUse(Member expression, uint32_t id) {
-            solver.members.addUse(solver, expression, Use(UseKind::Test, id));
+            solver.addUse(expression, Use(UseKind::Test, id));
         }
 
         //! The ids the uses notified since the last call were registered with, sorted
@@ -204,13 +204,13 @@ namespace {
         void decideEqual(Member a, Member b) {
             solver.decideTrue(solver.equality(a, b));
             solver.propagate();
-            solver.members.checkInvariances(solver);
+            solver.checkInvariances();
         }
 
         void backtrack(int_t level) {
             solver.backtrack(level);
             solver.propagate();
-            solver.members.checkInvariances(solver);
+            solver.checkInvariances();
         }
 
         //! Start a decision level without touching any of the members
@@ -231,7 +231,7 @@ TEST(VerifyBackend, MemberUseNotifiedWhenTheNormalFormChanges) {
 
     // Only v1 was rewritten, so the normal form watched by the use of v2 is still v2 itself
     std::vector<Member> expected { f.l1, f.l2 };
-    EXPECT_EQ(f.solver.members.rewrite(f.v1), expected);
+    EXPECT_EQ(f.solver.memberRewrite(f.v1), expected);
     EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 1 }));
 }
 
@@ -246,7 +246,7 @@ TEST(VerifyBackend, MemberUseNotifiedThroughARewriteExpression) {
     // consumed by the first notification either.
     f.decideEqual(f.v2, f.l2);
     std::vector<Member> expected { f.l1, f.l2 };
-    EXPECT_EQ(f.solver.members.rewrite(f.v1), expected);
+    EXPECT_EQ(f.solver.memberRewrite(f.v1), expected);
     EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 1 }));
 }
 
@@ -257,8 +257,8 @@ TEST(VerifyBackend, MemberUseOfACompositeExpressionIsNotifiedOnce) {
     // Both variables are rewritten to the identity by this, and the use is registered for both of
     // them, so it takes the deduplication to notify it only once
     f.decideEqual(f.compose({ f.v1, f.v2 }), identity_member);
-    EXPECT_TRUE(f.solver.members.rewrite(f.v1).empty());
-    EXPECT_TRUE(f.solver.members.rewrite(f.v2).empty());
+    EXPECT_TRUE(f.solver.memberRewrite(f.v1).empty());
+    EXPECT_TRUE(f.solver.memberRewrite(f.v2).empty());
     EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 1 }));
 }
 
@@ -269,7 +269,7 @@ TEST(VerifyBackend, MemberUseOfARepeatedVariableIsNotifiedOnce) {
     // The variable is a target of the identity rewrite twice, so it is marked as changed twice
     // while its normal form only changes once
     f.decideEqual(f.compose({ f.v1, f.v1 }), identity_member);
-    EXPECT_TRUE(f.solver.members.rewrite(f.v1).empty());
+    EXPECT_TRUE(f.solver.memberRewrite(f.v1).empty());
     EXPECT_EQ(f.takeNotifiedIds(), std::vector<uint32_t>({ 1 }));
 }
 
@@ -294,7 +294,7 @@ TEST(VerifyBackend, MemberUseIsNotNotifiedWhenARewriteIsReverted) {
     // notified about, the use restores itself
     f.backtrack(0);
     std::vector<Member> expected { f.v1 };
-    EXPECT_EQ(f.solver.members.rewrite(f.v1), expected);
+    EXPECT_EQ(f.solver.memberRewrite(f.v1), expected);
     EXPECT_TRUE(f.takeNotifiedIds().empty());
 
     // The use still lives, so reapplying the rewrite notifies it again

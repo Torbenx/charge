@@ -444,6 +444,18 @@ Member Solver::composeMembers(std::span<const Member> expr) {
     return impl().members.compose(*this, expr);
 }
 
+std::vector<Member> Solver::memberRewrite(Member m) {
+    return impl().members.rewrite(m);
+}
+
+void Solver::appendMemberRewrite(Member m, std::vector<Member>& out) {
+    impl().members.appendRewrite(m, out);
+}
+
+void Solver::explainMemberRewrite(Member m, ClauseBuilder& clause) {
+    impl().members.explainRewrite(*this, m, clause);
+}
+
 // -------------------------- Rewrite order -------------------------
 
 static std::strong_ordering locationOrder(Solver& solver, MemoryLocation a, MemoryLocation b) {
@@ -776,7 +788,7 @@ bool Solver::assignedEqual(Value a, Value b) {
     } else if (sort == Sort::UninterpretedConstant) {
         return impl().uninterpConstantEquality.rewrite(a) == impl().uninterpConstantEquality.rewrite(b);
     } else if (sort == Sort::Member) {
-        return impl().members.rewrite((Member)a) == impl().members.rewrite((Member)b);
+        return memberRewrite((Member)a) == memberRewrite((Member)b);
     } else if (sort == Sort::MemoryDeclaration) {
         return impl().memoryDeclarationEquality.rewrite(a) == impl().memoryDeclarationEquality.rewrite(b);
     } else {
@@ -791,8 +803,8 @@ void Solver::explainEqual(Value a, Value b, ClauseBuilder& clause) {
         impl().uninterpConstantEquality.explainEqual(*this, a, b, clause);
     } else if (sort == Sort::Member) {
         // Members are equal when their normal forms are, so justifying both spellings says so
-        impl().members.explainRewrite(*this, (Member)a, clause);
-        impl().members.explainRewrite(*this, (Member)b, clause);
+        explainMemberRewrite((Member)a, clause);
+        explainMemberRewrite((Member)b, clause);
     } else if (sort == Sort::MemoryDeclaration) {
         impl().memoryDeclarationEquality.explainEqual(*this, a, b, clause);
     } else {

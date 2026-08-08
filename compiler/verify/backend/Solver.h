@@ -107,6 +107,13 @@ struct Solver {
         return composeMembers((std::span<const Member>)expr);
     }
 
+    //! The normal form of \p m, i.e. its defining expression with all rewrites applied
+    std::vector<Member> memberRewrite(Member m);
+    //! Append the normal form of \p m to \p out
+    void appendMemberRewrite(Member m, std::vector<Member>& out);
+    //! Justify the normal form of \p m by adding the negated reasons to \p clause
+    void explainMemberRewrite(Member m, ClauseBuilder& clause);
+
     std::strong_ordering rewriteOrder(Value, Value);
 
     PairHandle findPair(Value, Value);

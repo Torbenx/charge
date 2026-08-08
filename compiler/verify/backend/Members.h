@@ -100,6 +100,7 @@ private:
 
     private:
         friend Base;
+        Members& members();
         uint32_t makeNode(Solver&, std::vector<Member>, TreeLabel);
         std::strong_ordering compare(Solver&, std::span<const Member>, std::span<const Member>);
     };
