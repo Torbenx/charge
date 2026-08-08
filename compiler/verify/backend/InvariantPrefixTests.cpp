@@ -869,4 +869,26 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsAtTheIdentityLocation) {
     EXPECT_TRUE(f.solver.assignedFalse(eq));
 }
 
+TEST(VerifyBackend, InvariantIndexEmptyPath) {
+    IndexFixture f;
+    Member v1 = f.solver.newAuxMemberVariable();
+
+    Bool empty = f.solver.isEmpty(f.path(v1));
+    Bool memberEq = f.solver.equality(v1, identity_member);
+    Bool setEq = f.solver.equality(f.path(v1), f.path(identity_member));
+    EXPECT_EQ(setEq, empty);
+
+    f.solver.decideTrue(memberEq);
+    f.solver.propagate();
+    EXPECT_TRUE(f.solver.assignedTrue(empty));
+    EXPECT_FALSE(f.hasConflicts());
+
+    f.solver.backtrack(0);
+    f.decideIn(f.path(v1));
+    f.solver.propagate();
+    EXPECT_TRUE(f.solver.assignedFalse(empty));
+    EXPECT_TRUE(f.solver.assignedFalse(memberEq));
+    EXPECT_FALSE(f.hasConflicts());
+}
+
 }

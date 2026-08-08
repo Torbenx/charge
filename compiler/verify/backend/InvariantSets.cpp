@@ -22,6 +22,10 @@ static InvariantSet locationSet(
     std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>& sets,
     TheoryData<Info, theory>& infos,
     MemoryLocation location) {
+    if (theory == TheoryId::PathInvariantSets && location.member == identity_member) {
+        return (InvariantSet)solver.impl().invariantSetsBaseTheory.emptySet();
+    }
+
     auto it = sets.find(location);
     if (it != sets.end())
         return it->second;
@@ -29,6 +33,11 @@ static InvariantSet locationSet(
     InvariantSet newSet = (InvariantSet)solver.newValue(theory);
     infos[newSet].location = location;
     sets.emplace(location, newSet);
+
+    if constexpr (theory == TheoryId::PathInvariantSets) {
+        solver.addClause({ !solver.equality(location.member, identity_member), solver.impl().invariantSetsBaseTheory.isEmpty(solver, newSet) });
+    }
+
     return newSet;
 }
 
@@ -41,17 +50,7 @@ InvariantSet InvariantSets::exclusiveSet(Solver& solver, MemoryLocation location
 }
 
 InvariantSet InvariantSets::pathSet(Solver& solver, MemoryLocation location) {
-    int_t oldCount = pathSets.size();
-    InvariantSet set = locationSet(solver, pathSets, pathInfos, location);
-
-    // No location is strictly above the whole declaration, so its path set is the empty one. Without
-    // this the emptiness is only found once the element is known to be somewhere in the declaration.
-    // TODO: There may be problem with elements that are later rewritten to the identity which are
-    //       not caught here.
-    if ((int_t)pathSets.size() != oldCount && location.member == identity_member)
-        solver.addClause({ baseTheory(solver).isEmpty(solver, set) });
-
-    return set;
+    return locationSet(solver, pathSets, pathInfos, location);
 }
 
 InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location, Invariant invariant) {

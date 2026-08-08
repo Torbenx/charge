@@ -9,15 +9,17 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
     auto [solver, _] = Solver::makeReference();
     Set emptySet = solver.emptySet(Sort::UninterpretedConstantSet);
 
+    EXPECT_TRUE(solver.assignedEmpty(emptySet));
+
+    auto element = solver.newSetElement(Sort::UninterpretedConstantSet);
+    solver.propagate();
+    EXPECT_TRUE(solver.assignedTrue(element, !Sets::in(emptySet)));
+
     Bool emptySetIsEmpty = solver.isEmpty(emptySet);
     EXPECT_TRUE(solver.alwaysTrue(emptySetIsEmpty));
 
     Bool emptySetEqEmptySet = solver.equality(emptySet, emptySet);
     EXPECT_TRUE(solver.alwaysTrue(emptySetEqEmptySet));
-
-    auto element = solver.newSetElement(Sort::UninterpretedConstantSet);
-    solver.propagate();
-    EXPECT_TRUE(solver.assignedTrue(element, !Sets::in(emptySet)));
 }
 
 TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
