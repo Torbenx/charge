@@ -97,6 +97,11 @@ struct Solver {
     //! Propagate \p containment to the theory defining its set
     void propagateSetContainment(Sets&, SetElement, SetContainment);
 
+    //! The set holding \p element and nothing else
+    Set singleton(Value element);
+    //! The element of the singleton set \p set, the inverse of singleton()
+    Value singletonElement(Set set);
+
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
         return composeMembers((std::span<const Member>)expr);

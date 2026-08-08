@@ -354,6 +354,24 @@ Bool Solver::mapToBool(SetElement element, SetContainment literal) {
     return setTheory(sortOf(literal.set().theory())).mapToBool(*this, element, literal);
 }
 
+Set Solver::singleton(Value element) {
+    switch (sortOf(element.theory())) {
+    case Sort::UninterpretedConstant:
+        return impl().uninterpConstantSingletons.singleton(*this, element);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Value Solver::singletonElement(Set set) {
+    switch (set.theory()) {
+    case TheoryId::UninterpretedConstantSingletonSets:
+        return impl().uninterpConstantSingletons.element(set);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 bool Solver::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
@@ -456,10 +474,8 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
         return ms.compositeLabel((Member)a) <=> ms.compositeLabel((Member)b);
     }
 
-    case TheoryId::UninterpretedConstantSingletonSets: {
-        auto& singletons = impl().uninterpConstantSingletons;
-        return rewriteOrder(singletons.element((Set)a), singletons.element((Set)b));
-    }
+    case TheoryId::UninterpretedConstantSingletonSets:
+        return rewriteOrder(singletonElement((Set)a), singletonElement((Set)b));
     case TheoryId::MemoryLocationSets: {
         auto& locations = impl().memorySets;
         return locationOrder(*this, locations.locationOf((MemorySet)a), locations.locationOf((MemorySet)b));
@@ -534,7 +550,7 @@ void SolverImpl::onNewPair(PairHandle handle) {
         // Note: This is a lot of stuff to add eagerly, maybe this can be reduced in the future.
         uninterpConstantEquality.newPair(*this, handle);
         Bool elementEq = equality(handle);
-        Bool singletonEq = equality(uninterpConstantSingletons.singleton(*this, a), uninterpConstantSingletons.singleton(*this, b));
+        Bool singletonEq = equality(singleton(a), singleton(b));
         addClause({ elementEq, !singletonEq });
         addClause({ !elementEq, singletonEq });
     } else if (sort == Sort::Member) {
@@ -545,7 +561,7 @@ void SolverImpl::onNewPair(PairHandle handle) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::UninterpretedConstantSingletonSets && b.theory() == TheoryId::UninterpretedConstantSingletonSets) {
             // The onNewPair() call for the element equality will automatically create the equivalence clauses.
-            [[maybe_unused]] Bool elementEq = equality(uninterpConstantSingletons.element((Set)a), uninterpConstantSingletons.element((Set)b));
+            [[maybe_unused]] Bool elementEq = equality(singletonElement((Set)a), singletonElement((Set)b));
         }
     } else if (sort == Sort::MemorySet) {
         setTheory(sort).newPair(*this, handle);

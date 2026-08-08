@@ -244,8 +244,8 @@ TEST(VerifyBackend, SetsSingletons) {
     Value aValue = solver.newAuxUninterpretedConstant();
     Value bValue = solver.newAuxUninterpretedConstant();
 
-    Set a = solver.uninterpConstantSingletons.singleton(solver, aValue);
-    Set b = solver.uninterpConstantSingletons.singleton(solver, bValue);
+    Set a = solver.singleton(aValue);
+    Set b = solver.singleton(bValue);
     Set u = solver.union_({ a, b });
     Bool valueEq = solver.equality(aValue, bValue);
     Bool eq = solver.equality(u, a);
