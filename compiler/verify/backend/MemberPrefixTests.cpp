@@ -23,14 +23,14 @@ namespace {
         }
 
         MemorySet location(Member member) {
-            return solver.memorySets.set(solver, declaration, member);
+            return solver.memorySet(declaration, member);
         }
         MemorySet location(std::initializer_list<Member> members) {
             return location(solver.composeMembers(members));
         }
 
         MemorySet otherLocation(Member member) {
-            return solver.memorySets.set(solver, otherDeclaration, member);
+            return solver.memorySet(otherDeclaration, member);
         }
         MemorySet otherLocation(std::initializer_list<Member> members) {
             return otherLocation(solver.composeMembers(members));

@@ -23,9 +23,6 @@ struct MemorySets : MemoryLocationSets<MemorySets> {
     MemorySets(Solver&);
 
     MemorySet set(Solver&, MemoryLocation location);
-    MemorySet set(Solver& solver, MemoryDeclaration declaration, Member member) {
-        return set(solver, { declaration, member });
-    }
 
     MemoryLocation locationOf(MemorySet set) const {
         VERIFY(set.theory() == TheoryId::MemoryLocationSets);

@@ -372,6 +372,14 @@ Value Solver::singletonElement(Set set) {
     }
 }
 
+MemorySet Solver::memorySet(MemoryLocation location) {
+    return impl().memorySets.set(*this, location);
+}
+
+MemoryLocation Solver::locationOf(MemorySet set) {
+    return impl().memorySets.locationOf(set);
+}
+
 bool Solver::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
@@ -488,10 +496,8 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
 
     case TheoryId::UninterpretedConstantSingletonSets:
         return rewriteOrder(singletonElement((Set)a), singletonElement((Set)b));
-    case TheoryId::MemoryLocationSets: {
-        auto& locations = impl().memorySets;
-        return locationOrder(*this, locations.locationOf((MemorySet)a), locations.locationOf((MemorySet)b));
-    }
+    case TheoryId::MemoryLocationSets:
+        return locationOrder(*this, locationOf((MemorySet)a), locationOf((MemorySet)b));
 
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
@@ -578,8 +584,8 @@ void SolverImpl::onNewPair(PairHandle handle) {
     } else if (sort == Sort::MemorySet) {
         setTheory(sort).newPair(*this, handle);
         if (a.theory() == TheoryId::MemoryLocationSets && b.theory() == TheoryId::MemoryLocationSets) {
-            MemoryLocation locationA = memorySets.locationOf((MemorySet)a);
-            MemoryLocation locationB = memorySets.locationOf((MemorySet)b);
+            MemoryLocation locationA = locationOf((MemorySet)a);
+            MemoryLocation locationB = locationOf((MemorySet)b);
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);

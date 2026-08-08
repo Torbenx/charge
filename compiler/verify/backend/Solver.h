@@ -102,6 +102,14 @@ struct Solver {
     //! The element of the singleton set \p set, the inverse of singleton()
     Value singletonElement(Set set);
 
+    //! The set of the memory described by \p location
+    MemorySet memorySet(MemoryLocation location);
+    MemorySet memorySet(MemoryDeclaration declaration, Member member) {
+        return memorySet({ declaration, member });
+    }
+    //! The location \p set describes, the inverse of memorySet()
+    MemoryLocation locationOf(MemorySet set);
+
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
         return composeMembers((std::span<const Member>)expr);
