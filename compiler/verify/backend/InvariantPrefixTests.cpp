@@ -41,22 +41,22 @@ namespace {
             return e;
         }
 
-        InvariantSet inclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, declaration, member); }
+        InvariantSet inclusive(Member member) { return solver.inclusiveInvariantSet(declaration, member); }
         InvariantSet inclusive(std::initializer_list<Member> members) { return inclusive(solver.composeMembers(members)); }
-        InvariantSet exclusive(Member member) { return solver.invariantSets.exclusiveSet(solver, declaration, member); }
+        InvariantSet exclusive(Member member) { return solver.exclusiveInvariantSet(declaration, member); }
         InvariantSet exclusive(std::initializer_list<Member> members) { return exclusive(solver.composeMembers(members)); }
-        InvariantSet path(Member member) { return solver.invariantSets.pathSet(solver, declaration, member); }
+        InvariantSet path(Member member) { return solver.pathInvariantSet(declaration, member); }
         InvariantSet path(std::initializer_list<Member> members) { return path(solver.composeMembers(members)); }
-        InvariantSet singleton(Member member, Invariant invariant) { return solver.invariantSets.singletonSet(solver, declaration, member, invariant); }
+        InvariantSet singleton(Member member, Invariant invariant) { return solver.invariantSingletonSet(declaration, member, invariant); }
         InvariantSet singleton(std::initializer_list<Member> members, Invariant invariant) {
             return singleton(solver.composeMembers(members), invariant);
         }
 
-        InvariantSet otherInclusive(Member member) { return solver.invariantSets.inclusiveSet(solver, otherDeclaration, member); }
-        InvariantSet otherPath(Member member) { return solver.invariantSets.pathSet(solver, otherDeclaration, member); }
+        InvariantSet otherInclusive(Member member) { return solver.inclusiveInvariantSet(otherDeclaration, member); }
+        InvariantSet otherPath(Member member) { return solver.pathInvariantSet(otherDeclaration, member); }
         InvariantSet otherPath(std::initializer_list<Member> members) { return otherPath(solver.composeMembers(members)); }
         InvariantSet otherSingleton(Member member, Invariant invariant) {
-            return solver.invariantSets.singletonSet(solver, otherDeclaration, member, invariant);
+            return solver.invariantSingletonSet(otherDeclaration, member, invariant);
         }
 
         Bool declarationEquality() { return solver.equality(declaration, otherDeclaration); }

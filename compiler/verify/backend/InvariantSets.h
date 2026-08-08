@@ -81,24 +81,9 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     InvariantSets(Solver&);
 
     InvariantSet inclusiveSet(Solver&, MemoryLocation);
-    InvariantSet inclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
-        return inclusiveSet(solver, { declaration, member });
-    }
-
     InvariantSet exclusiveSet(Solver&, MemoryLocation);
-    InvariantSet exclusiveSet(Solver& solver, MemoryDeclaration declaration, Member member) {
-        return exclusiveSet(solver, { declaration, member });
-    }
-
     InvariantSet pathSet(Solver&, MemoryLocation);
-    InvariantSet pathSet(Solver& solver, MemoryDeclaration declaration, Member member) {
-        return pathSet(solver, { declaration, member });
-    }
-
     InvariantSet singletonSet(Solver&, MemoryLocation, Invariant);
-    InvariantSet singletonSet(Solver& solver, MemoryDeclaration declaration, Member member, Invariant invariant) {
-        return singletonSet(solver, { declaration, member }, invariant);
-    }
 
     //! Whether \p value is one of the three kinds of sets of this theory
     static constexpr bool isInvariantSet(Value value) {

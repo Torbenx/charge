@@ -110,6 +110,32 @@ struct Solver {
     //! The location \p set describes, the inverse of memorySet()
     MemoryLocation locationOf(MemorySet set);
 
+    //! The invariants of \p location and of its members
+    InvariantSet inclusiveInvariantSet(MemoryLocation location);
+    InvariantSet inclusiveInvariantSet(MemoryDeclaration declaration, Member member) {
+        return inclusiveInvariantSet({ declaration, member });
+    }
+    //! The invariants of the members of \p location, but not of the location itself
+    InvariantSet exclusiveInvariantSet(MemoryLocation location);
+    InvariantSet exclusiveInvariantSet(MemoryDeclaration declaration, Member member) {
+        return exclusiveInvariantSet({ declaration, member });
+    }
+    //! The invariants of the locations strictly above \p location
+    InvariantSet pathInvariantSet(MemoryLocation location);
+    InvariantSet pathInvariantSet(MemoryDeclaration declaration, Member member) {
+        return pathInvariantSet({ declaration, member });
+    }
+    //! The set holding \p invariant of \p location and nothing else
+    InvariantSet invariantSingletonSet(MemoryLocation location, Invariant invariant);
+    InvariantSet invariantSingletonSet(MemoryDeclaration declaration, Member member, Invariant invariant) {
+        return invariantSingletonSet({ declaration, member }, invariant);
+    }
+
+    //! The location \p set describes
+    MemoryLocation locationOf(InvariantSet set);
+    //! The invariant of the singleton set \p set
+    Invariant invariantOf(InvariantSet set);
+
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
         return composeMembers((std::span<const Member>)expr);

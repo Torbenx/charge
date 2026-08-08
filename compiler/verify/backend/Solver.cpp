@@ -380,6 +380,30 @@ MemoryLocation Solver::locationOf(MemorySet set) {
     return impl().memorySets.locationOf(set);
 }
 
+InvariantSet Solver::inclusiveInvariantSet(MemoryLocation location) {
+    return impl().invariantSets.inclusiveSet(*this, location);
+}
+
+InvariantSet Solver::exclusiveInvariantSet(MemoryLocation location) {
+    return impl().invariantSets.exclusiveSet(*this, location);
+}
+
+InvariantSet Solver::pathInvariantSet(MemoryLocation location) {
+    return impl().invariantSets.pathSet(*this, location);
+}
+
+InvariantSet Solver::invariantSingletonSet(MemoryLocation location, Invariant invariant) {
+    return impl().invariantSets.singletonSet(*this, location, invariant);
+}
+
+MemoryLocation Solver::locationOf(InvariantSet set) {
+    return impl().invariantSets.locationOf(set);
+}
+
+Invariant Solver::invariantOf(InvariantSet set) {
+    return impl().invariantSets.invariantOf(set);
+}
+
 bool Solver::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
@@ -501,16 +525,13 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
 
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
-    case TheoryId::PathInvariantSets: {
-        auto& invariants = impl().invariantSets;
-        return locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
-    }
+    case TheoryId::PathInvariantSets:
+        return locationOrder(*this, locationOf((InvariantSet)a), locationOf((InvariantSet)b));
     case TheoryId::InvariantSingletonSets: {
-        auto& invariants = impl().invariantSets;
-        auto locationOrdering = locationOrder(*this, invariants.locationOf((InvariantSet)a), invariants.locationOf((InvariantSet)b));
+        auto locationOrdering = locationOrder(*this, locationOf((InvariantSet)a), locationOf((InvariantSet)b));
         if (locationOrdering != 0)
             return locationOrdering;
-        return invariants.invariantOf((InvariantSet)a).id() <=> invariants.invariantOf((InvariantSet)b).id();
+        return invariantOf((InvariantSet)a).id() <=> invariantOf((InvariantSet)b).id();
     }
 
     // Ordering is not important for these since no rewriting is done
@@ -596,8 +617,8 @@ void SolverImpl::onNewPair(PairHandle handle) {
         setTheory(sort).newPair(*this, handle);
         if (InvariantSets::isInvariantSet(a) && a.theory() == b.theory()) {
             TheoryId theory = a.theory();
-            MemoryLocation locationA = invariantSets.locationOf((InvariantSet)a);
-            MemoryLocation locationB = invariantSets.locationOf((InvariantSet)b);
+            MemoryLocation locationA = locationOf((InvariantSet)a);
+            MemoryLocation locationB = locationOf((InvariantSet)b);
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);
@@ -739,8 +760,7 @@ bool Solver::alwaysDisequal(Value a, Value b) {
         return false;
     case Sort::InvariantSet:
         if (a.theory() == TheoryId::InvariantSingletonSets && b.theory() == TheoryId::InvariantSingletonSets) {
-            auto& isets = impl().invariantSets;
-            if (isets.invariantOf((InvariantSet)a) != isets.invariantOf((InvariantSet)b))
+            if (invariantOf((InvariantSet)a) != invariantOf((InvariantSet)b))
                 return true;
         }
         return false;
