@@ -18,8 +18,8 @@ namespace {
         //! Decide that the member \p a is the member \p b and propagate
         void decideMembersEqual(Member a, Member b) {
             solver.decideTrue(solver.equality(a, b));
-            solver.sat.propagate();
-            EXPECT_FALSE(solver.sat.hasConflicts());
+            solver.propagate();
+            EXPECT_FALSE(solver.hasConflicts());
         }
     };
 
@@ -37,7 +37,7 @@ namespace {
 
         Sets::ElementId newElement() {
             auto e = solver.invariantSetsBaseTheory.newElement(solver);
-            solver.sat.propagate();
+            solver.propagate();
             return e;
         }
 
@@ -63,16 +63,15 @@ namespace {
 
         //! Check the index together with the theory whose rewrites it follows
         void checkInvariances() {
-            solver.invariantSets.checkInvariances(solver);
-            solver.members.checkInvariances(solver);
+            solver.checkInvariances();
         }
 
         //! Decide that \p element is contained in \p set and propagate
         void decideIn(Set set, bool contained = true) { decideIn(element, set, contained); }
         void decideIn(Sets::ElementId e, Set set, bool contained = true) {
             solver.invariantSetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
-            solver.sat.propagate();
-            if (!solver.sat.hasConflicts())
+            solver.propagate();
+            if (!solver.hasConflicts())
                 checkInvariances();
         }
         void decideNotIn(Set set) { decideIn(set, false); }
@@ -81,16 +80,16 @@ namespace {
         //! Decide that the member \p a is the member \p b and propagate
         void decideMembersEqual(Member a, Member b) {
             solver.decideTrue(solver.equality(a, b));
-            solver.sat.propagate();
-            if (!solver.sat.hasConflicts())
+            solver.propagate();
+            if (!solver.hasConflicts())
                 checkInvariances();
         }
 
         //! Decide that the two declarations are the same and propagate
         void decideDeclarationsEqual() {
             solver.decideTrue(declarationEquality());
-            solver.sat.propagate();
-            if (!solver.sat.hasConflicts())
+            solver.propagate();
+            if (!solver.hasConflicts())
                 checkInvariances();
         }
 
@@ -98,13 +97,13 @@ namespace {
         bool assignedNotIn(Set set) { return solver.invariantSetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
         bool assignedEmpty(Set set) { return solver.invariantSetsBaseTheory.assignedEmpty(solver, set); }
 
-        bool hasConflicts() const { return solver.sat.hasConflicts(); }
+        bool hasConflicts() const { return solver.hasConflicts(); }
 
         //! Resolve the pending conflicts and propagate what was learned from them
         void resolveConflicts() {
-            EXPECT_TRUE(solver.sat.hasConflicts());
-            EXPECT_TRUE(solver.sat.analyzeConflicts());
-            solver.sat.propagate();
+            EXPECT_TRUE(solver.hasConflicts());
+            EXPECT_TRUE(solver.analyzeConflicts());
+            solver.propagate();
             checkInvariances();
         }
     };
@@ -208,7 +207,7 @@ TEST(VerifyBackend, InvariantIndexConflictByRewrite) {
     // v1 = l1.l2 moves the location below l1, where its invariants are the excluded ones
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l2 }));
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -227,18 +226,18 @@ TEST(VerifyBackend, InvariantIndexRewriteIsBacktracked) {
     // v1 = l1.l1 puts the singleton below the excluded location
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l1 }));
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     // Reverting the rewrite by hand must leave the index without a conflict again
-    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
     EXPECT_FALSE(f.solver.assignedTrue(eq));
 
     // And the very same rewrite must conflict again when it is reapplied
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 }
 
@@ -380,7 +379,7 @@ TEST(VerifyBackend, InvariantIndexPathSetOfTheWholeDeclaration) {
 
     InvariantSet whole = f.path(identity_member);
     InvariantSet below = f.path(l1);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_FALSE(f.hasConflicts());
 
     // No location is strictly above the declaration itself, so nothing is on its path
@@ -442,7 +441,7 @@ TEST(VerifyBackend, InvariantIndexPathSetConflictByRewrite) {
     // v1 = l1.l2 moves the location below l1, which puts the singleton on its path
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l2 }));
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -461,18 +460,18 @@ TEST(VerifyBackend, InvariantIndexPathSetRewriteIsBacktracked) {
     // v1 = l1.l1 puts the singleton on the path of the excluded location
     Bool eq = f.solver.equality(v1, f.solver.composeMembers({ l1, l1 }));
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     // Reverting the rewrite by hand must leave the index without a conflict again
-    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
     EXPECT_FALSE(f.solver.assignedTrue(eq));
 
     // And the very same rewrite must conflict again when it is reapplied
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 }
 
@@ -537,7 +536,7 @@ TEST(VerifyBackend, InvariantIndexBacktrackTurnExcluiveIntoInclusivePrefix) {
     int_t preEqLevel = f.solver.currentDecisionLevel();
     Bool eq = f.solver.equality(v1, l2);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -554,7 +553,7 @@ TEST(VerifyBackend, InvariantIndexAVariableSuffixIsNoConflictWhenItIsTheIdentity
     // Rewriting v1 to the identity beforehand spells both words the same, which is the assignment
     // the hit of the two would have excluded
     f.solver.decideTrue(f.solver.equality(v1, identity_member));
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_FALSE(f.hasConflicts());
 
     f.decideNotIn(f.exclusive(l1));
@@ -598,7 +597,7 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsAfterRewrite) {
 
     Bool eq = f.solver.equality(l1, v1);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -618,7 +617,7 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithTheExclusionFirst) {
 
     Bool eq = f.solver.equality(l1, v1);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -638,7 +637,7 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithARewrittenKey) {
 
     Bool eq = f.solver.equality(v1, l1);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();
@@ -761,18 +760,18 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsAreBacktracked) {
 
     Bool eq = f.solver.equality(l1, v1);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     // Reverting the rewrite by hand must leave the index without a conflict again
-    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
     EXPECT_FALSE(f.solver.assignedTrue(eq));
 
     // And the very same rewrite must be found to match anew when it is reapplied
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 }
 
@@ -787,8 +786,8 @@ TEST(VerifyBackend, InvariantIndexExcludedSingletonsAreBacktracked) {
 
     // Reverting the exclusion has to forget the watch it registered, so the rewrite that would have
     // matched it finds nothing to compare anymore
-    f.solver.sat.beginBacktrack(levelBeforeExclusion + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeExclusion + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
     EXPECT_FALSE(f.assignedNotIn(f.singleton(v1, f.i1)));
 
@@ -814,8 +813,8 @@ TEST(VerifyBackend, InvariantIndexExcludedSingletonsOfSeveralElementsAreBacktrac
     f.decideNotIn(f.singleton(v2, f.i1));
     f.decideNotIn(other, f.singleton(v1, f.i1));
 
-    f.solver.sat.beginBacktrack(levelBeforeExclusions + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeExclusions + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
 
     // None of the exclusions is left, so neither location conflicts with the shared singleton
@@ -840,8 +839,8 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsWithSeveralExclusions) {
     f.decideMembersEqual(v2, l1);
     EXPECT_TRUE(f.hasConflicts());
 
-    f.solver.sat.beginBacktrack(levelBeforeRewrite + 1);
-    f.solver.sat.endBacktrack();
+    f.solver.beginBacktrack(levelBeforeRewrite + 1);
+    f.solver.endBacktrack();
     f.checkInvariances();
 
     f.decideMembersEqual(v1, l1);
@@ -859,7 +858,7 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsAtTheIdentityLocation) {
 
     Bool eq = f.solver.equality(v1, identity_member);
     f.solver.decideTrue(eq);
-    f.solver.sat.propagate();
+    f.solver.propagate();
     EXPECT_TRUE(f.hasConflicts());
 
     f.resolveConflicts();

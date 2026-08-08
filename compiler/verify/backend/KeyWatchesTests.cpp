@@ -68,7 +68,7 @@ namespace {
 
         void decideEqual(Value a, Value b) {
             solver.decideTrue(solver.equality(a, b));
-            solver.sat.propagate();
+            solver.propagate();
             watches.newDecisionLevel(solver);
             propagateRewrites();
         }
@@ -76,14 +76,14 @@ namespace {
         //! Start a decision level without touching any of the declarations
         void newDecisionLevel() {
             solver.decideTrue(solver.newAuxBooleanVariable());
-            solver.sat.propagate();
+            solver.propagate();
             watches.newDecisionLevel(solver);
             propagateRewrites();
         }
 
         void backtrack(int_t level) {
             solver.backtrack(level);
-            solver.sat.propagate();
+            solver.propagate();
             watches.beginBacktrack(solver);
             watches.checkInvariances(solver);
         }
@@ -214,7 +214,7 @@ TEST(VerifyBackend, KeyWatchesWithoutWatchData) {
     EXPECT_EQ(watches.matchCount, 0);
 
     solver.decideTrue(solver.equality(d1, d2));
-    solver.sat.propagate();
+    solver.propagate();
     watches.newDecisionLevel(solver);
     for (Use use : std::exchange(solver.useTest.rewrites, {}))
         watches.propagateRewrite(solver, use);

@@ -1,7 +1,5 @@
 #include <verify/backend/Clauses.h>
 
-#include <verify/backend/SolverImpl.h>
-
 namespace verify::backend {
 
 Clauses::Clauses(Solver& solver)
@@ -154,7 +152,7 @@ bool Clauses::checkAssignment(Solver& solver) {
             if (!unassignedGlueLiteral.has_value())
                 return false;
             solver.decideTrue(unassignedGlueLiteral.value());
-            if (!solver.impl().sat.propagate())
+            if (!solver.propagate())
                 return false;
         }
     }

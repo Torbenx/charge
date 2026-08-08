@@ -33,7 +33,7 @@ Sets::Sets(Solver& solver, const SetsParams& params)
     Set empty = (Set)solver.newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
     solver.assignTrue(isEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
-    VERIFY(solver.impl().sat.propagate());
+    VERIFY(solver.propagate());
 }
 
 Bool Sets::isEmpty(Solver& solver, Set set) {

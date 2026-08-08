@@ -130,7 +130,7 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
         solver.clauses.addClause(solver, std::move(outClause));
     }
 
-    if (solver.sat.hasConflicts() || !solver.sat.propagate())
+    if (solver.hasConflicts() || !solver.propagate())
         return std::nullopt; // unsat
 
     // solver
@@ -141,9 +141,9 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
             break;
 
         solver.decideTrue(lit.value());
-        VERIFY(!solver.sat.hasConflicts());
-        while (!solver.sat.propagate()) {
-            if (!solver.sat.analyzeConflicts())
+        VERIFY(!solver.hasConflicts());
+        while (!solver.propagate()) {
+            if (!solver.analyzeConflicts())
                 return std::nullopt; // unsat
         }
     }

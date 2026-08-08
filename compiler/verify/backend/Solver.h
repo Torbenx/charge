@@ -18,12 +18,21 @@ struct Solver {
 
     int_t currentDecisionLevel() const;
     void backtrack(int_t targetLevel);
+    void beginBacktrack(int_t targetLevel);
+    void endBacktrack();
     bool assignedTrue(Bool lit);
     bool assignedFalse(Bool lit);
     void decideTrue(Bool literal);
     void assignTrue(Bool trueLit, const Reason& reason);
     bool alwaysTrue(Bool);
     bool alwaysFalse(Bool v) { return alwaysTrue(!v); }
+
+    bool propagate();
+    bool hasConflicts() const;
+    bool analyzeConflicts();
+
+    Reason firstReason(Bool lit);
+    ClauseAndIndex justifyAssignment(Bool lit);
 
     ClauseBuilder beginClause();
     std::span<const Bool> viewClause(const ClauseBuilder&);
@@ -88,6 +97,9 @@ struct Solver {
     disequal to the other one (and this function must be able to detect this).
     */
     bool alwaysDisequal(Value a, Value b);
+
+    //! Explicitly check that the invariances of all theories hold
+    void checkInvariances();
 
 private:
     friend SolverImpl;

@@ -97,21 +97,21 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
 
     // One half of the location being the same says nothing about the sets
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(setEquality));
     EXPECT_FALSE(solver.assignedFalse(setEquality));
 
     // The two pairs describe the same location, so the sets of that location are the same and so is
     // everything that is known about them
     solver.decideTrue(solver.equality(d1, d2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedTrue(setEquality));
     EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
 }
@@ -130,8 +130,8 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocationsButDifferentKinds) {
         invariantSets.pathSet(solver, d, m2));
 
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_FALSE(solver.assignedTrue(setEquality));
     EXPECT_FALSE(solver.assignedTrue(pathEquality));
 }
@@ -149,13 +149,13 @@ TEST(VerifyBackend, InvariantPathSetsOfEqualLocations) {
 
     // One half of the location being the same says nothing about the sets
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(setEquality));
 
     // Two locations that are the same have the same locations above them, so the paths are the same
     solver.decideTrue(solver.equality(d1, d2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedTrue(setEquality));
 }
 
@@ -174,8 +174,8 @@ TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
         invariantSets.singletonSet(solver, d, m2, i2));
 
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
 
     // The location decides the singleton of one invariant, but the invariants of two of them are distinct
     EXPECT_TRUE(solver.assignedTrue(sameInvariant));
@@ -195,16 +195,16 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
     InvariantSet b = invariantSets.singletonSet(solver, d, m2, i);
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
 
     // A singleton set holds nothing but the singleton of its invariant at its location, so a singleton of two of
     // them is the same singleton and the locations of the two are the same as well
     sets.decideTrue(solver, e, Sets::in(b));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedTrue(solver.equality(a, b)));
     EXPECT_TRUE(solver.assignedTrue(solver.equality(m1, m2)));
 }
@@ -220,15 +220,15 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
     InvariantSet b = invariantSets.singletonSet(solver, d, m, Invariant(1));
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
 
     // The singletons of two invariants are distinct even at the same location, so no singleton is in both
     sets.decideTrue(solver, e, Sets::in(b));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
@@ -255,21 +255,21 @@ TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
     InvariantSet b = invariantSets.singletonSet(solver, d, m, Invariant(1));
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     int_t levelBeforeContainment = solver.currentDecisionLevel();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
 
     // Reverting the containment must forget the singleton set it was found in
-    solver.sat.beginBacktrack(levelBeforeContainment + 1);
-    solver.sat.endBacktrack();
+    solver.beginBacktrack(levelBeforeContainment + 1);
+    solver.endBacktrack();
     invariantSets.checkInvariances(solver);
     EXPECT_FALSE(sets.assignedTrue(solver, e, Sets::in(a)));
 
     // So the singleton of another invariant is not compared against it anymore
     sets.decideTrue(solver, e, Sets::in(b));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     invariantSets.checkInvariances(solver);
 }
 
@@ -287,27 +287,27 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
     Set u = sets.union_(solver, { whole, singleton });
 
     Bool eq = solver.equality(u, whole);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     // There are no rules relating a location to the invariants below it yet, so the subset relation must
     // be asserted explicitly.
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     solver.addClause({ solver.equality(sets.subset(solver, { singleton }, { whole }), sets.emptySet()) });
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { whole })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { whole }, { u })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }

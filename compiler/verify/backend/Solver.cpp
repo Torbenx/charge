@@ -36,7 +36,7 @@ SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
     VERIFY(b == true_literal);
     VERIFY(!b == false_literal);
     solver.assignTrue(b, makeReason<ReasonKind::Always>({}));
-    VERIFY(solver.impl().sat.propagate());
+    VERIFY(solver.propagate());
 }
 
 // -------------------------- Always reason -------------------------
@@ -69,7 +69,13 @@ int_t Solver::currentDecisionLevel() const {
 }
 void Solver::backtrack(int_t targetLevel) {
     VERIFY(targetLevel <= currentDecisionLevel());
+    beginBacktrack(targetLevel);
+    endBacktrack();
+}
+void Solver::beginBacktrack(int_t targetLevel) {
     impl().sat.beginBacktrack(targetLevel);
+}
+void Solver::endBacktrack() {
     impl().sat.endBacktrack();
 }
 bool Solver::assignedTrue(Bool lit) {
@@ -86,6 +92,21 @@ void Solver::assignTrue(Bool trueLit, const Reason& reason) {
 }
 bool Solver::alwaysTrue(Bool value) {
     return impl().sat.alwaysTrue(value);
+}
+bool Solver::propagate() {
+    return impl().sat.propagate();
+}
+bool Solver::hasConflicts() const {
+    return impl().sat.hasConflicts();
+}
+bool Solver::analyzeConflicts() {
+    return impl().sat.analyzeConflicts();
+}
+Reason Solver::firstReason(Bool lit) {
+    return impl().sat.firstReason(lit);
+}
+ClauseAndIndex Solver::justifyAssignment(Bool lit) {
+    return impl().sat.justifyAssignment(lit);
 }
 ClauseBuilder Solver::beginClause() {
     return impl().sat.beginClause();
@@ -326,7 +347,7 @@ void Solver::addClause(std::vector<Bool> clause) {
 }
 
 void Solver::addClause(const ClauseBuilder& builder) {
-    auto span = impl().sat.viewClause(builder);
+    auto span = viewClause(builder);
     addClause({ span.begin(), span.end() });
 }
 
@@ -738,6 +759,20 @@ Member Solver::newMemberLiteral(std::vector<Invariant> invariants) {
 std::span<const Invariant> Solver::usingInvariants(Member literal) {
     VERIFY(literal.theory() == TheoryId::MemberLiterals);
     return impl().memberLiteralInvariants[literal];
+}
+
+// ------------------------- Invariance check -----------------------
+
+void Solver::checkInvariances() {
+    // The theories producing rewrites are checked before their consumers,
+    // so that a broken rewrite is reported at its origin.
+    impl().uninterpConstantEquality.checkInvariances(*this);
+    impl().memoryDeclarationEquality.checkInvariances(*this);
+    impl().members.checkInvariances(*this);
+
+    impl().uninterpConstantSingletons.checkInvariances(*this);
+    impl().memorySets.checkInvariances(*this);
+    impl().invariantSets.checkInvariances(*this);
 }
 
 }

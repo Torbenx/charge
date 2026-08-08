@@ -16,7 +16,7 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
     EXPECT_TRUE(solver.alwaysTrue(emptySetEqEmptySet));
 
     auto element = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(sets.assignedTrue(solver, element, !Sets::in(emptySet)));
 }
 
@@ -25,7 +25,7 @@ TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
     auto& sets = solver.uninterpConstantSets;
     Set a = solver.newAuxUninterpretedConstantSet();
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     Bool empty = sets.isEmpty(solver, a);
     EXPECT_FALSE(solver.assignedTrue(empty));
@@ -33,14 +33,14 @@ TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
 
     int_t level = solver.currentDecisionLevel();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedFalse(empty));
 
     // Reverting the containment takes the witness and with it the non-emptiness away again
-    solver.sat.beginBacktrack(level + 1);
-    solver.sat.endBacktrack();
-    solver.sat.propagate();
+    solver.beginBacktrack(level + 1);
+    solver.endBacktrack();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(empty));
     EXPECT_FALSE(solver.assignedFalse(empty));
 }
@@ -50,20 +50,20 @@ TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
     auto& sets = solver.uninterpConstantSets;
     Set a = solver.newAuxUninterpretedConstantSet();
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     // The emptiness forces the element out, which is the forall distribution
     solver.decideTrue(sets.isEmpty(solver, a));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(sets.assignedFalse(solver, e, Sets::in(a)));
     solver.backtrack(0);
-    solver.sat.propagate();
+    solver.propagate();
 
     // And the other way around the element forces the set to be non empty
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedFalse(sets.isEmpty(solver, a)));
 }
 
@@ -80,27 +80,27 @@ TEST(VerifyBackend, SetsEqualityPropagation1) {
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(ab));
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, !Sets::in(ac));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     solver.backtrack(0);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     sets.decideTrue(solver, e, Sets::in(ac));
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, !Sets::in(ab));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     solver.backtrack(0);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
@@ -118,23 +118,23 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { ab }, { ac })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     VERIFY(solver.currentDecisionLevel() == -1);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { ac }, { ab })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     VERIFY(solver.currentDecisionLevel() == -1);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
@@ -156,29 +156,29 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { rhs }, { lhs })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     VERIFY(solver.currentDecisionLevel() == -1);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { lhs }, { rhs })));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
     VERIFY(solver.currentDecisionLevel() == -1);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
@@ -194,23 +194,23 @@ TEST(VerifyBackend, SetsProveDisequal) {
     solver.addClause({ sets.isEmpty(solver, sets.intersection(solver, { b, c })) });
     solver.addClause({ !sets.isEmpty(solver, c) });
     Bool eq = solver.equality(sets.union_(solver, { a, c }), b);
-    solver.sat.propagate();
+    solver.propagate();
 
     EXPECT_FALSE(solver.assignedFalse(eq));
     solver.decideTrue(eq);
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    EXPECT_FALSE(solver.hasConflicts());
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(c));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_EQ(solver.currentDecisionLevel(), -1);
     EXPECT_TRUE(solver.assignedFalse(eq));
@@ -226,22 +226,22 @@ TEST(VerifyBackend, SetsUnionOfEqualSets) {
     Bool eq = solver.equality(u, a);
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { a }, { u })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     solver.decideTrue(solver.equality(a, b));
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { a })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
@@ -258,45 +258,45 @@ TEST(VerifyBackend, SetsSingletons) {
     Set u = sets.union_(solver, { a, b });
     Bool valueEq = solver.equality(aValue, bValue);
     Bool eq = solver.equality(u, a);
-    solver.sat.propagate();
+    solver.propagate();
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     // 1. a = b implies {a}u{b} = {a}
     solver.decideTrue(valueEq);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { a }, { u })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { a })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
     solver.backtrack(0);
-    solver.sat.propagate();
+    solver.propagate();
 
     // 2. {a}u{b} = {a} implies a = b
     solver.decideTrue(eq);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(!valueEq);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(b));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(valueEq));
 }
@@ -308,15 +308,15 @@ TEST(VerifyBackend, SetsExaustiveOnNewSet) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, !Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, !Sets::in(b));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set u = sets.union_(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(sets.assignedFalse(solver, e, Sets::in(u)));
 }
 
@@ -327,12 +327,12 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(sets.isEmpty(solver, a));
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(sets.isEmpty(solver, b));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set u = sets.union_(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, u)));
 }
 
@@ -343,12 +343,12 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(!sets.isEmpty(solver, a));
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(!sets.isEmpty(solver, b));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set i = sets.intersection(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, i)));
 }
 
@@ -359,13 +359,13 @@ TEST(VerifyBackend, SetsExprToDefOnNewSet) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set u = sets.union_(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(u)));
 }
 
@@ -376,10 +376,10 @@ TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(sets.isEmpty(solver, a));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set i = sets.intersection(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(sets.isEmpty(solver, i)));
 }
 
@@ -390,10 +390,10 @@ TEST(VerifyBackend, SetsExprToDefOnNewSetPositiveIgnoredOnForAllElement) {
     Set b = solver.newAuxUninterpretedConstantSet();
 
     solver.decideTrue(!sets.isEmpty(solver, a));
-    solver.sat.propagate();
+    solver.propagate();
 
     Set u = sets.union_(solver, { a, b });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(!sets.isEmpty(solver, u)));
 }
 

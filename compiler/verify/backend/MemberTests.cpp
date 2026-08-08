@@ -26,7 +26,7 @@ TEST(VerifyBackend, MembersDefiningExpression) {
 
     // The expression is the definition, so it is unaffected by rewrites
     solver.decideTrue(solver.equality(v, l2));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_EQ(solver.members.rewrite(composite), (std::vector<Member> { l1, l2, l2 }));
     EXPECT_EQ(expression(v), std::vector<Member> { v });
     EXPECT_EQ(expression(composite), (std::vector<Member> { l1, v, l2 }));
@@ -46,9 +46,9 @@ TEST(VerifyBackend, MembersBasic1) {
 
     {
         solver.decideTrue(eq1);
-        solver.sat.propagate();
+        solver.propagate();
         solver.decideTrue(eq2);
-        solver.sat.propagate();
+        solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq3));
         std::vector<Member> expectedV1 { l1, l2 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
@@ -64,9 +64,9 @@ TEST(VerifyBackend, MembersBasic1) {
     }
     {
         solver.decideTrue(eq2);
-        solver.sat.propagate();
+        solver.propagate();
         solver.decideTrue(eq3);
-        solver.sat.propagate();
+        solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq1));
         std::vector<Member> expectedV1 { l1, l2 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
@@ -82,9 +82,9 @@ TEST(VerifyBackend, MembersBasic1) {
     }
     {
         solver.decideTrue(eq3);
-        solver.sat.propagate();
+        solver.propagate();
         solver.decideTrue(eq1);
-        solver.sat.propagate();
+        solver.propagate();
         EXPECT_TRUE(solver.assignedTrue(eq2));
         std::vector<Member> expectedV1 { l1, l2 };
         EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
@@ -112,9 +112,9 @@ TEST(VerifyBackend, MembersRewriteUpdate) {
     Bool eq2 = solver.equality(v2, solver.composeMembers({ l2, l3 }));
 
     solver.decideTrue(eq1);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(eq2);
-    solver.sat.propagate();
+    solver.propagate();
     std::vector<Member> expectedV1 { l1, l2, l3 };
     EXPECT_EQ(solver.members.rewrite(v1), expectedV1);
 }
@@ -130,25 +130,25 @@ TEST(VerifyBackend, MembersIdentityRewrite) {
     Bool eq2 = solver.equality(v2, identity_member);
 
     solver.decideTrue(eq0);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(eq1);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq2));
 
     solver.backtrack(0);
 
     solver.decideTrue(eq1);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(eq2);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq0));
 
     solver.backtrack(0);
 
     solver.decideTrue(eq2);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(eq0);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq1));
 }
 
@@ -165,9 +165,9 @@ TEST(VerifyBackend, MembersSubExpr) {
     Bool eq3 = solver.equality(v3, identity_member);
 
     solver.decideTrue(eq0);
-    solver.sat.propagate();
+    solver.propagate();
     solver.decideTrue(eq2);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(eq1));
     EXPECT_TRUE(solver.assignedTrue(eq3));
 }
@@ -203,20 +203,20 @@ namespace {
 
         void decideEqual(Member a, Member b) {
             solver.decideTrue(solver.equality(a, b));
-            solver.sat.propagate();
+            solver.propagate();
             solver.members.checkInvariances(solver);
         }
 
         void backtrack(int_t level) {
             solver.backtrack(level);
-            solver.sat.propagate();
+            solver.propagate();
             solver.members.checkInvariances(solver);
         }
 
         //! Start a decision level without touching any of the members
         void newDecisionLevel() {
             solver.decideTrue(solver.newAuxBooleanVariable());
-            solver.sat.propagate();
+            solver.propagate();
         }
     };
 
@@ -346,11 +346,11 @@ TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
 
     // assign eq1
     solver.decideTrue(eq1);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedFalse(eq3));
     {
         // Should be justified by eq1
-        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        auto [clause, index] = solver.justifyAssignment(!eq3);
         EXPECT_EQ(clause.size(), 2);
         EXPECT_EQ(index, 0);
         EXPECT_EQ(clause[0], !eq3);
@@ -359,11 +359,11 @@ TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
 
     // assign eq2
     solver.addClause({ eq2 });
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedFalse(eq3));
     {
         // Should still be justified by eq1
-        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        auto [clause, index] = solver.justifyAssignment(!eq3);
         EXPECT_EQ(clause.size(), 2);
         EXPECT_EQ(index, 0);
         EXPECT_EQ(clause[0], !eq3);
@@ -371,8 +371,8 @@ TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
     }
 
     // revert eq1
-    auto cachedReason = solver.sat.firstReason(!eq3);
-    solver.sat.beginBacktrack(0);
+    auto cachedReason = solver.firstReason(!eq3);
+    solver.beginBacktrack(0);
     EXPECT_FALSE(solver.assignedFalse(eq3));
     {
         // Should still be justified by eq1 even after backtrack
@@ -382,13 +382,13 @@ TEST(VerifyBackend, OutOfOrderRevertedMemberEquality) {
         EXPECT_EQ(clause[0], !eq3);
         EXPECT_EQ(clause[1], !eq1);
     }
-    solver.sat.endBacktrack();
+    solver.endBacktrack();
 
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedFalse(eq3));
     {
         // After propagating should be justified by eq2
-        auto [clause, index] = solver.sat.justifyAssignment(!eq3);
+        auto [clause, index] = solver.justifyAssignment(!eq3);
         EXPECT_EQ(clause.size(), 2);
         EXPECT_EQ(index, 0);
         EXPECT_EQ(clause[0], !eq3);

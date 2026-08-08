@@ -60,13 +60,13 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
 
     solver.decideTrue(solver.equality(d1, d2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
 
     // The two pairs describe the same location, so the sets of that location are the same and so is
     // everything that is known about them
@@ -87,14 +87,14 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
     Bool setEquality = solver.equality(a, b);
 
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     sets.decideTrue(solver, e, Sets::in(a));
-    solver.sat.propagate();
+    solver.propagate();
 
     // The member of a location decides it just as much as its declaration does
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
-    EXPECT_FALSE(solver.sat.hasConflicts());
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
 
     EXPECT_TRUE(solver.assignedTrue(setEquality));
     EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
@@ -111,16 +111,16 @@ TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
     MemorySet a = memorySets.set(solver, d1, m1);
     MemorySet b = memorySets.set(solver, d2, m2);
     Bool setEquality = solver.equality(a, b);
-    solver.sat.propagate();
+    solver.propagate();
 
     // One half of the location being the same says nothing about the sets
     solver.decideTrue(solver.equality(m1, m2));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(setEquality));
     EXPECT_FALSE(solver.assignedFalse(setEquality));
 
     solver.decideTrue(solver.equality(d1, d2));
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_TRUE(solver.assignedTrue(setEquality));
 }
 
@@ -137,27 +137,27 @@ TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     Set u = sets.union_(solver, { whole, part });
 
     Bool eq = solver.equality(u, whole);
-    solver.sat.propagate();
+    solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(eq));
 
     // There are no rules relating a location to its members yet, so the subset relation must be
     // asserted explicitly.
     auto e = sets.newElement(solver);
-    solver.sat.propagate();
+    solver.propagate();
     solver.addClause({ solver.equality(sets.subset(solver, { part }, { whole }), sets.emptySet()) });
-    solver.sat.propagate();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { whole })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { whole }, { u })));
-    solver.sat.propagate();
-    EXPECT_TRUE(solver.sat.hasConflicts());
-    solver.sat.analyzeConflicts();
-    solver.sat.propagate();
+    solver.propagate();
+    EXPECT_TRUE(solver.hasConflicts());
+    solver.analyzeConflicts();
+    solver.propagate();
 
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
