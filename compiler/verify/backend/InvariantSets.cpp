@@ -27,7 +27,7 @@ static InvariantSet locationSet(
     if (it != sets.end())
         return it->second;
 
-    InvariantSet newSet = (InvariantSet)solver.impl().newValue(theory);
+    InvariantSet newSet = (InvariantSet)solver.newValue(theory);
     infos[newSet].location = location;
     sets.emplace(location, newSet);
     return newSet;
@@ -61,7 +61,7 @@ InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location
     if (it != singletonSets.end())
         return it->second;
 
-    InvariantSet newSet = (InvariantSet)solver.impl().newValue(TheoryId::InvariantSingletonSets);
+    InvariantSet newSet = (InvariantSet)solver.newValue(TheoryId::InvariantSingletonSets);
     singletonInfos[newSet].location = location;
     singletonInfos[newSet].invariant = invariant;
     singletonSets.emplace(key, newSet);

@@ -32,10 +32,10 @@ SolverImpl::SolverImpl()
     , invariantSets(*this) { }
 
 SolverImpl::BuiltinTrueFalse::BuiltinTrueFalse(Solver& solver) {
-    Bool b = solver.impl().newBoolean(TheoryId::TrueFalse);
+    Bool b = solver.newBoolean(TheoryId::TrueFalse);
     VERIFY(b == true_literal);
     VERIFY(!b == false_literal);
-    solver.impl().assignTrue(b, makeReason<ReasonKind::Always>({}));
+    solver.assignTrue(b, makeReason<ReasonKind::Always>({}));
     VERIFY(solver.impl().sat.propagate());
 }
 
@@ -234,10 +234,10 @@ void Solver::addUse(Value value, Use use) {
     }
 }
 
-void SolverImpl::propagateRewrite(Use use) {
-#define USE_KIND(name, implMember)               \
-    case UseKind::name:                          \
-        implMember.propagateRewrite(*this, use); \
+void Solver::propagateRewrite(Use use) {
+#define USE_KIND(name, implMember)                      \
+    case UseKind::name:                                 \
+        impl().implMember.propagateRewrite(*this, use); \
         break;
     switch (use.kind()) {
 #include <verify/backend/theories.inc>
@@ -249,7 +249,7 @@ void SolverImpl::propagateRewrite(Use use) {
 
 // ------------------------------ Sets ------------------------------
 
-Sets& SolverImpl::setTheory(Sort sort) {
+Sets& Solver::setTheory(Sort sort) {
     static constexpr auto table = [] {
         std::array<Sets SolverImpl::*, std::to_underlying(Sort::COUNT)> result;
         result.fill(nullptr);
@@ -257,7 +257,7 @@ Sets& SolverImpl::setTheory(Sort sort) {
 #include <verify/backend/theories.inc>
         return result;
     }();
-    return (*this).*(table[std::to_underlying(sort)]);
+    return impl().*(table[std::to_underlying(sort)]);
 }
 
 void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::Containment containment) {
@@ -279,7 +279,7 @@ void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::C
     }
 }
 
-bool SolverImpl::alwaysNonEmpty(Set set) {
+bool Solver::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
         return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
@@ -331,6 +331,10 @@ void Solver::addClause(const ClauseBuilder& builder) {
 }
 
 // -------------------------- Data forwards -------------------------
+
+DataManager& Solver::dataManager() {
+    return impl().data;
+}
 
 int_t Solver::valueCount(TheoryId theory) {
     return impl().data.at(theory).valueCount;
@@ -538,7 +542,7 @@ PairHandle Solver::findPair(Value a, Value b) {
         if (a == true_literal)
             return PairHandle::makeSpecialPair(b);
     } else if (isSetSort(sort)) {
-        Set emptySet = impl().setTheory(sort).emptySet();
+        Set emptySet = setTheory(sort).emptySet();
         if (a == emptySet)
             return PairHandle::makeSpecialPair(b);
     }
@@ -575,7 +579,7 @@ Pair Solver::at(PairHandle handle) {
         if (sort == Sort::Boolean)
             return { true_literal, b };
         else if (isSetSort(sort))
-            return { impl().setTheory(sort).emptySet(), b };
+            return { setTheory(sort).emptySet(), b };
         else
             VERIFY_NOT_REACHED();
     }
@@ -661,7 +665,7 @@ Bool Solver::equality(PairHandle handle) {
         VERIFY(!handle.specialPair());
         return impl().memoryDeclarationEquality.makeEquality(handle);
     } else if (isSetSort(handle.sort())) {
-        Sets& sets = impl().setTheory(handle.sort());
+        Sets& sets = setTheory(handle.sort());
         if (handle.specialPair()) {
             // Encodes emptySet == b which is equivalent to b being empty
             return sets.isEmpty(*this, (Set)handle.encodedValue());
@@ -691,34 +695,34 @@ bool Solver::assignedEqual(Value a, Value b) {
 
 // ----------------------- Aux Value factories ----------------------
 
-Value SolverImpl::newValue(TheoryId theory) {
-    return data.newValue(theory, 1);
+Value Solver::newValue(TheoryId theory) {
+    return impl().data.newValue(theory, 1);
 }
 
-Bool SolverImpl::newBoolean(TheoryId theory) {
+Bool Solver::newBoolean(TheoryId theory) {
     VERIFY(sortOf(theory) == Sort::Boolean);
-    Bool result(data.newValue(theory, 2));
+    Bool result(impl().data.newValue(theory, 2));
     return result;
 }
 
 Bool Solver::newAuxBooleanVariable() {
-    return impl().newBoolean(TheoryId::AuxBooleanVariables);
+    return newBoolean(TheoryId::AuxBooleanVariables);
 }
 
 Value Solver::newAuxUninterpretedConstant() {
-    return impl().newValue(TheoryId::AuxUninterpretedConstants);
+    return newValue(TheoryId::AuxUninterpretedConstants);
 }
 
 Set Solver::newAuxUninterpretedConstantSet() {
-    return (Set)impl().newValue(TheoryId::AuxUninterpretedConstantSets);
+    return (Set)newValue(TheoryId::AuxUninterpretedConstantSets);
 }
 
 Member Solver::newAuxMemberVariable() {
-    return (Member)impl().newValue(TheoryId::AuxMemberVariables);
+    return (Member)newValue(TheoryId::AuxMemberVariables);
 }
 
 MemoryDeclaration Solver::newAuxMemoryDeclarationVariable() {
-    return (MemoryDeclaration)impl().newValue(TheoryId::AuxMemoryDeclarationVariables);
+    return (MemoryDeclaration)newValue(TheoryId::AuxMemoryDeclarationVariables);
 }
 
 // -------------------- Member Literal factories --------------------
@@ -726,7 +730,7 @@ MemoryDeclaration Solver::newAuxMemoryDeclarationVariable() {
 Member Solver::newMemberLiteral(std::vector<Invariant> invariants) {
     // Note: The invariants must not be modified after construction,
     //       doing so will break the solver.
-    Member result = (Member)impl().newValue(TheoryId::MemberLiterals);
+    Member result = (Member)newValue(TheoryId::MemberLiterals);
     impl().memberLiteralInvariants[result] = std::move(invariants);
     return result;
 }

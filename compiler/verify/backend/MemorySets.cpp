@@ -14,7 +14,7 @@ MemorySet MemorySets::set(Solver& solver, MemoryLocation location) {
     if (it != sets.end())
         return it->second;
 
-    MemorySet newSet = (MemorySet)solver.impl().newValue(TheoryId::MemoryLocationSets);
+    MemorySet newSet = (MemorySet)solver.newValue(TheoryId::MemoryLocationSets);
     setInfos[newSet].location = location;
     sets.emplace(location, newSet);
     return newSet;

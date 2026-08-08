@@ -1,6 +1,6 @@
 #include <verify/backend/DataManager.h>
 
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Solver.h>
 
 namespace verify::backend {
 
@@ -50,7 +50,7 @@ void initValue(std::byte* data, const DataManager::CommonDataInfo& dataInfo, Val
 }
 
 TheoryDataBase::TheoryDataBase(Solver& solver, TheoryId theory, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
-    solver.impl().data.registerTheoryData(*this, theory, elementSize, groupSize, initFunction, destroyFunction);
+    solver.dataManager().registerTheoryData(*this, theory, elementSize, groupSize, initFunction, destroyFunction);
 }
 
 void DataManager::registerTheoryData(TheoryDataBase& data, TheoryId theory, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
@@ -62,7 +62,7 @@ void DataManager::registerTheoryData(TheoryDataBase& data, TheoryId theory, int_
 }
 
 SortDataBase::SortDataBase(Solver& solver, Sort sort, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {
-    solver.impl().data.registerSortData(*this, sort, elementSize, groupSize, initFunction, destroyFunction);
+    solver.dataManager().registerSortData(*this, sort, elementSize, groupSize, initFunction, destroyFunction);
 }
 
 void DataManager::registerSortData(SortDataBase& data, Sort sort, int_t elementSize, int_t groupSize, DataInitializeFunction initFunction, DataDestroyFunction destroyFunction) {

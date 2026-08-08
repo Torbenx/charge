@@ -1,7 +1,5 @@
 #include <verify/backend/UninterpretedEquality.h>
 
-#include <verify/backend/SolverImpl.h>
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -229,7 +227,7 @@ void UninterpretedEquality::propagateEqual(Solver& solver, PairHandle eqPair) {
     // Note: The callback may create values, which invalidates references into the equality infos.
     std::span<const Use> targetUsesView = targetRootInfo.uses;
     for (auto use : targetUsesView)
-        solver.impl().propagateRewrite(use);
+        solver.propagateRewrite(use);
 }
 
 void UninterpretedEquality::propagateDisequal(Solver& solver, PairHandle diseqPair) {

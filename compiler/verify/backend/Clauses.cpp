@@ -87,7 +87,7 @@ void Clauses::addClause(Solver& solver, std::vector<Bool> clause) {
     for (int_t i = 0; i < extraClauses; i++) {
         std::vector<Bool> extraClause;
         extraClause.reserve(MAX_CLAUSE_SIZE);
-        Bool glueLit = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
+        Bool glueLit = solver.newBoolean(TheoryId::ClauseGlueVariables);
         primaryClause.push_back(glueLit);
         extraClause.push_back(!glueLit);
         take(extraClause, MAX_CLAUSE_SIZE - 1);
@@ -123,7 +123,7 @@ void Clauses::addClauseInternal(Solver& solver, std::vector<Bool> clause) {
         // the glue variable will be initially unassigned have its bit set.
         // TODO: What when clause.size() == MAX_CLAUSE_SIZE
         VERIFY(clause.size() < MAX_CLAUSE_SIZE);
-        Bool glue = solver.impl().newBoolean(TheoryId::ClauseGlueVariables);
+        Bool glue = solver.newBoolean(TheoryId::ClauseGlueVariables);
         occMap[glue].push_back({ (uint32_t)clause.size(), (uint32_t)clauseIndex });
         mask |= literalMask(clause.size());
         clause.push_back(glue);

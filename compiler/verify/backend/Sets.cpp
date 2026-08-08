@@ -30,7 +30,7 @@ Sets::Sets(Solver& solver, const SetsParams& params)
     elements.emplace_back();
     elements.back().clauseMasks.resize(0);
 
-    Set empty = (Set)solver.impl().newValue(params.emptySetTheory);
+    Set empty = (Set)solver.newValue(params.emptySetTheory);
     VERIFY(empty == emptySet());
     solver.assignTrue(isEmpty(solver, empty), makeReason<ReasonKind::Always>({}));
     VERIFY(solver.impl().sat.propagate());
@@ -164,7 +164,7 @@ Set Sets::addClause(Solver& solver, std::vector<Containment> inClause) {
     clauses.emplace_back(std::move(inClause));
     auto& clause = clauses.back();
 
-    VERIFY(solver.impl().newValue(params.expressionTheory) == expressionValue);
+    VERIFY(solver.newValue(params.expressionTheory) == expressionValue);
     VERIFY(clause.front().set() == expressionValue);
     for (int_t i = 0; i < (int_t)clause.size(); i++) {
         infoFor(clause[i]).occurrences.push_back({ .literalIndex = (uint32_t)i, .clauseIndex = expressionValue.id() });
@@ -473,10 +473,10 @@ Bool Sets::mapToBool(Solver& solver, ElementId element, Containment literal) {
     }
     std::optional<Bool>& maybeBool = inSetLiterals[element.id()];
     if (!maybeBool.has_value()) {
-        if (element == forAllElement() && solver.impl().alwaysNonEmpty(literal.set())) {
+        if (element == forAllElement() && solver.alwaysNonEmpty(literal.set())) {
             maybeBool = true_literal;
         } else {
-            maybeBool = solver.impl().newBoolean(params.elementInSetTheory);
+            maybeBool = solver.newBoolean(params.elementInSetTheory);
             inSetInfos[maybeBool.value()] = { .element = element, .set = literal.set() };
         }
     }

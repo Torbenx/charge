@@ -1,6 +1,6 @@
 #include <verify/backend/SingletonSets.h>
 
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
 
 namespace verify::backend {
 
@@ -29,7 +29,7 @@ Set SingletonSets::singleton(Solver& solver, Value element) {
     VERIFY(sortOf(element.theory()) == params.elementSort);
     auto& info = elementInfos[element];
     if (!info.singletonSet.has_value()) {
-        Set set = (Set)solver.impl().newValue(params.singletonTheory);
+        Set set = (Set)solver.newValue(params.singletonTheory);
         info.singletonSet = set;
         singletonInfos[set].element = element;
     }
@@ -95,6 +95,6 @@ void SingletonSets::checkInvariances(Solver& solver) {
         VERIFY(elementStates[i].singleton.has_value() == onTrace[i]);
 }
 
-Sets& SingletonSets::sets(Solver& solver) { return solver.impl().setTheory(params.setSort); }
+Sets& SingletonSets::sets(Solver& solver) { return solver.setTheory(params.setSort); }
 
 }

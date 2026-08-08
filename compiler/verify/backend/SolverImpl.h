@@ -38,20 +38,12 @@ struct SolverImpl : Solver, SatCore::Interface {
 
     SolverImpl();
 
-    Value newValue(TheoryId);
-    Bool newBoolean(TheoryId);
-
-    //! Propagate that the rewrite of the value referenced by \p use changed
-    void propagateRewrite(Use);
-
     void onNewBooleanPair(PairHandle);
     void onNewPair(PairHandle);
     template<TheoryId theory>
     uint64_t pairLabelOf(Value v);
 
-    Sets& setTheory(Sort);
     void propagateSetContainment(Sets&, Sets::ElementId, Sets::Containment);
-    bool alwaysNonEmpty(Set);
 
     // The initialization order here matters:
 

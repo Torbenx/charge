@@ -42,7 +42,7 @@ Members::Members(Solver& solver)
     uint32_t id = compositeMembers.get(solver, {});
     VERIFY(compositeMembers.size() == 1);
     VERIFY(id == identity_member.id());
-    Value identity = solver.impl().newValue(TheoryId::CompositeMembers);
+    Value identity = solver.newValue(TheoryId::CompositeMembers);
     VERIFY(identity == identity_member);
 }
 
@@ -71,7 +71,7 @@ Member Members::compose(Solver& solver, std::span<const Member> expr) {
     uint32_t id = compositeMembers.get(solver, std::move(result));
     if (compositeMembers.size() != oldSize) {
         VERIFY(solver.valueCount(TheoryId::CompositeMembers) == oldSize);
-        solver.impl().newValue(TheoryId::CompositeMembers);
+        solver.newValue(TheoryId::CompositeMembers);
     }
     return Member(TheoryId::CompositeMembers, id);
 }
@@ -170,7 +170,7 @@ void Members::sendRewrites(Solver& solver) {
     // Note: A notification may register new uses and apply further rewrites, which is why the
     //       change log is already emptied and the batch is held in a local.
     for (Use use : uses)
-        solver.impl().propagateRewrite(use);
+        solver.propagateRewrite(use);
 }
 
 void Members::markUsesAsDirty(VariableInfo& varInfo, bool externalPropagation) {

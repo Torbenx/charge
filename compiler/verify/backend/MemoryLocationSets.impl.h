@@ -14,7 +14,7 @@ MemoryLocationSets<Derived>::MemoryLocationSets(Solver&)
 
 template<typename Derived>
 Sets& MemoryLocationSets<Derived>::baseTheory(Solver& solver) {
-    return solver.impl().setTheory(params().setSort);
+    return solver.setTheory(params().setSort);
 }
 
 template<typename Derived>

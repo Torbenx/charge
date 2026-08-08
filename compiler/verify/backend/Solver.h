@@ -7,6 +7,9 @@
 
 namespace verify::backend {
 
+struct DataManager;
+struct Sets;
+
 struct Solver {
     static std::unique_ptr<Solver> make();
 
@@ -27,10 +30,26 @@ struct Solver {
     void addClause(const ClauseBuilder& builder);
     void addClause(std::vector<Bool> clause);
 
+    DataManager& dataManager();
     int_t valueCount(TheoryId);
     int_t booleanCount(TheoryId);
     void forEachValue(TheoryId, auto&& callback);
     void forEachBoolean(TheoryId, auto&& callback);
+
+    //! Create a new value of \p theory
+    /*!
+    This is a low-level factory function called by the subcomponent managing the values.
+    External users should use the specialized factory and expression functions.
+    */
+    Value newValue(TheoryId);
+    //! \see newValue()
+    Bool newBoolean(TheoryId);
+
+    //! The set theory of \p sort
+    Sets& setTheory(Sort);
+
+    //! Whether \p set is non-empty regardless of the current assignment
+    bool alwaysNonEmpty(Set);
 
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
@@ -48,6 +67,9 @@ struct Solver {
     bool assignedEqual(Value, Value);
 
     void addUse(Value, Use);
+
+    //! Propagate that the rewrite of the value referenced by \p use changed
+    void propagateRewrite(Use);
 
     Bool newAuxBooleanVariable();
     Value newAuxUninterpretedConstant();
