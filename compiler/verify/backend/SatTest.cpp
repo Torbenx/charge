@@ -114,8 +114,7 @@ struct VarSearch {
 
 static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     // setup
-    auto solverPtr = Solver::make();
-    SolverImpl& solver = solverPtr->impl();
+    SolverImpl solver;
 
     // generate
     VERIFY(solver.newAuxBooleanVariable().id() == 0);

@@ -13,6 +13,16 @@ struct Sets;
 struct Solver {
     static std::unique_ptr<Solver> make();
 
+    //! A solver together with a reference naming it
+    /*!
+    Use as:
+
+        auto [solver, _] = Solver::makeReference();
+    */
+    static std::pair<Solver&, std::unique_ptr<Solver>> makeReference();
+
+    virtual ~Solver();
+
     SolverImpl& impl();
     const SolverImpl& impl() const;
 

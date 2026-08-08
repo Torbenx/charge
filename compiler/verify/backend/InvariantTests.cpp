@@ -1,11 +1,12 @@
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 #include <gtest/gtest.h>
 
 namespace verify::backend {
 
 TEST(VerifyBackend, InvariantSetsAreUniquePerLocation) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -47,7 +48,7 @@ TEST(VerifyBackend, InvariantSetsAreUniquePerLocation) {
 
 TEST(VerifyBackend, InvariantSetsLookup) {
     // Enough sets that the lookup tables have to rehash their entries
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     std::vector<MemoryLocation> locations;
     std::vector<InvariantSet> inclusive;
     std::vector<InvariantSet> exclusive;
@@ -82,7 +83,7 @@ TEST(VerifyBackend, InvariantSetsLookup) {
 }
 
 TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -113,7 +114,7 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
 }
 
 TEST(VerifyBackend, InvariantSetsOfEqualLocationsButDifferentKinds) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
@@ -132,7 +133,7 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocationsButDifferentKinds) {
 }
 
 TEST(VerifyBackend, InvariantPathSetsOfEqualLocations) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -154,7 +155,7 @@ TEST(VerifyBackend, InvariantPathSetsOfEqualLocations) {
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
@@ -176,7 +177,7 @@ TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
@@ -201,7 +202,7 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
@@ -221,7 +222,7 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
@@ -233,7 +234,7 @@ TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
@@ -261,7 +262,7 @@ TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
 
 TEST(VerifyBackend, InvariantSetsInSetTheory) {
     // Invariant sets are ordinary sets, so the set theory reasoning applies to them
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
     Invariant i(0);

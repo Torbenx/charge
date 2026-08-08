@@ -1,4 +1,5 @@
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 #include <gtest/gtest.h>
 
@@ -10,7 +11,8 @@ namespace {
 
     //! A declaration with an element of the memory sets, i.e. one instance of the prefix index
     struct Fixture {
-        SolverImpl solver;
+        std::unique_ptr<Solver> solverOwner = Solver::make();
+        Solver& solver = *solverOwner;
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         //! A second declaration, unrelated to \ref declaration until they are decided to be equal
         MemoryDeclaration otherDeclaration = solver.newAuxMemoryDeclarationVariable();

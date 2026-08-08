@@ -1,11 +1,12 @@
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 #include <gtest/gtest.h>
 
 namespace verify::backend {
 
 TEST(VerifyBackend, MemoryLocationSetsAreUniquePerLocation) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -27,7 +28,7 @@ TEST(VerifyBackend, MemoryLocationSetsAreUniquePerLocation) {
 
 TEST(VerifyBackend, MemoryLocationSetsLookup) {
     // Enough locations that the lookup table has to rehash its entries
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     std::vector<MemoryLocation> locations;
     std::vector<MemorySet> sets;
     for (int_t i = 0; i < 8; i++) {
@@ -46,7 +47,7 @@ TEST(VerifyBackend, MemoryLocationSetsLookup) {
 }
 
 TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -71,7 +72,7 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
 }
 
 TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
@@ -95,7 +96,7 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
 }
 
 TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -119,7 +120,7 @@ TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
 
 TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     // Location sets are ordinary sets, so the set theory reasoning applies to them
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 

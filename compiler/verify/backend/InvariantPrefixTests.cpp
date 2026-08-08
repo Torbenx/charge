@@ -1,4 +1,6 @@
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/PrefixIndex.h>
+#include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 #include <gtest/gtest.h>
 
@@ -8,7 +10,8 @@ namespace {
 
     //! An index the words are only spelled with, so that no word is registered in the trie
     struct Fixture {
-        SolverImpl solver;
+        std::unique_ptr<Solver> solverOwner = Solver::make();
+        Solver& solver = *solverOwner;
         PrefixIndex prefixes;
         Invariant i1 { 0 };
         Invariant i2 { 1 };
@@ -25,7 +28,8 @@ namespace {
 
     //! A declaration with an element of the invariant sets, i.e. one instance of the prefix index
     struct IndexFixture {
-        SolverImpl solver;
+        std::unique_ptr<Solver> solverOwner = Solver::make();
+        Solver& solver = *solverOwner;
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         //! A second declaration, unrelated to \ref declaration until they are decided to be equal
         MemoryDeclaration otherDeclaration = solver.newAuxMemoryDeclarationVariable();

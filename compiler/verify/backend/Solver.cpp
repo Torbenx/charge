@@ -8,7 +8,15 @@ std::unique_ptr<Solver> Solver::make() {
     return std::make_unique<SolverImpl>();
 }
 
+std::pair<Solver&, std::unique_ptr<Solver>> Solver::makeReference() {
+    std::unique_ptr<Solver> solver = make();
+    Solver& reference = *solver;
+    return { reference, std::move(solver) };
+}
+
 Solver::Solver() { }
+
+Solver::~Solver() { }
 
 SolverImpl::SolverImpl()
     : literalInfos(*this, Sort::Boolean)

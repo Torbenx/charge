@@ -1,11 +1,12 @@
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
+#include <verify/backend/Solver.h>
 
 #include <gtest/gtest.h>
 
 namespace verify::backend {
 
 TEST(VerifyBackend, SetsEmptySetBasics) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set emptySet = solver.emptySet(Sort::UninterpretedConstantSet);
 
     Bool emptySetIsEmpty = solver.isEmpty(emptySet);
@@ -20,7 +21,7 @@ TEST(VerifyBackend, SetsEmptySetBasics) {
 }
 
 TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     auto e = solver.newSetElement(Sort::UninterpretedConstantSet);
     solver.propagate();
@@ -44,7 +45,7 @@ TEST(VerifyBackend, SetsContainedElementWitnessesNonEmpty) {
 }
 
 TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     auto e = solver.newSetElement(Sort::UninterpretedConstantSet);
     solver.propagate();
@@ -65,7 +66,7 @@ TEST(VerifyBackend, SetsEmptinessAndContainmentExclude) {
 }
 
 TEST(VerifyBackend, SetsEqualityPropagation1) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
     Set c = solver.newAuxUninterpretedConstantSet();
@@ -102,7 +103,7 @@ TEST(VerifyBackend, SetsEqualityPropagation1) {
 }
 
 TEST(VerifyBackend, SetsEqualityPropagation2) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
     Set c = solver.newAuxUninterpretedConstantSet();
@@ -135,7 +136,7 @@ TEST(VerifyBackend, SetsEqualityPropagation2) {
 }
 
 TEST(VerifyBackend, SetsUnionInterDistribution) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
     Set c = solver.newAuxUninterpretedConstantSet();
@@ -178,7 +179,7 @@ TEST(VerifyBackend, SetsUnionInterDistribution) {
 }
 
 TEST(VerifyBackend, SetsProveDisequal) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
     Set c = solver.newAuxUninterpretedConstantSet();
@@ -211,7 +212,7 @@ TEST(VerifyBackend, SetsProveDisequal) {
 
 TEST(VerifyBackend, SetsUnionOfEqualSets) {
     // Prove that union(A, B) = A if A = B
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
     Set u = solver.union_({ a, b });
@@ -240,7 +241,7 @@ TEST(VerifyBackend, SetsUnionOfEqualSets) {
 
 TEST(VerifyBackend, SetsSingletons) {
     // Prove that {a}u{b} = {a} iff a = b
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Value aValue = solver.newAuxUninterpretedConstant();
     Value bValue = solver.newAuxUninterpretedConstant();
 
@@ -293,7 +294,7 @@ TEST(VerifyBackend, SetsSingletons) {
 }
 
 TEST(VerifyBackend, SetsExaustiveOnNewSet) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
@@ -311,7 +312,7 @@ TEST(VerifyBackend, SetsExaustiveOnNewSet) {
 }
 
 TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
@@ -326,7 +327,7 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetNegativeOnForAllElement) {
 }
 
 TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
@@ -341,7 +342,7 @@ TEST(VerifyBackend, SetsExaustiveOnNewSetPositiveIgnoredOnForAllElement) {
 }
 
 TEST(VerifyBackend, SetsExprToDefOnNewSet) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
@@ -357,7 +358,7 @@ TEST(VerifyBackend, SetsExprToDefOnNewSet) {
 }
 
 TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
@@ -370,7 +371,7 @@ TEST(VerifyBackend, SetsExprToDefOnNewSetNegativeOnForAllElement) {
 }
 
 TEST(VerifyBackend, SetsExprToDefOnNewSetPositiveIgnoredOnForAllElement) {
-    SolverImpl solver;
+    auto [solver, _] = Solver::makeReference();
     Set a = solver.newAuxUninterpretedConstantSet();
     Set b = solver.newAuxUninterpretedConstantSet();
 
