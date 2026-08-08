@@ -33,35 +33,35 @@ MemoryLocationSets<Derived>& MemoryLocationSets<Derived>::PendingWatches::locati
 }
 
 template<typename Derived>
-bool MemoryLocationSets<Derived>::PendingWatches::matches(Solver& solver, ElementId, Containment key, Containment watch) {
+bool MemoryLocationSets<Derived>::PendingWatches::matches(Solver& solver, SetElement, SetContainment key, SetContainment watch) {
     MemoryLocationSets<Derived>& locations = locationSets();
     return solver.assignedEqual(locations.locationOf(key.set()).declaration, locations.locationOf(watch.set()).declaration);
 }
 
 template<typename Derived>
-void MemoryLocationSets<Derived>::PendingWatches::addValueUses(Solver& solver, ElementId, Containment watch, Use use) {
+void MemoryLocationSets<Derived>::PendingWatches::addValueUses(Solver& solver, SetElement, SetContainment watch, Use use) {
     solver.addUse(locationSets().locationOf(watch.set()).declaration, use);
 }
 
 template<typename Derived>
-void MemoryLocationSets<Derived>::PendingWatches::onKeyMatch(Solver& solver, ElementId element, Containment, Containment watch) {
+void MemoryLocationSets<Derived>::PendingWatches::onKeyMatch(Solver& solver, SetElement element, SetContainment, SetContainment watch) {
     locationSets().addWord(solver, element, watch);
 }
 
 template<typename Derived>
-void MemoryLocationSets<Derived>::addWord(Solver& solver, ElementId element, Containment cont) {
+void MemoryLocationSets<Derived>::addWord(Solver& solver, SetElement element, SetContainment cont) {
     derived().addWords(solver, prefixes, element, cont);
 }
 
 template<typename Derived>
-void MemoryLocationSets<Derived>::propagateContainment(Solver& solver, ElementId element, Sets::Containment containment) {
+void MemoryLocationSets<Derived>::propagateContainment(Solver& solver, SetElement element, SetContainment containment) {
     Set set = containment.set();
 
     if (element == baseTheory(solver).forAllElement())
         return;
 
     if (containment.contained()) {
-        std::optional<Containment> key = pendingWatches.keyOf(element);
+        std::optional<SetContainment> key = pendingWatches.keyOf(element);
         if (!key.has_value()) {
             VERIFY(solver.currentDecisionLevel() >= 0); // No positive set assignments are made without a decision
             // The set of the first location found to contain the element is its representative, and

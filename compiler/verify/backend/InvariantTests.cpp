@@ -85,7 +85,6 @@ TEST(VerifyBackend, InvariantSetsLookup) {
 
 TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
@@ -96,9 +95,9 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
     InvariantSet b = invariantSets.inclusiveSet(solver, d2, m2);
     Bool setEquality = solver.equality(a, b);
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
 
     // One half of the location being the same says nothing about the sets
@@ -113,7 +112,7 @@ TEST(VerifyBackend, InvariantSetsOfEqualLocations) {
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedTrue(setEquality));
-    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
+    EXPECT_TRUE(solver.assignedTrue(e, Sets::in(b)));
 }
 
 TEST(VerifyBackend, InvariantSetsOfEqualLocationsButDifferentKinds) {
@@ -184,7 +183,6 @@ TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
 
 TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -194,15 +192,15 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
     InvariantSet a = invariantSets.singletonSet(solver, d, m1, i);
     InvariantSet b = invariantSets.singletonSet(solver, d, m2, i);
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
 
     // A singleton set holds nothing but the singleton of its invariant at its location, so a singleton of two of
     // them is the same singleton and the locations of the two are the same as well
-    sets.decideTrue(solver, e, Sets::in(b));
+    solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
     EXPECT_TRUE(solver.assignedTrue(solver.equality(a, b)));
@@ -211,7 +209,6 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
 
 TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -219,14 +216,14 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
     InvariantSet a = invariantSets.singletonSet(solver, d, m, Invariant(0));
     InvariantSet b = invariantSets.singletonSet(solver, d, m, Invariant(1));
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
 
     // The singletons of two invariants are distinct even at the same location, so no singleton is in both
-    sets.decideTrue(solver, e, Sets::in(b));
+    solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
 }
@@ -246,7 +243,6 @@ TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
 
 TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -254,20 +250,20 @@ TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
     InvariantSet a = invariantSets.singletonSet(solver, d, m, Invariant(0));
     InvariantSet b = invariantSets.singletonSet(solver, d, m, Invariant(1));
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
     int_t levelBeforeContainment = solver.currentDecisionLevel();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
 
     // Reverting the containment must forget the singleton set it was found in
     solver.beginBacktrack(levelBeforeContainment + 1);
     solver.endBacktrack();
     invariantSets.checkInvariances(solver);
-    EXPECT_FALSE(sets.assignedTrue(solver, e, Sets::in(a)));
+    EXPECT_FALSE(solver.assignedTrue(e, Sets::in(a)));
 
     // So the singleton of another invariant is not compared against it anymore
-    sets.decideTrue(solver, e, Sets::in(b));
+    solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
     invariantSets.checkInvariances(solver);
@@ -276,7 +272,6 @@ TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
 TEST(VerifyBackend, InvariantSetsInSetTheory) {
     // Invariant sets are ordinary sets, so the set theory reasoning applies to them
     SolverImpl solver;
-    auto& sets = solver.invariantSetsBaseTheory;
     auto& invariantSets = solver.invariantSets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
@@ -284,7 +279,7 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
 
     InvariantSet whole = invariantSets.inclusiveSet(solver, d, identity_member);
     InvariantSet singleton = invariantSets.singletonSet(solver, d, m, i);
-    Set u = sets.union_(solver, { whole, singleton });
+    Set u = solver.union_({ whole, singleton });
 
     Bool eq = solver.equality(u, whole);
     solver.propagate();
@@ -292,18 +287,18 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
 
     // There are no rules relating a location to the invariants below it yet, so the subset relation must
     // be asserted explicitly.
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
-    solver.addClause({ solver.equality(sets.subset(solver, { singleton }, { whole }), sets.emptySet()) });
+    solver.addClause({ solver.equality(solver.subset({ singleton }, { whole }), solver.emptySet(Sort::InvariantSet)) });
     solver.propagate();
 
-    sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { whole })));
+    solver.decideTrue(e, Sets::in(solver.subset({ u }, { whole })));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
     solver.analyzeConflicts();
     solver.propagate();
 
-    sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { whole }, { u })));
+    solver.decideTrue(e, Sets::in(solver.subset({ whole }, { u })));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
     solver.analyzeConflicts();

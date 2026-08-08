@@ -43,8 +43,6 @@ struct SolverImpl : Solver, SatCore::Interface {
     template<TheoryId theory>
     uint64_t pairLabelOf(Value v);
 
-    void propagateSetContainment(Sets&, Sets::ElementId, Sets::Containment);
-
     // The initialization order here matters:
 
     // Initialize members with trivial ctors
@@ -88,18 +86,6 @@ inline SolverImpl& Solver::impl() {
 }
 inline const SolverImpl& Solver::impl() const {
     return static_cast<const SolverImpl&>(*this);
-}
-
-inline void Solver::forEachValue(TheoryId theory, auto&& callback) {
-    int_t valueCount = this->valueCount(theory);
-    for (int_t i = 0; i < valueCount; i++)
-        callback(Value(theory, i));
-}
-
-inline void Solver::forEachBoolean(TheoryId theory, auto&& callback) {
-    int_t boolCount = this->booleanCount(theory);
-    for (int_t i = 0; i < boolCount; i++)
-        callback(Bool(theory, i * 2));
 }
 
 }

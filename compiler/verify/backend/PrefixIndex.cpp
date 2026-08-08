@@ -4,10 +4,10 @@
 
 namespace verify::backend {
 
-PrefixIndex::WordId PrefixIndex::addWord(Solver& solver, Member expression, ElementId element, Sets::Containment containment, Role role, SelfInclusion inclusion) {
+PrefixIndex::WordId PrefixIndex::addWord(Solver& solver, Member expression, SetElement element, SetContainment containment, Role role, SelfInclusion inclusion) {
     while (element.id() >= elementRoots.size()) {
         uint32_t root = nodes.size();
-        nodes.push_back({ .letter = (Member)INVALID_VALUE, .element = ElementId(elementRoots.size()) });
+        nodes.push_back({ .letter = (Member)INVALID_VALUE, .element = SetElement(elementRoots.size()) });
         elementRoots.push_back(root);
     }
 

@@ -22,7 +22,7 @@ struct SingletonSets {
         return singletonInfos[singletonSet].element;
     }
 
-    void propagateContainment(Solver&, Sets::ElementId, Sets::Containment);
+    void propagateContainment(Solver&, SetElement, SetContainment);
 
     bool testReason(Solver&, Bool, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
@@ -48,7 +48,7 @@ private:
 
     Sets& sets(Solver& solver);
 
-    ElementState& stateOf(Sets::ElementId elem) {
+    ElementState& stateOf(SetElement elem) {
         if (elem.id() >= elementStates.size()) {
             elementStates.resize(elem.id() + 1);
         }
@@ -59,7 +59,7 @@ private:
 
     std::vector<ElementState> elementStates;
 
-    Trace<Sets::ElementId> singletonTrace;
+    Trace<SetElement> singletonTrace;
 
     SortData<ElementInfo> elementInfos;
     TheoryData<SingletonInfo> singletonInfos;

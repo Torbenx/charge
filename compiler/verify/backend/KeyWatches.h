@@ -23,18 +23,17 @@ The derived class has to provide the following static information:
 - \c PARAMS: the KeyWatchesParams of the structure
 
 And the following member functions:
-- \c void \c onKeyMatch(Solver&, ElementId, KeyType key, WatchType watch): the match callback
+- \c void \c onKeyMatch(Solver&, SetElement, KeyType key, WatchType watch): the match callback
 
 It may also replace the two hooks:
-- \c bool \c matches(Solver&, ElementId, KeyType key, WatchType watch): whether the two currently match
-- \c void \c addValueUses(Solver&, ElementId, KeyType | WatchType, Use): register the rewrite notifications of a value
+- \c bool \c matches(Solver&, SetElement, KeyType key, WatchType watch): whether the two currently match
+- \c void \c addValueUses(Solver&, SetElement, KeyType | WatchType, Use): register the rewrite notifications of a value
 
 Keys, watches and the matches reported for them are all reverted by beginBacktrack().
 */
 template<typename Derived, typename KeyType = Value, typename WatchType = Value>
 struct KeyWatches {
     using Params = KeyWatchesParams;
-    using ElementId = Sets::ElementId;
 
     struct WatchId {
         explicit WatchId(uint32_t id)
@@ -48,9 +47,9 @@ struct KeyWatches {
         uint32_t m_id;
     };
 
-    std::optional<KeyType> keyOf(ElementId) const;
-    void setKey(Solver&, ElementId, KeyType key);
-    void addWatch(Solver&, ElementId, WatchType watch);
+    std::optional<KeyType> keyOf(SetElement) const;
+    void setKey(Solver&, SetElement, KeyType key);
+    void addWatch(Solver&, SetElement, WatchType watch);
 
     void propagateRewrite(Solver&, Use);
 
@@ -58,9 +57,9 @@ struct KeyWatches {
     void beginBacktrack(Solver&);
 
     //! Whether \p watch matches \p key, replaceable by the derived class
-    bool matches(Solver&, ElementId, KeyType key, WatchType watch);
+    bool matches(Solver&, SetElement, KeyType key, WatchType watch);
     //! Register \p use for the values a match of \p watch depends on, replaceable by the derived class
-    void addValueUses(Solver&, ElementId, WatchType watch, Use);
+    void addValueUses(Solver&, SetElement, WatchType watch, Use);
 
     void checkInvariances(Solver&);
 
@@ -68,7 +67,7 @@ struct KeyWatches {
 
 private:
     struct WatchEntry {
-        ElementId element;
+        SetElement element;
         WatchType value;
         //! Becomes true when the watch is found to match the key
         bool matched = false;
@@ -81,15 +80,15 @@ private:
     };
 
     Derived& derived();
-    ElementState& stateOf(ElementId element);
+    ElementState& stateOf(SetElement element);
 
-    void reportMatch(Solver&, ElementId, WatchId watch);
-    void reportMatchesOf(Solver&, ElementId);
+    void reportMatch(Solver&, SetElement, WatchId watch);
+    void reportMatchesOf(Solver&, SetElement);
 
     std::vector<ElementState> elementStates;
     //! The watches, referenced by ElementState::watchIds
     Trace<WatchEntry, WatchId> watches;
-    Trace<ElementId> keyTrace;
+    Trace<SetElement> keyTrace;
     Trace<WatchId> matchTrace;
 };
 

@@ -275,6 +275,43 @@ Value encodePairTheoryValue(PairHandle h) {
     }
 }
 
+//! Identifies an element that the set theories track the containments of
+/*!
+An element with the same id may appear for different sorts but they completely unrealted.
+*/
+struct SetElement {
+    explicit SetElement(uint32_t id)
+        : m_id(id) { }
+    uint32_t id() const { return m_id; }
+
+    bool operator==(const SetElement&) const = default;
+
+private:
+    uint32_t m_id = limits::max;
+};
+
+//! Represents an internal boolean literal of the form '(not) in set'
+struct SetContainment {
+    SetContainment(Set set, bool contained)
+        : theoryBits(std::to_underlying(set.theory()))
+        , idBits(set.id())
+        , containedBit(contained) { }
+
+    Set set() const { return Set((TheoryId)theoryBits, idBits); }
+    bool contained() const { return containedBit != 0u; }
+    SetContainment operator!() const {
+        SetContainment copy = *this;
+        copy.containedBit ^= 1u;
+        return copy;
+    }
+    bool operator==(const SetContainment&) const = default;
+
+private:
+    uint32_t theoryBits : 7;
+    uint32_t idBits : 24;
+    uint32_t containedBit : 1;
+};
+
 }
 
 template<std::derived_from<verify::backend::Value> T>

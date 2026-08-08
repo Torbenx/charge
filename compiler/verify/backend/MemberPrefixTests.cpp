@@ -14,10 +14,10 @@ namespace {
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         //! A second declaration, unrelated to \ref declaration until they are decided to be equal
         MemoryDeclaration otherDeclaration = solver.newAuxMemoryDeclarationVariable();
-        Sets::ElementId element = newElement();
+        SetElement element = newElement();
 
-        Sets::ElementId newElement() {
-            auto e = solver.memorySetsBaseTheory.newElement(solver);
+        SetElement newElement() {
+            auto e = solver.newSetElement(Sort::MemorySet);
             solver.propagate();
             return e;
         }
@@ -61,17 +61,17 @@ namespace {
 
         //! Decide that \p element is contained in \p set and propagate
         void decideIn(Set set, bool contained = true) { decideIn(element, set, contained); }
-        void decideIn(Sets::ElementId e, Set set, bool contained = true) {
-            solver.memorySetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
+        void decideIn(SetElement e, Set set, bool contained = true) {
+            solver.decideTrue(e, SetContainment(set, contained));
             solver.propagate();
             if (!solver.hasConflicts())
                 checkInvariances();
         }
         void decideNotIn(Set set) { decideIn(set, false); }
-        void decideNotIn(Sets::ElementId e, Set set) { decideIn(e, set, false); }
+        void decideNotIn(SetElement e, Set set) { decideIn(e, set, false); }
 
-        bool assignedIn(Set set) { return solver.memorySetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
-        bool assignedNotIn(Set set) { return solver.memorySetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
+        bool assignedIn(Set set) { return solver.assignedTrue(element, Sets::in(set)); }
+        bool assignedNotIn(Set set) { return solver.assignedFalse(element, Sets::in(set)); }
 
         bool hasConflicts() const { return solver.hasConflicts(); }
 
@@ -130,7 +130,7 @@ TEST(VerifyBackend, MemoryPrefixElementsAreIndependent) {
     Fixture f;
     Member l1 = newLiteral(f.solver);
     Member l2 = newLiteral(f.solver);
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
 
     // The containments of different elements say nothing about each other
     f.decideNotIn(f.element, f.location(l1));
@@ -555,7 +555,7 @@ TEST(VerifyBackend, MemoryPrefixElementRootsGrowLate) {
 
     // An element that only shows up after the trie already holds the words of another one
     f.decideNotIn(f.element, f.location(l1));
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.location({ l1, l2 }));
     EXPECT_FALSE(f.hasConflicts());
 
@@ -570,7 +570,7 @@ TEST(VerifyBackend, MemoryPrefixEmptySetIsACandidate) {
 
     // An empty location set is a containment of the forall element, which is distributed to the
     // real elements and becomes a candidate for them
-    f.solver.addClause({ f.solver.equality(f.location(l1), f.solver.memorySetsBaseTheory.emptySet()) });
+    f.solver.addClause({ f.solver.equality(f.location(l1), f.solver.emptySet(Sort::MemorySet)) });
     f.solver.propagate();
     EXPECT_FALSE(f.hasConflicts());
     f.checkInvariances();
@@ -592,7 +592,7 @@ TEST(VerifyBackend, MemoryPrefixDistinctDeclarations) {
 
     // And neither is it the other way around. This needs an element of its own, because an element
     // of a location of both declarations would make them equal.
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideNotIn(other, f.location(l2));
     f.decideIn(other, f.otherLocation({ l2, l1 }));
     EXPECT_FALSE(f.hasConflicts());

@@ -53,39 +53,7 @@ constexpr bool isSetSort(Sort value) {
 }
 
 struct Sets {
-    struct ElementId {
-        explicit ElementId(uint32_t id)
-            : m_id(id) { }
-        uint32_t id() const { return m_id; }
-
-        bool operator==(const ElementId&) const = default;
-
-    private:
-        uint32_t m_id = limits::max;
-    };
-
-    //! Represents an internal boolean literal of the form '(not) in set'
-    struct Containment {
-        Containment(Set set, bool contained)
-            : theoryBits(std::to_underlying(set.theory()))
-            , idBits(set.id())
-            , containedBit(contained) { }
-
-        Set set() const { return Set((TheoryId)theoryBits, idBits); }
-        bool contained() const { return containedBit != 0u; }
-        Containment operator!() const {
-            Containment copy = *this;
-            copy.containedBit ^= 1u;
-            return copy;
-        }
-        bool operator==(const Containment&) const = default;
-
-    private:
-        uint32_t theoryBits : 7;
-        uint32_t idBits : 24;
-        uint32_t containedBit : 1;
-    };
-    static Containment in(Set set) { return { set, true }; }
+    static SetContainment in(Set set) { return { set, true }; }
 
     Sets(Solver&, const SetsParams&);
 
@@ -102,27 +70,27 @@ struct Sets {
     bool testReason(Solver&, Bool, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
 
-    bool assignedTrue(Solver&, ElementId, Containment);
-    bool assignedFalse(Solver& solver, ElementId element, Containment literal) {
+    bool assignedTrue(Solver&, SetElement, SetContainment);
+    bool assignedFalse(Solver& solver, SetElement element, SetContainment literal) {
         return assignedTrue(solver, element, !literal);
     }
-    void assignTrue(Solver&, ElementId, Containment, const Reason&);
-    void decideTrue(Solver&, ElementId, Containment);
+    void assignTrue(Solver&, SetElement, SetContainment, const Reason&);
+    void decideTrue(Solver&, SetElement, SetContainment);
 
     bool assignedEmpty(Solver& solver, Set);
 
-    Bool mapToBool(Solver&, ElementId, Containment);
-    std::optional<Bool> tryToBool(Solver&, ElementId, Containment);
-    std::pair<ElementId, Containment> mapFromBool(Bool);
+    Bool mapToBool(Solver&, SetElement, SetContainment);
+    std::optional<Bool> tryToBool(Solver&, SetElement, SetContainment);
+    std::pair<SetElement, SetContainment> mapFromBool(Bool);
 
-    ElementId newElement(Solver& solver);
+    SetElement newElement(Solver& solver);
 
     //! A virtual element to represent emptyness
     /*!
     The literal `forAllElement() not in set` is used for `isEmpty(set)`. Assignments of the from
     `forAllElement() in set` or `!isEmpty(set)` will not be propagated internally or externally.
     */
-    ElementId forAllElement() const { return ElementId(0); }
+    SetElement forAllElement() const { return SetElement(0); }
 
     Set emptySet() { return Set(params.emptySetTheory, 0); }
     Sort setSort() const { return params.setSort; }
@@ -181,14 +149,14 @@ private:
     };
 
     struct ElementInInfo {
-        ElementId element = ElementId(limits::max);
+        SetElement element = SetElement(limits::max);
         Set set = Set(INVALID_VALUE);
     };
 
     struct HashLookup {
         size_t hash;
         Sets& sets;
-        std::span<const Containment> clause;
+        std::span<const SetContainment> clause;
     };
 
     struct HashEntry {
@@ -215,12 +183,12 @@ private:
     bool unionExpression(Set) const;
     bool subsetExpression(Set) const;
 
-    Set addClause(Solver&, std::vector<Containment>);
+    Set addClause(Solver&, std::vector<SetContainment>);
 
-    void propagateContainment(Solver&, ElementId, Containment);
-    void unapplyContainment(Solver&, ElementId, Containment);
+    void propagateContainment(Solver&, SetElement, SetContainment);
+    void unapplyContainment(Solver&, SetElement, SetContainment);
 
-    LiteralInfo& infoFor(Containment lit) {
+    LiteralInfo& infoFor(SetContainment lit) {
         return setInfos[lit.set()].literalInfos[lit.contained()];
     }
 
@@ -257,7 +225,7 @@ private:
     - If any literal other than the first is true the first literal is false. This handles rules u3, s3a and s3b.
     - If the first literal is true than all other literals are false. This handles rules u4 and s4.
     */
-    std::vector<std::vector<Containment>> clauses;
+    std::vector<std::vector<SetContainment>> clauses;
     std::unordered_set<HashEntry, ClauseHash, ClauseHashEqual> clauseSet;
 
     std::vector<ElementInfo> elements;

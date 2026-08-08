@@ -9,7 +9,7 @@ namespace verify::backend {
 template struct MemoryLocationSets<InvariantSets>;
 
 struct SingletonToInclusiveReason {
-    Sets::ElementId element;
+    SetElement element;
     InvariantSet singletonSet;
 };
 
@@ -67,7 +67,7 @@ InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location
     return newSet;
 }
 
-void InvariantSets::addWords(Solver& solver, PrefixIndex& prefixes, ElementId element, Containment cont) {
+void InvariantSets::addWords(Solver& solver, PrefixIndex& prefixes, SetElement element, SetContainment cont) {
     PrefixIndex::Role role;
     PrefixIndex::SelfInclusion inclusion;
     switch (cont.set().theory()) {
@@ -101,7 +101,7 @@ void InvariantSets::propagateRewrite(Solver& solver, Use use) {
     singletonIndex.propagateRewrite(solver, use);
 }
 
-void InvariantSets::propagateContainment(Solver& solver, ElementId element, Containment containment) {
+void InvariantSets::propagateContainment(Solver& solver, SetElement element, SetContainment containment) {
     if (element == baseTheory(solver).forAllElement())
         return;
 
@@ -202,13 +202,13 @@ InvariantSets& InvariantSets::SingletonIndex::invariantSets() {
     return *ReverseMemberPointer<&InvariantSets::singletonIndex>::reverse(this);
 }
 
-void InvariantSets::SingletonIndex::addValueUses(Solver& solver, ElementId, InvariantSet set, Use use) {
+void InvariantSets::SingletonIndex::addValueUses(Solver& solver, SetElement, InvariantSet set, Use use) {
     auto loc = invariantSets().locationOf(set);
     solver.addUse(loc.declaration, use);
     solver.addUse(loc.member, use);
 }
 
-bool InvariantSets::SingletonIndex::matches(Solver& solver, ElementId, InvariantSet key, InvariantSet watch) {
+bool InvariantSets::SingletonIndex::matches(Solver& solver, SetElement, InvariantSet key, InvariantSet watch) {
     auto keyLoc = invariantSets().locationOf(key);
     auto watchLoc = invariantSets().locationOf(watch);
     return invariantSets().invariantOf(key) == invariantSets().invariantOf(watch)
@@ -216,14 +216,14 @@ bool InvariantSets::SingletonIndex::matches(Solver& solver, ElementId, Invariant
         && solver.assignedEqual(keyLoc.member, watchLoc.member);
 }
 
-void InvariantSets::SingletonIndex::explainMatch(Solver& solver, ElementId, InvariantSet key, InvariantSet watch, ClauseBuilder& clause) {
+void InvariantSets::SingletonIndex::explainMatch(Solver& solver, SetElement, InvariantSet key, InvariantSet watch, ClauseBuilder& clause) {
     auto keyLoc = invariantSets().locationOf(key);
     auto watchLoc = invariantSets().locationOf(watch);
     solver.explainEqual(keyLoc.declaration, watchLoc.declaration, clause);
     solver.explainEqual(keyLoc.member, watchLoc.member, clause);
 }
 
-void InvariantSets::SingletonIndex::onKeyMatch(Solver& solver, ElementId element, InvariantSet key, InvariantSet watch) {
+void InvariantSets::SingletonIndex::onKeyMatch(Solver& solver, SetElement element, InvariantSet key, InvariantSet watch) {
     solver.assignTrue(false_literal, makeReason<ReasonKind::InvariantSingletonConflict>({ element, key, watch }));
 }
 

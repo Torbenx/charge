@@ -29,14 +29,14 @@ namespace {
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         //! A second declaration, unrelated to \ref declaration until they are decided to be equal
         MemoryDeclaration otherDeclaration = solver.newAuxMemoryDeclarationVariable();
-        Sets::ElementId element = newElement();
+        SetElement element = newElement();
         Invariant i1 { 0 };
         Invariant i2 { 1 };
 
         Member newLiteral() { return solver.newMemberLiteral(); }
 
-        Sets::ElementId newElement() {
-            auto e = solver.invariantSetsBaseTheory.newElement(solver);
+        SetElement newElement() {
+            auto e = solver.newSetElement(Sort::InvariantSet);
             solver.propagate();
             return e;
         }
@@ -68,14 +68,14 @@ namespace {
 
         //! Decide that \p element is contained in \p set and propagate
         void decideIn(Set set, bool contained = true) { decideIn(element, set, contained); }
-        void decideIn(Sets::ElementId e, Set set, bool contained = true) {
-            solver.invariantSetsBaseTheory.decideTrue(solver, e, Sets::Containment(set, contained));
+        void decideIn(SetElement e, Set set, bool contained = true) {
+            solver.decideTrue(e, SetContainment(set, contained));
             solver.propagate();
             if (!solver.hasConflicts())
                 checkInvariances();
         }
         void decideNotIn(Set set) { decideIn(set, false); }
-        void decideNotIn(Sets::ElementId e, Set set) { decideIn(e, set, false); }
+        void decideNotIn(SetElement e, Set set) { decideIn(e, set, false); }
 
         //! Decide that the member \p a is the member \p b and propagate
         void decideMembersEqual(Member a, Member b) {
@@ -93,9 +93,9 @@ namespace {
                 checkInvariances();
         }
 
-        bool assignedIn(Set set) { return solver.invariantSetsBaseTheory.assignedTrue(solver, element, Sets::in(set)); }
-        bool assignedNotIn(Set set) { return solver.invariantSetsBaseTheory.assignedFalse(solver, element, Sets::in(set)); }
-        bool assignedEmpty(Set set) { return solver.invariantSetsBaseTheory.assignedEmpty(solver, set); }
+        bool assignedIn(Set set) { return solver.assignedTrue(element, Sets::in(set)); }
+        bool assignedNotIn(Set set) { return solver.assignedFalse(element, Sets::in(set)); }
+        bool assignedEmpty(Set set) { return solver.assignedEmpty(set); }
 
         bool hasConflicts() const { return solver.hasConflicts(); }
 
@@ -135,7 +135,7 @@ TEST(VerifyBackend, InvariantIndexExclusiveSetSkipsTheInvariantsOfItsLocation) {
     EXPECT_FALSE(f.hasConflicts());
 
     // but everything of its members. This needs an element of its own, a singleton is at one location.
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideNotIn(other, f.exclusive(l1));
     f.decideIn(other, f.singleton({ l1, l2 }, f.i1));
     EXPECT_TRUE(f.hasConflicts());
@@ -153,7 +153,7 @@ TEST(VerifyBackend, InvariantIndexExclusiveSetIsBelowTheInclusiveOne) {
     f.resolveConflicts();
 
     // And the inclusive set of a member is below the exclusive set of the location
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideNotIn(other, f.exclusive(l1));
     f.decideIn(other, f.inclusive({ l1, l2 }));
     EXPECT_TRUE(f.hasConflicts());
@@ -172,7 +172,7 @@ TEST(VerifyBackend, InvariantIndexWholeDeclaration) {
     f.resolveConflicts();
 
     // but not the ones of the declaration itself
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideNotIn(other, f.exclusive(identity_member));
     f.decideIn(other, f.singleton(identity_member, f.i1));
     EXPECT_FALSE(f.hasConflicts());
@@ -188,7 +188,7 @@ TEST(VerifyBackend, InvariantIndexDistinctInvariants) {
     EXPECT_FALSE(f.hasConflicts());
 
     // A singleton set holds nothing but its own singleton, not even the ones below its location
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideNotIn(other, f.singleton(l1, f.i1));
     f.decideIn(other, f.singleton({ l1, l1 }, f.i1));
     EXPECT_FALSE(f.hasConflicts());
@@ -305,7 +305,7 @@ TEST(VerifyBackend, InvariantIndexPathSetHoldsTheInvariantsAboveItsLocation) {
     EXPECT_TRUE(f.assignedNotIn(f.singleton(l1, f.i1)));
 
     // and holding them is all the containment in it says
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.path({ l1, l2 }));
     f.decideIn(other, f.singleton(l1, f.i1));
     EXPECT_FALSE(f.hasConflicts());
@@ -323,7 +323,7 @@ TEST(VerifyBackend, InvariantIndexPathSetSkipsTheInvariantsOfItsLocation) {
     f.resolveConflicts();
 
     // and nothing of the locations below it either
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.path(l1));
     f.decideIn(other, f.singleton({ l1, l2 }, f.i1));
     EXPECT_TRUE(f.hasConflicts());
@@ -342,14 +342,14 @@ TEST(VerifyBackend, InvariantIndexPathSetIsDisjointFromTheInclusiveOne) {
     f.resolveConflicts();
 
     // The same holds for every location below the one of the path set
-    Sets::ElementId below = f.newElement();
+    SetElement below = f.newElement();
     f.decideIn(below, f.path(l1));
     f.decideIn(below, f.inclusive({ l1, l2 }));
     EXPECT_TRUE(f.hasConflicts());
     f.resolveConflicts();
 
     // A location above it is exactly where the invariants of a path set are, so that is no conflict
-    Sets::ElementId above = f.newElement();
+    SetElement above = f.newElement();
     f.decideIn(above, f.path({ l1, l2 }));
     f.decideIn(above, f.inclusive(l1));
     EXPECT_FALSE(f.hasConflicts());
@@ -367,7 +367,7 @@ TEST(VerifyBackend, InvariantIndexPathSetsGrowWithTheirLocation) {
     f.resolveConflicts();
 
     // The other direction does not hold, those locations in between are what the higher one misses
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.path({ l1, l2 }));
     f.decideNotIn(other, f.path(l1));
     EXPECT_FALSE(f.hasConflicts());
@@ -406,7 +406,7 @@ TEST(VerifyBackend, InvariantIndexSingletonIsNotBelowItsOwnLocation) {
     f.resolveConflicts();
 
     // and a singleton is at one location, so no set of a location below it can hold it
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.singleton(l1, f.i1));
     f.decideIn(other, f.inclusive({ l1, l2 }));
     EXPECT_TRUE(f.hasConflicts());
@@ -423,7 +423,7 @@ TEST(VerifyBackend, InvariantIndexSingletonDoesNotConflictWithItself) {
     EXPECT_FALSE(f.hasConflicts());
 
     // The same at the identity location, where both of the words are the empty one
-    Sets::ElementId whole = f.newElement();
+    SetElement whole = f.newElement();
     f.decideIn(whole, f.singleton(identity_member, f.i1));
     EXPECT_FALSE(f.hasConflicts());
 }
@@ -509,13 +509,13 @@ TEST(VerifyBackend, InvariantIndexAVariableSuffixIsNoStrictPrefix) {
 
     // The same holds for the singleton of an invariant of l1, which is where the location of a
     // positive singleton is compared as the excluding one
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.singleton(l1, f.i1));
     f.decideIn(other, f.inclusive({ l1, v1 }));
     EXPECT_FALSE(f.hasConflicts());
 
     // and for a path set, which is the only case where the strict prefix is on the excluded side
-    Sets::ElementId onPath = f.newElement();
+    SetElement onPath = f.newElement();
     f.decideIn(onPath, f.singleton(l1, f.i1));
     f.decideNotIn(onPath, f.path({ l1, v1 }));
     EXPECT_FALSE(f.hasConflicts());
@@ -580,7 +580,7 @@ TEST(VerifyBackend, InvariantIndexTwoExclusionsNeverConflict) {
     EXPECT_FALSE(f.hasConflicts());
 
     // The word of the exclusive set is a prefix of that path word as well
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(other, f.singleton(l3, f.i1));
     f.decideNotIn(other, f.exclusive(l1));
     f.decideNotIn(other, f.path({ l1, l2 }));
@@ -742,7 +742,7 @@ TEST(VerifyBackend, InvariantIndexConflictingSingletonsAreSeparatePerElement) {
     Member v1 = f.solver.newAuxMemberVariable();
 
     // The exclusion belongs to another element than the singleton, so the two never meet
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
     f.decideIn(f.singleton(l1, f.i1));
     f.decideNotIn(other, f.singleton(v1, f.i1));
     f.decideMembersEqual(l1, v1);
@@ -800,7 +800,7 @@ TEST(VerifyBackend, InvariantIndexExcludedSingletonsOfSeveralElementsAreBacktrac
     Member l1 = f.newLiteral();
     Member v1 = f.solver.newAuxMemberVariable();
     Member v2 = f.solver.newAuxMemberVariable();
-    Sets::ElementId other = f.newElement();
+    SetElement other = f.newElement();
 
     f.decideIn(f.singleton(l1, f.i1));
     f.decideIn(other, f.singleton(l1, f.i1));

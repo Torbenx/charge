@@ -31,7 +31,7 @@ struct MemorySets : MemoryLocationSets<MemorySets> {
         VERIFY(set.theory() == TheoryId::MemoryLocationSets);
         return setInfos[set].location;
     }
-    void addWords(Solver& solver, PrefixIndex& prefixes, ElementId element, Containment cont) {
+    void addWords(Solver& solver, PrefixIndex& prefixes, SetElement element, SetContainment cont) {
         // If an element is in a location set but not in the location set of some prefix of it, thats a conflict.
         auto role = cont.contained() ? PrefixIndex::Role::Path : PrefixIndex::Role::Prefix;
         prefixes.addWord(solver, locationOf((MemorySet)cont.set()).member, element, cont, role, PrefixIndex::SelfInclusion::Inclusive);

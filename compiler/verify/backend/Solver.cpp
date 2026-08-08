@@ -281,23 +281,77 @@ Sets& Solver::setTheory(Sort sort) {
     return impl().*(table[std::to_underlying(sort)]);
 }
 
-void SolverImpl::propagateSetContainment(Sets&, Sets::ElementId element, Sets::Containment containment) {
+void Solver::propagateSetContainment(Sets&, SetElement element, SetContainment containment) {
     switch (containment.set().theory()) {
     case TheoryId::UninterpretedConstantSingletonSets:
-        uninterpConstantSingletons.propagateContainment(*this, element, containment);
+        impl().uninterpConstantSingletons.propagateContainment(*this, element, containment);
         break;
     case TheoryId::MemoryLocationSets:
-        memorySets.propagateContainment(*this, element, containment);
+        impl().memorySets.propagateContainment(*this, element, containment);
         break;
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
     case TheoryId::PathInvariantSets:
     case TheoryId::InvariantSingletonSets:
-        invariantSets.propagateContainment(*this, element, containment);
+        impl().invariantSets.propagateContainment(*this, element, containment);
         break;
     default:
         break;
     }
+}
+
+//! The set theory the sets of \p vals belong to
+static Sets& setTheoryOf(Solver& solver, std::span<const Set> vals) {
+    VERIFY(!vals.empty());
+    return solver.setTheory(sortOf(vals.front().theory()));
+}
+
+SetElement Solver::newSetElement(Sort sort) {
+    return setTheory(sort).newElement(*this);
+}
+
+Set Solver::emptySet(Sort sort) {
+    return setTheory(sort).emptySet();
+}
+
+Bool Solver::isEmpty(Set set) {
+    return setTheory(sortOf(set.theory())).isEmpty(*this, set);
+}
+
+bool Solver::assignedEmpty(Set set) {
+    return setTheory(sortOf(set.theory())).assignedEmpty(*this, set);
+}
+
+Set Solver::union_(std::span<const Set> vals) {
+    return setTheoryOf(*this, vals).union_(*this, vals);
+}
+
+Set Solver::intersection(std::span<const Set> vals) {
+    return setTheoryOf(*this, vals).intersection(*this, vals);
+}
+
+Set Solver::setminus(Set base, std::span<const Set> minus) {
+    return setTheory(sortOf(base.theory())).setminus(*this, base, minus);
+}
+
+Set Solver::subset(std::span<const Set> intersection, std::span<const Set> minus) {
+    return setTheoryOf(*this, intersection).subset(*this, intersection, minus);
+}
+
+bool Solver::assignedTrue(SetElement element, SetContainment literal) {
+    return setTheory(sortOf(literal.set().theory())).assignedTrue(*this, element, literal);
+}
+
+void Solver::assignTrue(SetElement element, SetContainment literal, const Reason& reason) {
+    setTheory(sortOf(literal.set().theory())).assignTrue(*this, element, literal, reason);
+}
+
+void Solver::decideTrue(SetElement element, SetContainment literal) {
+    setTheory(sortOf(literal.set().theory())).decideTrue(*this, element, literal);
+}
+
+Bool Solver::mapToBool(SetElement element, SetContainment literal) {
+    return setTheory(sortOf(literal.set().theory())).mapToBool(*this, element, literal);
 }
 
 bool Solver::alwaysNonEmpty(Set set) {

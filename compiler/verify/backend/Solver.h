@@ -60,6 +60,43 @@ struct Solver {
     //! Whether \p set is non-empty regardless of the current assignment
     bool alwaysNonEmpty(Set);
 
+    // The set operations below take the sort of their theory from the sets they are given,
+    // so they are usable without naming the set theory involved.
+
+    SetElement newSetElement(Sort);
+    Set emptySet(Sort);
+
+    //! The literal saying that \p set holds no elements at all
+    Bool isEmpty(Set);
+    bool assignedEmpty(Set);
+
+    Set union_(std::span<const Set>);
+    Set union_(std::initializer_list<Set> vals) { return union_(std::span<const Set>(vals)); }
+
+    Set intersection(std::span<const Set>);
+    Set intersection(std::initializer_list<Set> vals) { return intersection(std::span<const Set>(vals)); }
+
+    Set setminus(Set base, std::span<const Set> minus);
+    Set setminus(Set base, std::initializer_list<Set> minus) { return setminus(base, std::span<const Set>(minus)); }
+
+    Set subset(std::span<const Set> intersection, std::span<const Set> minus);
+    Set subset(std::initializer_list<Set> intersection, std::initializer_list<Set> minus) {
+        return subset(std::span<const Set>(intersection), std::span<const Set>(minus));
+    }
+
+    bool assignedTrue(SetElement, SetContainment);
+    bool assignedFalse(SetElement element, SetContainment literal) {
+        return assignedTrue(element, !literal);
+    }
+    void assignTrue(SetElement, SetContainment, const Reason&);
+    void decideTrue(SetElement, SetContainment);
+
+    //! The boolean literal the containment is represented by, creating it when needed
+    Bool mapToBool(SetElement, SetContainment);
+
+    //! Propagate \p containment to the theory defining its set
+    void propagateSetContainment(Sets&, SetElement, SetContainment);
+
     Member composeMembers(std::span<const Member>);
     Member composeMembers(std::initializer_list<Member> expr) {
         return composeMembers((std::span<const Member>)expr);
@@ -106,5 +143,17 @@ private:
     friend SolverImpl;
     Solver();
 };
+
+inline void Solver::forEachValue(TheoryId theory, auto&& callback) {
+    int_t valueCount = this->valueCount(theory);
+    for (int_t i = 0; i < valueCount; i++)
+        callback(Value(theory, i));
+}
+
+inline void Solver::forEachBoolean(TheoryId theory, auto&& callback) {
+    int_t boolCount = this->booleanCount(theory);
+    for (int_t i = 0; i < boolCount; i++)
+        callback(Bool(theory, i * 2));
+}
 
 }

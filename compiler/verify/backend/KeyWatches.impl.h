@@ -8,27 +8,27 @@ template<typename Derived, typename KeyType, typename WatchType>
 Derived& KeyWatches<Derived, KeyType, WatchType>::derived() { return static_cast<Derived&>(*this); }
 
 template<typename Derived, typename KeyType, typename WatchType>
-KeyWatches<Derived, KeyType, WatchType>::ElementState& KeyWatches<Derived, KeyType, WatchType>::stateOf(ElementId element) {
+KeyWatches<Derived, KeyType, WatchType>::ElementState& KeyWatches<Derived, KeyType, WatchType>::stateOf(SetElement element) {
     if (element.id() >= elementStates.size())
         elementStates.resize(element.id() + 1);
     return elementStates[element.id()];
 }
 
 template<typename Derived, typename KeyType, typename WatchType>
-bool KeyWatches<Derived, KeyType, WatchType>::matches(Solver& solver, ElementId, KeyType key, WatchType watch) { return solver.assignedEqual(key, watch); }
+bool KeyWatches<Derived, KeyType, WatchType>::matches(Solver& solver, SetElement, KeyType key, WatchType watch) { return solver.assignedEqual(key, watch); }
 
 template<typename Derived, typename KeyType, typename WatchType>
-void KeyWatches<Derived, KeyType, WatchType>::addValueUses(Solver& solver, ElementId, WatchType watch, Use use) { solver.addUse(watch, use); }
+void KeyWatches<Derived, KeyType, WatchType>::addValueUses(Solver& solver, SetElement, WatchType watch, Use use) { solver.addUse(watch, use); }
 
 template<typename Derived, typename KeyType, typename WatchType>
-std::optional<KeyType> KeyWatches<Derived, KeyType, WatchType>::keyOf(ElementId element) const {
+std::optional<KeyType> KeyWatches<Derived, KeyType, WatchType>::keyOf(SetElement element) const {
     if (element.id() >= elementStates.size())
         return std::nullopt;
     return elementStates[element.id()].key;
 }
 
 template<typename Derived, typename KeyType, typename WatchType>
-void KeyWatches<Derived, KeyType, WatchType>::setKey(Solver& solver, ElementId element, KeyType key) {
+void KeyWatches<Derived, KeyType, WatchType>::setKey(Solver& solver, SetElement element, KeyType key) {
     ElementState& state = stateOf(element);
     VERIFY(!state.key.has_value());
     state.key = key;
@@ -40,7 +40,7 @@ void KeyWatches<Derived, KeyType, WatchType>::setKey(Solver& solver, ElementId e
 }
 
 template<typename Derived, typename KeyType, typename WatchType>
-void KeyWatches<Derived, KeyType, WatchType>::addWatch(Solver& solver, ElementId element, WatchType watch) {
+void KeyWatches<Derived, KeyType, WatchType>::addWatch(Solver& solver, SetElement element, WatchType watch) {
     WatchId id = watches.push({ .element = element, .value = watch });
     ElementState& state = stateOf(element);
     state.watchIds.push_back(id);
@@ -50,7 +50,7 @@ void KeyWatches<Derived, KeyType, WatchType>::addWatch(Solver& solver, ElementId
 }
 
 template<typename Derived, typename KeyType, typename WatchType>
-void KeyWatches<Derived, KeyType, WatchType>::reportMatch(Solver& solver, ElementId element, WatchId watch) {
+void KeyWatches<Derived, KeyType, WatchType>::reportMatch(Solver& solver, SetElement element, WatchId watch) {
     WatchEntry& entry = watches[watch];
     const auto& state = stateOf(element);
     if (entry.matched)
@@ -69,7 +69,7 @@ void KeyWatches<Derived, KeyType, WatchType>::reportMatch(Solver& solver, Elemen
 
 //! Bring the key or the watch named by \p use up to date with the rewrites applied
 template<typename Derived, typename KeyType, typename WatchType>
-void KeyWatches<Derived, KeyType, WatchType>::reportMatchesOf(Solver& solver, ElementId element) {
+void KeyWatches<Derived, KeyType, WatchType>::reportMatchesOf(Solver& solver, SetElement element) {
     for (WatchId watch : stateOf(element).watchIds)
         reportMatch(solver, element, watch);
 }
@@ -77,7 +77,7 @@ void KeyWatches<Derived, KeyType, WatchType>::reportMatchesOf(Solver& solver, El
 template<typename Derived, typename KeyType, typename WatchType>
 void KeyWatches<Derived, KeyType, WatchType>::propagateRewrite(Solver& solver, Use use) {
     if (use.kind() == params().keyUse) {
-        reportMatchesOf(solver, ElementId(use.id()));
+        reportMatchesOf(solver, SetElement(use.id()));
     } else if (use.kind() == params().watchUse) {
         WatchId watch { use.id() };
         reportMatch(solver, watches[watch].element, watch);
@@ -109,7 +109,7 @@ void KeyWatches<Derived, KeyType, WatchType>::beginBacktrack(Solver& solver) {
     }
     watches.truncate(solver);
 
-    for (ElementId element : keyTrace.backtrackedReverse(solver))
+    for (SetElement element : keyTrace.backtrackedReverse(solver))
         stateOf(element).key.reset();
     keyTrace.truncate(solver);
 }
@@ -140,7 +140,7 @@ void KeyWatches<Derived, KeyType, WatchType>::checkInvariances(Solver& solver) {
     // An element has a key exactly when it is on the trace, and it is on it only once
     std::vector<bool> onTrace;
     onTrace.resize(elementStates.size());
-    for (ElementId element : keyTrace) {
+    for (SetElement element : keyTrace) {
         VERIFY(element.id() < onTrace.size());
         VERIFY(!onTrace[element.id()]);
         onTrace[element.id()] = true;

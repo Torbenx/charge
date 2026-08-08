@@ -12,10 +12,10 @@ namespace {
 }
 
 struct InSingletonReason : private PackedReason<AggPair, uint32_t> {
-    InSingletonReason(Sets::ElementId element, Set setA, Set setB)
+    InSingletonReason(SetElement element, Set setA, Set setB)
         : PackedReason({ setA, setB }, element.id()) { }
     AggPair sets() const { return data(); }
-    Sets::ElementId element() const { return Sets::ElementId(tag()); }
+    SetElement element() const { return SetElement(tag()); }
 };
 
 SingletonSets::SingletonSets(Solver& solver, const SingletonSetsParams& params)
@@ -36,7 +36,7 @@ Set SingletonSets::singleton(Solver& solver, Value element) {
     return info.singletonSet.value();
 }
 
-void SingletonSets::propagateContainment(Solver& solver, Sets::ElementId element, Sets::Containment cont) {
+void SingletonSets::propagateContainment(Solver& solver, SetElement element, SetContainment cont) {
     if (!cont.contained())
         return;
     auto& state = stateOf(element);
@@ -73,7 +73,7 @@ void SingletonSets::newDecisionLevel(Solver& solver) {
 }
 
 void SingletonSets::beginBacktrack(Solver& solver) {
-    for (Sets::ElementId element : singletonTrace.backtrackedReverse(solver))
+    for (SetElement element : singletonTrace.backtrackedReverse(solver))
         stateOf(element).singleton.reset();
     singletonTrace.truncate(solver);
 }
@@ -86,7 +86,7 @@ void SingletonSets::checkInvariances(Solver& solver) {
     // An element has a singleton exactly when it is on the trace, and it is on it only once
     std::vector<bool> onTrace;
     onTrace.resize(elementStates.size());
-    for (Sets::ElementId element : singletonTrace) {
+    for (SetElement element : singletonTrace) {
         VERIFY(element.id() < onTrace.size());
         VERIFY(!onTrace[element.id()]);
         onTrace[element.id()] = true;

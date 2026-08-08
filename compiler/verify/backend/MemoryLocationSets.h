@@ -17,11 +17,11 @@ struct SharedElementSets {
 };
 
 struct SharedElementReason : private PackedReason<SharedElementSets, uint32_t> {
-    SharedElementReason(Sets::ElementId element, Set setA, Set setB)
+    SharedElementReason(SetElement element, Set setA, Set setB)
         : PackedReason({ setA, setB }, element.id()) { }
 
     SharedElementSets sets() const { return data(); }
-    Sets::ElementId element() const { return Sets::ElementId(tag()); }
+    SetElement element() const { return SetElement(tag()); }
 };
 
 struct MemoryLocationSetsParams {
@@ -34,12 +34,10 @@ struct MemoryLocationSetsParams {
 template<typename Derived>
 struct MemoryLocationSets {
     using Params = MemoryLocationSetsParams;
-    using ElementId = Sets::ElementId;
-    using Containment = Sets::Containment;
 
     MemoryLocationSets(Solver&);
 
-    void propagateContainment(Solver&, ElementId, Sets::Containment);
+    void propagateContainment(Solver&, SetElement, SetContainment);
     void propagateRewrite(Solver&, Use);
 
     bool testReason(Solver&, Bool, const Reason&);
@@ -59,14 +57,14 @@ private:
     The key of an element is the set of its representative and its watches are the sets of all its
     containments, both compared by the declarations of their locations.
     */
-    struct PendingWatches : KeyWatches<PendingWatches, Containment, Containment> {
+    struct PendingWatches : KeyWatches<PendingWatches, SetContainment, SetContainment> {
         static constexpr KeyWatchesParams PARAMS = Derived::PARAMS.watchesParams;
 
         MemoryLocationSets& locationSets();
 
-        bool matches(Solver&, ElementId, Containment key, Containment watch);
-        void addValueUses(Solver&, ElementId, Containment watch, Use);
-        void onKeyMatch(Solver&, ElementId, Containment key, Containment watch);
+        bool matches(Solver&, SetElement, SetContainment key, SetContainment watch);
+        void addValueUses(Solver&, SetElement, SetContainment watch, Use);
+        void onKeyMatch(Solver&, SetElement, SetContainment key, SetContainment watch);
     };
 
     static auto setHandle(Set set) { return typename Derived::SetHandle(set); }
@@ -82,7 +80,7 @@ private:
     static constexpr MemoryLocationSetsParams params();
     Derived& derived() { return static_cast<Derived&>(*this); }
 
-    void addWord(Solver&, ElementId, Containment);
+    void addWord(Solver&, SetElement, SetContainment);
 
     PendingWatches pendingWatches;
 

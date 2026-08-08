@@ -133,10 +133,10 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
         return singletonInfos[set].invariant;
     }
 
-    void addWords(Solver&, PrefixIndex&, ElementId, Containment);
+    void addWords(Solver&, PrefixIndex&, SetElement, SetContainment);
 
     void propagateRewrite(Solver&, Use);
-    void propagateContainment(Solver&, ElementId, Containment);
+    void propagateContainment(Solver&, SetElement, SetContainment);
 
     bool testReason(Solver&, Bool, const Reason&);
     ClauseAndIndex reasonToClause(Solver&, Bool, const Reason&);
@@ -180,10 +180,10 @@ private:
         };
 
         InvariantSets& invariantSets();
-        void addValueUses(Solver&, ElementId, InvariantSet, Use);
-        bool matches(Solver&, ElementId, InvariantSet key, InvariantSet watch);
-        void explainMatch(Solver&, ElementId, InvariantSet key, InvariantSet watch, ClauseBuilder& clause);
-        void onKeyMatch(Solver&, ElementId, InvariantSet key, InvariantSet watch);
+        void addValueUses(Solver&, SetElement, InvariantSet, Use);
+        bool matches(Solver&, SetElement, InvariantSet key, InvariantSet watch);
+        void explainMatch(Solver&, SetElement, InvariantSet key, InvariantSet watch, ClauseBuilder& clause);
+        void onKeyMatch(Solver&, SetElement, InvariantSet key, InvariantSet watch);
     };
 
     // Note: The keys of these maps could be obtained from the stored values

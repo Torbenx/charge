@@ -49,7 +49,6 @@ TEST(VerifyBackend, MemoryLocationSetsLookup) {
 
 TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
     SolverImpl solver;
-    auto& sets = solver.memorySetsBaseTheory;
     auto& memorySets = solver.memorySets;
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
@@ -59,9 +58,9 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
     MemorySet b = memorySets.set(solver, d2, m);
     Bool setEquality = solver.equality(a, b);
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::MemorySet);
     solver.propagate();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
 
     solver.decideTrue(solver.equality(d1, d2));
@@ -71,12 +70,11 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualDeclarations) {
     // The two pairs describe the same location, so the sets of that location are the same and so is
     // everything that is known about them
     EXPECT_TRUE(solver.assignedTrue(setEquality));
-    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
+    EXPECT_TRUE(solver.assignedTrue(e, Sets::in(b)));
 }
 
 TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
     SolverImpl solver;
-    auto& sets = solver.memorySetsBaseTheory;
     auto& memorySets = solver.memorySets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -86,9 +84,9 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
     MemorySet b = memorySets.set(solver, d, m2);
     Bool setEquality = solver.equality(a, b);
 
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::MemorySet);
     solver.propagate();
-    sets.decideTrue(solver, e, Sets::in(a));
+    solver.decideTrue(e, Sets::in(a));
     solver.propagate();
 
     // The member of a location decides it just as much as its declaration does
@@ -97,7 +95,7 @@ TEST(VerifyBackend, MemoryLocationSetsOfEqualMembers) {
     EXPECT_FALSE(solver.hasConflicts());
 
     EXPECT_TRUE(solver.assignedTrue(setEquality));
-    EXPECT_TRUE(sets.assignedTrue(solver, e, Sets::in(b)));
+    EXPECT_TRUE(solver.assignedTrue(e, Sets::in(b)));
 }
 
 TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
@@ -127,14 +125,13 @@ TEST(VerifyBackend, MemoryLocationSetsNeedBothPartsOfTheLocation) {
 TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     // Location sets are ordinary sets, so the set theory reasoning applies to them
     SolverImpl solver;
-    auto& sets = solver.memorySetsBaseTheory;
     auto& memorySets = solver.memorySets;
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
     MemorySet whole = memorySets.set(solver, d, identity_member);
     MemorySet part = memorySets.set(solver, d, m);
-    Set u = sets.union_(solver, { whole, part });
+    Set u = solver.union_({ whole, part });
 
     Bool eq = solver.equality(u, whole);
     solver.propagate();
@@ -142,18 +139,18 @@ TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
 
     // There are no rules relating a location to its members yet, so the subset relation must be
     // asserted explicitly.
-    auto e = sets.newElement(solver);
+    auto e = solver.newSetElement(Sort::MemorySet);
     solver.propagate();
-    solver.addClause({ solver.equality(sets.subset(solver, { part }, { whole }), sets.emptySet()) });
+    solver.addClause({ solver.equality(solver.subset({ part }, { whole }), solver.emptySet(Sort::MemorySet)) });
     solver.propagate();
 
-    sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { u }, { whole })));
+    solver.decideTrue(e, Sets::in(solver.subset({ u }, { whole })));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
     solver.analyzeConflicts();
     solver.propagate();
 
-    sets.decideTrue(solver, e, Sets::in(sets.subset(solver, { whole }, { u })));
+    solver.decideTrue(e, Sets::in(solver.subset({ whole }, { u })));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
     solver.analyzeConflicts();

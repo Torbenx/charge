@@ -25,7 +25,7 @@ namespace {
             .watchUse = UseKind::KeyWatchesTestWatch,
         };
 
-        void onKeyMatch(Solver&, ElementId, Value key, Value watch) {
+        void onKeyMatch(Solver&, SetElement, Value key, Value watch) {
             reported.push_back({ key, watch });
         }
 
@@ -37,19 +37,19 @@ namespace {
         SolverImpl solver;
         TestWatches watches;
 
-        Sets::ElementId e1 { 1 };
-        Sets::ElementId e2 { 2 };
+        SetElement e1 { 1 };
+        SetElement e2 { 2 };
 
         MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
         MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
         MemoryDeclaration d3 = solver.newAuxMemoryDeclarationVariable();
 
-        void setKey(Sets::ElementId element, Value key) {
+        void setKey(SetElement element, Value key) {
             watches.setKey(solver, element, key);
             watches.checkInvariances(solver);
         }
 
-        void addWatch(Sets::ElementId element, Value watch) {
+        void addWatch(SetElement element, Value watch) {
             watches.addWatch(solver, element, watch);
             watches.checkInvariances(solver);
         }
@@ -195,7 +195,7 @@ namespace {
             .watchUse = UseKind::KeyWatchesTestWatch,
         };
 
-        void onKeyMatch(Solver&, ElementId, Value, Value) { matchCount++; }
+        void onKeyMatch(Solver&, SetElement, Value, Value) { matchCount++; }
 
         int_t matchCount = 0;
     };
@@ -205,7 +205,7 @@ namespace {
 TEST(VerifyBackend, KeyWatchesWithoutWatchData) {
     SolverImpl solver;
     PlainWatches watches;
-    Sets::ElementId element { 1 };
+    SetElement element { 1 };
     MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
     MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
 

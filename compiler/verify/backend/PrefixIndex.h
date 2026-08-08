@@ -61,17 +61,15 @@ struct PrefixIndex {
         Exclusive,
     };
 
-    using ElementId = Sets::ElementId;
-
     PrefixIndex(const Params& params)
         : m_params(params) { }
 
     //! Add the word described by \p key to the set of \p element selected by \p role
-    WordId addWord(Solver&, Member expression, ElementId element, Sets::Containment containment, Role role, SelfInclusion inclusion);
+    WordId addWord(Solver&, Member expression, SetElement element, SetContainment containment, Role role, SelfInclusion inclusion);
 
     Member expressionOf(WordId w) { return words[w].expression; }
-    ElementId elementOf(WordId w) const { return words[w].element; }
-    Sets::Containment containmentOf(WordId w) const { return words[w].containment; }
+    SetElement elementOf(WordId w) const { return words[w].element; }
+    SetContainment containmentOf(WordId w) const { return words[w].containment; }
 
     //! Returns whether \p prefix is currently a non-strict prefix of \p path
     /*!
@@ -103,7 +101,7 @@ struct PrefixIndex {
 private:
     struct Node {
         Member letter; //!< The last letter of the word spelled by this node
-        ElementId element;
+        SetElement element;
         //! The number of literals in the word of this node
         /*!
         Used to implement strict prefix detection in O(1).
@@ -120,8 +118,8 @@ private:
 
     struct WordInfo {
         Member expression; //!< The description the word is spelled from
-        ElementId element;
-        Sets::Containment containment;
+        SetElement element;
+        SetContainment containment;
         Role role;
         SelfInclusion selfInclusion;
         bool isPath() const { return role == Role::Path; };
