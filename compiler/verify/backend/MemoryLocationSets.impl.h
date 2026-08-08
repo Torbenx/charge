@@ -2,7 +2,7 @@
 
 #include <verify/backend/KeyWatches.impl.h>
 #include <verify/backend/MemoryLocationSets.h>
-#include <verify/backend/SolverImpl.h>
+#include <verify/backend/Sets.h>
 
 #include <ReverseMemberPointer.h>
 
@@ -129,7 +129,7 @@ ClauseAndIndex MemoryLocationSets<Derived>::reasonToClause(Solver& solver, Bool 
     clause.add(solver, !containmentOf(solver, data.path));
     prefixes.explainPrefix(solver, data.prefix, data.path, clause);
     // The subset relation only holds within one declaration
-    solver.impl().memoryDeclarationEquality.explainEqual(solver, declarationOf(data.prefix), declarationOf(data.path), clause);
+    solver.explainEqual(declarationOf(data.prefix), declarationOf(data.path), clause);
     return { solver.viewClause(clause), 0 };
 }
 

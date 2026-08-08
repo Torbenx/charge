@@ -714,6 +714,24 @@ bool Solver::assignedEqual(Value a, Value b) {
     }
 }
 
+void Solver::explainEqual(Value a, Value b, ClauseBuilder& clause) {
+    auto sort = sortOf(a.theory());
+    VERIFY(sort == sortOf(b.theory()));
+    if (sort == Sort::UninterpretedConstant) {
+        impl().uninterpConstantEquality.explainEqual(*this, a, b, clause);
+    } else if (sort == Sort::Member) {
+        // Members are equal when their normal forms are, so justifying both spellings says so
+        impl().members.explainRewrite(*this, (Member)a, clause);
+        impl().members.explainRewrite(*this, (Member)b, clause);
+    } else if (sort == Sort::MemoryDeclaration) {
+        impl().memoryDeclarationEquality.explainEqual(*this, a, b, clause);
+    } else {
+        // The remaining theories carry the fact in the equality literal itself. This also covers
+        // the booleans, whose equalities are eagerly encoded as clauses over the two literals.
+        clause.add(*this, !equality(a, b));
+    }
+}
+
 // ----------------------- Aux Value factories ----------------------
 
 Value Solver::newValue(TheoryId theory) {

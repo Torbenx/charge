@@ -74,6 +74,7 @@ struct Solver {
     Bool equality(Value, Value);
     Bool equality(PairHandle);
     bool assignedEqual(Value, Value);
+    void explainEqual(Value a, Value b, ClauseBuilder& clause);
 
     void addUse(Value, Use);
 

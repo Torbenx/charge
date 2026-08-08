@@ -1,7 +1,6 @@
 #include <verify/backend/InvariantSets.h>
 
 #include <verify/backend/MemoryLocationSets.impl.h>
-#include <verify/backend/SolverImpl.h>
 
 #include <algorithm>
 
@@ -220,9 +219,8 @@ bool InvariantSets::SingletonIndex::matches(Solver& solver, ElementId, Invariant
 void InvariantSets::SingletonIndex::explainMatch(Solver& solver, ElementId, InvariantSet key, InvariantSet watch, ClauseBuilder& clause) {
     auto keyLoc = invariantSets().locationOf(key);
     auto watchLoc = invariantSets().locationOf(watch);
-    solver.impl().memoryDeclarationEquality.explainEqual(solver, keyLoc.declaration, watchLoc.declaration, clause);
-    solver.impl().members.explainRewrite(solver, keyLoc.member, clause);
-    solver.impl().members.explainRewrite(solver, watchLoc.member, clause);
+    solver.explainEqual(keyLoc.declaration, watchLoc.declaration, clause);
+    solver.explainEqual(keyLoc.member, watchLoc.member, clause);
 }
 
 void InvariantSets::SingletonIndex::onKeyMatch(Solver& solver, ElementId element, InvariantSet key, InvariantSet watch) {
