@@ -70,9 +70,6 @@ struct Solver {
     //! Whether \p set is non-empty regardless of the current assignment
     bool alwaysNonEmpty(Set);
 
-    // The set operations below take the sort of their theory from the sets they are given,
-    // so they are usable without naming the set theory involved.
-
     SetElement newSetElement(Sort);
     Set emptySet(Sort);
 

@@ -100,7 +100,7 @@ inline constexpr Member identity_member = Member(TheoryId::CompositeMembers, 0);
 Memory locations do not have a sort of their own in the backend, a location only exists as this pair.
 */
 struct MemoryLocation {
-    MemoryLocation(MemoryDeclaration declaration, Member member = identity_member)
+    constexpr MemoryLocation(MemoryDeclaration declaration, Member member = identity_member)
         : declaration(declaration)
         , member(member) { }
 
@@ -321,6 +321,10 @@ struct optional_traits<T> {
 template<>
 struct optional_traits<verify::backend::Invariant> {
     static constexpr verify::backend::Invariant empty_value = verify::backend::Invariant(limits::max);
+};
+template<>
+struct optional_traits<verify::backend::MemoryLocation> {
+    static constexpr verify::backend::MemoryLocation empty_value = { (verify::backend::MemoryDeclaration)verify::backend::INVALID_VALUE };
 };
 template<>
 struct optional_traits<verify::backend::PairHandle> {

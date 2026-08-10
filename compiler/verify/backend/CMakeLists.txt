@@ -26,8 +26,8 @@ target_sources(${PROJECT_NAME}
     MemorySets.h
     MemoryTests.cpp
     PairSet.h
-    PrefixIndex.h
     PrefixIndex.cpp
+    PrefixIndex.h
     Reason.h
     SatCore.cpp
     SatCore.h

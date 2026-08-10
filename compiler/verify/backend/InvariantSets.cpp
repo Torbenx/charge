@@ -23,7 +23,7 @@ static InvariantSet locationSet(
     TheoryData<Info, theory>& infos,
     MemoryLocation location) {
     if (theory == TheoryId::PathInvariantSets && location.member == identity_member) {
-        return (InvariantSet)solver.impl().invariantSetsBaseTheory.emptySet();
+        return (InvariantSet)solver.emptySet(Sort::InvariantSet);
     }
 
     auto it = sets.find(location);
@@ -35,7 +35,7 @@ static InvariantSet locationSet(
     sets.emplace(location, newSet);
 
     if constexpr (theory == TheoryId::PathInvariantSets) {
-        solver.addClause({ !solver.equality(location.member, identity_member), solver.impl().invariantSetsBaseTheory.isEmpty(solver, newSet) });
+        solver.addClause({ !solver.equality(location.member, identity_member), solver.isEmpty(newSet) });
     }
 
     return newSet;
