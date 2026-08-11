@@ -93,6 +93,9 @@ TOKEN(ShiftRightUpdateStmt, GreaterGreaterEqual, None, None)
 TOKEN(LogicalAndUpdateStmt, AmpAmpEqual, None, None)
 TOKEN(LogicalOrUpdateStmt, VertVertEqual, None, None)
 
+TOKEN(ContextFunctionStmt, Colon, None, None)
+TOKEN(ContextExpressionStmt, EqualGreater, None, None)
+
 TOKEN(CompoundStmt, LeftBrace, None, None)
 TOKEN(ExpressionStmt, Invalid, None, None)
 TOKEN(IfStmt, Colon, None, None)

@@ -1964,13 +1964,31 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next statement
             goto statement$with_emit;
         }
-        // popScope ScopeKind::IfExprOrStmt
-        {
-            auto result = popScope(scopePosition, ScopeKind::IfExprOrStmt);
-            if (result == nullptr) {
-                goto pop_scope_failed;
+        // ifScope ScopeKind::IfExprOrStmt
+        if (scopePosition[0] == ScopeKind::IfExprOrStmt) {
+            // popScope ScopeKind::IfExprOrStmt
+            {
+                auto result = popScope(scopePosition, ScopeKind::IfExprOrStmt);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
             }
-            scopePosition = result;
+            // popScope ScopeKind::LeftExpr
+            {
+                auto result = popScope(scopePosition, ScopeKind::LeftExpr);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::IfBranch
+            scopePosition = pushScope(scopePosition, ScopeKind::IfBranch);
+            // emitToken TokenKind::IfStmt
+            carriedEmitTokenKind = TokenKind::IfStmt;
+            carriedEmitTokenData = 0;
+            // next statement
+            goto statement$with_emit;
         }
         // popScope ScopeKind::LeftExpr
         {
@@ -1980,10 +1998,10 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             }
             scopePosition = result;
         }
-        // pushScope ScopeKind::IfBranch
-        scopePosition = pushScope(scopePosition, ScopeKind::IfBranch);
-        // emitToken TokenKind::IfStmt
-        carriedEmitTokenKind = TokenKind::IfStmt;
+        // pushScope ScopeKind::ContextFunction
+        scopePosition = pushScope(scopePosition, ScopeKind::ContextFunction);
+        // emitToken TokenKind::ContextFunctionStmt
+        carriedEmitTokenKind = TokenKind::ContextFunctionStmt;
         carriedEmitTokenData = 0;
         // next statement
         goto statement$with_emit;
@@ -2082,16 +2100,34 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         }
         if (next == '>') {
             tokEnd += 2;
-            // popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+            // ifScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+            if (scopePosition[0] == ScopeKind::IfExpr || scopePosition[0] == ScopeKind::IfExprOrStmt) {
+                // popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+                {
+                    auto result = popScope(scopePosition, ScopeKind::IfExpr, ScopeKind::IfExprOrStmt);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // emitToken TokenKind::IfExpr
+                carriedEmitTokenKind = TokenKind::IfExpr;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            }
+            // popScope ScopeKind::LeftExpr
             {
-                auto result = popScope(scopePosition, ScopeKind::IfExpr, ScopeKind::IfExprOrStmt);
+                auto result = popScope(scopePosition, ScopeKind::LeftExpr);
                 if (result == nullptr) {
                     goto pop_scope_failed;
                 }
                 scopePosition = result;
             }
-            // emitToken TokenKind::IfExpr
-            carriedEmitTokenKind = TokenKind::IfExpr;
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::ContextExpressionStmt
+            carriedEmitTokenKind = TokenKind::ContextExpressionStmt;
             carriedEmitTokenData = 0;
             // next expression
             goto expression$with_emit;
@@ -2849,6 +2885,19 @@ after_statement$no_emit:
     }
     // ifScope ScopeKind::CompoundStmt
     if (scopePosition[0] == ScopeKind::CompoundStmt) {
+        // next statement
+        goto statement$no_emit;
+    }
+    // ifScope ScopeKind::ContextFunction
+    if (scopePosition[0] == ScopeKind::ContextFunction) {
+        // popScope ScopeKind::ContextFunction
+        {
+            auto result = popScope(scopePosition, ScopeKind::ContextFunction);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
         // next statement
         goto statement$no_emit;
     }

@@ -251,8 +251,13 @@ SwitchState after_expression() then error
         next after_statement
 
     punctuation =>
-        popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
-        emitToken TokenKind::IfExpr
+        ifScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+            popScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
+            emitToken TokenKind::IfExpr
+            next expression
+        popScope ScopeKind::LeftExpr
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::ContextExpressionStmt
         next expression
     punctuation :
         ifScope ScopeKind::BaseTypeExpr
@@ -263,10 +268,15 @@ SwitchState after_expression() then error
             pushScope ScopeKind::FunctionBody
             emitToken TokenKind::FunctionBody
             next statement
-        popScope ScopeKind::IfExprOrStmt
+        ifScope ScopeKind::IfExprOrStmt
+            popScope ScopeKind::IfExprOrStmt
+            popScope ScopeKind::LeftExpr
+            pushScope ScopeKind::IfBranch
+            emitToken TokenKind::IfStmt
+            next statement
         popScope ScopeKind::LeftExpr
-        pushScope ScopeKind::IfBranch
-        emitToken TokenKind::IfStmt
+        pushScope ScopeKind::ContextFunction
+        emitToken TokenKind::ContextFunctionStmt
         next statement
     punctuation =
         popScope ScopeKind::VariableType, ScopeKind::LeftExpr
@@ -372,6 +382,9 @@ LinearState after_statement() then error
             popScope ScopeKind::ElseBranch
             next statement         # TODO: This is not correct for nested ifs or outside a compound statement
         ifScope ScopeKind::CompoundStmt
+            next statement
+        ifScope ScopeKind::ContextFunction
+            popScope ScopeKind::ContextFunction
             next statement
 
 SwitchState statement() then expression

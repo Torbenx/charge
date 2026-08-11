@@ -42,35 +42,36 @@ inline bool isVariableDecl(TokenKind kind) {
 
 // ---------------------------- ScopeKind ---------------------------
 
-#define ENUMERATE_SCOPE_KINDS     \
-    SCOPE(Start)                  \
-    SCOPE(IfExpr)                 \
-    SCOPE(IfExprOrStmt)           \
-    SCOPE(CompoundStmt)           \
-    SCOPE(Paren)                  \
-    SCOPE(ParenInImplExpr)        \
-    SCOPE(Square)                 \
-    SCOPE(Brace)                  \
-    SCOPE(BraceInImplExpr)        \
-    SCOPE(LeftExpr)               \
-    SCOPE(RightExpr)              \
-    SCOPE(VariableType)           \
-    SCOPE(IfBranch)               \
-    SCOPE(ElseBranch)             \
-    SCOPE(Parameter)              \
-    SCOPE(Namespace)              \
-    SCOPE(FunctionBody)           \
-    SCOPE(ReturnType)             \
-    SCOPE(FunctionParameters)     \
-    SCOPE(Struct)                 \
-    SCOPE(Enum)                   \
-    SCOPE(BaseTypeExpr)           \
-    SCOPE(TemplateParameters)     \
-    SCOPE(StructImplExpression)   \
-    SCOPE(FunctionImplExpression) \
-    SCOPE(EnumImplExpression)     \
-    SCOPE(GlobalImplExpression)   \
-    SCOPE(GenericCategoryExpression)
+#define ENUMERATE_SCOPE_KINDS        \
+    SCOPE(Start)                     \
+    SCOPE(IfExpr)                    \
+    SCOPE(IfExprOrStmt)              \
+    SCOPE(CompoundStmt)              \
+    SCOPE(Paren)                     \
+    SCOPE(ParenInImplExpr)           \
+    SCOPE(Square)                    \
+    SCOPE(Brace)                     \
+    SCOPE(BraceInImplExpr)           \
+    SCOPE(LeftExpr)                  \
+    SCOPE(RightExpr)                 \
+    SCOPE(VariableType)              \
+    SCOPE(IfBranch)                  \
+    SCOPE(ElseBranch)                \
+    SCOPE(Parameter)                 \
+    SCOPE(Namespace)                 \
+    SCOPE(FunctionBody)              \
+    SCOPE(ReturnType)                \
+    SCOPE(FunctionParameters)        \
+    SCOPE(Struct)                    \
+    SCOPE(Enum)                      \
+    SCOPE(BaseTypeExpr)              \
+    SCOPE(TemplateParameters)        \
+    SCOPE(StructImplExpression)      \
+    SCOPE(FunctionImplExpression)    \
+    SCOPE(EnumImplExpression)        \
+    SCOPE(GlobalImplExpression)      \
+    SCOPE(GenericCategoryExpression) \
+    SCOPE(ContextFunction)
 
 enum class ScopeKind : uint8_t {
 #define SCOPE(kind) kind,

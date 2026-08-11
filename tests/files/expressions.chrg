@@ -79,23 +79,28 @@ a{
 /* expect-token IdentifierExpr; expect-token LogicalOrExpr; expect-token IdentifierExpr */ a || b;
 
 //; conditional expressions
-/* expect-token IdentifierExpr; expect-token IfExpr; expect-token IdentifierExpr */ if a => b;
-/* expect-token IdentifierExpr; expect-token CommaElseExpr; expect-token IdentifierExpr */ a, else => b;
+/* expect-token IdentifierExpr; expect-token IfExpr; expect-token IdentifierExpr; expect-token ExpressionStmt */ if a => b;
+/* expect-token IdentifierExpr; expect-token CommaElseExpr; expect-token IdentifierExpr; expect-token ExpressionStmt */ a, else => b;
 
 //; update statements
-/* expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr */ a = b;
-/* expect-token IdentifierExpr; expect-token AdditionUpdateStmt; expect-token IdentifierExpr */ a += b;
-/* expect-token IdentifierExpr; expect-token SubtractionUpdateStmt; expect-token IdentifierExpr */ a -= b;
-/* expect-token IdentifierExpr; expect-token MultiplyUpdateStmt; expect-token IdentifierExpr */ a *= b;
-/* expect-token IdentifierExpr; expect-token DivideUpdateStmt; expect-token IdentifierExpr */ a /= b;
-/* expect-token IdentifierExpr; expect-token RemainderUpdateStmt; expect-token IdentifierExpr */ a %= b;
-/* expect-token IdentifierExpr; expect-token BitwiseAndUpdateStmt; expect-token IdentifierExpr */ a &= b;
-/* expect-token IdentifierExpr; expect-token BitwiseXorUpdateStmt; expect-token IdentifierExpr */ a ^= b;
-/* expect-token IdentifierExpr; expect-token BitwiseOrUpdateStmt; expect-token IdentifierExpr */ a |= b;
-/* expect-token IdentifierExpr; expect-token ShiftLeftUpdateStmt; expect-token IdentifierExpr */ a <<= b;
-/* expect-token IdentifierExpr; expect-token ShiftRightUpdateStmt; expect-token IdentifierExpr */ a >>= b;
-/* expect-token IdentifierExpr; expect-token LogicalAndUpdateStmt; expect-token IdentifierExpr */ a &&= b;
-/* expect-token IdentifierExpr; expect-token LogicalOrUpdateStmt; expect-token IdentifierExpr */ a ||= b;
+/* expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a = b;
+/* expect-token IdentifierExpr; expect-token AdditionUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a += b;
+/* expect-token IdentifierExpr; expect-token SubtractionUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a -= b;
+/* expect-token IdentifierExpr; expect-token MultiplyUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a *= b;
+/* expect-token IdentifierExpr; expect-token DivideUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a /= b;
+/* expect-token IdentifierExpr; expect-token RemainderUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a %= b;
+/* expect-token IdentifierExpr; expect-token BitwiseAndUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a &= b;
+/* expect-token IdentifierExpr; expect-token BitwiseXorUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a ^= b;
+/* expect-token IdentifierExpr; expect-token BitwiseOrUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a |= b;
+/* expect-token IdentifierExpr; expect-token ShiftLeftUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a <<= b;
+/* expect-token IdentifierExpr; expect-token ShiftRightUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a >>= b;
+/* expect-token IdentifierExpr; expect-token LogicalAndUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a &&= b;
+/* expect-token IdentifierExpr; expect-token LogicalOrUpdateStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a ||= b;
+
+//; context statements
+/* expect-token IdentifierExpr; expect-token ContextFunctionStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a: b;
+/* expect-token IdentifierExpr; expect-token ContextFunctionStmt; expect-token CompoundStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode */ a: { b; }
+/* expect-token IdentifierExpr; expect-token ContextExpressionStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ a => b;
 
 /* expect-token CompoundStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode */ { a; }
 
