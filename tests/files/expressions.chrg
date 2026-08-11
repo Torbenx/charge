@@ -131,10 +131,10 @@ if a: { b; } else: { c; }
 /* expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a = init;
 /* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: type;
 /* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: type = init;
-/* expect-token LetValueDecl; expect-token VariableType; expect-token ExpressionStmt */ let a: unique;
-/* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: unique type;
-/* expect-token LetValueDecl; expect-token VariableType; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: unique = init;
-/* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: unique type = init;
+/* expect-token LetValueDecl; expect-token VariableType; expect-token ExpressionStmt */ let a: &unique;
+/* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: &unique type;
+/* expect-token LetValueDecl; expect-token VariableType; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: &unique = init;
+/* expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt */ let a: &unique type = init;
 
 // expect-token IdentifierExpr; expect-token IfStmt; expect-token LetValueDecl; expect-token ExpressionStmt
 // expect-token ElseStmt; expect-token LetValueDecl; expect-token ExpressionStmt

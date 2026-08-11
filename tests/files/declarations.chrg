@@ -10,7 +10,7 @@
 // expect-token VarValueDecl; expect-token ExpressionStmt
 // expect-token LetValueDecl; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f1(x: unique, y: shared, z: const, zx1: unique const, zy1: shared const, zx2: const unique, zy2: const shared, var a, b): { }
+fn f1(x: &unique, y: &shared, z: &const, zx1: &unique const, zy1: &shared const, zx2: &const unique, zy2: &const shared, var a, b): { }
 
 // expect-token FunctionDecl
 // expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token ExpressionStmt
@@ -22,7 +22,7 @@ fn f1(x: unique, y: shared, z: const, zx1: unique const, zy1: shared const, zx2:
 // expect-token VarValueDecl; expect-token VariableType; expect-token IdentifierExpr; expect-token ExpressionStmt
 // expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
-fn f1x(x: unique type, y: shared = init, z: const type = init, zx1: unique const type, zy1: shared const = init, zx2: const unique type = init, var a: type, b = init): { }
+fn f1x(x: &unique type, y: &shared = init, z: &const type = init, zx1: &unique const type, zy1: &shared const = init, zx2: &const unique type = init, var a: type, b = init): { }
 
 // expect-token FunctionDecl
 // expect-token LetValueDecl; expect-token AssignStmt; expect-token IdentifierExpr; expect-token ExpressionStmt; expect-token EmptyNode

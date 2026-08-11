@@ -206,6 +206,9 @@ SwitchState after_expression() then error
             popScope ScopeKind::ParenInImplExpr
             emitToken TokenKind::EmptyNode
             next after_impl_expression
+        ifScope ScopeKind::GenericCategoryExpression
+            popScope ScopeKind::GenericCategoryExpression
+            next after_variable_modifier
         popScope ScopeKind::Paren
         endCall
         emitToken TokenKind::EmptyNode
@@ -475,6 +478,11 @@ LinearState after_variable_declaration_id() then error
         emitToken TokenKind::ExpressionStmt
         next after_parameters
 LinearState variable_type() then expression
+    punctuation &
+        next reference_modifier
+    then
+        pushScope ScopeKind::VariableType
+LinearState reference_modifier() then error
     keyword unique
         updateData sema::VariableKind::UniqueReference
         next after_variable_unique_modifier
@@ -484,13 +492,11 @@ LinearState variable_type() then expression
     keyword const
         updateData sema::VariableKind::ConstSharedReference
         next after_variable_const_modifier
-    punctuation <
+    punctuation (
         updateData sema::VariableKind::Generic
         pushScope ScopeKind::GenericCategoryExpression
         emitToken TokenKind::VariableGenericCategory
-        next impl_expression
-    then
-        pushScope ScopeKind::VariableType
+        next expression
 LinearState after_variable_modifier() then expression
     punctuation =
         pushScope ScopeKind::RightExpr
@@ -572,9 +578,6 @@ LinearState after_impl_expression() then error
         pushScope ScopeKind::BraceInImplExpr
         emitCallToken TokenKind::Parameterize
         next argument
-    punctuation >
-        popScope ScopeKind::GenericCategoryExpression
-        next after_variable_modifier
     then
         ifScope ScopeKind::StructImplExpression
             popScope ScopeKind::StructImplExpression
@@ -671,7 +674,9 @@ LinearState after_template() then error
     punctuation (
         pushScope ScopeKind::TemplateParameters
         next first_parameter
-LinearState after_template_parameters() then templated_declaration_with_attributes
+LinearState after_template_parameters() then error
+    dispatch
+        next templated_declaration_with_attributes
 
 LinearState function_declaration_id() then error
     identifier

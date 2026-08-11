@@ -150,14 +150,14 @@ static testTofBase = DerivedT{X}::TofBase;
 
 struct WithMember: { member: X; }
 // expect-return-type X
-fn accessMember(w: shared WithMember) => w.member;
+fn accessMember(w: &shared WithMember) => w.member;
 // expect-type member_ptr{WithMember, X}
 // expect-value @memberPointer(WithMember/member)
 static memberPointer = WithMember::member;
 
 struct DerivedWithMember: { base WithMember; }
 // expect-return-type X
-fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
+fn accessDerivedMember(w: &shared DerivedWithMember) => w.member;
 // expect-type member_ptr{DerivedWithMember, X}
 static composedMemberPointer = DerivedWithMember::member;
 
@@ -205,7 +205,7 @@ static test2 = target(blub{X, T}());
 }
 
 // expect-return-type X
-fn referenceParameter(x: shared X) -> X: { }
+fn referenceParameter(x: &shared X) -> X: { }
 
 // expect-return-type X
 fn passReference() -> X: {
@@ -214,10 +214,10 @@ fn passReference() -> X: {
 }
 
 
-fn addConst(x1: const unique X, x2: const shared X) -> X: { }
-fn addShared(x1: shared X, x2: const shared X) -> X: { }
+fn addConst(x1: &const unique X, x2: &const shared X) -> X: { }
+fn addShared(x1: &shared X, x2: &const shared X) -> X: { }
 // expect-return-type X
-fn testRefCast(x1: unique X, x2: shared X, x3: const unique X) -> X: {
+fn testRefCast(x1: &unique X, x2: &shared X, x3: &const unique X) -> X: {
     addConst(x1, x2);
     addShared(x1, x3);
 }
@@ -229,7 +229,7 @@ fn typeExprFold() -> X: {
 }
 
 static var staticVar = X;
-fn needsShared(x: shared type) -> type: { }
+fn needsShared(x: &shared type) -> type: { }
 // expect-return-type type
 fn testStaticVarIsShared() => needsShared(staticVar);
 
@@ -287,7 +287,7 @@ template(value)
 struct ConstantValue: { }
 
 template(c: expression_category)
-fn genericExpressionCategory(p: <c> X) -> ConstantValue{c}: { }
+fn genericExpressionCategory(p: &(c) X) -> ConstantValue{c}: { }
 
 static staticX: X = X();
 // expect-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
@@ -341,38 +341,38 @@ struct OuterStruct: {
         template(self_type) fn testSelfType() => self_type;
 
         // expect-return-type OuterStruct::InnerStruct{#0, #1}
-        fn testSelf1(self: const shared) => self;
+        fn testSelf1(self: &const shared) => self;
 
         // expect-return-type #2
-        template(self_type) fn testSelf2(self: const shared) => self;
+        template(self_type) fn testSelf2(self: &const shared) => self;
     }
 }
 
 struct TestSelfCalls: {
-    fn simpleFunc(self: const shared) => self;
+    fn simpleFunc(self: &const shared) => self;
 
     // expect-return-type TestSelfCalls
-    fn callSimpleFunc(mySelf: const shared TestSelfCalls) => mySelf.simpleFunc();
+    fn callSimpleFunc(mySelf: &const shared TestSelfCalls) => mySelf.simpleFunc();
 
     template(selfT: type, Explicit: type, Deduced: type)
     struct ComplexResult: { }
     template(self_type, Explicit: type, Deduced: type)
-    fn complexFunc(self: const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
+    fn complexFunc(self: &const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
 }
 
 struct DerivedSelfCalls: {
     base TestSelfCalls;
 
     // expect-return-type TestSelfCalls::ComplexResult{DerivedSelfCalls, X, bool}
-    fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);
+    fn callComplexFunc(self: &const shared) => self.complexFunc{X}(true);
 }
 
 struct TestUnbasedAccessExprs: {
     myMember: X;
     // expect-return-type X
-    fn accessMyMember(self: const shared) => .myMember;
+    fn accessMyMember(self: &const shared) => .myMember;
     // expect-return-type X
-    fn accessMyMemberFunc(self: const shared) => .accessMyMember();
+    fn accessMyMemberFunc(self: &const shared) => .accessMyMember();
 }
 
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
@@ -380,30 +380,30 @@ fn testLetParameterCategory(x: X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
 fn testVarParameterCategory(var x: X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
-fn testUniqueParameterCategory(x: unique X) => genericExpressionCategory(x);
+fn testUniqueParameterCategory(x: &unique X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
-fn testConstUniqueParameterCategory(x: const unique X) => genericExpressionCategory(x);
+fn testConstUniqueParameterCategory(x: &const unique X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, shared_ref)}
-fn testSharedParameterCategory(x: shared X) => genericExpressionCategory(x);
+fn testSharedParameterCategory(x: &shared X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
-fn testConstSharedParameterCategory(x: const shared X) => genericExpressionCategory(x);
+fn testConstSharedParameterCategory(x: &const shared X) => genericExpressionCategory(x);
 
 template(c: expression_category)
-fn genericParameterCategory(x: <c> X) => genericExpressionCategory(x);
+fn genericParameterCategory(x: &(c) X) => genericExpressionCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
 fn testValueParameterCategoryFold() => genericParameterCategory(X());
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, unique_ref)}
-fn testUniqueParameterCategoryFold(x: unique X) => genericParameterCategory(x);
+fn testUniqueParameterCategoryFold(x: &unique X) => genericParameterCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_unique_ref)}
-fn testConstUniqueParameterCategoryFold(x: const unique X) => genericParameterCategory(x);
+fn testConstUniqueParameterCategoryFold(x: &const unique X) => genericParameterCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, shared_ref)}
-fn testSharedParameterCategoryFold(x: shared X) => genericParameterCategory(x);
+fn testSharedParameterCategoryFold(x: &shared X) => genericParameterCategory(x);
 // expect-return-type ConstantValue{expression_category, @enumValue(expression_category, const_shared_ref)}
-fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCategory(x);
+fn testConstSharedParameterCategoryFold(x: &const shared X) => genericParameterCategory(x);
 
 // expect-return-type X
 template(c: expression_category)
-fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }
+fn genericParameterCategory2(x: &(c) X) -> X: { genericParameterCategory(x); }
 
 template(T: type) static open openGlobalImplTest: bool = false;
 // expect-value @enumValue(bool, true) ;; Note: Required because impl not processed automatically
@@ -435,8 +435,8 @@ static examineLogicalNotFun = !!true;
 struct openStruct: {
     x: X;
 
-    fn getX(self: const) -> X: { }
-    fn getT(self: const) -> type: { }
+    fn getX(self: &const) -> X: { }
+    fn getT(self: &const) -> type: { }
 }
 
 struct impl openStruct: {
@@ -444,8 +444,8 @@ struct impl openStruct: {
     t: type;
 
     // expect-return-type X
-    fn getX(self: const) => .x;
+    fn getX(self: &const) => .x;
 
     //; TODO: expect-return-type type
-    //; fn getT(self: const) => .t;
+    //; fn getT(self: &const) => .t;
 }

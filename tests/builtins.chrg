@@ -29,7 +29,7 @@ struct member_ptr: { }
 
 // TODO: The function parameter should be named 'self' to support .copy() syntax.
 template(T: type)
-fn copy(from: const T) -> T: { }
+fn copy(from: &const T) -> T: { }
 
 // TODO: Should take a reference argument
 template(T: type)

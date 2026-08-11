@@ -45,9 +45,10 @@ try,LexerToken::Try
 unique,LexerToken::Unique
 var,LexerToken::Var
 while,LexerToken::While
+base,LexerToken::Base
+context,LexerToken::Context
 enum,LexerToken::Enum
 fn,LexerToken::Fn
-base,LexerToken::Base
 incomplete,LexerToken::Incomplete
 namespace,LexerToken::Namespace
 open,LexerToken::Open

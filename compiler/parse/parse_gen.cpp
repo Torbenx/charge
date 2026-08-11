@@ -146,12 +146,14 @@ std::string_view nameString(LexerToken token) {
         return "Var";
     case LexerToken::While:
         return "While";
+    case LexerToken::Base:
+        return "Base";
+    case LexerToken::Context:
+        return "Context";
     case LexerToken::Enum:
         return "Enum";
     case LexerToken::Fn:
         return "Fn";
-    case LexerToken::Base:
-        return "Base";
     case LexerToken::Incomplete:
         return "Incomplete";
     case LexerToken::Namespace:
@@ -231,6 +233,8 @@ std::string_view nameString(State state) {
         return "AfterVariableDeclarationId";
     case State::VariableType:
         return "VariableType";
+    case State::ReferenceModifier:
+        return "ReferenceModifier";
     case State::AfterVariableModifier:
         return "AfterVariableModifier";
     case State::AfterVariableUniqueModifier:
@@ -402,7 +406,11 @@ std::span<const LexerToken> possibleTokens(State state) {
         return r;
     }
     case State::VariableType: {
-        static constexpr std::array r = { LexerToken::Unique, LexerToken::Shared, LexerToken::Const, LexerToken::Less };
+        static constexpr std::array r = { LexerToken::Amp };
+        return r;
+    }
+    case State::ReferenceModifier: {
+        static constexpr std::array r = { LexerToken::Unique, LexerToken::Shared, LexerToken::Const, LexerToken::LeftParen };
         return r;
     }
     case State::AfterVariableModifier: {
@@ -441,7 +449,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return r;
     }
     case State::AfterImplExpression: {
-        static constexpr std::array r = { LexerToken::ColonColon, LexerToken::LeftBrace, LexerToken::Greater };
+        static constexpr std::array r = { LexerToken::ColonColon, LexerToken::LeftBrace };
         return r;
     }
     case State::ImplAccessExpression: {
@@ -647,6 +655,10 @@ std::span<const State> thenStates(State state) {
     }
     case State::VariableType: {
         static constexpr std::array r = { State::Error, State::Expression };
+        return r;
+    }
+    case State::ReferenceModifier: {
+        static constexpr std::array r = { State::Error };
         return r;
     }
     case State::AfterVariableModifier: {

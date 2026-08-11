@@ -27,9 +27,10 @@ inline constexpr ConstWordStringTable words {
     wordWithId("unique", KEYWORD_WORD_ID),
     wordWithId("var", KEYWORD_WORD_ID),
     wordWithId("while", KEYWORD_WORD_ID),
+    wordWithId("base", SPECIAL_IDENTIFIER_WORD_ID),
+    wordWithId("context", SPECIAL_IDENTIFIER_WORD_ID),
     wordWithId("enum", SPECIAL_IDENTIFIER_WORD_ID),
     wordWithId("fn", SPECIAL_IDENTIFIER_WORD_ID),
-    wordWithId("base", SPECIAL_IDENTIFIER_WORD_ID),
     wordWithId("incomplete", SPECIAL_IDENTIFIER_WORD_ID),
     wordWithId("namespace", SPECIAL_IDENTIFIER_WORD_ID),
     wordWithId("open", SPECIAL_IDENTIFIER_WORD_ID),
@@ -143,9 +144,10 @@ enum class LexerToken : uint8_t {
     Unique, // unique
     Var, // var
     While, // while
+    Base, // base
+    Context, // context
     Enum, // enum
     Fn, // fn
-    Base, // base
     Incomplete, // incomplete
     Namespace, // namespace
     Open, // open
@@ -162,7 +164,7 @@ enum class LexerToken : uint8_t {
     FirstKeyword = Assert,
     LastKeyword = While,
 
-    FirstSpecialIdentifier = Enum,
+    FirstSpecialIdentifier = Base,
     LastSpecialIdentifier = Virtual,
 
     Invalid = 255
@@ -248,9 +250,10 @@ inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {
         { LexerToken::Unique, "unique" },
         { LexerToken::Var, "var" },
         { LexerToken::While, "while" },
+        { LexerToken::Base, "base" },
+        { LexerToken::Context, "context" },
         { LexerToken::Enum, "enum" },
         { LexerToken::Fn, "fn" },
-        { LexerToken::Base, "base" },
         { LexerToken::Incomplete, "incomplete" },
         { LexerToken::Namespace, "namespace" },
         { LexerToken::Open, "open" },
@@ -286,6 +289,7 @@ enum class State : uint8_t {
     AfterSimpleVariableDeclarationId,
     AfterVariableDeclarationId,
     VariableType,
+    ReferenceModifier,
     AfterVariableModifier,
     AfterVariableUniqueModifier,
     AfterVariableSharedModifier,

@@ -3,26 +3,26 @@ template(T: type)
 struct refcell: {
 
     struct unique_ref: {
-        fn get(self: unique) -> unique[self] T: {
+        fn get(self: &unique) -> &unique[self] T: {
             intern .cell:
                 return *.cell.target;
         }
 
-        fn impl destroy_behavior(self: unique): {
+        fn impl destroy_behavior(self: &unique): {
             intern .cell:
                 .cell.shared_refcount = 0;
         }
 
         base borrow_tracker;
-        context cell: shared refcell{T};
+        context cell: &shared refcell{T};
     }
 
     struct shared_ref: {
-        fn get(self: unique) -> shared[unique self] T: {
+        fn get(self: unique) -> &shared[unique self] T: {
             return *.cell.target;
         }
 
-        fn impl destroy_behavior(self: unique): {
+        fn impl destroy_behavior(self: &unique): {
             intern .cell:
                 .cell.shared_refcount -= 1;
             if .cell.shared_refcount == 0: {
@@ -32,7 +32,7 @@ struct refcell: {
         }
 
         base borrow_tracker;
-        context cell: shared refcell{T};
+        context cell: &shared refcell{T};
     }
 
     invariant: {
@@ -51,18 +51,18 @@ struct refcell: {
             prove !.target.uniquely_referenced();
             prove .unique_refs.empty();
             prove .shared_refs.size() == .shared_refcount;
-            let activeBorrows = count_if(.shared_refs, fn(r: const) => r.uniquely_borrowed());
+            let activeBorrows = count_if(.shared_refs, fn(r: &const) => r.uniquely_borrowed());
             prove .target.shared_reference_count() <= activeBorrows;
         }
     }
 
-    fn unique_borrow(intern self: shared) -> unique_ref: {
+    fn unique_borrow(intern self: &shared) -> unique_ref: {
         assert .shared_refcount == 0;
         .shared_refcount = INVALID_REFCOUNT;
         return unique_ref(cell: self);
     }
 
-    fn shared_borrow(intern self: shared) -> shared_ref: {
+    fn shared_borrow(intern self: &shared) -> shared_ref: {
         assert .shared_refcount < INVALID_REFCOUNT;
         .shared_refcount += 1;
         assert .shared_refcount < INVALID_REFCOUNT;

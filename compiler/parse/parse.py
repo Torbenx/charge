@@ -36,9 +36,10 @@ keywords = [
 ]
 # Identifiers that have spacial meaning in some context
 specialIdentifiers = [
+    "base",
+    "context",
     "enum",
     "fn",
-    "base",
     "incomplete",
     "namespace",
     "open",
