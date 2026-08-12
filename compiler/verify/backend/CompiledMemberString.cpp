@@ -362,7 +362,7 @@ TEST(VerifyBackend, CompiledMemberStringCompilation) {
         seenPositions |= CompiledMemberString::positionMask(position);
     }
     EXPECT_EQ(seenPositions, compiled.sizeMask());
-    std::ranges::is_sorted(compiled.letters, LetterOrder());
+    EXPECT_TRUE(std::ranges::is_sorted(compiled.letters, LetterOrder()));
 }
 
 TEST(VerifyBackend, CompiledMemberStringEqualityWithALiteral) {
