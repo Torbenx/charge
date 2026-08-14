@@ -10,7 +10,7 @@ Charge is an experimental memory-safe systems programming language, most similar
 ## Status
 
 It is currently not possible to compile or verify any real programs.
-The current work is focused on developing the safety-related compiler components individually and exercising them with tests. Integration between components is mostly missing and is only planned once they have reached a good level of maturity individually. Some important components, such as a compile-time interpreter and a code generation backend, are also completely missing.
+The current work is focused on developing the safety-related compiler components individually and exercising them with tests. Integration between components is mostly missing and is only planned once they have reached a good level of maturity individually. Some important components, such as a compile-time interpreter and a code generation backend, are completely missing.
 
 Next milestones:
 
@@ -38,5 +38,9 @@ There is also a Visual Studio Code extension in `vscode` with syntax highlightin
 ## Building
 
 The project requires Python 3 and a C++23-compatible compiler and standard library. Building is tested with Clang 22 and GCC 15 on Ubuntu 26.04. The build produces a single binary `charge` that runs the test suite.
+```
+cmake -S . -B build
+cmake --build build && ./build/charge
+```
 
 To test the Visual Studio Code extension, Node.js is required. First run `npm install` once in the `vscode` directory to set up the extension. Then open the project in Visual Studio Code and press F5 or manually run the `Extension` configuration. This will open a development instance with the extension installed.
