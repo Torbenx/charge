@@ -20,6 +20,7 @@ struct RecoveryElement {
     LexerToken insert() const { return m_token.value(); }
     int_t inserts() const { return isInsert() ? 1 : 0; }
     int_t skips() const { return isInsert() ? 0 : 1; }
+    uint32_t cost() const { return isInsert() ? 3 : 2; }
 
     bool operator==(const RecoveryElement&) const = default;
 
@@ -113,6 +114,40 @@ ReturnStatus SimpleParser::apply(const NoOutput& output, const RecoveryInstructi
     return applyExpand(*this, output, instructions);
 }
 
+}
+
+namespace parse::recovery {
+
+struct StateHandle {
+    constexpr StateHandle(uint32_t id)
+        : m_id(id) { }
+    constexpr uint32_t id() const { return m_id; }
+    bool operator==(const StateHandle&) const = default;
+    uint32_t m_id;
+};
+
+struct EdgeHandle {
+    constexpr EdgeHandle(uint32_t id)
+        : m_id(id) { }
+    constexpr uint32_t id() const { return m_id; }
+    bool operator==(const EdgeHandle&) const = default;
+    uint32_t m_id;
+};
+
+}
+
+template<>
+struct optional_traits<parse::recovery::StateHandle> {
+    static constexpr auto empty_value = parse::recovery::StateHandle(limits::max);
+};
+
+template<>
+struct optional_traits<parse::recovery::EdgeHandle> {
+    static constexpr auto empty_value = parse::recovery::EdgeHandle(limits::max);
+};
+
+namespace parse::recovery {
+
 static std::vector<RecoveryElement> generateCases(const SavedParserState& savedState) {
     if (savedState.status == ReturnStatus::EOS)
         return {};
@@ -165,12 +200,6 @@ static std::vector<RecoveryElement> generateCases(const SavedParserState& savedS
     return cases;
 }
 
-struct StateHandle {
-    uint32_t m_id = limits::max;
-    constexpr uint32_t id() const { return m_id; }
-    bool operator==(const StateHandle&) const = default;
-};
-
 //! Everything that determines how the parser continues from a recovery state.
 /*!
 The parsed token count is not part of it since it also counts the tokens inserted on the way to the state.
@@ -189,6 +218,12 @@ struct StateTable {
         StateKey key;
         //! Index of the source token at key.sourcePosition
         uint32_t sourceTokenIndex = 0;
+        //! Cost of the cheapest known way to the state, final once the state is expanded
+        uint32_t modificationCost = limits::max;
+        //! All the ways to the state that cost modificationCost
+        std::optional<EdgeHandle> lastIncomingEdge;
+        uint32_t incomingEdges = 0;
+        bool expanded = false;
     };
 
     struct InternResult {
@@ -209,6 +244,12 @@ struct StateTable {
         else
             VERIFY(m_states[it->second.id()].sourceTokenIndex == sourceTokenIndex);
         return { it->second, isNew };
+    }
+
+    //! The parsed token count is not stored with the state and has to be supplied by the caller
+    SavedParserState savedState(StateHandle handle, uint32_t parsedTokens) const {
+        const StateData& data = m_states[handle.id()];
+        return { data.key.status, data.key.state, parsedTokens, data.key.sourcePosition, data.key.scopes };
     }
 
     int_t size() const { return (int_t)m_states.size(); }
@@ -243,23 +284,19 @@ struct RecoveryState {
         PruneCondition { .tokenLookAhead = 1, .costTolerance = 3 },
     };
 
-    struct ErrorNode;
+    //! Maximum number of equally good ways to a state that are remembered
+    static constexpr uint32_t MAX_INCOMING_EDGES = 4;
+    //! Maximum number of alternative recovery paths that are reported
+    static constexpr int_t MAX_RECOVERY_PATHS = 8;
 
-    // An error node is pruned by PRUNE_CONDITIONS when there exists a node that is at least tokenLookAhead
-    // source tokens ahead and uses costTolarance or fewer modifications. All the best nodes are stored
-    // in a vector ordered by total advance.
-    struct ErrorNode {
-        uint32_t totalAdvancedTokens() const { return sourceTokenIndex; }
-        uint32_t modificationCost() const { return totalSkippedTokens * 2 + totalInsertedTokens * 3; }
+    using StateData = StateTable::StateData;
 
-        uint32_t parentNode;
+    //! Applying a recovery element to its parent state leads to the state holding the edge
+    struct Edge {
+        StateHandle parent;
         RecoveryElement recovery;
-        //! Index of the source token at preNextRecoveryState.sourcePosition. Unlike the parsed
-        //! token count this only depends on the source position and not on the path taken.
-        uint32_t sourceTokenIndex = 0;
-        uint32_t totalSkippedTokens = 0;
-        uint32_t totalInsertedTokens = 0;
-        SavedParserState preNextRecoveryState;
+        //! Implements singly linked list of incoming edges to the same target
+        std::optional<EdgeHandle> prevIncomingEdge;
     };
 
     struct ReturnElement {
@@ -273,12 +310,12 @@ struct RecoveryState {
     };
 
     struct ErrorInfo {
-        ErrorInfo(uint32_t nodeIdx, ErrorNode& node)
-            : nodeIdx(nodeIdx)
-            , totalAdvancedTokens(node.totalAdvancedTokens())
-            , modificationCost(node.modificationCost()) { }
+        ErrorInfo(StateHandle state, const StateData& data)
+            : state(state)
+            , totalAdvancedTokens(data.sourceTokenIndex)
+            , modificationCost(data.modificationCost) { }
 
-        uint32_t nodeIdx;
+        StateHandle state;
         uint32_t totalAdvancedTokens = 0;
         uint32_t modificationCost = 0;
 
@@ -291,12 +328,7 @@ struct RecoveryState {
         }
     };
 
-    void insertNode(ErrorNode child) {
-        VERIFY(child.sourceTokenIndex == child.preNextRecoveryState.parsedTokens + child.totalSkippedTokens - child.totalInsertedTokens);
-        stateTable.intern(child.preNextRecoveryState, child.sourceTokenIndex);
-        uint32_t idx = allNodes.size();
-        ErrorInfo info(idx, child);
-        allNodes.emplace_back(std::move(child));
+    void insertBestError(ErrorInfo info) {
         // dbgprint("inserting (adv={}, mod={}) into", info.totalAdvancedTokens, info.modificationCost);
         // for (auto i : bestErrors)
         //     dbgprint(" (adv={}, mod={})", i.totalAdvancedTokens, i.modificationCost);
@@ -328,129 +360,194 @@ struct RecoveryState {
         bestErrors.erase(newEnd, bestErrors.end());
     }
 
-    void makeNodes(uint32_t parentIdx, RecoveryElement recovery, uint32_t parentSourceTokenIndex, uint32_t totalSkippedTokens, uint32_t totalInsertedTokens, SimpleParser& parser, int_t validTokensUntilError) {
-        uint32_t sourceTokenIndex = parentSourceTokenIndex + (uint32_t)recovery.skips();
-        if (validTokensUntilError > 1) {
-            parser.parse(NoOutput(), validTokensUntilError - 1);
-            insertNode({
-                .parentNode = parentIdx,
-                .recovery = recovery,
-                .sourceTokenIndex = sourceTokenIndex + (uint32_t)validTokensUntilError - 1,
+    bool isPruned(const StateData& state) const {
+        for (const auto& cond : PRUNE_CONDITIONS) {
+            auto it = std::partition_point(bestErrors.begin(), bestErrors.end(), [&](const ErrorInfo& info) {
+                return info.totalAdvancedTokens >= state.sourceTokenIndex + cond.tokenLookAhead;
+            });
+            if (it == bestErrors.begin())
+                continue;
+            VERIFY(std::prev(it)->totalAdvancedTokens >= state.sourceTokenIndex + cond.tokenLookAhead);
+            if (std::prev(it)->modificationCost + cond.costTolerance <= state.modificationCost)
+                return true;
+        }
+        return false;
+    }
+
+    void enqueue(StateHandle handle, uint32_t modificationCost) {
+        if (modificationCost >= queue.size())
+            queue.resize(modificationCost + 1);
+        queue[modificationCost].push_back(handle);
+    }
+
+    void addRootState(const SavedParserState& savedState, uint32_t sourceTokenIndex) {
+        auto [handle, isNew] = stateTable.intern(savedState, sourceTokenIndex);
+        if (!isNew)
+            return;
+        stateTable[handle].modificationCost = 0;
+        enqueue(handle, 0);
+    }
+
+    void addState(StateHandle parent, RecoveryElement recovery, uint32_t sourceTokenIndex, const SavedParserState& savedState) {
+        uint32_t modificationCost = stateTable[parent].modificationCost + recovery.cost();
+        auto [handle, isNew] = stateTable.intern(savedState, sourceTokenIndex);
+        StateData& state = stateTable[handle];
+        if (isNew || modificationCost < state.modificationCost) {
+            // Since every edge increases the cost and states are expanded in the order of their
+            // cost, a cheaper way to a state can only be found before it is expanded
+            VERIFY(!state.expanded);
+            state.modificationCost = modificationCost;
+            state.lastIncomingEdge = std::nullopt;
+            state.incomingEdges = 0;
+            enqueue(handle, modificationCost);
+        } else if (modificationCost > state.modificationCost || state.incomingEdges >= MAX_INCOMING_EDGES) {
+            return;
+        }
+
+        edges.push_back({ .parent = parent, .recovery = recovery, .prevIncomingEdge = state.lastIncomingEdge });
+        state.lastIncomingEdge = EdgeHandle { (uint32_t)edges.size() - 1 };
+        state.incomingEdges += 1;
+    }
+
+    void expandState(SimpleParser& parser, StateHandle handle) {
+        uint32_t sourceTokenIndex = stateTable[handle].sourceTokenIndex;
+        SavedParserState savedState = stateTable.savedState(handle, sourceTokenIndex);
+        for (RecoveryElement c : generateCases(savedState)) {
+            parser.restore(savedState);
+
+            // if (c.isInsert())
+            //     dbgln("Inserting '{}' at \"{}\"", exampleString(c.insert()), savedState.sourcePosition);
+            // else
+            //     dbgln("Skipping 1 at \"{}\"", savedState.sourcePosition);
+            if (parser.apply(NoOutput(), c) != ReturnStatus::Ready) {
+                // if (c.isInsert())
+                //     dbgln("Inserting '{}' failed: {}", exampleString(c.insert()), formatInternalErrorMessage({ parser.save(), parser.skipToken() }));
+                continue;
+            }
+            int_t prevParsedTokens = parser.parsedTokens();
+            parser.parse(NoOutput());
+            uint32_t index = sourceTokenIndex + (uint32_t)c.skips();
+            if (parser.done()) {
+                addState(handle, c, index + (uint32_t)(parser.parsedTokens() - prevParsedTokens), parser.save());
+                continue;
+            }
+
+            VERIFY(parser.error());
+            int_t validTokensUntilError = parser.parsedTokens() - prevParsedTokens;
+            parser.restore(savedState);
+            VERIFY(parser.apply(NoOutput(), c) == ReturnStatus::Ready);
+            if (validTokensUntilError > 1) {
+                parser.parse(NoOutput(), validTokensUntilError - 1);
+                addState(handle, c, index + (uint32_t)validTokensUntilError - 1, parser.save());
+                parser.parse(NoOutput(), 1);
+            } else {
+                parser.parse(NoOutput(), validTokensUntilError);
+            }
+            addState(handle, c, index + (uint32_t)validTokensUntilError, parser.save());
+        }
+    }
+
+    void grind(SimpleParser& parser) {
+        for (uint32_t cost = 0; cost < queue.size(); cost++) {
+            // Nothing is added to the current bucket while it is drained since every edge increases
+            // the cost. Expanding the states that are furthest ahead first lets the pruning
+            // conditions take effect earlier.
+            std::ranges::sort(queue[cost], std::less(), [this](StateHandle handle) {
+                return stateTable[handle].sourceTokenIndex;
+            });
+            while (!queue[cost].empty()) {
+                StateHandle handle = queue[cost].back();
+                queue[cost].pop_back();
+                StateData& state = stateTable[handle];
+                if (state.expanded || state.modificationCost != cost)
+                    continue;
+                state.expanded = true;
+
+                insertBestError({ handle, state });
+                if (isPruned(state))
+                    continue;
+                expandState(parser, handle);
+            }
+        }
+    }
+
+    //! Collects up to MAX_RECOVERY_PATHS of the ways to reach the state as edge sequences
+    void collectPaths(StateHandle handle, std::vector<EdgeHandle>& path, std::vector<std::vector<EdgeHandle>>& result) const {
+        std::vector<EdgeHandle> incoming;
+        for (std::optional<EdgeHandle> edge = stateTable[handle].lastIncomingEdge; edge.has_value(); edge = edges[edge->id()].prevIncomingEdge) {
+            VERIFY(incoming.size() < MAX_INCOMING_EDGES);
+            incoming.push_back(edge.value());
+        }
+        if (incoming.empty()) {
+            result.emplace_back(path.rbegin(), path.rend());
+            return;
+        }
+
+        // The incoming edges are stored in the reverse order of their discovery
+        for (EdgeHandle edge : std::views::reverse(incoming)) {
+            if ((int_t)result.size() >= MAX_RECOVERY_PATHS)
+                return;
+            path.push_back(edge);
+            collectPaths(edges[edge.id()].parent, path, result);
+            path.pop_back();
+        }
+    }
+
+    //! Replays the path to recompute the parser states
+    /*!
+    This is required to recover the number tokens parsed along the path.
+    */
+    std::vector<ReturnElement> buildPath(std::string_view source, std::span<const EdgeHandle> path) const {
+        SimpleParser parser(source.data());
+        std::vector<ReturnElement> result;
+        uint32_t totalSkippedTokens = 0;
+        uint32_t totalInsertedTokens = 0;
+        for (EdgeHandle edge : path) {
+            const Edge& incoming = edges[edge.id()];
+            const StateData& state = stateTable[incoming.parent];
+            int_t advancedTokens = parser.parsedTokens() + (int_t)totalSkippedTokens - (int_t)totalInsertedTokens;
+            VERIFY(parser.parse(NoOutput(), (int_t)state.sourceTokenIndex - advancedTokens) == ReturnStatus::Ready);
+            SavedParserState preRecoveryState = parser.save();
+            VERIFY(stateTable.savedState(incoming.parent, preRecoveryState.parsedTokens) == preRecoveryState);
+
+            result.push_back(ReturnElement {
                 .totalSkippedTokens = totalSkippedTokens,
                 .totalInsertedTokens = totalInsertedTokens,
-                .preNextRecoveryState = parser.save(),
-            });
+                .preRecoveryState = std::move(preRecoveryState),
+                .recovery = incoming.recovery });
+            VERIFY(parser.apply(NoOutput(), incoming.recovery) == ReturnStatus::Ready);
+            totalSkippedTokens += (uint32_t)incoming.recovery.skips();
+            totalInsertedTokens += (uint32_t)incoming.recovery.inserts();
+        }
+        return result;
+    }
+
+    static std::vector<std::vector<ReturnElement>> recover(std::string_view source, const SavedParserState& errorState) {
+        RecoveryState state;
+        SimpleParser parser(source.data());
+        // The states the parser passes through before the first error are the roots of the search
+        int_t validTokensUntilError = errorState.parsedTokens;
+        if (validTokensUntilError > 1) {
+            parser.parse(NoOutput(), validTokensUntilError - 1);
+            state.addRootState(parser.save(), (uint32_t)validTokensUntilError - 1);
             parser.parse(NoOutput(), 1);
         } else {
             parser.parse(NoOutput(), validTokensUntilError);
         }
-
-        insertNode({
-            .parentNode = parentIdx,
-            .recovery = recovery,
-            .sourceTokenIndex = sourceTokenIndex + (uint32_t)validTokensUntilError,
-            .totalSkippedTokens = totalSkippedTokens,
-            .totalInsertedTokens = totalInsertedTokens,
-            .preNextRecoveryState = parser.save(),
-        });
-    }
-
-    void grind(SimpleParser& parser) {
-        while (nextNodeToProcessed < (int_t)allNodes.size()) {
-            int_t parentIdx = nextNodeToProcessed++;
-            bool pruneNode = false;
-            for (const auto& cond : PRUNE_CONDITIONS) {
-                ErrorNode& parent = allNodes[parentIdx];
-                auto it = std::partition_point(bestErrors.begin(), bestErrors.end(), [&](const ErrorInfo& info) {
-                    return info.totalAdvancedTokens >= parent.totalAdvancedTokens() + cond.tokenLookAhead;
-                });
-                if (it == bestErrors.begin())
-                    continue;
-                VERIFY(std::prev(it)->totalAdvancedTokens >= parent.totalAdvancedTokens() + cond.tokenLookAhead);
-                if (std::prev(it)->modificationCost + cond.costTolerance <= parent.modificationCost()) {
-                    pruneNode = true;
-                    break;
-                }
-            }
-            if (pruneNode)
-                continue;
-
-            for (RecoveryElement c : generateCases(allNodes[parentIdx].preNextRecoveryState)) {
-                parser.restore(allNodes[parentIdx].preNextRecoveryState);
-
-                // if (c.isInsert())
-                //     dbgln("Inserting '{}' at \"{}\"", exampleString(c.insert()), allNodes[parentIdx].preNextRecoveryState.sourcePosition);
-                // else
-                //     dbgln("Skipping 1 at \"{}\"", allNodes[parentIdx].preNextRecoveryState.sourcePosition);
-                if (parser.apply(NoOutput(), c) != ReturnStatus::Ready) {
-                    // if (c.isInsert())
-                    //     dbgln("Inserting '{}' failed: {}", exampleString(c.insert()), formatInternalErrorMessage({ parser.save(), parser.skipToken() }));
-                    continue;
-                }
-                int_t prevParsedTokens = parser.parsedTokens();
-                parser.parse(NoOutput());
-                if (parser.done()) {
-                    insertNode({
-                        .parentNode = (uint32_t)parentIdx,
-                        .recovery = c,
-                        .sourceTokenIndex = (uint32_t)(allNodes[parentIdx].sourceTokenIndex + c.skips() + parser.parsedTokens() - prevParsedTokens),
-                        .totalSkippedTokens = (uint32_t)(allNodes[parentIdx].totalSkippedTokens + c.skips()),
-                        .totalInsertedTokens = (uint32_t)(allNodes[parentIdx].totalInsertedTokens + c.inserts()),
-                        .preNextRecoveryState = parser.save(),
-                    });
-                    continue;
-                }
-
-                VERIFY(parser.error());
-                int_t validTokensUntilError = parser.parsedTokens() - prevParsedTokens;
-                parser.restore(allNodes[parentIdx].preNextRecoveryState);
-                VERIFY(parser.apply(NoOutput(), c) == ReturnStatus::Ready);
-                makeNodes(
-                    parentIdx, c,
-                    allNodes[parentIdx].sourceTokenIndex,
-                    allNodes[parentIdx].totalSkippedTokens + c.skips(),
-                    allNodes[parentIdx].totalInsertedTokens + c.inserts(),
-                    parser, validTokensUntilError);
-            }
-        }
-    }
-
-    std::vector<ReturnElement> recoveryPath(int_t nodeIdx) const {
-        std::vector<ReturnElement> result;
-        for (;;) {
-            const auto& node = allNodes[nodeIdx];
-            int_t parentIdx = node.parentNode;
-            if (parentIdx == (int_t)(uint32_t)limits::max)
-                break;
-            const auto& parent = allNodes[parentIdx];
-            result.push_back(ReturnElement {
-                .totalSkippedTokens = parent.totalSkippedTokens,
-                .totalInsertedTokens = parent.totalInsertedTokens,
-                .preRecoveryState = parent.preNextRecoveryState,
-                .recovery = node.recovery });
-            nodeIdx = parentIdx;
-        }
-        std::ranges::reverse(result);
-        return result;
-    }
-
-    static std::vector<std::vector<ReturnElement>> recover(SimpleParser& parser, const SavedParserState& errorState) {
-        VERIFY(parser.parsedTokens() == 0);
-        RecoveryState state;
-        state.makeNodes(limits::max, RecoveryElement::insert(LexerToken::Invalid), 0, 0, 0, parser, errorState.parsedTokens);
+        state.addRootState(parser.save(), (uint32_t)validTokensUntilError);
         state.grind(parser);
 
-        std::vector<std::vector<ReturnElement>> result;
+        std::vector<std::vector<EdgeHandle>> paths;
+        std::vector<EdgeHandle> path;
         for (const ErrorInfo& info : state.bestErrors) {
-            const auto& node = state.allNodes[info.nodeIdx];
-            if (node.preNextRecoveryState.status == ReturnStatus::EOS)
-                result.emplace_back(state.recoveryPath(info.nodeIdx));
+            if (state.stateTable[info.state].key.status == ReturnStatus::EOS)
+                state.collectPaths(info.state, path, paths);
         }
+
+        std::vector<std::vector<ReturnElement>> result;
+        for (const auto& edgePath : paths)
+            result.emplace_back(state.buildPath(source, edgePath));
         return result;
-    }
-    static std::vector<std::vector<ReturnElement>> recover(std::string_view source, const SavedParserState& errorState) {
-        SimpleParser parser(source.data());
-        return recover(parser, errorState);
     }
 
     void checkInvariances() {
@@ -462,11 +559,11 @@ struct RecoveryState {
         }
     }
 
-    int_t nextNodeToProcessed = 0;
     StateTable stateTable = {};
+    std::vector<Edge> edges = {};
+    //! States that still have to be expanded, indexed by their modification cost
+    std::vector<std::vector<StateHandle>> queue = {};
     std::vector<ErrorInfo> bestErrors = {};
-    std::vector<ErrorNode> allNodes = {};
-    std::unique_ptr<ErrorNode> rootError = nullptr;
 };
 
 struct RecoveryGroup {
@@ -502,8 +599,7 @@ std::vector<RecoveryGroup> buildGroups(std::span<RecoveryState::ReturnElement> i
 }
 
 std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState) {
-    SimpleParser parser(source.data());
-    auto ungroupedPaths = RecoveryState::recover(parser, rootErrorState);
+    auto ungroupedPaths = RecoveryState::recover(source, rootErrorState);
     VERIFY(!ungroupedPaths.empty());
     std::vector<std::vector<RecoveryGroup>> paths;
     for (auto& path : ungroupedPaths)

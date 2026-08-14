@@ -87,7 +87,9 @@ void parseOrThrow(sema::Context& context) {
     }
 }
 
-std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState);
+namespace recovery {
+    std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState);
+}
 
 std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
     VERIFY(context.tokenBuffer.tokens.empty());
@@ -96,7 +98,7 @@ std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
         SimpleParser parser(context.tokenBuffer.source.data());
         parser.parse(NoOutput());
         if (!parser.done())
-            errors = recoverAndAnalyze(context.tokenBuffer.source, parser.save());
+            errors = recovery::recoverAndAnalyze(context.tokenBuffer.source, parser.save());
     }
 
     Parser parser(context.tokenBuffer.source.data());
