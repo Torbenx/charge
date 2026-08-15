@@ -100,6 +100,15 @@ void FunctionChecker::checkSortsOfKind(Expr expr, const Data& data) {
         // An equality accepts any sort as long as both of its sides agree
         if (function.sortOf(data.left) != function.sortOf(data.right))
             report.malformedExpressions.push_back(expr);
+    } else if constexpr (variadicOperandSort(kind).has_value()) {
+        static constexpr Sort operandSort = variadicOperandSort(kind).value();
+        bool valid = data.operands.size() >= 2;
+        for (Expr operand : function.view(data.operands)) {
+            if (function.sortOf(operand) != operandSort)
+                valid = false;
+        }
+        if (!valid)
+            report.malformedExpressions.push_back(expr);
     } else if (!argumentSortsMatch(data)) {
         report.malformedExpressions.push_back(expr);
     }

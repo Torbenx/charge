@@ -18,6 +18,8 @@ inline constexpr ConstWordStringTable words {
     "phi",
     "true",
     "false",
+    "and",
+    "or",
     "load",
     "pre",
     "post",

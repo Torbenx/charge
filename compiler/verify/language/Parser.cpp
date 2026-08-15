@@ -616,7 +616,7 @@ struct FunctionParser {
     }
 
     ir::Expr parseExpression(TokenStream& s) {
-        return parseBinaryExpr(s);
+        return parseOrExpr(s);
     }
 
     template<typename T>
@@ -624,7 +624,31 @@ struct FunctionParser {
         return sortCast<T>(parseExpression(s));
     }
 
-    ir::Expr parseBinaryExpr(TokenStream& s) {
+    template<typename Parse>
+    std::vector<ir::Bool> parseConnectiveOperands(TokenStream& s, Word connective, Parse parseOperand) {
+        std::vector<ir::Bool> operands { sortCast<ir::Bool>(parseOperand(s)) };
+        while (s.tokKind() == TokenKind::Identifier && s.tok().word() == connective) {
+            s.advance();
+            operands.push_back(sortCast<ir::Bool>(parseOperand(s)));
+        }
+        return operands;
+    }
+
+    ir::Expr parseOrExpr(TokenStream& s) {
+        auto operands = parseConnectiveOperands(s, words["or"], [this](TokenStream& s) { return parseAndExpr(s); });
+        if (operands.size() == 1)
+            return operands.front();
+        return ir.addOr(operands);
+    }
+
+    ir::Expr parseAndExpr(TokenStream& s) {
+        auto operands = parseConnectiveOperands(s, words["and"], [this](TokenStream& s) { return parseEqualityExpr(s); });
+        if (operands.size() == 1)
+            return operands.front();
+        return ir.addAnd(operands);
+    }
+
+    ir::Expr parseEqualityExpr(TokenStream& s) {
         ir::Expr left = parseUnaryExpr(s);
         if (s.tokKind() == TokenKind::Equal) {
             s.advance();
@@ -641,6 +665,7 @@ struct FunctionParser {
 
     ir::Expr parseUnaryExpr(TokenStream& s) {
         if (s.tokKind() == TokenKind::Exclaim) {
+            s.advance();
             return !sortCast<ir::Bool>(parseUnaryExpr(s));
         } else {
             return parsePostfixExpr(s);
@@ -924,6 +949,91 @@ fn #test($a, $b, $c):
     testExpr(ir::CodePos(3));
     testExpr(ir::CodePos(4));
     testExpr(ir::CodePos(5));
+}
+
+TEST(VerifyLanguage, ParseConnectivePrecedence) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c, $d, $e, $f):
+    store $a <- $a = $b and $c = $d or $e = $f
+    store $a <- ($a = $b and $c = $d) or ($e = $f)
+    store $a <- $a = $b and ($c = $d or $e = $f)
+)");
+    // 'or' binds weakest, so the first two stores hold the same expression
+    ir::Bool first = (ir::Bool)fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(first.kind(), ir::ExprKind::Or);
+    EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(1)).value, first);
+
+    auto disjuncts = fn.view(fn.getOr(first).operands);
+    EXPECT_EQ(disjuncts.size(), 2);
+    EXPECT_EQ(disjuncts[0].kind(), ir::ExprKind::And);
+    EXPECT_EQ(disjuncts[1].kind(), ir::ExprKind::Equality);
+
+    // The operands of the 'and' are the equalities, which bind strongest
+    auto conjuncts = fn.view(fn.getAnd((ir::Bool)disjuncts[0]).operands);
+    EXPECT_EQ(conjuncts.size(), 2);
+    EXPECT_EQ(conjuncts[0].kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(conjuncts[1].kind(), ir::ExprKind::Equality);
+
+    // Parentheses give the 'or' the higher precedence instead
+    ir::Bool grouped = (ir::Bool)fn.getStore(ir::CodePos(2)).value;
+    EXPECT_EQ(grouped.kind(), ir::ExprKind::And);
+    EXPECT_EQ(fn.view(fn.getAnd(grouped).operands)[1].kind(), ir::ExprKind::Or);
+}
+
+TEST(VerifyLanguage, ParseConnectiveAssociativity) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    store $a <- $a = $a or $b = $b or $c = $c
+    store $a <- ($a = $a or $b = $b) or $c = $c
+    store $a <- $a = $a or ($b = $b or $c = $c)
+    store $a <- $a = $a or !($b = $b or $c = $c)
+)");
+    // A chain of the same connective is one expression, however it is grouped
+    ir::Bool chain = (ir::Bool)fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.view(fn.getOr(chain).operands).size(), 3);
+    EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(1)).value, chain);
+    EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(2)).value, chain);
+
+    // A negated operand is not merged into the surrounding disjunction
+    ir::Bool negated = (ir::Bool)fn.getStore(ir::CodePos(3)).value;
+    EXPECT_NE(negated, chain);
+    auto operands = fn.view(fn.getOr(negated).operands);
+    EXPECT_EQ(operands.size(), 2);
+    EXPECT_EQ(operands[1].kind(), ir::ExprKind::Or);
+    EXPECT_EQ((uint32_t)operands[1].boolNegatedBit, 1u);
+}
+
+TEST(VerifyLanguage, ParseMultilineConnective) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    prove $a = $b
+        or $b = $c
+        or $a = $c by eq_transitive
+    store $a <- $a = $b or $b = $c or $a = $c
+)");
+    // Continuation lines do not change the expression
+    ir::Bool prop = fn.prop(ir::Theorem(0));
+    EXPECT_EQ(prop.kind(), ir::ExprKind::Or);
+    EXPECT_EQ(fn.view(fn.getOr(prop).operands).size(), 3);
+    EXPECT_EQ(fn.proof(ir::Theorem(0)).tactic(), ir::Tactic::EqualityTransitive);
+    EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(0)).value, prop);
+}
+
+TEST(VerifyLanguage, ParseConnectiveInSatClause) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    prove true by sat:
+        clause $a = $b or $b = $a by sorry
+        clause $a = $a and $b = $b by eq_reflexive
+)");
+    auto& proof = fn.getSat(fn.proof(ir::Theorem(0)));
+    EXPECT_EQ(proof.clauses.size(), 2);
+
+    // 'by' ends the clause expression, it is not read as another operand
+    EXPECT_EQ(proof.clauses[0].prop.kind(), ir::ExprKind::Or);
+    EXPECT_EQ(proof.clauses[0].proof.tactic(), ir::Tactic::Sorry);
+    EXPECT_EQ(proof.clauses[1].prop.kind(), ir::ExprKind::And);
+    EXPECT_EQ(proof.clauses[1].proof.tactic(), ir::Tactic::EqualityReflexive);
 }
 
 TEST(VerifyLanguage, ParseTheorems) {

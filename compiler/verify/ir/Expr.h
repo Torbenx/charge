@@ -18,6 +18,18 @@ enum class ExprKind : uint8_t {
 #include <verify/ir/expressions.inc>
 };
 
+constexpr std::optional<Sort> variadicOperandSort(ExprKind kind) {
+    switch (kind) {
+#define VARIADIC_EXPR(name, sort, operandSort) \
+    case ExprKind::name:                       \
+        return Sort::operandSort;
+#include <verify/ir/expressions.inc>
+
+    default:
+        return std::nullopt;
+    }
+}
+
 //! The expressions of all sorts that only differ in the sort they are declared with
 /*!
 Loads exist once per sort. Since all of them store the same data they can be created

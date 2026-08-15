@@ -148,6 +148,29 @@ ExprList Function::makeExprList(std::span<const Expr> list) {
     return result;
 }
 
+template<ExprKind kind, std::derived_from<Expr> OperandSort>
+ExprList Function::flattenOperands(std::span<const OperandSort> operands) {
+    VERIFY(operands.size() >= 2);
+    std::vector<Expr> flattened;
+    flattened.reserve(operands.size());
+    for (Bool operand : operands) {
+        if (operand.kind() != kind || operand.boolNegatedBit) {
+            flattened.push_back(operand);
+            continue;
+        }
+        using data_t = function_detail::compound_expr<kind>;
+        std::span<const Expr> nested = view(fromArray<data_t>(m_expressions[operand.idBits].data).operands);
+        flattened.insert(flattened.end(), nested.begin(), nested.end());
+    }
+    return makeExprList(flattened);
+}
+
+#define VARIADIC_EXPR(name, sortType, operandSortType)                        \
+    sortType Function::add##name(std::span<const operandSortType> operands) { \
+        return add##name({ flattenOperands<ExprKind::name>(operands) });      \
+    }
+#include <verify/ir/expressions.inc>
+
 std::optional<Theorem> Function::findTheorem(Bool prop) const {
     auto it = m_theoremByProp.find(prop);
     if (it == m_theoremByProp.end())

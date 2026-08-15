@@ -24,6 +24,20 @@ TEST(VerifyIR, CheckExpressionSorts) {
     EXPECT_EQ(check(fn).malformedExpressions, std::vector<Expr> { wrongArgument });
 }
 
+TEST(VerifyIR, CheckVariadicExpressionSorts) {
+    Function fn;
+    Bool cond(fn.addParameter(Sort::Bool));
+    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+
+    fn.addAnd({ cond, !cond });
+    fn.addOr({ cond, Bool(fn.addEquality({ loc, loc })) });
+    EXPECT_TRUE(check(fn).malformedExpressions.empty());
+
+    // Operands are stored as plain expressions, so a location among them is only caught here
+    Expr wrongOperand = fn.addAnd({ cond, Bool(loc) });
+    EXPECT_EQ(check(fn).malformedExpressions, std::vector<Expr> { wrongOperand });
+}
+
 TEST(VerifyIR, CheckExpressionSortsOfLoads) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));

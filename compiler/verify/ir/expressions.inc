@@ -7,8 +7,14 @@
 #ifndef INLINE_EXPR
 #define INLINE_EXPR(name, sort, arg) EXPR(name, sort)
 #endif
+#ifndef VARIADIC_EXPR
+#define VARIADIC_EXPR(name, exprSort, operandSort) COMPOUND_EXPR(name, exprSort, ExprList operands)
+#endif
 
 COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
+
+VARIADIC_EXPR(And, Bool, Bool)
+VARIADIC_EXPR(Or, Bool, Bool)
 
 // There is one load per sort so that the sort of a load is known from its kind alone
 #define SORT(name, snake_case) COMPOUND_EXPR(name##Load, name, MemoryLoc loc, RelativeCodePos pos)
@@ -38,6 +44,7 @@ COMPOUND_EXPR(MemoryLocType, Type, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocDecl, MemoryDecl, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocMember, Member, MemoryLoc loc)
 
+#undef VARIADIC_EXPR
 #undef COMPOUND_EXPR
 #undef INLINE_EXPR
 #undef EXPR

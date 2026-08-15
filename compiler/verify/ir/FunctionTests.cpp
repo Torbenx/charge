@@ -86,6 +86,55 @@ TEST(VerifyIR, UniqueExpressionsWithLists) {
     EXPECT_NE(fn.addPureScalarReturn({ target, fn.makeExprList(reversed) }), call);
 }
 
+TEST(VerifyIR, FlattenVariadicExpressions) {
+    Function fn;
+    Bool a(fn.addParameter(Sort::Bool));
+    Bool b(fn.addParameter(Sort::Bool));
+    Bool c(fn.addParameter(Sort::Bool));
+    Bool d(fn.addParameter(Sort::Bool));
+
+    // A nested conjunction contributes its operands instead of itself, on either side
+    Bool flat = fn.addAnd({ a, b, c });
+    EXPECT_TRUE(std::ranges::equal(fn.view(fn.getAnd(flat).operands), std::array<Expr, 3> { a, b, c }));
+    EXPECT_EQ(fn.addAnd({ fn.addAnd({ a, b }), c }), flat);
+    EXPECT_EQ(fn.addAnd({ a, fn.addAnd({ b, c }) }), flat);
+    EXPECT_EQ(fn.addAnd({ fn.addAnd({ a, b }), fn.addAnd({ c, d }) }), fn.addAnd({ a, b, c, d }));
+
+    // Only the operands of the same kind are spliced
+    Bool orOfCd = fn.addOr({ c, d });
+    Bool mixed = fn.addAnd({ a, orOfCd });
+    EXPECT_TRUE(std::ranges::equal(fn.view(fn.getAnd(mixed).operands), std::array<Expr, 2> { a, orOfCd }));
+
+    // A negated operand denotes the negation of the whole conjunction, so it is not spliced
+    Bool negated = fn.addAnd({ a, !fn.addAnd({ b, c }) });
+    EXPECT_TRUE(std::ranges::equal(fn.view(fn.getAnd(negated).operands),
+        std::array<Expr, 2> { a, !fn.addAnd({ b, c }) }));
+}
+
+TEST(VerifyIR, VariadicExpressionsAreNotNormalized) {
+    Function fn;
+    Bool a(fn.addParameter(Sort::Bool));
+    Bool b(fn.addParameter(Sort::Bool));
+
+    // Neither the order nor repeated operands nor literals are touched
+    EXPECT_NE(fn.addAnd({ a, b }), fn.addAnd({ b, a }));
+    EXPECT_EQ(fn.view(fn.getAnd(fn.addAnd({ a, a })).operands).size(), 2);
+    EXPECT_EQ(fn.view(fn.getOr(fn.addOr({ a, Bool(false) })).operands).size(), 2);
+
+    // 'and' and 'or' over the same operands are distinct expressions
+    Bool conjunction = fn.addAnd({ a, b });
+    Bool disjunction = fn.addOr({ a, b });
+    EXPECT_EQ(conjunction.kind(), ExprKind::And);
+    EXPECT_EQ(disjunction.kind(), ExprKind::Or);
+    EXPECT_NE(conjunction.id(), disjunction.id());
+
+    // Like every other expression they are uniqued, and negating one keeps its identity
+    EXPECT_EQ(fn.addAnd({ a, b }), conjunction);
+    EXPECT_EQ((!conjunction).id(), conjunction.id());
+    EXPECT_NE(!conjunction, conjunction);
+    EXPECT_EQ(fn.sortOf(conjunction), Sort::Bool);
+}
+
 TEST(VerifyIR, EnumerateExpressions) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));

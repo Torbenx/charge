@@ -11,6 +11,7 @@ namespace verify::ir::function_detail {
 template<int_t bytes>
 struct Padding {
     constexpr Padding() { storage.fill((std::byte)0); }
+
 private:
     std::array<std::byte, bytes> storage;
 };
@@ -109,10 +110,19 @@ struct Function {
 
     ExprList makeExprList(std::span<const Expr> list);
 
+    std::span<const Expr> view(ExprList list) const { return viewInternal(m_expressionLists, list); }
+
     PhiParentList makePhiParentList(std::span<const CodePos> list) {
         return (PhiParentList)makeListInternal(m_phiParents, list);
     }
 
+#define VARIADIC_EXPR(name, sortType, operandSortType)                        \
+    sortType add##name(std::span<const operandSortType>);                     \
+    sortType add##name(std::initializer_list<operandSortType> operands) {     \
+        return add##name((std::span<const operandSortType>)operands);         \
+    }                                                                         \
+    function_detail::compound_expr<ExprKind::name> get##name(sortType) const; \
+    std::optional<sortType> find##name(const function_detail::compound_expr<ExprKind::name>&) const;
 #define COMPOUND_EXPR(name, sortType, args...)                                                       \
     function_detail::compound_expr<ExprKind::name> get##name(sortType) const;                        \
     std::optional<sortType> find##name(const function_detail::compound_expr<ExprKind::name>&) const; \
@@ -167,6 +177,13 @@ struct Function {
 private:
     using expr_arr = std::array<uint32_t, 3>;
     using inst_arr = std::array<uint32_t, 3>;
+
+#define VARIADIC_EXPR(name, sortType, operandSortType) \
+    sortType add##name(const function_detail::compound_expr<ExprKind::name>&);
+#include <verify/ir/expressions.inc>
+
+    template<ExprKind kind, std::derived_from<Expr> OperandSort>
+    ExprList flattenOperands(std::span<const OperandSort> operands);
 
     //! Identifies a compound expression that is already present in 'm_expressions'
     /*!
