@@ -366,8 +366,15 @@ struct FunctionParser {
             for (;;) {
                 if (s.tokKind() != TokenKind::LocalName)
                     s.error("Expected parameter name");
-                locals.insert(s.tok().word(), ir.addParameter(ir::Sort::MemoryLoc));
+                Word name = s.tok().word();
                 s.advance();
+                // A parameter without a sort is a memory location
+                ir::Sort sort = ir::Sort::MemoryLoc;
+                if (s.tokKind() == TokenKind::Colon) {
+                    s.advance();
+                    sort = parseSort(s);
+                }
+                locals.insert(name, ir.addParameter(sort));
                 if (s.tokKind() == TokenKind::Comma) {
                     s.advance();
                     continue;
@@ -387,6 +394,18 @@ struct FunctionParser {
         if (s.tokKind() != TokenKind::BeginScope)
             s.error("Expected function body");
         parseInstructions(s);
+    }
+
+    ir::Sort parseSort(TokenStream& s) {
+        if (s.tokKind() != TokenKind::Identifier)
+            s.error("Expected sort name");
+        Word id = s.tok().word();
+        s.advance();
+#define SORT(name, snake_case)    \
+    if (id == words[#snake_case]) \
+        return ir::Sort::name;
+#include <verify/ir/sorts.inc>
+        s.error("Unknown sort");
     }
 
     void parseInstructions(TokenStream s) {
@@ -411,6 +430,8 @@ struct FunctionParser {
                     parseBranch(s);
                 } else if (id == words["phi"]) {
                     parsePhi(s);
+                } else if (id == words["nop"]) {
+                    parseNop(s);
                 } else if (id == words["pre"]) {
                     parseTheorem(s, true);
                 } else if (id == words["post"]) {
@@ -516,7 +537,14 @@ struct FunctionParser {
             }
             break;
         }
-        ir.addPhi({ .parents = ir.makePhiParentList(parents) });
+        ir.addPhi(parents);
+    }
+
+    void parseNop(TokenStream& s) {
+        VERIFY(s.tokKind() == TokenKind::Identifier);
+        VERIFY(s.tok().word() == words["nop"]);
+        s.advance();
+        ir.addNop({});
     }
 
     ir::Theorem parseTheorem(TokenStream& s, bool isPreCondition) {
@@ -573,6 +601,8 @@ struct FunctionParser {
             return ir::Proof::makePhiActivate();
         } else if (id == words["phi_active_backward"]) {
             return ir::Proof::makePhiActiveBackward();
+        } else if (id == words["phi_load"]) {
+            return ir::Proof::makePhiLoad();
         } else if (id == words["jump_active_forward"]) {
             return ir::Proof::makeJumpActiveForward();
         } else if (id == words["branch_active_forward"]) {
@@ -844,18 +874,33 @@ struct FunctionParser {
     std::vector<UnresolvedLabel> unresolvedLabels;
 };
 
-ir::Function parseForTest(const char* source) {
+ParsedFunction parse(const char* source) {
     Lexer lexer;
     lexer.lex(source);
-    ir::Function result;
-    FunctionParser parser { result };
+    ParsedFunction result;
+
+    FunctionParser parser { result.function };
     auto s = TokenStream::makeRoot(lexer.tokens.data());
     VERIFY(s.tokKind() == TokenKind::BeginScope);
     s.advance();
     while (s.tokKind() == TokenKind::ContinueScope)
         s.advance();
     parser.parse(s);
+
+    result.parameterNames.resize(result.function.parameterCount());
+    parser.locals.forEachEntry([&result, &lexer](Word name, ir::Expr expr) {
+        if (expr.kind() == ir::ExprKind::FunctionParameter)
+            result.parameterNames[expr.id()] = lexer.wordTable.view(name);
+    });
+    parser.labels.forEachEntry([&result, &lexer](Word name, FunctionParser::LabelInfo info) {
+        result.labels.emplace_back(lexer.wordTable.view(name), info.codePos());
+    });
+
     return result;
+}
+
+static ir::Function parseForTest(const char* source) {
+    return parse(source).function;
 }
 
 TEST(VerifyLanguage, ParseFunctionDefinition) {
@@ -869,6 +914,55 @@ fn #test($a, $b, $c):
 )");
     EXPECT_EQ(fn.parameterCount(), 3);
     EXPECT_EQ(fn.here().id(), 5);
+}
+
+TEST(VerifyLanguage, ParseParameterSorts) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a: bool, $b, $c: memory_decl):
+    nop
+)");
+    EXPECT_EQ(fn.parameterCount(), 3);
+    EXPECT_EQ(fn.sortOf(ir::Expr(ir::ExprKind::FunctionParameter, 0)), ir::Sort::Bool);
+    // A parameter without a sort is a memory location
+    EXPECT_EQ(fn.sortOf(ir::Expr(ir::ExprKind::FunctionParameter, 1)), ir::Sort::MemoryLoc);
+    EXPECT_EQ(fn.sortOf(ir::Expr(ir::ExprKind::FunctionParameter, 2)), ir::Sort::MemoryDecl);
+
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a: not_a_sort):
+    nop
+)"),
+        ParserException);
+}
+
+TEST(VerifyLanguage, ParseNop) {
+    ir::Function fn = parseForTest(R"(
+fn #test():
+@first:
+    nop
+@second:
+    nop
+)");
+    // A nop occupies a code position without doing anything
+    EXPECT_EQ(fn.here().id(), 2);
+    EXPECT_EQ(fn.opcodeAt(ir::CodePos(0)), ir::Opcode::Nop);
+    EXPECT_EQ(fn.opcodeAt(ir::CodePos(1)), ir::Opcode::Nop);
+}
+
+TEST(VerifyLanguage, ParseNames) {
+    ParsedFunction parsed = parse(R"(
+fn #test($a, $b):
+@entry:
+    jump @exit
+@exit:
+    nop
+)");
+    EXPECT_EQ(parsed.parameterNames, (std::vector<std::string> { "a", "b" }));
+    // Label order is highly volatile due the hash map, nomalize it using sort.
+    std::ranges::sort(parsed.labels, std::less(), [](std::pair<std::string, ir::CodePos> pair) { return pair.second.id(); });
+    EXPECT_EQ(parsed.labels,
+        (std::vector<std::pair<std::string, ir::CodePos>> {
+            { "entry", ir::CodePos(0) },
+            { "exit", ir::CodePos(1) } }));
 }
 
 TEST(VerifyLanguage, ParseStore) {

@@ -212,6 +212,15 @@ Theorem Function::addPreCondition(Bool prop, CodePos pos) {
     }
 #include <verify/ir/expressions.inc>
 
+void Function::addPhi(std::span<const CodePos> parents) {
+    CodePos phiPos = here();
+    uint32_t offset = m_phiParents.size();
+    m_phiParents.append_range(std::views::transform(parents, [phiPos](CodePos parentPos) {
+        return PhiParentInfo { parentPos, phiPos };
+    }));
+    addPhi({ PhiParentList { offset, (uint32_t)parents.size() } });
+}
+
 #define INSTRUCTION(name, args...)                                                                                  \
     void Function::add##name(const function_detail::instruction_data<Opcode::name>& data) {                         \
         m_instructions.push_back({ Opcode::name, toArray<function_detail::instruction_data<Opcode::name>>(data) }); \
@@ -264,7 +273,10 @@ void Function::setParent(CodePos phiInst, int_t index, CodePos parent) {
     VERIFY(inst.opcode == Opcode::Phi);
     auto data = fromArray<data_t>(inst.data);
     VERIFY(index >= 0 && index < data.parents.size());
-    m_phiParents[data.parents.m_offset + (uint32_t)index] = parent;
+    auto& info = m_phiParents[data.parents.m_offset + (uint32_t)index];
+    VERIFY(info.target == phiInst);
+    VERIFY(info.parent == INVALID_CODE_POS);
+    info.parent = parent;
 }
 
 }

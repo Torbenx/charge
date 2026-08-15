@@ -16,6 +16,80 @@ private:
     std::array<std::byte, bytes> storage;
 };
 
+//! Stands in for any member of 'T' during aggregate initialization
+/*!
+The conversion to 'T' itself has to be excluded, otherwise initializing an aggregate with a
+single member would be ambiguous with copying it.
+*/
+template<typename T>
+struct AnyMember {
+    template<typename U>
+        requires(!std::same_as<T, std::remove_cvref_t<U>>)
+    operator U() const;
+};
+
+//! The number of members of an aggregate
+/*!
+It is the largest number of initializers the aggregate accepts. The larger counts have to be
+tried first because an aggregate does not accept fewer initializers than it has members when the
+remaining members cannot be value initialized.
+*/
+template<typename T>
+constexpr int_t memberCount() {
+    if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {}, AnyMember<T> {} }; })
+        return 3;
+    else if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {} }; })
+        return 2;
+    else if constexpr (requires { T { AnyMember<T> {} }; })
+        return 1;
+    else
+        static_assert(false, "Only aggregates with one to three members are supported");
+}
+
+//! Calls 'callback' for every member of an aggregate
+template<typename T, typename Callback>
+void forEachMember(const T& value, Callback&& callback) {
+    if constexpr (memberCount<T>() == 3) {
+        const auto& [a, b, c] = value;
+        callback(a);
+        callback(b);
+        callback(c);
+    } else if constexpr (memberCount<T>() == 2) {
+        const auto& [a, b] = value;
+        callback(a);
+        callback(b);
+    } else {
+        const auto& [a] = value;
+        callback(a);
+    }
+}
+
+//! Calls 'callback' for the members of two aggregates of the same type pairwise
+template<typename T, typename Callback>
+void forEachMemberPair(const T& left, const T& right, Callback&& callback) {
+    if constexpr (memberCount<T>() == 3) {
+        const auto& [a, b, c] = left;
+        const auto& [x, y, z] = right;
+        callback(a, x);
+        callback(b, y);
+        callback(c, z);
+    } else if constexpr (memberCount<T>() == 2) {
+        const auto& [a, b] = left;
+        const auto& [x, y] = right;
+        callback(a, x);
+        callback(b, y);
+    } else {
+        const auto& [a] = left;
+        const auto& [x] = right;
+        callback(a, x);
+    }
+}
+
+template<typename T>
+constexpr bool is_padding = false;
+template<int_t bytes>
+constexpr bool is_padding<Padding<bytes>> = true;
+
 template<ExprKind kind>
 struct compound_expr;
 
@@ -93,6 +167,12 @@ struct Function {
     }
     std::optional<Theorem> findTheorem(Bool prop) const;
 
+    //! All theorems of the function in the order they were added
+    auto theorems() const {
+        return std::views::iota(0u, (uint32_t)m_theorems.size())
+            | std::views::transform([](uint32_t id) { return Theorem(id); });
+    }
+
     //! Adds a theorem for a proposition that is not proven yet
     Theorem addTheorem(Bool prop, CodePos pos, Proof proof = Proof::makeSorry());
 
@@ -112,9 +192,8 @@ struct Function {
 
     std::span<const Expr> view(ExprList list) const { return viewInternal(m_expressionLists, list); }
 
-    PhiParentList makePhiParentList(std::span<const CodePos> list) {
-        return (PhiParentList)makeListInternal(m_phiParents, list);
-    }
+    void addPhi(std::span<const CodePos> parents);
+    int_t phiParentCount() const { return m_phiParents.size(); }
 
 #define VARIADIC_EXPR(name, sortType, operandSortType)                        \
     sortType add##name(std::span<const operandSortType>);                     \
@@ -171,7 +250,12 @@ struct Function {
 
     CodePos parentPosition(PhiParent parent) const {
         VERIFY(parent.id() < m_phiParents.size());
-        return m_phiParents[parent.id()];
+        return m_phiParents[parent.id()].parent;
+    }
+
+    CodePos phiPosition(PhiParent parent) const {
+        VERIFY(parent.id() < m_phiParents.size());
+        return m_phiParents[parent.id()].target;
     }
 
 private:
@@ -315,10 +399,15 @@ private:
         Sort sort;
     };
 
+    struct PhiParentInfo {
+        CodePos parent;
+        CodePos target;
+    };
+
     template<typename T>
     static ListBase makeListInternal(std::vector<T>& vec, std::span<const T> list) {
         uint32_t offset = vec.size();
-        vec.insert(vec.end(), list.begin(), list.end());
+        vec.append_range(list);
         return { offset, (uint32_t)list.size() };
     }
 
@@ -337,7 +426,7 @@ private:
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;
     std::unordered_set<ExprListEntry, ExprListHash, ExprListHashEqual> m_expressionListSet;
-    std::vector<CodePos> m_phiParents;
+    std::vector<PhiParentInfo> m_phiParents;
     std::vector<ParameterData> m_parameters;
     std::vector<Theorem> m_preConditions;
     std::vector<Theorem> m_postConditions;

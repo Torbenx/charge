@@ -50,7 +50,7 @@ SIMPLE_TACTIC(PhiActivate)
 // !@phi.from@label or @label.active
 SIMPLE_TACTIC(PhiActiveBackward)
 
-// @phi.from@label or x.load@phi = x.load@label
+// !@phi.from@label or x.load@phi = x.load@label
 SIMPLE_TACTIC(PhiLoad)
 
 // For @jump: jump @phi proves !@jump.active or @phi.from@jump

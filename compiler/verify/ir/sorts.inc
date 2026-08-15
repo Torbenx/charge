@@ -11,4 +11,6 @@ SORT(Member, member)
 SORT(MemoryDecl, memory_decl)
 SORT(MemoryLoc, memory_loc)
 
+SORT(UninterpretedConstant, uninterpreted_constant)
+
 #undef SORT

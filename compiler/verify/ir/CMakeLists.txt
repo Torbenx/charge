@@ -10,4 +10,9 @@ target_sources(${PROJECT_NAME}
     Function.cpp
     Function.h
     FunctionTests.cpp
+    Match.cpp
+    Match.h
+    Tactics.cpp
+    Tactics.h
+    TacticTests.cpp
 )

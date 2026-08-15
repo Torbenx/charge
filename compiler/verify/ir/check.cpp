@@ -1,43 +1,8 @@
 #include <verify/ir/check.h>
 
+#include <verify/ir/Tactics.h>
+
 namespace verify::ir {
-
-//! Stands in for any member of 'T' during aggregate initialization
-/*!
-The conversion to 'T' itself has to be excluded, otherwise initializing an aggregate with a
-single member would be ambiguous with copying it.
-*/
-template<typename T>
-struct AnyMember {
-    template<typename U>
-        requires(!std::same_as<T, std::remove_cvref_t<U>>)
-    operator U() const;
-};
-
-//! Calls 'callback' for every member of an aggregate
-/*!
-The number of members is the largest number of initializers the aggregate accepts. The larger
-counts have to be tried first because an aggregate does not accept fewer initializers than it
-has members when the remaining members cannot be value initialized.
-*/
-template<typename T, typename Callback>
-static void forEachMember(const T& value, Callback&& callback) {
-    if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {}, AnyMember<T> {} }; }) {
-        const auto& [a, b, c] = value;
-        callback(a);
-        callback(b);
-        callback(c);
-    } else if constexpr (requires { T { AnyMember<T> {}, AnyMember<T> {} }; }) {
-        const auto& [a, b] = value;
-        callback(a);
-        callback(b);
-    } else if constexpr (requires { T { AnyMember<T> {} }; }) {
-        const auto& [a] = value;
-        callback(a);
-    } else {
-        static_assert(false, "Only aggregates with one to three members are supported");
-    }
-}
 
 //! Collects the results of all checks performed on a single function
 struct FunctionChecker {
@@ -84,7 +49,7 @@ any sort and arguments that are not expressions at all have no sort to check.
 template<typename Data>
 bool FunctionChecker::argumentSortsMatch(const Data& data) {
     bool valid = true;
-    forEachMember(data, [&](const auto& member) {
+    function_detail::forEachMember(data, [&](const auto& member) {
         using member_t = std::remove_cvref_t<decltype(member)>;
         if constexpr (requires { member_t::sort; }) {
             if (function.sortOf(member) != member_t::sort)
@@ -148,7 +113,27 @@ void FunctionChecker::checkInstructionSorts() {
 }
 
 void FunctionChecker::checkProofs() {
-    // TODO
+    for (Theorem theorem : function.theorems()) {
+        switch (function.proof(theorem).tactic()) {
+        case Tactic::Sorry:
+            report.sorryTheorems.push_back(theorem);
+            continue;
+        case Tactic::SmtSolve:
+            report.smtSolveTheorems.push_back(theorem);
+            continue;
+        case Tactic::Precondition:
+            // A precondition is assumed, not proven
+            continue;
+        default:
+            break;
+        }
+
+        // TODO: The tactics that do not state a fixed clause are not checked yet and are
+        // rejected until they are. Once every tactic is implemented this has to be a
+        // 'VERIFY_NOT_REACHED()' in 'provesProp' instead.
+        if (!provesProp(function, function.proof(theorem).tactic(), function.prop(theorem)))
+            report.invalidProofs.push_back(theorem);
+    }
 }
 
 void FunctionChecker::checkPreconditions() {

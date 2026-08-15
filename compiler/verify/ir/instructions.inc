@@ -2,6 +2,8 @@
 #define INSTRUCTION(name, ...)
 #endif
 
+INSTRUCTION(Nop, Padding<4> _padding = {})
+
 INSTRUCTION(Store, MemoryLoc loc, Expr value)
 INSTRUCTION(Call, Fn target, ExprList args)
 INSTRUCTION(Phi, PhiParentList parents)

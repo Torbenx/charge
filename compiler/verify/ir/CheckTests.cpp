@@ -74,7 +74,7 @@ TEST(VerifyIR, CheckInstructionSortsWithoutArguments) {
 
     // Instructions whose arguments are not expressions have no sort to check
     fn.addJump({ CodePos(0) });
-    fn.addPhi({ fn.makePhiParentList(std::array { CodePos(0) }) });
+    fn.addPhi(std::array { CodePos(0) });
     EXPECT_TRUE(check(fn).malformedInstructions.empty());
 }
 

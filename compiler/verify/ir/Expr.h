@@ -64,6 +64,7 @@ enum class Opcode : uint8_t {
 enum class Tactic : uint8_t {
 #define TACTIC(name) name,
 #include <verify/ir/tactics.inc>
+    COUNT,
 };
 
 struct Proof {
@@ -244,6 +245,12 @@ struct Member : Expr {
 struct MemoryLoc : Expr {
     static constexpr Sort sort = Sort::MemoryLoc;
     explicit MemoryLoc(Expr e)
+        : Expr(e) { }
+};
+
+struct UninterpretedConstant : Expr {
+    static constexpr Sort sort = Sort::UninterpretedConstant;
+    explicit UninterpretedConstant(Expr e)
         : Expr(e) { }
 };
 

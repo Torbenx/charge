@@ -8,7 +8,6 @@
 namespace verify::language {
 
 inline constexpr ConstWordStringTable words {
-    "fn",
     "active",
     "from",
     "store",
@@ -16,6 +15,7 @@ inline constexpr ConstWordStringTable words {
     "jump",
     "branch",
     "phi",
+    "nop",
     "true",
     "false",
     "and",
@@ -36,11 +36,11 @@ inline constexpr ConstWordStringTable words {
     "phi_exclusivity",
     "phi_activate",
     "phi_active_backward",
+    "phi_load",
     "jump_active_forward",
     "branch_active_forward",
     "branch_decision",
-    "type",
-#define SORT(name, snake_case) #snake_case "_scalar",
+#define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
 #include <verify/ir/sorts.inc>
 };
 
@@ -85,7 +85,30 @@ struct LookupTable {
         }
     }
 
+    void forEachEntry(auto&& callback) const {
+        for (int_t bucket = 0; bucket < m_table.bucketCount(); bucket++) {
+            const auto& entry = m_table.entries[bucket];
+            if (!entry.empty())
+                callback(entry.word, std::bit_cast<T>(entry.payload));
+        }
+    }
+
     WordTable m_table;
 };
+
+//! A function parsed from the text form together with the names it was written with
+/*!
+A 'Word' is only meaningful together with the table it was interned in, so the names of the
+placeholders a caller wants to address are handed out as strings.
+*/
+struct ParsedFunction {
+    ir::Function function;
+    //! The name of every parameter, indexed by its parameter id
+    std::vector<std::string> parameterNames;
+    //! Every label in the order it was defined
+    std::vector<std::pair<std::string, ir::CodePos>> labels;
+};
+
+ParsedFunction parse(const char* source);
 
 }
