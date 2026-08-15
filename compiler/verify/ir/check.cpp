@@ -1,5 +1,6 @@
 #include <verify/ir/check.h>
 
+#include <verify/ir/Sat.h>
 #include <verify/ir/Tactics.h>
 
 namespace verify::ir {
@@ -124,6 +125,17 @@ void FunctionChecker::checkProofs() {
         case Tactic::Precondition:
             // A precondition is assumed, not proven
             continue;
+        case Tactic::Sat: {
+            const SatProof& proof = function.getSat(function.proof(theorem));
+            // A clause has to be stated before the theorem it serves, so that the theorems can
+            // be checked in the order they are listed in and no proof can rest on itself
+            bool ordered = true;
+            for (Theorem clause : proof.clauses)
+                ordered = ordered && clause.id() < theorem.id();
+            if (!ordered || !provesPropBySat(function, proof, function.prop(theorem)))
+                report.invalidProofs.push_back(theorem);
+            continue;
+        }
         default:
             break;
         }

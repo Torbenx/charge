@@ -559,11 +559,21 @@ struct FunctionParser {
             s.advance();
         }
         ir::Bool prop = parseExpression<ir::Bool>(s);
+
+        // The proof is read before the theorem is added, so that the theorems its clauses
+        // state come before it and the order of the list is an order to check them in.
+        // The theorem does not exist yet either, so a proof cannot rest on itself.
+        std::optional<ir::Proof> proof;
+        if (!isPreCondition)
+            proof = parseProof(s);
+
+        // This also catches a clause of the proof restating the proposition
         if (ir.findTheorem(prop).has_value())
             s.error("Proposition was already stated by another theorem");
+
         ir::Theorem theorem = isPreCondition
             ? ir.addPreCondition(prop, ir.here())
-            : ir.addTheorem(prop, ir.here(), parseProof(s));
+            : ir.addTheorem(prop, ir.here(), proof.value());
         if (!name.empty())
             theorems.insert(name, theorem);
         return theorem;
@@ -614,8 +624,8 @@ struct FunctionParser {
         }
     }
 
-    std::vector<ir::SatProof::Clause> parseSatClauses(TokenStream s) {
-        std::vector<ir::SatProof::Clause> clauses;
+    std::vector<ir::Theorem> parseSatClauses(TokenStream s) {
+        std::vector<ir::Theorem> clauses;
         for (;;) {
             switch (s.tokKind()) {
             case TokenKind::EndScope:
@@ -629,15 +639,30 @@ struct FunctionParser {
                 if (s.tok().word() != words["clause"])
                     s.error("Expected clause");
                 s.advance();
-                ir::Bool prop = parseExpression<ir::Bool>(s);
-                ir::Proof proof = parseProof(s);
-                clauses.push_back({ prop, proof });
+                clauses.push_back(parseSatClause(s));
                 continue;
             }
             default:
                 s.error("Expected clause");
             }
         }
+    }
+
+    //! A clause either names a theorem that is already stated or states one of its own
+    ir::Theorem parseSatClause(TokenStream& s) {
+        if (s.tokKind() == TokenKind::TheoremName) {
+            auto theorem = theorems.get(s.tok().word());
+            if (!theorem.has_value())
+                s.error("Theorem must be stated before use");
+            s.advance();
+            return theorem.value();
+        }
+
+        ir::Bool prop = parseExpression<ir::Bool>(s);
+        ir::Proof proof = parseProof(s);
+        if (ir.findTheorem(prop).has_value())
+            s.error("Proposition was already stated by another theorem");
+        return ir.addTheorem(prop, ir.here(), proof);
     }
 
     template<typename T>
@@ -1120,14 +1145,14 @@ fn #test($a, $b):
         clause $a = $b or $b = $a by sorry
         clause $a = $a and $b = $b by eq_reflexive
 )");
-    auto& proof = fn.getSat(fn.proof(ir::Theorem(0)));
+    auto& proof = fn.getSat(fn.proof(ir::Theorem(2)));
     EXPECT_EQ(proof.clauses.size(), 2);
 
     // 'by' ends the clause expression, it is not read as another operand
-    EXPECT_EQ(proof.clauses[0].prop.kind(), ir::ExprKind::Or);
-    EXPECT_EQ(proof.clauses[0].proof.tactic(), ir::Tactic::Sorry);
-    EXPECT_EQ(proof.clauses[1].prop.kind(), ir::ExprKind::And);
-    EXPECT_EQ(proof.clauses[1].proof.tactic(), ir::Tactic::EqualityReflexive);
+    EXPECT_EQ(fn.prop(proof.clauses[0]).kind(), ir::ExprKind::Or);
+    EXPECT_EQ(fn.proof(proof.clauses[0]).tactic(), ir::Tactic::Sorry);
+    EXPECT_EQ(fn.prop(proof.clauses[1]).kind(), ir::ExprKind::And);
+    EXPECT_EQ(fn.proof(proof.clauses[1]).tactic(), ir::Tactic::EqualityReflexive);
 }
 
 TEST(VerifyLanguage, ParseTheorems) {
@@ -1221,17 +1246,66 @@ fn #test($a, $b):
     EXPECT_EQ(fn.parameterCount(), 2);
     EXPECT_EQ(fn.here().id(), 0);
 
-    ir::Theorem satTheorem(0);
+    // Writing a clause down states a theorem of its own, which comes before the one it proves
+    ir::Theorem satTheorem(2);
     EXPECT_EQ(fn.position(satTheorem), ir::CodePos(0));
     EXPECT_EQ(fn.proof(satTheorem).tactic(), ir::Tactic::Sat);
     EXPECT_EQ(fn.prop(satTheorem), ir::Expr::makeBooleanLiteral(true));
     auto& proof = fn.getSat(fn.proof(satTheorem));
-    EXPECT_EQ(proof.clauses.size(), 2);
+    EXPECT_EQ(proof.clauses, (std::vector<ir::Theorem> { ir::Theorem(0), ir::Theorem(1) }));
+    for (ir::Theorem clause : proof.clauses) {
+        EXPECT_EQ(fn.position(clause), ir::CodePos(0));
+        EXPECT_EQ(fn.prop(clause).kind(), ir::ExprKind::Equality);
+        EXPECT_EQ(fn.proof(clause).tactic(), ir::Tactic::EqualityReflexive);
+    }
+}
 
-    EXPECT_EQ(proof.clauses[0].prop.kind(), ir::ExprKind::Equality);
-    EXPECT_EQ(proof.clauses[0].proof.tactic(), ir::Tactic::EqualityReflexive);
-    EXPECT_EQ(proof.clauses[1].prop.kind(), ir::ExprKind::Equality);
-    EXPECT_EQ(proof.clauses[1].proof.tactic(), ir::Tactic::EqualityReflexive);
+TEST(VerifyLanguage, ParseSatProofOfStatedTheorem) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    prove %a_eq_b: $a = $b by sorry
+    prove true by sat:
+        clause %a_eq_b
+        clause $b = $b by eq_reflexive
+)");
+    // Naming a theorem refers to it, it does not state a second one
+    auto& proof = fn.getSat(fn.proof(ir::Theorem(2)));
+    EXPECT_EQ(proof.clauses, (std::vector<ir::Theorem> { ir::Theorem(0), ir::Theorem(1) }));
+
+    // A theorem has to be stated before a clause can name it
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    prove true by sat:
+        clause %a_eq_b
+    prove %a_eq_b: $a = $b by sorry
+)"),
+        ParserException);
+
+    // A proof cannot rest on the theorem it establishes
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    prove %circular: $a = $b by sat:
+        clause %circular
+)"),
+        ParserException);
+
+    // Restating the proposition of a theorem is an error for a clause as well
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    prove %a_eq_b: $a = $b by sorry
+    prove true by sat:
+        clause $a = $b by eq_reflexive
+)"),
+        ParserException);
+
+    // The clauses are stated first, so a clause restating the proposition of the theorem
+    // they prove is caught the same way round
+    EXPECT_THROW(parseForTest(R"(
+fn #test($a, $b):
+    prove $a = $b by sat:
+        clause $a = $b by eq_reflexive
+)"),
+        ParserException);
 }
 
 TEST(VerifyLanguage, ParseUniqueExpressions) {

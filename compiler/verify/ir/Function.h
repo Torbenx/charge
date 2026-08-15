@@ -125,12 +125,14 @@ struct instruction_data;
 namespace verify::ir {
 
 struct SmtParameters { };
+
+//! The theorems whose propositions are taken as the clauses of the SAT problem
+/*!
+A clause is a theorem of the function like any other, so it is proven and checked on its own and
+the proof only refers to it. The same theorem may be a clause of more than one proof.
+*/
 struct SatProof {
-    struct Clause {
-        Bool prop;
-        Proof proof;
-    };
-    std::vector<Clause> clauses;
+    std::vector<Theorem> clauses;
 };
 struct IntFarkasProof {
     std::vector<int32_t> coeff;

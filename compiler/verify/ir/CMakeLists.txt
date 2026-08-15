@@ -12,6 +12,9 @@ target_sources(${PROJECT_NAME}
     FunctionTests.cpp
     Match.cpp
     Match.h
+    Sat.cpp
+    Sat.h
+    SatTests.cpp
     Tactics.cpp
     Tactics.h
     TacticTests.cpp
