@@ -223,7 +223,7 @@ bool Matcher::matchRelativePosition(RelativeCodePos patternPos, RelativeCodePos 
     // TODO: Relative positions
     if (!patternPos.simple() || !targetPos.simple())
         return false;
-    return bindPosition(CodePos(patternPos.offset()), CodePos(targetPos.offset()));
+    return bindPosition(patternPos.simplePos(), targetPos.simplePos());
 }
 
 bool Matcher::checkPhi(ControlFlowEdgeList patternEdges, ControlFlowEdgeList targetEdges) {

@@ -24,9 +24,19 @@ constexpr std::optional<Sort> variadicOperandSort(ExprKind kind) {
     case ExprKind::name:                       \
         return Sort::operandSort;
 #include <verify/ir/expressions.inc>
-
     default:
         return std::nullopt;
+    }
+}
+
+inline bool isCompoundExpr(ExprKind kind) {
+    switch (kind) {
+#define COMPOUND_EXPR(name, sort, args...) \
+    case ExprKind::name:                   \
+        return true;
+#include <verify/ir/expressions.inc>
+    default:
+        return false;
     }
 }
 
@@ -155,9 +165,9 @@ struct RelativeCodePos {
     bool simple() const {
         return kind() == RelativePosKind::Simple;
     }
-    uint32_t offset() const {
+    CodePos simplePos() const {
         VERIFY(simple());
-        return dataBits;
+        return CodePos(dataBits);
     }
 
     uint32_t kindBits : 8 = 0;
