@@ -212,13 +212,13 @@ Theorem Function::addPreCondition(Bool prop, CodePos pos) {
     }
 #include <verify/ir/expressions.inc>
 
-void Function::addPhi(std::span<const CodePos> parents) {
+void Function::addPhi(std::span<const CodePos> sources) {
     CodePos phiPos = here();
-    uint32_t offset = m_phiParents.size();
-    m_phiParents.append_range(std::views::transform(parents, [phiPos](CodePos parentPos) {
-        return PhiParentInfo { parentPos, phiPos };
+    uint32_t offset = m_controlFlowEdges.size();
+    m_controlFlowEdges.append_range(std::views::transform(sources, [phiPos](CodePos sourcePos) {
+        return ControlFlowEdgeInfo { sourcePos, phiPos };
     }));
-    addPhi({ PhiParentList { offset, (uint32_t)parents.size() } });
+    addPhi({ ControlFlowEdgeList { offset, (uint32_t)sources.size() } });
 }
 
 #define INSTRUCTION(name, args...)                                                                                  \
@@ -267,16 +267,16 @@ void Function::setBranchFalseTarget(CodePos branchInst, CodePos target) {
     inst.data = toArray<data_t>(data);
 }
 
-void Function::setParent(CodePos phiInst, int_t index, CodePos parent) {
+void Function::setEdgeSource(CodePos phiInst, int_t index, CodePos source) {
     using data_t = function_detail::instruction_data<Opcode::Phi>;
     Inst& inst = instRef(phiInst);
     VERIFY(inst.opcode == Opcode::Phi);
     auto data = fromArray<data_t>(inst.data);
-    VERIFY(index >= 0 && index < data.parents.size());
-    auto& info = m_phiParents[data.parents.m_offset + (uint32_t)index];
+    VERIFY(index >= 0 && index < data.incomingEdges.size());
+    auto& info = m_controlFlowEdges[data.incomingEdges.m_offset + (uint32_t)index];
     VERIFY(info.target == phiInst);
-    VERIFY(info.parent == INVALID_CODE_POS);
-    info.parent = parent;
+    VERIFY(info.source == INVALID_CODE_POS);
+    info.source = source;
 }
 
 }

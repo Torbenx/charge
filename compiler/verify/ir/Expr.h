@@ -118,10 +118,10 @@ struct Theorem : SmallHandle {
     using SmallHandle::SmallHandle;
 };
 
-struct PhiParent : SmallHandle {
+struct ControlFlowEdge : SmallHandle {
     using SmallHandle::SmallHandle;
 };
-using PhiParentList = SmallHandleList<PhiParent>;
+using ControlFlowEdgeList = SmallHandleList<ControlFlowEdge>;
 
 struct MemberLiteral : SmallHandle {
     using SmallHandle::SmallHandle;

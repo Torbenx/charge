@@ -27,7 +27,7 @@ INLINE_EXPR(FunctionParameter, Expr, uint32_t)
 
 INLINE_EXPR(BooleanLiteral, Bool, bool)
 INLINE_EXPR(PositionActive, Bool, CodePos)
-INLINE_EXPR(ParentEdgeTaken, Bool, PhiParent)
+INLINE_EXPR(ControlFlowEdgeTaken, Bool, ControlFlowEdge)
 
 COMPOUND_EXPR(TypeIsImpl, Bool, Type type, TypeImpl impl)
 

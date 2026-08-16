@@ -40,11 +40,11 @@ SIMPLE_TACTIC(SkipStore)
 // For @phi: phi @a @b @c this proves !@phi.active or @phi.from@a or @phi.from@b or @phi.from@c
 SIMPLE_TACTIC(PhiEnumerate)
 
-// Proves that phi parents are mutually exlusive
-// !@phi.from@a or !@phi.from@b for all pairs of parents @a, @b
+// Proves that the incoming control flow edges of a phi are mutually exlusive
+// !@phi.from@a or !@phi.from@b for all pairs of sources @a, @b
 SIMPLE_TACTIC(PhiExclusivity)
 
-// !@phi.from@a or @phi.active for all parents @a
+// !@phi.from@a or @phi.active for all sources @a
 SIMPLE_TACTIC(PhiActivate)
 
 // !@phi.from@label or @label.active

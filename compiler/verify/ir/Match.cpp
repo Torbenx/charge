@@ -62,7 +62,7 @@ Match::Match(const Pattern& pattern)
     : m_pattern(pattern)
     , m_placeholders(pattern.function().parameterCount())
     , m_runBase(pattern.runCount())
-    , m_edges(pattern.function().phiParentCount()) { }
+    , m_edges(pattern.function().controlFlowEdgeCount()) { }
 
 std::optional<CodePos> Match::position(CodePos patternPos) const {
     const Pattern::PositionInfo& info = m_pattern.positionInfo(patternPos);
@@ -88,7 +88,7 @@ struct Matcher {
     bool matchMember(const T& patternMember, const T& targetMember);
 
     bool matchInstruction(CodePos patternPos, CodePos targetPos);
-    bool checkPhi(PhiParentList patternParents, PhiParentList targetParents);
+    bool checkPhi(ControlFlowEdgeList patternEdges, ControlFlowEdgeList targetEdges);
     bool matchList(ExprList patternList, ExprList targetList);
     bool matchOperands(ExprList patternOperands, ExprList targetOperands);
     bool matchRelativePosition(RelativeCodePos patternPos, RelativeCodePos targetPos);
@@ -96,7 +96,7 @@ struct Matcher {
     bool bindPlaceholder(Expr patternExpr, Expr targetExpr);
     bool bindPosition(CodePos patternPos, CodePos targetPos);
     bool bindSort(Sort patternSort, Sort targetSort);
-    bool bindEdge(PhiParent patternEdge, PhiParent targetEdge);
+    bool bindEdge(ControlFlowEdge patternEdge, ControlFlowEdge targetEdge);
 
     const Pattern& pattern;
     const Function& target;
@@ -128,8 +128,8 @@ bool Matcher::matchExpr(Expr patternExpr, Expr targetExpr) {
     switch (patternExpr.kind()) {
     case ExprKind::PositionActive:
         return bindPosition(CodePos(patternExpr.id()), CodePos(targetExpr.id()));
-    case ExprKind::ParentEdgeTaken:
-        return bindEdge(PhiParent(patternExpr.id()), PhiParent(targetExpr.id()));
+    case ExprKind::ControlFlowEdgeTaken:
+        return bindEdge(ControlFlowEdge(patternExpr.id()), ControlFlowEdge(targetExpr.id()));
 
         // Only compound expressions carry arguments of their own
 #define COMPOUND_EXPR(name, sortType, args...)                                \
@@ -161,8 +161,8 @@ bool Matcher::matchMember(const T& patternMember, const T& targetMember) {
         return bindPosition(patternMember, targetMember);
     } else if constexpr (std::same_as<T, RelativeCodePos>) {
         return matchRelativePosition(patternMember, targetMember);
-    } else if constexpr (std::same_as<T, PhiParentList>) {
-        // The only instruction with PhiParentList as a member is a phi.
+    } else if constexpr (std::same_as<T, ControlFlowEdgeList>) {
+        // The only instruction with ControlFlowEdgeList as a member is a phi.
         // Use this to check the structural correctness of the bindings.
         return checkPhi(patternMember, targetMember);
     } else if constexpr (std::same_as<T, ExprList>) {
@@ -226,23 +226,23 @@ bool Matcher::matchRelativePosition(RelativeCodePos patternPos, RelativeCodePos 
     return bindPosition(CodePos(patternPos.offset()), CodePos(targetPos.offset()));
 }
 
-bool Matcher::checkPhi(PhiParentList patternParents, PhiParentList targetParents) {
-    // TODO: Some this may be invariances of the match algorithm rather than actual checks.
-    for (int_t i = 0; i < patternParents.size(); i++) {
-        PhiParent patternParent = patternParents.at(i);
-        if (patternParent.id() < result.m_edges.size() && result.m_edges[patternParent.id()].has_value()) {
-            if (!targetParents.contains(*result.m_edges[patternParent.id()]))
+bool Matcher::checkPhi(ControlFlowEdgeList patternEdges, ControlFlowEdgeList targetEdges) {
+    // TODO: Some of this may be invariances of the match algorithm rather than actual checks.
+    for (int_t i = 0; i < patternEdges.size(); i++) {
+        ControlFlowEdge patternEdge = patternEdges.at(i);
+        if (patternEdge.id() < result.m_edges.size() && result.m_edges[patternEdge.id()].has_value()) {
+            if (!targetEdges.contains(*result.m_edges[patternEdge.id()]))
                 return false;
             continue;
         }
 
-        std::optional<CodePos> parentPos = result.position(pattern.function().parentPosition(patternParent));
-        if (!parentPos.has_value())
+        std::optional<CodePos> sourcePos = result.position(pattern.function().edgeSource(patternEdge));
+        if (!sourcePos.has_value())
             continue; // Nothing determined where this edge comes from
 
         bool found = false;
-        for (int_t j = 0; j < targetParents.size(); j++)
-            found |= target.parentPosition(targetParents.at(j)) == *parentPos;
+        for (int_t j = 0; j < targetEdges.size(); j++)
+            found |= target.edgeSource(targetEdges.at(j)) == *sourcePos;
         if (!found)
             return false;
     }
@@ -284,19 +284,19 @@ bool Matcher::bindSort(Sort patternSort, Sort targetSort) {
     return true;
 }
 
-bool Matcher::bindEdge(PhiParent patternEdge, PhiParent targetEdge) {
-    if (!bindPosition(pattern.function().phiPosition(patternEdge), target.phiPosition(targetEdge)))
+bool Matcher::bindEdge(ControlFlowEdge patternEdge, ControlFlowEdge targetEdge) {
+    if (!bindPosition(pattern.function().edgeTarget(patternEdge), target.edgeTarget(targetEdge)))
         return false;
-    if (!bindPosition(pattern.function().parentPosition(patternEdge), target.parentPosition(targetEdge)))
+    if (!bindPosition(pattern.function().edgeSource(patternEdge), target.edgeSource(targetEdge)))
         return false;
 
     VERIFY(patternEdge.id() < result.m_edges.size());
-    std::optional<PhiParent>& binding = result.m_edges[patternEdge.id()];
+    std::optional<ControlFlowEdge>& binding = result.m_edges[patternEdge.id()];
     if (binding.has_value())
         return *binding == targetEdge;
 
     // Different edges in the pattern must bind to different edges in the target
-    for (const std::optional<PhiParent>& other : result.m_edges) {
+    for (const std::optional<ControlFlowEdge>& other : result.m_edges) {
         if (other.has_value() && *other == targetEdge)
             return false;
     }

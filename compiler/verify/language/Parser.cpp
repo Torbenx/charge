@@ -316,7 +316,7 @@ struct FunctionParser {
             // The instruction referring to the not-yet-resolved label.
             ir::CodePos instruction;
             // Which slot of the instruction the label fills: always 0 for a
-            // jump, 0 (true) or 1 (false) for a branch, the parent index for a phi.
+            // jump, 0 (true) or 1 (false) for a branch, the incoming edge index for a phi.
             uint32_t index;
         };
 
@@ -525,11 +525,11 @@ struct FunctionParser {
         VERIFY(s.tokKind() == TokenKind::Identifier);
         VERIFY(s.tok().word() == words["phi"]);
         s.advance();
-        std::vector<ir::CodePos> parents;
-        for (uint32_t parentIndex = 0;; parentIndex++) {
+        std::vector<ir::CodePos> sources;
+        for (uint32_t edgeIndex = 0;; edgeIndex++) {
             if (s.tokKind() != TokenKind::LabelName)
-                s.error("Expected parent label in phi");
-            parents.push_back(getLabelForInstruction(s, ir.here(), parentIndex));
+                s.error("Expected source label in phi");
+            sources.push_back(getLabelForInstruction(s, ir.here(), edgeIndex));
             s.advance();
             if (s.tokKind() == TokenKind::Comma) {
                 s.advance();
@@ -537,7 +537,7 @@ struct FunctionParser {
             }
             break;
         }
-        ir.addPhi(parents);
+        ir.addPhi(sources);
     }
 
     void parseNop(TokenStream& s) {
@@ -791,17 +791,17 @@ struct FunctionParser {
                 s.advance();
                 if (s.tokKind() != TokenKind::LabelName)
                     s.error("Expected label after '.from'");
-                ir::CodePos parentPos = getLabel(s);
+                ir::CodePos sourcePos = getLabel(s);
                 s.advance();
                 if (ir.opcodeAt(labelPos) != ir::Opcode::Phi)
                     s.error("'.from' requires a phi instruction");
-                ir::PhiParentList parents = ir.parents(labelPos);
-                for (int_t i = 0; i < parents.size(); i++) {
-                    ir::PhiParent parent = parents.at(i);
-                    if (ir.parentPosition(parent) == parentPos)
-                        return ir::Expr::makeParentEdgeTaken(parent);
+                ir::ControlFlowEdgeList incomingEdges = ir.incomingEdges(labelPos);
+                for (int_t i = 0; i < incomingEdges.size(); i++) {
+                    ir::ControlFlowEdge edge = incomingEdges.at(i);
+                    if (ir.edgeSource(edge) == sourcePos)
+                        return ir::Expr::makeControlFlowEdgeTaken(edge);
                 }
-                s.error("Label is not a parent of the referenced phi");
+                s.error("Label is not a source of the referenced phi");
             } else {
                 s.error("Invalid identifier after label");
             }
@@ -884,7 +884,7 @@ struct FunctionParser {
                     ir.setBranchFalseTarget(use.instruction, pos);
                 break;
             case ir::Opcode::Phi:
-                ir.setParent(use.instruction, use.index, pos);
+                ir.setEdgeSource(use.instruction, use.index, pos);
                 break;
             default:
                 VERIFY_NOT_REACHED();
@@ -1023,17 +1023,17 @@ fn #test($a, $b):
 
     EXPECT_EQ(fn.getJump(jumpPos).target, phi1Pos);
 
-    EXPECT_EQ(fn.parents(phi1Pos).size(), 2);
-    EXPECT_EQ(fn.parentPosition(fn.parents(phi1Pos).at(0)), jumpPos);
-    EXPECT_EQ(fn.parentPosition(fn.parents(phi1Pos).at(1)), branchPos);
+    EXPECT_EQ(fn.incomingEdges(phi1Pos).size(), 2);
+    EXPECT_EQ(fn.edgeSource(fn.incomingEdges(phi1Pos).at(0)), jumpPos);
+    EXPECT_EQ(fn.edgeSource(fn.incomingEdges(phi1Pos).at(1)), branchPos);
 
     EXPECT_EQ(fn.getEquality(fn.getBranch(branchPos).cond).left, ir::Expr(ir::ExprKind::FunctionParameter, 0));
     EXPECT_EQ(fn.getEquality(fn.getBranch(branchPos).cond).right, ir::Expr(ir::ExprKind::FunctionParameter, 1));
     EXPECT_EQ(fn.getBranch(branchPos).ifTrue, phi1Pos);
     EXPECT_EQ(fn.getBranch(branchPos).ifFalse, phi2Pos);
 
-    EXPECT_EQ(fn.parents(phi2Pos).size(), 1);
-    EXPECT_EQ(fn.parentPosition(fn.parents(phi2Pos).at(0)), branchPos);
+    EXPECT_EQ(fn.incomingEdges(phi2Pos).size(), 1);
+    EXPECT_EQ(fn.edgeSource(fn.incomingEdges(phi2Pos).at(0)), branchPos);
 }
 
 TEST(VerifyLanguage, ParseMultilineExpression) {

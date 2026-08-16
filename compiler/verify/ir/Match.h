@@ -94,7 +94,7 @@ private:
     std::vector<std::optional<CodePos>> m_runBase;
     std::optional<Sort> m_uninterpretedSort;
     //! The edge every edge of the pattern was matched to
-    std::vector<std::optional<PhiParent>> m_edges;
+    std::vector<std::optional<ControlFlowEdge>> m_edges;
 };
 
 //! Matches the proposition 'prop' of 'function' against the shape of 'pattern'

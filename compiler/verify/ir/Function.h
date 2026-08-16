@@ -194,8 +194,8 @@ struct Function {
 
     std::span<const Expr> view(ExprList list) const { return viewInternal(m_expressionLists, list); }
 
-    void addPhi(std::span<const CodePos> parents);
-    int_t phiParentCount() const { return m_phiParents.size(); }
+    void addPhi(std::span<const CodePos> sources);
+    int_t controlFlowEdgeCount() const { return m_controlFlowEdges.size(); }
 
 #define VARIADIC_EXPR(name, sortType, operandSortType)                        \
     sortType add##name(std::span<const operandSortType>);                     \
@@ -246,18 +246,18 @@ struct Function {
     void setJumpTarget(CodePos jumpInst, CodePos target);
     void setBranchTrueTarget(CodePos branchInst, CodePos target);
     void setBranchFalseTarget(CodePos branchInst, CodePos target);
-    void setParent(CodePos phiInst, int_t index, CodePos parent);
+    void setEdgeSource(CodePos phiInst, int_t index, CodePos source);
 
-    PhiParentList parents(CodePos phiInst) const { return getPhi(phiInst).parents; }
+    ControlFlowEdgeList incomingEdges(CodePos phiInst) const { return getPhi(phiInst).incomingEdges; }
 
-    CodePos parentPosition(PhiParent parent) const {
-        VERIFY(parent.id() < m_phiParents.size());
-        return m_phiParents[parent.id()].parent;
+    CodePos edgeSource(ControlFlowEdge edge) const {
+        VERIFY(edge.id() < m_controlFlowEdges.size());
+        return m_controlFlowEdges[edge.id()].source;
     }
 
-    CodePos phiPosition(PhiParent parent) const {
-        VERIFY(parent.id() < m_phiParents.size());
-        return m_phiParents[parent.id()].target;
+    CodePos edgeTarget(ControlFlowEdge edge) const {
+        VERIFY(edge.id() < m_controlFlowEdges.size());
+        return m_controlFlowEdges[edge.id()].target;
     }
 
 private:
@@ -393,7 +393,7 @@ private:
     };
 
     struct RelativePosData {
-        std::vector<PhiParent> backedges;
+        std::vector<ControlFlowEdge> backedges;
         CodePos simplePos;
     };
 
@@ -401,8 +401,8 @@ private:
         Sort sort;
     };
 
-    struct PhiParentInfo {
-        CodePos parent;
+    struct ControlFlowEdgeInfo {
+        CodePos source;
         CodePos target;
     };
 
@@ -428,7 +428,7 @@ private:
     std::vector<RelativePosData> m_relativePositions;
     std::vector<Expr> m_expressionLists;
     std::unordered_set<ExprListEntry, ExprListHash, ExprListHashEqual> m_expressionListSet;
-    std::vector<PhiParentInfo> m_phiParents;
+    std::vector<ControlFlowEdgeInfo> m_controlFlowEdges;
     std::vector<ParameterData> m_parameters;
     std::vector<Theorem> m_preConditions;
     std::vector<Theorem> m_postConditions;
