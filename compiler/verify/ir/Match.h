@@ -54,7 +54,8 @@ private:
     Function m_function;
     Bool m_prop { false };
     std::vector<std::string> m_parameterNames;
-    std::vector<std::pair<std::string, CodePos>> m_labels;
+    //! The label of every code position, indexed by it
+    std::vector<std::string> m_labels;
     std::vector<PositionInfo> m_positions;
     int_t m_runCount = 0;
 };

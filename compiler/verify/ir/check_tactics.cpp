@@ -8,7 +8,7 @@ namespace verify::ir {
 
 struct PatternTactics {
     PatternTactics() {
-#define PATTERN_TACTIC(name, patterns...)   \
+#define PATTERN_TACTIC(name, snake_case, patterns...)   \
     for (const char* source : { patterns }) \
         add(Tactic::name, source);
 #include <verify/ir/tactics.inc>

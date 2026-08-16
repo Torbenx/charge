@@ -62,13 +62,13 @@ enum class Opcode : uint8_t {
 };
 
 enum class Tactic : uint8_t {
-#define TACTIC(name) name,
+#define TACTIC(name, snake_case) name,
 #include <verify/ir/tactics.inc>
     COUNT,
 };
 
 struct Proof {
-#define SIMPLE_TACTIC(name) \
+#define SIMPLE_TACTIC(name, snake_case) \
     static Proof make##name() { return Proof(Tactic::name, 0); }
 #include <verify/ir/tactics.inc>
 

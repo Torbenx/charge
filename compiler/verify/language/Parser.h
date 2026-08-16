@@ -26,18 +26,8 @@ inline constexpr ConstWordStringTable words {
     "prove",
     "clause",
     "by",
-    "sat",
-    "sorry",
-    "eq_reflexive",
-    "eq_transitive",
-    "load_store",
-    "skip_store",
-    "phi_enumerate",
-    "phi_exclusivity",
-    "phi_activate",
-    "phi_active_source",
-    "phi_load",
-    "branch_decision",
+#define TACTIC(name, snake_case) #snake_case,
+#include <verify/ir/tactics.inc>
 #define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
 #include <verify/ir/sorts.inc>
 };
@@ -96,15 +86,22 @@ struct LookupTable {
 
 //! A function parsed from the text form together with the names it was written with
 /*!
-A 'Word' is only meaningful together with the table it was interned in, so the names of the
-placeholders a caller wants to address are handed out as strings.
+A name that the source did not spell out is empty, every table has an entry for each of the things it names.
 */
 struct ParsedFunction {
     ir::Function function;
+    //! The name of the function
+    std::string name;
     //! The name of every parameter, indexed by its parameter id
     std::vector<std::string> parameterNames;
-    //! Every label in the order it was defined
-    std::vector<std::pair<std::string, ir::CodePos>> labels;
+    //! The label of every code position, indexed by it
+    /*!
+    A position may be labeled more than once, only the first of the names is kept.
+    It also contains the past-the-end label (if any).
+    */
+    std::vector<std::string> labels;
+    //! The name of every theorem, indexed by its id
+    std::vector<std::string> theoremNames;
 };
 
 ParsedFunction parse(const char* source);

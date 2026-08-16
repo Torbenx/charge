@@ -169,6 +169,8 @@ struct Function {
     }
     std::optional<Theorem> findTheorem(Bool prop) const;
 
+    int_t theoremCount() const { return m_theorems.size(); }
+
     //! All theorems of the function in the order they were added
     auto theorems() const {
         return std::views::iota(0u, (uint32_t)m_theorems.size())
@@ -189,6 +191,8 @@ struct Function {
     void addPostCondition(Theorem t) {
         m_postConditions.push_back(t);
     }
+
+    std::span<const Theorem> postConditions() const { return m_postConditions; }
 
     ExprList makeExprList(std::span<const Expr> list);
 
@@ -235,7 +239,7 @@ struct Function {
     function_detail::instruction_data<Opcode::name> get##name(CodePos pos) const;
 #include <verify/ir/instructions.inc>
 
-#define COMPLEX_TACTIC(name, type)                  \
+#define COMPLEX_TACTIC(name, snake_case, type)      \
     Proof add##name(type proofData);                \
     const type& get##name(Proof proof) const {      \
         VERIFY(proof.id() < m_proofs##name.size()); \
@@ -433,7 +437,7 @@ private:
     std::vector<Theorem> m_preConditions;
     std::vector<Theorem> m_postConditions;
 
-#define COMPLEX_TACTIC(name, type) std::vector<type> m_proofs##name;
+#define COMPLEX_TACTIC(name, snake_case, type) std::vector<type> m_proofs##name;
 #include <verify/ir/tactics.inc>
 };
 

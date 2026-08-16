@@ -232,7 +232,7 @@ void Function::addPhi(std::span<const CodePos> sources) {
     }
 #include <verify/ir/instructions.inc>
 
-#define COMPLEX_TACTIC(name, type)                         \
+#define COMPLEX_TACTIC(name, snake_case, type)             \
     Proof Function::add##name(type proofData) {            \
         Proof result(Tactic::name, m_proofs##name.size()); \
         m_proofs##name.emplace_back(std::move(proofData)); \

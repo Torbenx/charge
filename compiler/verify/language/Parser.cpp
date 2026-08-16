@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <format>
+
 namespace verify::language {
 
 static const char* skipSpaces(const char* position) {
@@ -347,8 +349,8 @@ struct FunctionParser {
         uint32_t valueBits : 31;
     };
 
-    explicit FunctionParser(ir::Function& f)
-        : ir(f) { }
+    FunctionParser(ParsedFunction& out, const WordStringTable& wordTable)
+        : ir(out.function), out(out), wordTable(wordTable) { }
 
     void parse(TokenStream& s) {
         VERIFY(s.tokKind() == TokenKind::Identifier);
@@ -357,7 +359,7 @@ struct FunctionParser {
 
         if (s.tokKind() != TokenKind::GlobalName)
             s.error("Expected global name after 'fn'");
-        Word fnName = s.tok().word();
+        out.name = wordTable.view(s.tok().word());
         s.advance();
         if (s.tokKind() != TokenKind::LeftParen)
             s.error("Expected '(' after function name");
@@ -375,6 +377,7 @@ struct FunctionParser {
                     sort = parseSort(s);
                 }
                 locals.insert(name, ir.addParameter(sort));
+                out.parameterNames.emplace_back(wordTable.view(name));
                 if (s.tokKind() == TokenKind::Comma) {
                     s.advance();
                     continue;
@@ -574,8 +577,10 @@ struct FunctionParser {
         ir::Theorem theorem = isPreCondition
             ? ir.addPreCondition(prop, ir.here())
             : ir.addTheorem(prop, ir.here(), proof.value());
-        if (!name.empty())
+        if (!name.empty()) {
             theorems.insert(name, theorem);
+            recordTheoremName(theorem, name);
+        }
         return theorem;
     }
 
@@ -588,36 +593,17 @@ struct FunctionParser {
         Word id = s.tok().word();
         s.advance();
 
-        if (id == words["sorry"]) {
-            return ir::Proof::makeSorry();
-        } else if (id == words["sat"]) {
+        if (id == words["sat"]) {
             if (s.tokKind() != TokenKind::Colon)
                 s.error("Expected ':' after 'sat'");
             s.advanceWithNoScopeChanges();
             return ir.addSat({ parseSatClauses(s) });
-        } else if (id == words["eq_reflexive"]) {
-            return ir::Proof::makeEqualityReflexive();
-        } else if (id == words["eq_transitive"]) {
-            return ir::Proof::makeEqualityTransitive();
-        } else if (id == words["load_store"]) {
-            return ir::Proof::makeLoadStore();
-        } else if (id == words["skip_store"]) {
-            return ir::Proof::makeSkipStore();
-        } else if (id == words["phi_enumerate"]) {
-            return ir::Proof::makePhiEnumerate();
-        } else if (id == words["phi_exclusivity"]) {
-            return ir::Proof::makePhiExclusivity();
-        } else if (id == words["phi_activate"]) {
-            return ir::Proof::makePhiActivate();
-        } else if (id == words["phi_active_source"]) {
-            return ir::Proof::makePhiActiveSource();
-        } else if (id == words["phi_load"]) {
-            return ir::Proof::makePhiLoad();
-        } else if (id == words["branch_decision"]) {
-            return ir::Proof::makeBranchDecision();
-        } else {
-            s.error("Unknown tactic");
         }
+#define SIMPLE_TACTIC(name, snake_case) \
+    if (id == words[#snake_case])       \
+        return ir::Proof::make##name();
+#include <verify/ir/tactics.inc>
+        s.error("Unknown tactic");
     }
 
     std::vector<ir::Theorem> parseSatClauses(TokenStream s) {
@@ -860,7 +846,21 @@ struct FunctionParser {
         return ir::INVALID_CODE_POS;
     }
 
+    void recordLabelName(ir::CodePos pos, Word name) {
+        if (out.labels.size() <= pos.id())
+            out.labels.resize(pos.id() + 1);
+        if (out.labels[pos.id()].empty())
+            out.labels[pos.id()] = wordTable.view(name);
+    }
+
+    void recordTheoremName(ir::Theorem theorem, Word name) {
+        if (out.theoremNames.size() <= theorem.id())
+            out.theoremNames.resize(theorem.id() + 1);
+        out.theoremNames[theorem.id()] = wordTable.view(name);
+    }
+
     void defineLabel(Word name, ir::CodePos pos) {
+        recordLabelName(pos, name);
         auto info = labels.insertOrUpdate(name, LabelInfo::resolved(pos));
         if (!info.has_value())
             return;
@@ -888,7 +888,23 @@ struct FunctionParser {
         }
     }
 
+    //! Reports the labels that were referenced by an instruction but never defined
+    void checkLabelsResolved() {
+        std::string undefined;
+        labels.forEachEntry([this, &undefined](Word name, LabelInfo info) {
+            if (info.isResolved())
+                return;
+            if (!undefined.empty())
+                undefined += ", ";
+            undefined += std::format("@{}", wordTable.view(name));
+        });
+        if (!undefined.empty())
+            throw ParserException(std::format("Label was never defined: {}", undefined));
+    }
+
     ir::Function& ir;
+    ParsedFunction& out;
+    const WordStringTable& wordTable;
     LookupTable<ir::Theorem> theorems;
     LookupTable<LabelInfo> labels;
     LookupTable<ir::Expr> locals;
@@ -900,22 +916,18 @@ ParsedFunction parse(const char* source) {
     lexer.lex(source);
     ParsedFunction result;
 
-    FunctionParser parser { result.function };
+    FunctionParser parser { result, lexer.wordTable };
     auto s = TokenStream::makeRoot(lexer.tokens.data());
     VERIFY(s.tokKind() == TokenKind::BeginScope);
     s.advance();
     while (s.tokKind() == TokenKind::ContinueScope)
         s.advance();
     parser.parse(s);
+    parser.checkLabelsResolved();
 
-    result.parameterNames.resize(result.function.parameterCount());
-    parser.locals.forEachEntry([&result, &lexer](Word name, ir::Expr expr) {
-        if (expr.kind() == ir::ExprKind::FunctionParameter)
-            result.parameterNames[expr.id()] = lexer.wordTable.view(name);
-    });
-    parser.labels.forEachEntry([&result, &lexer](Word name, FunctionParser::LabelInfo info) {
-        result.labels.emplace_back(lexer.wordTable.view(name), info.codePos());
-    });
+    // The name tables are filled as the names are read, so they end where the last name was
+    result.labels.resize(result.function.here().id() + 1);
+    result.theoremNames.resize(result.function.theoremCount());
 
     return result;
 }
@@ -975,15 +987,30 @@ fn #test($a, $b):
 @entry:
     jump @exit
 @exit:
+@second_name:
     nop
+    prove %a_eq_b: $a = $b by sorry
+    prove $b = $a by sorry
+@end:
+    nop
+    prove %never_true: !@entry.active by sorry
 )");
+    EXPECT_EQ(parsed.name, "test");
     EXPECT_EQ(parsed.parameterNames, (std::vector<std::string> { "a", "b" }));
-    // Label order is highly volatile due the hash map, nomalize it using sort.
-    std::ranges::sort(parsed.labels, std::less(), [](std::pair<std::string, ir::CodePos> pair) { return pair.second.id(); });
-    EXPECT_EQ(parsed.labels,
-        (std::vector<std::pair<std::string, ir::CodePos>> {
-            { "entry", ir::CodePos(0) },
-            { "exit", ir::CodePos(1) } }));
+    // Labels are indexed by position and a position keeps the first of its names. The table
+    // reaches one past the last instruction, where a label may sit in front of theorems.
+    EXPECT_EQ(parsed.labels, (std::vector<std::string> { "entry", "exit", "end", "" }));
+    // A theorem the source did not name has no name here either
+    EXPECT_EQ(parsed.theoremNames, (std::vector<std::string> { "a_eq_b", "", "never_true" }));
+}
+
+TEST(VerifyLanguage, ParseUndefinedLabel) {
+    // A label that is referenced but never defined leaves the jump without a target
+    EXPECT_THROW(parse(R"(
+fn #test():
+    jump @nowhere
+)"),
+        ParserException);
 }
 
 TEST(VerifyLanguage, ParseStore) {

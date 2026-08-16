@@ -51,9 +51,9 @@ Placeholder Pattern::placeholder(std::string_view name) const {
 }
 
 LabelPlaceholder Pattern::label(std::string_view name) const {
-    for (const auto& [labelName, pos] : m_labels) {
-        if (labelName == name)
-            return LabelPlaceholder(pos.id());
+    for (int_t i = 0; i < (int_t)m_labels.size(); i++) {
+        if (m_labels[i] == name)
+            return LabelPlaceholder(i);
     }
     VERIFY_NOT_REACHED(); // The pattern has no such label
 }
