@@ -35,10 +35,8 @@ inline constexpr ConstWordStringTable words {
     "phi_enumerate",
     "phi_exclusivity",
     "phi_activate",
-    "phi_active_backward",
+    "phi_active_source",
     "phi_load",
-    "jump_active_forward",
-    "branch_active_forward",
     "branch_decision",
 #define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
 #include <verify/ir/sorts.inc>

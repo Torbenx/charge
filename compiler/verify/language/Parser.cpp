@@ -609,14 +609,10 @@ struct FunctionParser {
             return ir::Proof::makePhiExclusivity();
         } else if (id == words["phi_activate"]) {
             return ir::Proof::makePhiActivate();
-        } else if (id == words["phi_active_backward"]) {
-            return ir::Proof::makePhiActiveBackward();
+        } else if (id == words["phi_active_source"]) {
+            return ir::Proof::makePhiActiveSource();
         } else if (id == words["phi_load"]) {
             return ir::Proof::makePhiLoad();
-        } else if (id == words["jump_active_forward"]) {
-            return ir::Proof::makeJumpActiveForward();
-        } else if (id == words["branch_active_forward"]) {
-            return ir::Proof::makeBranchActiveForward();
         } else if (id == words["branch_decision"]) {
             return ir::Proof::makeBranchDecision();
         } else {
@@ -819,9 +815,9 @@ struct FunctionParser {
             Word id = s.tok().word();
             s.advance();
             if (id == words["false"]) {
-                return ir::Expr::makeBooleanLiteral(false);
+                return ir::Bool(false);
             } else if (id == words["true"]) {
-                return ir::Expr::makeBooleanLiteral(true);
+                return ir::Bool(true);
             } else {
                 s.error("Invalid identifier for expression");
             }
@@ -1250,7 +1246,7 @@ fn #test($a, $b):
     ir::Theorem satTheorem(2);
     EXPECT_EQ(fn.position(satTheorem), ir::CodePos(0));
     EXPECT_EQ(fn.proof(satTheorem).tactic(), ir::Tactic::Sat);
-    EXPECT_EQ(fn.prop(satTheorem), ir::Expr::makeBooleanLiteral(true));
+    EXPECT_EQ(fn.prop(satTheorem), ir::Bool(true));
     auto& proof = fn.getSat(fn.proof(satTheorem));
     EXPECT_EQ(proof.clauses, (std::vector<ir::Theorem> { ir::Theorem(0), ir::Theorem(1) }));
     for (ir::Theorem clause : proof.clauses) {

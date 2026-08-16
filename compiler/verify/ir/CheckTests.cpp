@@ -92,11 +92,11 @@ TEST(VerifyIR, CheckLoadPrecondition) {
     EXPECT_EQ(report.invalidExpressions[0].precondition, fn.addScalarType({ locType, Sort::Type }));
 
     // The proposition has to hold for the loaded location and the loaded sort
-    fn.addTheorem(fn.addScalarType({ locType, Sort::Bool }), CodePos(0));
-    fn.addTheorem(fn.addScalarType({ otherType, Sort::Type }), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Bool }), CodePos(0), Proof::makeSorry());
+    fn.addTheorem(fn.addScalarType({ otherType, Sort::Type }), CodePos(0), Proof::makeSorry());
     EXPECT_EQ(check(fn).invalidExpressions.size(), 1u);
 
-    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0), Proof::makeSorry());
     EXPECT_TRUE(check(fn).invalidExpressions.empty());
 }
 
@@ -113,7 +113,7 @@ TEST(VerifyIR, CheckStorePrecondition) {
     EXPECT_EQ(report.invalidInstructions[0].pos, CodePos(0));
     EXPECT_EQ(report.invalidInstructions[0].precondition, fn.addScalarType({ locType, Sort::Type }));
 
-    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0));
+    fn.addTheorem(fn.addScalarType({ locType, Sort::Type }), CodePos(0), Proof::makeSorry());
     EXPECT_TRUE(check(fn).invalidInstructions.empty());
 }
 

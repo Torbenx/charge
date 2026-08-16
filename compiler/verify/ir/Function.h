@@ -176,7 +176,7 @@ struct Function {
     }
 
     //! Adds a theorem for a proposition that is not proven yet
-    Theorem addTheorem(Bool prop, CodePos pos, Proof proof = Proof::makeSorry());
+    Theorem addTheorem(Bool prop, CodePos pos, Proof proof);
 
     //! The proposition of a theorem never changes, so only the proof may be replaced
     void setProof(Theorem t, Proof p) {

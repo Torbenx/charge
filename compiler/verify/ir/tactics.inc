@@ -10,6 +10,10 @@
 #define COMPLEX_TACTIC(name, type) TACTIC(name)
 #endif
 
+#ifndef PATTERN_TACTIC
+#define PATTERN_TACTIC(name, patterns...) SIMPLE_TACTIC(name)
+#endif
+
 // Temporary placeholder for a missing proof
 SIMPLE_TACTIC(Sorry)
 
@@ -21,51 +25,122 @@ TACTIC(Precondition)
 // Proves generic propositions P by showing that !P is incompatible with a set of proven clauses
 COMPLEX_TACTIC(Sat, SatProof)
 
-// Proves propositions of the form x = x
-SIMPLE_TACTIC(EqualityReflexive)
-
 // Proves propositions of the form x_1 != x_2 or x_2 != x_3 or ... or x_(n-1) != x_n or x_1 = x_n
 SIMPLE_TACTIC(EqualityTransitive)
 
 // Proves the disjunction of linear integer formulars by means of Farkas lemma
 COMPLEX_TACTIC(IntFarkas, IntFarkasProof)
 
-// For a store store_target <- store_value proves x != store_target or x.load@after_store = store_value
-SIMPLE_TACTIC(LoadStore)
-
-// For a store to store_target proves x = store_target or x.load@after_store = x.load@before_store
-SIMPLE_TACTIC(SkipStore)
-
 // Proves that for an active phi one of its edges is taken
-// For @phi: phi @a @b @c this proves !@phi.active or @phi.from@a or @phi.from@b or @phi.from@c
+// For @phi: phi @a @b @c this proves @phi.from@a or @phi.from@b or @phi.from@c or !@phi.active
 SIMPLE_TACTIC(PhiEnumerate)
 
+PATTERN_TACTIC(EqualityReflexive, R"(
+fn #_($x: uninterpreted_constant):
+
+    prove $x = $x by sorry
+)")
+
+PATTERN_TACTIC(LoadStore, R"(
+fn #_($x, $target, $value: uninterpreted_constant):
+    pre %scalar: $x.type.uninterpreted_constant_scalar
+
+@store:
+    store $target <- $value
+@after:
+    nop
+
+    prove $x != $target or $x.load@after = $value by sorry
+)")
+
+PATTERN_TACTIC(SkipStore, R"(
+fn #_($x, $target, $value: uninterpreted_constant):
+    pre %scalar: $x.type.uninterpreted_constant_scalar
+
+@before:
+    store $target <- $value
+@after:
+    nop
+
+    prove $x = $target or $x.load@after = $x.load@before by sorry
+)")
+
 // Proves that the incoming control flow edges of a phi are mutually exlusive
-// !@phi.from@a or !@phi.from@b for all pairs of sources @a, @b
-SIMPLE_TACTIC(PhiExclusivity)
+PATTERN_TACTIC(PhiExclusivity, R"(
+fn #_():
+@first:
+    nop
+@second:
+    nop
 
-// !@phi.from@a or @phi.active for all sources @a
-SIMPLE_TACTIC(PhiActivate)
+@phi:
+    phi @first, @second
 
-// !@phi.from@label or @label.active
-SIMPLE_TACTIC(PhiActiveBackward)
+    prove !@phi.from@first or !@phi.from@second by sorry
+)")
 
-// !@phi.from@label or x.load@phi = x.load@label
-SIMPLE_TACTIC(PhiLoad)
+PATTERN_TACTIC(PhiActivate, R"(
+fn #_():
+@source:
+    nop
 
-// For @jump: jump @phi proves !@jump.active or @phi.from@jump
-SIMPLE_TACTIC(JumpActiveForward)
+@phi:
+    phi @source
 
-// For @branch: branch cond, @if_true, @if_false
-// !@branch.active or !cond or @if_true.from@branch
-// !@branch.active or cond or @if_false.from@branch
-SIMPLE_TACTIC(BranchActiveForward)
+    prove !@phi.from@source or @phi.active by sorry
+)")
 
-// For @branch: branch cond, @if_true, @if_false
-// !@if_true.from@branch or cond
-// !@if_false.from@branch or !cond
-SIMPLE_TACTIC(BranchDecision)
+PATTERN_TACTIC(PhiActiveSource, R"(
+fn #_():
+@source:
+    nop
+
+@phi:
+    phi @source
+
+    prove !@phi.from@source or @source.active by sorry
+)")
+
+PATTERN_TACTIC(PhiLoad, R"(
+fn #_($x):
+    pre %scalar: $x.type.uninterpreted_constant_scalar
+@source:
+    nop
+
+@phi:
+    phi @source
+
+    prove !@phi.from@source or $x.load@phi = $x.load@source by sorry
+)")
+
+PATTERN_TACTIC(BranchDecision, R"(
+fn #_($cond: bool):
+@if_true:
+    phi @branch
+    nop
+@if_false:
+    phi @branch
+    nop
+@branch:
+    branch $cond, @if_true, @if_false
+
+    prove !@if_true.from@branch or $cond by sorry
+)",
+    R"(
+fn #_($cond: bool):
+@if_true:
+    phi @branch
+    nop
+@if_false:
+    phi @branch
+    nop
+@branch:
+    branch $cond, @if_true, @if_false
+
+    prove !@if_false.from@branch or !$cond by sorry
+)")
 
 #undef TACTIC
 #undef SIMPLE_TACTIC
 #undef COMPLEX_TACTIC
+#undef PATTERN_TACTIC

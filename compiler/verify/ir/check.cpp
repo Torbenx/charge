@@ -1,9 +1,13 @@
 #include <verify/ir/check.h>
 
-#include <verify/ir/Sat.h>
-#include <verify/ir/Tactics.h>
+#include <algorithm>
 
 namespace verify::ir {
+
+// Proof specific checks, implemented in other .cpp files.
+bool checkPatternTactic(const Function&, Bool prop, Tactic);
+bool checkPhiEnumerate(const Function&, Bool prop);
+bool checkSatProof(const Function&, Bool pop, const SatProof&);
 
 //! Collects the results of all checks performed on a single function
 struct FunctionChecker {
@@ -129,22 +133,20 @@ void FunctionChecker::checkProofs() {
             const SatProof& proof = function.getSat(function.proof(theorem));
             // A clause has to be stated before the theorem it serves, so that the theorems can
             // be checked in the order they are listed in and no proof can rest on itself
-            bool ordered = true;
-            for (Theorem clause : proof.clauses)
-                ordered = ordered && clause.id() < theorem.id();
-            if (!ordered || !provesPropBySat(function, proof, function.prop(theorem)))
+            bool ordered = std::ranges::all_of(proof.clauses, [theorem](Theorem clause) { return clause.id() < theorem.id(); });
+            if (!ordered || !checkSatProof(function, function.prop(theorem), proof))
                 report.invalidProofs.push_back(theorem);
             continue;
         }
+        case Tactic::PhiEnumerate:
+            if (!checkPhiEnumerate(function, function.prop(theorem)))
+                report.invalidProofs.push_back(theorem);
+            continue;
         default:
-            break;
+            if (!checkPatternTactic(function, function.prop(theorem), function.proof(theorem).tactic()))
+                report.invalidProofs.push_back(theorem);
+            continue;
         }
-
-        // TODO: The tactics that do not state a fixed clause are not checked yet and are
-        // rejected until they are. Once every tactic is implemented this has to be a
-        // 'VERIFY_NOT_REACHED()' in 'provesProp' instead.
-        if (!provesProp(function, function.proof(theorem).tactic(), function.prop(theorem)))
-            report.invalidProofs.push_back(theorem);
     }
 }
 

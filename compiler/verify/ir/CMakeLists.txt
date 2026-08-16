@@ -3,6 +3,8 @@ target_sources(${PROJECT_NAME}
     PRIVATE
     check.cpp
     check.h
+    check_sat.cpp
+    check_tactics.cpp
     CheckTests.cpp
     Database.cpp
     Database.h
@@ -12,10 +14,4 @@ target_sources(${PROJECT_NAME}
     FunctionTests.cpp
     Match.cpp
     Match.h
-    Sat.cpp
-    Sat.h
-    SatTests.cpp
-    Tactics.cpp
-    Tactics.h
-    TacticTests.cpp
 )

@@ -154,7 +154,7 @@ ExprList Function::flattenOperands(std::span<const OperandSort> operands) {
     std::vector<Expr> flattened;
     flattened.reserve(operands.size());
     for (Bool operand : operands) {
-        if (operand.kind() != kind || operand.boolNegatedBit) {
+        if (operand.kind() != kind || operand.negated()) {
             flattened.push_back(operand);
             continue;
         }

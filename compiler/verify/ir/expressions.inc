@@ -25,7 +25,7 @@ COMPOUND_EXPR(ScalarType, Bool, Type type, Sort sort, Padding<3> _padding = {})
 COMPOUND_EXPR(PureScalarReturn, Expr, Fn target, ExprList args)
 INLINE_EXPR(FunctionParameter, Expr, uint32_t)
 
-INLINE_EXPR(BooleanLiteral, Bool, bool)
+EXPR(BooleanLiteral, Bool)
 INLINE_EXPR(PositionActive, Bool, CodePos)
 INLINE_EXPR(ControlFlowEdgeTaken, Bool, ControlFlowEdge)
 

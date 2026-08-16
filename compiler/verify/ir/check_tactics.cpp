@@ -1,19 +1,80 @@
-#include <verify/ir/check.h>
-
 #include <verify/ir/Match.h>
+#include <verify/ir/check.h>
 #include <verify/language/Parser.h>
 
 #include <gtest/gtest.h>
 
 namespace verify::ir {
 
-//! The theorems of 'source' whose proof does not establish their proposition
-static std::vector<Theorem> invalidProofs(const char* source) {
+struct PatternTactics {
+    PatternTactics() {
+#define PATTERN_TACTIC(name, patterns...)   \
+    for (const char* source : { patterns }) \
+        add(Tactic::name, source);
+#include <verify/ir/tactics.inc>
+    }
+
+    std::span<const Pattern> operator[](Tactic tactic) const {
+        return m_patterns[std::to_underlying(tactic)];
+    }
+
+private:
+    void add(Tactic tactic, const char* source) {
+        m_patterns[std::to_underlying(tactic)].emplace_back(source);
+    }
+
+    std::array<std::vector<Pattern>, std::to_underlying(Tactic::COUNT)> m_patterns;
+};
+
+bool checkPatternTactic(const Function& function, Bool prop, Tactic tactic) {
+    static const PatternTactics tactics;
+    for (const Pattern& pattern : tactics[tactic]) {
+        if (matchClause(pattern, function, prop).has_value())
+            return true;
+    }
+    return false;
+}
+
+bool checkPhiEnumerate(const Function& function, Bool prop) {
+    if (prop.kind() != ExprKind::Or || prop.negated())
+        return false;
+    auto clause = function.view(function.getOr(prop).operands);
+    VERIFY(clause.size() >= 2);
+
+    Bool notActiveLit = (Bool)clause.back();
+    if (notActiveLit.kind() != ExprKind::PositionActive || !notActiveLit.negated())
+        return false;
+    CodePos phiPos = notActiveLit.getPositionActive();
+    // The position behind the last instruction can be talked about, but it holds no phi
+    if (phiPos.id() >= function.here().id() || function.opcodeAt(phiPos) != Opcode::Phi)
+        return false;
+
+    ControlFlowEdgeList edges = function.incomingEdges(phiPos);
+    int_t offset = (int_t)clause.size() - edges.size() - 1;
+    if (offset < 0)
+        return false;
+    for (int_t edgeIndex = 0; edgeIndex < edges.size(); edgeIndex++) {
+        Bool edgeTakenLit = (Bool)clause[edgeIndex + offset];
+        if (edgeTakenLit.kind() != ExprKind::ControlFlowEdgeTaken || edgeTakenLit.negated())
+            return false;
+        if (edgeTakenLit.getControlFlowEdgeTaken() != edges.at(edgeIndex))
+            return false;
+    }
+    return true;
+}
+
+//! The result of checking the function 'source' describes
+static FunctionCheckReport checkSource(const char* source) {
     Function function = language::parse(source).function;
     FunctionCheckReport report = check(function);
     // A malformed function would make the result of the proof check meaningless
     VERIFY(report.malformedExpressions.empty() && report.malformedInstructions.empty());
-    return report.invalidProofs;
+    return report;
+}
+
+//! The theorems of 'source' whose proof does not establish their proposition
+static std::vector<Theorem> invalidProofs(const char* source) {
+    return checkSource(source).invalidProofs;
 }
 
 static std::vector<Theorem> theorems(std::initializer_list<uint32_t> ids) {
@@ -143,12 +204,12 @@ fn #test($x):
 @phi:
     phi @entry
     prove !@phi.from@entry or @phi.active by phi_activate
-    prove !@phi.from@entry or @entry.active by phi_active_backward
+    prove !@phi.from@entry or @entry.active by phi_active_source
     prove !@phi.from@entry or $x.load@phi = $x.load@entry by phi_load
 )")
             .empty());
 
-    // The two clauses of 'phi_activate' and 'phi_active_backward' are not interchangeable
+    // The two clauses of 'phi_activate' and 'phi_active_source' are not interchangeable
     EXPECT_EQ(invalidProofs(R"(
 fn #test():
 @entry:
@@ -156,7 +217,7 @@ fn #test():
 @phi:
     phi @entry
     prove !@phi.from@entry or @entry.active by phi_activate
-    prove !@phi.from@entry or @phi.active by phi_active_backward
+    prove !@phi.from@entry or @phi.active by phi_active_source
 )"),
         theorems({ 0, 1 }));
 
@@ -216,40 +277,144 @@ fn #test():
         theorems({ 0 }));
 }
 
-TEST(VerifyIR, JumpActiveForward) {
+TEST(VerifyIR, PhiEnumerate) {
     EXPECT_TRUE(invalidProofs(R"(
 fn #test():
-@jump:
+@first:
+    jump @phi
+@second:
     jump @phi
 @phi:
-    phi @jump
-    prove !@jump.active or @phi.from@jump by jump_active_forward
+    phi @first, @second
+    prove @phi.from@first or @phi.from@second or !@phi.active by phi_enumerate
 )")
             .empty());
 
-    // The jump has to lead to the phi the edge belongs to
+    // A phi with a single edge leaves no choice about which one is taken
+    EXPECT_TRUE(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove @phi.from@first or !@phi.active by phi_enumerate
+)")
+            .empty());
+
+    // All edges of the phi have to be enumerated
     EXPECT_EQ(invalidProofs(R"(
 fn #test():
-@jump:
-    jump @other
-@other:
-    nop
+@first:
+    jump @phi
+@second:
+    jump @phi
 @phi:
-    phi @jump
-    prove !@jump.active or @phi.from@jump by jump_active_forward
+    phi @first, @second
+    prove @phi.from@first or !@phi.active by phi_enumerate
 )"),
         theorems({ 0 }));
 
-    // The position the edge comes from has to be the jump
+    // The edges are enumerated in the order the phi lists them in
     EXPECT_EQ(invalidProofs(R"(
 fn #test():
-@jump:
+@first:
     jump @phi
-@other:
+@second:
     jump @phi
 @phi:
-    phi @jump, @other
-    prove !@jump.active or @phi.from@other by jump_active_forward
+    phi @first, @second
+    prove @phi.from@second or @phi.from@first or !@phi.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // The edges are stated positively and the activity of the phi is negated
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove !@phi.from@first or !@phi.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove @phi.from@first or @phi.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // A single edge is no clause, so nothing follows from it on its own
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove @phi.from@first by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // The enumerated edges are the ones of the phi that is claimed to be inactive
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@second:
+    jump @other
+@phi:
+    phi @first
+@other:
+    phi @second
+    prove @phi.from@first or !@other.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // Only a phi is entered through edges, no other instruction is
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove @phi.from@first or !@first.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // The position behind the last instruction holds no phi either
+    EXPECT_EQ(invalidProofs(R"(
+fn #test():
+@first:
+    jump @phi
+@phi:
+    phi @first
+@end:
+    prove @phi.from@first or !@end.active by phi_enumerate
+)"),
+        theorems({ 0 }));
+
+    // The clause may be weakened by further operands in front of the enumeration
+    EXPECT_TRUE(invalidProofs(R"(
+fn #test($a):
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove $a = $a or @phi.from@first or !@phi.active by phi_enumerate
+)")
+            .empty());
+
+    // The enumeration still has to end the clause
+    EXPECT_EQ(invalidProofs(R"(
+fn #test($a):
+@first:
+    jump @phi
+@phi:
+    phi @first
+    prove @phi.from@first or !@phi.active or $a = $a by phi_enumerate
 )"),
         theorems({ 0 }));
 }
@@ -263,8 +428,6 @@ fn #test($cond: bool):
     phi @branch
 @if_false:
     phi @branch
-    prove !@branch.active or !$cond or @if_true.from@branch by branch_active_forward
-    prove !@branch.active or $cond or @if_false.from@branch by branch_active_forward
     prove !@if_true.from@branch or $cond by branch_decision
     prove !@if_false.from@branch or !$cond by branch_decision
 )")

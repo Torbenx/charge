@@ -165,7 +165,7 @@ TEST(VerifyIR, SortOfExpressions) {
     EXPECT_EQ(fn.sortOf(type), Sort::Type);
 
     EXPECT_EQ(fn.sortOf(fn.addEquality({ loc, loc })), Sort::Bool);
-    EXPECT_EQ(fn.sortOf(Expr::makeBooleanLiteral(true)), Sort::Bool);
+    EXPECT_EQ(fn.sortOf(Bool(true)), Sort::Bool);
     EXPECT_EQ(fn.sortOf(fn.addMemoryLocDecl({ loc })), Sort::MemoryDecl);
     EXPECT_EQ(fn.sortOf(fn.addMemoryLocMember({ loc })), Sort::Member);
 }
@@ -201,7 +201,7 @@ TEST(VerifyIR, ScalarSort) {
     Bool scalarType = fn.addScalarType({ type, Sort::Type });
     EXPECT_FALSE(fn.scalarSort(type).has_value());
 
-    fn.addTheorem(scalarType, CodePos(0));
+    fn.addTheorem(scalarType, CodePos(0), Proof::makeSorry());
     EXPECT_EQ(fn.scalarSort(type).value(), Sort::Type);
     EXPECT_FALSE(fn.scalarSort(other).has_value());
 
@@ -219,14 +219,14 @@ TEST(VerifyIR, FindTheorem) {
 
     EXPECT_FALSE(fn.findTheorem(aEqB).has_value());
 
-    Theorem theorem = fn.addTheorem(aEqB, CodePos(0));
+    Theorem theorem = fn.addTheorem(aEqB, CodePos(0), Proof::makeSorry());
     EXPECT_EQ(fn.findTheorem(aEqB).value(), theorem);
     EXPECT_EQ(fn.prop(theorem), aEqB);
     EXPECT_EQ(fn.proof(theorem).tactic(), Tactic::Sorry);
 
     // A proposition and its negation are proven by separate theorems
     EXPECT_FALSE(fn.findTheorem(!aEqB).has_value());
-    Theorem negated = fn.addTheorem(!aEqB, CodePos(0));
+    Theorem negated = fn.addTheorem(!aEqB, CodePos(0), Proof::makeSorry());
     EXPECT_NE(negated, theorem);
     EXPECT_EQ(fn.findTheorem(!aEqB).value(), negated);
     EXPECT_EQ(fn.findTheorem(aEqB).value(), theorem);

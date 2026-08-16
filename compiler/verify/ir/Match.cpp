@@ -186,9 +186,9 @@ the clause itself: an operand of it that is a connective again would state somet
 with further operands, so those are matched as a whole.
 */
 bool Matcher::matchClause(Bool patternProp, Bool prop) {
-    if (patternProp.kind() != ExprKind::Or || patternProp.boolNegatedBit)
+    if (patternProp.kind() != ExprKind::Or || patternProp.negated())
         return matchExpr(patternProp, prop);
-    if (prop.kind() != ExprKind::Or || prop.boolNegatedBit)
+    if (prop.kind() != ExprKind::Or || prop.negated())
         return false;
     return matchOperands(pattern.function().getOr(patternProp).operands,
         target.getOr(prop).operands);

@@ -180,6 +180,13 @@ namespace inline_expr_detail {
         else
             return static_cast<uint32_t>(arg);
     }
+    template<typename T>
+    constexpr T fromUInt(uint32_t id) {
+        if constexpr (std::derived_from<T, SmallHandle>)
+            return T(id);
+        else
+            return static_cast<T>(id);
+    }
 }
 
 struct Bool;
@@ -191,7 +198,8 @@ struct MemoryLoc;
 
 struct Expr {
 #define INLINE_EXPR(name, sort, Arg) \
-    static sort make##name(Arg);
+    static sort make##name(Arg);     \
+    Arg get##name() const;
 #include <verify/ir/expressions.inc>
 
     Expr(ExprKind kind, uint32_t id)
@@ -216,6 +224,14 @@ struct Bool : Expr {
     Bool operator!() const {
         Bool copy = *this;
         copy.boolNegatedBit = !boolNegatedBit;
+        return copy;
+    }
+    constexpr bool negated() const {
+        return boolNegatedBit != 0;
+    }
+    constexpr Bool baseValue() const {
+        Bool copy = *this;
+        copy.boolNegatedBit = 0;
         return copy;
     }
 };
@@ -257,6 +273,10 @@ struct UninterpretedConstant : Expr {
 #define INLINE_EXPR(name, sort, Arg)                                        \
     inline sort Expr::make##name(Arg arg) {                                 \
         return (sort)Expr(ExprKind::name, inline_expr_detail::toUInt(arg)); \
+    }                                                                       \
+    inline Arg Expr::get##name() const {                                    \
+        VERIFY(kind() == ExprKind::name);                                   \
+        return inline_expr_detail::fromUInt<Arg>(id());                     \
     }
 #include <verify/ir/expressions.inc>
 
