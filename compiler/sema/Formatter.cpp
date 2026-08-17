@@ -161,17 +161,17 @@ void Formatter::formatVariableDeclaration(Word name, Constant type, VariableCate
     formatWord(name);
     output += ": ";
     if (category.isGeneric()) {
-        output += "<";
+        output += "&(";
         formatConstant(category.genericCategory());
-        output += "> ";
+        output += ") ";
     } else if (category.kind() == VariableKind::UniqueReference) {
-        output += "unique ";
+        output += "&unique ";
     } else if (category.kind() == VariableKind::ConstUniqueReference) {
-        output += "const unique ";
+        output += "&const unique ";
     } else if (category.kind() == VariableKind::SharedReference) {
-        output += "shared ";
+        output += "&shared ";
     } else if (category.kind() == VariableKind::ConstSharedReference) {
-        output += "const shared ";
+        output += "&const shared ";
     }
     formatConstant(type);
 }

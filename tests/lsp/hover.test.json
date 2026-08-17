@@ -122,7 +122,7 @@
         },
         {
             "documents": [
-                { "uri": "file:///dummyFile", "text": "fn f(val: unique) => val;" }
+                { "uri": "file:///dummyFile", "text": "fn f(val: &unique) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
@@ -132,12 +132,12 @@
                 }
             },
             "result": {
-                "contents": { "kind": "markdown", "value": "```charge\nval: unique _\n```" }
+                "contents": { "kind": "markdown", "value": "```charge\nval: &unique _\n```" }
             }
         },
         {
             "documents": [
-                { "uri": "file:///dummyFile", "text": "fn f(val: const) => val;" }
+                { "uri": "file:///dummyFile", "text": "fn f(val: &const) => val;" }
             ],
             "request": {
                 "method": "textDocument/hover",
@@ -147,7 +147,7 @@
                 }
             },
             "result": {
-                "contents": { "kind": "markdown", "value": "```charge\nval: const shared _\n```" }
+                "contents": { "kind": "markdown", "value": "```charge\nval: &const shared _\n```" }
             }
         }
     ]

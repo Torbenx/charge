@@ -3,12 +3,12 @@ template(T: type)
 struct refcell: {
 
     struct unique_ref: {
-        fn get(self: &unique) -> &unique[self] T: {
+        fn get(self: &unique, cell: &shared) -> &unique[self] T: {
             intern .cell:
                 return *.cell.target;
         }
 
-        fn impl destroy_behavior(self: &unique): {
+        fn impl destroy_behavior(self: &unique, cell: &shared): {
             intern .cell:
                 .cell.shared_refcount = 0;
         }
@@ -18,11 +18,11 @@ struct refcell: {
     }
 
     struct shared_ref: {
-        fn get(self: unique) -> &shared[unique self] T: {
+        fn get(self: &unique, cell: &shared) -> &shared[unique self] T: {
             return *.cell.target;
         }
 
-        fn impl destroy_behavior(self: &unique): {
+        fn impl destroy_behavior(self: &unique, cell: &shared): {
             intern .cell:
                 .cell.shared_refcount -= 1;
             if .cell.shared_refcount == 0: {
