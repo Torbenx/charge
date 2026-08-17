@@ -181,11 +181,14 @@ struct RecoveryState {
     // source tokens ahead and uses costTolarance or fewer modifications. All the best nodes are stored
     // in a vector ordered by total advance.
     struct ErrorNode {
-        uint32_t totalAdvancedTokens() const { return preNextRecoveryState.parsedTokens + totalSkippedTokens - totalInsertedTokens; }
+        uint32_t totalAdvancedTokens() const { return sourceTokenIndex; }
         uint32_t modificationCost() const { return totalSkippedTokens * 2 + totalInsertedTokens * 3; }
 
         uint32_t parentNode;
         RecoveryElement recovery;
+        //! Index of the source token at preNextRecoveryState.sourcePosition. Unlike the parsed
+        //! token count this only depends on the source position and not on the path taken.
+        uint32_t sourceTokenIndex = 0;
         uint32_t totalSkippedTokens = 0;
         uint32_t totalInsertedTokens = 0;
         SavedParserState preNextRecoveryState;
@@ -221,6 +224,7 @@ struct RecoveryState {
     };
 
     void insertNode(ErrorNode child) {
+        VERIFY(child.sourceTokenIndex == child.preNextRecoveryState.parsedTokens + child.totalSkippedTokens - child.totalInsertedTokens);
         uint32_t idx = allNodes.size();
         ErrorInfo info(idx, child);
         allNodes.emplace_back(std::move(child));
@@ -255,12 +259,14 @@ struct RecoveryState {
         bestErrors.erase(newEnd, bestErrors.end());
     }
 
-    void makeNodes(uint32_t parentIdx, RecoveryElement recovery, uint32_t totalSkippedTokens, uint32_t totalInsertedTokens, SimpleParser& parser, int_t validTokensUntilError) {
+    void makeNodes(uint32_t parentIdx, RecoveryElement recovery, uint32_t parentSourceTokenIndex, uint32_t totalSkippedTokens, uint32_t totalInsertedTokens, SimpleParser& parser, int_t validTokensUntilError) {
+        uint32_t sourceTokenIndex = parentSourceTokenIndex + (uint32_t)recovery.skips();
         if (validTokensUntilError > 1) {
             parser.parse(NoOutput(), validTokensUntilError - 1);
             insertNode({
                 .parentNode = parentIdx,
                 .recovery = recovery,
+                .sourceTokenIndex = sourceTokenIndex + (uint32_t)validTokensUntilError - 1,
                 .totalSkippedTokens = totalSkippedTokens,
                 .totalInsertedTokens = totalInsertedTokens,
                 .preNextRecoveryState = parser.save(),
@@ -273,6 +279,7 @@ struct RecoveryState {
         insertNode({
             .parentNode = parentIdx,
             .recovery = recovery,
+            .sourceTokenIndex = sourceTokenIndex + (uint32_t)validTokensUntilError,
             .totalSkippedTokens = totalSkippedTokens,
             .totalInsertedTokens = totalInsertedTokens,
             .preNextRecoveryState = parser.save(),
@@ -317,6 +324,7 @@ struct RecoveryState {
                     insertNode({
                         .parentNode = (uint32_t)parentIdx,
                         .recovery = c,
+                        .sourceTokenIndex = (uint32_t)(allNodes[parentIdx].sourceTokenIndex + c.skips() + parser.parsedTokens() - prevParsedTokens),
                         .totalSkippedTokens = (uint32_t)(allNodes[parentIdx].totalSkippedTokens + c.skips()),
                         .totalInsertedTokens = (uint32_t)(allNodes[parentIdx].totalInsertedTokens + c.inserts()),
                         .preNextRecoveryState = parser.save(),
@@ -330,6 +338,7 @@ struct RecoveryState {
                 VERIFY(parser.apply(NoOutput(), c) == ReturnStatus::Ready);
                 makeNodes(
                     parentIdx, c,
+                    allNodes[parentIdx].sourceTokenIndex,
                     allNodes[parentIdx].totalSkippedTokens + c.skips(),
                     allNodes[parentIdx].totalInsertedTokens + c.inserts(),
                     parser, validTokensUntilError);
@@ -359,7 +368,7 @@ struct RecoveryState {
     static std::vector<std::vector<ReturnElement>> recover(SimpleParser& parser, const SavedParserState& errorState) {
         VERIFY(parser.parsedTokens() == 0);
         RecoveryState state;
-        state.makeNodes(limits::max, RecoveryElement::insert(LexerToken::Invalid), 0, 0, parser, errorState.parsedTokens);
+        state.makeNodes(limits::max, RecoveryElement::insert(LexerToken::Invalid), 0, 0, 0, parser, errorState.parsedTokens);
         state.grind(parser);
 
         std::vector<std::vector<ReturnElement>> result;
