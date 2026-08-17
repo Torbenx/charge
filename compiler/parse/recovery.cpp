@@ -284,6 +284,14 @@ struct RecoveryState {
         PruneCondition { .tokenLookAhead = 1, .costTolerance = 3 },
     };
 
+    //! Pruning condition used once the search exceeds MAX_STATES
+    /*!
+    It only keeps the states that are furthest ahead, so the search still reaches the end of the
+    source but reports worse recoveries for the rest of it.
+    */
+    static constexpr PruneCondition STRICT_PRUNE_CONDITION { .tokenLookAhead = 1, .costTolerance = 0 };
+    static constexpr int_t MAX_STATES = 100000;
+
     //! Maximum number of equally good ways to a state that are remembered
     static constexpr uint32_t MAX_INCOMING_EDGES = 4;
     //! Maximum number of alternative recovery paths that are reported
@@ -361,7 +369,11 @@ struct RecoveryState {
     }
 
     bool isPruned(const StateData& state) const {
-        for (const auto& cond : PRUNE_CONDITIONS) {
+        std::span<const PruneCondition> conditions = PRUNE_CONDITIONS;
+        if (stateTable.size() > MAX_STATES)
+            conditions = { &STRICT_PRUNE_CONDITION, 1 };
+
+        for (const auto& cond : conditions) {
             auto it = std::partition_point(bestErrors.begin(), bestErrors.end(), [&](const ErrorInfo& info) {
                 return info.totalAdvancedTokens >= state.sourceTokenIndex + cond.tokenLookAhead;
             });
