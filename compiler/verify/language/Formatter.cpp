@@ -143,7 +143,8 @@ private:
                     visitExpr(e);
             } else if constexpr (std::same_as<T, ir::CodePos>) {
                 markReferenced(member);
-            } else if constexpr (std::same_as<T, ir::RelativeCodePos>) { /* TODO: Implement formatting for relative code positions*/
+            } else if constexpr (std::same_as<T, ir::RelativeCodePos>) {
+                // TODO: Implement formatting for relative code positions
                 VERIFY(member.simple());
                 markReferenced(member.simplePos());
             }
