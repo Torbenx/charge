@@ -6,6 +6,7 @@
 
 #include <bitset>
 #include <list>
+#include <unordered_map>
 
 namespace parse {
 
@@ -164,6 +165,73 @@ static std::vector<RecoveryElement> generateCases(const SavedParserState& savedS
     return cases;
 }
 
+struct StateHandle {
+    uint32_t m_id = limits::max;
+    constexpr uint32_t id() const { return m_id; }
+    bool operator==(const StateHandle&) const = default;
+};
+
+//! Everything that determines how the parser continues from a recovery state.
+/*!
+The parsed token count is not part of it since it also counts the tokens inserted on the way to the state.
+*/
+struct StateKey {
+    const char* sourcePosition = nullptr;
+    std::vector<ScopeKind> scopes;
+    State state;
+    ReturnStatus status;
+
+    bool operator==(const StateKey&) const = default;
+};
+
+struct StateTable {
+    struct StateData {
+        StateKey key;
+        //! Index of the source token at key.sourcePosition
+        uint32_t sourceTokenIndex = 0;
+    };
+
+    struct InternResult {
+        StateHandle handle;
+        bool isNew;
+    };
+
+    InternResult intern(const SavedParserState& state, uint32_t sourceTokenIndex) {
+        StateKey key {
+            .sourcePosition = state.sourcePosition,
+            .scopes = state.scopeBuffer,
+            .state = state.state,
+            .status = state.status,
+        };
+        auto [it, isNew] = m_ids.try_emplace(key, StateHandle { (uint32_t)m_states.size() });
+        if (isNew)
+            m_states.push_back({ .key = key, .sourceTokenIndex = sourceTokenIndex });
+        else
+            VERIFY(m_states[it->second.id()].sourceTokenIndex == sourceTokenIndex);
+        return { it->second, isNew };
+    }
+
+    int_t size() const { return (int_t)m_states.size(); }
+    StateData& operator[](StateHandle handle) { return m_states[handle.id()]; }
+    const StateData& operator[](StateHandle handle) const { return m_states[handle.id()]; }
+
+private:
+    struct Hash {
+        size_t operator()(const StateKey& key) const {
+            size_t hash = 0;
+            hash_combine(hash, std::hash<const char*>()(key.sourcePosition));
+            for (ScopeKind scope : key.scopes)
+                hash_combine(hash, std::to_underlying(scope));
+            hash_combine(hash, std::to_underlying(key.state));
+            hash_combine(hash, std::to_underlying(key.status));
+            return hash;
+        }
+    };
+
+    std::unordered_map<StateKey, StateHandle, Hash> m_ids;
+    std::vector<StateData> m_states;
+};
+
 struct RecoveryState {
     struct PruneCondition {
         uint32_t tokenLookAhead;
@@ -225,6 +293,7 @@ struct RecoveryState {
 
     void insertNode(ErrorNode child) {
         VERIFY(child.sourceTokenIndex == child.preNextRecoveryState.parsedTokens + child.totalSkippedTokens - child.totalInsertedTokens);
+        stateTable.intern(child.preNextRecoveryState, child.sourceTokenIndex);
         uint32_t idx = allNodes.size();
         ErrorInfo info(idx, child);
         allNodes.emplace_back(std::move(child));
@@ -394,6 +463,7 @@ struct RecoveryState {
     }
 
     int_t nextNodeToProcessed = 0;
+    StateTable stateTable = {};
     std::vector<ErrorInfo> bestErrors = {};
     std::vector<ErrorNode> allNodes = {};
     std::unique_ptr<ErrorNode> rootError = nullptr;
