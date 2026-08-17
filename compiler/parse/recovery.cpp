@@ -221,7 +221,7 @@ struct StateTable {
         //! Cost of the cheapest known way to the state, final once the state is expanded
         uint32_t modificationCost = limits::max;
         //! All the ways to the state that cost modificationCost
-        std::optional<EdgeHandle> lastIncomingEdge;
+        std::optional<EdgeHandle> lastIncomingEdge = std::nullopt;
         uint32_t incomingEdges = 0;
         bool expanded = false;
     };
