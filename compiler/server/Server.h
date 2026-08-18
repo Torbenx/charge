@@ -1,6 +1,7 @@
 #pragma once
 
 #include <server/LanguageServerProtocol.h>
+#include <server/MessageLog.h>
 #include <server/SemaContext.h>
 
 #include <filesystem>
@@ -146,6 +147,8 @@ struct Server {
     std::vector<std::unique_ptr<Method>> m_methods;
     std::unordered_set<FileInfo, FileInfoHash, FileInfoEqual> m_fileCache;
     SemaErrorHandler semaErrorHandler;
+    //! Records the incoming messages when enabled, null otherwise
+    std::unique_ptr<MessageLog> m_messageLog;
 
     int_t remainingContentSize = 0;
     std::string inputBuffer;

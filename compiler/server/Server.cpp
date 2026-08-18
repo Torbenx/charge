@@ -288,6 +288,9 @@ void Server::handleMessage(std::string data) {
 }
 
 void Server::writeMessage(std::string_view msg) {
+    if (m_messageLog != nullptr)
+        m_messageLog->record(MessageLog::Event::Outgoing);
+
     outputBuffer += "Content-Length: ";
     outputBuffer += std::to_string(msg.size());
     outputBuffer += "\r\n\r\n";
@@ -316,7 +319,11 @@ void Server::receiverChacacter(char val) {
     if (remainingContentSize > 0) {
         remainingContentSize -= 1;
         if (remainingContentSize == 0) {
+            if (m_messageLog != nullptr)
+                m_messageLog->record(MessageLog::Event::Incoming, inputBuffer);
             handleMessage(inputBuffer);
+            if (m_messageLog != nullptr)
+                m_messageLog->record(MessageLog::Event::Handled);
             inputBuffer.clear();
         }
     } else {

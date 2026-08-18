@@ -12,6 +12,8 @@ target_sources(${PROJECT_NAME}
     json.cpp
     json.h
     LanguageServerProtocol.h
+    MessageLog.cpp
+    MessageLog.h
     SemaContext.cpp
     SemaContext.h
     SemanticHighlight.cpp

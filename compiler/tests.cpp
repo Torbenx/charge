@@ -5,6 +5,7 @@
 #include <parse/api.h>
 #include <sema/Generator.h>
 
+#include <server/MessageLog.h>
 #include <server/Server.h>
 
 #include <gtest/gtest.h>
@@ -24,12 +25,35 @@
 
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string_view(argv[1]) == std::string_view("--server")) {
+        // charge --server [--realtime] [replay_file]
+        bool realtime = false;
+        std::optional<std::string_view> replayFile;
+        for (int i = 2; i < argc; i++) {
+            std::string_view arg = argv[i];
+            if (arg == "--realtime") {
+                realtime = true;
+            } else if (replayFile.has_value()) {
+                dbgln("Only a single replay file is supported");
+                return 1;
+            } else {
+                replayFile = arg;
+            }
+        }
+
+        if (replayFile.has_value()) {
+            server::replayLog(replayFile.value(), realtime);
+            return 0;
+        }
+        if (realtime)
+            dbgln("--realtime only has an effect when a replay file is given");
+
 #ifdef WIN32
         _setmode(_fileno(stdin), _O_BINARY);
         _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
         server::Server s;
+        s.m_messageLog = server::MessageLog::createFromEnvironment();
         while (!s.shouldExit()) {
             auto val = std::cin.get();
             if (std::cin.fail()) {
@@ -647,8 +671,8 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
             auto* errorProg = context.program(firstError->prog);
             Word name = (errorProg->isImpl() ? context.program(errorProg->baseProgram(errorProg->selfConstant()).value()) : errorProg)->name();
             FAIL() << "unexpected semantic error " << firstError->name << " in "
-                << (errorProg->isImpl() ? "impl of " : "") << context.tokenBuffer.wordTable.view(name)
-                << " near line " << firstError->location.lineNumber();
+                   << (errorProg->isImpl() ? "impl of " : "") << context.tokenBuffer.wordTable.view(name)
+                   << " near line " << firstError->location.lineNumber();
             return;
         }
 
