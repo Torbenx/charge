@@ -310,6 +310,13 @@ struct Program {
     bool isTemplate() const {
         return parameters.size() > inheritedParameterCount;
     }
+    bool hasExplicitParameters() const {
+        for (int_t index = inheritedParameterCount; index < (int_t)parameters.size(); index++) {
+            if (!parameters[index].implicit())
+                return true;
+        }
+        return false;
+    }
     int_t nonInheritedParameterCount() const { return parameters.size() - inheritedParameterCount; }
     bool isImpl() const {
         return m_fields.tag().isImpl();
@@ -317,11 +324,12 @@ struct Program {
 
     void dump(Context&);
 
-    parse::TokenHandle beginSignatureCheck() {
+    parse::TokenHandle beginSignatureCheck(Constant partialSelfConstant) {
         VERIFY(status() == ProgramStatus::Unchecked);
         auto tag = m_fields.tag();
         tag.setStatus(ProgramStatus::SignatureCheckInProgress);
         m_fields.setTag(tag);
+        m_partialSelfConstant = partialSelfConstant;
         return tokenRangeBegin;
     }
 
@@ -337,6 +345,10 @@ struct Program {
     ExternConstant selfConstant() const {
         VERIFY(status() == ProgramStatus::SignatureChecked);
         return m_selfConstant.value();
+    }
+    ExternConstant partialSelfConstant() const {
+        VERIFY(status() == ProgramStatus::SignatureChecked);
+        return m_partialSelfConstant.value();
     }
 
     std::optional<ProgramHandle> baseProgram(ExternConstant value) const {
@@ -403,10 +415,11 @@ protected:
     uint32_t m_subClassData = INVALID_SUBCLASS_DATA;
     DeclarationValue m_parent;
     std::optional<ExternConstant> m_selfConstant;
+    std::optional<ExternConstant> m_partialSelfConstant;
 
     friend struct Dumper;
 };
-static_assert(sizeof(Program) == 312);
+static_assert(sizeof(Program) == 320);
 
 enum class GlobalKind : uint8_t {
     Var,
@@ -741,7 +754,7 @@ union ProgramUnion {
         }
     }
 };
-static_assert(sizeof(ProgramUnion) == 360);
+static_assert(sizeof(ProgramUnion) == 368);
 
 inline constexpr Expression Expression::returnValueReference(FunctionProgram* prog) {
     return parameterReference(prog->functionParameters.size());

@@ -46,14 +46,6 @@ struct LookupCache {
     }
 };
 
-struct FoldBase {
-    Program* program;
-    ModuleHandle module;
-    ProgramHandle programHandle;
-    Constant value;
-    std::span<const Constant> arguments;
-};
-
 struct ConstantPair {
     ExternConstant pValue;
     Constant aValue;
@@ -359,8 +351,6 @@ struct Generator : Util {
 
     static void signatureCheck(Context& context, ProgramHandle progHandle);
 
-    FoldBase asFoldBase(Constant value);
-    std::optional<FoldBase> tryAsFoldBase(Constant value);
     Constant fold(Constant base, ExternConstant v);
     Constant fold(FoldBase base, ExternConstant v);
     //! Matches the \p pValue against \p aValue and fills \p state accordingly
@@ -417,6 +407,7 @@ struct Generator : Util {
     Type lookupSelfType();
 
     Constant inheriteParameters(DeclarationValue parent);
+    Constant importParameters(Constant baseValue, Expression (Generator::*)(SourceLocation, Word, Type, std::optional<Constant>));
 
     Expression addParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue);
     Expression addExplicitParameter(SourceLocation location, Word name, Type type, std::optional<Constant> defaultValue);

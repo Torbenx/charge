@@ -183,22 +183,33 @@ Constant Generator::inheriteParameters(DeclarationValue parent) {
         return (Constant)parentHandle;
 
     // inherite parameters
-    int_t parameterCount = parentProg->parameters.size();
-    VERIFY(parameterCount > 0);
-    std::vector<Constant> parentArguments(parameterCount, INVALID_CONSTANT);
-    for (int_t i = 0; i < parameterCount; i++) {
-        const auto& parentParameter = parentProg->parameters[i];
-        parentArguments[i] = addInheritedParameter(parentParameter.location, parentParameter.name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter();
+    return importParameters(Constant(parentHandle), &Generator::addInheritedParameter);
+}
+
+Constant Generator::importParameters(Constant baseValue, Expression (Generator::*add)(SourceLocation, Word, Type, std::optional<Constant>)) {
+    ProgramHandle baseProgHandle = baseProgram(baseValue).value();
+    Program* baseProg = context.program(baseProgHandle);
+    VERIFY(program->parameters.size() == parameterTypes.size());
+
+    std::vector<Constant> baseArguments;
+    if (baseValue.kind() == ConstantKind::Parameterize)
+        baseArguments.assign_range(program->getParameterize(baseValue).arguments);
+    int_t firstNewArgument = baseArguments.size();
+    while (baseArguments.size() < baseProg->parameters.size()) {
+        const auto& baseParameter = baseProg->parameters[baseArguments.size()];
+        baseArguments.push_back(addInheritedParameter(baseParameter.location, baseParameter.name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter());
     }
 
-    Constant parentValue = program->addParameterize(context, { parentHandle, parentArguments });
-    FoldBase base = asFoldBase(parentValue);
-    for (int_t i = 0; i < parameterCount; i++) {
-        Type type = verifyType(fold(base, base.program->parameters[i].type));
-        program->parameters[i].type = type;
-        parameterTypes[i] = type;
+    Constant completeBaseValue = program->addParameterize(context, { baseProgHandle, baseArguments });
+    FoldBase base = asFoldBase(completeBaseValue);
+    for (int_t baseParameterIndex = firstNewArgument; baseParameterIndex < (int_t)baseProg->parameters.size(); baseParameterIndex++) {
+        const auto& baseParameter = base.program->parameters[baseParameterIndex];
+        Type type = verifyType(fold(base, baseParameter.type));
+        int_t newParameterIndex = baseArguments[baseParameterIndex].parameterIndex();
+        program->parameters[newParameterIndex].type = type;
+        parameterTypes[newParameterIndex] = type;
     }
-    return parentValue;
+    return completeBaseValue;
 }
 
 std::optional<DeductionState> Generator::resolveImplicitImplTarget() {
@@ -1014,26 +1025,6 @@ void Generator::initialize(std::optional<TokenInfo*> implicitActionToken, Deduct
     }
 }
 
-FoldBase Generator::asFoldBase(Constant base) {
-    return tryAsFoldBase(base).value();
-}
-
-std::optional<FoldBase> Generator::tryAsFoldBase(Constant base) {
-    if (base.kind() == ConstantKind::Program) {
-        Program* baseProg = context.program(base.program());
-        if (baseProg->isDependent())
-            return std::nullopt;
-        return FoldBase { baseProg, context.moduleOf(base.program()), base.program(), base, {} };
-    } else if (base.kind() == ConstantKind::Parameterize) {
-        auto param = program->getParameterize(base);
-        Program* baseProg = context.program(param.base);
-        if (baseProg->parameters.size() != param.arguments.size())
-            return std::nullopt;
-        return FoldBase { context.program(param.base), context.moduleOf(param.base), param.base, base, param.arguments };
-    }
-    return std::nullopt;
-}
-
 // pValue and aValue must be known to have the same type
 std::optional<Constant> Generator::staticMatch(DeductionState& state, ExternConstant pValue, Constant aValue) {
     if (pValue == builtins::self_constant)
@@ -1241,13 +1232,13 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     }
 }
 
-void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
-    Program* program = context.program(progHandle);
+void Generator::signatureCheck(Context& context, ProgramHandle programHandle) {
+    Program* program = context.program(programHandle);
     if (program->status() >= ProgramStatus::SignatureChecked)
         return;
     VERIFY(program->status() == ProgramStatus::Unchecked); // TODO: This should be an error
 
-    Generator g(context, progHandle);
+    Generator g(context, programHandle);
     g.inheriteParameters(program->parent());
     // build lookup stack
     DeclarationValue scope = program->parent();
@@ -1273,7 +1264,12 @@ void Generator::signatureCheck(Context& context, ProgramHandle progHandle) {
     }
     std::reverse(g.lookupStack.begin(), g.lookupStack.end());
 
-    auto parseLocation = program->beginSignatureCheck();
+    Constant partialSelf = INVALID_CONSTANT;
+    if (program->parent().kind() == DeclarationValueKind::Program)
+        partialSelf = g.makeParameterize(programHandle, copyParameters(context.program(program->parent().program())));
+    else
+        partialSelf = g.makeParameterize(programHandle, {});
+    auto parseLocation = program->beginSignatureCheck(partialSelf);
     g.setParseLocation(parseLocation);
     g.visitDeclaration();
 }

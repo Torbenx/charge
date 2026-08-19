@@ -4,6 +4,14 @@
 
 namespace sema {
 
+struct FoldBase {
+    Program* program;
+    ModuleHandle module;
+    ProgramHandle programHandle;
+    Constant value;
+    std::span<const Constant> arguments;
+};
+
 struct Util {
     Util(Context& context, ProgramHandle handle);
 
@@ -18,6 +26,9 @@ struct Util {
     std::strong_ordering compare(MemberPointer, MemberPointer);
     std::strong_ordering compare(RemoteComputation, RemoteComputation);
     std::strong_ordering compare(EnumValue, EnumValue);
+
+    FoldBase asFoldBase(Constant value);
+    std::optional<FoldBase> tryAsFoldBase(Constant value);
 
     Context& context;
     Program* program;

@@ -1,8 +1,33 @@
 #include <sema/Formatter.h>
 
 #include <sema/Context.h>
+#include <sema/Generator.h>
 
 namespace sema {
+
+static Generator foldGenerator(Context& context, ProgramHandle programHandle) {
+    // TODO: The parameter types have to be filled in manually since they are only
+    //       tracked while the program itself is being generated.
+    Generator generator(context, programHandle);
+    generator.parameterTypes.reserve(generator.program->parameters.size());
+    for (const auto& p : generator.program->parameters)
+        generator.parameterTypes.push_back(Type(Constant(p.type)));
+    return generator;
+}
+
+Constant Formatter::fold(const FoldBase& base, ExternConstant value) {
+    return foldGenerator(context, programHandle).fold(base, value);
+}
+
+Constant Formatter::fold(Constant base, ExternConstant value) {
+    return foldGenerator(context, programHandle).fold(base, value);
+}
+
+VariableCategory Formatter::foldCategory(const FoldBase& base, VariableCategory category) {
+    if (!category.isGeneric())
+        return category;
+    return VariableCategory(fold(base, category.genericCategory()));
+}
 
 void Formatter::formatWord(Word word) {
     output += context.tokenBuffer.wordTable.view(word);
@@ -28,15 +53,15 @@ void Formatter::formatNamespace(NamespaceHandle nsHandle) {
 }
 
 void Formatter::formatProgramBare(ProgramHandle progHandle, std::span<const Constant> arguments) {
-    auto* prog = context.program(progHandle);
-    auto parent = prog->parent();
+    Program* prog = context.program(progHandle);
+    VERIFY(!prog->isImpl());
+    DeclarationValue parent = prog->parent();
     if (parent.kind() == DeclarationValueKind::Namespace) {
         formatNamespaceQualifier(parent.nsHandle());
     } else if (parent.kind() == DeclarationValueKind::Program) {
         formatCompleteProgram(parent.program(), arguments.subspan(0, prog->inheritedParameterCount));
         output += "::";
     }
-    VERIFY(!prog->isImpl());
     formatWord(prog->name());
 }
 
@@ -45,7 +70,7 @@ void Formatter::formatCompleteProgram(ProgramHandle progHandle, std::span<const 
 
     auto* prog = context.program(progHandle);
     VERIFY(prog->parameters.size() == arguments.size());
-    if (!prog->isTemplate())
+    if (!prog->hasExplicitParameters())
         return;
     output += "{";
     bool first = true;
@@ -103,7 +128,7 @@ void Formatter::formatConstant(Constant c) {
                 output += "::";
                 if (member.isBase()) {
                     output += "base ";
-                    formatAs(progHandle, [&] { formatConstant(Constant(member.type())); });
+                    formatConstant(fold(elem.structImpl, member.type()));
                 } else {
                     formatWord(member.name());
                 }
@@ -177,42 +202,128 @@ void Formatter::formatVariableDeclaration(Word name, Constant type, VariableCate
 }
 
 void Formatter::formatEnumValueDeclaration(Constant enumType, int_t valueIndex) {
-    ProgramHandle progHandle = baseProgram(enumType).value();
-    auto* enumProg = cast<EnumProgram>(context.program(progHandle));
+    auto* enumProg = cast<EnumProgram>(context.program(baseProgram(enumType).value()));
     const auto& valueDecl = enumProg->values[valueIndex];
     formatConstant(enumType);
     output += "::";
     formatWord(valueDecl.name());
     output += " = ";
-    formatAs(progHandle, [&] {
-        if (valueDecl.explicitValue().has_value()) {
-            formatConstant(Constant(valueDecl.explicitValue().value()));
-        } else {
-            // TODO: Should be able to access the implicit value here
-            output += "...";
-        }
-    });
+    if (valueDecl.explicitValue().has_value()) {
+        formatConstant(fold(enumType, valueDecl.explicitValue().value()));
+    } else {
+        // TODO: Should be able to access the implicit value here
+        output += "...";
+    }
 }
 
 void Formatter::formatMemberDeclaration(Constant structType, int_t memberIndex) {
-    ProgramHandle progHandle = baseProgram(structType).value();
-    auto* structProg = cast<StructProgram>(context.program(progHandle));
+    auto* structProg = cast<StructProgram>(context.program(baseProgram(structType).value()));
     const auto& member = structProg->members[memberIndex];
     formatConstant(structType);
     output += "::";
-    formatAs(progHandle, [&] {
-        if (member.isBase()) {
-            output += "base ";
-            formatConstant(Constant(member.type()));
-        } else {
-            formatWord(member.name());
-            output += ": ";
-            formatConstant(Constant(member.type()));
-        }
-    });
+    if (member.isBase()) {
+        output += "base ";
+        formatConstant(fold(structType, member.type()));
+    } else {
+        formatWord(member.name());
+        output += ": ";
+        formatConstant(fold(structType, member.type()));
+    }
 }
 
-bool Formatter::formatAsDeclaration(Constant c) {
+void Formatter::formatTemplateClause(FoldBase base) {
+    if (!base.program->hasExplicitParameters())
+        return;
+    output += "template(";
+    bool first = true;
+    for (int_t i = base.program->inheritedParameterCount; i < (int_t)base.program->parameters.size(); i++) {
+        const auto& parameter = base.program->parameters[i];
+        if (parameter.implicit())
+            continue;
+        if (first)
+            first = false;
+        else
+            output += ", ";
+        formatWord(parameter.name);
+        output += ": ";
+        formatConstant(fold(base, (Constant)parameter.type));
+    }
+    output += ")\n";
+}
+
+void Formatter::formatProgramAsReferencedDeclaration(FoldBase base, bool formatAsIncomplete, bool isImpl) {
+    if (formatAsIncomplete)
+        formatTemplateClause(base);
+    auto formatProgramName = [&] {
+        if (isImpl)
+            output += "impl ";
+        if (formatAsIncomplete)
+            formatProgramBare(base.programHandle, base.arguments);
+        else
+            formatConstant(base.value);
+    };
+
+    switch (base.program->kind()) {
+    case ProgramKind::Struct:
+        output += "struct ";
+        formatProgramName();
+        break;
+    case ProgramKind::Enum:
+        output += "enum ";
+        formatProgramName();
+        break;
+    case ProgramKind::Function: {
+        auto* fnProg = cast<FunctionProgram>(base.program);
+        output += "fn ";
+        formatProgramName();
+        output += "(";
+        bool first = true;
+        for (const auto& p : fnProg->functionParameters) {
+            if (first)
+                first = false;
+            else
+                output += ", ";
+            formatVariableDeclaration(p.name(), fold(base, p.type()), foldCategory(base, p.category()));
+        }
+        output += ") -> ";
+        formatConstant(fold(base, fnProg->returnType()));
+        break;
+    }
+    case ProgramKind::Global: {
+        auto* globalProg = cast<GlobalProgram>(base.program);
+        output += "static ";
+        switch (globalProg->globalKind()) {
+        case GlobalKind::Let:
+            output += "let ";
+            break;
+        case GlobalKind::Var:
+            output += "var ";
+            break;
+        case GlobalKind::ConstVar:
+            output += "const var ";
+            break;
+        case GlobalKind::OpenLet:
+            output += "open let ";
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        formatProgramName();
+
+        output += ": ";
+        formatConstant(fold(base, globalProg->type()));
+        if (globalProg->globalKind() != GlobalKind::OpenLet && globalProg->hasInitializer()) {
+            output += " = ";
+            formatConstant(fold(base, globalProg->initializer()));
+        }
+        break;
+    }
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+bool Formatter::formatAsReferencedDeclaration(Constant c) {
     if (c.isEnumValueLiteral()) {
         auto valueRef = program->getEnumValue(c);
         formatEnumValueDeclaration(Constant(valueRef.enumType), valueRef.valueIndex);
@@ -250,84 +361,42 @@ bool Formatter::formatAsDeclaration(Constant c) {
     }
     case ConstantKind::CopyOfOpenGlobal$Program:
     case ConstantKind::CopyOfOpenGlobal$Parameterize:
-        return formatAsDeclaration(c.copiedGlobal());
+        return formatAsReferencedDeclaration(c.copiedGlobal());
     case ConstantKind::Program:
     case ConstantKind::Parameterize: {
+        auto maybeBase = tryAsFoldBase(c);
+        if (maybeBase.has_value()) {
+            formatProgramAsReferencedDeclaration(maybeBase.value(), false, false);
+            return true;
+        }
+
         ProgramHandle progHandle = baseProgram(c).value();
         Program* prog = context.program(progHandle);
-        VERIFY(!prog->isImpl());
-        std::span<const Constant> arguments;
-        if (c.kind() == ConstantKind::Parameterize)
-            arguments = program->getParameterize(c).arguments;
+        ProgramHandle childProgHandle = context.newProgram(prog->kind(), prog->name(), parse::TokenHandle(), programHandle, SourceLocation());
+        Generator g(context, childProgHandle);
+        Constant selfInChildProg = g.inheriteParameters(programHandle);
+        Constant cInChild = g.fold(selfInChildProg, c);
+        Constant completeCInChild = g.importParameters(cInChild, &Generator::addParameter);
+        Formatter fmt(context, childProgHandle);
+        fmt.formatProgramAsReferencedDeclaration(g.asFoldBase(completeCInChild), true, false);
+        output += fmt.output;
 
-        switch (prog->kind()) {
-        case ProgramKind::Struct:
-            output += "struct ";
-            formatConstant(c);
-            break;
-        case ProgramKind::Enum:
-            output += "enum ";
-            formatConstant(c);
-            break;
-        case ProgramKind::Function: {
-            auto* fnProg = cast<FunctionProgram>(prog);
-            output += "fn ";
-            formatConstant(c);
-            formatAs(progHandle, [&] {
-                output += "(";
-                bool first = true;
-                for (const auto& p : fnProg->functionParameters) {
-                    if (first)
-                        first = false;
-                    else
-                        output += ", ";
-                    formatVariableDeclaration(p.name(), p.type(), p.category());
-                }
-                output += ") -> ";
-                formatConstant(Constant(fnProg->returnType()));
-            });
-            break;
-        }
-        case ProgramKind::Global: {
-            auto* globalProg = cast<GlobalProgram>(prog);
-            output += "static ";
-            switch (globalProg->globalKind()) {
-            case GlobalKind::Let:
-                output += "let ";
-                break;
-            case GlobalKind::Var:
-                output += "var ";
-                break;
-            case GlobalKind::ConstVar:
-                output += "const var ";
-                break;
-            case GlobalKind::OpenLet:
-                output += "open let ";
-                break;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-            formatConstant(c);
-
-            formatAs(progHandle, [&] {
-                output += ": ";
-                formatConstant(Constant(globalProg->type()));
-                if (globalProg->globalKind() != GlobalKind::OpenLet && globalProg->hasInitializer()) {
-                    output += " = ";
-                    formatConstant(Constant(globalProg->initializer()));
-                }
-            });
-            break;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
         return true;
     }
     default:
         break;
     }
     return false;
+}
+
+void Formatter::formatDeclaration() {
+    if (program->isImpl()) {
+        auto base = asFoldBase((Constant)program->selfConstant());
+        formatTemplateClause(base);
+        formatProgramAsReferencedDeclaration(base, false, true);
+    } else {
+        formatAsReferencedDeclaration((Constant)program->partialSelfConstant());
+    }
 }
 
 }

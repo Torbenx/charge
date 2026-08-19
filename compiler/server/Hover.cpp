@@ -86,7 +86,7 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
             auto staticInfo = extractStaticInfo(util, expr.value());
             if (std::holds_alternative<sema::Constant>(staticInfo)) {
                 sema::Constant c = std::get<sema::Constant>(staticInfo);
-                if (!formatter.formatAsDeclaration(c))
+                if (!formatter.formatAsReferencedDeclaration(c))
                     formatter.formatConstant(c);
             } else if (std::holds_alternative<VariableInfo>(staticInfo)) {
                 auto [name, type, category] = std::get<VariableInfo>(staticInfo);
@@ -94,9 +94,9 @@ Hover::Result Hover::doRequest(Server& server, const Params& params) {
             }
         }
     } else if (token.kind() == parse::TokenKind::NamespaceDecl) {
-        formatter.formatAsDeclaration(sema::Constant(token.data2<parse::DataKind::DeclarationValue>().nsHandle()));
+        formatter.formatAsReferencedDeclaration(sema::Constant(token.data2<parse::DataKind::DeclarationValue>().nsHandle()));
     } else if (parse::isProgramDecl(token.kind())) {
-        formatter.formatAsDeclaration(sema::Constant(util.program->selfConstant()));
+        formatter.formatDeclaration();
     } else if (parse::isEnumValueDecl(token.kind())) {
         auto valueIndex = token.data2<parse::DataKind::DeclIndex>();
         formatter.formatEnumValueDeclaration(sema::Constant(util.program->selfConstant()), valueIndex);

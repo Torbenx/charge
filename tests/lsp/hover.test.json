@@ -72,7 +72,52 @@
                 }
             },
             "result": {
-                "contents": { "kind": "markdown", "value": "```charge\nstatic open let val: type\n```" }
+                "contents": { "kind": "markdown", "value": "```charge\ntemplate(T: type)\nstatic open let val: type\n```" }
+            }
+        },
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "template(S: type) struct A: { template(T: type) fn foo(t: A{T}) -> S: { } } static x = A{type}::foo;" }
+            ],
+            "request": {
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 25 }
+                }
+            },
+            "result": {
+                "contents": { "kind": "markdown", "value": "```charge\ntemplate(S: type)\nstruct A\n```" }
+            }
+        },
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "template(S: type) struct A: { template(T: type) fn foo(t: A{T}) -> S: { } } static x = A{type}::foo;" }
+            ],
+            "request": {
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 51 }
+                }
+            },
+            "result": {
+                "contents": { "kind": "markdown", "value": "```charge\ntemplate(T: type)\nfn A{S: S}::foo(let t: A{S: T}) -> S\n```" }
+            }
+        },
+        {
+            "documents": [
+                { "uri": "file:///dummyFile", "text": "template(S: type) struct A: { template(T: type) fn foo(t: A{T}) -> S: { } } static x = A{type}::foo;" }
+            ],
+            "request": {
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///dummyFile" },
+                    "position": { "line": 0, "character": 96 }
+                }
+            },
+            "result": {
+                "contents": { "kind": "markdown", "value": "```charge\ntemplate(T: type)\nfn A{S: type}::foo(let t: A{S: T}) -> type\n```" }
             }
         },
         {

@@ -49,6 +49,8 @@ std::strong_ordering Util::compare(Constant a, Constant b) {
             return program->compareParameterizes(a.returnTypeOf(), b.returnTypeOf());
         case ConstantKind::EnumValue:
             return compare(program->getEnumValue(a), program->getEnumValue(b));
+        case ConstantKind::CopyOfError:
+            return a.id() <=> b.id();
         default:
             VERIFY_NOT_REACHED();
     }
@@ -122,6 +124,26 @@ std::strong_ordering Util::compare(EnumValue a, EnumValue b) {
         return typeOrdering;
 
     return a.valueIndex <=> b.valueIndex;
+}
+
+FoldBase Util::asFoldBase(Constant base) {
+    return tryAsFoldBase(base).value();
+}
+
+std::optional<FoldBase> Util::tryAsFoldBase(Constant base) {
+    if (base.kind() == ConstantKind::Program) {
+        Program* baseProg = context.program(base.program());
+        if (baseProg->isDependent())
+            return std::nullopt;
+        return FoldBase { baseProg, context.moduleOf(base.program()), base.program(), base, {} };
+    } else if (base.kind() == ConstantKind::Parameterize) {
+        auto param = program->getParameterize(base);
+        Program* baseProg = context.program(param.base);
+        if (baseProg->parameters.size() != param.arguments.size())
+            return std::nullopt;
+        return FoldBase { context.program(param.base), context.moduleOf(param.base), param.base, base, param.arguments };
+    }
+    return std::nullopt;
 }
 
 }

@@ -5,10 +5,13 @@
 
 namespace sema {
 
+struct FoldBase;
+
 struct Formatter : Util {
     using Util::Util;
     Formatter(const Util& util)
         : Util(util) { }
+
     void formatWord(Word);
     void formatNamespace(NamespaceHandle);
     void formatNamespaceQualifier(NamespaceHandle);
@@ -18,23 +21,16 @@ struct Formatter : Util {
     void formatVariableDeclaration(Word name, Constant type, VariableCategory category);
     void formatEnumValueDeclaration(Constant enumType, int_t valueIndex);
     void formatMemberDeclaration(Constant structType, int_t memberIndex);
-    bool formatAsDeclaration(Constant);
+    void formatProgramAsReferencedDeclaration(FoldBase, bool formatAsIncomplete, bool isImpl);
+    bool formatAsReferencedDeclaration(Constant);
+    void formatDeclaration();
 
-    //! Change formatting context
-    /*!
-    TODO: This is workaround to not having access to a scratch program,
-          which would allow folding values instead.
-    */
-    template<typename F>
-    void formatAs(ProgramHandle handle, F&& f) {
-        ProgramHandle curProgramHandle = programHandle;
-        Program* curProgram = program;
-        programHandle = handle;
-        program = context.program(handle);
-        f();
-        programHandle = curProgramHandle;
-        program = curProgram;
-    }
+    //! Emits a "template(...)" clause of a program
+    void formatTemplateClause(FoldBase);
+
+    Constant fold(const FoldBase&, ExternConstant);
+    Constant fold(Constant base, ExternConstant);
+    VariableCategory foldCategory(const FoldBase&, VariableCategory);
 
     std::string output = {};
 };
