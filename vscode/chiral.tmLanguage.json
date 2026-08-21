@@ -18,6 +18,9 @@
 			"include": "#numbers"
 		},
 		{
+			"include": "#operators"
+		},
+		{
 			"include": "#keywords"
 		}
 	],
@@ -41,6 +44,10 @@
 		"numbers": {
 			"match": "\\b[0-9]+\\b",
 			"name": "constant.numeric.chiral"
+		},
+		"operators": {
+			"match": "[∧∨¬≠]",
+			"name": "keyword.operator.chiral"
 		},
 		"keywords": {
 			"match": "\\b[A-Za-z0-9_:]*[A-Za-z0-9_]\\b",

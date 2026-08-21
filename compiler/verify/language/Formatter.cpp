@@ -14,6 +14,16 @@ namespace {
     //! The column a statement is broken into continuation lines at
     constexpr int_t LINE_LIMIT = 100;
 
+    //! The width of utf8 encoded text, where a symbol is one column and several bytes
+    int_t columnCount(std::string_view text) {
+        int_t columns = 0;
+        for (char c : text) {
+            if (((uint8_t)c & 0xC0) != 0x80)
+                columns += 1;
+        }
+        return columns;
+    }
+
     std::string_view tacticName(ir::Tactic tactic) {
         switch (tactic) {
 #define TACTIC(name, snake_case) \
@@ -358,7 +368,7 @@ private:
         output += suffix;
 
         bool isConnective = (expr.kind() == ir::ExprKind::And || expr.kind() == ir::ExprKind::Or) && !ir::Bool(expr).negated();
-        if ((int_t)(output.size() - lineBegin) <= LINE_LIMIT || !isConnective) {
+        if (columnCount(std::string_view(output).substr(lineBegin)) <= LINE_LIMIT || !isConnective) {
             output += '\n';
             return false;
         }
@@ -366,12 +376,13 @@ private:
         output.resize(exprBegin);
         std::span<const ir::Expr> operands = connectiveOperands(expr);
         Precedence context = operandPrecedence(expr);
-        std::string_view connective = expr.kind() == ir::ExprKind::And ? "and " : "or ";
+        std::string_view connective = expr.kind() == ir::ExprKind::And ? symbols::AND : symbols::OR;
         appendExpr(output, operands[0], context);
         for (int_t i = 1; i < (int_t)operands.size(); i++) {
             output += '\n';
             output.append(indent + INDENT, ' ');
             output += connective;
+            output += ' ';
             appendExpr(output, operands[i], context);
         }
         output += suffix;
@@ -419,14 +430,20 @@ private:
         case ir::ExprKind::Equality: {
             auto equality = ir.getEquality((ir::Bool)expr);
             appendExpr(text, equality.left, Precedence::Unary);
-            text += ir::Bool(expr).negated() ? " != " : " = ";
+            text += ' ';
+            if (ir::Bool(expr).negated())
+                text += symbols::NOT_EQUAL;
+            else
+                text += '=';
+            text += ' ';
             appendExpr(text, equality.right, Precedence::Unary);
             return;
         }
         case ir::ExprKind::And:
         case ir::ExprKind::Or: {
             if (ir::Bool(expr).negated()) {
-                text += "!(";
+                text += symbols::NOT;
+                text += '(';
                 appendConnective(text, expr);
                 text += ')';
             } else {
@@ -440,7 +457,7 @@ private:
 
         // This is not guaranteed to be a bool, but non-bools are never negated.
         if (ir::Bool(expr).negated())
-            text += '!';
+            text += symbols::NOT;
 
         if (ir::isLoad(expr.kind())) {
             auto load = ir.getLoad(expr);
@@ -478,10 +495,13 @@ private:
     void appendConnective(std::string& text, ir::Expr expr) const {
         std::span<const ir::Expr> operands = connectiveOperands(expr);
         Precedence context = operandPrecedence(expr);
-        std::string_view connective = expr.kind() == ir::ExprKind::And ? " and " : " or ";
+        std::string_view connective = expr.kind() == ir::ExprKind::And ? symbols::AND : symbols::OR;
         for (int_t i = 0; i < (int_t)operands.size(); i++) {
-            if (i > 0)
+            if (i > 0) {
+                text += ' ';
                 text += connective;
+                text += ' ';
+            }
             appendExpr(text, operands[i], context);
         }
     }
@@ -570,20 +590,32 @@ TEST(VerifyLanguage, FormatExpressions) {
 fn #test($a, $b, $c, $d):
     store $a <- true
     store $a <- false
-    store $a <- $a != $b
+    store $a <- $a ≠ $b
     store $a <- ($a = $b) = ($c = $d)
-    store $a <- $a = $b and $c = $d or $a = $c
-    store $a <- $a = $b and ($c = $d or $a = $c)
-    store $a <- !($a = $b and $c = $d)
-    store $a <- ($a != $b) = $c
+    store $a <- $a = $b ∧ $c = $d ∨ $a = $c
+    store $a <- $a = $b ∧ ($c = $d ∨ $a = $c)
+    store $a <- ¬($a = $b ∧ $c = $d)
+    store $a <- ($a ≠ $b) = $c
 )");
 
-    // A negated equality is spelled with '!=' however the source wrote it
+    // A negated equality is spelled with the symbol however the source wrote it
     EXPECT_EQ(format(parse(R"(
 fn #test($a, $b, $c):
     store $a <- !($a = $b) = $c
 )")),
-        "fn #test($a, $b, $c):\n    store $a <- ($a != $b) = $c\n");
+        "fn #test($a, $b, $c):\n    store $a <- ($a ≠ $b) = $c\n");
+}
+
+TEST(VerifyLanguage, FormatAsciiOperators) {
+    // An operator the source wrote out in ascii is written back as its symbol
+    EXPECT_EQ(format(parse(R"(
+fn #test($a, $b, $c):
+    store $a <- $a = $b and $c = $a or $a != $b
+    store $a <- !($a = $b and $c = $a)
+)")),
+        "fn #test($a, $b, $c):\n"
+        "    store $a <- $a = $b ∧ $c = $a ∨ $a ≠ $b\n"
+        "    store $a <- ¬($a = $b ∧ $c = $a)\n");
 }
 
 TEST(VerifyLanguage, FormatPositionExpressions) {
@@ -595,7 +627,7 @@ fn #test($x, $y):
     jump @next
 @next:
     phi @entry
-    prove !@next.active or @next.from@entry by phi_enumerate
+    prove ¬@next.active ∨ @next.from@entry by phi_enumerate
 )");
 }
 
@@ -605,9 +637,9 @@ fn #test($a, $b):
     pre %a_eq_b: $a = $b
     prove %reflex: $a = $a by eq_reflexive
     prove $b = $a by eq_transitive
-    post %both: $a = $a and $b = $b by sat:
+    post %both: $a = $a ∧ $b = $b by sat:
         clause %a_eq_b
-        clause $b != $a by sorry
+        clause $b ≠ $a by sorry
         clause %reflex
 )");
 }
@@ -672,7 +704,7 @@ fn #test($a, $b):
     pre %1: $a = $b
     jump @exit
 @exit:
-    prove %0: !@0.active by sorry
+    prove %0: ¬@0.active by sorry
     prove true by sat:
         clause %1
 )");
@@ -683,11 +715,20 @@ TEST(VerifyLanguage, FormatWrapping) {
     expectFormatted(R"(
 fn #test($first_operand, $second_operand, $third_operand):
     prove $first_operand = $second_operand
-        or $second_operand = $third_operand
-        or $first_operand = $third_operand by eq_transitive
+        ∨ $second_operand = $third_operand
+        ∨ $first_operand = $third_operand by eq_transitive
     store $first_operand <- $first_operand = $second_operand
-        or $second_operand = $third_operand
-        or $first_operand = $third_operand
+        ∨ $second_operand = $third_operand
+        ∨ $first_operand = $third_operand
+)");
+}
+
+TEST(VerifyLanguage, FormatWrappingCountsColumns) {
+    // A symbol is one column of the limit and several bytes, this line is 99 columns and 103
+    // bytes long, so measuring the bytes would break it up
+    expectFormatted(R"(
+fn #test($operand_1, $operand_2, $operand_3, $operand_4, $operand_5, $operand_6):
+    store $operand_1 <- $operand_1 = $operand_2 ∨ $operand_3 = $operand_4 ∨ $operand_5 = $operand_6
 )");
 }
 
@@ -696,8 +737,8 @@ TEST(VerifyLanguage, FormatWrappedSatProposition) {
     expectFormatted(R"(
 fn #test($first_operand, $second_operand, $third_operand):
     prove %wrapped: $first_operand = $second_operand
-        or $second_operand = $third_operand
-        or $first_operand = $third_operand by sat:
+        ∨ $second_operand = $third_operand
+        ∨ $first_operand = $third_operand by sat:
             clause $first_operand = $second_operand by sorry
             clause $second_operand = $third_operand by sorry
 )");

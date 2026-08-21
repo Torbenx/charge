@@ -32,6 +32,18 @@ inline constexpr ConstWordStringTable words {
 #include <verify/ir/sorts.inc>
 };
 
+//! The mathematical symbols an operator may be written with
+/*!
+The source may spell an operator either way, the formatter always writes the symbol. A symbol
+never appears inside a name, so reading one is a token of its own.
+*/
+namespace symbols {
+    inline constexpr std::string_view AND = "\u2227"; // ∧
+    inline constexpr std::string_view OR = "\u2228"; // ∨
+    inline constexpr std::string_view NOT = "\u00ac"; // ¬
+    inline constexpr std::string_view NOT_EQUAL = "\u2260"; // ≠
+}
+
 struct ParserException : std::exception {
     ParserException(std::string message)
         : message(std::move(message)) { }

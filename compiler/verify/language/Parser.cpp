@@ -19,6 +19,38 @@ static bool isBulkNameCharacter(char c) {
         || c == '_';
 }
 
+//! Every byte of a character but the first one, which are the ones a column does not count
+static bool isUtf8ContinuationByte(char c) {
+    return ((uint8_t)c & 0xC0) == 0x80;
+}
+
+//! The length of the character beginning with 'lead', or 0 if no character begins there
+static int_t utf8CharacterLength(char lead) {
+    if (((uint8_t)lead & 0x80) == 0x00)
+        return 1;
+    if (((uint8_t)lead & 0xE0) == 0xC0)
+        return 2;
+    if (((uint8_t)lead & 0xF0) == 0xE0)
+        return 3;
+    if (((uint8_t)lead & 0xF8) == 0xF0)
+        return 4;
+    return 0;
+}
+
+//! Consumes the symbol if the source spells it out at the position
+/*!
+The source is terminated, and the comparison stops at the first byte that differs, so a
+character the end of the source cut short is never read past.
+*/
+static bool matchSymbol(const char*& position, std::string_view symbol) {
+    for (int_t i = 0; i < (int_t)symbol.size(); i++) {
+        if (position[i] != symbol[i])
+            return false;
+    }
+    position += symbol.size();
+    return true;
+}
+
 enum class TokenKind : uint8_t {
     BeginScope,
     ContinueScope,
@@ -59,8 +91,10 @@ struct Token {
 };
 
 struct Lexer {
-    void lex(const char* position);
+    void lex(const char* source);
     Word readWord(const char*& position);
+    void lexSymbol(const char*& position);
+    [[noreturn]] void error(const char* position, std::string message) const;
 
     struct ScopeStackEntry {
         uint32_t indent = 0;
@@ -69,9 +103,16 @@ struct Lexer {
     WordStringTable wordTable;
     std::vector<Token> tokens;
     std::vector<ScopeStackEntry> scopeStack;
+    const char* sourceBegin = nullptr;
 };
 
-void Lexer::lex(const char* position) {
+void Lexer::lex(const char* source) {
+    sourceBegin = source;
+    const char* position = source;
+
+    // A file may begin with a byte order mark, which says nothing a utf8 source does not
+    matchSymbol(position, "\xEF\xBB\xBF");
+
     scopeStack.push_back({ .indent = 0 });
     tokens.push_back({ TokenKind::BeginScope });
 
@@ -128,7 +169,7 @@ void Lexer::lex(const char* position) {
                 tokens.push_back({ TokenKind::LeftArrow });
                 continue;
             } else {
-                VERIFY_NOT_REACHED();
+                error(position, "Expected '-' after '<'");
             }
         case '=':
             position += 1;
@@ -152,21 +193,26 @@ void Lexer::lex(const char* position) {
             tokens.push_back({ TokenKind::GlobalName, readWord(position).toUint() });
             continue;
             // clang-format off
-            case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M':
-            case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
-            case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':
-            case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
-            case '_':
+        case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M':
+        case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+        case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':
+        case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+        case '_':
             // clang-format on
             tokens.push_back({ TokenKind::Identifier, readWord(position).toUint() });
             continue;
             // clang-format off
-            case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
             // clang-format on
-            VERIFY_NOT_REACHED();
+            error(position, "Numbers are not supported yet");
 
         default:
-            VERIFY_NOT_REACHED();
+            // Everything outside of ascii is a symbol, names are spelled with ascii alone
+            if ((uint8_t)position[0] >= 0x80) {
+                lexSymbol(position);
+                continue;
+            }
+            error(position, std::format("Unexpected character '{}'", position[0]));
         }
 
         // Handle scope changes
@@ -177,7 +223,8 @@ void Lexer::lex(const char* position) {
             if (position[0] == '@') {
                 position += 1;
                 labels.push_back(readWord(position));
-                VERIFY(position[0] == ':');
+                if (position[0] != ':')
+                    error(position, "Expected ':' after label");
                 position += 1;
             }
             position = skipSpaces(position);
@@ -210,7 +257,8 @@ void Lexer::lex(const char* position) {
                 tokens.push_back({ TokenKind::EndScope });
                 scopeStack.pop_back();
             }
-            VERIFY(indent == scopeStack.back().indent);
+            if (indent != scopeStack.back().indent)
+                error(position, "Line is not indented to any scope it could continue");
             if (labels.empty()) {
                 tokens.push_back({ TokenKind::ContinueScope });
             } else {
@@ -230,6 +278,56 @@ void Lexer::lex(const char* position) {
     }
     auto hash = Word::finalizeHash(state, position - begin);
     return wordTable.getWithHash({ begin, position }, hash);
+}
+
+//! A symbol reads as the token the operator it stands for is written with
+void Lexer::lexSymbol(const char*& position) {
+    const char* begin = position;
+    if (matchSymbol(position, symbols::AND)) {
+        tokens.push_back({ TokenKind::Identifier, words["and"].toUint() });
+        return;
+    }
+    if (matchSymbol(position, symbols::OR)) {
+        tokens.push_back({ TokenKind::Identifier, words["or"].toUint() });
+        return;
+    }
+    if (matchSymbol(position, symbols::NOT)) {
+        tokens.push_back({ TokenKind::Exclaim });
+        return;
+    }
+    if (matchSymbol(position, symbols::NOT_EQUAL)) {
+        tokens.push_back({ TokenKind::ExclaimEqual });
+        return;
+    }
+
+    // The character stands for nothing here, if it is a character at all. Its bytes are read
+    // one at a time, so a character the end of the source cut short ends the character too.
+    int_t length = utf8CharacterLength(begin[0]);
+    for (int_t i = 1; i < length; i++) {
+        if (!isUtf8ContinuationByte(begin[i]))
+            error(begin, "Source is not encoded as utf8");
+    }
+    if (length == 0)
+        error(begin, "Source is not encoded as utf8");
+    error(begin, std::format("Unknown operator '{}'", std::string_view(begin, length)));
+}
+
+[[noreturn]] void Lexer::error(const char* position, std::string message) const {
+    int_t line = 1;
+    const char* lineBegin = sourceBegin;
+    for (const char* it = sourceBegin; it < position; it++) {
+        if (*it == '\n') {
+            line += 1;
+            lineBegin = it + 1;
+        }
+    }
+    // A column counts characters, of which the bytes that continue one are a part
+    int_t column = 1;
+    for (const char* it = lineBegin; it < position; it++) {
+        if (!isUtf8ContinuationByte(*it))
+            column += 1;
+    }
+    throw ParserException(std::format("{}:{}: {}", line, column, message));
 }
 
 struct TokenStream {
@@ -1159,6 +1257,86 @@ fn #test($a, $b, $c):
     EXPECT_EQ(fn.view(fn.getOr(prop).operands).size(), 3);
     EXPECT_EQ(fn.proof(ir::Theorem(0)).tactic(), ir::Tactic::EqualityTransitive);
     EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(0)).value, prop);
+}
+
+TEST(VerifyLanguage, ParseOperatorSymbols) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c, $d):
+    store $a <- $a = $b and $c = $d or $a = $c
+    store $a <- $a = $b ∧ $c = $d ∨ $a = $c
+    store $a <- $a = $b ∧ $c = $d or $a = $c
+    store $a <- !($a = $b)
+    store $a <- ¬($a = $b)
+    store $a <- $a != $b
+    store $a <- $a ≠ $b
+)");
+    // A symbol stands for the operator it spells, whichever way the rest is written
+    ir::Expr connectives = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, connectives);
+    EXPECT_EQ(fn.getStore(ir::CodePos(2)).value, connectives);
+
+    ir::Expr negated = fn.getStore(ir::CodePos(3)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(4)).value, negated);
+    EXPECT_EQ(fn.getStore(ir::CodePos(5)).value, negated);
+    EXPECT_EQ(fn.getStore(ir::CodePos(6)).value, negated);
+}
+
+TEST(VerifyLanguage, ParseSymbolsWithoutSpaces) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c, $d):
+    store $a <- $a = $b ∧ ¬($c = $d)
+    store $a <- $a=$b∧¬($c=$d)
+)");
+    // A symbol is no part of a name, so it separates the names around it on its own
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, fn.getStore(ir::CodePos(0)).value);
+}
+
+TEST(VerifyLanguage, ParseMultilineSymbolConnective) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    prove $a = $b
+        ∨ $b = $c
+        ∨ $a = $c by eq_transitive
+    store $a <- $a = $b or $b = $c or $a = $c
+)");
+    // A continuation line may begin with a symbol, as it may with the word it stands for
+    ir::Bool prop = fn.prop(ir::Theorem(0));
+    EXPECT_EQ(prop.kind(), ir::ExprKind::Or);
+    EXPECT_EQ(fn.view(fn.getOr(prop).operands).size(), 3);
+    EXPECT_EQ((ir::Bool)fn.getStore(ir::CodePos(0)).value, prop);
+}
+
+TEST(VerifyLanguage, LexErrors) {
+    // A character outside of ascii is read as a symbol, and has to spell an operator
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- $a ⊕ $a\n"), ParserException);
+    // The source is required to be encoded as utf8
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- $a \xE2\x88 $a\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- \x80$a\n"), ParserException);
+    // A character cut short by the end of the source is not read past it
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- $a \xE2"), ParserException);
+
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- 1\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a < $a\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    nop\n  nop\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n@label\n    nop\n"), ParserException);
+
+    // An error says which character it is about and where it stands
+    try {
+        parseForTest("fn #test($a):\n    store $a <- $a ⊕ $a\n");
+        ADD_FAILURE() << "Expected the unknown operator to be reported";
+    } catch (const ParserException& e) {
+        EXPECT_EQ(std::string(e.what()), "2:20: Unknown operator '⊕'");
+    }
+}
+
+TEST(VerifyLanguage, LexByteOrderMark) {
+    // A file may begin with a byte order mark, which says nothing a utf8 source does not
+    ir::Function fn = parseForTest("\xEF\xBB\xBF"
+                                   R"(fn #test($a, $b):
+    store $a <- $a ≠ $b
+)");
+    EXPECT_EQ(fn.here().id(), 1);
+    EXPECT_EQ(fn.getStore(ir::CodePos(0)).value.kind(), ir::ExprKind::Equality);
 }
 
 TEST(VerifyLanguage, ParseConnectiveInSatClause) {
