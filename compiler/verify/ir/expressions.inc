@@ -16,7 +16,7 @@ COMPOUND_EXPR(Equality, Bool, Expr left, Expr right)
 VARIADIC_EXPR(And, Bool, Bool)
 VARIADIC_EXPR(Or, Bool, Bool)
 
-// There is one load per sort so that the sort of a load is known from its kind alone
+// There are separate load expressions per sort, to make the kind -> sort map possible.
 #define SORT(name, snake_case) COMPOUND_EXPR(name##Load, name, MemoryLoc loc, RelativeCodePos pos)
 #include <verify/ir/sorts.inc>
 
@@ -43,6 +43,21 @@ COMPOUND_EXPR(MakeMemoryLoc, MemoryLoc, MemoryDecl decl, Member member)
 COMPOUND_EXPR(MemoryLocType, Type, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocDecl, MemoryDecl, MemoryLoc loc)
 COMPOUND_EXPR(MemoryLocMember, Member, MemoryLoc loc)
+
+// There are separate set expressions per sort, to make the kind -> sort map possible.
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case)                \
+    EXPR(name##Empty, name)                       \
+    VARIADIC_EXPR(name##Union, name, name)        \
+    VARIADIC_EXPR(name##Intersection, name, name) \
+    COMPOUND_EXPR(name##Minus, name, name base, name subtrahend)
+#include <verify/ir/sorts.inc>
+
+COMPOUND_EXPR(LocationMemorySet, MemorySet, MemoryLoc loc)
+COMPOUND_EXPR(InclusiveInvariantSet, InvariantSet, MemoryLoc loc)
+COMPOUND_EXPR(ExclusiveInvariantSet, InvariantSet, MemoryLoc loc)
+COMPOUND_EXPR(PathInvariantSet, InvariantSet, MemoryLoc loc)
+COMPOUND_EXPR(SingletonInvariantSet, InvariantSet, MemoryLoc loc, Invariant invariant)
 
 #undef VARIADIC_EXPR
 #undef COMPOUND_EXPR

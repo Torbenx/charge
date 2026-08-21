@@ -46,7 +46,7 @@
 			"name": "constant.numeric.chiral"
 		},
 		"operators": {
-			"match": "[∧∨¬≠]",
+			"match": "[∧∨¬≠∪∩∖]",
 			"name": "keyword.operator.chiral"
 		},
 		"keywords": {

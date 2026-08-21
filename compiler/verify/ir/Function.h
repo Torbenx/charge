@@ -230,6 +230,27 @@ struct Function {
     LoadData getLoad(Expr) const;
     Expr addLoad(Sort, const LoadData&);
 
+    //! The set operations of all set sorts share the same data
+    struct SetMinusData {
+        Expr base;
+        Expr subtrahend;
+    };
+
+    Expr emptySet(Sort sort) const { return Expr(emptySetKind(sort), 0); }
+    Expr addUnion(Sort, std::span<const Expr> operands);
+    Expr addUnion(Sort sort, std::initializer_list<Expr> operands) {
+        return addUnion(sort, (std::span<const Expr>)operands);
+    }
+    Expr addIntersection(Sort, std::span<const Expr> operands);
+    Expr addIntersection(Sort sort, std::initializer_list<Expr> operands) {
+        return addIntersection(sort, (std::span<const Expr>)operands);
+    }
+    Expr addSetMinus(Sort, const SetMinusData&);
+
+    //! The operands of a union or an intersection of any set sort
+    ExprList getSetOperands(Expr) const;
+    SetMinusData getSetMinus(Expr) const;
+
     std::optional<Sort> scalarSort(Type) const;
     //! Returns the sort a location may be loaded with according to its type
     std::optional<Sort> scalarSort(MemoryLoc) const;

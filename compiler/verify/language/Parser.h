@@ -26,6 +26,15 @@ inline constexpr ConstWordStringTable words {
     "prove",
     "clause",
     "by",
+    "union",
+    "intersection",
+    "setminus",
+    "mset",
+    "iset",
+    "incl_iset",
+    "excl_iset",
+    "path_iset",
+    "invariant",
 #define TACTIC(name, snake_case) #snake_case,
 #include <verify/ir/tactics.inc>
 #define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
@@ -42,6 +51,9 @@ namespace symbols {
     inline constexpr std::string_view OR = "\u2228"; // ∨
     inline constexpr std::string_view NOT = "\u00ac"; // ¬
     inline constexpr std::string_view NOT_EQUAL = "\u2260"; // ≠
+    inline constexpr std::string_view UNION = "\u222a"; // ∪
+    inline constexpr std::string_view INTERSECTION = "\u2229"; // ∩
+    inline constexpr std::string_view SET_MINUS = "\u2216"; // ∖
 }
 
 struct ParserException : std::exception {

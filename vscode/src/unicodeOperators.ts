@@ -24,6 +24,9 @@ const operators = [
 	{ command: '\\or', symbol: '∨' },
 	{ command: '\\neg', symbol: '¬' },
 	{ command: '\\neq', symbol: '≠' },
+	{ command: '\\union', symbol: '∪' },
+	{ command: '\\intersection', symbol: '∩' },
+	{ command: '\\setminus', symbol: '∖' },
 ];
 
 /**

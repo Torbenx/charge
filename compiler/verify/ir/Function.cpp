@@ -108,6 +108,52 @@ Expr Function::addLoad(Sort sort, const LoadData& data) {
     return addExprInternal(loadKind(sort), toArray<LoadData>(data));
 }
 
+ExprList Function::getSetOperands(Expr expr) const {
+    VERIFY(isSetUnion(expr.kind()) || isSetIntersection(expr.kind()));
+    return fromArray<ExprList>(m_expressions[expr.idBits].data);
+}
+
+Function::SetMinusData Function::getSetMinus(Expr expr) const {
+    VERIFY(isSetMinus(expr.kind()));
+    return fromArray<SetMinusData>(m_expressions[expr.idBits].data);
+}
+
+Expr Function::addUnion(Sort sort, std::span<const Expr> operands) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return add##name##Union({ flattenOperands<ExprKind::name##Union>(operands) });
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Expr Function::addIntersection(Sort sort, std::span<const Expr> operands) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return add##name##Intersection({ flattenOperands<ExprKind::name##Intersection>(operands) });
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+Expr Function::addSetMinus(Sort sort, const SetMinusData& data) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return add##name##Minus({ (name)data.base, (name)data.subtrahend });
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 std::optional<Sort> Function::scalarSort(MemoryLoc loc) const {
     std::optional<Type> locType = findMemoryLocType({ loc });
     if (!locType.has_value())
@@ -153,8 +199,10 @@ ExprList Function::flattenOperands(std::span<const OperandSort> operands) {
     VERIFY(operands.size() >= 2);
     std::vector<Expr> flattened;
     flattened.reserve(operands.size());
-    for (Bool operand : operands) {
-        if (operand.kind() != kind || operand.negated()) {
+    for (const OperandSort& operand : operands) {
+        // Only a bool is ever negated, and a negated one stands for something else than the
+        // expression it is built from, so it is not merged into the surrounding one
+        if (operand.kind() != kind || Bool(operand).negated()) {
             flattened.push_back(operand);
             continue;
         }

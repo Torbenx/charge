@@ -299,6 +299,18 @@ void Lexer::lexSymbol(const char*& position) {
         tokens.push_back({ TokenKind::ExclaimEqual });
         return;
     }
+    if (matchSymbol(position, symbols::UNION)) {
+        tokens.push_back({ TokenKind::Identifier, words["union"].toUint() });
+        return;
+    }
+    if (matchSymbol(position, symbols::INTERSECTION)) {
+        tokens.push_back({ TokenKind::Identifier, words["intersection"].toUint() });
+        return;
+    }
+    if (matchSymbol(position, symbols::SET_MINUS)) {
+        tokens.push_back({ TokenKind::Identifier, words["setminus"].toUint() });
+        return;
+    }
 
     // The character stands for nothing here, if it is a character at all. Its bytes are read
     // one at a time, so a character the end of the source cut short ends the character too.
@@ -760,12 +772,20 @@ struct FunctionParser {
     }
 
     template<typename Parse>
-    std::vector<ir::Bool> parseConnectiveOperands(TokenStream& s, Word connective, Parse parseOperand) {
-        std::vector<ir::Bool> operands { sortCast<ir::Bool>(parseOperand(s)) };
+    std::vector<ir::Expr> parseInfixOperands(TokenStream& s, Word connective, Parse parseOperand) {
+        std::vector<ir::Expr> operands { parseOperand(s) };
         while (s.tokKind() == TokenKind::Identifier && s.tok().word() == connective) {
             s.advance();
-            operands.push_back(sortCast<ir::Bool>(parseOperand(s)));
+            operands.push_back(parseOperand(s));
         }
+        return operands;
+    }
+
+    template<typename Parse>
+    std::vector<ir::Bool> parseConnectiveOperands(TokenStream& s, Word connective, Parse parseOperand) {
+        std::vector<ir::Bool> operands;
+        for (ir::Expr operand : parseInfixOperands(s, connective, parseOperand))
+            operands.push_back(sortCast<ir::Bool>(operand));
         return operands;
     }
 
@@ -784,18 +804,50 @@ struct FunctionParser {
     }
 
     ir::Expr parseEqualityExpr(TokenStream& s) {
-        ir::Expr left = parseUnaryExpr(s);
+        ir::Expr left = parseUnionExpr(s);
         if (s.tokKind() == TokenKind::Equal) {
             s.advance();
-            ir::Expr right = parseUnaryExpr(s);
+            ir::Expr right = parseUnionExpr(s);
             return ir.addEquality({ left, right });
         } else if (s.tokKind() == TokenKind::ExclaimEqual) {
             s.advance();
-            ir::Expr right = parseUnaryExpr(s);
+            ir::Expr right = parseUnionExpr(s);
             return !ir.addEquality({ left, right });
         } else {
             return left;
         }
+    }
+
+    ir::Sort setSortOf(TokenStream& s, ir::Expr operand) {
+        ir::Sort sort = ir.sortOf(operand);
+        if (!ir::isSetSort(sort))
+            s.error("Operand of a set operator is not a set");
+        return sort;
+    }
+
+    ir::Expr parseUnionExpr(TokenStream& s) {
+        auto operands = parseInfixOperands(s, words["union"], [this](TokenStream& s) { return parseSetMinusExpr(s); });
+        if (operands.size() == 1)
+            return operands.front();
+        return ir.addUnion(setSortOf(s, operands.front()), operands);
+    }
+
+    //! A chain of 'setminus' groups to the left, the operator is not associative
+    ir::Expr parseSetMinusExpr(TokenStream& s) {
+        ir::Expr base = parseIntersectionExpr(s);
+        while (s.tokKind() == TokenKind::Identifier && s.tok().word() == words["setminus"]) {
+            s.advance();
+            ir::Expr subtrahend = parseIntersectionExpr(s);
+            base = ir.addSetMinus(setSortOf(s, base), { base, subtrahend });
+        }
+        return base;
+    }
+
+    ir::Expr parseIntersectionExpr(TokenStream& s) {
+        auto operands = parseInfixOperands(s, words["intersection"], [this](TokenStream& s) { return parseUnaryExpr(s); });
+        if (operands.size() == 1)
+            return operands.front();
+        return ir.addIntersection(setSortOf(s, operands.front()), operands);
     }
 
     ir::Expr parseUnaryExpr(TokenStream& s) {
@@ -844,6 +896,63 @@ struct FunctionParser {
         ir::CodePos pos = getLabel(s);
         s.advance();
         return ir.addLoad(*sort, { loc, pos });
+    }
+
+    static bool isSetConstructor(Word id) {
+        return id == words["mset"] || id == words["iset"]
+            || id == words["incl_iset"] || id == words["excl_iset"]
+            || id == words["path_iset"] || id == words["invariant"];
+    }
+
+    //! The sets a memory location describes, together with the empty set of either set sort
+    /*!
+    'mset()' and 'iset()' are the empty sets. A set has a sort, so there is one of them per set
+    sort and neither is written without saying which one it is.
+    */
+    ir::Expr parseSetConstructor(TokenStream& s, Word id) {
+        if (s.tokKind() != TokenKind::LeftParen)
+            s.error("Expected '(' after a set constructor");
+        s.advance();
+
+        if (s.tokKind() == TokenKind::RightParen) {
+            s.advance();
+            if (id == words["mset"])
+                return ir.emptySet(ir::Sort::MemorySet);
+            if (id == words["iset"])
+                return ir.emptySet(ir::Sort::InvariantSet);
+            s.error("Expected a memory location in a set constructor");
+        }
+        // The invariant sets of a location are the inclusive, the exclusive and the path one,
+        // so 'iset' is only ever written as the empty set
+        if (id == words["iset"])
+            s.error("Expected ')' after 'iset(', an invariant set of a location is written with 'incl_iset', 'excl_iset' or 'path_iset'");
+
+        ir::MemoryLoc loc = parseExpression<ir::MemoryLoc>(s);
+
+        if (id == words["invariant"]) {
+            if (s.tokKind() != TokenKind::Comma)
+                s.error("Expected ',' after the location of an invariant");
+            s.advance();
+            if (s.tokKind() != TokenKind::GlobalName)
+                s.error("Expected the global name of an invariant");
+            s.advance();
+            // TODO: Resolve the name to the invariant it stands for and build the expression
+            // 'ir.addSingletonInvariantSet({ loc, invariant })' from it
+            VERIFY_NOT_REACHED();
+        }
+
+        if (s.tokKind() != TokenKind::RightParen)
+            s.error("Expected ')' after the location of a set constructor");
+        s.advance();
+
+        if (id == words["mset"])
+            return ir.addLocationMemorySet({ loc });
+        if (id == words["incl_iset"])
+            return ir.addInclusiveInvariantSet({ loc });
+        if (id == words["excl_iset"])
+            return ir.addExclusiveInvariantSet({ loc });
+        VERIFY(id == words["path_iset"]);
+        return ir.addPathInvariantSet({ loc });
     }
 
     ir::Expr parsePrimaryExpression(TokenStream& s) {
@@ -902,6 +1011,8 @@ struct FunctionParser {
                 return ir::Bool(false);
             } else if (id == words["true"]) {
                 return ir::Bool(true);
+            } else if (isSetConstructor(id)) {
+                return parseSetConstructor(s, id);
             } else {
                 s.error("Invalid identifier for expression");
             }
@@ -1559,6 +1670,122 @@ fn #test($f, $a, $b):
 
     EXPECT_EQ(args(3).size(), 0);
     EXPECT_TRUE(sameList(args(4), args(3)));
+}
+
+TEST(VerifyLanguage, ParseSetConstructors) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    store $a <- mset($a)
+    store $a <- incl_iset($a)
+    store $a <- excl_iset($a)
+    store $a <- path_iset($a)
+    store $a <- mset()
+    store $a <- iset()
+)");
+    auto value = [&fn](uint32_t pos) { return fn.getStore(ir::CodePos(pos)).value; };
+    ir::Expr a(ir::ExprKind::FunctionParameter, 0);
+
+    EXPECT_EQ(value(0).kind(), ir::ExprKind::LocationMemorySet);
+    EXPECT_EQ(fn.getLocationMemorySet((ir::MemorySet)value(0)).loc, a);
+    EXPECT_EQ(value(1).kind(), ir::ExprKind::InclusiveInvariantSet);
+    EXPECT_EQ(value(2).kind(), ir::ExprKind::ExclusiveInvariantSet);
+    EXPECT_EQ(value(3).kind(), ir::ExprKind::PathInvariantSet);
+
+    // The three invariant sets of a location share a sort with the empty one
+    EXPECT_EQ(fn.sortOf(value(0)), ir::Sort::MemorySet);
+    EXPECT_EQ(fn.sortOf(value(1)), ir::Sort::InvariantSet);
+    EXPECT_EQ(fn.sortOf(value(2)), ir::Sort::InvariantSet);
+    EXPECT_EQ(fn.sortOf(value(3)), ir::Sort::InvariantSet);
+
+    // An empty set is one expression per set sort, it carries nothing beyond the sort
+    EXPECT_EQ(value(4), fn.emptySet(ir::Sort::MemorySet));
+    EXPECT_EQ(value(5), fn.emptySet(ir::Sort::InvariantSet));
+    EXPECT_NE(value(4), value(5));
+
+    // 'iset' only writes the empty set, an invariant set of a location says which one it is
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- iset($a)\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- incl_iset()\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- mset $a\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a):\n    store $a <- mset($a\n"), ParserException);
+}
+
+TEST(VerifyLanguage, ParseSetOperatorPrecedence) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c, $d):
+    store $a <- mset($a) union mset($b) setminus mset($c) intersection mset($d)
+    store $a <- mset($a) union (mset($b) setminus (mset($c) intersection mset($d)))
+    store $a <- mset($a) ∪ mset($b) ∖ mset($c) ∩ mset($d)
+)");
+    // 'intersection' binds strongest, then 'setminus', then 'union'
+    ir::Expr chain = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, chain);
+    // A symbol stands for the operator it spells, so it groups the same way
+    EXPECT_EQ(fn.getStore(ir::CodePos(2)).value, chain);
+
+    EXPECT_EQ(chain.kind(), ir::ExprKind::MemorySetUnion);
+    auto operands = fn.view(fn.getSetOperands(chain));
+    EXPECT_EQ(operands.size(), 2);
+    EXPECT_EQ(operands[0].kind(), ir::ExprKind::LocationMemorySet);
+    EXPECT_EQ(operands[1].kind(), ir::ExprKind::MemorySetMinus);
+
+    auto setMinus = fn.getSetMinus(operands[1]);
+    EXPECT_EQ(setMinus.base.kind(), ir::ExprKind::LocationMemorySet);
+    EXPECT_EQ(setMinus.subtrahend.kind(), ir::ExprKind::MemorySetIntersection);
+    EXPECT_EQ(fn.view(fn.getSetOperands(setMinus.subtrahend)).size(), 2);
+}
+
+TEST(VerifyLanguage, ParseSetOperatorsBindTighterThanEquality) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    store $a <- mset($a) union mset($b) = mset($c)
+    store $a <- (mset($a) union mset($b)) = mset($c)
+)");
+    ir::Bool equality = (ir::Bool)fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, equality);
+    EXPECT_EQ(equality.kind(), ir::ExprKind::Equality);
+    EXPECT_EQ(fn.getEquality(equality).left.kind(), ir::ExprKind::MemorySetUnion);
+}
+
+TEST(VerifyLanguage, ParseSetOperatorAssociativity) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b, $c):
+    store $a <- mset($a) union mset($b) union mset($c)
+    store $a <- (mset($a) union mset($b)) union mset($c)
+    store $a <- mset($a) union (mset($b) union mset($c))
+    store $a <- mset($a) setminus mset($b) setminus mset($c)
+    store $a <- (mset($a) setminus mset($b)) setminus mset($c)
+    store $a <- mset($a) setminus (mset($b) setminus mset($c))
+)");
+    // A chain of unions is one expression, however it is grouped
+    ir::Expr chain = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(fn.view(fn.getSetOperands(chain)).size(), 3);
+    EXPECT_EQ(fn.getStore(ir::CodePos(1)).value, chain);
+    EXPECT_EQ(fn.getStore(ir::CodePos(2)).value, chain);
+
+    // 'setminus' is not associative, so a chain of it groups to the left and no further
+    ir::Expr nested = fn.getStore(ir::CodePos(3)).value;
+    EXPECT_EQ(fn.getStore(ir::CodePos(4)).value, nested);
+    EXPECT_NE(fn.getStore(ir::CodePos(5)).value, nested);
+    EXPECT_EQ(fn.getSetMinus(nested).base.kind(), ir::ExprKind::MemorySetMinus);
+}
+
+TEST(VerifyLanguage, ParseInvariantSetOperators) {
+    ir::Function fn = parseForTest(R"(
+fn #test($a, $b):
+    store $a <- incl_iset($a) ∖ path_iset($b) ∪ iset()
+)");
+    // The operators exist once per set sort, the sort of the operands decides which one is meant
+    ir::Expr chain = fn.getStore(ir::CodePos(0)).value;
+    EXPECT_EQ(chain.kind(), ir::ExprKind::InvariantSetUnion);
+    EXPECT_EQ(fn.sortOf(chain), ir::Sort::InvariantSet);
+    EXPECT_EQ(fn.view(fn.getSetOperands(chain))[0].kind(), ir::ExprKind::InvariantSetMinus);
+}
+
+TEST(VerifyLanguage, ParseSetOperatorOfNonSet) {
+    // Only a set has set operations, the sort of the first operand is what says so
+    EXPECT_THROW(parseForTest("fn #test($a, $b):\n    store $a <- $a union $b\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a, $b):\n    store $a <- $a setminus $b\n"), ParserException);
+    EXPECT_THROW(parseForTest("fn #test($a, $b):\n    store $a <- $a intersection $b\n"), ParserException);
 }
 
 TEST(VerifyLanguage, ParseEqualityNegation) {

@@ -52,6 +52,58 @@ TEST(VerifyIR, CheckExpressionSortsOfLoads) {
     EXPECT_EQ(check(fn).malformedExpressions, std::vector<Expr> { wrongLocation });
 }
 
+TEST(VerifyIR, CheckSetExpressionSorts) {
+    Function fn;
+    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+    MemorySet memory(fn.addLocationMemorySet({ loc }));
+    InvariantSet invariants(fn.addInclusiveInvariantSet({ loc }));
+
+    fn.addUnion(Sort::MemorySet, { memory, fn.emptySet(Sort::MemorySet) });
+    fn.addIntersection(Sort::InvariantSet, { invariants, fn.addPathInvariantSet({ loc }) });
+    fn.addSetMinus(Sort::MemorySet, { memory, memory });
+    EXPECT_TRUE(check(fn).malformedExpressions.empty());
+
+    // The set sorts are distinct, so an operation of one does not accept a set of the other
+    Expr mixedUnion = fn.addUnion(Sort::MemorySet, { memory, invariants });
+    Expr mixedMinus = fn.addSetMinus(Sort::InvariantSet, { invariants, memory });
+    EXPECT_EQ(check(fn).malformedExpressions, (std::vector<Expr> { mixedUnion, mixedMinus }));
+}
+
+TEST(VerifyIR, CheckSetConstructorSorts) {
+    Function fn;
+    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+    Type type(fn.addParameter(Sort::Type));
+
+    fn.addLocationMemorySet({ loc });
+    fn.addExclusiveInvariantSet({ loc });
+    fn.addSingletonInvariantSet({ loc, Invariant(0) });
+    EXPECT_TRUE(check(fn).malformedExpressions.empty());
+
+    // A set of a location is built from a location, whatever the set describes about it
+    Expr wrongLocation = fn.addPathInvariantSet({ MemoryLoc(type) });
+    EXPECT_EQ(check(fn).malformedExpressions, std::vector<Expr> { wrongLocation });
+}
+
+TEST(VerifyIR, CheckSetSorts) {
+    Function fn;
+    MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));
+
+    // The sort of a set operation follows from its kind, as it does for a load
+    EXPECT_EQ(fn.sortOf(fn.addLocationMemorySet({ loc })), Sort::MemorySet);
+    EXPECT_EQ(fn.sortOf(fn.addInclusiveInvariantSet({ loc })), Sort::InvariantSet);
+    EXPECT_EQ(fn.sortOf(fn.addSingletonInvariantSet({ loc, Invariant(7) })), Sort::InvariantSet);
+    EXPECT_EQ(fn.sortOf(fn.emptySet(Sort::MemorySet)), Sort::MemorySet);
+    EXPECT_EQ(fn.sortOf(fn.emptySet(Sort::InvariantSet)), Sort::InvariantSet);
+
+    // An invariant is part of the identity of the singleton set it is the only element of
+    EXPECT_EQ(fn.addSingletonInvariantSet({ loc, Invariant(7) }),
+        fn.addSingletonInvariantSet({ loc, Invariant(7) }));
+    EXPECT_NE(fn.addSingletonInvariantSet({ loc, Invariant(7) }),
+        fn.addSingletonInvariantSet({ loc, Invariant(8) }));
+    EXPECT_EQ(fn.getSingletonInvariantSet(fn.addSingletonInvariantSet({ loc, Invariant(7) })).invariant,
+        Invariant(7));
+}
+
 TEST(VerifyIR, CheckInstructionSorts) {
     Function fn;
     MemoryLoc loc(fn.addParameter(Sort::MemoryLoc));

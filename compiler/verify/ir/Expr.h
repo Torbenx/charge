@@ -66,6 +66,109 @@ inline ExprKind loadKind(Sort sort) {
     }
 }
 
+constexpr bool isSetSort(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) case Sort::name:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool isEmptySet(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) case ExprKind::name##Empty:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool isSetUnion(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) case ExprKind::name##Union:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool isSetIntersection(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) case ExprKind::name##Intersection:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline bool isSetMinus(ExprKind kind) {
+    switch (kind) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) case ExprKind::name##Minus:
+#include <verify/ir/sorts.inc>
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline ExprKind emptySetKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return ExprKind::name##Empty;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+inline ExprKind unionKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return ExprKind::name##Union;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+inline ExprKind intersectionKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return ExprKind::name##Intersection;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+inline ExprKind setMinusKind(Sort sort) {
+    switch (sort) {
+#define SORT(name, snake_case)
+#define SET_SORT(name, snake_case) \
+    case Sort::name:               \
+        return ExprKind::name##Minus;
+#include <verify/ir/sorts.inc>
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 enum class Opcode : uint8_t {
 #define INSTRUCTION(name, ...) name,
 #include <verify/ir/instructions.inc>
@@ -142,6 +245,10 @@ struct TypeImpl : SmallHandle {
     using SmallHandle::SmallHandle;
 };
 
+struct Invariant : SmallHandle {
+    using SmallHandle::SmallHandle;
+};
+
 enum class RelativePosKind : uint8_t {
     Simple,
     Complex,
@@ -205,6 +312,8 @@ struct Type;
 struct Member;
 struct MemoryDecl;
 struct MemoryLoc;
+struct MemorySet;
+struct InvariantSet;
 
 struct Expr {
 #define INLINE_EXPR(name, sort, Arg) \
@@ -277,6 +386,18 @@ struct MemoryLoc : Expr {
 struct UninterpretedConstant : Expr {
     static constexpr Sort sort = Sort::UninterpretedConstant;
     explicit UninterpretedConstant(Expr e)
+        : Expr(e) { }
+};
+
+struct MemorySet : Expr {
+    static constexpr Sort sort = Sort::MemorySet;
+    explicit MemorySet(Expr e)
+        : Expr(e) { }
+};
+
+struct InvariantSet : Expr {
+    static constexpr Sort sort = Sort::InvariantSet;
+    explicit InvariantSet(Expr e)
         : Expr(e) { }
 };
 

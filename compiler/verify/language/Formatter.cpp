@@ -74,6 +74,9 @@ namespace {
         Or,
         And,
         Equality,
+        Union,
+        SetMinus,
+        Intersection,
         Unary,
         Postfix,
     };
@@ -417,9 +420,19 @@ private:
         case ir::ExprKind::BooleanLiteral:
             return Precedence::Postfix;
         default:
-            // This is not guaranteed to be a bool, but non-bools are never negated.
-            return ir::Bool(expr).negated() ? Precedence::Unary : Precedence::Postfix;
+            break;
         }
+
+        // A set operator is never negated, its operands are not bools
+        if (ir::isSetUnion(expr.kind()))
+            return Precedence::Union;
+        if (ir::isSetMinus(expr.kind()))
+            return Precedence::SetMinus;
+        if (ir::isSetIntersection(expr.kind()))
+            return Precedence::Intersection;
+
+        // This is not guaranteed to be a bool, but non-bools are never negated.
+        return ir::Bool(expr).negated() ? Precedence::Unary : Precedence::Postfix;
     }
 
     void appendExprBody(std::string& text, ir::Expr expr) const {
@@ -429,14 +442,14 @@ private:
             return;
         case ir::ExprKind::Equality: {
             auto equality = ir.getEquality((ir::Bool)expr);
-            appendExpr(text, equality.left, Precedence::Unary);
+            appendExpr(text, equality.left, Precedence::Union);
             text += ' ';
             if (ir::Bool(expr).negated())
                 text += symbols::NOT_EQUAL;
             else
                 text += '=';
             text += ' ';
-            appendExpr(text, equality.right, Precedence::Unary);
+            appendExpr(text, equality.right, Precedence::Union);
             return;
         }
         case ir::ExprKind::And:
@@ -465,6 +478,33 @@ private:
             text += std::format(".load@{}", label(load.pos.simplePos()));
             return;
         }
+
+        // The set operators exist once per set sort and are all written the same way
+        if (ir::isSetUnion(expr.kind())) {
+            appendSetChain(text, expr, symbols::UNION, Precedence::SetMinus);
+            return;
+        }
+        if (ir::isSetIntersection(expr.kind())) {
+            appendSetChain(text, expr, symbols::INTERSECTION, Precedence::Unary);
+            return;
+        }
+        if (ir::isSetMinus(expr.kind())) {
+            // The operator groups to the left, so only a right operand of its own level needs parentheses
+            auto setMinus = ir.getSetMinus(expr);
+            appendExpr(text, setMinus.base, Precedence::SetMinus);
+            text += ' ';
+            text += symbols::SET_MINUS;
+            text += ' ';
+            appendExpr(text, setMinus.subtrahend, Precedence::Intersection);
+            return;
+        }
+        if (ir::isEmptySet(expr.kind())) {
+            // An empty set has a sort, so it is written as the constructor of that sort with
+            // nothing in it rather than as a symbol that would leave the sort unsaid
+            text += ir.sortOf(expr) == ir::Sort::MemorySet ? "mset()" : "iset()";
+            return;
+        }
+
         switch (expr.kind()) {
         case ir::ExprKind::FunctionParameter:
             text += std::format("${}", parameterNames[expr.id()]);
@@ -487,9 +527,44 @@ private:
             appendExpr(text, ir.getMemoryLocType((ir::Type)expr).loc, Precedence::Postfix);
             text += ".type";
             return;
+        case ir::ExprKind::LocationMemorySet:
+            appendSetOfLocation(text, "mset", ir.getLocationMemorySet((ir::MemorySet)expr).loc);
+            return;
+        case ir::ExprKind::InclusiveInvariantSet:
+            appendSetOfLocation(text, "incl_iset", ir.getInclusiveInvariantSet((ir::InvariantSet)expr).loc);
+            return;
+        case ir::ExprKind::ExclusiveInvariantSet:
+            appendSetOfLocation(text, "excl_iset", ir.getExclusiveInvariantSet((ir::InvariantSet)expr).loc);
+            return;
+        case ir::ExprKind::PathInvariantSet:
+            appendSetOfLocation(text, "path_iset", ir.getPathInvariantSet((ir::InvariantSet)expr).loc);
+            return;
         default:
+            // A singleton invariant set names its invariant with a global, which cannot be
+            // looked up yet, so it has no syntax to be written with either
             VERIFY_NOT_REACHED(); // The expression has no syntax in the language yet
         }
+    }
+
+    //! Writes a chain of one variadic set operator, whose operands bind at \p context
+    void appendSetChain(std::string& text, ir::Expr expr, std::string_view symbol, Precedence context) const {
+        std::span<const ir::Expr> operands = ir.view(ir.getSetOperands(expr));
+        for (int_t i = 0; i < (int_t)operands.size(); i++) {
+            if (i > 0) {
+                text += ' ';
+                text += symbol;
+                text += ' ';
+            }
+            appendExpr(text, operands[i], context);
+        }
+    }
+
+    //! Writes a set constructor, whose location stands alone inside the parentheses
+    void appendSetOfLocation(std::string& text, std::string_view name, ir::MemoryLoc loc) const {
+        text += name;
+        text += '(';
+        appendExpr(text, loc, Precedence::Or);
+        text += ')';
     }
 
     void appendConnective(std::string& text, ir::Expr expr) const {
@@ -616,6 +691,37 @@ fn #test($a, $b, $c):
         "fn #test($a, $b, $c):\n"
         "    store $a <- $a = $b ∧ $c = $a ∨ $a ≠ $b\n"
         "    store $a <- ¬($a = $b ∧ $c = $a)\n");
+}
+
+TEST(VerifyLanguage, FormatSetExpressions) {
+    expectFormatted(R"(
+fn #test($a, $b, $c, $d):
+    store $a <- mset()
+    store $a <- iset()
+    store $a <- mset($a)
+    store $a <- incl_iset($a)
+    store $a <- excl_iset($a)
+    store $a <- path_iset($a)
+    store $a <- mset($a) ∪ mset($b) ∖ mset($c) ∩ mset($d)
+    store $a <- (mset($a) ∪ mset($b)) ∖ mset($c)
+    store $a <- mset($a) ∖ (mset($b) ∖ mset($c))
+    store $a <- mset($a) ∖ mset($b) ∖ mset($c)
+    store $a <- mset($a) ∩ mset($b) ∪ mset($c) = mset($d)
+    store $a <- incl_iset($a) ∖ path_iset($b) ∪ iset()
+)");
+}
+
+TEST(VerifyLanguage, FormatSetAsciiOperators) {
+    // An operator the source wrote out in ascii is written back as its symbol, and the grouping
+    // the precedence gives it needs no parentheses to be read back the same way
+    EXPECT_EQ(format(parse(R"(
+fn #test($a, $b, $c):
+    store $a <- mset($a) union mset($b) setminus mset($c)
+    store $a <- (mset($a) intersection mset($b)) union mset($c)
+)")),
+        "fn #test($a, $b, $c):\n"
+        "    store $a <- mset($a) ∪ mset($b) ∖ mset($c)\n"
+        "    store $a <- mset($a) ∩ mset($b) ∪ mset($c)\n");
 }
 
 TEST(VerifyLanguage, FormatPositionExpressions) {
