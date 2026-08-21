@@ -451,6 +451,15 @@ SwitchState statement() then expression
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::DiscardStmt
         next expression
+    keyword prove
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::ProveStmt
+        next expression
+    keyword assert
+        pushScope ScopeKind::RightExpr
+        emitToken TokenKind::AssertStmt
+        next expression
+
 
     keyword while
         pushScope ScopeKind::WhileCondition

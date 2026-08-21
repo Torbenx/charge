@@ -898,6 +898,9 @@ LABEL_MAYBE_UNUSED lex$word_case:
         case toCaseValue<identifier_t>(LexerToken::Open, "open"):
             // lexToken
             return LexerToken::Open;
+        case toCaseValue<identifier_t>(LexerToken::Prove, "prove"):
+            // lexToken
+            return LexerToken::Prove;
         case toCaseValue<identifier_t>(LexerToken::Return, "return"):
             // lexToken
             return LexerToken::Return;
@@ -3765,6 +3768,14 @@ LABEL_MAYBE_UNUSED statement$word_case_with_read:
 LABEL_MAYBE_UNUSED statement$word_case:
     if (isIdentifierKeywordOrSpecial(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
+        case toCaseValue<identifier_t>(LexerToken::Assert, "assert"):
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::AssertStmt
+            carriedEmitTokenKind = TokenKind::AssertStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
         case toCaseValue<identifier_t>(LexerToken::Break, "break"):
             // emitToken TokenKind::BreakStmt
             carriedEmitTokenKind = TokenKind::BreakStmt;
@@ -3823,6 +3834,14 @@ LABEL_MAYBE_UNUSED statement$word_case:
             carriedEmitTokenData = 0;
             // next loop_body
             goto loop_body$with_emit;
+        case toCaseValue<identifier_t>(LexerToken::Prove, "prove"):
+            // pushScope ScopeKind::RightExpr
+            scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+            // emitToken TokenKind::ProveStmt
+            carriedEmitTokenKind = TokenKind::ProveStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
         case toCaseValue<identifier_t>(LexerToken::Return, "return"):
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -3976,6 +3995,15 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
     LABEL_MAYBE_UNUSED check_else_branch$word_case:
         if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::Assert, "assert"):
+                // -> statement
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitToken TokenKind::AssertStmt
+                carriedEmitTokenKind = TokenKind::AssertStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Break, "break"):
                 // -> statement
                 // emitToken TokenKind::BreakStmt
@@ -4048,6 +4076,15 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
                 carriedEmitTokenData = 0;
                 // next loop_body
                 goto loop_body$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Prove, "prove"):
+                // -> statement
+                // pushScope ScopeKind::RightExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
+                // emitToken TokenKind::ProveStmt
+                carriedEmitTokenKind = TokenKind::ProveStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Return, "return"):
                 // -> statement
                 // pushScope ScopeKind::RightExpr

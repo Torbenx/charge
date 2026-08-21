@@ -28,6 +28,7 @@ keywords = [
     "in",
     "let",
     "loop",
+    "prove",
     "return",
     "shared",
     "static",

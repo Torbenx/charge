@@ -40,6 +40,7 @@ impl,LexerToken::Impl
 in,LexerToken::In
 let,LexerToken::Let
 loop,LexerToken::Loop
+prove,LexerToken::Prove
 return,LexerToken::Return
 shared,LexerToken::Shared
 static,LexerToken::Static

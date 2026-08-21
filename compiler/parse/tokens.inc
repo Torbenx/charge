@@ -104,6 +104,8 @@ TOKEN(ElseStmt, Colon, None, None)
 TOKEN(ReturnStmt, Return, None, None)
 TOKEN(DestroyStmt, Destroy, None, None)
 TOKEN(DiscardStmt, Discard, None, None)
+TOKEN(ProveStmt, Prove, None, None)
+TOKEN(AssertStmt, Assert, None, None)
 TOKEN(EmptyReturnStmt, Return, None, None)
 
 TOKEN(WhileStmt, While, None, None)

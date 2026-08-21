@@ -22,6 +22,7 @@ inline constexpr ConstWordStringTable words {
     wordWithId("in", KEYWORD_WORD_ID),
     wordWithId("let", KEYWORD_WORD_ID),
     wordWithId("loop", KEYWORD_WORD_ID),
+    wordWithId("prove", KEYWORD_WORD_ID),
     wordWithId("return", KEYWORD_WORD_ID),
     wordWithId("shared", KEYWORD_WORD_ID),
     wordWithId("static", KEYWORD_WORD_ID),
@@ -142,6 +143,7 @@ enum class LexerToken : uint8_t {
     In, // in
     Let, // let
     Loop, // loop
+    Prove, // prove
     Return, // return
     Shared, // shared
     Static, // static
@@ -250,6 +252,7 @@ inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {
         { LexerToken::In, "in" },
         { LexerToken::Let, "let" },
         { LexerToken::Loop, "loop" },
+        { LexerToken::Prove, "prove" },
         { LexerToken::Return, "return" },
         { LexerToken::Shared, "shared" },
         { LexerToken::Static, "static" },

@@ -166,6 +166,12 @@ return;
 
 // expect-token DestroyStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 destroy a;
+// expect-token DiscardStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+discard a;
+// expect-token ProveStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+prove a;
+// expect-token AssertStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+assert a;
 
 //; while loops
 // expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody

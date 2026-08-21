@@ -136,6 +136,8 @@ std::string_view nameString(LexerToken token) {
         return "Let";
     case LexerToken::Loop:
         return "Loop";
+    case LexerToken::Prove:
+        return "Prove";
     case LexerToken::Return:
         return "Return";
     case LexerToken::Shared:
@@ -398,7 +400,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return {};
     }
     case State::Statement: {
-        static constexpr std::array r = { LexerToken::LeftBrace, LexerToken::If, LexerToken::Let, LexerToken::Var, LexerToken::Return, LexerToken::Destroy, LexerToken::Discard, LexerToken::While, LexerToken::Do, LexerToken::Loop, LexerToken::For, LexerToken::Break, LexerToken::Continue, LexerToken::RightBrace };
+        static constexpr std::array r = { LexerToken::LeftBrace, LexerToken::If, LexerToken::Let, LexerToken::Var, LexerToken::Return, LexerToken::Destroy, LexerToken::Discard, LexerToken::Prove, LexerToken::Assert, LexerToken::While, LexerToken::Do, LexerToken::Loop, LexerToken::For, LexerToken::Break, LexerToken::Continue, LexerToken::RightBrace };
         return r;
     }
     case State::LetStatement: {
