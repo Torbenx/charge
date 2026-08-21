@@ -30,7 +30,18 @@
       "language": "chiral",
       "scopeName": "source.chiral",
       "path": "./chiral.tmLanguage.json"
-    }]
+    }],
+    "configurationDefaults": {
+      "[chiral]": {
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.unicodeHighlight.allowedCharacters": {
+          "∧": true,
+          "∨": true,
+          "¬": true,
+          "≠": true
+        }
+      }
+    }
   },
   "scripts": {
 		"vscode:prepublish": "npm run compile",

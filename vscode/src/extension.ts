@@ -11,9 +11,14 @@ import {
 	TransportKind
 } from 'vscode-languageclient/node';
 
+import { registerUnicodeOperators } from './unicodeOperators';
+
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
+	// Writing the symbols needs no language server, so it is set up before one is looked for
+	registerUnicodeOperators(context);
+
 	const outputDir = process.env["charge_output_directory"];
 	if (outputDir == undefined) {
 		console.error("output directory unknown");
