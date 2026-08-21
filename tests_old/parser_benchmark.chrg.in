@@ -1,7 +1,7 @@
 
-fn f1(x: unique, y: shared, z: const, zx1: unique const, zy1: shared const, zx2: const unique, zy2: const shared, var a, b): { }
+fn f1(x: &unique, y: &shared, z: &const, zx1: &unique const, zy1: &shared const, zx2: &const unique, zy2: &const shared, var a, b): { }
 
-fn f1x(x: unique type, y: shared = init, z: const type = init, zx1: unique const type, zy1: shared const = init, zx2: const unique type = init, var a: type, b = init): { }
+fn f1x(x: &unique type, y: &shared = init, z: &const type = init, zx1: &unique const type, zy1: &shared const = init, zx2: &const unique type = init, var a: type, b = init): { }
 
 fn f2(x = init): { }
 
@@ -91,10 +91,10 @@ fn impl base(x: X, x2: X) -> X: { }
 
 fn impl base(x1: X) -> X: { }
 
-fn impl base(x: unique X) -> X: { }
+fn impl base(x: &unique X) -> X: { }
 
-fn genericBase(x: <expression_category::value> X) -> X: { }
-fn impl genericBase(x: <expression_category::unique_ref> X) -> X: { }
+fn genericBase(x: &(expression_category::value) X) -> X: { }
+fn impl genericBase(x: &(expression_category::unique_ref) X) -> X: { }
 
 fn impl base(x: Y) -> X: { }
 
@@ -242,10 +242,10 @@ namespace Init: {
 
 static g1: type = X();
 
-fn fr1(x: unique X) -> X: { }
+fn fr1(x: &unique X) -> X: { }
 fn f1() => fr1(X());
 
-fn f2(x: shared X) => fr1(x);
+fn f2(x: &shared X) => fr1(x);
 
 }
 
@@ -365,10 +365,10 @@ var a;
 let a = init;
 let a: type;
 let a: type = init;
-let a: unique;
-let a: unique type;
-let a: unique = init;
-let a: unique type = init;
+let a: &unique;
+let a: &unique type;
+let a: &unique = init;
+let a: &unique type = init;
 
 if a: let b; else: let c;
 
@@ -511,11 +511,11 @@ static testTofDerived = DerivedT{X}::TofDerived;
 static testTofBase = DerivedT{X}::TofBase;
 
 struct WithMember: { member: X; }
-fn accessMember(w: shared WithMember) => w.member;
+fn accessMember(w: &shared WithMember) => w.member;
 static memberPointer = WithMember::member;
 
 struct DerivedWithMember: { base WithMember; }
-fn accessDerivedMember(w: shared DerivedWithMember) => w.member;
+fn accessDerivedMember(w: &shared DerivedWithMember) => w.member;
 static composedMemberPointer = DerivedWithMember::member;
 
 fn withBody1() -> X: { }
@@ -547,7 +547,7 @@ static test2 = target(blub{X, T}());
 
 }
 
-fn referenceParameter(x: shared X) -> X: { }
+fn referenceParameter(x: &shared X) -> X: { }
 
 fn passReference() -> X: {
     let x: X;
@@ -555,9 +555,9 @@ fn passReference() -> X: {
 }
 
 
-fn addConst(x1: const unique X, x2: const shared X) -> X: { }
-fn addShared(x1: shared X, x2: const shared X) -> X: { }
-fn testRefCast(x1: unique X, x2: shared X, x3: const unique X) -> X: {
+fn addConst(x1: &const unique X, x2: &const shared X) -> X: { }
+fn addShared(x1: &shared X, x2: &const shared X) -> X: { }
+fn testRefCast(x1: &unique X, x2: &shared X, x3: &const unique X) -> X: {
     addConst(x1, x2);
     addShared(x1, x3);
 }
@@ -568,7 +568,7 @@ fn typeExprFold() -> X: {
 }
 
 static var staticVar = X;
-fn needsShared(x: shared type) -> type: { }
+fn needsShared(x: &shared type) -> type: { }
 fn testStaticVarIsShared() => needsShared(staticVar);
 
 static open openVar = X;
@@ -616,7 +616,7 @@ template(value)
 struct ConstantValue: { }
 
 template(c: expression_category)
-fn genericExpressionCategory(p: <c> X) -> ConstantValue{c}: { }
+fn genericExpressionCategory(p: &(c) X) -> ConstantValue{c}: { }
 
 static staticX: X = X();
 static testGenericExpressionDeduction1 = genericExpressionCategory(staticX);
@@ -651,52 +651,52 @@ struct OuterStruct: {
 
         template(self_type) fn testSelfType() => self_type;
 
-        fn testSelf1(self: const shared) => self;
+        fn testSelf1(self: &const shared) => self;
 
-        template(self_type) fn testSelf2(self: const shared) => self;
+        template(self_type) fn testSelf2(self: &const shared) => self;
     }
 }
 
 struct TestSelfCalls: {
-    fn simpleFunc(self: const shared) => self;
+    fn simpleFunc(self: &const shared) => self;
 
-    fn callSimpleFunc(mySelf: const shared TestSelfCalls) => mySelf.simpleFunc();
+    fn callSimpleFunc(mySelf: &const shared TestSelfCalls) => mySelf.simpleFunc();
 
     template(selfT: type, Explicit: type, Deduced: type)
     struct ComplexResult: { }
     template(self_type, Explicit: type, Deduced: type)
-    fn complexFunc(self: const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
+    fn complexFunc(self: &const shared, d: Deduced) -> ComplexResult{self_type, Explicit, Deduced}: { }
 }
 
 struct DerivedSelfCalls: {
     base TestSelfCalls;
 
-    fn callComplexFunc(self: const shared) => self.complexFunc{X}(true);
+    fn callComplexFunc(self: &const shared) => self.complexFunc{X}(true);
 }
 
 struct TestUnbasedAccessExprs: {
     myMember: X;
-    fn accessMyMember(self: const shared) => .myMember;
-    fn accessMyMemberFunc(self: const shared) => .accessMyMember();
+    fn accessMyMember(self: &const shared) => .myMember;
+    fn accessMyMemberFunc(self: &const shared) => .accessMyMember();
 }
 
 fn testLetParameterCategory(x: X) => genericExpressionCategory(x);
 fn testVarParameterCategory(var x: X) => genericExpressionCategory(x);
-fn testUniqueParameterCategory(x: unique X) => genericExpressionCategory(x);
-fn testConstUniqueParameterCategory(x: const unique X) => genericExpressionCategory(x);
-fn testSharedParameterCategory(x: shared X) => genericExpressionCategory(x);
-fn testConstSharedParameterCategory(x: const shared X) => genericExpressionCategory(x);
+fn testUniqueParameterCategory(x: &unique X) => genericExpressionCategory(x);
+fn testConstUniqueParameterCategory(x: &const unique X) => genericExpressionCategory(x);
+fn testSharedParameterCategory(x: &shared X) => genericExpressionCategory(x);
+fn testConstSharedParameterCategory(x: &const shared X) => genericExpressionCategory(x);
 
 template(c: expression_category)
-fn genericParameterCategory(x: <c> X) => genericExpressionCategory(x);
+fn genericParameterCategory(x: &(c) X) => genericExpressionCategory(x);
 fn testValueParameterCategoryFold() => genericParameterCategory(X());
-fn testUniqueParameterCategoryFold(x: unique X) => genericParameterCategory(x);
-fn testConstUniqueParameterCategoryFold(x: const unique X) => genericParameterCategory(x);
-fn testSharedParameterCategoryFold(x: shared X) => genericParameterCategory(x);
-fn testConstSharedParameterCategoryFold(x: const shared X) => genericParameterCategory(x);
+fn testUniqueParameterCategoryFold(x: &unique X) => genericParameterCategory(x);
+fn testConstUniqueParameterCategoryFold(x: &const unique X) => genericParameterCategory(x);
+fn testSharedParameterCategoryFold(x: &shared X) => genericParameterCategory(x);
+fn testConstSharedParameterCategoryFold(x: &const shared X) => genericParameterCategory(x);
 
 template(c: expression_category)
-fn genericParameterCategory2(x: <c> X) -> X: { genericParameterCategory(x); }
+fn genericParameterCategory2(x: &(c) X) -> X: { genericParameterCategory(x); }
 
 template(T: type) static open openGlobalImplTest: bool = false;
 static impl openGlobalImplTest{X}: bool = true;
