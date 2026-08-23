@@ -50,18 +50,26 @@ struct TokenBuffer {
     IdentifierTable wordTable;
     std::vector<Word> callArguments;
     std::string_view source;
+    SourceLocation lastLineStartLocation;
+    const char* lastLineStartPosition = nullptr;
     TokenBuffer(std::string_view source);
 
     void reset() {
         tokens.clear();
         lines.clear();
         whitespace.clear();
-        lines.push_back({ source.data() });
+        addLine(source.begin());
     }
 
-    TokenHandle toHandle(const TokenInfo* ptr) const {
-        int_t index = ptr - tokens.begin();
-        VERIFY(index >= 0 && index < tokens.size());
+    void addLine(const char* position) {
+        lines.push_back({ position });
+        lastLineStartLocation = SourceLocation(lastLineStartLocation.fileId(), lines.size() - 1, 0);
+        lastLineStartPosition = position;
+    }
+
+    TokenHandle toHandle(auto it) const {
+        int_t index = it - tokens.begin();
+        VERIFY(index >= 0 && index < (int_t)tokens.size());
         return { (uint32_t)index };
     }
     TokenInfo& token(TokenHandle handle) { return tokens[handle.id()]; }

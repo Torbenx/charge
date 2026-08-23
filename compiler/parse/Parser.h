@@ -62,22 +62,45 @@ struct ArgumentBuffer {
 };
 
 struct SimpleTokenInfo {
-    TokenKind m_kind;
-    SimpleTokenInfo(TokenKind kind)
-        : m_kind(kind) { }
-    TokenKind kind() const { return m_kind; }
-    void setKind(TokenKind kind) { m_kind = kind; }
+    TaggedSourceLocation<TokenKind> m_fields;
+    SimpleTokenInfo(TokenKind kind, SourceLocation location)
+        : m_fields(kind, location) { }
+    TokenKind kind() const { return m_fields.tag(); }
+    void setKind(TokenKind kind) { m_fields.setTag(kind); }
 };
 
 struct SimpleTokenBuffer {
-    std::vector<SimpleTokenInfo> tokens;
+    PageBumpAllocator<SimpleTokenInfo> tokens;
+    PageBumpAllocator<LineInfo> lines;
+    PageBumpAllocator<WhitespaceInfo> whitespace;
+    std::string_view source;
+    SourceLocation lastLineStartLocation;
+    const char* lastLineStartPosition = nullptr;
+
+    SimpleTokenBuffer(std::string_view source)
+        : source(source) {
+        reset();
+    }
 
     TokenHandle currentToken() const { return { (uint32_t)tokens.size() }; }
-    void reset() { tokens.clear(); }
+    void reset() {
+        tokens.clear();
+        lines.clear();
+        addLine(source.begin());
+    }
+
+    void addLine(const char* position) {
+        lines.push_back({ position });
+        lastLineStartLocation = SourceLocation(lastLineStartLocation.fileId(), lines.size() - 1, 0);
+        lastLineStartPosition = position;
+    }
 };
 
 struct SimpleOutput {
     SimpleTokenBuffer tokenBuffer;
+
+    SimpleOutput(std::string_view source)
+        : tokenBuffer(source) { }
 
     void reset() { tokenBuffer.reset(); }
 };

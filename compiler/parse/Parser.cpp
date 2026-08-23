@@ -81,7 +81,7 @@ TEST(Parse, LexEOF) {
 TEST(Parse, StringLiteral) {
     auto parse = [](const char* source) {
         SimpleParser parser(source);
-        SimpleOutput output;
+        SimpleOutput output(source);
         parser.parse(output);
         return parser;
     };
@@ -103,19 +103,19 @@ TEST(Parse, StringLiteral) {
 TEST(Parse, TokenCount) {
     {
         SimpleParser parser("static a = a;");
-        SimpleOutput output;
+        SimpleOutput output(parser.sourcePosition());
         parser.parse(output);
         EXPECT_EQ(parser.parsedTokens(), 6); // Includes one EOF token
     }
     {
         SimpleParser parser("static a = a;");
-        SimpleOutput output;
+        SimpleOutput output(parser.sourcePosition());
         parser.parse(output, 2);
         EXPECT_EQ(parser.parsedTokens(), 2);
     }
     {
         SimpleParser parser("static a = ;");
-        SimpleOutput output;
+        SimpleOutput output(parser.sourcePosition());
         parser.parse(output);
         EXPECT_EQ(parser.parsedTokens(), 3);
     }

@@ -132,11 +132,12 @@ static Word* addCallArgument(Word* ptr, LexerToken, const NoOutput&) { return pt
 static void updateCallArgument(Word*, LexerToken, const NoOutput&) { }
 static Word* endCall(Word* ptr, const NoOutput&) { return ptr; }
 
-static SourceLocation locationInCurrentLine(const char* position, sema::Context& output) {
+static SourceLocation locationInCurrentLine(const char* position, auto& output) {
+    SourceLocation base = output.tokenBuffer.lastLineStartLocation;
     return {
-        0u,
-        (uint32_t)output.tokenBuffer.lines.size() - 1,
-        (uint32_t)(position - output.tokenBuffer.lines.back().begin)
+        base.fileId(),
+        base.lineIndex(),
+        (uint32_t)(position - output.tokenBuffer.lastLineStartPosition)
     };
 }
 
@@ -148,8 +149,8 @@ static void discardLastToken(sema::Context& output) {
     output.tokenBuffer.tokens.pop_back();
 }
 
-NO_INLINE static void emitToken(TokenKind kind, const char*, uint32_t, SimpleOutput& output) {
-    output.tokenBuffer.tokens.push_back(kind);
+NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t, SimpleOutput& output) {
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output) });
 }
 
 static void discardLastToken(SimpleOutput& output) {
@@ -171,16 +172,18 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     argPos += 2;
     return argPos;
 }
-NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char*, SimpleOutput& output) {
-    output.tokenBuffer.tokens.push_back(kind);
+NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char* begin, SimpleOutput& output) {
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output) });
     return ptr;
 }
 static Word* emitCallToken(Word* ptr, TokenKind, const char*, const NoOutput&) { return ptr; }
 
 NO_INLINE static void markLineBegin(const char* position, sema::Context& output) {
-    output.tokenBuffer.lines.push_back({ position });
+    output.tokenBuffer.addLine(position);
 }
-static void markLineBegin(const char*, SimpleOutput&) { }
+static void markLineBegin(const char* position, SimpleOutput& output) {
+    output.tokenBuffer.addLine(position);
+}
 static void markLineBegin(const char*, const NoOutput&) { }
 
 struct WordAndPosition {
@@ -318,7 +321,9 @@ static constexpr bool isStringLiteralCharacter(uint8_t c) {
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, sema::Context& output) {
     output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
-static void emitWhitespace(WhitespaceKind, const char*, const char*, SimpleOutput&) { }
+static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, SimpleOutput& output) {
+    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
+}
 static void emitWhitespace(WhitespaceKind, const char*, const char*, const NoOutput&) { }
 
 template<typename ParseOutput>

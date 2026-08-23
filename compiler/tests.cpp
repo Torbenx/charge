@@ -741,7 +741,7 @@ TEST(Charge, DISABLED_BenchmarkSimple) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < 10; i++) {
-        parse::SimpleOutput output;
+        parse::SimpleOutput output(sourceBuffer);
         parse::SimpleParser parser(sourceBuffer.data());
         auto start = Clock::now();
         parser.parse(output);
