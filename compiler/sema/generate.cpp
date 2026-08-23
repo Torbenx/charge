@@ -197,7 +197,7 @@ Constant Generator::importParameters(Constant baseValue, Expression (Generator::
     int_t firstNewArgument = baseArguments.size();
     while (baseArguments.size() < baseProg->parameters.size()) {
         const auto& baseParameter = baseProg->parameters[baseArguments.size()];
-        baseArguments.push_back(addInheritedParameter(baseParameter.location, baseParameter.name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter());
+        baseArguments.push_back((this->*add)(baseParameter.location, baseParameter.name, (Type)INVALID_CONSTANT, std::nullopt).copyTemplateParameter());
     }
 
     Constant completeBaseValue = program->addParameterize(context, { baseProgHandle, baseArguments });
