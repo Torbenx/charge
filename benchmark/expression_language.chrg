@@ -1,0 +1,4912 @@
+// A small expression language: tokenizer, Pratt parser, tree-walking
+// interpreter, a constant folder and a pretty printer that round-trips the
+// abstract syntax tree back to source text.
+//
+// The language accepted here looks like this:
+//
+//     let radius = 12;
+//     let area = 3141 * radius ** 2 / 1000;
+//     if area > 100 then "large" else "small"
+//     points[0].x + offset(dx: 4, dy: 5)
+//
+// Numbers are stored as a scaled integer mantissa plus a decimal exponent,
+// because the charge lexer only accepts plain decimal integer literals. The
+// value of a literal is  mantissa * 10^exponent, so the source text `12.5`
+// lexes into the pair (125, -1) and prints back out as `12.5`.
+//
+// The parser is a precedence climbing (Pratt) parser: a single table maps a
+// token kind to a binding power, and `parse_expression` calls itself through
+// the prefix, infix and postfix rules. Those functions are mutually
+// recursive, which is the whole point of the design - the grammar is data,
+// not control flow.
+namespace expression: {
+
+// --- Character constants -------------------------------------------------
+//
+// The tokenizer compares raw characters on nearly every line, so each one
+// that matters gets a name up here rather than being spelled inline.
+
+static CHAR_NUL: char = '\0';
+static CHAR_SPACE: char = ' ';
+static CHAR_TAB: char = '\t';
+static CHAR_NEWLINE: char = '\n';
+static CHAR_RETURN: char = '\r';
+static CHAR_QUOTE: char = '"';
+static CHAR_BACKSLASH: char = '\\';
+static CHAR_UNDERSCORE: char = '_';
+static CHAR_DOT: char = '.';
+static CHAR_COMMA: char = ',';
+static CHAR_COLON: char = ':';
+static CHAR_SEMICOLON: char = ';';
+static CHAR_QUESTION: char = '?';
+static CHAR_BANG: char = '!';
+static CHAR_TILDE: char = '~';
+static CHAR_PLUS: char = '+';
+static CHAR_MINUS: char = '-';
+static CHAR_STAR: char = '*';
+static CHAR_SLASH: char = '/';
+static CHAR_PERCENT: char = '%';
+static CHAR_AMP: char = '&';
+static CHAR_PIPE: char = '|';
+static CHAR_CARET: char = '^';
+static CHAR_LESS: char = '<';
+static CHAR_GREATER: char = '>';
+static CHAR_EQUAL: char = '=';
+static CHAR_LPAREN: char = '(';
+static CHAR_RPAREN: char = ')';
+static CHAR_LBRACKET: char = '[';
+static CHAR_RBRACKET: char = ']';
+static CHAR_LBRACE: char = '{';
+static CHAR_RBRACE: char = '}';
+static CHAR_ZERO: char = '0';
+static CHAR_NINE: char = '9';
+
+// --- Spellings -----------------------------------------------------------
+//
+// Both the tokenizer and the printer need the surface text of every
+// operator. Keeping them in one place is what makes the round trip exact.
+
+static TEXT_EMPTY: string = "";
+static TEXT_SPACE: string = " ";
+static TEXT_NEWLINE: string = "\n";
+static TEXT_INDENT: string = "    ";
+static TEXT_LPAREN: string = "(";
+static TEXT_RPAREN: string = ")";
+static TEXT_LBRACKET: string = "[";
+static TEXT_RBRACKET: string = "]";
+static TEXT_LBRACE: string = "{";
+static TEXT_RBRACE: string = "}";
+static TEXT_COMMA_SPACE: string = ", ";
+static TEXT_SEMICOLON: string = ";";
+static TEXT_DOT: string = ".";
+static TEXT_COLON_SPACE: string = ": ";
+static TEXT_QUESTION_SPACE: string = " ? ";
+static TEXT_SPACE_COLON_SPACE: string = " : ";
+
+static WORD_LET: string = "let";
+static WORD_IF: string = "if";
+static WORD_THEN: string = "then";
+static WORD_ELSE: string = "else";
+static WORD_WHILE: string = "while";
+static WORD_FN: string = "fn";
+static WORD_RETURN: string = "return";
+static WORD_TRUE: string = "true";
+static WORD_FALSE: string = "false";
+static WORD_NULL: string = "null";
+static WORD_AND: string = "and";
+static WORD_OR: string = "or";
+static WORD_NOT: string = "not";
+
+// Decimal scaling. A number is mantissa * 10^exponent; the tokenizer refuses
+// to keep more than MAX_DIGITS significant digits so the mantissa cannot run
+// away on input like 0.0000000000000000001.
+static NUMBER_BASE: int = 10;
+static MAX_DIGITS: int = 18;
+static MIN_EXPONENT: int = -30;
+static MAX_EXPONENT: int = 30;
+static MAX_DEPTH: int = 96;
+static MAX_ARGUMENTS: int = 32;
+
+// --- Token kinds ---------------------------------------------------------
+//
+// One entry per distinct spelling. The tokenizer does maximal munch, so
+// `<<=` has to be tried before `<<` and `<<` before `<`.
+enum TokenKind: {
+    End;
+    Invalid;
+
+    Identifier;
+    Number;
+    Text;
+    Comment;
+
+    Plus;
+    Minus;
+    Star;
+    Slash;
+    Percent;
+    StarStar;
+
+    Amp;
+    Pipe;
+    Caret;
+    Tilde;
+    LessLess;
+    GreaterGreater;
+
+    Bang;
+    AmpAmp;
+    PipePipe;
+
+    Less;
+    LessEqual;
+    Greater;
+    GreaterEqual;
+    EqualEqual;
+    BangEqual;
+
+    Equal;
+    PlusEqual;
+    MinusEqual;
+    StarEqual;
+    SlashEqual;
+    PercentEqual;
+    AmpEqual;
+    PipeEqual;
+    CaretEqual;
+    LessLessEqual;
+    GreaterGreaterEqual;
+
+    PlusPlus;
+    MinusMinus;
+
+    Question;
+    Colon;
+    Comma;
+    Semicolon;
+    Dot;
+    Arrow;
+
+    LParen;
+    RParen;
+    LBracket;
+    RBracket;
+    LBrace;
+    RBrace;
+
+    KeywordLet;
+    KeywordIf;
+    KeywordThen;
+    KeywordElse;
+    KeywordWhile;
+    KeywordFn;
+    KeywordReturn;
+    KeywordTrue;
+    KeywordFalse;
+    KeywordNull;
+    KeywordAnd;
+    KeywordOr;
+    KeywordNot;
+}
+
+// --- Node kinds ----------------------------------------------------------
+
+enum NodeKind: {
+    Invalid;
+    NumberLiteral;
+    TextLiteral;
+    BoolLiteral;
+    NullLiteral;
+    Variable;
+    Unary;
+    Binary;
+    Postfix;
+    Assign;
+    Call;
+    Index;
+    Member;
+    Conditional;
+    Let;
+    Block;
+    Loop;
+    Return;
+    Empty;
+}
+
+// --- Value kinds ---------------------------------------------------------
+
+enum ValueKind: {
+    Nil;
+    Bool;
+    Number;
+    Text;
+    List;
+    Builtin;
+    Failure;
+}
+
+// --- Associativity -------------------------------------------------------
+
+enum Associativity: {
+    None;
+    Left;
+    Right;
+}
+
+// --- Diagnostics ---------------------------------------------------------
+
+enum ErrorCode: {
+    None;
+    UnexpectedCharacter;
+    UnterminatedText;
+    UnterminatedComment;
+    BadEscape;
+    TooManyDigits;
+    ExponentRange;
+    ExpectedExpression;
+    ExpectedToken;
+    ExpectedIdentifier;
+    UnbalancedParen;
+    UnbalancedBracket;
+    DepthExceeded;
+    TooManyArguments;
+    NotAssignable;
+    UnknownName;
+    NotCallable;
+    NotIndexable;
+    WrongArity;
+    DivideByZero;
+    TypeMismatch;
+}
+
+fn error_text(code: ErrorCode) -> string: {
+    if code == ErrorCode::None: {
+        return "no error";
+    }
+    if code == ErrorCode::UnexpectedCharacter: {
+        return "unexpected character in the input";
+    }
+    if code == ErrorCode::UnterminatedText: {
+        return "unterminated string literal, expected a closing quote";
+    }
+    if code == ErrorCode::UnterminatedComment: {
+        return "unterminated block comment, expected a closing marker";
+    }
+    if code == ErrorCode::BadEscape: {
+        return "invalid escape sequence after a backslash";
+    }
+    if code == ErrorCode::TooManyDigits: {
+        return "number has more significant digits than can be represented";
+    }
+    if code == ErrorCode::ExponentRange: {
+        return "decimal exponent is out of range";
+    }
+    if code == ErrorCode::ExpectedExpression: {
+        return "expected an expression";
+    }
+    if code == ErrorCode::ExpectedToken: {
+        return "expected a different token here";
+    }
+    if code == ErrorCode::ExpectedIdentifier: {
+        return "expected an identifier";
+    }
+    if code == ErrorCode::UnbalancedParen: {
+        return "expected a closing parenthesis";
+    }
+    if code == ErrorCode::UnbalancedBracket: {
+        return "expected a closing bracket";
+    }
+    if code == ErrorCode::DepthExceeded: {
+        return "expression nests too deeply";
+    }
+    if code == ErrorCode::TooManyArguments: {
+        return "call has too many arguments";
+    }
+    if code == ErrorCode::NotAssignable: {
+        return "left hand side of the assignment is not assignable";
+    }
+    if code == ErrorCode::UnknownName: {
+        return "name is not bound in any enclosing scope";
+    }
+    if code == ErrorCode::NotCallable: {
+        return "value is not callable";
+    }
+    if code == ErrorCode::NotIndexable: {
+        return "value cannot be indexed";
+    }
+    if code == ErrorCode::WrongArity: {
+        return "builtin called with the wrong number of arguments";
+    }
+    if code == ErrorCode::DivideByZero: {
+        return "division by zero";
+    }
+    if code == ErrorCode::TypeMismatch: {
+        return "operand types do not match the operator";
+    }
+    return "unknown error";
+}
+
+// --- Source positions ----------------------------------------------------
+
+// Every token carries the position it started at so that a diagnostic can
+// point at a line and a column rather than a bare byte offset.
+struct Position: {
+
+    fn advance_over(self: &unique, c: char): {
+        .offset += 1;
+        if c == CHAR_NEWLINE: {
+            .line += 1;
+            .column = 1;
+        } else: {
+            .column += 1;
+        }
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out: string = "line ";
+        out.append(to_string(.line));
+        out.append(", column ");
+        out.append(to_string(.column));
+        return out;
+    }
+
+    offset: int = 0;
+    line: int = 1;
+    column: int = 1;
+}
+
+// A half open range of the source text. The printer never uses spans, but the
+// interpreter quotes them back when a runtime error happens.
+struct Span: {
+
+    fn length(self: &const shared) -> int: {
+        return .end.offset - .begin.offset;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .length() <= 0;
+    }
+
+    fn text_of(self: &const shared, source: &const shared string) -> string: {
+        if .empty(): {
+            return TEXT_EMPTY;
+        }
+        return source.substr(.begin.offset, .length());
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out = .begin.describe();
+        if .end.line != .begin.line: {
+            out.append(" through ");
+            out.append(.end.describe());
+        }
+        return out;
+    }
+
+    begin: Position;
+    end: Position;
+}
+
+struct Diagnostic: {
+
+    fn ok(self: &const shared) -> bool: {
+        return .code == ErrorCode::None;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out = .where.describe();
+        out.append(": ");
+        out.append(error_text(.code));
+        if .detail.size() > 0: {
+            out.append(" (");
+            out.append(.detail);
+            out.append(")");
+        }
+        return out;
+    }
+
+    code: ErrorCode = ErrorCode::None;
+    where: Position;
+    detail: string;
+}
+
+// --- Tokens --------------------------------------------------------------
+
+struct Token: {
+
+    fn is_end(self: &const shared) -> bool: {
+        return .kind == TokenKind::End;
+    }
+
+    fn is_literal(self: &const shared) -> bool: {
+        if .kind == TokenKind::Number: {
+            return true;
+        }
+        if .kind == TokenKind::Text: {
+            return true;
+        }
+        if .kind == TokenKind::KeywordTrue: {
+            return true;
+        }
+        if .kind == TokenKind::KeywordFalse: {
+            return true;
+        }
+        if .kind == TokenKind::KeywordNull: {
+            return true;
+        }
+        return false;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out = token_name(.kind);
+        if .text.size() > 0: {
+            out.append(" '");
+            out.append(.text);
+            out.append("'");
+        }
+        out.append(" at ");
+        out.append(.span.begin.describe());
+        return out;
+    }
+
+    kind: TokenKind = TokenKind::End;
+    text: string;
+    span: Span;
+    // Numeric payload, only meaningful when kind is Number. The literal
+    // value is mantissa * 10^exponent.
+    mantissa: int = 0;
+    exponent: int = 0;
+}
+
+// --- Character classification --------------------------------------------
+
+fn is_space(c: char) => c == CHAR_SPACE || c == CHAR_TAB || c == CHAR_NEWLINE || c == CHAR_RETURN;
+
+fn is_digit(c: char) => c >= '0' && c <= '9';
+
+fn is_lower(c: char) => c >= 'a' && c <= 'z';
+
+fn is_upper(c: char) => c >= 'A' && c <= 'Z';
+
+fn is_letter(c: char) -> bool: {
+    if is_lower(c): {
+        return true;
+    }
+    if is_upper(c): {
+        return true;
+    }
+    return c == CHAR_UNDERSCORE;
+}
+
+fn is_identifier_start(c: char) -> bool: {
+    return is_letter(c);
+}
+
+fn is_identifier_body(c: char) -> bool: {
+    if is_letter(c): {
+        return true;
+    }
+    return is_digit(c);
+}
+
+fn digit_value(c: char) -> int: {
+    return int(c) - int(CHAR_ZERO);
+}
+
+fn to_lower(c: char) -> char: {
+    if is_upper(c): {
+        return char(int(c) + 32);
+    }
+    return c;
+}
+
+fn to_upper(c: char) -> char: {
+    if is_lower(c): {
+        return char(int(c) - 32);
+    }
+    return c;
+}
+
+// True when the character can begin an operator token. Anything that is not
+// a letter, a digit, whitespace or a quote has to be one of these.
+fn is_operator_start(c: char) -> bool: {
+    if c == CHAR_PLUS || c == CHAR_MINUS || c == CHAR_STAR || c == CHAR_SLASH: {
+        return true;
+    }
+    if c == CHAR_PERCENT || c == CHAR_AMP || c == CHAR_PIPE || c == CHAR_CARET: {
+        return true;
+    }
+    if c == CHAR_TILDE || c == CHAR_BANG || c == CHAR_LESS || c == CHAR_GREATER: {
+        return true;
+    }
+    if c == CHAR_EQUAL || c == CHAR_QUESTION || c == CHAR_COLON || c == CHAR_COMMA: {
+        return true;
+    }
+    if c == CHAR_SEMICOLON || c == CHAR_DOT: {
+        return true;
+    }
+    return is_bracket(c);
+}
+
+fn is_bracket(c: char) -> bool: {
+    if c == CHAR_LPAREN || c == CHAR_RPAREN: {
+        return true;
+    }
+    if c == CHAR_LBRACKET || c == CHAR_RBRACKET: {
+        return true;
+    }
+    if c == CHAR_LBRACE || c == CHAR_RBRACE: {
+        return true;
+    }
+    return false;
+}
+
+// --- Token spellings -----------------------------------------------------
+//
+// charge has no switch, so the dispatch tables in this file are written as
+// long if / else cascades over the token kind. They are ordered the same way
+// as the enum so that the two stay easy to compare by eye.
+
+fn token_spelling(kind: TokenKind) -> string: {
+    if kind == TokenKind::Plus: { return "+"; }
+    if kind == TokenKind::Minus: { return "-"; }
+    if kind == TokenKind::Star: { return "*"; }
+    if kind == TokenKind::Slash: { return "/"; }
+    if kind == TokenKind::Percent: { return "%"; }
+    if kind == TokenKind::StarStar: { return "**"; }
+    if kind == TokenKind::Amp: { return "&"; }
+    if kind == TokenKind::Pipe: { return "|"; }
+    if kind == TokenKind::Caret: { return "^"; }
+    if kind == TokenKind::Tilde: { return "~"; }
+    if kind == TokenKind::LessLess: { return "<<"; }
+    if kind == TokenKind::GreaterGreater: { return ">>"; }
+    if kind == TokenKind::Bang: { return "!"; }
+    if kind == TokenKind::AmpAmp: { return "&&"; }
+    if kind == TokenKind::PipePipe: { return "||"; }
+    if kind == TokenKind::Less: { return "<"; }
+    if kind == TokenKind::LessEqual: { return "<="; }
+    if kind == TokenKind::Greater: { return ">"; }
+    if kind == TokenKind::GreaterEqual: { return ">="; }
+    if kind == TokenKind::EqualEqual: { return "=="; }
+    if kind == TokenKind::BangEqual: { return "!="; }
+    if kind == TokenKind::Equal: { return "="; }
+    if kind == TokenKind::PlusEqual: { return "+="; }
+    if kind == TokenKind::MinusEqual: { return "-="; }
+    if kind == TokenKind::StarEqual: { return "*="; }
+    if kind == TokenKind::SlashEqual: { return "/="; }
+    if kind == TokenKind::PercentEqual: { return "%="; }
+    if kind == TokenKind::AmpEqual: { return "&="; }
+    if kind == TokenKind::PipeEqual: { return "|="; }
+    if kind == TokenKind::CaretEqual: { return "^="; }
+    if kind == TokenKind::LessLessEqual: { return "<<="; }
+    if kind == TokenKind::GreaterGreaterEqual: { return ">>="; }
+    if kind == TokenKind::PlusPlus: { return "++"; }
+    if kind == TokenKind::MinusMinus: { return "--"; }
+    if kind == TokenKind::Question: { return "?"; }
+    if kind == TokenKind::Colon: { return ":"; }
+    if kind == TokenKind::Comma: { return ","; }
+    if kind == TokenKind::Semicolon: { return ";"; }
+    if kind == TokenKind::Dot: { return "."; }
+    if kind == TokenKind::Arrow: { return "->"; }
+    if kind == TokenKind::LParen: { return "("; }
+    if kind == TokenKind::RParen: { return ")"; }
+    if kind == TokenKind::LBracket: { return "["; }
+    if kind == TokenKind::RBracket: { return "]"; }
+    if kind == TokenKind::LBrace: { return "{"; }
+    if kind == TokenKind::RBrace: { return "}"; }
+    if kind == TokenKind::KeywordLet: { return "let"; }
+    if kind == TokenKind::KeywordIf: { return "if"; }
+    if kind == TokenKind::KeywordThen: { return "then"; }
+    if kind == TokenKind::KeywordElse: { return "else"; }
+    if kind == TokenKind::KeywordWhile: { return "while"; }
+    if kind == TokenKind::KeywordFn: { return "fn"; }
+    if kind == TokenKind::KeywordReturn: { return "return"; }
+    if kind == TokenKind::KeywordTrue: { return "true"; }
+    if kind == TokenKind::KeywordFalse: { return "false"; }
+    if kind == TokenKind::KeywordNull: { return "null"; }
+    if kind == TokenKind::KeywordAnd: { return "and"; }
+    if kind == TokenKind::KeywordOr: { return "or"; }
+    if kind == TokenKind::KeywordNot: { return "not"; }
+    return TEXT_EMPTY;
+}
+
+// The human readable name, used in diagnostics like "expected ')', found
+// end of input".
+fn token_name(kind: TokenKind) -> string: {
+    if kind == TokenKind::End: { return "end of input"; }
+    if kind == TokenKind::Invalid: { return "invalid token"; }
+    if kind == TokenKind::Identifier: { return "identifier"; }
+    if kind == TokenKind::Number: { return "number"; }
+    if kind == TokenKind::Text: { return "string"; }
+    if kind == TokenKind::Comment: { return "comment"; }
+    let spelling = token_spelling(kind);
+    if spelling.size() > 0: {
+        return spelling;
+    }
+    return "token";
+}
+
+// Keyword recognition happens after an identifier has been scanned, so the
+// tokenizer never needs to back up.
+fn keyword_kind(word: &const shared string) -> TokenKind: {
+    if *word == WORD_LET: { return TokenKind::KeywordLet; }
+    if *word == WORD_IF: { return TokenKind::KeywordIf; }
+    if *word == WORD_THEN: { return TokenKind::KeywordThen; }
+    if *word == WORD_ELSE: { return TokenKind::KeywordElse; }
+    if *word == WORD_WHILE: { return TokenKind::KeywordWhile; }
+    if *word == WORD_FN: { return TokenKind::KeywordFn; }
+    if *word == WORD_RETURN: { return TokenKind::KeywordReturn; }
+    if *word == WORD_TRUE: { return TokenKind::KeywordTrue; }
+    if *word == WORD_FALSE: { return TokenKind::KeywordFalse; }
+    if *word == WORD_NULL: { return TokenKind::KeywordNull; }
+    if *word == WORD_AND: { return TokenKind::KeywordAnd; }
+    if *word == WORD_OR: { return TokenKind::KeywordOr; }
+    if *word == WORD_NOT: { return TokenKind::KeywordNot; }
+    return TokenKind::Identifier;
+}
+
+fn is_keyword(word: &const shared string) -> bool: {
+    return keyword_kind(word) != TokenKind::Identifier;
+}
+
+// --- The precedence table ------------------------------------------------
+//
+// Binding powers, lowest first. Every infix operator gets one number; a right
+// associative operator is parsed by recursing with the same power instead of
+// power + 1, which is what `infix_associativity` below decides.
+//
+//      10  = += -= *= /= %= &= |= ^= <<= >>=       (right)
+//      20  ?:                                       (right)
+//      30  || or                                    (left)
+//      40  && and                                   (left)
+//      50  |                                        (left)
+//      60  ^                                        (left)
+//      70  &                                        (left)
+//      80  == !=                                    (left)
+//      90  < <= > >=                                (left)
+//     100  << >>                                    (left)
+//     110  + -                                      (left)
+//     120  * / %                                    (left)
+//     130  **                                       (right)
+//     140  prefix - + ! ~ not ++ --
+//     150  postfix ++ -- and the call, index and member suffixes
+
+static PRECEDENCE_ASSIGN: int = 10;
+static PRECEDENCE_CONDITIONAL: int = 20;
+static PRECEDENCE_LOGICAL_OR: int = 30;
+static PRECEDENCE_LOGICAL_AND: int = 40;
+static PRECEDENCE_BIT_OR: int = 50;
+static PRECEDENCE_BIT_XOR: int = 60;
+static PRECEDENCE_BIT_AND: int = 70;
+static PRECEDENCE_EQUALITY: int = 80;
+static PRECEDENCE_RELATIONAL: int = 90;
+static PRECEDENCE_SHIFT: int = 100;
+static PRECEDENCE_ADDITIVE: int = 110;
+static PRECEDENCE_MULTIPLICATIVE: int = 120;
+static PRECEDENCE_POWER: int = 130;
+static PRECEDENCE_PREFIX: int = 140;
+static PRECEDENCE_POSTFIX: int = 150;
+static PRECEDENCE_NONE: int = 0;
+
+// One row of the operator table. The parser does not actually walk a vector
+// of these - the cascades below are faster and easier to read - but the
+// printer and the test harness both want the table as data.
+struct OperatorRow: {
+
+    fn describe(self: &const shared) -> string: {
+        var out = .spelling;
+        out.append(" [");
+        out.append(to_string(.precedence));
+        if .associativity == Associativity::Right: {
+            out.append(", right");
+        }
+        if .associativity == Associativity::Left: {
+            out.append(", left");
+        }
+        out.append("]");
+        return out;
+    }
+
+    kind: TokenKind = TokenKind::Invalid;
+    spelling: string;
+    precedence: int = 0;
+    associativity: Associativity = Associativity::Left;
+    // True when the operator writes through its left operand, which the
+    // constant folder uses to decide whether a subtree is pure.
+    mutating: bool = false;
+}
+
+fn operator_table() -> vector{OperatorRow}: {
+    var rows: vector{OperatorRow};
+    rows.push_back(OperatorRow(kind: TokenKind::Equal, spelling: "=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::PlusEqual, spelling: "+=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::MinusEqual, spelling: "-=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::StarEqual, spelling: "*=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::SlashEqual, spelling: "/=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::PercentEqual, spelling: "%=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::AmpEqual, spelling: "&=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::PipeEqual, spelling: "|=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::CaretEqual, spelling: "^=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::LessLessEqual, spelling: "<<=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::GreaterGreaterEqual, spelling: ">>=", precedence: PRECEDENCE_ASSIGN, associativity: Associativity::Right, mutating: true));
+    rows.push_back(OperatorRow(kind: TokenKind::PipePipe, spelling: "||", precedence: PRECEDENCE_LOGICAL_OR, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::KeywordOr, spelling: "or", precedence: PRECEDENCE_LOGICAL_OR, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::AmpAmp, spelling: "&&", precedence: PRECEDENCE_LOGICAL_AND, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::KeywordAnd, spelling: "and", precedence: PRECEDENCE_LOGICAL_AND, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Pipe, spelling: "|", precedence: PRECEDENCE_BIT_OR, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Caret, spelling: "^", precedence: PRECEDENCE_BIT_XOR, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Amp, spelling: "&", precedence: PRECEDENCE_BIT_AND, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::EqualEqual, spelling: "==", precedence: PRECEDENCE_EQUALITY, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::BangEqual, spelling: "!=", precedence: PRECEDENCE_EQUALITY, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Less, spelling: "<", precedence: PRECEDENCE_RELATIONAL, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::LessEqual, spelling: "<=", precedence: PRECEDENCE_RELATIONAL, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Greater, spelling: ">", precedence: PRECEDENCE_RELATIONAL, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::GreaterEqual, spelling: ">=", precedence: PRECEDENCE_RELATIONAL, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::LessLess, spelling: "<<", precedence: PRECEDENCE_SHIFT, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::GreaterGreater, spelling: ">>", precedence: PRECEDENCE_SHIFT, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Plus, spelling: "+", precedence: PRECEDENCE_ADDITIVE, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Minus, spelling: "-", precedence: PRECEDENCE_ADDITIVE, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Star, spelling: "*", precedence: PRECEDENCE_MULTIPLICATIVE, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Slash, spelling: "/", precedence: PRECEDENCE_MULTIPLICATIVE, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::Percent, spelling: "%", precedence: PRECEDENCE_MULTIPLICATIVE, associativity: Associativity::Left));
+    rows.push_back(OperatorRow(kind: TokenKind::StarStar, spelling: "**", precedence: PRECEDENCE_POWER, associativity: Associativity::Right));
+    return rows;
+}
+
+// The binding power of `kind` when it appears between two operands. Zero
+// means "not an infix operator", which is how `parse_expression` knows to
+// stop climbing.
+fn infix_precedence(kind: TokenKind) -> int: {
+    if kind == TokenKind::Equal: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::PlusEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::MinusEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::StarEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::SlashEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::PercentEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::AmpEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::PipeEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::CaretEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::LessLessEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::GreaterGreaterEqual: { return PRECEDENCE_ASSIGN; }
+    if kind == TokenKind::Question: { return PRECEDENCE_CONDITIONAL; }
+    if kind == TokenKind::PipePipe: { return PRECEDENCE_LOGICAL_OR; }
+    if kind == TokenKind::KeywordOr: { return PRECEDENCE_LOGICAL_OR; }
+    if kind == TokenKind::AmpAmp: { return PRECEDENCE_LOGICAL_AND; }
+    if kind == TokenKind::KeywordAnd: { return PRECEDENCE_LOGICAL_AND; }
+    if kind == TokenKind::Pipe: { return PRECEDENCE_BIT_OR; }
+    if kind == TokenKind::Caret: { return PRECEDENCE_BIT_XOR; }
+    if kind == TokenKind::Amp: { return PRECEDENCE_BIT_AND; }
+    if kind == TokenKind::EqualEqual: { return PRECEDENCE_EQUALITY; }
+    if kind == TokenKind::BangEqual: { return PRECEDENCE_EQUALITY; }
+    if kind == TokenKind::Less: { return PRECEDENCE_RELATIONAL; }
+    if kind == TokenKind::LessEqual: { return PRECEDENCE_RELATIONAL; }
+    if kind == TokenKind::Greater: { return PRECEDENCE_RELATIONAL; }
+    if kind == TokenKind::GreaterEqual: { return PRECEDENCE_RELATIONAL; }
+    if kind == TokenKind::LessLess: { return PRECEDENCE_SHIFT; }
+    if kind == TokenKind::GreaterGreater: { return PRECEDENCE_SHIFT; }
+    if kind == TokenKind::Plus: { return PRECEDENCE_ADDITIVE; }
+    if kind == TokenKind::Minus: { return PRECEDENCE_ADDITIVE; }
+    if kind == TokenKind::Star: { return PRECEDENCE_MULTIPLICATIVE; }
+    if kind == TokenKind::Slash: { return PRECEDENCE_MULTIPLICATIVE; }
+    if kind == TokenKind::Percent: { return PRECEDENCE_MULTIPLICATIVE; }
+    if kind == TokenKind::StarStar: { return PRECEDENCE_POWER; }
+    return PRECEDENCE_NONE;
+}
+
+fn infix_associativity(kind: TokenKind) -> Associativity: {
+    if is_assignment_operator(kind): {
+        return Associativity::Right;
+    }
+    if kind == TokenKind::Question: {
+        return Associativity::Right;
+    }
+    if kind == TokenKind::StarStar: {
+        return Associativity::Right;
+    }
+    if infix_precedence(kind) == PRECEDENCE_NONE: {
+        return Associativity::None;
+    }
+    return Associativity::Left;
+}
+
+// The power a prefix operator binds its single operand with. Prefix
+// operators are always right associative, so `- - x` parses as `-(-x)`.
+fn prefix_precedence(kind: TokenKind) -> int: {
+    if kind == TokenKind::Minus: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::Plus: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::Bang: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::KeywordNot: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::Tilde: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::PlusPlus: { return PRECEDENCE_PREFIX; }
+    if kind == TokenKind::MinusMinus: { return PRECEDENCE_PREFIX; }
+    return PRECEDENCE_NONE;
+}
+
+fn postfix_precedence(kind: TokenKind) -> int: {
+    if kind == TokenKind::PlusPlus: { return PRECEDENCE_POSTFIX; }
+    if kind == TokenKind::MinusMinus: { return PRECEDENCE_POSTFIX; }
+    if kind == TokenKind::Bang: { return PRECEDENCE_POSTFIX; }
+    if kind == TokenKind::LParen: { return PRECEDENCE_POSTFIX; }
+    if kind == TokenKind::LBracket: { return PRECEDENCE_POSTFIX; }
+    if kind == TokenKind::Dot: { return PRECEDENCE_POSTFIX; }
+    return PRECEDENCE_NONE;
+}
+
+fn is_assignment_operator(kind: TokenKind) -> bool: {
+    if kind == TokenKind::Equal: { return true; }
+    if kind == TokenKind::PlusEqual: { return true; }
+    if kind == TokenKind::MinusEqual: { return true; }
+    if kind == TokenKind::StarEqual: { return true; }
+    if kind == TokenKind::SlashEqual: { return true; }
+    if kind == TokenKind::PercentEqual: { return true; }
+    if kind == TokenKind::AmpEqual: { return true; }
+    if kind == TokenKind::PipeEqual: { return true; }
+    if kind == TokenKind::CaretEqual: { return true; }
+    if kind == TokenKind::LessLessEqual: { return true; }
+    if kind == TokenKind::GreaterGreaterEqual: { return true; }
+    return false;
+}
+
+// A compound assignment such as `a += b` desugars to `a = a + b`, so the
+// evaluator needs the plain operator that hides inside it.
+fn compound_base_operator(kind: TokenKind) -> TokenKind: {
+    if kind == TokenKind::PlusEqual: { return TokenKind::Plus; }
+    if kind == TokenKind::MinusEqual: { return TokenKind::Minus; }
+    if kind == TokenKind::StarEqual: { return TokenKind::Star; }
+    if kind == TokenKind::SlashEqual: { return TokenKind::Slash; }
+    if kind == TokenKind::PercentEqual: { return TokenKind::Percent; }
+    if kind == TokenKind::AmpEqual: { return TokenKind::Amp; }
+    if kind == TokenKind::PipeEqual: { return TokenKind::Pipe; }
+    if kind == TokenKind::CaretEqual: { return TokenKind::Caret; }
+    if kind == TokenKind::LessLessEqual: { return TokenKind::LessLess; }
+    if kind == TokenKind::GreaterGreaterEqual: { return TokenKind::GreaterGreater; }
+    return TokenKind::Invalid;
+}
+
+// Operators whose right hand side may be skipped entirely.
+fn is_short_circuit(kind: TokenKind) -> bool: {
+    if kind == TokenKind::AmpAmp || kind == TokenKind::KeywordAnd: {
+        return true;
+    }
+    if kind == TokenKind::PipePipe || kind == TokenKind::KeywordOr: {
+        return true;
+    }
+    return false;
+}
+
+fn is_comparison(kind: TokenKind) -> bool: {
+    let power = infix_precedence(kind);
+    if power == PRECEDENCE_EQUALITY: {
+        return true;
+    }
+    return power == PRECEDENCE_RELATIONAL;
+}
+
+fn is_arithmetic(kind: TokenKind) -> bool: {
+    let power = infix_precedence(kind);
+    if power == PRECEDENCE_ADDITIVE: {
+        return true;
+    }
+    if power == PRECEDENCE_MULTIPLICATIVE: {
+        return true;
+    }
+    return power == PRECEDENCE_POWER;
+}
+
+fn is_bitwise(kind: TokenKind) -> bool: {
+    let power = infix_precedence(kind);
+    if power == PRECEDENCE_BIT_OR || power == PRECEDENCE_BIT_XOR: {
+        return true;
+    }
+    if power == PRECEDENCE_BIT_AND: {
+        return true;
+    }
+    return power == PRECEDENCE_SHIFT;
+}
+
+// --- The tokenizer -------------------------------------------------------
+//
+// A hand written scanner over a string. It never allocates for a token that
+// it is going to throw away, and every token records the span it covers so
+// that the printer can reproduce the original spacing if it wants to.
+struct Tokenizer: {
+
+    fn at_end(self: &const shared) -> bool: {
+        return .cursor.offset >= .source.size();
+    }
+
+    fn remaining(self: &const shared) -> int: {
+        return .source.size() - .cursor.offset;
+    }
+
+    fn peek(self: &const shared) -> char: {
+        if .at_end(): {
+            return CHAR_NUL;
+        }
+        return .source.at(.cursor.offset);
+    }
+
+    fn peek_at(self: &const shared, ahead: int) -> char: {
+        let index = .cursor.offset + ahead;
+        if index >= .source.size(): {
+            return CHAR_NUL;
+        }
+        return .source.at(index);
+    }
+
+    fn advance(self: &unique) -> char: {
+        let c = .peek();
+        .cursor.advance_over(c);
+        return c;
+    }
+
+    // Consume `c` if it is the next character. Returns whether it was there,
+    // which is what makes the maximal munch cascade below read well.
+    fn eat(self: &unique, c: char) -> bool: {
+        if .peek() == c: {
+            discard .advance();
+            return true;
+        }
+        return false;
+    }
+
+    fn fail(self: &unique, code: ErrorCode, detail: &const shared string) -> Token: {
+        if .problem.ok(): {
+            .problem.code = code;
+            .problem.where = .cursor;
+            .problem.detail = *detail;
+        }
+        var bad = Token(kind: TokenKind::Invalid, text: *detail);
+        bad.span.begin = .cursor;
+        bad.span.end = .cursor;
+        return bad;
+    }
+
+    fn make(self: &const shared, kind: TokenKind, begin: &const shared Position) -> Token: {
+        var out = Token(kind: kind);
+        out.span.begin = *begin;
+        out.span.end = .cursor;
+        out.text = .source.substr(begin.offset, .cursor.offset - begin.offset);
+        return out;
+    }
+
+    // --- Trivia ----------------------------------------------------------
+
+    // Whitespace, line comments and nestable block comments. When
+    // `keep_comments` is set the caller gets the comment back as a token
+    // instead, which is what the formatter mode wants.
+    fn skip_trivia(self: &unique): {
+        loop: {
+            while !.at_end() && is_space(.peek()): {
+                discard .advance();
+            }
+            if .at_line_comment(): {
+                .skip_line_comment();
+            } else: {
+                if .at_block_comment(): {
+                    .skip_block_comment();
+                } else: {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn at_line_comment(self: &const shared) -> bool: {
+        if .peek() != CHAR_SLASH: {
+            return false;
+        }
+        return .peek_at(1) == CHAR_SLASH;
+    }
+
+    fn at_block_comment(self: &const shared) -> bool: {
+        if .peek() != CHAR_SLASH: {
+            return false;
+        }
+        return .peek_at(1) == CHAR_STAR;
+    }
+
+    fn skip_line_comment(self: &unique): {
+        discard .advance();
+        discard .advance();
+        while !.at_end() && .peek() != CHAR_NEWLINE: {
+            discard .advance();
+        }
+    }
+
+    // Block comments nest, so a commented out region that already contains a
+    // comment still ends where the reader expects it to.
+    fn skip_block_comment(self: &unique): {
+        discard .advance();
+        discard .advance();
+        var depth: int = 1;
+        while depth > 0: {
+            if .at_end(): {
+                .problem.code = ErrorCode::UnterminatedComment;
+                .problem.where = .cursor;
+                return;
+            }
+            if .at_block_comment(): {
+                discard .advance();
+                discard .advance();
+                depth += 1;
+            } else: {
+                if .peek() == CHAR_STAR && .peek_at(1) == CHAR_SLASH: {
+                    discard .advance();
+                    discard .advance();
+                    depth -= 1;
+                } else: {
+                    discard .advance();
+                }
+            }
+        }
+    }
+
+    fn scan_comment(self: &unique) -> Token: {
+        let begin = .cursor;
+        if .at_line_comment(): {
+            .skip_line_comment();
+        } else: {
+            .skip_block_comment();
+        }
+        return .make(TokenKind::Comment, begin);
+    }
+
+    // --- Words -----------------------------------------------------------
+
+    fn scan_identifier(self: &unique) -> Token: {
+        let begin = .cursor;
+        discard .advance();
+        while !.at_end() && is_identifier_body(.peek()): {
+            discard .advance();
+        }
+        var word = .make(TokenKind::Identifier, begin);
+        word.kind = keyword_kind(word.text);
+        return word;
+    }
+
+    // --- Numbers ---------------------------------------------------------
+    //
+    // The literal grammar is
+    //
+    //     digits [ '.' digits ] [ ('e'|'E') ['+'|'-'] digits ]
+    //
+    // and the result is the pair (mantissa, exponent) such that the value is
+    // mantissa * 10^exponent. Digits past MAX_DIGITS are dropped and the
+    // exponent is bumped instead, so `123456789012345678901` still lexes.
+    fn scan_number(self: &unique) -> Token: {
+        let begin = .cursor;
+        var mantissa: int = 0;
+        var exponent: int = 0;
+        var digits: int = 0;
+        var seen_any = false;
+
+        while !.at_end() && is_digit(.peek()): {
+            let d = digit_value(.advance());
+            seen_any = true;
+            if digits < MAX_DIGITS: {
+                mantissa = mantissa * NUMBER_BASE + d;
+                if mantissa != 0: {
+                    digits += 1;
+                }
+            } else: {
+                exponent += 1;
+            }
+        }
+
+        if .peek() == CHAR_DOT && is_digit(.peek_at(1)): {
+            discard .advance();
+            while !.at_end() && is_digit(.peek()): {
+                let d = digit_value(.advance());
+                seen_any = true;
+                if digits < MAX_DIGITS: {
+                    mantissa = mantissa * NUMBER_BASE + d;
+                    exponent -= 1;
+                    digits += 1;
+                }
+            }
+        }
+
+        if !seen_any: {
+            return .fail(ErrorCode::UnexpectedCharacter, "expected at least one digit");
+        }
+
+        if .peek() == 'e' || .peek() == 'E': {
+            let saved = .cursor;
+            discard .advance();
+            var sign: int = 1;
+            if .eat(CHAR_MINUS): {
+                sign = -1;
+            } else: {
+                discard .eat(CHAR_PLUS);
+            }
+            if is_digit(.peek()): {
+                var written: int = 0;
+                while !.at_end() && is_digit(.peek()): {
+                    written = written * NUMBER_BASE + digit_value(.advance());
+                    if written > MAX_EXPONENT * NUMBER_BASE: {
+                        return .fail(ErrorCode::ExponentRange, "exponent is too large");
+                    }
+                }
+                exponent += sign * written;
+            } else: {
+                // Not an exponent after all, `2eggs` is `2` then a word.
+                .cursor = saved;
+            }
+        }
+
+        if exponent > MAX_EXPONENT || exponent < MIN_EXPONENT: {
+            return .fail(ErrorCode::ExponentRange, "decimal exponent leaves the supported range");
+        }
+
+        var number = .make(TokenKind::Number, begin);
+        number.mantissa = mantissa;
+        number.exponent = exponent;
+        return number;
+    }
+
+    // --- Strings ---------------------------------------------------------
+
+    fn scan_text(self: &unique) -> Token: {
+        let begin = .cursor;
+        discard .advance();
+        var decoded: string = "";
+        loop: {
+            if .at_end(): {
+                return .fail(ErrorCode::UnterminatedText, "reached end of input inside a string");
+            }
+            let c = .advance();
+            if c == CHAR_QUOTE: {
+                break;
+            }
+            if c != CHAR_BACKSLASH: {
+                decoded.push_back(c);
+            } else: {
+                if .at_end(): {
+                    return .fail(ErrorCode::UnterminatedText, "trailing backslash");
+                }
+                let marker = .advance();
+                let plain = decode_escape(marker);
+                if plain != CHAR_NUL: {
+                    decoded.push_back(plain);
+                } else: {
+                    var detail: string = "unknown escape marker ";
+                    detail.push_back(marker);
+                    return .fail(ErrorCode::BadEscape, detail);
+                }
+            }
+        }
+        var out = .make(TokenKind::Text, begin);
+        out.text = decoded;
+        return out;
+    }
+
+    // --- Operators -------------------------------------------------------
+    //
+    // Maximal munch: three character operators are tried before two and two
+    // before one. This is the densest cascade in the file and it is the part
+    // the parser leans on hardest.
+    fn scan_operator(self: &unique) -> Token: {
+        let begin = .cursor;
+        let c = .advance();
+
+        if c == CHAR_PLUS: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::PlusEqual, begin); }
+            if .eat(CHAR_PLUS): { return .make(TokenKind::PlusPlus, begin); }
+            return .make(TokenKind::Plus, begin);
+        }
+        if c == CHAR_MINUS: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::MinusEqual, begin); }
+            if .eat(CHAR_MINUS): { return .make(TokenKind::MinusMinus, begin); }
+            if .eat(CHAR_GREATER): { return .make(TokenKind::Arrow, begin); }
+            return .make(TokenKind::Minus, begin);
+        }
+        if c == CHAR_STAR: {
+            if .eat(CHAR_STAR): { return .make(TokenKind::StarStar, begin); }
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::StarEqual, begin); }
+            return .make(TokenKind::Star, begin);
+        }
+        if c == CHAR_SLASH: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::SlashEqual, begin); }
+            return .make(TokenKind::Slash, begin);
+        }
+        if c == CHAR_PERCENT: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::PercentEqual, begin); }
+            return .make(TokenKind::Percent, begin);
+        }
+        if c == CHAR_AMP: {
+            if .eat(CHAR_AMP): { return .make(TokenKind::AmpAmp, begin); }
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::AmpEqual, begin); }
+            return .make(TokenKind::Amp, begin);
+        }
+        if c == CHAR_PIPE: {
+            if .eat(CHAR_PIPE): { return .make(TokenKind::PipePipe, begin); }
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::PipeEqual, begin); }
+            return .make(TokenKind::Pipe, begin);
+        }
+        if c == CHAR_CARET: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::CaretEqual, begin); }
+            return .make(TokenKind::Caret, begin);
+        }
+        if c == CHAR_TILDE: {
+            return .make(TokenKind::Tilde, begin);
+        }
+        if c == CHAR_BANG: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::BangEqual, begin); }
+            return .make(TokenKind::Bang, begin);
+        }
+        if c == CHAR_LESS: {
+            if .eat(CHAR_LESS): {
+                if .eat(CHAR_EQUAL): { return .make(TokenKind::LessLessEqual, begin); }
+                return .make(TokenKind::LessLess, begin);
+            }
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::LessEqual, begin); }
+            return .make(TokenKind::Less, begin);
+        }
+        if c == CHAR_GREATER: {
+            if .eat(CHAR_GREATER): {
+                if .eat(CHAR_EQUAL): { return .make(TokenKind::GreaterGreaterEqual, begin); }
+                return .make(TokenKind::GreaterGreater, begin);
+            }
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::GreaterEqual, begin); }
+            return .make(TokenKind::Greater, begin);
+        }
+        if c == CHAR_EQUAL: {
+            if .eat(CHAR_EQUAL): { return .make(TokenKind::EqualEqual, begin); }
+            return .make(TokenKind::Equal, begin);
+        }
+        if c == CHAR_QUESTION: {
+            return .make(TokenKind::Question, begin);
+        }
+        if c == CHAR_COLON: {
+            return .make(TokenKind::Colon, begin);
+        }
+        if c == CHAR_COMMA: {
+            return .make(TokenKind::Comma, begin);
+        }
+        if c == CHAR_SEMICOLON: {
+            return .make(TokenKind::Semicolon, begin);
+        }
+        if c == CHAR_DOT: {
+            return .make(TokenKind::Dot, begin);
+        }
+        if c == CHAR_LPAREN: { return .make(TokenKind::LParen, begin); }
+        if c == CHAR_RPAREN: { return .make(TokenKind::RParen, begin); }
+        if c == CHAR_LBRACKET: { return .make(TokenKind::LBracket, begin); }
+        if c == CHAR_RBRACKET: { return .make(TokenKind::RBracket, begin); }
+        if c == CHAR_LBRACE: { return .make(TokenKind::LBrace, begin); }
+        if c == CHAR_RBRACE: { return .make(TokenKind::RBrace, begin); }
+
+        var detail: string = "stray byte ";
+        detail.append(to_string(int(c)));
+        return .fail(ErrorCode::UnexpectedCharacter, detail);
+    }
+
+    // --- The driver ------------------------------------------------------
+
+    fn next_token(self: &unique) -> Token: {
+        if .keep_comments: {
+            while !.at_end() && is_space(.peek()): {
+                discard .advance();
+            }
+            if .at_line_comment() || .at_block_comment(): {
+                return .scan_comment();
+            }
+        } else: {
+            .skip_trivia();
+        }
+
+        let begin = .cursor;
+        if .at_end(): {
+            var done = Token(kind: TokenKind::End);
+            done.span.begin = begin;
+            done.span.end = begin;
+            return done;
+        }
+
+        let c = .peek();
+        if is_identifier_start(c): {
+            return .scan_identifier();
+        }
+        if is_digit(c): {
+            return .scan_number();
+        }
+        if c == CHAR_DOT && is_digit(.peek_at(1)): {
+            return .scan_number();
+        }
+        if c == CHAR_QUOTE: {
+            return .scan_text();
+        }
+        if is_operator_start(c): {
+            return .scan_operator();
+        }
+
+        discard .advance();
+        var detail: string = "character ";
+        detail.push_back(c);
+        return .fail(ErrorCode::UnexpectedCharacter, detail);
+    }
+
+    source: string;
+    cursor: Position;
+    problem: Diagnostic;
+    keep_comments: bool = false;
+}
+
+// The eight single character escapes the string scanner understands. NUL is
+// the "not an escape" answer, which is fine because a source file may not
+// contain a raw NUL anyway.
+fn decode_escape(marker: char) -> char: {
+    if marker == 'n': { return CHAR_NEWLINE; }
+    if marker == 't': { return CHAR_TAB; }
+    if marker == 'r': { return CHAR_RETURN; }
+    if marker == CHAR_QUOTE: { return CHAR_QUOTE; }
+    if marker == CHAR_BACKSLASH: { return CHAR_BACKSLASH; }
+    if marker == '0': { return CHAR_SPACE; }
+    if marker == 'e': { return CHAR_SPACE; }
+    return CHAR_NUL;
+}
+
+fn encode_escape(c: char) -> string: {
+    if c == CHAR_QUOTE: { return "\\\""; }
+    if c == CHAR_BACKSLASH: { return "\\\\"; }
+    if c == CHAR_NEWLINE: { return "\\n"; }
+    if c == CHAR_TAB: { return "\\t"; }
+    if c == CHAR_RETURN: { return "\\r"; }
+    return TEXT_EMPTY;
+}
+
+// Run the tokenizer to completion. Used by the test harness and by the
+// formatter, both of which want the whole stream up front.
+fn tokenize(source: &const shared string) -> vector{Token}: {
+    var scanner = Tokenizer(source: *source);
+    var out: vector{Token};
+    loop: {
+        let token = scanner.next_token();
+        out.push_back(token);
+        if token.kind == TokenKind::End: {
+            break;
+        }
+        if token.kind == TokenKind::Invalid: {
+            break;
+        }
+    }
+    return out;
+}
+
+// --- The syntax tree -----------------------------------------------------
+//
+// Nodes live in one flat arena and refer to each other by index. That keeps
+// every node the same size, makes the constant folder able to rewrite a
+// subtree in place, and sidesteps the ownership question that a tree of
+// unique pointers would raise.
+//
+// Index 0 is always the invalid node, so a zero child means "absent".
+
+static NO_NODE: int = 0;
+
+struct Node: {
+
+    fn is_literal(self: &const shared) -> bool: {
+        if .kind == NodeKind::NumberLiteral: { return true; }
+        if .kind == NodeKind::TextLiteral: { return true; }
+        if .kind == NodeKind::BoolLiteral: { return true; }
+        if .kind == NodeKind::NullLiteral: { return true; }
+        return false;
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        if .is_literal(): {
+            return true;
+        }
+        if .kind == NodeKind::Variable: { return true; }
+        if .kind == NodeKind::Empty: { return true; }
+        return false;
+    }
+
+    // An lvalue is anything an assignment may be written through.
+    fn is_assignable(self: &const shared) -> bool: {
+        if .kind == NodeKind::Variable: { return true; }
+        if .kind == NodeKind::Index: { return true; }
+        if .kind == NodeKind::Member: { return true; }
+        return false;
+    }
+
+    fn child_count(self: &const shared) -> int: {
+        var total: int = 0;
+        if .lhs != NO_NODE: { total += 1; }
+        if .rhs != NO_NODE: { total += 1; }
+        if .extra != NO_NODE: { total += 1; }
+        return total + .parts.size();
+    }
+
+    fn kind_name(self: &const shared) -> string: {
+        return node_kind_name(.kind);
+    }
+
+    kind: NodeKind = NodeKind::Invalid;
+    // The operator for Unary, Binary, Postfix and Assign nodes.
+    op: TokenKind = TokenKind::Invalid;
+    // Up to three positional children: the operand or condition, the second
+    // operand or the then branch, and the else branch.
+    lhs: int = 0;
+    rhs: int = 0;
+    extra: int = 0;
+    // Variable width children: call arguments and block statements.
+    parts: vector{int};
+    // Literal payloads.
+    mantissa: int = 0;
+    exponent: int = 0;
+    text: string;
+    flag: bool = false;
+    span: Span;
+}
+
+fn node_kind_name(kind: NodeKind) -> string: {
+    if kind == NodeKind::Invalid: { return "invalid"; }
+    if kind == NodeKind::NumberLiteral: { return "number"; }
+    if kind == NodeKind::TextLiteral: { return "string"; }
+    if kind == NodeKind::BoolLiteral: { return "bool"; }
+    if kind == NodeKind::NullLiteral: { return "null"; }
+    if kind == NodeKind::Variable: { return "variable"; }
+    if kind == NodeKind::Unary: { return "unary"; }
+    if kind == NodeKind::Binary: { return "binary"; }
+    if kind == NodeKind::Postfix: { return "postfix"; }
+    if kind == NodeKind::Assign: { return "assign"; }
+    if kind == NodeKind::Call: { return "call"; }
+    if kind == NodeKind::Index: { return "index"; }
+    if kind == NodeKind::Member: { return "member"; }
+    if kind == NodeKind::Conditional: { return "conditional"; }
+    if kind == NodeKind::Let: { return "let"; }
+    if kind == NodeKind::Block: { return "block"; }
+    if kind == NodeKind::Loop: { return "loop"; }
+    if kind == NodeKind::Return: { return "return"; }
+    if kind == NodeKind::Empty: { return "empty"; }
+    return "unknown";
+}
+
+// The arena. Every function that builds or walks a tree takes one of these
+// by reference; nothing else owns a node.
+struct Arena: {
+
+    fn size(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn valid(self: &const shared, index: int) -> bool: {
+        if index <= NO_NODE: {
+            return false;
+        }
+        return index < .nodes.size();
+    }
+
+    fn at(self: &shared, index: int) -> &shared[self] Node: {
+        assert index >= 0;
+        if !.valid(index): {
+            return .nodes[0];
+        }
+        return .nodes[index];
+    }
+
+    fn kind_of(self: &const shared, index: int) -> NodeKind: {
+        if !.valid(index): {
+            return NodeKind::Invalid;
+        }
+        return .nodes[index].kind;
+    }
+
+    fn operator_of(self: &const shared, index: int) -> TokenKind: {
+        if !.valid(index): {
+            return TokenKind::Invalid;
+        }
+        return .nodes[index].op;
+    }
+
+    fn add(self: &unique, node: Node) -> int: {
+        .nodes.push_back(move(node));
+        return .nodes.size() - 1;
+    }
+
+    fn add_number(self: &unique, mantissa: int, exponent: int) -> int: {
+        return .add(Node(kind: NodeKind::NumberLiteral, mantissa: mantissa, exponent: exponent));
+    }
+
+    fn add_text(self: &unique, text: &const shared string) -> int: {
+        return .add(Node(kind: NodeKind::TextLiteral, text: *text));
+    }
+
+    fn add_bool(self: &unique, value: bool) -> int: {
+        return .add(Node(kind: NodeKind::BoolLiteral, flag: value));
+    }
+
+    fn add_null(self: &unique) -> int: {
+        return .add(Node(kind: NodeKind::NullLiteral));
+    }
+
+    fn add_variable(self: &unique, name: &const shared string) -> int: {
+        return .add(Node(kind: NodeKind::Variable, text: *name));
+    }
+
+    fn add_unary(self: &unique, op: TokenKind, operand: int) -> int: {
+        return .add(Node(kind: NodeKind::Unary, op: op, lhs: operand));
+    }
+
+    fn add_binary(self: &unique, op: TokenKind, left: int, right: int) -> int: {
+        return .add(Node(kind: NodeKind::Binary, op: op, lhs: left, rhs: right));
+    }
+
+    fn add_conditional(self: &unique, condition: int, whenever: int, otherwise: int) -> int: {
+        return .add(Node(kind: NodeKind::Conditional, lhs: condition, rhs: whenever, extra: otherwise));
+    }
+
+    // Replace a node in place. The folder uses this so that every parent
+    // that already points at `index` sees the rewritten value.
+    fn replace(self: &unique, index: int, node: Node): {
+        if !.valid(index): {
+            return;
+        }
+        let slot: &unique = .nodes[index];
+        slot.kind = node.kind;
+        slot.op = node.op;
+        slot.lhs = node.lhs;
+        slot.rhs = node.rhs;
+        slot.extra = node.extra;
+        slot.mantissa = node.mantissa;
+        slot.exponent = node.exponent;
+        slot.text = node.text;
+        slot.flag = node.flag;
+    }
+
+    fn replace_with_number(self: &unique, index: int, mantissa: int, exponent: int): {
+        if !.valid(index): {
+            return;
+        }
+        let slot: &unique = .nodes[index];
+        slot.kind = NodeKind::NumberLiteral;
+        slot.op = TokenKind::Invalid;
+        slot.lhs = NO_NODE;
+        slot.rhs = NO_NODE;
+        slot.extra = NO_NODE;
+        slot.mantissa = mantissa;
+        slot.exponent = exponent;
+        slot.parts.clear();
+    }
+
+    fn replace_with_bool(self: &unique, index: int, value: bool): {
+        if !.valid(index): {
+            return;
+        }
+        let slot: &unique = .nodes[index];
+        slot.kind = NodeKind::BoolLiteral;
+        slot.op = TokenKind::Invalid;
+        slot.lhs = NO_NODE;
+        slot.rhs = NO_NODE;
+        slot.extra = NO_NODE;
+        slot.flag = value;
+        slot.parts.clear();
+    }
+
+    // Splice `source` into this arena, returning the index of the copy. Used
+    // when a fold turns `if true then a else b` into just `a`: the surviving
+    // branch has to keep its own children.
+    fn adopt(self: &unique, index: int) -> int: {
+        if !.valid(index): {
+            return NO_NODE;
+        }
+        var copy = Node(kind: .nodes[index].kind, op: .nodes[index].op);
+        copy.mantissa = .nodes[index].mantissa;
+        copy.exponent = .nodes[index].exponent;
+        copy.text = .nodes[index].text;
+        copy.flag = .nodes[index].flag;
+        copy.lhs = .nodes[index].lhs;
+        copy.rhs = .nodes[index].rhs;
+        copy.extra = .nodes[index].extra;
+        for child in .nodes[index].parts: {
+            copy.parts.push_back(child);
+        }
+        return .add(move(copy));
+    }
+
+    fn clear(self: &unique): {
+        .nodes.clear();
+        .nodes.push_back(Node(kind: NodeKind::Invalid));
+    }
+
+    nodes: vector{Node};
+}
+
+fn make_arena() -> Arena: {
+    var arena: Arena;
+    arena.clear();
+    return arena;
+}
+
+// --- The parser ----------------------------------------------------------
+//
+// Precedence climbing. `parse_expression(power)` parses a prefix form and
+// then keeps absorbing infix and postfix operators for as long as their
+// binding power is at least `power`. The prefix, infix and postfix helpers
+// all call back into `parse_expression`, so the whole family is mutually
+// recursive and the shape of the grammar lives in the precedence table
+// rather than in the control flow.
+struct Parser: {
+
+    // --- Token access ----------------------------------------------------
+
+    fn peek(self: &const shared) -> &const shared[self] Token: {
+        return .lookahead;
+    }
+
+    fn peek_kind(self: &const shared) -> TokenKind: {
+        return .lookahead.kind;
+    }
+
+    fn at(self: &const shared, kind: TokenKind) -> bool: {
+        return .lookahead.kind == kind;
+    }
+
+    fn at_end(self: &const shared) -> bool: {
+        return .lookahead.kind == TokenKind::End;
+    }
+
+    fn advance(self: &unique) -> Token: {
+        var previous = .lookahead;
+        .lookahead = .scanner.next_token();
+        if .lookahead.kind == TokenKind::Invalid: {
+            .adopt_scanner_error();
+        }
+        return previous;
+    }
+
+    fn eat(self: &unique, kind: TokenKind) -> bool: {
+        if .at(kind): {
+            discard .advance();
+            return true;
+        }
+        return false;
+    }
+
+    fn expect(self: &unique, kind: TokenKind) -> bool: {
+        if .eat(kind): {
+            return true;
+        }
+        var detail: string = "expected ";
+        detail.append(token_name(kind));
+        detail.append(", found ");
+        detail.append(token_name(.lookahead.kind));
+        .report(ErrorCode::ExpectedToken, detail);
+        return false;
+    }
+
+    fn adopt_scanner_error(self: &unique): {
+        if .problem.ok(): {
+            .problem = .scanner.problem;
+        }
+    }
+
+    fn report(self: &unique, code: ErrorCode, detail: &const shared string): {
+        if .problem.ok(): {
+            .problem.code = code;
+            .problem.where = .lookahead.span.begin;
+            .problem.detail = *detail;
+        }
+    }
+
+    fn failed(self: &const shared) -> bool: {
+        return !.problem.ok();
+    }
+
+    // Recover by skipping to the next statement boundary. Without this a
+    // single bad token would produce one error per remaining token.
+    fn recover(self: &unique): {
+        while !.at_end(): {
+            if .at(TokenKind::Semicolon): {
+                discard .advance();
+                return;
+            }
+            if .at(TokenKind::RBrace): {
+                return;
+            }
+            discard .advance();
+        }
+    }
+
+    // --- Depth guard -----------------------------------------------------
+
+    fn enter(self: &unique) -> bool: {
+        .depth += 1;
+        if .depth > MAX_DEPTH: {
+            .report(ErrorCode::DepthExceeded, "nesting limit reached");
+            return false;
+        }
+        return true;
+    }
+
+    fn leave(self: &unique): {
+        .depth -= 1;
+    }
+
+    // --- Entry points ----------------------------------------------------
+
+    fn start(self: &unique, source: &const shared string): {
+        .scanner = Tokenizer(source: *source);
+        .tree.clear();
+        .problem = Diagnostic();
+        .depth = 0;
+        .lookahead = .scanner.next_token();
+    }
+
+    // A whole program is a sequence of statements, gathered into one block.
+    fn parse_program(self: &unique, source: &const shared string) -> int: {
+        .start(source);
+        var block = Node(kind: NodeKind::Block);
+        block.span.begin = .lookahead.span.begin;
+        while !.at_end() && !.failed(): {
+            let statement = .parse_statement();
+            if statement != NO_NODE: {
+                block.parts.push_back(statement);
+            } else: {
+                .recover();
+            }
+        }
+        block.span.end = .lookahead.span.end;
+        return .tree.add(move(block));
+    }
+
+    // The convenience entry point for a single expression, which is what the
+    // read eval print loop and most of the tests use.
+    fn parse_source(self: &unique, source: &const shared string) -> int: {
+        .start(source);
+        let root = .parse_expression(PRECEDENCE_NONE);
+        if !.at_end() && !.failed(): {
+            .report(ErrorCode::ExpectedToken, "trailing content after the expression");
+        }
+        return root;
+    }
+
+    // --- Statements ------------------------------------------------------
+
+    fn parse_statement(self: &unique) -> int: {
+        if .at(TokenKind::Semicolon): {
+            discard .advance();
+            return .tree.add(Node(kind: NodeKind::Empty));
+        }
+        if .at(TokenKind::KeywordLet): {
+            return .parse_let();
+        }
+        if .at(TokenKind::KeywordWhile): {
+            return .parse_loop();
+        }
+        if .at(TokenKind::KeywordReturn): {
+            return .parse_return();
+        }
+        if .at(TokenKind::LBrace): {
+            return .parse_block();
+        }
+        let value = .parse_expression(PRECEDENCE_NONE);
+        discard .eat(TokenKind::Semicolon);
+        return value;
+    }
+
+    // `let name = expression ;`
+    fn parse_let(self: &unique) -> int: {
+        let keyword = .advance();
+        if !.at(TokenKind::Identifier): {
+            .report(ErrorCode::ExpectedIdentifier, "a binding needs a name");
+            return NO_NODE;
+        }
+        let name = .advance();
+        var binding = Node(kind: NodeKind::Let, text: name.text);
+        binding.span.begin = keyword.span.begin;
+        if .eat(TokenKind::Equal): {
+            binding.lhs = .parse_expression(PRECEDENCE_NONE);
+        } else: {
+            binding.lhs = .tree.add_null();
+        }
+        discard .eat(TokenKind::Semicolon);
+        binding.span.end = .lookahead.span.begin;
+        return .tree.add(move(binding));
+    }
+
+    // `while condition { body }`
+    fn parse_loop(self: &unique) -> int: {
+        let keyword = .advance();
+        var node = Node(kind: NodeKind::Loop);
+        node.span.begin = keyword.span.begin;
+        node.lhs = .parse_expression(PRECEDENCE_NONE);
+        if .at(TokenKind::LBrace): {
+            node.rhs = .parse_block();
+        } else: {
+            node.rhs = .parse_statement();
+        }
+        node.span.end = .lookahead.span.begin;
+        return .tree.add(move(node));
+    }
+
+    fn parse_return(self: &unique) -> int: {
+        let keyword = .advance();
+        var node = Node(kind: NodeKind::Return);
+        node.span.begin = keyword.span.begin;
+        if .at(TokenKind::Semicolon): {
+            node.lhs = .tree.add_null();
+        } else: {
+            node.lhs = .parse_expression(PRECEDENCE_NONE);
+        }
+        discard .eat(TokenKind::Semicolon);
+        return .tree.add(move(node));
+    }
+
+    // `{ statement* }`
+    fn parse_block(self: &unique) -> int: {
+        if !.enter(): {
+            return NO_NODE;
+        }
+        let open = .advance();
+        var block = Node(kind: NodeKind::Block);
+        block.span.begin = open.span.begin;
+        while !.at(TokenKind::RBrace) && !.at_end() && !.failed(): {
+            let statement = .parse_statement();
+            if statement == NO_NODE: {
+                .recover();
+            } else: {
+                block.parts.push_back(statement);
+            }
+        }
+        if !.expect(TokenKind::RBrace): {
+            .leave();
+            return NO_NODE;
+        }
+        block.span.end = .lookahead.span.begin;
+        .leave();
+        return .tree.add(move(block));
+    }
+
+    // --- The climbing loop -----------------------------------------------
+    //
+    // This is the heart of the parser. Everything else in this struct exists
+    // to be called from here or to call back into here.
+    fn parse_expression(self: &unique, minimum: int) -> int: {
+        if !.enter(): {
+            return NO_NODE;
+        }
+        var left = .parse_prefix();
+        if left == NO_NODE: {
+            .leave();
+            return NO_NODE;
+        }
+
+        loop: {
+            if .failed(): {
+                break;
+            }
+            let kind = .peek_kind();
+
+            // Postfix binds tighter than any infix operator, so it is tried
+            // first and it never consults `minimum`.
+            let postfix = postfix_precedence(kind);
+            if postfix != PRECEDENCE_NONE && postfix >= minimum: {
+                let extended = .parse_postfix(left);
+                if extended == NO_NODE: {
+                    break;
+                }
+                if extended != left: {
+                    left = extended;
+                    continue;
+                }
+            }
+
+            let power = infix_precedence(kind);
+            if power == PRECEDENCE_NONE: {
+                break;
+            }
+            if power < minimum: {
+                break;
+            }
+
+            left = .parse_infix(left, power);
+            if left == NO_NODE: {
+                break;
+            }
+        }
+
+        .leave();
+        return left;
+    }
+
+    // --- Prefix rules ----------------------------------------------------
+    //
+    // One arm per token kind that may begin an expression.
+    fn parse_prefix(self: &unique) -> int: {
+        let kind = .peek_kind();
+
+        if kind == TokenKind::Number: {
+            let token = .advance();
+            var literal = Node(kind: NodeKind::NumberLiteral);
+            literal.mantissa = token.mantissa;
+            literal.exponent = token.exponent;
+            literal.text = token.text;
+            literal.span = token.span;
+            return .tree.add(move(literal));
+        }
+        if kind == TokenKind::Text: {
+            let token = .advance();
+            var literal = Node(kind: NodeKind::TextLiteral, text: token.text);
+            literal.span = token.span;
+            return .tree.add(move(literal));
+        }
+        if kind == TokenKind::KeywordTrue: {
+            let token = .advance();
+            var literal = Node(kind: NodeKind::BoolLiteral, flag: true);
+            literal.span = token.span;
+            return .tree.add(move(literal));
+        }
+        if kind == TokenKind::KeywordFalse: {
+            let token = .advance();
+            var literal = Node(kind: NodeKind::BoolLiteral, flag: false);
+            literal.span = token.span;
+            return .tree.add(move(literal));
+        }
+        if kind == TokenKind::KeywordNull: {
+            let token = .advance();
+            var literal = Node(kind: NodeKind::NullLiteral);
+            literal.span = token.span;
+            return .tree.add(move(literal));
+        }
+        if kind == TokenKind::Identifier: {
+            let token = .advance();
+            var name = Node(kind: NodeKind::Variable, text: token.text);
+            name.span = token.span;
+            return .tree.add(move(name));
+        }
+        if kind == TokenKind::LParen: {
+            return .parse_group();
+        }
+        if kind == TokenKind::LBracket: {
+            return .parse_list();
+        }
+        if kind == TokenKind::KeywordIf: {
+            return .parse_if();
+        }
+        if prefix_precedence(kind) != PRECEDENCE_NONE: {
+            return .parse_unary();
+        }
+
+        var detail: string = "found ";
+        detail.append(token_name(kind));
+        detail.append(" where an operand was required");
+        .report(ErrorCode::ExpectedExpression, detail);
+        return NO_NODE;
+    }
+
+    fn parse_unary(self: &unique) -> int: {
+        let token = .advance();
+        var node = Node(kind: NodeKind::Unary, op: token.kind);
+        node.span.begin = token.span.begin;
+        node.lhs = .parse_expression(prefix_precedence(token.kind));
+        if node.lhs == NO_NODE: {
+            return NO_NODE;
+        }
+        node.span.end = .lookahead.span.begin;
+        return .tree.add(move(node));
+    }
+
+    // A parenthesised expression carries no node of its own; the printer
+    // reinserts the parentheses from the precedence table instead, which is
+    // what makes the round trip minimal rather than literal.
+    fn parse_group(self: &unique) -> int: {
+        discard .advance();
+        let inner = .parse_expression(PRECEDENCE_NONE);
+        if inner == NO_NODE: {
+            return NO_NODE;
+        }
+        if !.at(TokenKind::RParen): {
+            .report(ErrorCode::UnbalancedParen, "the group opened earlier is never closed");
+            return NO_NODE;
+        }
+        discard .advance();
+        return inner;
+    }
+
+    // `[ a, b, c ]` builds a Call to the builtin list constructor, which
+    // keeps the evaluator from needing a separate node kind.
+    fn parse_list(self: &unique) -> int: {
+        let open = .advance();
+        var call = Node(kind: NodeKind::Call);
+        call.span.begin = open.span.begin;
+        call.lhs = .tree.add_variable("list");
+        if !.at(TokenKind::RBracket): {
+            loop: {
+                let element = .parse_expression(PRECEDENCE_ASSIGN);
+                if element == NO_NODE: {
+                    return NO_NODE;
+                }
+                call.parts.push_back(element);
+                if !.eat(TokenKind::Comma): {
+                    break;
+                }
+                if .at(TokenKind::RBracket): {
+                    break;
+                }
+            }
+        }
+        if !.expect(TokenKind::RBracket): {
+            return NO_NODE;
+        }
+        call.span.end = .lookahead.span.begin;
+        return .tree.add(move(call));
+    }
+
+    // The keyword form of a conditional: `if c then a else b`. The operator
+    // form is handled by `parse_infix` when it sees a question mark.
+    fn parse_if(self: &unique) -> int: {
+        let keyword = .advance();
+        var node = Node(kind: NodeKind::Conditional);
+        node.span.begin = keyword.span.begin;
+        node.lhs = .parse_expression(PRECEDENCE_CONDITIONAL);
+        if node.lhs == NO_NODE: {
+            return NO_NODE;
+        }
+        if !.expect(TokenKind::KeywordThen): {
+            return NO_NODE;
+        }
+        node.rhs = .parse_expression(PRECEDENCE_CONDITIONAL);
+        if node.rhs == NO_NODE: {
+            return NO_NODE;
+        }
+        if .eat(TokenKind::KeywordElse): {
+            node.extra = .parse_expression(PRECEDENCE_CONDITIONAL);
+            if node.extra == NO_NODE: {
+                return NO_NODE;
+            }
+        } else: {
+            node.extra = .tree.add_null();
+        }
+        node.span.end = .lookahead.span.begin;
+        return .tree.add(move(node));
+    }
+
+    // --- Infix rules -----------------------------------------------------
+
+    fn parse_infix(self: &unique, left: int, power: int) -> int: {
+        let token = .advance();
+        let kind = token.kind;
+
+        if kind == TokenKind::Question: {
+            return .parse_conditional_tail(left);
+        }
+        if is_assignment_operator(kind): {
+            return .parse_assignment_tail(left, kind);
+        }
+
+        var next_power = power + 1;
+        if infix_associativity(kind) == Associativity::Right: {
+            next_power = power;
+        }
+
+        let right = .parse_expression(next_power);
+        if right == NO_NODE: {
+            return NO_NODE;
+        }
+        var node = Node(kind: NodeKind::Binary, op: kind, lhs: left, rhs: right);
+        node.span.begin = .tree.at(left).span.begin;
+        node.span.end = .tree.at(right).span.end;
+        return .tree.add(move(node));
+    }
+
+    // The question mark has already been consumed; the branches parse at the
+    // conditional level so that a nested conditional groups to the right.
+    fn parse_conditional_tail(self: &unique, condition: int) -> int: {
+        var node = Node(kind: NodeKind::Conditional, lhs: condition);
+        node.span.begin = .tree.at(condition).span.begin;
+        node.rhs = .parse_expression(PRECEDENCE_NONE);
+        if node.rhs == NO_NODE: {
+            return NO_NODE;
+        }
+        if !.expect(TokenKind::Colon): {
+            return NO_NODE;
+        }
+        node.extra = .parse_expression(PRECEDENCE_CONDITIONAL);
+        if node.extra == NO_NODE: {
+            return NO_NODE;
+        }
+        node.flag = true;
+        node.span.end = .lookahead.span.begin;
+        return .tree.add(move(node));
+    }
+
+    fn parse_assignment_tail(self: &unique, target: int, op: TokenKind) -> int: {
+        if !.tree.at(target).is_assignable(): {
+            var detail: string = "cannot assign to a ";
+            detail.append(node_kind_name(.tree.kind_of(target)));
+            detail.append(" expression");
+            .report(ErrorCode::NotAssignable, detail);
+            return NO_NODE;
+        }
+        let value = .parse_expression(PRECEDENCE_ASSIGN);
+        if value == NO_NODE: {
+            return NO_NODE;
+        }
+        var node = Node(kind: NodeKind::Assign, op: op, lhs: target, rhs: value);
+        node.span.begin = .tree.at(target).span.begin;
+        node.span.end = .tree.at(value).span.end;
+        return .tree.add(move(node));
+    }
+
+    // --- Postfix rules ---------------------------------------------------
+    //
+    // Returns `left` unchanged when the next token turns out not to start a
+    // suffix after all, which the climbing loop reads as "stop trying".
+    fn parse_postfix(self: &unique, left: int) -> int: {
+        let kind = .peek_kind();
+        if kind == TokenKind::LParen: {
+            return .parse_call(left);
+        }
+        if kind == TokenKind::LBracket: {
+            return .parse_index(left);
+        }
+        if kind == TokenKind::Dot: {
+            return .parse_member(left);
+        }
+        if kind == TokenKind::PlusPlus || kind == TokenKind::MinusMinus: {
+            let token = .advance();
+            var node = Node(kind: NodeKind::Postfix, op: token.kind, lhs: left);
+            node.span.begin = .tree.at(left).span.begin;
+            node.span.end = token.span.end;
+            return .tree.add(move(node));
+        }
+        if kind == TokenKind::Bang: {
+            // Postfix `!` is factorial, but only after something that can
+            // actually produce a number.
+            if .tree.kind_of(left) == NodeKind::NumberLiteral || .tree.kind_of(left) == NodeKind::Variable: {
+                let token = .advance();
+                var node = Node(kind: NodeKind::Postfix, op: token.kind, lhs: left);
+                node.span.begin = .tree.at(left).span.begin;
+                node.span.end = token.span.end;
+                return .tree.add(move(node));
+            }
+        }
+        return left;
+    }
+
+    // `callee ( argument, name: argument )`
+    fn parse_call(self: &unique, callee: int) -> int: {
+        let open = .advance();
+        var node = Node(kind: NodeKind::Call, lhs: callee);
+        node.span.begin = .tree.at(callee).span.begin;
+        if !.at(TokenKind::RParen): {
+            loop: {
+                if node.parts.size() >= MAX_ARGUMENTS: {
+                    .report(ErrorCode::TooManyArguments, "argument limit reached");
+                    return NO_NODE;
+                }
+                let argument = .parse_argument();
+                if argument == NO_NODE: {
+                    return NO_NODE;
+                }
+                node.parts.push_back(argument);
+                if !.eat(TokenKind::Comma): {
+                    break;
+                }
+            }
+        }
+        if !.expect(TokenKind::RParen): {
+            return NO_NODE;
+        }
+        node.span.end = .lookahead.span.begin;
+        discard open;
+        return .tree.add(move(node));
+    }
+
+    // An argument is either a bare expression or `name: expression`. The
+    // label is stored on a Let node wrapping the value, which the evaluator
+    // unwraps when it binds parameters.
+    fn parse_argument(self: &unique) -> int: {
+        if .at(TokenKind::Identifier): {
+            let saved = .lookahead;
+            let name = .advance();
+            if .eat(TokenKind::Colon): {
+                var labelled = Node(kind: NodeKind::Let, text: name.text, flag: true);
+                labelled.span.begin = name.span.begin;
+                labelled.lhs = .parse_expression(PRECEDENCE_ASSIGN);
+                if labelled.lhs == NO_NODE: {
+                    return NO_NODE;
+                }
+                labelled.span.end = .lookahead.span.begin;
+                return .tree.add(move(labelled));
+            }
+            // Not a label: rebuild the variable the lookahead already ate and
+            // keep parsing from there.
+            var variable = Node(kind: NodeKind::Variable, text: name.text);
+            variable.span = saved.span;
+            let base = .tree.add(move(variable));
+            return .continue_expression(base, PRECEDENCE_ASSIGN);
+        }
+        return .parse_expression(PRECEDENCE_ASSIGN);
+    }
+
+    // Resume the climbing loop with an operand that has already been built.
+    // This is what lets `parse_argument` back out of a mistaken label.
+    fn continue_expression(self: &unique, left: int, minimum: int) -> int: {
+        var current = left;
+        loop: {
+            if .failed(): {
+                break;
+            }
+            let kind = .peek_kind();
+            let postfix = postfix_precedence(kind);
+            if postfix != PRECEDENCE_NONE: {
+                let extended = .parse_postfix(current);
+                if extended == NO_NODE: {
+                    return NO_NODE;
+                }
+                if extended != current: {
+                    current = extended;
+                    continue;
+                }
+            }
+            let power = infix_precedence(kind);
+            if power == PRECEDENCE_NONE || power < minimum: {
+                break;
+            }
+            current = .parse_infix(current, power);
+            if current == NO_NODE: {
+                return NO_NODE;
+            }
+        }
+        return current;
+    }
+
+    fn parse_index(self: &unique, target: int) -> int: {
+        discard .advance();
+        var node = Node(kind: NodeKind::Index, lhs: target);
+        node.span.begin = .tree.at(target).span.begin;
+        node.rhs = .parse_expression(PRECEDENCE_NONE);
+        if node.rhs == NO_NODE: {
+            return NO_NODE;
+        }
+        if !.at(TokenKind::RBracket): {
+            .report(ErrorCode::UnbalancedBracket, "the subscript opened earlier is never closed");
+            return NO_NODE;
+        }
+        discard .advance();
+        node.span.end = .lookahead.span.begin;
+        return .tree.add(move(node));
+    }
+
+    fn parse_member(self: &unique, target: int) -> int: {
+        discard .advance();
+        if !.at(TokenKind::Identifier): {
+            .report(ErrorCode::ExpectedIdentifier, "a member access needs a field name");
+            return NO_NODE;
+        }
+        let name = .advance();
+        var node = Node(kind: NodeKind::Member, lhs: target, text: name.text);
+        node.span.begin = .tree.at(target).span.begin;
+        node.span.end = name.span.end;
+        return .tree.add(move(node));
+    }
+
+    fn arena(self: &shared) -> &shared[self] Arena: {
+        return .tree;
+    }
+
+    scanner: Tokenizer;
+    lookahead: Token;
+    tree: Arena;
+    problem: Diagnostic;
+    depth: int = 0;
+}
+
+// One shot helper: parse a source string and hand back both the arena and
+// the root, so callers do not have to keep the parser alive.
+struct ParseResult: {
+
+    fn ok(self: &const shared) -> bool: {
+        if .root == NO_NODE: {
+            return false;
+        }
+        return .problem.ok();
+    }
+
+    fn describe(self: &const shared) -> string: {
+        if .ok(): {
+            return "parsed";
+        }
+        return .problem.describe();
+    }
+
+    tree: Arena;
+    root: int = 0;
+    problem: Diagnostic;
+}
+
+fn parse_expression_text(source: &const shared string) -> ParseResult: {
+    var parser: Parser;
+    let root = parser.parse_source(source);
+    var out: ParseResult;
+    out.root = root;
+    out.problem = parser.problem;
+    out.tree = move(parser.tree);
+    return out;
+}
+
+fn parse_program_text(source: &const shared string) -> ParseResult: {
+    var parser: Parser;
+    let root = parser.parse_program(source);
+    var out: ParseResult;
+    out.root = root;
+    out.problem = parser.problem;
+    out.tree = move(parser.tree);
+    return out;
+}
+
+// --- Scaled decimal arithmetic -------------------------------------------
+//
+// Every number in this language is a pair (mantissa, exponent) standing for
+// mantissa * 10^exponent. Addition has to line the exponents up first;
+// multiplication just adds them. Nothing here rounds to nearest, it
+// truncates, which is documented behaviour rather than an accident.
+
+fn power_of_ten(n: int) -> int: {
+    var out: int = 1;
+    var left = n;
+    while left > 0: {
+        out *= NUMBER_BASE;
+        left -= 1;
+    }
+    return out;
+}
+
+fn digit_count(value: int) -> int: {
+    var left = abs(value);
+    var count: int = 0;
+    while left > 0: {
+        left /= NUMBER_BASE;
+        count += 1;
+    }
+    if count == 0: {
+        return 1;
+    }
+    return count;
+}
+
+// Strip trailing zeros from the mantissa so that 1500 * 10^-2 and 15 * 10^0
+// compare and print the same way.
+struct Decimal: {
+
+    fn is_zero(self: &const shared) -> bool: {
+        return .mantissa == 0;
+    }
+
+    fn is_negative(self: &const shared) -> bool: {
+        return .mantissa < 0;
+    }
+
+    fn is_integral(self: &const shared) -> bool: {
+        if .exponent >= 0: {
+            return true;
+        }
+        var copy = *self;
+        copy.normalize();
+        return copy.exponent >= 0;
+    }
+
+    fn normalize(self: &unique): {
+        if .mantissa == 0: {
+            .exponent = 0;
+            return;
+        }
+        while .exponent < 0 && .mantissa % NUMBER_BASE == 0: {
+            .mantissa /= NUMBER_BASE;
+            .exponent += 1;
+        }
+    }
+
+    fn scaled_to(self: &const shared, target: int) -> int: {
+        if target >= .exponent: {
+            return .mantissa / power_of_ten(target - .exponent);
+        }
+        return .mantissa * power_of_ten(.exponent - target);
+    }
+
+    fn to_int(self: &const shared) -> int: {
+        return .scaled_to(0);
+    }
+
+    // The printed form. Integral values print without a point; fractional
+    // ones get exactly as many digits as the exponent calls for.
+    fn to_text(self: &const shared) -> string: {
+        var copy = *self;
+        copy.normalize();
+        if copy.exponent >= 0: {
+            var whole = to_string(copy.mantissa);
+            var zeros = copy.exponent;
+            while zeros > 0: {
+                whole.push_back(CHAR_ZERO);
+                zeros -= 1;
+            }
+            return whole;
+        }
+        var out: string = "";
+        if copy.mantissa < 0: {
+            out.push_back(CHAR_MINUS);
+        }
+        let magnitude = abs(copy.mantissa);
+        let places = -copy.exponent;
+        let divisor = power_of_ten(places);
+        out.append(to_string(magnitude / divisor));
+        out.push_back(CHAR_DOT);
+        var fraction = to_string(magnitude % divisor);
+        var pad = places - fraction.size();
+        while pad > 0: {
+            out.push_back(CHAR_ZERO);
+            pad -= 1;
+        }
+        out.append(fraction);
+        return out;
+    }
+
+    mantissa: int = 0;
+    exponent: int = 0;
+}
+
+fn make_decimal(mantissa: int, exponent: int) -> Decimal: {
+    var out = Decimal(mantissa: mantissa, exponent: exponent);
+    out.normalize();
+    return out;
+}
+
+fn decimal_from_int(value: int) -> Decimal: {
+    return Decimal(mantissa: value, exponent: 0);
+}
+
+// The common exponent two operands have to be brought to before they can be
+// added or compared. Always the smaller of the two, so no digits are lost.
+fn common_exponent(a: &const shared Decimal, b: &const shared Decimal) -> int: {
+    if a.exponent < b.exponent: {
+        return a.exponent;
+    }
+    return b.exponent;
+}
+
+fn decimal_add(a: &const shared Decimal, b: &const shared Decimal) -> Decimal: {
+    let e = common_exponent(a, b);
+    return make_decimal(a.scaled_to(e) + b.scaled_to(e), e);
+}
+
+fn decimal_subtract(a: &const shared Decimal, b: &const shared Decimal) -> Decimal: {
+    let e = common_exponent(a, b);
+    return make_decimal(a.scaled_to(e) - b.scaled_to(e), e);
+}
+
+fn decimal_multiply(a: &const shared Decimal, b: &const shared Decimal) -> Decimal: {
+    return make_decimal(a.mantissa * b.mantissa, a.exponent + b.exponent);
+}
+
+// Division keeps DIVISION_DIGITS extra digits of the quotient and lowers the
+// exponent to match, which is how 1 / 3 comes out as 0.333333.
+static DIVISION_DIGITS: int = 6;
+
+fn decimal_divide(a: &const shared Decimal, b: &const shared Decimal) -> Decimal: {
+    if b.mantissa == 0: {
+        return Decimal(mantissa: 0, exponent: 0);
+    }
+    let lifted = a.mantissa * power_of_ten(DIVISION_DIGITS);
+    let exponent = a.exponent - b.exponent - DIVISION_DIGITS;
+    return make_decimal(lifted / b.mantissa, exponent);
+}
+
+fn decimal_remainder(a: &const shared Decimal, b: &const shared Decimal) -> Decimal: {
+    if b.mantissa == 0: {
+        return Decimal(mantissa: 0, exponent: 0);
+    }
+    let e = common_exponent(a, b);
+    return make_decimal(a.scaled_to(e) % b.scaled_to(e), e);
+}
+
+fn decimal_negate(a: &const shared Decimal) -> Decimal: {
+    return make_decimal(-a.mantissa, a.exponent);
+}
+
+// Only integral exponents are supported, which is all the language exposes.
+fn decimal_power(base: &const shared Decimal, exponent: &const shared Decimal) -> Decimal: {
+    var count = exponent.to_int();
+    if count < 0: {
+        let one = decimal_from_int(1);
+        var positive = *exponent;
+        positive.mantissa = -positive.mantissa;
+        return decimal_divide(one, decimal_power(base, positive));
+    }
+    var out = decimal_from_int(1);
+    while count > 0: {
+        out = decimal_multiply(out, *base);
+        count -= 1;
+    }
+    return out;
+}
+
+// Returns -1, 0 or 1.
+fn decimal_compare(a: &const shared Decimal, b: &const shared Decimal) -> int: {
+    let e = common_exponent(a, b);
+    let left = a.scaled_to(e);
+    let right = b.scaled_to(e);
+    if left < right: {
+        return -1;
+    }
+    if left > right: {
+        return 1;
+    }
+    return 0;
+}
+
+fn decimal_equal(a: &const shared Decimal, b: &const shared Decimal) -> bool: {
+    return decimal_compare(a, b) == 0;
+}
+
+// --- Values --------------------------------------------------------------
+//
+// A tagged union. charge has no variant type yet, so each payload gets its
+// own field and `kind` says which one is live.
+struct Value: {
+
+    fn is_nil(self: &const shared) -> bool: {
+        return .kind == ValueKind::Nil;
+    }
+
+    fn is_number(self: &const shared) -> bool: {
+        return .kind == ValueKind::Number;
+    }
+
+    fn is_text(self: &const shared) -> bool: {
+        return .kind == ValueKind::Text;
+    }
+
+    fn is_bool(self: &const shared) -> bool: {
+        return .kind == ValueKind::Bool;
+    }
+
+    fn is_list(self: &const shared) -> bool: {
+        return .kind == ValueKind::List;
+    }
+
+    fn is_failure(self: &const shared) -> bool: {
+        return .kind == ValueKind::Failure;
+    }
+
+    // Every value has a truth value; only nil, false, zero, the empty string
+    // and the empty list are falsy.
+    fn truthy(self: &const shared) -> bool: {
+        if .kind == ValueKind::Nil: {
+            return false;
+        }
+        if .kind == ValueKind::Bool: {
+            return .flag;
+        }
+        if .kind == ValueKind::Number: {
+            return !.number.is_zero();
+        }
+        if .kind == ValueKind::Text: {
+            return .text.size() > 0;
+        }
+        if .kind == ValueKind::List: {
+            return .items.size() > 0;
+        }
+        if .kind == ValueKind::Failure: {
+            return false;
+        }
+        return true;
+    }
+
+    fn kind_name(self: &const shared) -> string: {
+        if .kind == ValueKind::Nil: { return "null"; }
+        if .kind == ValueKind::Bool: { return "bool"; }
+        if .kind == ValueKind::Number: { return "number"; }
+        if .kind == ValueKind::Text: { return "string"; }
+        if .kind == ValueKind::List: { return "list"; }
+        if .kind == ValueKind::Builtin: { return "builtin"; }
+        if .kind == ValueKind::Failure: { return "error"; }
+        return "unknown";
+    }
+
+    fn size(self: &const shared) -> int: {
+        if .kind == ValueKind::List: {
+            return .items.size();
+        }
+        if .kind == ValueKind::Text: {
+            return .text.size();
+        }
+        return 0;
+    }
+
+    // The display form, used by `print` and by the test harness.
+    fn to_text(self: &const shared) -> string: {
+        if .kind == ValueKind::Nil: {
+            return WORD_NULL;
+        }
+        if .kind == ValueKind::Bool: {
+            if .flag: {
+                return WORD_TRUE;
+            }
+            return WORD_FALSE;
+        }
+        if .kind == ValueKind::Number: {
+            return .number.to_text();
+        }
+        if .kind == ValueKind::Text: {
+            return .text;
+        }
+        if .kind == ValueKind::Builtin: {
+            var out: string = "<builtin ";
+            out.append(.text);
+            out.append(">");
+            return out;
+        }
+        if .kind == ValueKind::Failure: {
+            var out: string = "<error: ";
+            out.append(.text);
+            out.append(">");
+            return out;
+        }
+        var out: string = "[";
+        var first = true;
+        for element: &const in .items: {
+            if !first: {
+                out.append(TEXT_COMMA_SPACE);
+            }
+            out.append(element.to_text());
+            first = false;
+        }
+        out.append("]");
+        return out;
+    }
+
+    kind: ValueKind = ValueKind::Nil;
+    number: Decimal;
+    text: string;
+    flag: bool = false;
+    items: vector{Value};
+    // For builtins: the arity the dispatcher checks before calling.
+    arity: int = 0;
+}
+
+fn nil_value() -> Value: {
+    return Value(kind: ValueKind::Nil);
+}
+
+fn bool_value(flag: bool) -> Value: {
+    return Value(kind: ValueKind::Bool, flag: flag);
+}
+
+fn number_value(number: Decimal) -> Value: {
+    return Value(kind: ValueKind::Number, number: number);
+}
+
+fn int_value(n: int) -> Value: {
+    return number_value(decimal_from_int(n));
+}
+
+fn text_value(text: &const shared string) -> Value: {
+    return Value(kind: ValueKind::Text, text: *text);
+}
+
+fn list_value(items: vector{Value}) -> Value: {
+    return Value(kind: ValueKind::List, items: move(items));
+}
+
+fn failure_value(detail: &const shared string) -> Value: {
+    return Value(kind: ValueKind::Failure, text: *detail);
+}
+
+// Structural equality across kinds. Numbers compare by value, so 1.50 equals
+// 1.5, and lists compare element by element.
+fn values_equal(a: &const shared Value, b: &const shared Value) -> bool: {
+    if a.kind != b.kind: {
+        return false;
+    }
+    if a.kind == ValueKind::Nil: {
+        return true;
+    }
+    if a.kind == ValueKind::Bool: {
+        return a.flag == b.flag;
+    }
+    if a.kind == ValueKind::Number: {
+        return decimal_equal(a.number, b.number);
+    }
+    if a.kind == ValueKind::Text: {
+        return a.text == b.text;
+    }
+    if a.kind == ValueKind::List: {
+        if a.items.size() != b.items.size(): {
+            return false;
+        }
+        for i in range(0, a.items.size()): {
+            if !values_equal(a.items[i], b.items[i]): {
+                return false;
+            }
+        }
+        return true;
+    }
+    return a.text == b.text;
+}
+
+// Ordering, defined only for numbers and strings.
+fn compare_values(a: &const shared Value, b: &const shared Value) -> int: {
+    if a.kind == ValueKind::Number && b.kind == ValueKind::Number: {
+        return decimal_compare(a.number, b.number);
+    }
+    if a.kind == ValueKind::Text && b.kind == ValueKind::Text: {
+        return a.text.compare(b.text);
+    }
+    if values_equal(a, b): {
+        return 0;
+    }
+    return -1;
+}
+
+// --- Scopes and environments ---------------------------------------------
+//
+// Lexical scoping with a flat vector of frames. A lookup walks outwards from
+// the innermost frame, so an inner binding shadows an outer one, and a
+// frame boundary is just an index into the same two parallel vectors.
+struct Scope: {
+
+    fn size(self: &const shared) -> int: {
+        return .names.size();
+    }
+
+    fn index_of(self: &const shared, name: &const shared string) -> int: {
+        var i = .names.size() - 1;
+        while i >= 0: {
+            if .names[i] == *name: {
+                return i;
+            }
+            i -= 1;
+        }
+        return -1;
+    }
+
+    fn contains(self: &const shared, name: &const shared string) -> bool: {
+        return .index_of(name) >= 0;
+    }
+
+    fn define(self: &unique, name: &const shared string, value: Value): {
+        let existing = .index_of(name);
+        if existing >= 0: {
+            .values[existing] = move(value);
+            return;
+        }
+        .names.push_back(*name);
+        .values.push_back(move(value));
+    }
+
+    fn at(self: &shared, index: int) -> &shared[self] Value: {
+        return .values[index];
+    }
+
+    fn clear(self: &unique): {
+        .names.clear();
+        .values.clear();
+    }
+
+    names: vector{string};
+    values: vector{Value};
+    // Purely informational, but it makes a dumped environment readable.
+    label: string;
+}
+
+struct Environment: {
+
+    fn depth(self: &const shared) -> int: {
+        return .frames.size();
+    }
+
+    fn global(self: &shared) -> &shared[self] Scope: {
+        return .frames[0];
+    }
+
+    fn innermost(self: &shared) -> &shared[self] Scope: {
+        return .frames[.frames.size() - 1];
+    }
+
+    fn push_scope(self: &unique, label: &const shared string): {
+        .frames.push_back(Scope(label: *label));
+    }
+
+    fn pop_scope(self: &unique): {
+        if .frames.size() > 1: {
+            .frames.pop_back();
+        }
+    }
+
+    fn define(self: &unique, name: &const shared string, value: Value): {
+        let frame: &unique = .frames[.frames.size() - 1];
+        frame.define(name, move(value));
+    }
+
+    fn define_global(self: &unique, name: &const shared string, value: Value): {
+        let frame: &unique = .frames[0];
+        frame.define(name, move(value));
+    }
+
+    fn bound(self: &const shared, name: &const shared string) -> bool: {
+        var i = .frames.size() - 1;
+        while i >= 0: {
+            if .frames[i].contains(name): {
+                return true;
+            }
+            i -= 1;
+        }
+        return false;
+    }
+
+    // Look a name up from the innermost frame outwards. Returns the missing
+    // sentinel when nothing matches, which the evaluator turns into an
+    // UnknownName failure.
+    fn lookup(self: &shared, name: &const shared string) -> &shared[self] Value: {
+        var i = .frames.size() - 1;
+        while i >= 0: {
+            let frame: &shared = .frames[i];
+            let slot = frame.index_of(name);
+            if slot >= 0: {
+                return frame.at(slot);
+            }
+            i -= 1;
+        }
+        return .missing;
+    }
+
+    // Assignment writes through to the frame the name was found in, rather
+    // than shadowing it in the current one.
+    fn assign(self: &unique, name: &const shared string, value: Value) -> bool: {
+        var i = .frames.size() - 1;
+        while i >= 0: {
+            let frame: &unique = .frames[i];
+            let slot = frame.index_of(name);
+            if slot >= 0: {
+                frame.values[slot] = move(value);
+                return true;
+            }
+            i -= 1;
+        }
+        return false;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out: string = "";
+        for frame: &const in .frames: {
+            out.append(frame.label);
+            out.append(" {");
+            for i in range(0, frame.names.size()): {
+                if i > 0: {
+                    out.append(TEXT_COMMA_SPACE);
+                }
+                out.append(frame.names[i]);
+            }
+            out.append("}\n");
+        }
+        return out;
+    }
+
+    frames: vector{Scope};
+    missing: Value;
+}
+
+fn make_environment() -> Environment: {
+    var env: Environment;
+    env.frames.push_back(Scope(label: "global"));
+    return env;
+}
+
+// --- Builtins ------------------------------------------------------------
+//
+// Builtins are dispatched by name from one cascade. Registering a name in
+// the environment only records its arity; the body lives in `call_builtin`.
+
+fn builtin_arity(name: &const shared string) -> int: {
+    if *name == "abs": { return 1; }
+    if *name == "min": { return 2; }
+    if *name == "max": { return 2; }
+    if *name == "floor": { return 1; }
+    if *name == "ceil": { return 1; }
+    if *name == "round": { return 1; }
+    if *name == "sqrt": { return 1; }
+    if *name == "len": { return 1; }
+    if *name == "upper": { return 1; }
+    if *name == "lower": { return 1; }
+    if *name == "trim": { return 1; }
+    if *name == "concat": { return 2; }
+    if *name == "at": { return 2; }
+    if *name == "slice": { return 3; }
+    if *name == "push": { return 2; }
+    if *name == "sum": { return 1; }
+    if *name == "type": { return 1; }
+    if *name == "number": { return 1; }
+    if *name == "string": { return 1; }
+    if *name == "print": { return 1; }
+    // A negative arity means "any number of arguments".
+    if *name == "list": { return -1; }
+    return -2;
+}
+
+fn is_builtin(name: &const shared string) -> bool: {
+    return builtin_arity(name) != -2;
+}
+
+fn builtin_names() -> vector{string}: {
+    var names: vector{string};
+    names.push_back("abs");
+    names.push_back("min");
+    names.push_back("max");
+    names.push_back("floor");
+    names.push_back("ceil");
+    names.push_back("round");
+    names.push_back("sqrt");
+    names.push_back("len");
+    names.push_back("upper");
+    names.push_back("lower");
+    names.push_back("trim");
+    names.push_back("concat");
+    names.push_back("at");
+    names.push_back("slice");
+    names.push_back("push");
+    names.push_back("sum");
+    names.push_back("type");
+    names.push_back("number");
+    names.push_back("string");
+    names.push_back("print");
+    names.push_back("list");
+    return names;
+}
+
+// Builtins the folder is allowed to evaluate at compile time. Anything that
+// prints or mutates is deliberately absent.
+fn builtin_is_pure(name: &const shared string) -> bool: {
+    if *name == "print": {
+        return false;
+    }
+    if *name == "push": {
+        return false;
+    }
+    return is_builtin(name);
+}
+
+// Integer square root by bisection, on the scaled representation.
+fn decimal_sqrt(value: &const shared Decimal) -> Decimal: {
+    let target = value.scaled_to(-2);
+    if target <= 0: {
+        return decimal_from_int(0);
+    }
+    var low: int = 0;
+    var high = target;
+    while low < high: {
+        let middle = (low + high + 1) / 2;
+        if middle * middle <= target * 100: {
+            low = middle;
+        } else: {
+            high = middle - 1;
+        }
+    }
+    return make_decimal(low, -2);
+}
+
+fn decimal_floor(value: &const shared Decimal) -> Decimal: {
+    let whole = value.scaled_to(0);
+    var out = decimal_from_int(whole);
+    if value.is_negative() && decimal_compare(out, *value) != 0: {
+        out = decimal_from_int(whole - 1);
+    }
+    return out;
+}
+
+fn decimal_ceil(value: &const shared Decimal) -> Decimal: {
+    let floored = decimal_floor(value);
+    if decimal_equal(floored, *value): {
+        return floored;
+    }
+    return decimal_add(floored, decimal_from_int(1));
+}
+
+fn decimal_round(value: &const shared Decimal) -> Decimal: {
+    let half = make_decimal(5, -1);
+    return decimal_floor(decimal_add(*value, half));
+}
+
+fn text_upper(text: &const shared string) -> string: {
+    var out: string = "";
+    for i in range(0, text.size()): {
+        out.push_back(to_upper(text.at(i)));
+    }
+    return out;
+}
+
+fn text_lower(text: &const shared string) -> string: {
+    var out: string = "";
+    for i in range(0, text.size()): {
+        out.push_back(to_lower(text.at(i)));
+    }
+    return out;
+}
+
+fn text_trim(text: &const shared string) -> string: {
+    var begin: int = 0;
+    var end = text.size();
+    while begin < end && is_space(text.at(begin)): {
+        begin += 1;
+    }
+    while end > begin && is_space(text.at(end - 1)): {
+        end -= 1;
+    }
+    return text.substr(begin, end - begin);
+}
+
+// --- The interpreter -----------------------------------------------------
+//
+// A straight tree walk. `evaluate` dispatches on the node kind and every arm
+// calls back into `evaluate`, so this family is as mutually recursive as the
+// parser above it.
+struct Interpreter: {
+
+    fn fail(self: &unique, code: ErrorCode, detail: &const shared string) -> Value: {
+        if .problem.ok(): {
+            .problem.code = code;
+            .problem.detail = *detail;
+        }
+        var message = error_text(code);
+        message.append(": ");
+        message.append(*detail);
+        return failure_value(message);
+    }
+
+    fn node_kind(self: &const shared, index: int) -> NodeKind: {
+        return .tree.kind_of(index);
+    }
+
+    // --- Dispatch --------------------------------------------------------
+
+    fn evaluate(self: &unique, index: int) -> Value: {
+        if !.tree.valid(index): {
+            return nil_value();
+        }
+        .steps += 1;
+        let kind = .tree.kind_of(index);
+
+        if kind == NodeKind::NumberLiteral: {
+            return number_value(make_decimal(.tree.at(index).mantissa, .tree.at(index).exponent));
+        }
+        if kind == NodeKind::TextLiteral: {
+            return text_value(.tree.at(index).text);
+        }
+        if kind == NodeKind::BoolLiteral: {
+            return bool_value(.tree.at(index).flag);
+        }
+        if kind == NodeKind::NullLiteral: {
+            return nil_value();
+        }
+        if kind == NodeKind::Empty: {
+            return nil_value();
+        }
+        if kind == NodeKind::Variable: {
+            return .evaluate_variable(index);
+        }
+        if kind == NodeKind::Unary: {
+            return .evaluate_unary(index);
+        }
+        if kind == NodeKind::Postfix: {
+            return .evaluate_postfix(index);
+        }
+        if kind == NodeKind::Binary: {
+            return .evaluate_binary(index);
+        }
+        if kind == NodeKind::Assign: {
+            return .evaluate_assign(index);
+        }
+        if kind == NodeKind::Conditional: {
+            return .evaluate_conditional(index);
+        }
+        if kind == NodeKind::Call: {
+            return .evaluate_call(index);
+        }
+        if kind == NodeKind::Index: {
+            return .evaluate_index(index);
+        }
+        if kind == NodeKind::Member: {
+            return .evaluate_member(index);
+        }
+        if kind == NodeKind::Let: {
+            return .evaluate_let(index);
+        }
+        if kind == NodeKind::Block: {
+            return .evaluate_block(index);
+        }
+        if kind == NodeKind::Loop: {
+            return .evaluate_loop(index);
+        }
+        if kind == NodeKind::Return: {
+            var out = .evaluate(.tree.at(index).lhs);
+            .returning = true;
+            return out;
+        }
+        return .fail(ErrorCode::ExpectedExpression, "cannot evaluate this node");
+    }
+
+    fn evaluate_variable(self: &unique, index: int) -> Value: {
+        let name = .tree.at(index).text;
+        if .environment.bound(name): {
+            return .environment.lookup(name);
+        }
+        if is_builtin(name): {
+            return Value(kind: ValueKind::Builtin, text: name, arity: builtin_arity(name));
+        }
+        var detail: string = "no binding named '";
+        detail.append(name);
+        detail.append("'");
+        return .fail(ErrorCode::UnknownName, detail);
+    }
+
+    // --- Operators -------------------------------------------------------
+
+    fn evaluate_unary(self: &unique, index: int) -> Value: {
+        let op = .tree.at(index).op;
+        let operand = .evaluate(.tree.at(index).lhs);
+        if operand.is_failure(): {
+            return operand;
+        }
+
+        if op == TokenKind::Minus: {
+            if !operand.is_number(): {
+                return .fail(ErrorCode::TypeMismatch, "unary minus needs a number");
+            }
+            return number_value(decimal_negate(operand.number));
+        }
+        if op == TokenKind::Plus: {
+            if !operand.is_number(): {
+                return .fail(ErrorCode::TypeMismatch, "unary plus needs a number");
+            }
+            return operand;
+        }
+        if op == TokenKind::Bang || op == TokenKind::KeywordNot: {
+            return bool_value(!operand.truthy());
+        }
+        if op == TokenKind::Tilde: {
+            if !operand.is_number(): {
+                return .fail(ErrorCode::TypeMismatch, "bitwise complement needs a number");
+            }
+            return int_value(~operand.number.to_int());
+        }
+        if op == TokenKind::PlusPlus || op == TokenKind::MinusMinus: {
+            return .apply_step(.tree.at(index).lhs, op, false);
+        }
+        return .fail(ErrorCode::TypeMismatch, "unknown prefix operator");
+    }
+
+    fn evaluate_postfix(self: &unique, index: int) -> Value: {
+        let op = .tree.at(index).op;
+        if op == TokenKind::PlusPlus || op == TokenKind::MinusMinus: {
+            return .apply_step(.tree.at(index).lhs, op, true);
+        }
+        if op == TokenKind::Bang: {
+            let operand = .evaluate(.tree.at(index).lhs);
+            if !operand.is_number(): {
+                return .fail(ErrorCode::TypeMismatch, "factorial needs a number");
+            }
+            var count = operand.number.to_int();
+            var out: int = 1;
+            while count > 1: {
+                out *= count;
+                count -= 1;
+            }
+            return int_value(out);
+        }
+        return .fail(ErrorCode::TypeMismatch, "unknown postfix operator");
+    }
+
+    // Shared by both the prefix and the postfix increment. `after` decides
+    // which of the two values the expression itself produces.
+    fn apply_step(self: &unique, target: int, op: TokenKind, after: bool) -> Value: {
+        if .tree.kind_of(target) != NodeKind::Variable: {
+            return .fail(ErrorCode::NotAssignable, "increment needs a variable");
+        }
+        let name = .tree.at(target).text;
+        let current = .environment.lookup(name);
+        if !current.is_number(): {
+            return .fail(ErrorCode::TypeMismatch, "increment needs a number");
+        }
+        var stepped = current.number;
+        if op == TokenKind::PlusPlus: {
+            stepped = decimal_add(stepped, decimal_from_int(1));
+        } else: {
+            stepped = decimal_subtract(stepped, decimal_from_int(1));
+        }
+        discard .environment.assign(name, number_value(stepped));
+        if after: {
+            return number_value(current.number);
+        }
+        return number_value(stepped);
+    }
+
+    fn evaluate_binary(self: &unique, index: int) -> Value: {
+        let op = .tree.at(index).op;
+
+        // The short circuit operators must not evaluate their right side.
+        if is_short_circuit(op): {
+            let left = .evaluate(.tree.at(index).lhs);
+            if left.is_failure(): {
+                return left;
+            }
+            if op == TokenKind::AmpAmp || op == TokenKind::KeywordAnd: {
+                if !left.truthy(): {
+                    return bool_value(false);
+                }
+                let right = .evaluate(.tree.at(index).rhs);
+                if right.is_failure(): {
+                    return right;
+                }
+                return bool_value(right.truthy());
+            }
+            if left.truthy(): {
+                return bool_value(true);
+            }
+            let right = .evaluate(.tree.at(index).rhs);
+            if right.is_failure(): {
+                return right;
+            }
+            return bool_value(right.truthy());
+        }
+
+        let left = .evaluate(.tree.at(index).lhs);
+        if left.is_failure(): {
+            return left;
+        }
+        let right = .evaluate(.tree.at(index).rhs);
+        if right.is_failure(): {
+            return right;
+        }
+        return .apply_binary(op, left, right);
+    }
+
+    fn apply_binary(self: &unique, op: TokenKind, left: &const shared Value, right: &const shared Value) -> Value: {
+        if op == TokenKind::EqualEqual: {
+            return bool_value(values_equal(left, right));
+        }
+        if op == TokenKind::BangEqual: {
+            return bool_value(!values_equal(left, right));
+        }
+        if is_comparison(op): {
+            let order = compare_values(left, right);
+            if op == TokenKind::Less: { return bool_value(order < 0); }
+            if op == TokenKind::LessEqual: { return bool_value(order <= 0); }
+            if op == TokenKind::Greater: { return bool_value(order > 0); }
+            if op == TokenKind::GreaterEqual: { return bool_value(order >= 0); }
+        }
+
+        // `+` is overloaded on strings and lists as concatenation.
+        if op == TokenKind::Plus: {
+            if left.is_text() || right.is_text(): {
+                var joined = left.to_text();
+                joined.append(right.to_text());
+                return text_value(joined);
+            }
+            if left.is_list(): {
+                var items = left.items;
+                if right.is_list(): {
+                    for element: &const in right.items: {
+                        items.push_back(*element);
+                    }
+                } else: {
+                    items.push_back(*right);
+                }
+                return list_value(move(items));
+            }
+        }
+
+        if !left.is_number() || !right.is_number(): {
+            var detail: string = "operator ";
+            detail.append(token_spelling(op));
+            detail.append(" does not accept ");
+            detail.append(left.kind_name());
+            detail.append(" and ");
+            detail.append(right.kind_name());
+            return .fail(ErrorCode::TypeMismatch, detail);
+        }
+
+        if op == TokenKind::Plus: {
+            return number_value(decimal_add(left.number, right.number));
+        }
+        if op == TokenKind::Minus: {
+            return number_value(decimal_subtract(left.number, right.number));
+        }
+        if op == TokenKind::Star: {
+            return number_value(decimal_multiply(left.number, right.number));
+        }
+        if op == TokenKind::Slash: {
+            if right.number.is_zero(): {
+                return .fail(ErrorCode::DivideByZero, "the divisor evaluates to zero");
+            }
+            return number_value(decimal_divide(left.number, right.number));
+        }
+        if op == TokenKind::Percent: {
+            if right.number.is_zero(): {
+                return .fail(ErrorCode::DivideByZero, "the modulus evaluates to zero");
+            }
+            return number_value(decimal_remainder(left.number, right.number));
+        }
+        if op == TokenKind::StarStar: {
+            return number_value(decimal_power(left.number, right.number));
+        }
+
+        // The bitwise family works on the truncated integer value.
+        let a = left.number.to_int();
+        let b = right.number.to_int();
+        if op == TokenKind::Amp: { return int_value(a & b); }
+        if op == TokenKind::Pipe: { return int_value(a | b); }
+        if op == TokenKind::Caret: { return int_value(a ^ b); }
+        if op == TokenKind::LessLess: { return int_value(a << b); }
+        if op == TokenKind::GreaterGreater: { return int_value(a >> b); }
+
+        var detail: string = "unknown operator ";
+        detail.append(token_spelling(op));
+        return .fail(ErrorCode::TypeMismatch, detail);
+    }
+
+    fn evaluate_assign(self: &unique, index: int) -> Value: {
+        let op = .tree.at(index).op;
+        let target = .tree.at(index).lhs;
+        if .tree.kind_of(target) != NodeKind::Variable: {
+            return .fail(ErrorCode::NotAssignable, "only plain names may be assigned to");
+        }
+        let name = .tree.at(target).text;
+        var value = .evaluate(.tree.at(index).rhs);
+        if value.is_failure(): {
+            return value;
+        }
+        if op != TokenKind::Equal: {
+            let base = compound_base_operator(op);
+            let current = .environment.lookup(name);
+            value = .apply_binary(base, current, value);
+            if value.is_failure(): {
+                return value;
+            }
+        }
+        if !.environment.assign(name, value): {
+            .environment.define(name, value);
+        }
+        return value;
+    }
+
+    fn evaluate_conditional(self: &unique, index: int) -> Value: {
+        let condition = .evaluate(.tree.at(index).lhs);
+        if condition.is_failure(): {
+            return condition;
+        }
+        if condition.truthy(): {
+            return .evaluate(.tree.at(index).rhs);
+        }
+        return .evaluate(.tree.at(index).extra);
+    }
+
+    fn evaluate_let(self: &unique, index: int) -> Value: {
+        let value = .evaluate(.tree.at(index).lhs);
+        if value.is_failure(): {
+            return value;
+        }
+        .environment.define(.tree.at(index).text, value);
+        return value;
+    }
+
+    fn evaluate_block(self: &unique, index: int) -> Value: {
+        .environment.push_scope("block");
+        var last = nil_value();
+        for statement in .tree.at(index).parts: {
+            last = .evaluate(statement);
+            if last.is_failure(): {
+                break;
+            }
+            if .returning: {
+                break;
+            }
+        }
+        .environment.pop_scope();
+        return last;
+    }
+
+    fn evaluate_loop(self: &unique, index: int) -> Value: {
+        var last = nil_value();
+        var rounds: int = 0;
+        loop: {
+            let condition = .evaluate(.tree.at(index).lhs);
+            if condition.is_failure(): {
+                return condition;
+            }
+            if !condition.truthy(): {
+                break;
+            }
+            last = .evaluate(.tree.at(index).rhs);
+            if last.is_failure(): {
+                return last;
+            }
+            if .returning: {
+                break;
+            }
+            rounds += 1;
+            if rounds > .step_limit: {
+                return .fail(ErrorCode::DepthExceeded, "loop ran past the step limit");
+            }
+        }
+        return last;
+    }
+
+    fn evaluate_index(self: &unique, index: int) -> Value: {
+        let target = .evaluate(.tree.at(index).lhs);
+        if target.is_failure(): {
+            return target;
+        }
+        let subscript = .evaluate(.tree.at(index).rhs);
+        if subscript.is_failure(): {
+            return subscript;
+        }
+        if !subscript.is_number(): {
+            return .fail(ErrorCode::TypeMismatch, "a subscript has to be a number");
+        }
+        let position = subscript.number.to_int();
+        if target.is_list(): {
+            if position < 0 || position >= target.items.size(): {
+                return nil_value();
+            }
+            return target.items[position];
+        }
+        if target.is_text(): {
+            if position < 0 || position >= target.text.size(): {
+                return nil_value();
+            }
+            return text_value(target.text.substr(position, 1));
+        }
+        return .fail(ErrorCode::NotIndexable, target.kind_name());
+    }
+
+    // Member access is limited to a fixed set of pseudo fields, since the
+    // language has no user defined records yet.
+    fn evaluate_member(self: &unique, index: int) -> Value: {
+        let target = .evaluate(.tree.at(index).lhs);
+        if target.is_failure(): {
+            return target;
+        }
+        let field = .tree.at(index).text;
+        if field == "length" || field == "size": {
+            return int_value(target.size());
+        }
+        if field == "kind": {
+            return text_value(target.kind_name());
+        }
+        if field == "first": {
+            if target.is_list() && target.items.size() > 0: {
+                return target.items[0];
+            }
+            return nil_value();
+        }
+        if field == "last": {
+            if target.is_list() && target.items.size() > 0: {
+                return target.items[target.items.size() - 1];
+            }
+            return nil_value();
+        }
+        if field == "text": {
+            return text_value(target.to_text());
+        }
+        var detail: string = "no member named '";
+        detail.append(field);
+        detail.append("'");
+        return .fail(ErrorCode::UnknownName, detail);
+    }
+
+    fn evaluate_call(self: &unique, index: int) -> Value: {
+        let callee = .tree.at(index).lhs;
+        if .tree.kind_of(callee) != NodeKind::Variable: {
+            return .fail(ErrorCode::NotCallable, "only named builtins may be called");
+        }
+        let name = .tree.at(callee).text;
+        var arguments: vector{Value};
+        for child in .tree.at(index).parts: {
+            var argument = child;
+            // Unwrap a labelled argument; the label is only documentation.
+            if .tree.kind_of(argument) == NodeKind::Let: {
+                argument = .tree.at(argument).lhs;
+            }
+            let value = .evaluate(argument);
+            if value.is_failure(): {
+                return value;
+            }
+            arguments.push_back(value);
+        }
+        return .call_builtin(name, arguments);
+    }
+
+    fn call_builtin(self: &unique, name: &const shared string, arguments: &const shared vector{Value}) -> Value: {
+        let wanted = builtin_arity(name);
+        if wanted == -2: {
+            var unknown: string = "no builtin named '";
+            unknown.append(*name);
+            unknown.append("'");
+            return .fail(ErrorCode::NotCallable, unknown);
+        }
+        if wanted >= 0 && arguments.size() != wanted: {
+            var detail = *name;
+            detail.append(" expects ");
+            detail.append(to_string(wanted));
+            detail.append(" arguments, got ");
+            detail.append(to_string(arguments.size()));
+            return .fail(ErrorCode::WrongArity, detail);
+        }
+
+        if *name == "list": {
+            var items: vector{Value};
+            for element: &const in *arguments: {
+                items.push_back(*element);
+            }
+            return list_value(move(items));
+        }
+        if *name == "print": {
+            println(arguments[0].to_text());
+            .output.push_back(arguments[0].to_text());
+            return arguments[0];
+        }
+        if *name == "type": {
+            return text_value(arguments[0].kind_name());
+        }
+        if *name == "len": {
+            return int_value(arguments[0].size());
+        }
+        if *name == "string": {
+            return text_value(arguments[0].to_text());
+        }
+        if *name == "upper": {
+            return text_value(text_upper(arguments[0].to_text()));
+        }
+        if *name == "lower": {
+            return text_value(text_lower(arguments[0].to_text()));
+        }
+        if *name == "trim": {
+            return text_value(text_trim(arguments[0].to_text()));
+        }
+        if *name == "concat": {
+            var joined = arguments[0].to_text();
+            joined.append(arguments[1].to_text());
+            return text_value(joined);
+        }
+        if *name == "at": {
+            let container = arguments[0];
+            let position = arguments[1].number.to_int();
+            if container.is_list(): {
+                if position < 0 || position >= container.items.size(): {
+                    return nil_value();
+                }
+                return container.items[position];
+            }
+            if container.is_text(): {
+                if position < 0 || position >= container.text.size(): {
+                    return nil_value();
+                }
+                return text_value(container.text.substr(position, 1));
+            }
+            return .fail(ErrorCode::NotIndexable, container.kind_name());
+        }
+        if *name == "slice": {
+            let container = arguments[0];
+            let begin = arguments[1].number.to_int();
+            let count = arguments[2].number.to_int();
+            if container.is_text(): {
+                return text_value(container.text.substr(begin, count));
+            }
+            var items: vector{Value};
+            for i in range(begin, begin + count): {
+                if i >= 0 && i < container.items.size(): {
+                    items.push_back(container.items[i]);
+                }
+            }
+            return list_value(move(items));
+        }
+        if *name == "push": {
+            var items = arguments[0].items;
+            items.push_back(arguments[1]);
+            return list_value(move(items));
+        }
+        if *name == "sum": {
+            var total = decimal_from_int(0);
+            for element: &const in arguments[0].items: {
+                if element.is_number(): {
+                    total = decimal_add(total, element.number);
+                }
+            }
+            return number_value(total);
+        }
+
+        // The numeric family, all of which want a number argument.
+        if !arguments[0].is_number(): {
+            var detail = *name;
+            detail.append(" expects a number");
+            return .fail(ErrorCode::TypeMismatch, detail);
+        }
+        if *name == "abs": {
+            if arguments[0].number.is_negative(): {
+                return number_value(decimal_negate(arguments[0].number));
+            }
+            return arguments[0];
+        }
+        if *name == "floor": {
+            return number_value(decimal_floor(arguments[0].number));
+        }
+        if *name == "ceil": {
+            return number_value(decimal_ceil(arguments[0].number));
+        }
+        if *name == "round": {
+            return number_value(decimal_round(arguments[0].number));
+        }
+        if *name == "sqrt": {
+            return number_value(decimal_sqrt(arguments[0].number));
+        }
+        if *name == "number": {
+            return arguments[0];
+        }
+        if *name == "min": {
+            if decimal_compare(arguments[0].number, arguments[1].number) <= 0: {
+                return arguments[0];
+            }
+            return arguments[1];
+        }
+        if *name == "max": {
+            if decimal_compare(arguments[0].number, arguments[1].number) >= 0: {
+                return arguments[0];
+            }
+            return arguments[1];
+        }
+        return .fail(ErrorCode::NotCallable, *name);
+    }
+
+    fn reset(self: &unique): {
+        .environment = make_environment();
+        .problem = Diagnostic();
+        .output.clear();
+        .steps = 0;
+        .returning = false;
+    }
+
+    tree: Arena;
+    environment: Environment;
+    problem: Diagnostic;
+    output: vector{string};
+    steps: int = 0;
+    step_limit: int = 100000;
+    returning: bool = false;
+}
+
+// --- Constant folding ----------------------------------------------------
+//
+// A bottom up rewrite over the arena. Every fold rewrites a node in place so
+// that parents keep pointing at the same index, and the pass reports how
+// many nodes it changed so that a caller can iterate to a fixed point.
+struct Folder: {
+
+    fn folded(self: &const shared) -> int: {
+        return .rewrites;
+    }
+
+    // A subtree is pure when evaluating it twice has the same effect as
+    // evaluating it once and nothing outside it can observe the difference.
+    fn pure(self: &const shared, index: int) -> bool: {
+        if !.tree.valid(index): {
+            return true;
+        }
+        let kind = .tree.kind_of(index);
+        if kind == NodeKind::Assign: {
+            return false;
+        }
+        if kind == NodeKind::Postfix: {
+            return false;
+        }
+        if kind == NodeKind::Let: {
+            return false;
+        }
+        if kind == NodeKind::Loop: {
+            return false;
+        }
+        if kind == NodeKind::Return: {
+            return false;
+        }
+        if kind == NodeKind::Unary: {
+            let op = .tree.operator_of(index);
+            if op == TokenKind::PlusPlus || op == TokenKind::MinusMinus: {
+                return false;
+            }
+            return .pure(.tree.at(index).lhs);
+        }
+        if kind == NodeKind::Call: {
+            let callee = .tree.at(index).lhs;
+            if .tree.kind_of(callee) != NodeKind::Variable: {
+                return false;
+            }
+            if !builtin_is_pure(.tree.at(callee).text): {
+                return false;
+            }
+            for child in .tree.at(index).parts: {
+                if !.pure(child): {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if kind == NodeKind::Variable: {
+            // A free variable is pure to read but its value is unknown, so
+            // the folder treats it as pure and simply cannot fold it.
+            return true;
+        }
+        if .tree.at(index).lhs != NO_NODE && !.pure(.tree.at(index).lhs): {
+            return false;
+        }
+        if .tree.at(index).rhs != NO_NODE && !.pure(.tree.at(index).rhs): {
+            return false;
+        }
+        if .tree.at(index).extra != NO_NODE && !.pure(.tree.at(index).extra): {
+            return false;
+        }
+        return true;
+    }
+
+    fn is_constant(self: &const shared, index: int) -> bool: {
+        if !.tree.valid(index): {
+            return false;
+        }
+        return .tree.at(index).is_literal();
+    }
+
+    fn constant_value(self: &shared, index: int) -> Value: {
+        let kind = .tree.kind_of(index);
+        if kind == NodeKind::NumberLiteral: {
+            return number_value(make_decimal(.tree.at(index).mantissa, .tree.at(index).exponent));
+        }
+        if kind == NodeKind::TextLiteral: {
+            return text_value(.tree.at(index).text);
+        }
+        if kind == NodeKind::BoolLiteral: {
+            return bool_value(.tree.at(index).flag);
+        }
+        return nil_value();
+    }
+
+    fn write_value(self: &unique, index: int, value: &const shared Value): {
+        if value.is_number(): {
+            .tree.replace_with_number(index, value.number.mantissa, value.number.exponent);
+            .rewrites += 1;
+            return;
+        }
+        if value.is_bool(): {
+            .tree.replace_with_bool(index, value.flag);
+            .rewrites += 1;
+            return;
+        }
+        if value.is_text(): {
+            var literal = Node(kind: NodeKind::TextLiteral, text: value.text);
+            .tree.replace(index, move(literal));
+            .rewrites += 1;
+            return;
+        }
+        if value.is_nil(): {
+            .tree.replace(index, Node(kind: NodeKind::NullLiteral));
+            .rewrites += 1;
+        }
+    }
+
+    // --- The pass --------------------------------------------------------
+
+    fn fold(self: &unique, index: int) -> int: {
+        if !.tree.valid(index): {
+            return index;
+        }
+        let kind = .tree.kind_of(index);
+
+        if kind == NodeKind::Unary: {
+            return .fold_unary(index);
+        }
+        if kind == NodeKind::Binary: {
+            return .fold_binary(index);
+        }
+        if kind == NodeKind::Conditional: {
+            return .fold_conditional(index);
+        }
+        if kind == NodeKind::Call: {
+            return .fold_call(index);
+        }
+        if kind == NodeKind::Block: {
+            return .fold_block(index);
+        }
+        if kind == NodeKind::Index: {
+            discard .fold(.tree.at(index).lhs);
+            discard .fold(.tree.at(index).rhs);
+            return index;
+        }
+        if kind == NodeKind::Member: {
+            discard .fold(.tree.at(index).lhs);
+            return index;
+        }
+        if kind == NodeKind::Assign: {
+            discard .fold(.tree.at(index).rhs);
+            return index;
+        }
+        if kind == NodeKind::Let: {
+            discard .fold(.tree.at(index).lhs);
+            return index;
+        }
+        if kind == NodeKind::Loop: {
+            return .fold_loop(index);
+        }
+        if kind == NodeKind::Return: {
+            discard .fold(.tree.at(index).lhs);
+            return index;
+        }
+        return index;
+    }
+
+    fn fold_unary(self: &unique, index: int) -> int: {
+        let operand = .fold(.tree.at(index).lhs);
+        let op = .tree.operator_of(index);
+
+        // Double negation cancels, which shows up constantly in generated
+        // input like `-(-x)`.
+        if op == TokenKind::Minus && .tree.kind_of(operand) == NodeKind::Unary: {
+            if .tree.operator_of(operand) == TokenKind::Minus: {
+                let inner = .tree.at(operand).lhs;
+                let copy = .tree.adopt(inner);
+                var replacement = Node(kind: .tree.kind_of(copy));
+                replacement.op = .tree.operator_of(copy);
+                replacement.lhs = .tree.at(copy).lhs;
+                replacement.rhs = .tree.at(copy).rhs;
+                replacement.extra = .tree.at(copy).extra;
+                replacement.mantissa = .tree.at(copy).mantissa;
+                replacement.exponent = .tree.at(copy).exponent;
+                replacement.text = .tree.at(copy).text;
+                replacement.flag = .tree.at(copy).flag;
+                .tree.replace(index, move(replacement));
+                .rewrites += 1;
+                return index;
+            }
+        }
+
+        if !.is_constant(operand): {
+            return index;
+        }
+        var machine = Interpreter();
+        machine.tree = .tree;
+        let value = machine.evaluate(index);
+        if value.is_failure(): {
+            return index;
+        }
+        .write_value(index, value);
+        return index;
+    }
+
+    fn fold_binary(self: &unique, index: int) -> int: {
+        let left = .fold(.tree.at(index).lhs);
+        let right = .fold(.tree.at(index).rhs);
+        let op = .tree.operator_of(index);
+
+        if .is_constant(left) && .is_constant(right): {
+            let a = .constant_value(left);
+            let b = .constant_value(right);
+            if op == TokenKind::Slash && b.is_number() && b.number.is_zero(): {
+                return index;
+            }
+            if op == TokenKind::Percent && b.is_number() && b.number.is_zero(): {
+                return index;
+            }
+            var machine = Interpreter();
+            machine.tree = .tree;
+            let value = machine.evaluate(index);
+            if !value.is_failure(): {
+                .write_value(index, value);
+            }
+            return index;
+        }
+
+        // Algebraic identities, which fire far more often than full folds.
+        if .is_zero_literal(right) && (op == TokenKind::Plus || op == TokenKind::Minus): {
+            .splice(index, left);
+            return index;
+        }
+        if .is_zero_literal(left) && op == TokenKind::Plus: {
+            .splice(index, right);
+            return index;
+        }
+        if .is_one_literal(right) && (op == TokenKind::Star || op == TokenKind::Slash): {
+            .splice(index, left);
+            return index;
+        }
+        if .is_one_literal(left) && op == TokenKind::Star: {
+            .splice(index, right);
+            return index;
+        }
+        if .is_zero_literal(right) && op == TokenKind::Star && .pure(left): {
+            .tree.replace_with_number(index, 0, 0);
+            .rewrites += 1;
+            return index;
+        }
+        if op == TokenKind::AmpAmp && .is_false_literal(left): {
+            .tree.replace_with_bool(index, false);
+            .rewrites += 1;
+            return index;
+        }
+        if op == TokenKind::PipePipe && .is_true_literal(left): {
+            .tree.replace_with_bool(index, true);
+            .rewrites += 1;
+            return index;
+        }
+        return index;
+    }
+
+    fn fold_conditional(self: &unique, index: int) -> int: {
+        let condition = .fold(.tree.at(index).lhs);
+        let whenever = .fold(.tree.at(index).rhs);
+        let otherwise = .fold(.tree.at(index).extra);
+        if !.is_constant(condition): {
+            return index;
+        }
+        // Dead branch elimination: a constant condition means one of the two
+        // arms can never run, so the surviving arm replaces the whole node.
+        let decided = .constant_value(condition);
+        if decided.truthy(): {
+            .splice(index, whenever);
+        } else: {
+            .splice(index, otherwise);
+        }
+        return index;
+    }
+
+    fn fold_call(self: &unique, index: int) -> int: {
+        var all_constant = true;
+        for child in .tree.at(index).parts: {
+            let folded = .fold(child);
+            if !.is_constant(folded): {
+                all_constant = false;
+            }
+        }
+        let callee = .tree.at(index).lhs;
+        if .tree.kind_of(callee) != NodeKind::Variable: {
+            return index;
+        }
+        if !builtin_is_pure(.tree.at(callee).text): {
+            return index;
+        }
+        if !all_constant: {
+            return index;
+        }
+        var machine = Interpreter();
+        machine.tree = .tree;
+        let value = machine.evaluate(index);
+        if value.is_failure(): {
+            return index;
+        }
+        if value.is_list(): {
+            return index;
+        }
+        .write_value(index, value);
+        return index;
+    }
+
+    // `while false { ... }` never runs at all.
+    fn fold_loop(self: &unique, index: int) -> int: {
+        let condition = .fold(.tree.at(index).lhs);
+        discard .fold(.tree.at(index).rhs);
+        if .is_false_literal(condition): {
+            .tree.replace(index, Node(kind: NodeKind::Empty));
+            .rewrites += 1;
+        }
+        return index;
+    }
+
+    // Dead code within a block: statements after a `return` can never run,
+    // and pure statements whose value is discarded can be dropped outright.
+    fn fold_block(self: &unique, index: int) -> int: {
+        var kept: vector{int};
+        var terminated = false;
+        let total = .tree.at(index).parts.size();
+        var position: int = 0;
+        for child in .tree.at(index).parts: {
+            position += 1;
+            if terminated: {
+                .removed += 1;
+                continue;
+            }
+            let folded = .fold(child);
+            let kind = .tree.kind_of(folded);
+            if kind == NodeKind::Empty: {
+                .removed += 1;
+                continue;
+            }
+            // The final statement is the value of the block, so it stays
+            // even when it is pure.
+            if position < total && .pure(folded) && .droppable(folded): {
+                .removed += 1;
+                continue;
+            }
+            kept.push_back(folded);
+            if kind == NodeKind::Return: {
+                terminated = true;
+            }
+        }
+        let slot: &unique = .tree.at(index);
+        slot.parts.clear();
+        for survivor in kept: {
+            slot.parts.push_back(survivor);
+        }
+        return index;
+    }
+
+    // Statements worth removing when their value is unused. A bare variable
+    // or literal qualifies; a call never does, even a pure one, because the
+    // author probably meant it.
+    fn droppable(self: &const shared, index: int) -> bool: {
+        let kind = .tree.kind_of(index);
+        if kind == NodeKind::Variable: { return true; }
+        if kind == NodeKind::NumberLiteral: { return true; }
+        if kind == NodeKind::TextLiteral: { return true; }
+        if kind == NodeKind::BoolLiteral: { return true; }
+        if kind == NodeKind::NullLiteral: { return true; }
+        if kind == NodeKind::Empty: { return true; }
+        return false;
+    }
+
+    // Copy `source` over `target` so that the parent keeps its index.
+    fn splice(self: &unique, target: int, source: int): {
+        if !.tree.valid(source): {
+            return;
+        }
+        var replacement = Node(kind: .tree.kind_of(source));
+        replacement.op = .tree.operator_of(source);
+        replacement.lhs = .tree.at(source).lhs;
+        replacement.rhs = .tree.at(source).rhs;
+        replacement.extra = .tree.at(source).extra;
+        replacement.mantissa = .tree.at(source).mantissa;
+        replacement.exponent = .tree.at(source).exponent;
+        replacement.text = .tree.at(source).text;
+        replacement.flag = .tree.at(source).flag;
+        for child in .tree.at(source).parts: {
+            replacement.parts.push_back(child);
+        }
+        .tree.replace(target, move(replacement));
+        .rewrites += 1;
+    }
+
+    fn is_zero_literal(self: &const shared, index: int) -> bool: {
+        if .tree.kind_of(index) != NodeKind::NumberLiteral: {
+            return false;
+        }
+        return .tree.at(index).mantissa == 0;
+    }
+
+    fn is_one_literal(self: &const shared, index: int) -> bool: {
+        if .tree.kind_of(index) != NodeKind::NumberLiteral: {
+            return false;
+        }
+        var probe = make_decimal(.tree.at(index).mantissa, .tree.at(index).exponent);
+        return decimal_equal(probe, decimal_from_int(1));
+    }
+
+    fn is_true_literal(self: &const shared, index: int) -> bool: {
+        if .tree.kind_of(index) != NodeKind::BoolLiteral: {
+            return false;
+        }
+        return .tree.at(index).flag;
+    }
+
+    fn is_false_literal(self: &const shared, index: int) -> bool: {
+        if .tree.kind_of(index) != NodeKind::BoolLiteral: {
+            return false;
+        }
+        return !.tree.at(index).flag;
+    }
+
+    tree: Arena;
+    rewrites: int = 0;
+    removed: int = 0;
+}
+
+// Run the folder until it stops making progress, or until the round limit is
+// hit. Two rounds are usually enough; the third only confirms the fixed
+// point.
+static MAX_FOLD_ROUNDS: int = 4;
+
+fn fold_to_fixed_point(tree: &unique Arena, root: int) -> int: {
+    var total: int = 0;
+    var round: int = 0;
+    while round < MAX_FOLD_ROUNDS: {
+        var pass = Folder();
+        pass.tree = *tree;
+        discard pass.fold(root);
+        *tree = move(pass.tree);
+        total += pass.rewrites;
+        if pass.rewrites == 0: {
+            break;
+        }
+        round += 1;
+    }
+    return total;
+}
+
+// --- The printer ---------------------------------------------------------
+//
+// Turns a tree back into source text. The output is not the original text -
+// spacing is normalised and redundant parentheses are dropped - but it is
+// guaranteed to reparse into the same tree, which is what the round trip
+// test in this file checks.
+//
+// Parentheses are reinserted from the same precedence table the parser used:
+// a child is wrapped when its own binding power is lower than the level it
+// appears in, or when it sits on the wrong side of a left associative
+// operator.
+struct Printer: {
+
+    fn print(self: &shared, index: int) -> string: {
+        return .print_at(index, PRECEDENCE_NONE);
+    }
+
+    fn print_at(self: &shared, index: int, context_power: int) -> string: {
+        if !.tree.valid(index): {
+            return TEXT_EMPTY;
+        }
+        let kind = .tree.kind_of(index);
+
+        if kind == NodeKind::NumberLiteral: {
+            return .print_number(index);
+        }
+        if kind == NodeKind::TextLiteral: {
+            return quote_text(.tree.at(index).text);
+        }
+        if kind == NodeKind::BoolLiteral: {
+            if .tree.at(index).flag: {
+                return WORD_TRUE;
+            }
+            return WORD_FALSE;
+        }
+        if kind == NodeKind::NullLiteral: {
+            return WORD_NULL;
+        }
+        if kind == NodeKind::Empty: {
+            return TEXT_SEMICOLON;
+        }
+        if kind == NodeKind::Variable: {
+            return .tree.at(index).text;
+        }
+        if kind == NodeKind::Unary: {
+            return .print_unary(index, context_power);
+        }
+        if kind == NodeKind::Postfix: {
+            return .print_postfix(index);
+        }
+        if kind == NodeKind::Binary: {
+            return .print_binary(index, context_power);
+        }
+        if kind == NodeKind::Assign: {
+            return .print_assign(index, context_power);
+        }
+        if kind == NodeKind::Conditional: {
+            return .print_conditional(index, context_power);
+        }
+        if kind == NodeKind::Call: {
+            return .print_call(index);
+        }
+        if kind == NodeKind::Index: {
+            return .print_index(index);
+        }
+        if kind == NodeKind::Member: {
+            return .print_member(index);
+        }
+        if kind == NodeKind::Let: {
+            return .print_let(index);
+        }
+        if kind == NodeKind::Block: {
+            return .print_block(index);
+        }
+        if kind == NodeKind::Loop: {
+            return .print_loop(index);
+        }
+        if kind == NodeKind::Return: {
+            var out: string = "return ";
+            out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_NONE));
+            return out;
+        }
+        return "<invalid>";
+    }
+
+    fn print_number(self: &shared, index: int) -> string: {
+        var value = make_decimal(.tree.at(index).mantissa, .tree.at(index).exponent);
+        return value.to_text();
+    }
+
+    fn print_unary(self: &shared, index: int, context_power: int) -> string: {
+        var out = token_spelling(.tree.operator_of(index));
+        // `not x` needs the separating space that `!x` does not.
+        if .tree.operator_of(index) == TokenKind::KeywordNot: {
+            out.append(TEXT_SPACE);
+        }
+        let operand = .tree.at(index).lhs;
+        // `- -x` must not print as `--x`, which would relex as a decrement.
+        if .tree.kind_of(operand) == NodeKind::Unary: {
+            if .tree.operator_of(operand) == .tree.operator_of(index): {
+                out.append(TEXT_SPACE);
+            }
+        }
+        out.append(.print_at(operand, PRECEDENCE_PREFIX));
+        return .wrap_if(out, PRECEDENCE_PREFIX, context_power);
+    }
+
+    fn print_postfix(self: &shared, index: int) -> string: {
+        var out = .print_at(.tree.at(index).lhs, PRECEDENCE_POSTFIX);
+        out.append(token_spelling(.tree.operator_of(index)));
+        return out;
+    }
+
+    fn print_binary(self: &shared, index: int, context_power: int) -> string: {
+        let op = .tree.operator_of(index);
+        let power = infix_precedence(op);
+        let right_associative = infix_associativity(op) == Associativity::Right;
+
+        var left_power = power;
+        var right_power = power + 1;
+        if right_associative: {
+            left_power = power + 1;
+            right_power = power;
+        }
+
+        var out = .print_at(.tree.at(index).lhs, left_power);
+        if .spaced_operator(op): {
+            out.append(TEXT_SPACE);
+            out.append(token_spelling(op));
+            out.append(TEXT_SPACE);
+        } else: {
+            out.append(token_spelling(op));
+        }
+        out.append(.print_at(.tree.at(index).rhs, right_power));
+        return .wrap_if(out, power, context_power);
+    }
+
+    fn print_assign(self: &shared, index: int, context_power: int) -> string: {
+        var out = .print_at(.tree.at(index).lhs, PRECEDENCE_ASSIGN + 1);
+        out.append(TEXT_SPACE);
+        out.append(token_spelling(.tree.operator_of(index)));
+        out.append(TEXT_SPACE);
+        out.append(.print_at(.tree.at(index).rhs, PRECEDENCE_ASSIGN));
+        return .wrap_if(out, PRECEDENCE_ASSIGN, context_power);
+    }
+
+    // The `flag` field records which of the two surface forms the input
+    // used, so the round trip preserves the author's choice.
+    fn print_conditional(self: &shared, index: int, context_power: int) -> string: {
+        var out: string = "";
+        if .tree.at(index).flag: {
+            out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_CONDITIONAL + 1));
+            out.append(TEXT_QUESTION_SPACE);
+            out.append(.print_at(.tree.at(index).rhs, PRECEDENCE_NONE));
+            out.append(TEXT_SPACE_COLON_SPACE);
+            out.append(.print_at(.tree.at(index).extra, PRECEDENCE_CONDITIONAL));
+            return .wrap_if(out, PRECEDENCE_CONDITIONAL, context_power);
+        }
+        out.append(WORD_IF);
+        out.append(TEXT_SPACE);
+        out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_CONDITIONAL));
+        out.append(TEXT_SPACE);
+        out.append(WORD_THEN);
+        out.append(TEXT_SPACE);
+        out.append(.print_at(.tree.at(index).rhs, PRECEDENCE_CONDITIONAL));
+        if .tree.kind_of(.tree.at(index).extra) != NodeKind::NullLiteral: {
+            out.append(TEXT_SPACE);
+            out.append(WORD_ELSE);
+            out.append(TEXT_SPACE);
+            out.append(.print_at(.tree.at(index).extra, PRECEDENCE_CONDITIONAL));
+        }
+        return .wrap_if(out, PRECEDENCE_CONDITIONAL, context_power);
+    }
+
+    fn print_call(self: &shared, index: int) -> string: {
+        var out = .print_at(.tree.at(index).lhs, PRECEDENCE_POSTFIX);
+        out.append(TEXT_LPAREN);
+        var first = true;
+        for child in .tree.at(index).parts: {
+            if !first: {
+                out.append(TEXT_COMMA_SPACE);
+            }
+            out.append(.print_argument(child));
+            first = false;
+        }
+        out.append(TEXT_RPAREN);
+        return out;
+    }
+
+    fn print_argument(self: &shared, index: int) -> string: {
+        if .tree.kind_of(index) == NodeKind::Let && .tree.at(index).flag: {
+            var out = .tree.at(index).text;
+            out.append(TEXT_COLON_SPACE);
+            out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_ASSIGN));
+            return out;
+        }
+        return .print_at(index, PRECEDENCE_ASSIGN);
+    }
+
+    fn print_index(self: &shared, index: int) -> string: {
+        var out = .print_at(.tree.at(index).lhs, PRECEDENCE_POSTFIX);
+        out.append(TEXT_LBRACKET);
+        out.append(.print_at(.tree.at(index).rhs, PRECEDENCE_NONE));
+        out.append(TEXT_RBRACKET);
+        return out;
+    }
+
+    fn print_member(self: &shared, index: int) -> string: {
+        var out = .print_at(.tree.at(index).lhs, PRECEDENCE_POSTFIX);
+        out.append(TEXT_DOT);
+        out.append(.tree.at(index).text);
+        return out;
+    }
+
+    fn print_let(self: &shared, index: int) -> string: {
+        var out = WORD_LET;
+        out.append(TEXT_SPACE);
+        out.append(.tree.at(index).text);
+        out.append(" = ");
+        out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_NONE));
+        return out;
+    }
+
+    fn print_loop(self: &shared, index: int) -> string: {
+        var out = WORD_WHILE;
+        out.append(TEXT_SPACE);
+        out.append(.print_at(.tree.at(index).lhs, PRECEDENCE_NONE));
+        out.append(TEXT_SPACE);
+        out.append(.print_at(.tree.at(index).rhs, PRECEDENCE_NONE));
+        return out;
+    }
+
+    fn print_block(self: &shared, index: int) -> string: {
+        if .tree.at(index).parts.empty(): {
+            return "{}";
+        }
+        var out = TEXT_LBRACE;
+        out.append(TEXT_NEWLINE);
+        .indent += 1;
+        for statement in .tree.at(index).parts: {
+            out.append(.padding());
+            out.append(.print_at(statement, PRECEDENCE_NONE));
+            out.append(TEXT_SEMICOLON);
+            out.append(TEXT_NEWLINE);
+        }
+        .indent -= 1;
+        out.append(.padding());
+        out.append(TEXT_RBRACE);
+        return out;
+    }
+
+    fn padding(self: &const shared) -> string: {
+        var out: string = "";
+        for i in range(0, .indent): {
+            out.append(TEXT_INDENT);
+            discard i;
+        }
+        return out;
+    }
+
+    // Operators that read better without surrounding spaces at their
+    // precedence level. Multiplication is tight, addition is not.
+    fn spaced_operator(self: &const shared, op: TokenKind) -> bool: {
+        if !.compact: {
+            return true;
+        }
+        if infix_precedence(op) >= PRECEDENCE_MULTIPLICATIVE: {
+            return false;
+        }
+        return true;
+    }
+
+    fn wrap_if(self: &const shared, body: &const shared string, power: int, context_power: int) -> string: {
+        if power >= context_power: {
+            return *body;
+        }
+        var out = TEXT_LPAREN;
+        out.append(*body);
+        out.append(TEXT_RPAREN);
+        return out;
+    }
+
+    tree: Arena;
+    indent: int = 0;
+    compact: bool = false;
+}
+
+// Re-escape a string literal so that it lexes back to the same contents.
+fn quote_text(text: &const shared string) -> string: {
+    var out: string = "";
+    out.push_back(CHAR_QUOTE);
+    for i in range(0, text.size()): {
+        let c = text.at(i);
+        let escaped = encode_escape(c);
+        if escaped.size() > 0: {
+            out.append(escaped);
+        } else: {
+            out.push_back(c);
+        }
+    }
+    out.push_back(CHAR_QUOTE);
+    return out;
+}
+
+fn print_tree(tree: &shared Arena, root: int) -> string: {
+    var writer = Printer();
+    writer.tree = *tree;
+    return writer.print(root);
+}
+
+// --- Structural dumping --------------------------------------------------
+//
+// The other direction: an indented tree dump, used when a test fails and the
+// flat source form is not enough to see what went wrong.
+fn dump_node(tree: &shared Arena, index: int, depth: int) -> string: {
+    var out: string = "";
+    for i in range(0, depth): {
+        out.append(TEXT_INDENT);
+        discard i;
+    }
+    if !tree.valid(index): {
+        out.append("<none>\n");
+        return out;
+    }
+    out.append(node_kind_name(tree.kind_of(index)));
+    let op = tree.operator_of(index);
+    if op != TokenKind::Invalid: {
+        out.append(" '");
+        out.append(token_spelling(op));
+        out.append("'");
+    }
+    if tree.at(index).text.size() > 0: {
+        out.append(" ");
+        out.append(tree.at(index).text);
+    }
+    if tree.kind_of(index) == NodeKind::NumberLiteral: {
+        out.append(" ");
+        out.append(to_string(tree.at(index).mantissa));
+        out.append("e");
+        out.append(to_string(tree.at(index).exponent));
+    }
+    out.append(TEXT_NEWLINE);
+    if tree.at(index).lhs != NO_NODE: {
+        out.append(dump_node(tree, tree.at(index).lhs, depth + 1));
+    }
+    if tree.at(index).rhs != NO_NODE: {
+        out.append(dump_node(tree, tree.at(index).rhs, depth + 1));
+    }
+    if tree.at(index).extra != NO_NODE: {
+        out.append(dump_node(tree, tree.at(index).extra, depth + 1));
+    }
+    for child in tree.at(index).parts: {
+        out.append(dump_node(tree, child, depth + 1));
+    }
+    return out;
+}
+
+// Structural comparison, which is what "round trips" actually means: the
+// text may differ, the tree may not.
+fn trees_equal(left: &shared Arena, a: int, right: &shared Arena, b: int) -> bool: {
+    if !left.valid(a) || !right.valid(b): {
+        return left.valid(a) == right.valid(b);
+    }
+    if left.kind_of(a) != right.kind_of(b): {
+        return false;
+    }
+    if left.operator_of(a) != right.operator_of(b): {
+        return false;
+    }
+    if left.at(a).text != right.at(b).text: {
+        return false;
+    }
+    if left.kind_of(a) == NodeKind::NumberLiteral: {
+        let x = make_decimal(left.at(a).mantissa, left.at(a).exponent);
+        let y = make_decimal(right.at(b).mantissa, right.at(b).exponent);
+        if !decimal_equal(x, y): {
+            return false;
+        }
+    }
+    if left.at(a).flag != right.at(b).flag: {
+        return false;
+    }
+    if left.at(a).parts.size() != right.at(b).parts.size(): {
+        return false;
+    }
+    if !trees_equal(left, left.at(a).lhs, right, right.at(b).lhs): {
+        return false;
+    }
+    if !trees_equal(left, left.at(a).rhs, right, right.at(b).rhs): {
+        return false;
+    }
+    if !trees_equal(left, left.at(a).extra, right, right.at(b).extra): {
+        return false;
+    }
+    for i in range(0, left.at(a).parts.size()): {
+        if !trees_equal(left, left.at(a).parts[i], right, right.at(b).parts[i]): {
+            return false;
+        }
+    }
+    return true;
+}
+
+// --- Driving the whole pipeline ------------------------------------------
+//
+// One object that owns a parser, a folder and an interpreter, so that a
+// caller can feed it one line at a time and keep the bindings between calls.
+struct Session: {
+
+    fn ready(self: &const shared) -> bool: {
+        return .problem.ok();
+    }
+
+    fn last_error(self: &const shared) -> string: {
+        return .problem.describe();
+    }
+
+    // Parse, optionally fold, then evaluate. Returns the value of the last
+    // statement, or a failure value describing the first thing that went
+    // wrong.
+    fn run(self: &unique, source: &const shared string) -> Value: {
+        var parser: Parser;
+        let root = parser.parse_program(source);
+        if !parser.problem.ok(): {
+            .problem = parser.problem;
+            return failure_value(.problem.describe());
+        }
+        if .optimize: {
+            .rewrites += fold_to_fixed_point(parser.tree, root);
+        }
+        .machine.tree = move(parser.tree);
+        .machine.returning = false;
+        let value = .machine.evaluate(root);
+        .steps += .machine.steps;
+        if value.is_failure(): {
+            .problem = .machine.problem;
+        }
+        .last = value;
+        return value;
+    }
+
+    fn define(self: &unique, name: &const shared string, value: Value): {
+        .machine.environment.define_global(name, move(value));
+    }
+
+    fn bound(self: &const shared, name: &const shared string) -> bool: {
+        return .machine.environment.bound(name);
+    }
+
+    fn value_of(self: &shared, name: &const shared string) -> &shared[self] Value: {
+        return .machine.environment.lookup(name);
+    }
+
+    fn reset(self: &unique): {
+        .machine.reset();
+        .problem = Diagnostic();
+        .steps = 0;
+        .rewrites = 0;
+        .last = nil_value();
+    }
+
+    machine: Interpreter;
+    problem: Diagnostic;
+    last: Value;
+    steps: int = 0;
+    rewrites: int = 0;
+    optimize: bool = true;
+}
+
+fn make_session() -> Session: {
+    var session: Session;
+    session.machine.environment = make_environment();
+    return session;
+}
+
+// Convenience: evaluate one expression in a throwaway session.
+fn evaluate_text(source: &const shared string) -> Value: {
+    var session = make_session();
+    return session.run(source);
+}
+
+// --- The round trip ------------------------------------------------------
+//
+// Parse, print, reparse and compare. This is the property the printer has to
+// satisfy: printing may change the text but it may never change the tree.
+fn round_trips(source: &const shared string) -> bool: {
+    var first: Parser;
+    let a = first.parse_source(source);
+    if !first.problem.ok(): {
+        return false;
+    }
+    let printed = print_tree(first.tree, a);
+
+    var second: Parser;
+    let b = second.parse_source(printed);
+    if !second.problem.ok(): {
+        return false;
+    }
+    return trees_equal(first.tree, a, second.tree, b);
+}
+
+// The stronger version: printing the reprinted text has to be byte identical
+// to the first printing, so the printer is idempotent as well as faithful.
+fn printing_is_stable(source: &const shared string) -> bool: {
+    var first: Parser;
+    let a = first.parse_source(source);
+    if !first.problem.ok(): {
+        return false;
+    }
+    let once = print_tree(first.tree, a);
+
+    var second: Parser;
+    let b = second.parse_source(once);
+    if !second.problem.ok(): {
+        return false;
+    }
+    let twice = print_tree(second.tree, b);
+    return once == twice;
+}
+
+// --- Sample programs -----------------------------------------------------
+//
+// Deliberately dense inputs that exercise the whole precedence table at
+// once. They are held as strings, so the operators inside them are data for
+// the tokenizer rather than charge syntax.
+fn sample_expressions() -> vector{string}: {
+    var samples: vector{string};
+    samples.push_back("1 + 2 * 3 - 4 / 2");
+    samples.push_back("2 ** 3 ** 2");
+    samples.push_back("-x * -y + ~mask");
+    samples.push_back("a < b && b < c || not done");
+    samples.push_back("flags & 12 | 3 ^ 5");
+    samples.push_back("value << 3 >> 1");
+    samples.push_back("total += count * 2");
+    samples.push_back("if ready then 1 else 0");
+    samples.push_back("ready ? first : second");
+    samples.push_back("points[0].x + points[1].y");
+    samples.push_back("min(a, b) + max(c, d)");
+    samples.push_back("offset(dx: 3, dy: 4)");
+    samples.push_back("\"prefix \" + name + \" suffix\"");
+    samples.push_back("counter++ + ++counter");
+    samples.push_back("5! + 3!");
+    samples.push_back("12.5 * 4 - 0.5");
+    samples.push_back("list(1, 2, 3).length");
+    samples.push_back("[1, 2, 3][1]");
+    samples.push_back("(a + b) * (c - d)");
+    samples.push_back("a = b = c = 0");
+    samples.push_back("sum([10, 20, 30]) / 3");
+    samples.push_back("upper(trim(\"  hello  \"))");
+    return samples;
+}
+
+fn sample_programs() -> vector{string}: {
+    var programs: vector{string};
+    programs.push_back("let x = 3; let y = 4; sqrt(x ** 2 + y ** 2)");
+    programs.push_back("let total = 0; let i = 0; while i < 10 { total += i; i++; } total");
+    programs.push_back("let name = \"world\"; concat(\"hello \", name)");
+    programs.push_back("let items = [1, 2, 3, 4]; sum(items) / len(items)");
+    programs.push_back("let flag = true; if flag then \"yes\" else \"no\"");
+    programs.push_back("let scale = 1000; let ratio = 3141 / scale; round(ratio)");
+    // A block whose tail is dead: the folder should drop everything after
+    // the return.
+    programs.push_back("{ return 1; let unused = 2; unused + 3; }");
+    return programs;
+}
+
+// --- Self checks ---------------------------------------------------------
+//
+// These read like unit tests but they are ordinary functions; the benchmark
+// harness calls them and the assertions document the intended behaviour.
+
+fn check_precedence_table(): {
+    assert infix_precedence(TokenKind::Star) > infix_precedence(TokenKind::Plus);
+    assert infix_precedence(TokenKind::Plus) > infix_precedence(TokenKind::LessLess);
+    assert infix_precedence(TokenKind::LessLess) > infix_precedence(TokenKind::Less);
+    assert infix_precedence(TokenKind::Less) > infix_precedence(TokenKind::EqualEqual);
+    assert infix_precedence(TokenKind::EqualEqual) > infix_precedence(TokenKind::Amp);
+    assert infix_precedence(TokenKind::Amp) > infix_precedence(TokenKind::Caret);
+    assert infix_precedence(TokenKind::Caret) > infix_precedence(TokenKind::Pipe);
+    assert infix_precedence(TokenKind::Pipe) > infix_precedence(TokenKind::AmpAmp);
+    assert infix_precedence(TokenKind::AmpAmp) > infix_precedence(TokenKind::PipePipe);
+    assert infix_precedence(TokenKind::PipePipe) > infix_precedence(TokenKind::Question);
+    assert infix_precedence(TokenKind::Question) > infix_precedence(TokenKind::Equal);
+    assert infix_precedence(TokenKind::StarStar) > infix_precedence(TokenKind::Star);
+    assert prefix_precedence(TokenKind::Bang) > infix_precedence(TokenKind::StarStar);
+    assert postfix_precedence(TokenKind::LParen) > prefix_precedence(TokenKind::Bang);
+    prove infix_precedence(TokenKind::Identifier) == PRECEDENCE_NONE;
+    prove infix_associativity(TokenKind::StarStar) == Associativity::Right;
+    prove infix_associativity(TokenKind::Minus) == Associativity::Left;
+}
+
+fn check_table_is_consistent(): {
+    let rows = operator_table();
+    for row: &const in rows: {
+        assert row.precedence == infix_precedence(row.kind);
+        assert row.associativity == infix_associativity(row.kind);
+        assert row.spelling == token_spelling(row.kind);
+        if row.mutating: {
+            assert is_assignment_operator(row.kind);
+        }
+    }
+}
+
+fn check_tokenizer(): {
+    let tokens = tokenize("a + 12.5 * \"text\" // trailing");
+    assert tokens.size() > 0;
+    assert tokens[0].kind == TokenKind::Identifier;
+    assert tokens[1].kind == TokenKind::Plus;
+    assert tokens[2].kind == TokenKind::Number;
+    assert tokens[2].mantissa == 125;
+    assert tokens[2].exponent == -1;
+    assert tokens[3].kind == TokenKind::Star;
+    assert tokens[4].kind == TokenKind::Text;
+    assert tokens[tokens.size() - 1].kind == TokenKind::End;
+}
+
+fn check_maximal_munch(): {
+    let tokens = tokenize("a <<= b >>= c ++ d -- e ** f");
+    assert tokens[1].kind == TokenKind::LessLessEqual;
+    assert tokens[3].kind == TokenKind::GreaterGreaterEqual;
+    assert tokens[5].kind == TokenKind::PlusPlus;
+    assert tokens[7].kind == TokenKind::MinusMinus;
+    assert tokens[9].kind == TokenKind::StarStar;
+}
+
+fn check_decimals(): {
+    let a = make_decimal(125, -1);
+    let b = make_decimal(5, -1);
+    assert decimal_add(a, b).to_text() == "13";
+    assert decimal_subtract(a, b).to_text() == "12";
+    assert decimal_multiply(a, decimal_from_int(2)).to_text() == "25";
+    assert decimal_compare(a, b) > 0;
+    assert decimal_equal(make_decimal(150, -2), make_decimal(15, -1));
+    prove decimal_from_int(0).is_zero();
+}
+
+fn check_parses(): {
+    for source: &const in sample_expressions(): {
+        var parser: Parser;
+        let root = parser.parse_source(source);
+        assert root != NO_NODE;
+        assert parser.problem.ok();
+    }
+}
+
+fn check_round_trip(): {
+    for source: &const in sample_expressions(): {
+        assert round_trips(source);
+        assert printing_is_stable(source);
+    }
+}
+
+fn check_associativity_shape(): {
+    // `2 ** 3 ** 2` groups to the right, so the left child is a literal and
+    // the right child is another power node.
+    var parser: Parser;
+    let root = parser.parse_source("2 ** 3 ** 2");
+    assert parser.tree.kind_of(root) == NodeKind::Binary;
+    assert parser.tree.operator_of(root) == TokenKind::StarStar;
+    let right = parser.tree.at(root).rhs;
+    assert parser.tree.kind_of(right) == NodeKind::Binary;
+    assert parser.tree.operator_of(right) == TokenKind::StarStar;
+
+    // Subtraction groups to the left, so the shape is mirrored.
+    var other: Parser;
+    let flat = other.parse_source("1 - 2 - 3");
+    assert other.tree.kind_of(other.tree.at(flat).lhs) == NodeKind::Binary;
+    assert other.tree.kind_of(other.tree.at(flat).rhs) == NodeKind::NumberLiteral;
+}
+
+fn check_folding(): {
+    var parser: Parser;
+    let root = parser.parse_source("1 + 2 * 3");
+    let changes = fold_to_fixed_point(parser.tree, root);
+    assert changes > 0;
+    assert parser.tree.kind_of(root) == NodeKind::NumberLiteral;
+    assert parser.tree.at(root).mantissa == 7;
+}
+
+fn check_identity_folding(): {
+    var parser: Parser;
+    let root = parser.parse_source("x * 1 + 0");
+    discard fold_to_fixed_point(parser.tree, root);
+    assert parser.tree.kind_of(root) == NodeKind::Variable;
+    assert parser.tree.at(root).text == "x";
+}
+
+fn check_dead_branch(): {
+    var parser: Parser;
+    let root = parser.parse_source("if true then 1 else 2");
+    discard fold_to_fixed_point(parser.tree, root);
+    assert parser.tree.kind_of(root) == NodeKind::NumberLiteral;
+    assert parser.tree.at(root).mantissa == 1;
+}
+
+fn check_evaluation(): {
+    assert evaluate_text("1 + 2 * 3").to_text() == "7";
+    assert evaluate_text("2 ** 10").to_text() == "1024";
+    assert evaluate_text("10 / 4").to_text() == "2.5";
+    assert evaluate_text("7 % 3").to_text() == "1";
+    assert evaluate_text("\"a\" + \"b\"").to_text() == "ab";
+    assert evaluate_text("len([1, 2, 3])").to_text() == "3";
+    assert evaluate_text("true && false").to_text() == WORD_FALSE;
+    assert evaluate_text("1 < 2 && 2 < 3").truthy();
+}
+
+fn check_scoping(): {
+    var session = make_session();
+    discard session.run("let outer = 1;");
+    assert session.bound("outer");
+    discard session.run("{ let inner = 2; inner + outer; }");
+    // The inner binding died with its block; the outer one survived.
+    assert session.bound("outer");
+    assert !session.bound("inner");
+}
+
+fn check_errors(): {
+    var parser: Parser;
+    let root = parser.parse_source("1 +");
+    assert root == NO_NODE || !parser.problem.ok();
+    assert parser.problem.code == ErrorCode::ExpectedExpression;
+
+    var second: Parser;
+    discard second.parse_source("(1 + 2");
+    assert second.problem.code == ErrorCode::UnbalancedParen;
+
+    var third: Parser;
+    discard third.parse_source("1 = 2");
+    assert third.problem.code == ErrorCode::NotAssignable;
+}
+
+fn check_programs(): {
+    for source: &const in sample_programs(): {
+        var session = make_session();
+        let value = session.run(source);
+        assert !value.is_failure();
+    }
+}
+
+// The entry point the benchmark harness calls. Everything above is reachable
+// from here.
+fn run_all_checks(): {
+    check_precedence_table();
+    check_table_is_consistent();
+    check_tokenizer();
+    check_maximal_munch();
+    check_decimals();
+    check_parses();
+    check_round_trip();
+    check_associativity_shape();
+    check_folding();
+    check_identity_folding();
+    check_dead_branch();
+    check_evaluation();
+    check_scoping();
+    check_errors();
+    check_programs();
+    println("expression language: all checks passed");
+}
+
+// A tiny read eval print driver, kept at the bottom so the file ends on the
+// thing a reader is most likely to look for.
+fn repl(lines: &const shared vector{string}) -> int: {
+    var session = make_session();
+    var failures: int = 0;
+    for line: &const in *lines: {
+        let trimmed = text_trim(line);
+        if trimmed.empty(): {
+            continue;
+        }
+        let value = session.run(trimmed);
+        if value.is_failure(): {
+            failures += 1;
+            println(session.last_error());
+        } else: {
+            println(value.to_text());
+        }
+    }
+    return failures;
+}
+
+}

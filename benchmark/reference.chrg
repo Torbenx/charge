@@ -1,0 +1,144 @@
+// Open-addressing hash map with Robin Hood probing.
+namespace containers: {
+
+enum SlotState: {
+    Empty;
+    Occupied;
+    Tombstone = 2;
+}
+
+static DEFAULT_CAPACITY: int = 16;
+static MAX_LOAD_PERCENT: int = 75;
+
+template(K: type, V: type)
+struct Slot: {
+    key: K;
+    value: V;
+    hash: int = 0;
+    distance: int = 0;
+    state: SlotState = SlotState::Empty;
+}
+
+template(K: type, V: type)
+struct HashMap: {
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn slot_index(self: &const shared, h: int) -> int: {
+        return h & (.slots.size() - 1);
+    }
+
+    fn should_grow(self: &const shared) -> bool: {
+        let limit = .slots.size() * MAX_LOAD_PERCENT;
+        return .count * 100 >= limit;
+    }
+
+    fn find(self: &shared, key: &const K) -> &shared[self] V: {
+        let h = hash_of(key);
+        var index = .slot_index(h);
+        var probe: int = 0;
+        loop: {
+            let slot: &shared = .slots[index];
+            if slot.state == SlotState::Empty: {
+                break;
+            }
+            if slot.state == SlotState::Occupied && slot.hash == h: {
+                if slot.key == *key: {
+                    return slot.value;
+                }
+            }
+            if probe > slot.distance: {
+                break;
+            }
+            index = .slot_index(index + 1);
+            probe += 1;
+        }
+        return .missing;
+    }
+
+    fn insert(self: &unique, key: K, value: V) -> bool: {
+        if .should_grow(): {
+            .rehash(.slots.size() * 2);
+        }
+        let h = hash_of(key);
+        var index = .slot_index(h);
+        var distance: int = 0;
+        var pending = Slot{K, V}(key: key, value: value, hash: h);
+        loop: {
+            let slot: &unique = .slots[index];
+            if slot.state != SlotState::Occupied: {
+                slot.key = pending.key;
+                slot.value = pending.value;
+                slot.hash = pending.hash;
+                slot.distance = distance;
+                slot.state = SlotState::Occupied;
+                .count += 1;
+                return true;
+            }
+            if slot.hash == h && slot.key == pending.key: {
+                slot.value = pending.value;
+                return false;
+            }
+            if slot.distance < distance: {
+                swap(slot.key, pending.key);
+                swap(slot.value, pending.value);
+                swap(slot.distance, distance);
+            }
+            index = .slot_index(index + 1);
+            distance += 1;
+        }
+    }
+
+    fn erase(self: &unique, key: &const K) -> bool: {
+        var index = .slot_index(hash_of(key));
+        var probe: int = 0;
+        while probe < .slots.size(): {
+            let slot: &unique = .slots[index];
+            if slot.state == SlotState::Empty: {
+                return false;
+            }
+            if slot.state == SlotState::Occupied && slot.key == *key: {
+                slot.state = SlotState::Tombstone;
+                .count -= 1;
+                return true;
+            }
+            index = .slot_index(index + 1);
+            probe += 1;
+        }
+        return false;
+    }
+
+    fn rehash(self: &unique, capacity: int): {
+        var old = move(.slots);
+        .slots = vector{Slot{K, V}}(capacity);
+        .count = 0;
+        for entry: &const in old: {
+            if entry.state == SlotState::Occupied: {
+                .insert(entry.key, entry.value);
+            } else: {
+                discard entry;
+            }
+        }
+        destroy old;
+    }
+
+    fn clear(self: &unique): {
+        for slot: &unique in .slots: {
+            slot.state = SlotState::Empty;
+            slot.distance = 0;
+        }
+        .count = 0;
+    }
+
+    slots: vector{Slot{K, V}};
+    count: int = 0;
+    missing: V;
+}
+
+}

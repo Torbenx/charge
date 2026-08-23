@@ -745,7 +745,7 @@ TEST(Charge, TokenSpelling) {
 using Clock = std::chrono::high_resolution_clock;
 
 static constexpr int BENCHMARK_REPEATS = 1;
-static constexpr auto BENCHMARK_FILE = COMPILER_TEST_DIR "_old/parser_benchmark.chrg.in";
+static constexpr auto BENCHMARK_FILE = COMPILER_TEST_DIR "/../benchmark/benchmark.chrg";
 
 TEST(Charge, BenchmarkSema) {
     namespace fs = std::filesystem;
@@ -757,10 +757,14 @@ TEST(Charge, BenchmarkSema) {
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
         sema::Context context({}, sourceBuffer);
         parse::Parser parser(sourceBuffer);
+        auto start = Clock::now();
         {
             PerfEnable enable;
             parser.parse(context);
         }
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << context.tokenBuffer.tokens.size() << " semantic tokens.\n";
         ASSERT_TRUE(parser.done());
         ASSERT_TRUE(context.m_scopeStack.size() == 1);
     }

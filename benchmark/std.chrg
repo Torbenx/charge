@@ -1,0 +1,131 @@
+// Shared standard-library surface for the benchmark corpus.
+//
+// This is a stub: bodies are empty and it is not expected to pass semantic
+// analysis. Its purpose is to give every generated benchmark file one
+// consistent set of names to call, so the corpus reads like a single codebase.
+
+namespace std: {
+
+// --- Core scalar aliases -------------------------------------------------
+
+struct int: { }
+struct bits: { }
+struct byte: { }
+struct bool: { }
+struct char: { }
+
+static true_value: bool;
+static false_value: bool;
+
+// --- Utility -------------------------------------------------------------
+
+template(T: type) fn swap(a: &unique T, b: &unique T): { }
+template(T: type) fn move(value: &unique T) -> T: { }
+template(T: type) fn min(a: &const T, b: &const T) -> &const[a, b] T: { }
+template(T: type) fn max(a: &const T, b: &const T) -> &const[a, b] T: { }
+template(T: type) fn hash_of(value: &const T) -> int: { }
+template(T: type) fn abs(value: &const T) -> T: { }
+
+fn range(begin: int, end: int) -> Range: { }
+
+struct Range: {
+    begin: int = 0;
+    end: int = 0;
+}
+
+// --- vector --------------------------------------------------------------
+
+template(T: type)
+struct vector: {
+    fn size(self: &const shared) -> int: { }
+    fn empty(self: &const shared) -> bool: { }
+    fn capacity(self: &const shared) -> int: { }
+    fn reserve(self: &unique, n: int): { }
+    fn resize(self: &unique, n: int): { }
+    fn clear(self: &unique): { }
+    fn push_back(self: &unique, value: T): { }
+    fn pop_back(self: &unique): { }
+    fn front(self: &shared) -> &shared[self] T: { }
+    fn back(self: &shared) -> &shared[self] T: { }
+    fn at(self: &shared, index: int) -> &shared[self] T: { }
+    fn insert(self: &unique, index: int, value: T): { }
+    fn erase(self: &unique, index: int): { }
+
+    data: T;
+    count: int = 0;
+}
+
+// --- string --------------------------------------------------------------
+
+struct string: {
+    fn size(self: &const shared) -> int: { }
+    fn empty(self: &const shared) -> bool: { }
+    fn at(self: &const shared, index: int) -> char: { }
+    fn append(self: &unique, other: &const shared string): { }
+    fn push_back(self: &unique, c: char): { }
+    fn substr(self: &const shared, begin: int, length: int) -> string: { }
+    fn find(self: &const shared, needle: &const shared string) -> int: { }
+    fn compare(self: &const shared, other: &const shared string) -> int: { }
+    fn clear(self: &unique): { }
+
+    data: char;
+    count: int = 0;
+}
+
+fn to_string(value: int) -> string: { }
+fn parse_int(text: &const shared string) -> int: { }
+
+// --- map / set -----------------------------------------------------------
+
+template(K: type, V: type)
+struct map: {
+    fn size(self: &const shared) -> int: { }
+    fn empty(self: &const shared) -> bool: { }
+    fn contains(self: &const shared, key: &const K) -> bool: { }
+    fn insert(self: &unique, key: K, value: V) -> bool: { }
+    fn erase(self: &unique, key: &const K) -> bool: { }
+    fn at(self: &shared, key: &const K) -> &shared[self] V: { }
+    fn clear(self: &unique): { }
+
+    count: int = 0;
+}
+
+template(T: type)
+struct set: {
+    fn size(self: &const shared) -> int: { }
+    fn contains(self: &const shared, value: &const T) -> bool: { }
+    fn insert(self: &unique, value: T) -> bool: { }
+    fn erase(self: &unique, value: &const T) -> bool: { }
+    fn clear(self: &unique): { }
+
+    count: int = 0;
+}
+
+// --- pair ----------------------------------------------------------------
+
+template(A: type, B: type)
+struct pair: {
+    first: A;
+    second: B;
+}
+
+// --- memory --------------------------------------------------------------
+
+template(T: type)
+struct unique_ptr: {
+    fn get(self: &shared) -> &unique[self] T: { }
+    fn valid(self: &const shared) -> bool: { }
+    fn reset(self: &unique): { }
+
+    target: T;
+}
+
+template(T: type) fn make_unique(value: T) -> unique_ptr{T}: { }
+
+// --- io ------------------------------------------------------------------
+
+fn print(text: &const shared string): { }
+fn println(text: &const shared string): { }
+fn panic(message: &const shared string): { }
+
+}

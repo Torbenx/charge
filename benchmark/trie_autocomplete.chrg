@@ -1,0 +1,4629 @@
+// Prefix-tree text index.
+//
+// This file collects the four data structures that a practical text index is
+// usually built out of, plus the query layers that sit on top of them:
+//
+//   * `Trie{V, ALPHABET}`        -- a classic array-mapped trie.  Every node
+//                                   owns a dense child slot table of exactly
+//                                   `ALPHABET` entries plus a sparse
+//                                   `map{char, int}` overflow map for symbols
+//                                   that fall outside the dense alphabet.
+//   * `RadixTree{V, ALPHABET}`   -- the path-compressed (Patricia) variant.
+//                                   Each edge carries a whole label rather
+//                                   than a single character, so insertion has
+//                                   to split labels and deletion has to merge
+//                                   them back together again.
+//   * `TernaryTree{V}`           -- a ternary search tree, which trades the
+//                                   fan-out of a trie for three-way branching
+//                                   and a much smaller memory footprint.
+//   * `Autocomplete{V, ALPHABET}`-- the ranking layer.  Completions are drawn
+//                                   from a trie, scored by a stored weight,
+//                                   and reduced to the best `k` by a bounded
+//                                   selection pass.
+//
+// Every structure is arena based: nodes live in a flat
+// `vector{TrieNode{V, ALPHABET}}` and every link is an integer index into that
+// arena, with `TRIE_NIL` (-1) standing for "no such node".  Index links keep
+// the whole index relocatable, which is what makes the flat-array
+// serialisation at the bottom of the file a straight copy rather than a
+// pointer fix-up pass.
+//
+// Two parameters are threaded through nearly every declaration:
+//
+//   * `V`        -- the payload type stored at terminal nodes,
+//   * `ALPHABET` -- a non-type parameter giving the width of the dense child
+//                   table.  26 indexes lowercase ASCII, 128 indexes the whole
+//                   ASCII range, and 256 indexes raw bytes.
+//
+// Weights and scores are fixed-point integers scaled by `WEIGHT_SCALE`
+// (1000), so a weight of `2500` means 2.5.  No floating point appears
+// anywhere in this file.
+namespace trie: {
+
+// --- Enumerations ---------------------------------------------------------
+
+// What an insertion did to the index.
+enum TrieOutcome: {
+    Inserted;
+    Replaced;
+    Rejected;
+    Overflowed = 3;
+}
+
+// The role a node plays in the structure it belongs to.
+enum NodeKind: {
+    Branch;
+    Terminal;
+    Compressed;
+    Pruned = 3;
+}
+
+// What happened to an edge label during a radix-tree mutation.
+enum EdgeAction: {
+    NoAction;
+    LabelSplit;
+    LabelMerged;
+    ChildAdopted;
+    EdgeRemoved = 4;
+}
+
+// How a query result was obtained.
+enum MatchKind: {
+    ExactMatch;
+    PrefixMatch;
+    FuzzyMatch;
+    NoMatch = 3;
+}
+
+// Ordering applied by the ranking layer before top-k selection.
+enum RankOrder: {
+    ByWeightDescending;
+    ByWeightAscending;
+    Lexicographic;
+    ByDepth = 3;
+}
+
+// Record tags used by the flat-array serialisation.
+enum SerialTag: {
+    TagEmpty;
+    TagBranch;
+    TagLeaf;
+    TagEdge;
+    TagPayload = 4;
+}
+
+// Result of a visitor callback during a traversal.
+enum WalkState: {
+    Continue;
+    Skip;
+    Stop = 2;
+}
+
+// Which of the three ternary-search-tree links to follow next.
+enum TernaryLink: {
+    LowLink;
+    EqualLink;
+    HighLink = 2;
+}
+
+// --- Tuning constants -----------------------------------------------------
+
+// Sentinel index meaning "no node".  Negative so it can never index an arena.
+static TRIE_NIL: int = -1;
+
+// Dense alphabet widths that the file instantiates.
+static ALPHABET_LOWER: int = 26;
+static ALPHABET_ASCII: int = 128;
+static ALPHABET_BYTE: int = 256;
+
+// Arena capacity used when an index is built without a size hint.
+static TRIE_INITIAL_CAPACITY: int = 64;
+
+// Growth factor for the node arena, as a percentage, so no floating point is
+// required to resize.
+static TRIE_GROWTH_PERCENT: int = 200;
+
+// Hard cap on how deep any walk is allowed to go.  Traversal stacks are sized
+// from this up front so they never reallocate mid-walk.
+static TRIE_MAX_DEPTH: int = 256;
+
+// Longest key the index will accept.  Keys past this are rejected rather than
+// silently truncated.
+static TRIE_MAX_KEY_LENGTH: int = 192;
+
+// Fixed-point scale for weights and scores: a stored weight of 1000 is 1.0.
+static WEIGHT_SCALE: int = 1000;
+
+// Default weight given to a key inserted without one.
+static WEIGHT_DEFAULT: int = 1000;
+
+// Weight floor, so a decayed entry never becomes exactly zero and drops out
+// of the ranking entirely.
+static WEIGHT_FLOOR: int = 1;
+
+// Percentage of its weight an entry keeps when the whole index is decayed.
+static WEIGHT_DECAY_PERCENT: int = 90;
+
+// Bonus, in scaled units, applied to a completion that matched exactly.
+static SCORE_EXACT_BONUS: int = 5000;
+
+// Penalty, in scaled units, charged per edit in a fuzzy match.
+static SCORE_EDIT_PENALTY: int = 1200;
+
+// Penalty per character of unmatched suffix, so short completions rank above
+// long ones when the weights tie.
+static SCORE_LENGTH_PENALTY: int = 40;
+
+// Default number of completions returned by the ranking layer.
+static DEFAULT_TOP_K: int = 8;
+
+// Upper bound on `k` regardless of what the caller asks for.
+static MAX_TOP_K: int = 64;
+
+// Default edit-distance budget for the fuzzy walk.
+static DEFAULT_EDIT_BUDGET: int = 2;
+
+// Hard cap on the edit budget; beyond this the walk degenerates into a full
+// scan and the ranking is meaningless.
+static MAX_EDIT_BUDGET: int = 4;
+
+// Number of sampled completions the statistics pass is allowed to retain.
+static TRIE_SAMPLE_LIMIT: int = 8;
+
+// Radix labels shorter than this are never split further; the child is
+// adopted wholesale instead.
+static RADIX_MIN_LABEL: int = 1;
+
+// Histogram bucket count for the fan-out distribution.
+static FANOUT_BUCKETS: int = 9;
+
+// --- Character constants --------------------------------------------------
+
+// Character-level code compares raw symbols on nearly every line, so each
+// significant character is named once here and referred to by name below.
+static CHAR_NUL: char = '\0';
+static CHAR_TAB: char = '\t';
+static CHAR_NEWLINE: char = '\n';
+static CHAR_RETURN: char = '\r';
+static CHAR_SPACE: char = ' ';
+static CHAR_MINUS: char = '-';
+static CHAR_UNDERSCORE: char = '_';
+static CHAR_DOT: char = '.';
+static CHAR_SLASH: char = '/';
+static CHAR_STAR: char = '*';
+static CHAR_QUESTION: char = '?';
+static CHAR_HASH: char = '#';
+static CHAR_ZERO: char = '0';
+static CHAR_NINE: char = '9';
+static CHAR_LOWER_A: char = 'a';
+static CHAR_LOWER_Z: char = 'z';
+static CHAR_UPPER_A: char = 'A';
+static CHAR_UPPER_Z: char = 'Z';
+
+// The apostrophe has to be spelled as a one-character string: the escaped
+// character literal form is not accepted by the lexer.
+static APOSTROPHE: string = "'";
+
+// Sentinel appended to a key before it is written into the flat serialised
+// form, marking the end of one record.
+static SERIAL_TERMINATOR: char = '\0';
+
+// --- Character classification ---------------------------------------------
+
+// True for the 26 lowercase ASCII letters, which is the dense alphabet used
+// by every `ALPHABET_LOWER` instantiation.
+fn is_lower(c: char) -> bool: {
+    return c >= CHAR_LOWER_A && c <= CHAR_LOWER_Z;
+}
+
+fn is_upper(c: char) -> bool: {
+    return c >= CHAR_UPPER_A && c <= CHAR_UPPER_Z;
+}
+
+fn is_digit(c: char) -> bool: {
+    return c >= CHAR_ZERO && c <= CHAR_NINE;
+}
+
+fn is_letter(c: char) -> bool: {
+    return is_lower(c) || is_upper(c);
+}
+
+// Word characters are what the tokeniser keeps; everything else is a break.
+fn is_word_char(c: char) -> bool: {
+    if is_letter(c): {
+        return true;
+    }
+    if is_digit(c): {
+        return true;
+    }
+    if c == CHAR_UNDERSCORE: {
+        return true;
+    }
+    if c == CHAR_MINUS: {
+        return true;
+    }
+    return false;
+}
+
+fn is_space(c: char) -> bool: {
+    if c == CHAR_SPACE: {
+        return true;
+    }
+    if c == CHAR_TAB: {
+        return true;
+    }
+    if c == CHAR_NEWLINE: {
+        return true;
+    }
+    if c == CHAR_RETURN: {
+        return true;
+    }
+    return false;
+}
+
+// Case folding.  Only ASCII is handled; anything else passes through.
+fn to_lower(c: char) -> char: {
+    if is_upper(c): {
+        return c + (CHAR_LOWER_A - CHAR_UPPER_A);
+    }
+    return c;
+}
+
+fn to_upper(c: char) -> char: {
+    if is_lower(c): {
+        return c - (CHAR_LOWER_A - CHAR_UPPER_A);
+    }
+    return c;
+}
+
+// --- Alphabet mapping -----------------------------------------------------
+
+// Maps a character onto a dense child slot, or `TRIE_NIL` when the character
+// falls outside the dense range and has to live in the sparse overflow map.
+//
+// The mapping depends on the alphabet width, which is why it is a template
+// over the non-type parameter rather than a plain function.
+template(ALPHABET: int)
+fn slot_of(c: char) -> int: {
+    if ALPHABET == 26: {
+        if is_lower(c): {
+            return c - CHAR_LOWER_A;
+        }
+        if is_upper(c): {
+            return to_lower(c) - CHAR_LOWER_A;
+        }
+        return TRIE_NIL;
+    }
+    if c < 0: {
+        return TRIE_NIL;
+    }
+    if c >= ALPHABET: {
+        return TRIE_NIL;
+    }
+    return c;
+}
+
+// Inverse of `slot_of`: turns a dense slot back into the character it stands
+// for.  Used by every routine that has to rebuild a key from a path.
+template(ALPHABET: int)
+fn char_of_slot(slot: int) -> char: {
+    if ALPHABET == 26: {
+        return CHAR_LOWER_A + slot;
+    }
+    return slot;
+}
+
+// True when `c` can be stored in a dense slot at this alphabet width.
+template(ALPHABET: int)
+fn in_alphabet(c: char) -> bool: {
+    return slot_of{ALPHABET}(c) != TRIE_NIL;
+}
+
+// Normalises a whole key: case folded, with every character outside the
+// alphabet dropped.  Returns the folded key and the number of characters that
+// were discarded.
+template(ALPHABET: int)
+fn normalize_key(key: &const shared string) -> pair{string, int}: {
+    var out = string();
+    var dropped: int = 0;
+    var index: int = 0;
+    while index < key.size(): {
+        let c = to_lower(key.at(index));
+        if in_alphabet{ALPHABET}(c): {
+            out.push_back(c);
+        } else: {
+            dropped += 1;
+        }
+        index += 1;
+    }
+    return pair{string, int}(first: out, second: dropped);
+}
+
+// --- String helpers -------------------------------------------------------
+
+// Length of the longest common prefix of two strings, in characters.
+fn common_prefix_length(a: &const shared string, b: &const shared string) -> int: {
+    var index: int = 0;
+    let limit = min(a.size(), b.size());
+    while index < limit: {
+        if a.at(index) != b.at(index): {
+            return index;
+        }
+        index += 1;
+    }
+    return limit;
+}
+
+// True when `whole` begins with `prefix`.
+fn starts_with(whole: &const shared string, prefix: &const shared string) -> bool: {
+    if prefix.size() > whole.size(): {
+        return false;
+    }
+    return common_prefix_length(whole, prefix) == prefix.size();
+}
+
+// Lexicographic three-way comparison, so the ranking layer has a total order
+// to fall back on when two weights tie.
+fn compare_strings(a: &const shared string, b: &const shared string) -> int: {
+    let shared_len = common_prefix_length(a, b);
+    if shared_len < a.size() && shared_len < b.size(): {
+        if a.at(shared_len) < b.at(shared_len): {
+            return -1;
+        }
+        return 1;
+    }
+    if a.size() < b.size(): {
+        return -1;
+    }
+    if a.size() > b.size(): {
+        return 1;
+    }
+    return 0;
+}
+
+// Concatenation that does not disturb either operand.
+fn concat(a: &const shared string, b: &const shared string) -> string: {
+    var out = string();
+    out.append(a);
+    out.append(b);
+    return out;
+}
+
+// `text` with one character appended, returned by value.
+fn push_char(text: &const shared string, c: char) -> string: {
+    var out = string();
+    out.append(text);
+    out.push_back(c);
+    return out;
+}
+
+// Splits `text` on every run of non-word characters, which is how a document
+// is turned into the key stream an index is built from.
+fn tokenize(text: &const shared string) -> vector{string}: {
+    var out = vector{string}();
+    var current = string();
+    var index: int = 0;
+    while index < text.size(): {
+        let c = to_lower(text.at(index));
+        if is_word_char(c): {
+            current.push_back(c);
+        } else: {
+            if current.size() > 0: {
+                out.push_back(current);
+                current.clear();
+            }
+        }
+        index += 1;
+    }
+    if current.size() > 0: {
+        out.push_back(current);
+    }
+    destroy current;
+    return out;
+}
+
+// --- Trie node ------------------------------------------------------------
+
+// One node of the array-mapped trie.
+//
+// The dense `children` vector always has exactly `ALPHABET` entries, each of
+// them a node index or `TRIE_NIL`.  Characters that do not map into the dense
+// range go into `overflow`, a `map{char, int}` that is empty for the vast
+// majority of nodes.  Keeping both means the structure stays exact for
+// arbitrary input without paying 256 slots per node when the input happens to
+// be lowercase words.
+template(V: type, ALPHABET: int)
+struct TrieNode: {
+
+    // --- Capacity ---------------------------------------------------------
+
+    fn width(self: &const shared) -> int: {
+        return ALPHABET;
+    }
+
+    fn is_terminal(self: &const shared) -> bool: {
+        return .terminal;
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .degree() == 0;
+    }
+
+    // Number of dense slots that are occupied.
+    fn dense_degree(self: &const shared) -> int: {
+        var found: int = 0;
+        var slot: int = 0;
+        while slot < ALPHABET: {
+            if .children[slot] != TRIE_NIL: {
+                found += 1;
+            }
+            slot += 1;
+        }
+        return found;
+    }
+
+    fn sparse_degree(self: &const shared) -> int: {
+        return .overflow.size();
+    }
+
+    fn degree(self: &const shared) -> int: {
+        return .dense_degree() + .sparse_degree();
+    }
+
+    // A node can be pruned once it holds no payload and has no children left.
+    fn prunable(self: &const shared) -> bool: {
+        if .terminal: {
+            return false;
+        }
+        return .degree() == 0;
+    }
+
+    // --- Child access -----------------------------------------------------
+
+    // Child reached by following `c`, or `TRIE_NIL`.  Dense slots are checked
+    // first because that is the overwhelmingly common case.
+    fn child_for(self: &const shared, c: char) -> int: {
+        let slot = slot_of{ALPHABET}(c);
+        if slot != TRIE_NIL: {
+            return .children[slot];
+        }
+        if .overflow.contains(c): {
+            return .overflow.at(c);
+        }
+        return TRIE_NIL;
+    }
+
+    fn child_at_slot(self: &const shared, slot: int) -> int: {
+        if slot < 0: {
+            return TRIE_NIL;
+        }
+        if slot >= ALPHABET: {
+            return TRIE_NIL;
+        }
+        return .children[slot];
+    }
+
+    // Installs `node` as the child reached by `c`, routing through whichever
+    // of the two tables can hold it.
+    fn attach(self: &unique, c: char, node: int) -> bool: {
+        let slot = slot_of{ALPHABET}(c);
+        if slot != TRIE_NIL: {
+            let existed = .children[slot] != TRIE_NIL;
+            .children[slot] = node;
+            if !existed: {
+                .live_children += 1;
+            }
+            return !existed;
+        }
+        let fresh = !.overflow.contains(c);
+        discard .overflow.insert(c, node);
+        if fresh: {
+            .live_children += 1;
+        }
+        return fresh;
+    }
+
+    // Removes the link for `c` without touching the child node itself.
+    fn detach(self: &unique, c: char) -> bool: {
+        let slot = slot_of{ALPHABET}(c);
+        if slot != TRIE_NIL: {
+            if .children[slot] == TRIE_NIL: {
+                return false;
+            }
+            .children[slot] = TRIE_NIL;
+            .live_children -= 1;
+            return true;
+        }
+        if !.overflow.contains(c): {
+            return false;
+        }
+        discard .overflow.erase(c);
+        .live_children -= 1;
+        return true;
+    }
+
+    // Every outgoing edge as a (character, node index) pair, dense slots in
+    // alphabet order first and overflow entries after them.
+    fn edges(self: &const shared) -> vector{pair{char, int}}: {
+        var out = vector{pair{char, int}}();
+        var slot: int = 0;
+        while slot < ALPHABET: {
+            if .children[slot] != TRIE_NIL: {
+                out.push_back(pair{char, int}(first: char_of_slot{ALPHABET}(slot),
+                                              second: .children[slot]));
+            }
+            slot += 1;
+        }
+        for entry: &const in .overflow: {
+            out.push_back(pair{char, int}(first: entry.first, second: entry.second));
+        }
+        return out;
+    }
+
+    // First occupied dense slot at or after `from`, or `TRIE_NIL`.
+    fn next_slot(self: &const shared, from: int) -> int: {
+        var slot = from;
+        while slot < ALPHABET: {
+            if .children[slot] != TRIE_NIL: {
+                return slot;
+            }
+            slot += 1;
+        }
+        return TRIE_NIL;
+    }
+
+    // --- Bookkeeping ------------------------------------------------------
+
+    // Returns the node to its post-construction state, keeping the dense
+    // table allocated so a recycled node does not have to resize it again.
+    fn reset(self: &unique): {
+        var slot: int = 0;
+        while slot < ALPHABET: {
+            .children[slot] = TRIE_NIL;
+            slot += 1;
+        }
+        .overflow.clear();
+        .terminal = false;
+        .weight = 0;
+        .subtree_weight = 0;
+        .subtree_keys = 0;
+        .live_children = 0;
+        .parent = TRIE_NIL;
+        .edge_char = CHAR_NUL;
+        .depth = 0;
+        .kind = NodeKind::Branch;
+    }
+
+    // Grows the dense table to the full alphabet width.  Called once when a
+    // node is handed out by the arena.
+    fn initialize(self: &unique, parent: int, edge: char, depth: int): {
+        .children.resize(ALPHABET);
+        var slot: int = 0;
+        while slot < ALPHABET: {
+            .children[slot] = TRIE_NIL;
+            slot += 1;
+        }
+        .parent = parent;
+        .edge_char = edge;
+        .depth = depth;
+        .kind = NodeKind::Branch;
+        .live = true;
+    }
+
+    fn mark_terminal(self: &unique, value: V, weight: int): {
+        .payload = value;
+        .weight = weight;
+        .terminal = true;
+        .kind = NodeKind::Terminal;
+    }
+
+    fn clear_terminal(self: &unique): {
+        .terminal = false;
+        .weight = 0;
+        .kind = NodeKind::Branch;
+    }
+
+    // Dense child slots.  Always exactly `ALPHABET` entries once initialised.
+    children: vector{int};
+
+    // Sparse spill-over for characters outside the dense alphabet.
+    overflow: map{char, int};
+
+    // Payload, meaningful only when `terminal` is set.
+    payload: V;
+
+    // Scaled weight of this key, and the aggregate weight of the subtree
+    // rooted here.  The aggregate is what the ranking layer prunes against.
+    weight: int = 0;
+    subtree_weight: int = 0;
+    subtree_keys: int = 0;
+
+    live_children: int = 0;
+    parent: int = -1;
+    edge_char: char = '\0';
+    depth: int = 0;
+    terminal: bool = false;
+    live: bool = false;
+    kind: NodeKind = NodeKind::Branch;
+}
+
+// --- Query results --------------------------------------------------------
+
+// One completion produced by a prefix or fuzzy query, before ranking.
+template(V: type)
+struct Completion: {
+
+    fn better_than(self: &const shared, other: &const shared Completion{V}) -> bool: {
+        if .score != other.score: {
+            return .score > other.score;
+        }
+        return compare_strings(.key, other.key) < 0;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append(.key);
+        text.append(" score=");
+        text.append(to_string(.score));
+        text.append(" edits=");
+        text.append(to_string(.edits));
+        return text;
+    }
+
+    key: string;
+    value: V;
+    score: int = 0;
+    weight: int = 0;
+    edits: int = 0;
+    node: int = -1;
+    kind: MatchKind = MatchKind::NoMatch;
+}
+
+// Result of walking a key as far as the index allows.
+template(V: type)
+struct WalkResult: {
+
+    fn complete(self: &const shared) -> bool: {
+        return .consumed == .requested;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("consumed=");
+        text.append(to_string(.consumed));
+        text.append(" of ");
+        text.append(to_string(.requested));
+        return text;
+    }
+
+    // Payload of the deepest terminal the walk passed through.
+    payload: V;
+
+    node: int = -1;
+    consumed: int = 0;
+    requested: int = 0;
+    last_terminal: int = -1;
+    last_terminal_length: int = 0;
+    kind: MatchKind = MatchKind::NoMatch;
+}
+
+// --- The trie -------------------------------------------------------------
+
+// Array-mapped trie mapping `string` keys onto `V` payloads.
+//
+// The arena is a `vector{TrieNode{V, ALPHABET}}`; node zero is the root and is
+// never released.  Freed nodes are threaded onto `free_list` through their
+// `parent` field so that a long-lived index does not grow without bound as
+// keys come and go.
+template(V: type, ALPHABET: int)
+struct Trie: {
+
+    // --- Basic accessors --------------------------------------------------
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn node_count(self: &const shared) -> int: {
+        return .nodes.size() - .free_count;
+    }
+
+    fn alphabet_width(self: &const shared) -> int: {
+        return ALPHABET;
+    }
+
+    fn root_index(self: &const shared) -> int: {
+        return .root;
+    }
+
+    // Borrowed view of one node, so callers can inspect fan-out without
+    // copying the dense child table.
+    fn node_at(self: &shared, index: int) -> &shared[self] TrieNode{V, ALPHABET}: {
+        return .nodes[index];
+    }
+
+    // --- Arena ------------------------------------------------------------
+
+    fn reserve(self: &unique, capacity: int): {
+        .nodes.reserve(capacity);
+    }
+
+    // Makes sure the root exists.  Every mutating entry point calls this
+    // first, so a default-constructed index is usable straight away.
+    fn ensure_root(self: &unique): {
+        if .root != TRIE_NIL: {
+            return;
+        }
+        .nodes.push_back(TrieNode{V, ALPHABET}());
+        .root = .nodes.size() - 1;
+        .nodes[.root].initialize(TRIE_NIL, CHAR_NUL, 0);
+    }
+
+    // Hands out a node, recycling from the free list when possible.
+    fn allocate_node(self: &unique, parent: int, edge: char, depth: int) -> int: {
+        if .free_list != TRIE_NIL: {
+            let recycled = .free_list;
+            .free_list = .nodes[recycled].parent;
+            .free_count -= 1;
+            .nodes[recycled].reset();
+            .nodes[recycled].initialize(parent, edge, depth);
+            .allocations += 1;
+            return recycled;
+        }
+        .nodes.push_back(TrieNode{V, ALPHABET}());
+        let fresh = .nodes.size() - 1;
+        .nodes[fresh].initialize(parent, edge, depth);
+        .allocations += 1;
+        return fresh;
+    }
+
+    // Returns a node to the free list.  The caller is responsible for having
+    // already detached it from its parent.
+    fn release_node(self: &unique, index: int): {
+        if index == .root: {
+            return;
+        }
+        .nodes[index].reset();
+        .nodes[index].live = false;
+        .nodes[index].kind = NodeKind::Pruned;
+        .nodes[index].parent = .free_list;
+        .free_list = index;
+        .free_count += 1;
+        .releases += 1;
+    }
+
+    // --- Insertion --------------------------------------------------------
+
+    // Inserts `key`, creating any missing nodes along the way.
+    //
+    // Returns `Inserted` for a new key, `Replaced` when an existing payload
+    // was overwritten, and `Rejected` when the key was empty or too long.
+    fn insert(self: &unique, key: &const shared string, value: V, weight: int) -> TrieOutcome: {
+        if key.size() == 0: {
+            return TrieOutcome::Rejected;
+        }
+        if key.size() > TRIE_MAX_KEY_LENGTH: {
+            return TrieOutcome::Rejected;
+        }
+        .ensure_root();
+
+        var current = .root;
+        var index: int = 0;
+        while index < key.size(): {
+            let c = key.at(index);
+            var next = .nodes[current].child_for(c);
+            if next == TRIE_NIL: {
+                next = .allocate_node(current, c, index + 1);
+                discard .nodes[current].attach(c, next);
+                .edges_created += 1;
+            }
+            current = next;
+            index += 1;
+        }
+
+        let was_terminal = .nodes[current].terminal;
+        .nodes[current].mark_terminal(value, weight);
+        if was_terminal: {
+            .replacements += 1;
+            .refresh_path(current);
+            return TrieOutcome::Replaced;
+        }
+        .count += 1;
+        .refresh_path(current);
+        return TrieOutcome::Inserted;
+    }
+
+    // Convenience overload spelling: insert with the default weight.
+    fn add(self: &unique, key: &const shared string, value: V) -> TrieOutcome: {
+        return .insert(key, value, WEIGHT_DEFAULT);
+    }
+
+    // Bulk insertion from a `vector{pair{string, V}}` run.  Returns how many
+    // keys were genuinely new.
+    fn insert_all(self: &unique, entries: &const shared vector{pair{string, V}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            if .insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // Bulk insertion from a weighted run, which is the shape the autocomplete
+    // layer feeds in.
+    fn insert_weighted(self: &unique,
+                       entries: &const shared vector{pair{string, pair{V, int}}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            let outcome = .insert(entry.first, entry.second.first, entry.second.second);
+            if outcome == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // Recomputes the aggregate weight and key count on the path from `node`
+    // back to the root.  Called after every mutation so the ranking layer can
+    // prune subtrees by their best possible score.
+    fn refresh_path(self: &unique, node: int): {
+        var current = node;
+        var guard: int = 0;
+        while current != TRIE_NIL && guard < TRIE_MAX_DEPTH: {
+            .recompute_node(current);
+            current = .nodes[current].parent;
+            guard += 1;
+        }
+    }
+
+    // Aggregate of one node from its own payload plus its children.
+    fn recompute_node(self: &unique, node: int): {
+        var best = 0;
+        var keys = 0;
+        if .nodes[node].terminal: {
+            best = .nodes[node].weight;
+            keys = 1;
+        }
+        var edges = .nodes[node].edges();
+        for edge: &const in edges: {
+            let child = edge.second;
+            if .nodes[child].subtree_weight > best: {
+                best = .nodes[child].subtree_weight;
+            }
+            keys += .nodes[child].subtree_keys;
+        }
+        destroy edges;
+        .nodes[node].subtree_weight = best;
+        .nodes[node].subtree_keys = keys;
+    }
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Walks `key` as far as the structure allows, recording the deepest
+    // terminal node seen on the way.  Every other query is phrased in terms
+    // of this one walk.
+    fn walk(self: &const shared, key: &const shared string) -> WalkResult{V}: {
+        var result = WalkResult{V}();
+        result.requested = key.size();
+        if .root == TRIE_NIL: {
+            return result;
+        }
+
+        var current = .root;
+        var index: int = 0;
+        while index < key.size(): {
+            let next = .nodes[current].child_for(key.at(index));
+            if next == TRIE_NIL: {
+                result.node = current;
+                result.consumed = index;
+                result.kind = MatchKind::NoMatch;
+                return result;
+            }
+            current = next;
+            index += 1;
+            if .nodes[current].terminal: {
+                result.last_terminal = current;
+                result.last_terminal_length = index;
+            }
+        }
+
+        result.node = current;
+        result.consumed = key.size();
+        if .nodes[current].terminal: {
+            result.kind = MatchKind::ExactMatch;
+            result.payload = .nodes[current].payload;
+        } else: {
+            result.kind = MatchKind::PrefixMatch;
+        }
+        return result;
+    }
+
+    // Node reached by following the whole of `key`, or `TRIE_NIL`.
+    fn find_node(self: &const shared, key: &const shared string) -> int: {
+        let result = .walk(key);
+        if result.consumed != key.size(): {
+            return TRIE_NIL;
+        }
+        return result.node;
+    }
+
+    fn contains(self: &const shared, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        return .nodes[node].terminal;
+    }
+
+    // True when any stored key begins with `prefix`.
+    fn contains_prefix(self: &const shared, prefix: &const shared string) -> bool: {
+        return .find_node(prefix) != TRIE_NIL;
+    }
+
+    // Borrowed payload for `key`, falling back to the shared `missing` value
+    // so the signature stays total.
+    fn at(self: &shared, key: &const shared string) -> &shared[self] V: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return .missing;
+        }
+        if !.nodes[node].terminal: {
+            return .missing;
+        }
+        return .nodes[node].payload;
+    }
+
+    // Stored weight of `key`, or zero.
+    fn weight_of(self: &const shared, key: &const shared string) -> int: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return 0;
+        }
+        return .nodes[node].weight;
+    }
+
+    // Bumps the weight of an existing key, saturating at the scaled maximum.
+    fn bump(self: &unique, key: &const shared string, delta: int) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        if !.nodes[node].terminal: {
+            return false;
+        }
+        .nodes[node].weight += delta;
+        if .nodes[node].weight < WEIGHT_FLOOR: {
+            .nodes[node].weight = WEIGHT_FLOOR;
+        }
+        .refresh_path(node);
+        return true;
+    }
+
+    // --- Prefix queries ---------------------------------------------------
+
+    // Longest stored key that is a prefix of `text`.  This is the query a
+    // dictionary-based tokeniser runs on every position of its input.
+    fn longest_matching_prefix(self: &const shared, text: &const shared string) -> pair{string, int}: {
+        let result = .walk(text);
+        if result.last_terminal == TRIE_NIL: {
+            return pair{string, int}(first: string(), second: 0);
+        }
+        return pair{string, int}(first: text.substr(0, result.last_terminal_length),
+                                 second: result.last_terminal);
+    }
+
+    // Longest common prefix shared by every key in the index.  Walks down
+    // while each node has exactly one edge and holds no payload of its own.
+    fn longest_common_prefix(self: &const shared) -> string: {
+        var out = string();
+        if .root == TRIE_NIL: {
+            return out;
+        }
+        var current = .root;
+        var guard: int = 0;
+        while guard < TRIE_MAX_DEPTH: {
+            if .nodes[current].terminal: {
+                return out;
+            }
+            var edges = .nodes[current].edges();
+            if edges.size() != 1: {
+                destroy edges;
+                return out;
+            }
+            out.push_back(edges[0].first);
+            current = edges[0].second;
+            destroy edges;
+            guard += 1;
+        }
+        return out;
+    }
+
+    // Longest common prefix of the keys stored under `prefix`, which is what
+    // an editor uses to complete as far as it unambiguously can.
+    fn extend_unambiguously(self: &const shared, prefix: &const shared string) -> string: {
+        var out = string();
+        out.append(prefix);
+        let start = .find_node(prefix);
+        if start == TRIE_NIL: {
+            return out;
+        }
+        var current = start;
+        var guard: int = 0;
+        while guard < TRIE_MAX_DEPTH: {
+            if .nodes[current].terminal: {
+                return out;
+            }
+            var edges = .nodes[current].edges();
+            if edges.size() != 1: {
+                destroy edges;
+                return out;
+            }
+            out.push_back(edges[0].first);
+            current = edges[0].second;
+            destroy edges;
+            guard += 1;
+        }
+        return out;
+    }
+
+    // Every key stored beneath `node`, with `prefix` already prepended.  The
+    // walk is iterative over an explicit stack of
+    // `pair{int, string}` frames rather than recursive, so a pathological key
+    // length cannot blow the machine stack.
+    fn collect_under(self: &const shared, node: int, prefix: &const shared string,
+                     limit: int) -> vector{pair{string, V}}: {
+        var out = vector{pair{string, V}}();
+        if node == TRIE_NIL: {
+            return out;
+        }
+        var stack = vector{pair{int, string}}();
+        stack.reserve(TRIE_MAX_DEPTH);
+        stack.push_back(pair{int, string}(first: node, second: prefix));
+
+        while stack.size() > 0: {
+            let frame = stack.back();
+            let here = frame.first;
+            var path = frame.second;
+            stack.pop_back();
+
+            if .nodes[here].terminal: {
+                out.push_back(pair{string, V}(first: path, second: .nodes[here].payload));
+                if limit > 0 && out.size() >= limit: {
+                    destroy stack;
+                    destroy path;
+                    return out;
+                }
+            }
+
+            // Push in reverse alphabet order so the pops come out ascending.
+            var edges = .nodes[here].edges();
+            var index = edges.size() - 1;
+            while index >= 0: {
+                var child_path = push_char(path, edges[index].first);
+                stack.push_back(pair{int, string}(first: edges[index].second,
+                                                  second: child_path));
+                destroy child_path;
+                index -= 1;
+            }
+            destroy edges;
+            destroy path;
+        }
+        destroy stack;
+        return out;
+    }
+
+    // Every key beginning with `prefix`.
+    fn keys_with_prefix(self: &const shared, prefix: &const shared string,
+                        limit: int) -> vector{pair{string, V}}: {
+        let start = .find_node(prefix);
+        return .collect_under(start, prefix, limit);
+    }
+
+    // Same query, but keeping the stored weight alongside the payload.  The
+    // nested pair is what the ranking layer consumes directly.
+    fn weighted_with_prefix(self: &const shared,
+                            prefix: &const shared string) -> vector{pair{string, pair{V, int}}}: {
+        var out = vector{pair{string, pair{V, int}}}();
+        var plain = .keys_with_prefix(prefix, 0);
+        for entry: &const in plain: {
+            let w = .weight_of(entry.first);
+            var boxed = pair{V, int}(first: entry.second, second: w);
+            out.push_back(pair{string, pair{V, int}}(first: entry.first, second: boxed));
+            destroy boxed;
+        }
+        destroy plain;
+        return out;
+    }
+
+    // Every key in the index, in lexicographic order.
+    fn to_pairs(self: &const shared) -> vector{pair{string, V}}: {
+        var empty_prefix = string();
+        var out = .collect_under(.root, empty_prefix, 0);
+        destroy empty_prefix;
+        return out;
+    }
+
+    // Keys grouped by their first character.  The deeply nested return type
+    // is exactly what a per-letter completion cache wants.
+    fn group_by_initial(self: &const shared) -> map{char, vector{pair{string, V}}}: {
+        var groups = map{char, vector{pair{string, V}}}();
+        var entries = .to_pairs();
+        for entry: &const in entries: {
+            if entry.first.size() == 0: {
+                discard entry;
+            } else: {
+                let initial = entry.first.at(0);
+                if !groups.contains(initial): {
+                    var bucket = vector{pair{string, V}}();
+                    discard groups.insert(initial, bucket);
+                    destroy bucket;
+                }
+                groups.at(initial).push_back(entry);
+            }
+        }
+        destroy entries;
+        return groups;
+    }
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Removes `key` and prunes every node that the removal made redundant.
+    //
+    // Pruning walks back towards the root and stops at the first node that is
+    // either terminal in its own right or still has another child, because
+    // that node is still needed by some other key.
+    fn erase(self: &unique, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        if !.nodes[node].terminal: {
+            return false;
+        }
+
+        .nodes[node].clear_terminal();
+        .count -= 1;
+        .prune_from(node);
+        return true;
+    }
+
+    // Releases `start` and as many of its ancestors as have become useless.
+    fn prune_from(self: &unique, start: int) -> int: {
+        var current = start;
+        var pruned: int = 0;
+        var guard: int = 0;
+        while current != TRIE_NIL && guard < TRIE_MAX_DEPTH: {
+            if current == .root: {
+                .recompute_node(current);
+                return pruned;
+            }
+            if !.nodes[current].prunable(): {
+                .refresh_path(current);
+                return pruned;
+            }
+            let parent = .nodes[current].parent;
+            let edge = .nodes[current].edge_char;
+            discard .nodes[parent].detach(edge);
+            .release_node(current);
+            pruned += 1;
+            current = parent;
+            guard += 1;
+        }
+        return pruned;
+    }
+
+    // Removes every key beginning with `prefix`.  The whole subtree below the
+    // prefix node is released in one pass and only then is the spine pruned.
+    fn erase_prefix(self: &unique, prefix: &const shared string) -> int: {
+        let start = .find_node(prefix);
+        if start == TRIE_NIL: {
+            return 0;
+        }
+        let removed = .release_subtree(start);
+        .count -= removed;
+
+        if start == .root: {
+            .recompute_node(.root);
+            return removed;
+        }
+        let parent = .nodes[start].parent;
+        let edge = .nodes[start].edge_char;
+        discard .nodes[parent].detach(edge);
+        .release_node(start);
+        discard .prune_from(parent);
+        return removed;
+    }
+
+    // Releases everything strictly below `start`, returning the number of
+    // stored keys that went with it.  `start` itself survives.
+    fn release_subtree(self: &unique, start: int) -> int: {
+        var removed: int = 0;
+        var stack = vector{int}();
+        stack.reserve(TRIE_MAX_DEPTH);
+
+        var seed = .nodes[start].edges();
+        for edge: &const in seed: {
+            stack.push_back(edge.second);
+        }
+        destroy seed;
+
+        while stack.size() > 0: {
+            let here = stack.back();
+            stack.pop_back();
+            if .nodes[here].terminal: {
+                removed += 1;
+            }
+            var edges = .nodes[here].edges();
+            for edge: &const in edges: {
+                stack.push_back(edge.second);
+            }
+            destroy edges;
+            .release_node(here);
+        }
+        destroy stack;
+
+        if .nodes[start].terminal: {
+            removed += 1;
+            .nodes[start].clear_terminal();
+        }
+        return removed;
+    }
+
+    // Drops every key whose weight has fallen below `threshold`.  Returns the
+    // number of keys evicted.
+    fn evict_below(self: &unique, threshold: int) -> int: {
+        var doomed = vector{string}();
+        var entries = .to_pairs();
+        for entry: &const in entries: {
+            if .weight_of(entry.first) < threshold: {
+                doomed.push_back(entry.first);
+            }
+        }
+        destroy entries;
+
+        var evicted: int = 0;
+        for key: &const in doomed: {
+            if .erase(key): {
+                evicted += 1;
+            }
+        }
+        destroy doomed;
+        return evicted;
+    }
+
+    // Multiplies every stored weight by `WEIGHT_DECAY_PERCENT`, which is how
+    // a long-running suggestion index forgets stale queries.
+    fn decay(self: &unique) -> int: {
+        var touched: int = 0;
+        var index: int = 0;
+        while index < .nodes.size(): {
+            if .nodes[index].live && .nodes[index].terminal: {
+                var scaled = .nodes[index].weight * WEIGHT_DECAY_PERCENT / 100;
+                if scaled < WEIGHT_FLOOR: {
+                    scaled = WEIGHT_FLOOR;
+                }
+                .nodes[index].weight = scaled;
+                touched += 1;
+            }
+            index += 1;
+        }
+        if .root != TRIE_NIL: {
+            .rebuild_aggregates();
+        }
+        return touched;
+    }
+
+    // Recomputes every subtree aggregate from the leaves upwards.  Cheaper
+    // than calling `refresh_path` once per key after a bulk mutation.
+    fn rebuild_aggregates(self: &unique): {
+        var order = .post_order();
+        for node: &const in order: {
+            .recompute_node(node);
+        }
+        destroy order;
+    }
+
+    // Node indices in post order, so children always precede their parent.
+    fn post_order(self: &const shared) -> vector{int}: {
+        var out = vector{int}();
+        if .root == TRIE_NIL: {
+            return out;
+        }
+        var stack = vector{int}();
+        stack.push_back(.root);
+        while stack.size() > 0: {
+            let here = stack.back();
+            stack.pop_back();
+            out.push_back(here);
+            var edges = .nodes[here].edges();
+            for edge: &const in edges: {
+                stack.push_back(edge.second);
+            }
+            destroy edges;
+        }
+        destroy stack;
+
+        // The stack walk produced a reversed post order; flip it in place.
+        var low: int = 0;
+        var high = out.size() - 1;
+        while low < high: {
+            swap(out[low], out[high]);
+            low += 1;
+            high -= 1;
+        }
+        return out;
+    }
+
+    // Node indices grouped by depth, which the statistics pass walks.
+    fn level_order(self: &const shared) -> vector{vector{int}}: {
+        var levels = vector{vector{int}}();
+        if .root == TRIE_NIL: {
+            return levels;
+        }
+        var frontier = vector{int}();
+        frontier.push_back(.root);
+        var depth: int = 0;
+        while frontier.size() > 0 && depth < TRIE_MAX_DEPTH: {
+            levels.push_back(frontier);
+            var next = vector{int}();
+            for node: &const in frontier: {
+                var edges = .nodes[node].edges();
+                for edge: &const in edges: {
+                    next.push_back(edge.second);
+                }
+                destroy edges;
+            }
+            frontier.clear();
+            for node: &const in next: {
+                frontier.push_back(node);
+            }
+            destroy next;
+            depth += 1;
+        }
+        destroy frontier;
+        return levels;
+    }
+
+    fn height(self: &const shared) -> int: {
+        var levels = .level_order();
+        let depth = levels.size();
+        destroy levels;
+        return depth;
+    }
+
+    // --- Wholesale operations ---------------------------------------------
+
+    fn clear(self: &unique): {
+        for node: &unique in .nodes: {
+            node.reset();
+            node.live = false;
+        }
+        .nodes.clear();
+        .root = TRIE_NIL;
+        .free_list = TRIE_NIL;
+        .free_count = 0;
+        .count = 0;
+        .allocations = 0;
+        .releases = 0;
+        .edges_created = 0;
+        .replacements = 0;
+    }
+
+    // Copies every key of this index into `target`.
+    fn copy_into(self: &const shared, target: &unique Trie{V, ALPHABET}) -> int: {
+        var entries = .weighted_with_prefix(string());
+        let added = target.insert_weighted(entries);
+        destroy entries;
+        return added;
+    }
+
+    // --- Validation -------------------------------------------------------
+
+    // Structural invariants, restated for the verifier:
+    //
+    //   1. Every live node except the root has a parent that links back to it
+    //      through `edge_char`.
+    //   2. A node's depth is one more than its parent's.
+    //   3. `count` equals the number of terminal nodes.
+    //   4. No node is both pruned and reachable.
+    fn check_validity(self: &const shared) -> bool: {
+        assert .count >= 0;
+        assert .free_count >= 0;
+        assert ALPHABET > 0;
+
+        if .root == TRIE_NIL: {
+            assert .count == 0;
+            prove .count == 0;
+            return true;
+        }
+
+        assert .nodes[.root].parent == TRIE_NIL;
+        assert .nodes[.root].depth == 0;
+        prove .nodes[.root].depth == 0;
+
+        var terminals: int = 0;
+        var order = .post_order();
+        for node: &const in order: {
+            assert .nodes[node].live;
+            if .nodes[node].terminal: {
+                terminals += 1;
+                assert .nodes[node].weight >= 0;
+            }
+            if node != .root: {
+                let parent = .nodes[node].parent;
+                assert parent != TRIE_NIL;
+                assert .nodes[parent].child_for(.nodes[node].edge_char) == node;
+                assert .nodes[node].depth == .nodes[parent].depth + 1;
+                prove .nodes[node].depth == .nodes[parent].depth + 1;
+            }
+            assert .nodes[node].subtree_keys >= 0;
+        }
+        destroy order;
+
+        assert terminals == .count;
+        prove terminals == .count;
+
+        let measured = .height();
+        assert measured <= TRIE_MAX_DEPTH;
+        prove measured <= TRIE_MAX_DEPTH;
+        return true;
+    }
+
+    // --- State ------------------------------------------------------------
+
+    // Flat arena of nodes.  Index zero is the root once `ensure_root` has run.
+    nodes: vector{TrieNode{V, ALPHABET}};
+
+    // Per-prefix completion cache, invalidated wholesale on any mutation.
+    // The nesting is deliberate: a prefix maps onto a ranked run of
+    // (completion, score) pairs.
+    cache: map{string, vector{pair{string, int}}};
+
+    // Keys deferred by `insert_weighted` when the arena was momentarily full.
+    pending: vector{pair{string, pair{V, int}}};
+
+    root: int = -1;
+    free_list: int = -1;
+    free_count: int = 0;
+    count: int = 0;
+    allocations: int = 0;
+    releases: int = 0;
+    edges_created: int = 0;
+    replacements: int = 0;
+    missing: V;
+}
+
+// --- Radix tree (Patricia) ------------------------------------------------
+
+// One node of the path-compressed trie.
+//
+// Unlike `TrieNode`, the edge into this node carries a whole `label` rather
+// than a single character, so a chain of single-child nodes collapses into one
+// node with a long label.  Children are keyed by the *first* character of
+// their label, which is enough to pick a branch because no two siblings may
+// share a leading character -- that is exactly the invariant `split_edge`
+// restores after every insertion.
+template(V: type, ALPHABET: int)
+struct RadixNode: {
+
+    fn is_terminal(self: &const shared) -> bool: {
+        return .terminal;
+    }
+
+    fn degree(self: &const shared) -> int: {
+        return .children.size();
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .children.size() == 0;
+    }
+
+    fn label_length(self: &const shared) -> int: {
+        return .label.size();
+    }
+
+    // A node with exactly one child and no payload of its own is redundant:
+    // its label can be folded into that child's.
+    fn mergeable(self: &const shared) -> bool: {
+        if .terminal: {
+            return false;
+        }
+        return .children.size() == 1;
+    }
+
+    fn first_char(self: &const shared) -> char: {
+        if .label.size() == 0: {
+            return CHAR_NUL;
+        }
+        return .label.at(0);
+    }
+
+    fn child_for(self: &const shared, c: char) -> int: {
+        if .children.contains(c): {
+            return .children.at(c);
+        }
+        return TRIE_NIL;
+    }
+
+    fn attach(self: &unique, c: char, node: int) -> bool: {
+        return .children.insert(c, node);
+    }
+
+    fn detach(self: &unique, c: char) -> bool: {
+        return .children.erase(c);
+    }
+
+    // Outgoing edges as (leading character, node) pairs.
+    fn edges(self: &const shared) -> vector{pair{char, int}}: {
+        var out = vector{pair{char, int}}();
+        for entry: &const in .children: {
+            out.push_back(pair{char, int}(first: entry.first, second: entry.second));
+        }
+        return out;
+    }
+
+    fn reset(self: &unique): {
+        .label.clear();
+        .children.clear();
+        .terminal = false;
+        .weight = 0;
+        .subtree_weight = 0;
+        .parent = TRIE_NIL;
+        .depth = 0;
+        .kind = NodeKind::Compressed;
+        .live = false;
+    }
+
+    // Compressed edge label leading into this node from its parent.
+    label: string;
+
+    // Leading character of each child's label mapped onto the child index.
+    children: map{char, int};
+
+    payload: V;
+    weight: int = 0;
+    subtree_weight: int = 0;
+    parent: int = -1;
+    depth: int = 0;
+    terminal: bool = false;
+    live: bool = false;
+    kind: NodeKind = NodeKind::Compressed;
+}
+
+// Result of trying to place a key against one compressed edge.
+struct EdgeMatch: {
+
+    fn exhausted_label(self: &const shared) -> bool: {
+        return .shared_len == .label_len;
+    }
+
+    fn exhausted_key(self: &const shared) -> bool: {
+        return .shared_len == .key_len;
+    }
+
+    fn needs_split(self: &const shared) -> bool: {
+        if .shared_len == 0: {
+            return false;
+        }
+        return .shared_len < .label_len;
+    }
+
+    shared_len: int = 0;
+    label_len: int = 0;
+    key_len: int = 0;
+    node: int = -1;
+    action: EdgeAction = EdgeAction::NoAction;
+}
+
+// Path-compressed prefix tree over `string` keys.
+//
+// The API mirrors `Trie{V, ALPHABET}` so the two can be swapped underneath the
+// autocomplete layer without touching it; the difference is purely in the
+// node count, which is bounded by twice the number of stored keys rather than
+// by their total length.
+template(V: type, ALPHABET: int)
+struct RadixTree: {
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn node_count(self: &const shared) -> int: {
+        return .nodes.size() - .free_count;
+    }
+
+    fn node_at(self: &shared, index: int) -> &shared[self] RadixNode{V, ALPHABET}: {
+        return .nodes[index];
+    }
+
+    fn ensure_root(self: &unique): {
+        if .root != TRIE_NIL: {
+            return;
+        }
+        .nodes.push_back(RadixNode{V, ALPHABET}());
+        .root = .nodes.size() - 1;
+        .nodes[.root].live = true;
+        .nodes[.root].parent = TRIE_NIL;
+        .nodes[.root].depth = 0;
+    }
+
+    fn allocate_node(self: &unique, parent: int, label: &const shared string) -> int: {
+        if .free_list != TRIE_NIL: {
+            let recycled = .free_list;
+            .free_list = .nodes[recycled].parent;
+            .free_count -= 1;
+            .nodes[recycled].reset();
+            .nodes[recycled].label.append(label);
+            .nodes[recycled].parent = parent;
+            .nodes[recycled].live = true;
+            return recycled;
+        }
+        .nodes.push_back(RadixNode{V, ALPHABET}());
+        let fresh = .nodes.size() - 1;
+        .nodes[fresh].label.append(label);
+        .nodes[fresh].parent = parent;
+        .nodes[fresh].live = true;
+        return fresh;
+    }
+
+    fn release_node(self: &unique, index: int): {
+        if index == .root: {
+            return;
+        }
+        .nodes[index].reset();
+        .nodes[index].parent = .free_list;
+        .free_list = index;
+        .free_count += 1;
+    }
+
+    // --- Edge splitting ---------------------------------------------------
+
+    // Splits the edge into `node` after `at` characters.
+    //
+    // Before:   parent --"abcdef"--> node
+    // After:    parent --"abc"--> fresh --"def"--> node
+    //
+    // The freshly interposed node inherits nothing but the shared prefix, so
+    // it is a plain branch until the caller marks it terminal or hangs another
+    // child off it.
+    fn split_edge(self: &unique, node: int, at: int) -> int: {
+        let parent = .nodes[node].parent;
+        var head = .nodes[node].label.substr(0, at);
+        var tail = .nodes[node].label.substr(at, .nodes[node].label.size() - at);
+
+        let fresh = .allocate_node(parent, head);
+        .nodes[fresh].depth = .nodes[node].depth;
+        .nodes[fresh].kind = NodeKind::Compressed;
+
+        // Re-point the parent at the new head node.
+        discard .nodes[parent].detach(head.at(0));
+        discard .nodes[parent].attach(head.at(0), fresh);
+
+        // The old node keeps only the tail of its former label.
+        .nodes[node].label.clear();
+        .nodes[node].label.append(tail);
+        .nodes[node].parent = fresh;
+        .nodes[node].depth = .nodes[fresh].depth + 1;
+        discard .nodes[fresh].attach(tail.at(0), node);
+
+        destroy head;
+        destroy tail;
+        .splits += 1;
+        return fresh;
+    }
+
+    // Folds a redundant single-child node into that child, which is the
+    // inverse of `split_edge` and the step that keeps deletion from leaving
+    // long chains of one-child nodes behind.
+    fn merge_edge(self: &unique, node: int) -> bool: {
+        if node == .root: {
+            return false;
+        }
+        if !.nodes[node].mergeable(): {
+            return false;
+        }
+        var edges = .nodes[node].edges();
+        if edges.size() != 1: {
+            destroy edges;
+            return false;
+        }
+        let child = edges[0].second;
+        destroy edges;
+
+        let parent = .nodes[node].parent;
+        var combined = concat(.nodes[node].label, .nodes[child].label);
+
+        discard .nodes[parent].detach(.nodes[node].label.at(0));
+        .nodes[child].label.clear();
+        .nodes[child].label.append(combined);
+        .nodes[child].parent = parent;
+        .nodes[child].depth = .nodes[parent].depth + 1;
+        discard .nodes[parent].attach(combined.at(0), child);
+
+        destroy combined;
+        .release_node(node);
+        .merges += 1;
+        return true;
+    }
+
+    // --- Insertion --------------------------------------------------------
+
+    // Inserts `key`, splitting whatever edges stand in the way.
+    fn insert(self: &unique, key: &const shared string, value: V, weight: int) -> TrieOutcome: {
+        if key.size() == 0: {
+            return TrieOutcome::Rejected;
+        }
+        if key.size() > TRIE_MAX_KEY_LENGTH: {
+            return TrieOutcome::Rejected;
+        }
+        .ensure_root();
+
+        var current = .root;
+        var offset: int = 0;
+        var guard: int = 0;
+        while guard < TRIE_MAX_DEPTH: {
+            guard += 1;
+            if offset == key.size(): {
+                // The key ended exactly on a node boundary.
+                let was = .nodes[current].terminal;
+                .nodes[current].terminal = true;
+                .nodes[current].payload = value;
+                .nodes[current].weight = weight;
+                if was: {
+                    return TrieOutcome::Replaced;
+                }
+                .count += 1;
+                return TrieOutcome::Inserted;
+            }
+
+            let lead = key.at(offset);
+            let child = .nodes[current].child_for(lead);
+            if child == TRIE_NIL: {
+                // No edge starts with this character: hang the whole
+                // remaining suffix off `current` as one compressed edge.
+                var suffix = key.substr(offset, key.size() - offset);
+                let fresh = .allocate_node(current, suffix);
+                .nodes[fresh].depth = .nodes[current].depth + 1;
+                .nodes[fresh].terminal = true;
+                .nodes[fresh].payload = value;
+                .nodes[fresh].weight = weight;
+                discard .nodes[current].attach(lead, fresh);
+                destroy suffix;
+                .count += 1;
+                return TrieOutcome::Inserted;
+            }
+
+            var remainder = key.substr(offset, key.size() - offset);
+            let shared_len = common_prefix_length(remainder, .nodes[child].label);
+            let label_len = .nodes[child].label.size();
+            destroy remainder;
+
+            if shared_len == label_len: {
+                // The whole label was consumed; descend and keep going.
+                current = child;
+                offset += shared_len;
+            } else: {
+                // Partial overlap: interpose a node at the divergence point
+                // and retry from there.
+                let interposed = .split_edge(child, shared_len);
+                current = interposed;
+                offset += shared_len;
+            }
+        }
+        return TrieOutcome::Overflowed;
+    }
+
+    fn add(self: &unique, key: &const shared string, value: V) -> TrieOutcome: {
+        return .insert(key, value, WEIGHT_DEFAULT);
+    }
+
+    fn insert_all(self: &unique, entries: &const shared vector{pair{string, V}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            if .insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Node whose accumulated label spells exactly `key`, or `TRIE_NIL`.
+    fn find_node(self: &const shared, key: &const shared string) -> int: {
+        if .root == TRIE_NIL: {
+            return TRIE_NIL;
+        }
+        var current = .root;
+        var offset: int = 0;
+        var guard: int = 0;
+        while offset < key.size() && guard < TRIE_MAX_DEPTH: {
+            guard += 1;
+            let child = .nodes[current].child_for(key.at(offset));
+            if child == TRIE_NIL: {
+                return TRIE_NIL;
+            }
+            var remainder = key.substr(offset, key.size() - offset);
+            let shared_len = common_prefix_length(remainder, .nodes[child].label);
+            destroy remainder;
+            if shared_len != .nodes[child].label.size(): {
+                return TRIE_NIL;
+            }
+            current = child;
+            offset += shared_len;
+        }
+        return current;
+    }
+
+    // Node covering `prefix`, even when the prefix stops in the middle of a
+    // compressed label.  Prefix queries need this looser walk.
+    fn find_prefix_node(self: &const shared, prefix: &const shared string) -> int: {
+        if .root == TRIE_NIL: {
+            return TRIE_NIL;
+        }
+        var current = .root;
+        var offset: int = 0;
+        var guard: int = 0;
+        while offset < prefix.size() && guard < TRIE_MAX_DEPTH: {
+            guard += 1;
+            let child = .nodes[current].child_for(prefix.at(offset));
+            if child == TRIE_NIL: {
+                return TRIE_NIL;
+            }
+            var remainder = prefix.substr(offset, prefix.size() - offset);
+            let shared_len = common_prefix_length(remainder, .nodes[child].label);
+            let label_len = .nodes[child].label.size();
+            let rest_len = remainder.size();
+            destroy remainder;
+            if shared_len == rest_len: {
+                // The prefix ran out inside this label: the child covers it.
+                return child;
+            }
+            if shared_len != label_len: {
+                return TRIE_NIL;
+            }
+            current = child;
+            offset += shared_len;
+        }
+        return current;
+    }
+
+    fn contains(self: &const shared, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        return .nodes[node].terminal;
+    }
+
+    fn at(self: &shared, key: &const shared string) -> &shared[self] V: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return .missing;
+        }
+        return .nodes[node].payload;
+    }
+
+    // Full key spelled by the path from the root down to `node`.
+    fn path_of(self: &const shared, node: int) -> string: {
+        var parts = vector{string}();
+        var current = node;
+        var guard: int = 0;
+        while current != TRIE_NIL && current != .root && guard < TRIE_MAX_DEPTH: {
+            parts.push_back(.nodes[current].label);
+            current = .nodes[current].parent;
+            guard += 1;
+        }
+        var out = string();
+        var index = parts.size() - 1;
+        while index >= 0: {
+            out.append(parts[index]);
+            index -= 1;
+        }
+        destroy parts;
+        return out;
+    }
+
+    // Every key stored beneath `node`, prefixed by `base`.
+    fn collect_under(self: &const shared, node: int,
+                     base: &const shared string) -> vector{pair{string, V}}: {
+        var out = vector{pair{string, V}}();
+        if node == TRIE_NIL: {
+            return out;
+        }
+        var stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}(first: node, second: base));
+        while stack.size() > 0: {
+            let frame = stack.back();
+            let here = frame.first;
+            var path = frame.second;
+            stack.pop_back();
+
+            if .nodes[here].terminal: {
+                out.push_back(pair{string, V}(first: path, second: .nodes[here].payload));
+            }
+            var edges = .nodes[here].edges();
+            for edge: &const in edges: {
+                var child_path = concat(path, .nodes[edge.second].label);
+                stack.push_back(pair{int, string}(first: edge.second, second: child_path));
+                destroy child_path;
+            }
+            destroy edges;
+            destroy path;
+        }
+        destroy stack;
+        return out;
+    }
+
+    fn keys_with_prefix(self: &const shared,
+                        prefix: &const shared string) -> vector{pair{string, V}}: {
+        let node = .find_prefix_node(prefix);
+        if node == TRIE_NIL: {
+            return vector{pair{string, V}}();
+        }
+        var base = .path_of(node);
+        var out = .collect_under(node, base);
+        destroy base;
+        return out;
+    }
+
+    fn to_pairs(self: &const shared) -> vector{pair{string, V}}: {
+        var base = string();
+        var out = .collect_under(.root, base);
+        destroy base;
+        return out;
+    }
+
+    // Longest stored key that prefixes `text`, walked label by label.
+    fn longest_matching_prefix(self: &const shared,
+                               text: &const shared string) -> pair{string, int}: {
+        var best = string();
+        var best_node: int = -1;
+        if .root == TRIE_NIL: {
+            return pair{string, int}(first: best, second: best_node);
+        }
+        var current = .root;
+        var offset: int = 0;
+        var guard: int = 0;
+        while offset < text.size() && guard < TRIE_MAX_DEPTH: {
+            guard += 1;
+            let child = .nodes[current].child_for(text.at(offset));
+            if child == TRIE_NIL: {
+                return pair{string, int}(first: best, second: best_node);
+            }
+            var remainder = text.substr(offset, text.size() - offset);
+            let shared_len = common_prefix_length(remainder, .nodes[child].label);
+            destroy remainder;
+            if shared_len != .nodes[child].label.size(): {
+                return pair{string, int}(first: best, second: best_node);
+            }
+            current = child;
+            offset += shared_len;
+            if .nodes[current].terminal: {
+                best.clear();
+                best.append(text.substr(0, offset));
+                best_node = current;
+            }
+        }
+        return pair{string, int}(first: best, second: best_node);
+    }
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Removes `key` and merges away any node the removal made redundant.
+    fn erase(self: &unique, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        if !.nodes[node].terminal: {
+            return false;
+        }
+        .nodes[node].terminal = false;
+        .nodes[node].weight = 0;
+        .count -= 1;
+
+        var current = node;
+        var guard: int = 0;
+        while current != TRIE_NIL && current != .root && guard < TRIE_MAX_DEPTH: {
+            guard += 1;
+            if .nodes[current].is_leaf() && !.nodes[current].terminal: {
+                let parent = .nodes[current].parent;
+                discard .nodes[parent].detach(.nodes[current].label.at(0));
+                .release_node(current);
+                current = parent;
+            } else: {
+                discard .merge_edge(current);
+                current = TRIE_NIL;
+            }
+        }
+        if current != TRIE_NIL && current != .root: {
+            discard .merge_edge(current);
+        }
+        return true;
+    }
+
+    fn clear(self: &unique): {
+        for node: &unique in .nodes: {
+            node.reset();
+        }
+        .nodes.clear();
+        .root = TRIE_NIL;
+        .free_list = TRIE_NIL;
+        .free_count = 0;
+        .count = 0;
+        .splits = 0;
+        .merges = 0;
+    }
+
+    // --- Validation -------------------------------------------------------
+
+    // 1. No two siblings share a leading character.
+    // 2. Every non-root node has a non-empty label.
+    // 3. No node is redundant, i.e. no non-terminal node has exactly one
+    //    child, because `merge_edge` would have folded it away.
+    fn check_validity(self: &const shared) -> bool: {
+        assert .count >= 0;
+        if .root == TRIE_NIL: {
+            assert .count == 0;
+            prove .count == 0;
+            return true;
+        }
+        var stack = vector{int}();
+        stack.push_back(.root);
+        var terminals: int = 0;
+        while stack.size() > 0: {
+            let here = stack.back();
+            stack.pop_back();
+            if .nodes[here].terminal: {
+                terminals += 1;
+            }
+            if here != .root: {
+                assert .nodes[here].label.size() >= RADIX_MIN_LABEL;
+                prove .nodes[here].label.size() >= RADIX_MIN_LABEL;
+                assert !.nodes[here].mergeable();
+            }
+            var seen = set{char}();
+            var edges = .nodes[here].edges();
+            for edge: &const in edges: {
+                assert seen.insert(edge.first);
+                assert .nodes[edge.second].parent == here;
+                assert .nodes[edge.second].label.at(0) == edge.first;
+                stack.push_back(edge.second);
+            }
+            destroy edges;
+            destroy seen;
+        }
+        destroy stack;
+        assert terminals == .count;
+        prove terminals == .count;
+        return true;
+    }
+
+    nodes: vector{RadixNode{V, ALPHABET}};
+
+    // Cached expansions, keyed by prefix, exactly as in `Trie`.
+    cache: map{string, vector{pair{string, int}}};
+
+    root: int = -1;
+    free_list: int = -1;
+    free_count: int = 0;
+    count: int = 0;
+    splits: int = 0;
+    merges: int = 0;
+    missing: V;
+}
+
+// --- Ternary search tree --------------------------------------------------
+
+// One node of a ternary search tree.
+//
+// Each node stores a single split character and three links: `low` for keys
+// whose next character sorts before it, `high` for keys that sort after, and
+// `equal` for keys that matched and therefore continue at the next character.
+// The result is a binary search tree of characters layered over a trie, which
+// is why it needs no per-node child table at all and stays compact for sparse
+// alphabets where `Trie{V, 256}` would waste most of its slots.
+template(V: type)
+struct TernaryNode: {
+
+    fn is_terminal(self: &const shared) -> bool: {
+        return .terminal;
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        if .low != TRIE_NIL: {
+            return false;
+        }
+        if .equal != TRIE_NIL: {
+            return false;
+        }
+        return .high == TRIE_NIL;
+    }
+
+    fn degree(self: &const shared) -> int: {
+        var found: int = 0;
+        if .low != TRIE_NIL: {
+            found += 1;
+        }
+        if .equal != TRIE_NIL: {
+            found += 1;
+        }
+        if .high != TRIE_NIL: {
+            found += 1;
+        }
+        return found;
+    }
+
+    // Link selected by comparing `c` against this node's split character.
+    fn link_for(self: &const shared, c: char) -> TernaryLink: {
+        if c < .split: {
+            return TernaryLink::LowLink;
+        }
+        if c > .split: {
+            return TernaryLink::HighLink;
+        }
+        return TernaryLink::EqualLink;
+    }
+
+    fn follow(self: &const shared, which: TernaryLink) -> int: {
+        if which == TernaryLink::LowLink: {
+            return .low;
+        }
+        if which == TernaryLink::HighLink: {
+            return .high;
+        }
+        return .equal;
+    }
+
+    fn set_link(self: &unique, which: TernaryLink, node: int): {
+        if which == TernaryLink::LowLink: {
+            .low = node;
+        } else: {
+            if which == TernaryLink::HighLink: {
+                .high = node;
+            } else: {
+                .equal = node;
+            }
+        }
+    }
+
+    fn reset(self: &unique): {
+        .split = CHAR_NUL;
+        .low = TRIE_NIL;
+        .equal = TRIE_NIL;
+        .high = TRIE_NIL;
+        .terminal = false;
+        .weight = 0;
+        .live = false;
+    }
+
+    split: char = '\0';
+    payload: V;
+    weight: int = 0;
+    low: int = -1;
+    equal: int = -1;
+    high: int = -1;
+    depth: int = 0;
+    terminal: bool = false;
+    live: bool = false;
+}
+
+// Ternary search tree mapping `string` keys onto `V` payloads.
+//
+// Kept deliberately un-parameterised on the alphabet: three-way branching does
+// not care how wide the character set is, which is the whole point of picking
+// this representation over `Trie{V, ALPHABET}`.
+template(V: type)
+struct TernaryTree: {
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn node_count(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn node_at(self: &shared, index: int) -> &shared[self] TernaryNode{V}: {
+        return .nodes[index];
+    }
+
+    fn allocate_node(self: &unique, c: char, depth: int) -> int: {
+        .nodes.push_back(TernaryNode{V}());
+        let fresh = .nodes.size() - 1;
+        .nodes[fresh].split = c;
+        .nodes[fresh].depth = depth;
+        .nodes[fresh].live = true;
+        return fresh;
+    }
+
+    // --- Insertion --------------------------------------------------------
+
+    // Iterative insertion.  The tricky part is that the first character of a
+    // key may have to become the root, so the root link is patched after the
+    // walk rather than during it.
+    fn insert(self: &unique, key: &const shared string, value: V, weight: int) -> TrieOutcome: {
+        if key.size() == 0: {
+            return TrieOutcome::Rejected;
+        }
+        if .root == TRIE_NIL: {
+            .root = .allocate_node(key.at(0), 0);
+        }
+
+        var current = .root;
+        var index: int = 0;
+        var guard: int = 0;
+        while guard < TRIE_MAX_DEPTH * 4: {
+            guard += 1;
+            let c = key.at(index);
+            let which = .nodes[current].link_for(c);
+
+            if which == TernaryLink::EqualLink: {
+                if index + 1 == key.size(): {
+                    let was = .nodes[current].terminal;
+                    .nodes[current].terminal = true;
+                    .nodes[current].payload = value;
+                    .nodes[current].weight = weight;
+                    if was: {
+                        return TrieOutcome::Replaced;
+                    }
+                    .count += 1;
+                    return TrieOutcome::Inserted;
+                }
+                if .nodes[current].equal == TRIE_NIL: {
+                    let fresh = .allocate_node(key.at(index + 1),
+                                               .nodes[current].depth + 1);
+                    .nodes[current].equal = fresh;
+                }
+                current = .nodes[current].equal;
+                index += 1;
+            } else: {
+                let next = .nodes[current].follow(which);
+                if next == TRIE_NIL: {
+                    let fresh = .allocate_node(c, .nodes[current].depth);
+                    .nodes[current].set_link(which, fresh);
+                    current = fresh;
+                } else: {
+                    current = next;
+                }
+            }
+        }
+        return TrieOutcome::Overflowed;
+    }
+
+    fn add(self: &unique, key: &const shared string, value: V) -> TrieOutcome: {
+        return .insert(key, value, WEIGHT_DEFAULT);
+    }
+
+    fn insert_all(self: &unique, entries: &const shared vector{pair{string, V}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            if .insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Node whose `equal` chain spells exactly `key`, or `TRIE_NIL`.
+    fn find_node(self: &const shared, key: &const shared string) -> int: {
+        if .root == TRIE_NIL: {
+            return TRIE_NIL;
+        }
+        if key.size() == 0: {
+            return TRIE_NIL;
+        }
+        var current = .root;
+        var index: int = 0;
+        var guard: int = 0;
+        while current != TRIE_NIL && guard < TRIE_MAX_DEPTH * 4: {
+            guard += 1;
+            let c = key.at(index);
+            if c < .nodes[current].split: {
+                current = .nodes[current].low;
+            } else: {
+                if c > .nodes[current].split: {
+                    current = .nodes[current].high;
+                } else: {
+                    if index + 1 == key.size(): {
+                        return current;
+                    }
+                    current = .nodes[current].equal;
+                    index += 1;
+                }
+            }
+        }
+        return TRIE_NIL;
+    }
+
+    fn contains(self: &const shared, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        return .nodes[node].terminal;
+    }
+
+    fn at(self: &shared, key: &const shared string) -> &shared[self] V: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return .missing;
+        }
+        return .nodes[node].payload;
+    }
+
+    // Every key stored in the subtree rooted at `node`, with `prefix` already
+    // spelled out.  Walked with an explicit frame stack, like everywhere else
+    // in this file.
+    fn collect_under(self: &const shared, node: int,
+                     prefix: &const shared string) -> vector{pair{string, V}}: {
+        var out = vector{pair{string, V}}();
+        if node == TRIE_NIL: {
+            return out;
+        }
+        var stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}(first: node, second: prefix));
+        while stack.size() > 0: {
+            let frame = stack.back();
+            let here = frame.first;
+            var path = frame.second;
+            stack.pop_back();
+
+            if .nodes[here].high != TRIE_NIL: {
+                stack.push_back(pair{int, string}(first: .nodes[here].high, second: path));
+            }
+            if .nodes[here].low != TRIE_NIL: {
+                stack.push_back(pair{int, string}(first: .nodes[here].low, second: path));
+            }
+
+            var extended = push_char(path, .nodes[here].split);
+            if .nodes[here].terminal: {
+                out.push_back(pair{string, V}(first: extended,
+                                              second: .nodes[here].payload));
+            }
+            if .nodes[here].equal != TRIE_NIL: {
+                stack.push_back(pair{int, string}(first: .nodes[here].equal,
+                                                  second: extended));
+            }
+            destroy extended;
+            destroy path;
+        }
+        destroy stack;
+        return out;
+    }
+
+    // Every key beginning with `prefix`.  The prefix node's `equal` subtree
+    // holds the continuations; the prefix itself is reported separately when
+    // it happens to be a stored key.
+    fn keys_with_prefix(self: &const shared,
+                        prefix: &const shared string) -> vector{pair{string, V}}: {
+        var out = vector{pair{string, V}}();
+        let node = .find_node(prefix);
+        if node == TRIE_NIL: {
+            return out;
+        }
+        if .nodes[node].terminal: {
+            out.push_back(pair{string, V}(first: prefix, second: .nodes[node].payload));
+        }
+        var deeper = .collect_under(.nodes[node].equal, prefix);
+        for entry: &const in deeper: {
+            out.push_back(entry);
+        }
+        destroy deeper;
+        return out;
+    }
+
+    fn to_pairs(self: &const shared) -> vector{pair{string, V}}: {
+        var base = string();
+        var out = .collect_under(.root, base);
+        destroy base;
+        return out;
+    }
+
+    // Longest stored key that prefixes `text`.
+    fn longest_matching_prefix(self: &const shared, text: &const shared string) -> string: {
+        var best = string();
+        if .root == TRIE_NIL: {
+            return best;
+        }
+        var current = .root;
+        var index: int = 0;
+        var guard: int = 0;
+        while current != TRIE_NIL && index < text.size() && guard < TRIE_MAX_DEPTH * 4: {
+            guard += 1;
+            let c = text.at(index);
+            if c < .nodes[current].split: {
+                current = .nodes[current].low;
+            } else: {
+                if c > .nodes[current].split: {
+                    current = .nodes[current].high;
+                } else: {
+                    index += 1;
+                    if .nodes[current].terminal: {
+                        best.clear();
+                        best.append(text.substr(0, index));
+                    }
+                    current = .nodes[current].equal;
+                }
+            }
+        }
+        return best;
+    }
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Marks `key` as no longer stored.  Nodes are only unlinked when they
+    // become wholly unreachable, which for a ternary tree means all three
+    // links are nil and the node carries no payload.
+    fn erase(self: &unique, key: &const shared string) -> bool: {
+        let node = .find_node(key);
+        if node == TRIE_NIL: {
+            return false;
+        }
+        if !.nodes[node].terminal: {
+            return false;
+        }
+        .nodes[node].terminal = false;
+        .nodes[node].weight = 0;
+        .count -= 1;
+        .pending_prune += 1;
+        if .pending_prune >= 16: {
+            discard .compact();
+        }
+        return true;
+    }
+
+    // Rebuilds the tree from its surviving keys, which is the simplest way to
+    // reclaim the nodes that repeated erasures left dangling.  The rebuild
+    // inserts in median-first order so the resulting tree is balanced.
+    fn compact(self: &unique) -> int: {
+        var entries = .to_pairs();
+        let before = .nodes.size();
+        .nodes.clear();
+        .root = TRIE_NIL;
+        .count = 0;
+        .pending_prune = 0;
+
+        var ordered = sort_pairs_by_key{V}(entries);
+        .insert_balanced(ordered, 0, ordered.size() - 1);
+        destroy ordered;
+        destroy entries;
+        return before - .nodes.size();
+    }
+
+    // Inserts the half-open run `[low, high]` median first, which keeps the
+    // low/high links of the rebuilt tree balanced.
+    fn insert_balanced(self: &unique, entries: &const shared vector{pair{string, V}},
+                       low: int, high: int): {
+        if low > high: {
+            return;
+        }
+        var stack = vector{pair{int, int}}();
+        stack.push_back(pair{int, int}(first: low, second: high));
+        while stack.size() > 0: {
+            let frame = stack.back();
+            stack.pop_back();
+            let begin = frame.first;
+            let end = frame.second;
+            if begin > end: {
+                discard frame;
+            } else: {
+                let middle = begin + (end - begin) / 2;
+                discard .insert(entries[middle].first, entries[middle].second,
+                                WEIGHT_DEFAULT);
+                stack.push_back(pair{int, int}(first: begin, second: middle - 1));
+                stack.push_back(pair{int, int}(first: middle + 1, second: end));
+            }
+        }
+        destroy stack;
+    }
+
+    fn clear(self: &unique): {
+        for node: &unique in .nodes: {
+            node.reset();
+        }
+        .nodes.clear();
+        .root = TRIE_NIL;
+        .count = 0;
+        .pending_prune = 0;
+    }
+
+    // --- Validation -------------------------------------------------------
+
+    // 1. Low links hold strictly smaller split characters, high links
+    //    strictly larger.
+    // 2. `count` equals the number of terminal nodes.
+    fn check_validity(self: &const shared) -> bool: {
+        assert .count >= 0;
+        if .root == TRIE_NIL: {
+            assert .count == 0;
+            prove .count == 0;
+            return true;
+        }
+        var stack = vector{int}();
+        stack.push_back(.root);
+        var terminals: int = 0;
+        while stack.size() > 0: {
+            let here = stack.back();
+            stack.pop_back();
+            if .nodes[here].terminal: {
+                terminals += 1;
+            }
+            if .nodes[here].low != TRIE_NIL: {
+                assert .nodes[.nodes[here].low].split < .nodes[here].split;
+                prove .nodes[.nodes[here].low].split < .nodes[here].split;
+                stack.push_back(.nodes[here].low);
+            }
+            if .nodes[here].high != TRIE_NIL: {
+                assert .nodes[.nodes[here].high].split > .nodes[here].split;
+                prove .nodes[.nodes[here].high].split > .nodes[here].split;
+                stack.push_back(.nodes[here].high);
+            }
+            if .nodes[here].equal != TRIE_NIL: {
+                stack.push_back(.nodes[here].equal);
+            }
+        }
+        destroy stack;
+        assert terminals == .count;
+        prove terminals == .count;
+        return true;
+    }
+
+    nodes: vector{TernaryNode{V}};
+    root: int = -1;
+    count: int = 0;
+    pending_prune: int = 0;
+    missing: V;
+}
+
+// --- Bounded top-k selection ----------------------------------------------
+
+// A fixed-capacity best-of collection over `Completion{V}` values.
+//
+// Completions arrive in trie order, which is lexicographic and has nothing to
+// do with their score, so the ranking layer needs a running "best k so far".
+// Keeping the run sorted by insertion is cheap because `k` is small -- eight
+// by default -- and it means the caller never has to sort the whole candidate
+// set, which for a one-character prefix can be the entire index.
+template(V: type)
+struct TopK: {
+
+    fn size(self: &const shared) -> int: {
+        return .entries.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .entries.size() == 0;
+    }
+
+    fn full(self: &const shared) -> bool: {
+        return .entries.size() >= .capacity;
+    }
+
+    fn configure(self: &unique, k: int): {
+        var bounded = k;
+        if bounded < 1: {
+            bounded = 1;
+        }
+        if bounded > MAX_TOP_K: {
+            bounded = MAX_TOP_K;
+        }
+        .capacity = bounded;
+        .entries.reserve(bounded);
+    }
+
+    // Score of the weakest entry currently held, or a very negative sentinel
+    // while the collection has room to spare.  Callers prune their search
+    // against this, which is what makes the whole thing worth having.
+    fn cutoff(self: &const shared) -> int: {
+        if .entries.size() < .capacity: {
+            return -2147483647;
+        }
+        return .entries[.entries.size() - 1].score;
+    }
+
+    // True when a candidate scoring `score` could still make the cut.
+    fn admits(self: &const shared, score: int) -> bool: {
+        if .entries.size() < .capacity: {
+            return true;
+        }
+        return score > .cutoff();
+    }
+
+    // Inserts `candidate` in score order, dropping the weakest entry when the
+    // collection is already at capacity.
+    fn offer(self: &unique, candidate: &const shared Completion{V}) -> bool: {
+        .considered += 1;
+        if !.admits(candidate.score): {
+            .rejected += 1;
+            return false;
+        }
+
+        var position = .entries.size();
+        var index: int = 0;
+        while index < .entries.size(): {
+            if candidate.better_than(.entries[index]): {
+                position = index;
+                index = .entries.size();
+            } else: {
+                index += 1;
+            }
+        }
+
+        .entries.insert(position, candidate);
+        if .entries.size() > .capacity: {
+            .entries.pop_back();
+            .evicted += 1;
+        }
+        .accepted += 1;
+        return true;
+    }
+
+    // The ranked run, best first.
+    fn ranked(self: &const shared) -> vector{Completion{V}}: {
+        var out = vector{Completion{V}}();
+        for entry: &const in .entries: {
+            out.push_back(entry);
+        }
+        return out;
+    }
+
+    // The same run reduced to (key, score) pairs, which is the shape the
+    // per-prefix cache stores.
+    fn as_scored_keys(self: &const shared) -> vector{pair{string, int}}: {
+        var out = vector{pair{string, int}}();
+        for entry: &const in .entries: {
+            out.push_back(pair{string, int}(first: entry.key, second: entry.score));
+        }
+        return out;
+    }
+
+    fn clear(self: &unique): {
+        .entries.clear();
+        .considered = 0;
+        .accepted = 0;
+        .rejected = 0;
+        .evicted = 0;
+    }
+
+    // Ranked entries, best first, never longer than `capacity`.
+    entries: vector{Completion{V}};
+
+    capacity: int = 8;
+    considered: int = 0;
+    accepted: int = 0;
+    rejected: int = 0;
+    evicted: int = 0;
+}
+
+// --- Fuzzy matching -------------------------------------------------------
+
+// One row of the edit-distance table, paired with the node it was computed at.
+//
+// The fuzzy walk carries a single dynamic-programming row down the trie: at
+// each node the row is extended by one character, and the whole subtree is
+// abandoned as soon as every cell in the row exceeds the budget.  That is the
+// entire trick -- it turns `O(keys * length)` into something closer to
+// `O(reachable nodes)`.
+struct EditRow: {
+
+    fn width(self: &const shared) -> int: {
+        return .cells.size();
+    }
+
+    fn last(self: &const shared) -> int: {
+        return .cells[.cells.size() - 1];
+    }
+
+    // Smallest value anywhere in the row: the best any descendant could
+    // possibly do, and therefore the pruning bound.
+    fn best(self: &const shared) -> int: {
+        var lowest = TRIE_MAX_KEY_LENGTH;
+        for cell: &const in .cells: {
+            if cell < lowest: {
+                lowest = cell;
+            }
+        }
+        return lowest;
+    }
+
+    fn exceeds(self: &const shared, budget: int) -> bool: {
+        return .best() > budget;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("row depth=");
+        text.append(to_string(.depth));
+        text.append(" best=");
+        text.append(to_string(.best()));
+        return text;
+    }
+
+    cells: vector{int};
+    node: int = -1;
+    depth: int = 0;
+    edge: char = '\0';
+}
+
+// Bounded-edit-distance search over a `Trie{V, ALPHABET}`.
+//
+// Kept as its own struct rather than a method so the budget, the counters and
+// the seed row can be configured once and reused across queries.
+template(V: type, ALPHABET: int)
+struct FuzzyMatcher: {
+
+    fn configure(self: &unique, budget: int): {
+        var bounded = budget;
+        if bounded < 0: {
+            bounded = 0;
+        }
+        if bounded > MAX_EDIT_BUDGET: {
+            bounded = MAX_EDIT_BUDGET;
+        }
+        .budget = bounded;
+    }
+
+    // The row for the root: distance `i` from the empty string to the first
+    // `i` characters of the pattern.
+    fn seed_row(self: &const shared, pattern: &const shared string) -> EditRow: {
+        var row = EditRow();
+        var index: int = 0;
+        while index <= pattern.size(): {
+            row.cells.push_back(index);
+            index += 1;
+        }
+        row.depth = 0;
+        row.edge = CHAR_NUL;
+        return row;
+    }
+
+    // Extends `previous` by the character `c`, which is the standard
+    // Levenshtein recurrence with the three costs spelled out.
+    fn step_row(self: &const shared, previous: &const shared EditRow, c: char,
+                pattern: &const shared string) -> EditRow: {
+        var row = EditRow();
+        row.depth = previous.depth + 1;
+        row.edge = c;
+        row.cells.push_back(previous.cells[0] + 1);
+
+        var index: int = 1;
+        while index <= pattern.size(): {
+            let deletion = row.cells[index - 1] + 1;
+            let insertion = previous.cells[index] + 1;
+            var substitution = previous.cells[index - 1];
+            if pattern.at(index - 1) != c: {
+                substitution += 1;
+            }
+
+            var best = deletion;
+            if insertion < best: {
+                best = insertion;
+            }
+            if substitution < best: {
+                best = substitution;
+            }
+            row.cells.push_back(best);
+            index += 1;
+        }
+        .rows_built += 1;
+        return row;
+    }
+
+    // Walks `index` collecting every key within `budget` edits of `pattern`.
+    //
+    // The frame stack carries `pair{EditRow, string}` values: the row computed
+    // at that node and the key spelled by the path taken to reach it.
+    fn search(self: &unique, index: &const shared Trie{V, ALPHABET},
+              pattern: &const shared string) -> vector{Completion{V}}: {
+        var out = vector{Completion{V}}();
+        .rows_built = 0;
+        .nodes_visited = 0;
+        .subtrees_pruned = 0;
+        if index.size() == 0: {
+            return out;
+        }
+
+        var stack = vector{pair{EditRow, string}}();
+        var root_row = .seed_row(pattern);
+        root_row.node = index.root_index();
+        var empty_path = string();
+        stack.push_back(pair{EditRow, string}(first: root_row, second: empty_path));
+        destroy root_row;
+        destroy empty_path;
+
+        while stack.size() > 0: {
+            let frame = stack.back();
+            var row = frame.first;
+            var path = frame.second;
+            stack.pop_back();
+            .nodes_visited += 1;
+
+            let here = row.node;
+            let distance = row.last();
+            if distance <= .budget && index.node_at(here).is_terminal(): {
+                var found = Completion{V}();
+                found.key.append(path);
+                found.value = index.node_at(here).payload;
+                found.weight = index.node_at(here).weight;
+                found.edits = distance;
+                found.node = here;
+                if distance == 0: {
+                    found.kind = MatchKind::ExactMatch;
+                } else: {
+                    found.kind = MatchKind::FuzzyMatch;
+                }
+                found.score = fuzzy_score(found.weight, distance, path.size(),
+                                          pattern.size());
+                out.push_back(found);
+                destroy found;
+            }
+
+            var edges = index.node_at(here).edges();
+            for edge: &const in edges: {
+                var child_row = .step_row(row, edge.first, pattern);
+                child_row.node = edge.second;
+                if child_row.exceeds(.budget): {
+                    .subtrees_pruned += 1;
+                } else: {
+                    var child_path = push_char(path, edge.first);
+                    stack.push_back(pair{EditRow, string}(first: child_row,
+                                                          second: child_path));
+                    destroy child_path;
+                }
+                destroy child_row;
+            }
+            destroy edges;
+            destroy row;
+            destroy path;
+        }
+        destroy stack;
+        return out;
+    }
+
+    // Fuzzy search reduced to the best `k` results.
+    fn search_top(self: &unique, index: &const shared Trie{V, ALPHABET},
+                  pattern: &const shared string, k: int) -> vector{Completion{V}}: {
+        var picker = TopK{V}();
+        picker.configure(k);
+        var candidates = .search(index, pattern);
+        for candidate: &const in candidates: {
+            discard picker.offer(candidate);
+        }
+        destroy candidates;
+        var out = picker.ranked();
+        destroy picker;
+        return out;
+    }
+
+    // Per-query counters, useful for confirming that pruning is doing its job.
+    budget: int = 2;
+    rows_built: int = 0;
+    nodes_visited: int = 0;
+    subtrees_pruned: int = 0;
+}
+
+// --- Autocomplete layer ---------------------------------------------------
+
+// One learned query, kept so the ranking layer can prefer things the user has
+// actually typed over things that merely exist in the dictionary.
+struct QueryRecord: {
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append(.text);
+        text.append(" hits=");
+        text.append(to_string(.hits));
+        text.append(" weight=");
+        text.append(to_string(.weight));
+        return text;
+    }
+
+    // Reinforcement: each new hit raises the weight, with diminishing returns
+    // so a single runaway query cannot dominate the ranking forever.
+    fn reinforce(self: &unique, amount: int): {
+        .hits += 1;
+        var gain = amount;
+        if .hits > 8: {
+            gain = amount / 2;
+        }
+        if .hits > 64: {
+            gain = amount / 4;
+        }
+        .weight += gain;
+    }
+
+    text: string;
+    hits: int = 0;
+    weight: int = 0;
+    last_seen: int = 0;
+}
+
+// The ranking layer.
+//
+// It owns three views of the same key set:
+//
+//   * `index`  -- the array-mapped trie, used for prefix and fuzzy queries,
+//   * `mirror` -- the radix tree, used for longest-prefix queries where the
+//                 compressed representation walks far fewer nodes,
+//   * `history`-- the learned query weights.
+//
+// Keeping both tree representations live is deliberate: it doubles the
+// mutation cost but it makes every query cheap, and for a suggestion index
+// reads outnumber writes by orders of magnitude.
+template(V: type, ALPHABET: int)
+struct Autocomplete: {
+
+    fn size(self: &const shared) -> int: {
+        return .index.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .index.empty();
+    }
+
+    fn alphabet_width(self: &const shared) -> int: {
+        return ALPHABET;
+    }
+
+    // Borrowed view of the underlying trie, so callers can run their own
+    // walks without the layer having to proxy every method.
+    fn trie(self: &shared) -> &shared[self] Trie{V, ALPHABET}: {
+        return .index;
+    }
+
+    fn radix(self: &shared) -> &shared[self] RadixTree{V, ALPHABET}: {
+        return .mirror;
+    }
+
+    // --- Population -------------------------------------------------------
+
+    // Adds one term to both representations.
+    fn learn(self: &unique, key: &const shared string, value: V, weight: int) -> TrieOutcome: {
+        var folded = normalize_key{ALPHABET}(key);
+        if folded.first.size() == 0: {
+            destroy folded;
+            return TrieOutcome::Rejected;
+        }
+        let outcome = .index.insert(folded.first, value, weight);
+        discard .mirror.insert(folded.first, value, weight);
+        .dropped_characters += folded.second;
+        .invalidate(folded.first);
+        destroy folded;
+        return outcome;
+    }
+
+    fn learn_default(self: &unique, key: &const shared string, value: V) -> TrieOutcome: {
+        return .learn(key, value, WEIGHT_DEFAULT);
+    }
+
+    // Bulk population from a weighted run.
+    fn learn_all(self: &unique,
+                 entries: &const shared vector{pair{string, pair{V, int}}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            if .learn(entry.first, entry.second.first,
+                      entry.second.second) == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // Records that the user actually selected `key`, raising its weight in
+    // the index and in the history table alike.
+    fn record_selection(self: &unique, key: &const shared string) -> bool: {
+        var folded = normalize_key{ALPHABET}(key);
+        if !.history.contains(folded.first): {
+            var record = QueryRecord();
+            record.text.append(folded.first);
+            record.weight = WEIGHT_DEFAULT;
+            discard .history.insert(folded.first, record);
+            destroy record;
+        }
+        .history.at(folded.first).reinforce(WEIGHT_DEFAULT / 4);
+        .history.at(folded.first).last_seen = .clock;
+        .clock += 1;
+
+        let bumped = .index.bump(folded.first, WEIGHT_DEFAULT / 4);
+        .invalidate(folded.first);
+        destroy folded;
+        return bumped;
+    }
+
+    // Registers `alias` as another spelling of `canonical`.  Aliases are
+    // expanded at query time rather than being inserted as real keys, so they
+    // cost nothing until somebody actually types one.
+    fn add_alias(self: &unique, alias: &const shared string,
+                 canonical: &const shared string): {
+        if !.synonyms.contains(alias): {
+            var bucket = vector{string}();
+            discard .synonyms.insert(alias, bucket);
+            destroy bucket;
+        }
+        .synonyms.at(alias).push_back(canonical);
+    }
+
+    fn remove(self: &unique, key: &const shared string) -> bool: {
+        var folded = normalize_key{ALPHABET}(key);
+        let gone = .index.erase(folded.first);
+        discard .mirror.erase(folded.first);
+        discard .history.erase(folded.first);
+        .invalidate(folded.first);
+        destroy folded;
+        return gone;
+    }
+
+    // --- Cache ------------------------------------------------------------
+
+    // Drops every cached expansion that could be affected by a change to
+    // `key`, which is every prefix of it plus every prefix it is a prefix of.
+    fn invalidate(self: &unique, key: &const shared string): {
+        var doomed = vector{string}();
+        for entry: &const in .cache: {
+            if starts_with(key, entry.first) || starts_with(entry.first, key): {
+                doomed.push_back(entry.first);
+            }
+        }
+        for prefix: &const in doomed: {
+            discard .cache.erase(prefix);
+        }
+        destroy doomed;
+        .invalidations += 1;
+    }
+
+    fn clear_cache(self: &unique): {
+        .cache.clear();
+        .cache_hits = 0;
+        .cache_misses = 0;
+    }
+
+    // --- Scoring ----------------------------------------------------------
+
+    // Score for a completion drawn from the trie under `prefix`.
+    //
+    // The weight dominates; the length penalty only breaks ties between
+    // equally popular completions, and the exact-match bonus makes sure that
+    // typing a whole key ranks it first.
+    fn score_for(self: &const shared, key: &const shared string,
+                 prefix: &const shared string, weight: int) -> int: {
+        var score = weight;
+        let extra = key.size() - prefix.size();
+        score -= extra * SCORE_LENGTH_PENALTY;
+        if extra == 0: {
+            score += SCORE_EXACT_BONUS;
+        }
+        if .history.contains(key): {
+            score += .history.at(key).weight / 2;
+        }
+        if score < WEIGHT_FLOOR: {
+            score = WEIGHT_FLOOR;
+        }
+        return score;
+    }
+
+    // --- Queries ----------------------------------------------------------
+
+    // The best `k` completions of `prefix`, ranked by score.
+    //
+    // The walk is a bounded top-k selection over the trie subtree, pruned by
+    // the running cutoff: a subtree whose aggregate weight cannot beat the
+    // weakest entry already held is skipped without being entered.
+    fn suggest(self: &unique, prefix: &const shared string, k: int) -> vector{Completion{V}}: {
+        var folded = normalize_key{ALPHABET}(prefix);
+        var picker = TopK{V}();
+        picker.configure(k);
+
+        let start = .index.find_node(folded.first);
+        if start == TRIE_NIL: {
+            .misses += 1;
+            var empty_result = picker.ranked();
+            destroy picker;
+            destroy folded;
+            return empty_result;
+        }
+
+        var stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}(first: start, second: folded.first));
+        var visited: int = 0;
+        var pruned: int = 0;
+
+        while stack.size() > 0: {
+            let frame = stack.back();
+            let here = frame.first;
+            var path = frame.second;
+            stack.pop_back();
+            visited += 1;
+
+            if .index.node_at(here).is_terminal(): {
+                var found = Completion{V}();
+                found.key.append(path);
+                found.value = .index.node_at(here).payload;
+                found.weight = .index.node_at(here).weight;
+                found.node = here;
+                found.edits = 0;
+                if path.size() == folded.first.size(): {
+                    found.kind = MatchKind::ExactMatch;
+                } else: {
+                    found.kind = MatchKind::PrefixMatch;
+                }
+                found.score = .score_for(found.key, folded.first, found.weight);
+                discard picker.offer(found);
+                destroy found;
+            }
+
+            var edges = .index.node_at(here).edges();
+            for edge: &const in edges: {
+                // Best score any key in this subtree could possibly reach.
+                let ceiling = .index.node_at(edge.second).subtree_weight;
+                if picker.admits(ceiling): {
+                    var child_path = push_char(path, edge.first);
+                    stack.push_back(pair{int, string}(first: edge.second,
+                                                      second: child_path));
+                    destroy child_path;
+                } else: {
+                    pruned += 1;
+                }
+            }
+            destroy edges;
+            destroy path;
+        }
+        destroy stack;
+
+        .nodes_visited += visited;
+        .subtrees_pruned += pruned;
+        .queries += 1;
+
+        // Memoise the ranked keys so an identical prefix is answered from the
+        // cache next time.
+        var scored = picker.as_scored_keys();
+        discard .cache.insert(folded.first, scored);
+        destroy scored;
+
+        var out = picker.ranked();
+        destroy picker;
+        destroy folded;
+        return out;
+    }
+
+    fn suggest_default(self: &unique, prefix: &const shared string) -> vector{Completion{V}}: {
+        return .suggest(prefix, DEFAULT_TOP_K);
+    }
+
+    // Cached variant: returns the memoised (key, score) run when the prefix
+    // has been asked for before, and only walks the trie otherwise.
+    fn suggest_cached(self: &unique, prefix: &const shared string,
+                      k: int) -> vector{pair{string, int}}: {
+        var folded = normalize_key{ALPHABET}(prefix);
+        if .cache.contains(folded.first): {
+            .cache_hits += 1;
+            var hit = vector{pair{string, int}}();
+            for entry: &const in .cache.at(folded.first): {
+                hit.push_back(entry);
+            }
+            destroy folded;
+            return hit;
+        }
+        .cache_misses += 1;
+        var fresh = .suggest(folded.first, k);
+        var out = vector{pair{string, int}}();
+        for entry: &const in fresh: {
+            out.push_back(pair{string, int}(first: entry.key, second: entry.score));
+        }
+        destroy fresh;
+        destroy folded;
+        return out;
+    }
+
+    // Completions of `prefix` allowing up to `budget` edits, which is what a
+    // search box falls back to when the exact prefix has no hits.
+    fn suggest_fuzzy(self: &unique, prefix: &const shared string, k: int,
+                     budget: int) -> vector{Completion{V}}: {
+        var folded = normalize_key{ALPHABET}(prefix);
+        var matcher = FuzzyMatcher{V, ALPHABET}();
+        matcher.configure(budget);
+        var out = matcher.search_top(.index, folded.first, k);
+        .fuzzy_queries += 1;
+        .nodes_visited += matcher.nodes_visited;
+        .subtrees_pruned += matcher.subtrees_pruned;
+        destroy matcher;
+        destroy folded;
+        return out;
+    }
+
+    // Exact prefix hits first, falling back to a fuzzy pass only when the
+    // exact query came up short.  This is the query an editor actually runs.
+    fn suggest_or_correct(self: &unique, prefix: &const shared string,
+                          k: int) -> vector{Completion{V}}: {
+        var exact = .suggest(prefix, k);
+        if exact.size() >= k: {
+            return exact;
+        }
+        var corrected = .suggest_fuzzy(prefix, k, DEFAULT_EDIT_BUDGET);
+        var seen = set{string}();
+        var out = vector{Completion{V}}();
+        for entry: &const in exact: {
+            discard seen.insert(entry.key);
+            out.push_back(entry);
+        }
+        for entry: &const in corrected: {
+            if !seen.contains(entry.key): {
+                discard seen.insert(entry.key);
+                out.push_back(entry);
+            }
+        }
+        destroy seen;
+        destroy corrected;
+        destroy exact;
+        return out;
+    }
+
+    // Aliases expanded, then each expansion completed.  The nested return
+    // type maps each alias onto its own ranked run.
+    fn suggest_with_aliases(self: &unique, prefix: &const shared string,
+                            k: int) -> map{string, vector{pair{string, int}}}: {
+        var out = map{string, vector{pair{string, int}}}();
+        var direct = .suggest_cached(prefix, k);
+        discard out.insert(prefix, direct);
+        destroy direct;
+
+        if .synonyms.contains(prefix): {
+            for alias: &const in .synonyms.at(prefix): {
+                var expansion = .suggest_cached(alias, k);
+                discard out.insert(alias, expansion);
+                destroy expansion;
+            }
+        }
+        return out;
+    }
+
+    // The inline completion an editor greys out after the cursor: the longest
+    // unambiguous extension of what has been typed so far.
+    fn inline_completion(self: &const shared, prefix: &const shared string) -> string: {
+        return .index.extend_unambiguously(prefix);
+    }
+
+    // Longest stored term that prefixes `text`, answered from the compressed
+    // mirror because that walk touches far fewer nodes.
+    fn longest_term_in(self: &const shared, text: &const shared string) -> string: {
+        var found = .mirror.longest_matching_prefix(text);
+        var out = string();
+        out.append(found.first);
+        destroy found;
+        return out;
+    }
+
+    // Greedy left-to-right segmentation of `text` into stored terms.  Each
+    // step takes the longest term that matches at the cursor, and skips one
+    // character when nothing matches at all.
+    fn segment(self: &const shared, text: &const shared string) -> vector{pair{string, int}}: {
+        var out = vector{pair{string, int}}();
+        var cursor: int = 0;
+        var guard: int = 0;
+        while cursor < text.size() && guard < TRIE_MAX_KEY_LENGTH: {
+            guard += 1;
+            var tail = text.substr(cursor, text.size() - cursor);
+            var term = .longest_term_in(tail);
+            if term.size() == 0: {
+                cursor += 1;
+            } else: {
+                out.push_back(pair{string, int}(first: term, second: cursor));
+                cursor += term.size();
+            }
+            destroy term;
+            destroy tail;
+        }
+        return out;
+    }
+
+    // --- Maintenance ------------------------------------------------------
+
+    // Ages every weight and drops whatever fell through the floor.
+    fn age(self: &unique) -> int: {
+        discard .index.decay();
+        let evicted = .index.evict_below(WEIGHT_FLOOR + 1);
+        .clear_cache();
+        return evicted;
+    }
+
+    fn clear(self: &unique): {
+        .index.clear();
+        .mirror.clear();
+        .history.clear();
+        .synonyms.clear();
+        .cache.clear();
+        .queries = 0;
+        .fuzzy_queries = 0;
+        .misses = 0;
+        .nodes_visited = 0;
+        .subtrees_pruned = 0;
+        .invalidations = 0;
+        .dropped_characters = 0;
+        .clock = 0;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("autocomplete terms=");
+        text.append(to_string(.index.size()));
+        text.append(" nodes=");
+        text.append(to_string(.index.node_count()));
+        text.append(" queries=");
+        text.append(to_string(.queries));
+        text.append(" pruned=");
+        text.append(to_string(.subtrees_pruned));
+        text.append(" cache=");
+        text.append(to_string(.cache_hits));
+        text.append("/");
+        text.append(to_string(.cache_hits + .cache_misses));
+        return text;
+    }
+
+    // Primary index.
+    index: Trie{V, ALPHABET};
+
+    // Compressed mirror, kept in step with `index` on every mutation.
+    mirror: RadixTree{V, ALPHABET};
+
+    // Learned query weights.
+    history: map{string, QueryRecord};
+
+    // Alias expansions, one prefix mapping onto many canonical spellings.
+    synonyms: map{string, vector{string}};
+
+    // Memoised ranked expansions, keyed by prefix.
+    cache: map{string, vector{pair{string, int}}};
+
+    queries: int = 0;
+    fuzzy_queries: int = 0;
+    misses: int = 0;
+    cache_hits: int = 0;
+    cache_misses: int = 0;
+    nodes_visited: int = 0;
+    subtrees_pruned: int = 0;
+    invalidations: int = 0;
+    dropped_characters: int = 0;
+    clock: int = 0;
+}
+
+// --- Flat-array serialisation ---------------------------------------------
+
+// One record of the serialised form.
+//
+// Records are emitted in breadth-first order, so a record's parent always
+// appears before it and the whole array can be replayed in a single forward
+// pass with no back-patching.
+struct FlatRecord: {
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .child_count == 0;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("record parent=");
+        text.append(to_string(.parent));
+        text.append(" edge=");
+        text.push_back(.edge);
+        text.append(" children=");
+        text.append(to_string(.child_count));
+        return text;
+    }
+
+    parent: int = -1;
+    edge: char = '\0';
+    depth: int = 0;
+    weight: int = 0;
+    child_count: int = 0;
+    payload_slot: int = -1;
+    tag: SerialTag = SerialTag::TagBranch;
+}
+
+// The flat form of a whole index.
+//
+// Everything is stored in parallel arrays of plain values, so the structure
+// can be written to disk, hashed, or compared for equality without walking a
+// single link.  `payloads` is kept separate from `records` because payload
+// types are frequently much larger than a record and most nodes have none.
+template(V: type, ALPHABET: int)
+struct FlatTrie: {
+
+    fn size(self: &const shared) -> int: {
+        return .records.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .records.size() == 0;
+    }
+
+    fn key_count(self: &const shared) -> int: {
+        return .payloads.size();
+    }
+
+    fn alphabet_width(self: &const shared) -> int: {
+        return ALPHABET;
+    }
+
+    // Header validation: the version and alphabet width have to match what
+    // this build expects before any record is trusted.
+    fn header_valid(self: &const shared) -> bool: {
+        if .version != 1: {
+            return false;
+        }
+        if .alphabet != ALPHABET: {
+            return false;
+        }
+        return .records.size() >= .payloads.size();
+    }
+
+    // Rebuilds the key spelled by record `index` by walking the parent chain.
+    fn key_of(self: &const shared, index: int) -> string: {
+        var reversed = vector{char}();
+        var current = index;
+        var guard: int = 0;
+        while current > 0 && guard < TRIE_MAX_DEPTH: {
+            reversed.push_back(.records[current].edge);
+            current = .records[current].parent;
+            guard += 1;
+        }
+        var out = string();
+        var cursor = reversed.size() - 1;
+        while cursor >= 0: {
+            out.push_back(reversed[cursor]);
+            cursor -= 1;
+        }
+        destroy reversed;
+        return out;
+    }
+
+    // Every stored key with its payload, recovered straight from the flat
+    // form without rebuilding a tree first.
+    fn entries(self: &const shared) -> vector{pair{string, V}}: {
+        var out = vector{pair{string, V}}();
+        for slot: &const in .payloads: {
+            var key = .key_of(slot.first);
+            out.push_back(pair{string, V}(first: key, second: slot.second));
+            destroy key;
+        }
+        return out;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("flat records=");
+        text.append(to_string(.records.size()));
+        text.append(" payloads=");
+        text.append(to_string(.payloads.size()));
+        text.append(" alphabet=");
+        text.append(to_string(.alphabet));
+        return text;
+    }
+
+    fn clear(self: &unique): {
+        .records.clear();
+        .payloads.clear();
+        .edge_table.clear();
+        .version = 1;
+        .alphabet = ALPHABET;
+    }
+
+    // Breadth-first record array.
+    records: vector{FlatRecord};
+
+    // (record index, payload) pairs, one per terminal node.
+    payloads: vector{pair{int, V}};
+
+    // Redundant edge index: parent record onto its (character, child) list.
+    // Not needed to replay the array, but it makes a random-access reader
+    // possible without a full scan.
+    edge_table: map{int, vector{pair{char, int}}};
+
+    version: int = 1;
+    alphabet: int = 0;
+}
+
+// Serialises `source` into its flat form.
+//
+// Nodes are numbered by the order they come out of the breadth-first walk,
+// which is not the same as their arena index, so `mapping` translates between
+// the two while the records are being emitted.
+template(V: type, ALPHABET: int)
+fn serialize_trie(source: &const shared Trie{V, ALPHABET}) -> FlatTrie{V, ALPHABET}: {
+    var flat = FlatTrie{V, ALPHABET}();
+    flat.version = 1;
+    flat.alphabet = ALPHABET;
+    if source.size() == 0: {
+        return flat;
+    }
+
+    var mapping = map{int, int}();
+    var frontier = vector{int}();
+    frontier.push_back(source.root_index());
+    discard mapping.insert(source.root_index(), 0);
+
+    var root_record = FlatRecord();
+    root_record.parent = TRIE_NIL;
+    root_record.edge = CHAR_NUL;
+    root_record.depth = 0;
+    root_record.tag = SerialTag::TagBranch;
+    flat.records.push_back(root_record);
+    destroy root_record;
+
+    var cursor: int = 0;
+    while cursor < frontier.size(): {
+        let here = frontier[cursor];
+        let record_index = mapping.at(here);
+        cursor += 1;
+
+        if source.node_at(here).is_terminal(): {
+            flat.records[record_index].tag = SerialTag::TagLeaf;
+            flat.records[record_index].weight = source.node_at(here).weight;
+            flat.records[record_index].payload_slot = flat.payloads.size();
+            flat.payloads.push_back(pair{int, V}(first: record_index,
+                                                 second: source.node_at(here).payload));
+        }
+
+        var edges = source.node_at(here).edges();
+        flat.records[record_index].child_count = edges.size();
+
+        var listing = vector{pair{char, int}}();
+        for edge: &const in edges: {
+            var child_record = FlatRecord();
+            child_record.parent = record_index;
+            child_record.edge = edge.first;
+            child_record.depth = flat.records[record_index].depth + 1;
+            child_record.tag = SerialTag::TagEdge;
+            flat.records.push_back(child_record);
+            let child_index = flat.records.size() - 1;
+            destroy child_record;
+
+            discard mapping.insert(edge.second, child_index);
+            frontier.push_back(edge.second);
+            listing.push_back(pair{char, int}(first: edge.first, second: child_index));
+        }
+        if listing.size() > 0: {
+            discard flat.edge_table.insert(record_index, listing);
+        }
+        destroy listing;
+        destroy edges;
+    }
+
+    destroy frontier;
+    destroy mapping;
+    return flat;
+}
+
+// Replays a flat form back into a live trie.
+//
+// Because records are in breadth-first order, one forward pass suffices: by
+// the time a record is read, its parent has already been created.
+template(V: type, ALPHABET: int)
+fn deserialize_trie(flat: &const shared FlatTrie{V, ALPHABET},
+                    target: &unique Trie{V, ALPHABET}) -> bool: {
+    target.clear();
+    if !flat.header_valid(): {
+        return false;
+    }
+    if flat.empty(): {
+        return true;
+    }
+
+    var entries = flat.entries();
+    var index: int = 0;
+    while index < entries.size(): {
+        let record_index = flat.payloads[index].first;
+        let weight = flat.records[record_index].weight;
+        discard target.insert(entries[index].first, entries[index].second, weight);
+        index += 1;
+    }
+    destroy entries;
+    target.rebuild_aggregates();
+    return true;
+}
+
+// Round-trip check: serialise, replay, and confirm the key sets agree.
+template(V: type, ALPHABET: int)
+fn round_trip_ok(source: &const shared Trie{V, ALPHABET}) -> bool: {
+    var flat = serialize_trie{V, ALPHABET}(source);
+    var rebuilt = Trie{V, ALPHABET}();
+    if !deserialize_trie{V, ALPHABET}(flat, rebuilt): {
+        destroy flat;
+        destroy rebuilt;
+        return false;
+    }
+    let same = rebuilt.size() == source.size();
+    assert same;
+    prove rebuilt.size() == source.size();
+    destroy flat;
+    destroy rebuilt;
+    return same;
+}
+
+// --- Statistics -----------------------------------------------------------
+
+// Shape summary for one index.
+//
+// Everything here is derived, never maintained incrementally, because the
+// numbers are only ever looked at by a human or a test and paying for them on
+// every insertion would be absurd.
+template(V: type, ALPHABET: int)
+struct TrieStatistics: {
+
+    // Mean depth of a terminal node, in hundredths so the fixed-point result
+    // still carries two useful digits.
+    fn average_depth(self: &const shared) -> int: {
+        if .terminals == 0: {
+            return 0;
+        }
+        return .depth_total * 100 / .terminals;
+    }
+
+    // Mean number of children over the branch nodes, also in hundredths.
+    fn average_fanout(self: &const shared) -> int: {
+        let branches = .nodes - .leaves;
+        if branches == 0: {
+            return 0;
+        }
+        return .fanout_total * 100 / branches;
+    }
+
+    fn leaf_percent(self: &const shared) -> int: {
+        if .nodes == 0: {
+            return 0;
+        }
+        return .leaves * 100 / .nodes;
+    }
+
+    // Nodes per stored key.  A well-shared dictionary sits well below 100;
+    // a set of unrelated keys approaches their average length.
+    fn nodes_per_key(self: &const shared) -> int: {
+        if .terminals == 0: {
+            return 0;
+        }
+        return .nodes * 100 / .terminals;
+    }
+
+    // How much the path-compressed mirror saved, as a percentage of the
+    // uncompressed node count.
+    fn compression_percent(self: &const shared) -> int: {
+        if .nodes == 0: {
+            return 0;
+        }
+        return (.nodes - .compressed_nodes) * 100 / .nodes;
+    }
+
+    // A tree is considered well-shaped when no terminal sits more than twice
+    // the average depth down.
+    fn balanced(self: &const shared) -> bool: {
+        if .terminals == 0: {
+            return true;
+        }
+        return .max_depth * 100 <= .average_depth() * 2 + 100;
+    }
+
+    // Number of nodes recorded at exactly `depth`.
+    fn at_depth(self: &const shared, depth: int) -> int: {
+        for bucket: &const in .depth_histogram: {
+            if bucket.first == depth: {
+                return bucket.second;
+            }
+        }
+        return 0;
+    }
+
+    // Number of nodes whose fan-out fell into bucket `slot`.
+    fn fanout_bucket(self: &const shared, slot: int) -> int: {
+        for bucket: &const in .fanout_histogram: {
+            if bucket.first == slot: {
+                return bucket.second;
+            }
+        }
+        return 0;
+    }
+
+    fn record_depth(self: &unique, depth: int): {
+        var index: int = 0;
+        while index < .depth_histogram.size(): {
+            if .depth_histogram[index].first == depth: {
+                .depth_histogram[index].second += 1;
+                return;
+            }
+            index += 1;
+        }
+        .depth_histogram.push_back(pair{int, int}(first: depth, second: 1));
+    }
+
+    fn record_fanout(self: &unique, fanout: int): {
+        var slot = fanout;
+        if slot >= FANOUT_BUCKETS: {
+            slot = FANOUT_BUCKETS - 1;
+        }
+        var index: int = 0;
+        while index < .fanout_histogram.size(): {
+            if .fanout_histogram[index].first == slot: {
+                .fanout_histogram[index].second += 1;
+                return;
+            }
+            index += 1;
+        }
+        .fanout_histogram.push_back(pair{int, int}(first: slot, second: 1));
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("nodes=");
+        text.append(to_string(.nodes));
+        text.append(" keys=");
+        text.append(to_string(.terminals));
+        text.append(" leaves=");
+        text.append(to_string(.leaves));
+        text.append(" maxdepth=");
+        text.append(to_string(.max_depth));
+        text.append(" avgdepth=");
+        text.append(to_string(.average_depth()));
+        text.append(" avgfanout=");
+        text.append(to_string(.average_fanout()));
+        text.append(" nodesperkey=");
+        text.append(to_string(.nodes_per_key()));
+        return text;
+    }
+
+    // Node count at each depth.
+    depth_histogram: vector{pair{int, int}};
+
+    // Node count in each fan-out bucket, the last bucket being "or more".
+    fanout_histogram: vector{pair{int, int}};
+
+    // How many keys start with each initial character.
+    initial_counts: map{char, int};
+
+    // Keys grouped by length, retained only up to the sample limit so the
+    // summary itself stays small.
+    length_groups: map{int, vector{string}};
+
+    // A handful of representative (key, weight) pairs.
+    samples: vector{pair{string, int}};
+
+    nodes: int = 0;
+    terminals: int = 0;
+    leaves: int = 0;
+    branches: int = 0;
+    overflow_nodes: int = 0;
+    compressed_nodes: int = 0;
+    max_depth: int = 0;
+    depth_total: int = 0;
+    fanout_total: int = 0;
+    max_fanout: int = 0;
+    weight_total: int = 0;
+    key_length_total: int = 0;
+}
+
+// Single pass over an index collecting every shape number at once.
+template(V: type, ALPHABET: int)
+fn collect_statistics(index: &const shared Trie{V, ALPHABET}) -> TrieStatistics{V, ALPHABET}: {
+    var stats = TrieStatistics{V, ALPHABET}();
+    if index.size() == 0: {
+        return stats;
+    }
+
+    var levels = index.level_order();
+    var depth: int = 0;
+    while depth < levels.size(): {
+        for node: &const in levels[depth]: {
+            stats.nodes += 1;
+            stats.record_depth(depth);
+
+            let fanout = index.node_at(node).degree();
+            stats.fanout_total += fanout;
+            stats.record_fanout(fanout);
+            if fanout > stats.max_fanout: {
+                stats.max_fanout = fanout;
+            }
+            if fanout == 0: {
+                stats.leaves += 1;
+            } else: {
+                stats.branches += 1;
+            }
+            if index.node_at(node).sparse_degree() > 0: {
+                stats.overflow_nodes += 1;
+            }
+            if index.node_at(node).is_terminal(): {
+                stats.terminals += 1;
+                stats.depth_total += depth;
+                stats.weight_total += index.node_at(node).weight;
+                if depth > stats.max_depth: {
+                    stats.max_depth = depth;
+                }
+            }
+        }
+        depth += 1;
+    }
+    destroy levels;
+
+    // Second pass over the key set for the per-key groupings.
+    var entries = index.to_pairs();
+    for entry: &const in entries: {
+        stats.key_length_total += entry.first.size();
+
+        if entry.first.size() > 0: {
+            let initial = entry.first.at(0);
+            if !stats.initial_counts.contains(initial): {
+                discard stats.initial_counts.insert(initial, 0);
+            }
+            stats.initial_counts.at(initial) += 1;
+        }
+
+        let length = entry.first.size();
+        if !stats.length_groups.contains(length): {
+            var bucket = vector{string}();
+            discard stats.length_groups.insert(length, bucket);
+            destroy bucket;
+        }
+        if stats.length_groups.at(length).size() < TRIE_SAMPLE_LIMIT: {
+            stats.length_groups.at(length).push_back(entry.first);
+        }
+
+        if stats.samples.size() < TRIE_SAMPLE_LIMIT: {
+            stats.samples.push_back(pair{string, int}(first: entry.first,
+                                                      second: index.weight_of(entry.first)));
+        }
+    }
+    destroy entries;
+    return stats;
+}
+
+// Statistics with the compressed node count filled in from a radix mirror, so
+// `compression_percent` becomes meaningful.
+template(V: type, ALPHABET: int)
+fn collect_statistics_paired(index: &const shared Trie{V, ALPHABET},
+                             mirror: &const shared RadixTree{V, ALPHABET})
+        -> TrieStatistics{V, ALPHABET}: {
+    var stats = collect_statistics{V, ALPHABET}(index);
+    stats.compressed_nodes = mirror.node_count();
+    return stats;
+}
+
+// --- Free functions -------------------------------------------------------
+
+// Score for a fuzzy hit: the stored weight, less a penalty per edit and per
+// character of length mismatch.  Kept free so the fuzzy walker does not have
+// to know anything about the ranking policy.
+fn fuzzy_score(weight: int, edits: int, key_length: int, pattern_length: int) -> int: {
+    var score = weight;
+    score -= edits * SCORE_EDIT_PENALTY;
+    let spread = abs(key_length - pattern_length);
+    score -= spread * SCORE_LENGTH_PENALTY;
+    if edits == 0: {
+        score += SCORE_EXACT_BONUS;
+    }
+    if score < WEIGHT_FLOOR: {
+        score = WEIGHT_FLOOR;
+    }
+    return score;
+}
+
+// Plain Levenshtein distance between two strings, used as the reference the
+// trie walk is checked against.
+fn edit_distance(a: &const shared string, b: &const shared string) -> int: {
+    var previous = vector{int}();
+    var index: int = 0;
+    while index <= b.size(): {
+        previous.push_back(index);
+        index += 1;
+    }
+
+    var row: int = 1;
+    while row <= a.size(): {
+        var current = vector{int}();
+        current.push_back(row);
+        var column: int = 1;
+        while column <= b.size(): {
+            let deletion = current[column - 1] + 1;
+            let insertion = previous[column] + 1;
+            var substitution = previous[column - 1];
+            if a.at(row - 1) != b.at(column - 1): {
+                substitution += 1;
+            }
+            var best = deletion;
+            if insertion < best: {
+                best = insertion;
+            }
+            if substitution < best: {
+                best = substitution;
+            }
+            current.push_back(best);
+            column += 1;
+        }
+        previous.clear();
+        for cell: &const in current: {
+            previous.push_back(cell);
+        }
+        destroy current;
+        row += 1;
+    }
+
+    let answer = previous[b.size()];
+    destroy previous;
+    return answer;
+}
+
+// Insertion sort of a `vector{pair{string, V}}` run by key.  Insertion sort is
+// the right choice here because the runs it is handed come out of a trie and
+// are therefore already almost sorted.
+template(V: type)
+fn sort_pairs_by_key(entries: &const shared vector{pair{string, V}}) -> vector{pair{string, V}}: {
+    var out = vector{pair{string, V}}();
+    for entry: &const in entries: {
+        var position = out.size();
+        var index: int = 0;
+        while index < out.size(): {
+            if compare_strings(entry.first, out[index].first) < 0: {
+                position = index;
+                index = out.size();
+            } else: {
+                index += 1;
+            }
+        }
+        out.insert(position, entry);
+    }
+    return out;
+}
+
+// Same shape, ordered by descending score instead.
+template(V: type)
+fn sort_completions(entries: &const shared vector{Completion{V}}) -> vector{Completion{V}}: {
+    var out = vector{Completion{V}}();
+    for entry: &const in entries: {
+        var position = out.size();
+        var index: int = 0;
+        while index < out.size(): {
+            if entry.better_than(out[index]): {
+                position = index;
+                index = out.size();
+            } else: {
+                index += 1;
+            }
+        }
+        out.insert(position, entry);
+    }
+    return out;
+}
+
+// Drops repeated keys, keeping the first occurrence, which after
+// `sort_completions` is the highest scoring one.
+template(V: type)
+fn dedupe_completions(entries: &const shared vector{Completion{V}}) -> vector{Completion{V}}: {
+    var out = vector{Completion{V}}();
+    var seen = set{string}();
+    for entry: &const in entries: {
+        if seen.contains(entry.key): {
+            discard entry;
+        } else: {
+            discard seen.insert(entry.key);
+            out.push_back(entry);
+        }
+    }
+    destroy seen;
+    return out;
+}
+
+// Best `k` of an already-collected candidate run, via the same bounded
+// selection the trie walk uses.
+template(V: type)
+fn take_top_k(entries: &const shared vector{Completion{V}}, k: int) -> vector{Completion{V}}: {
+    var picker = TopK{V}();
+    picker.configure(k);
+    for entry: &const in entries: {
+        discard picker.offer(entry);
+    }
+    var out = picker.ranked();
+    destroy picker;
+    return out;
+}
+
+// Longest common prefix of a whole run of strings, computed pairwise.
+fn common_prefix_of_all(keys: &const shared vector{string}) -> string: {
+    var out = string();
+    if keys.size() == 0: {
+        return out;
+    }
+    out.append(keys[0]);
+    var index: int = 1;
+    while index < keys.size(): {
+        let shared_len = common_prefix_length(out, keys[index]);
+        var trimmed = out.substr(0, shared_len);
+        out.clear();
+        out.append(trimmed);
+        destroy trimmed;
+        if out.size() == 0: {
+            return out;
+        }
+        index += 1;
+    }
+    return out;
+}
+
+// Builds a trie from a plain word list, weighting every term equally.
+template(V: type, ALPHABET: int)
+fn trie_from_words(words: &const shared vector{string}, value: V) -> Trie{V, ALPHABET}: {
+    var index = Trie{V, ALPHABET}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
+    for word: &const in words: {
+        var folded = normalize_key{ALPHABET}(word);
+        discard index.insert(folded.first, value, WEIGHT_DEFAULT);
+        destroy folded;
+    }
+    return index;
+}
+
+// Builds a trie from a document, weighting each term by how often it occurs.
+// This is the one place the whole pipeline runs end to end: tokenise, count,
+// insert, aggregate.
+template(V: type, ALPHABET: int)
+fn trie_from_text(text: &const shared string, value: V) -> Trie{V, ALPHABET}: {
+    var counts = map{string, int}();
+    var words = tokenize(text);
+    for word: &const in words: {
+        if !counts.contains(word): {
+            discard counts.insert(word, 0);
+        }
+        counts.at(word) += 1;
+    }
+    destroy words;
+
+    var index = Trie{V, ALPHABET}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
+    for entry: &const in counts: {
+        discard index.insert(entry.first, value, entry.second * WEIGHT_SCALE);
+    }
+    destroy counts;
+    index.rebuild_aggregates();
+    return index;
+}
+
+// Copies every key of `source` into `target`, keeping the larger weight when
+// a key is present in both.
+template(V: type, ALPHABET: int)
+fn merge_tries(target: &unique Trie{V, ALPHABET},
+               source: &const shared Trie{V, ALPHABET}) -> int: {
+    var entries = source.weighted_with_prefix(string());
+    var added: int = 0;
+    for entry: &const in entries: {
+        let existing = target.weight_of(entry.first);
+        if existing >= entry.second.second: {
+            discard entry;
+        } else: {
+            if target.insert(entry.first, entry.second.first,
+                             entry.second.second) == TrieOutcome::Inserted: {
+                added += 1;
+            }
+        }
+    }
+    destroy entries;
+    target.rebuild_aggregates();
+    return added;
+}
+
+// Keys present in both indexes, with the left index's payload.
+template(V: type, ALPHABET: int)
+fn intersect_tries(left: &const shared Trie{V, ALPHABET},
+                   right: &const shared Trie{V, ALPHABET}) -> vector{pair{string, V}}: {
+    var out = vector{pair{string, V}}();
+    var entries = left.to_pairs();
+    for entry: &const in entries: {
+        if right.contains(entry.first): {
+            out.push_back(entry);
+        }
+    }
+    destroy entries;
+    return out;
+}
+
+// True when two indexes hold exactly the same key set.
+template(V: type, ALPHABET: int)
+fn tries_equal(left: &const shared Trie{V, ALPHABET},
+               right: &const shared Trie{V, ALPHABET}) -> bool: {
+    if left.size() != right.size(): {
+        return false;
+    }
+    var a = left.to_pairs();
+    var b = right.to_pairs();
+    var same: bool = true;
+    var index: int = 0;
+    while index < a.size(): {
+        if compare_strings(a[index].first, b[index].first) != 0: {
+            same = false;
+            index = a.size();
+        } else: {
+            index += 1;
+        }
+    }
+    destroy a;
+    destroy b;
+    return same;
+}
+
+// Cross-checks the array-mapped trie against the compressed mirror: both must
+// agree on every key.
+template(V: type, ALPHABET: int)
+fn mirrors_agree(index: &const shared Trie{V, ALPHABET},
+                 mirror: &const shared RadixTree{V, ALPHABET}) -> bool: {
+    if index.size() != mirror.size(): {
+        return false;
+    }
+    var entries = index.to_pairs();
+    var agreed: bool = true;
+    for entry: &const in entries: {
+        if !mirror.contains(entry.first): {
+            agreed = false;
+        }
+    }
+    assert agreed;
+    prove index.size() == mirror.size();
+    destroy entries;
+    return agreed;
+}
+
+// Cross-checks the trie against a ternary search tree holding the same keys.
+template(V: type, ALPHABET: int)
+fn ternary_agrees(index: &const shared Trie{V, ALPHABET},
+                  ternary: &const shared TernaryTree{V}) -> bool: {
+    if index.size() != ternary.size(): {
+        return false;
+    }
+    var entries = index.to_pairs();
+    var agreed: bool = true;
+    for entry: &const in entries: {
+        if !ternary.contains(entry.first): {
+            agreed = false;
+        }
+    }
+    destroy entries;
+    return agreed;
+}
+
+// One-line shape summary, mirroring `describe_shape` in the B-tree file.
+template(V: type, ALPHABET: int)
+fn describe_index(index: &const shared Trie{V, ALPHABET}) -> string: {
+    var stats = collect_statistics{V, ALPHABET}(index);
+    var text = stats.describe();
+    text.append(" alphabet=");
+    text.append(to_string(ALPHABET));
+    text.append(" balanced=");
+    if stats.balanced(): {
+        text.append("yes");
+    } else: {
+        text.append("no");
+    }
+    destroy stats;
+    return text;
+}
+
+// Renders a ranked run as one line per completion.
+template(V: type)
+fn render_completions(entries: &const shared vector{Completion{V}}) -> vector{string}: {
+    var out = vector{string}();
+    var rank: int = 1;
+    for entry: &const in entries: {
+        var line = string();
+        line.append(to_string(rank));
+        line.append(". ");
+        line.append(entry.describe());
+        out.push_back(line);
+        destroy line;
+        rank += 1;
+    }
+    return out;
+}
+
+// --- Demo -----------------------------------------------------------------
+
+// A small fixed vocabulary, built by hand so the demo does not depend on
+// reading a file.  The words deliberately share long prefixes, which is what
+// makes the path-compressed mirror measurably smaller than the plain trie.
+fn demo_vocabulary() -> vector{string}: {
+    var words = vector{string}();
+    words.push_back("auto");
+    words.push_back("autocomplete");
+    words.push_back("autocorrect");
+    words.push_back("automatic");
+    words.push_back("automaton");
+    words.push_back("automobile");
+    words.push_back("autonomy");
+    words.push_back("bank");
+    words.push_back("banker");
+    words.push_back("banking");
+    words.push_back("bankrupt");
+    words.push_back("banner");
+    words.push_back("banquet");
+    words.push_back("prefix");
+    words.push_back("prefixed");
+    words.push_back("prefixes");
+    words.push_back("preface");
+    words.push_back("prefer");
+    words.push_back("preference");
+    words.push_back("present");
+    words.push_back("presenter");
+    words.push_back("pressure");
+    words.push_back("trie");
+    words.push_back("tries");
+    words.push_back("trigger");
+    words.push_back("trigonometry");
+    words.push_back("trim");
+    words.push_back("trimmed");
+    words.push_back("trivial");
+    words.push_back("trivia");
+    return words;
+}
+
+// Weights chosen so the ranking has something to actually rank: the shorter,
+// more common words are heavier.
+fn demo_weights() -> map{string, int}: {
+    var weights = map{string, int}();
+    discard weights.insert("auto", 9000);
+    discard weights.insert("autocomplete", 7500);
+    discard weights.insert("automatic", 6000);
+    discard weights.insert("bank", 8800);
+    discard weights.insert("banking", 5200);
+    discard weights.insert("prefix", 7100);
+    discard weights.insert("present", 6400);
+    discard weights.insert("trie", 9500);
+    discard weights.insert("trigger", 4300);
+    discard weights.insert("trivial", 3900);
+    return weights;
+}
+
+// Exercises the whole file end to end at two different alphabet widths, which
+// is also the cheapest way to force both instantiations to be checked.
+fn demo_trie_autocomplete(): {
+    var words = demo_vocabulary();
+    var weights = demo_weights();
+
+    // --- Plain trie over the 26-letter alphabet ---------------------------
+
+    var index = Trie{int, 26}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
+    var rank: int = 0;
+    for word: &const in words: {
+        var weight = WEIGHT_DEFAULT;
+        if weights.contains(word): {
+            weight = weights.at(word);
+        }
+        discard index.insert(word, rank, weight);
+        rank += 1;
+    }
+    index.rebuild_aggregates();
+    println(describe_index{int, 26}(index));
+
+    if !index.check_validity(): {
+        panic("trie invariants violated after bulk insert");
+    }
+
+    // Exact and prefix lookups.
+    assert index.contains("automaton");
+    assert index.contains_prefix("auto");
+    assert !index.contains("automat");
+    println(to_string(index.weight_of("trie")));
+
+    // Longest common prefix of everything under "auto".
+    var extended = index.extend_unambiguously("auto");
+    println(extended);
+    destroy extended;
+
+    // Longest stored key that prefixes a longer word.
+    var longest = index.longest_matching_prefix("automobiles");
+    println(longest.first);
+    destroy longest;
+
+    // Every completion of "ban", unranked.
+    var raw = index.keys_with_prefix("ban", 0);
+    for entry: &const in raw: {
+        println(entry.first);
+    }
+    destroy raw;
+
+    // Keys grouped by initial letter, exercising the nested map return type.
+    var grouped = index.group_by_initial();
+    println(to_string(grouped.size()));
+    for bucket: &const in grouped: {
+        println(to_string(bucket.second.size()));
+    }
+    destroy grouped;
+
+    // --- Deletion with pruning --------------------------------------------
+
+    let before_nodes = index.node_count();
+    assert index.erase("trigonometry");
+    let after_nodes = index.node_count();
+    assert after_nodes < before_nodes;
+    prove after_nodes <= before_nodes;
+    println(to_string(before_nodes - after_nodes));
+
+    // Prefix deletion takes a whole subtree at once.
+    let dropped = index.erase_prefix("pre");
+    println(to_string(dropped));
+    if !index.check_validity(): {
+        panic("trie invariants violated after prefix erase");
+    }
+
+    // --- Radix mirror ------------------------------------------------------
+
+    var compressed = RadixTree{int, 26}();
+    var surviving = index.to_pairs();
+    discard compressed.insert_all(surviving);
+    destroy surviving;
+
+    if !compressed.check_validity(): {
+        panic("radix invariants violated after bulk insert");
+    }
+    if !mirrors_agree{int, 26}(index, compressed): {
+        panic("radix mirror disagrees with the trie");
+    }
+    println(to_string(index.node_count()));
+    println(to_string(compressed.node_count()));
+
+    // Splitting and merging, driven by an insertion that diverges mid-label
+    // followed by the deletion that puts the label back together.
+    discard compressed.add("bankruptcy", 900);
+    assert compressed.contains("bankrupt");
+    assert compressed.contains("bankruptcy");
+    assert compressed.erase("bankruptcy");
+    assert compressed.contains("bankrupt");
+    if !compressed.check_validity(): {
+        panic("radix invariants violated after split and merge");
+    }
+    println(to_string(compressed.splits));
+    println(to_string(compressed.merges));
+
+    // Longest matching prefix from the compressed side.
+    var matched = compressed.longest_matching_prefix("bankers");
+    println(matched.first);
+    destroy matched;
+
+    // --- Ternary search tree ----------------------------------------------
+
+    var ternary = TernaryTree{int}();
+    var again = index.to_pairs();
+    discard ternary.insert_all(again);
+    destroy again;
+
+    if !ternary.check_validity(): {
+        panic("ternary invariants violated after bulk insert");
+    }
+    if !ternary_agrees{int, 26}(index, ternary): {
+        panic("ternary tree disagrees with the trie");
+    }
+
+    var ternary_hits = ternary.keys_with_prefix("tri");
+    for entry: &const in ternary_hits: {
+        println(entry.first);
+    }
+    destroy ternary_hits;
+
+    var ternary_longest = ternary.longest_matching_prefix("triggered");
+    println(ternary_longest);
+    destroy ternary_longest;
+
+    // Erasing enough keys forces a compaction rebuild.
+    var index_of_erase: int = 0;
+    while index_of_erase < words.size(): {
+        if index_of_erase % 3 == 0: {
+            discard ternary.erase(words[index_of_erase]);
+        }
+        index_of_erase += 1;
+    }
+    println(to_string(ternary.compact()));
+    if !ternary.check_validity(): {
+        panic("ternary invariants violated after compaction");
+    }
+
+    // --- Autocomplete layer -----------------------------------------------
+
+    var engine = Autocomplete{string, 26}();
+    for word: &const in words: {
+        var weight = WEIGHT_DEFAULT;
+        if weights.contains(word): {
+            weight = weights.at(word);
+        }
+        var payload = string();
+        payload.append(word);
+        discard engine.learn(word, payload, weight);
+        destroy payload;
+    }
+
+    engine.add_alias("auto", "automatic");
+    engine.add_alias("auto", "autocomplete");
+    discard engine.record_selection("autocomplete");
+    discard engine.record_selection("autocomplete");
+    discard engine.record_selection("trie");
+
+    var ranked = engine.suggest("auto", DEFAULT_TOP_K);
+    var lines = render_completions{string}(ranked);
+    for line: &const in lines: {
+        println(line);
+    }
+    destroy lines;
+    destroy ranked;
+
+    // The cached path answers the same query without walking the trie.
+    var first_pass = engine.suggest_cached("ban", 4);
+    var second_pass = engine.suggest_cached("ban", 4);
+    assert first_pass.size() == second_pass.size();
+    prove first_pass.size() == second_pass.size();
+    destroy first_pass;
+    destroy second_pass;
+    println(engine.describe());
+
+    // Alias expansion, one ranked run per spelling.
+    var expanded = engine.suggest_with_aliases("auto", 3);
+    for entry: &const in expanded: {
+        println(entry.first);
+        println(to_string(entry.second.size()));
+    }
+    destroy expanded;
+
+    // Inline completion: the longest unambiguous extension.
+    var inline_text = engine.inline_completion("banq");
+    println(inline_text);
+    destroy inline_text;
+
+    // Greedy segmentation of a run-together string.
+    var segments = engine.segment("autotrieprefix");
+    for segment: &const in segments: {
+        println(segment.first);
+        println(to_string(segment.second));
+    }
+    destroy segments;
+
+    // --- Fuzzy matching ----------------------------------------------------
+
+    var matcher = FuzzyMatcher{string, 26}();
+    matcher.configure(DEFAULT_EDIT_BUDGET);
+    var fuzzy = matcher.search_top(engine.trie(), "automatik", 5);
+    for entry: &const in fuzzy: {
+        println(entry.describe());
+        // The walk's own distance must agree with the reference computation.
+        assert entry.edits == edit_distance(entry.key, "automatik");
+        prove entry.edits <= DEFAULT_EDIT_BUDGET;
+    }
+    println(to_string(matcher.nodes_visited));
+    println(to_string(matcher.subtrees_pruned));
+    destroy fuzzy;
+    destroy matcher;
+
+    // A misspelling with no exact hits falls through to the fuzzy path.
+    var corrected = engine.suggest_or_correct("bnk", 4);
+    var corrected_lines = render_completions{string}(corrected);
+    for line: &const in corrected_lines: {
+        println(line);
+    }
+    destroy corrected_lines;
+    destroy corrected;
+
+    // --- Serialisation ------------------------------------------------------
+
+    var flat = serialize_trie{int, 26}(index);
+    println(flat.describe());
+    assert flat.header_valid();
+
+    var replayed = Trie{int, 26}();
+    if !deserialize_trie{int, 26}(flat, replayed): {
+        panic("failed to replay the serialised trie");
+    }
+    if !tries_equal{int, 26}(index, replayed): {
+        panic("serialisation round trip lost keys");
+    }
+    assert round_trip_ok{int, 26}(index);
+    println(to_string(replayed.size()));
+
+    // Every key recovered straight from the flat array, no tree involved.
+    var recovered = flat.entries();
+    println(to_string(recovered.size()));
+    destroy recovered;
+    destroy flat;
+
+    // --- Statistics ---------------------------------------------------------
+
+    var stats = collect_statistics_paired{int, 26}(index, compressed);
+    println(stats.describe());
+    println(to_string(stats.compression_percent()));
+    println(to_string(stats.leaf_percent()));
+    println(to_string(stats.max_fanout));
+    for bucket: &const in stats.depth_histogram: {
+        println(to_string(bucket.first));
+        println(to_string(bucket.second));
+    }
+    for bucket: &const in stats.fanout_histogram: {
+        println(to_string(bucket.second));
+    }
+    for sample: &const in stats.samples: {
+        println(sample.first);
+        println(to_string(sample.second));
+    }
+    for group: &const in stats.length_groups: {
+        println(to_string(group.first));
+        println(to_string(group.second.size()));
+    }
+    destroy stats;
+
+    // --- A second instantiation at full ASCII width -------------------------
+
+    // The same code at `ALPHABET_ASCII` has to cope with punctuation, which
+    // the 26-letter instantiation folds away entirely.
+    var wide = trie_from_words{int, 128}(words, 0);
+    discard wide.add("read-only", 1);
+    discard wide.add("read_write", 2);
+    discard wide.add("read.me", 3);
+    wide.rebuild_aggregates();
+    println(describe_index{int, 128}(wide));
+    assert wide.contains("read-only");
+    assert wide.contains_prefix("read");
+
+    var wide_hits = wide.keys_with_prefix("read", 0);
+    println(to_string(wide_hits.size()));
+    destroy wide_hits;
+
+    // Merging the narrow index into the wide one keeps the heavier weights.
+    println(to_string(merge_tries{int, 128}(wide, index)));
+    if !wide.check_validity(): {
+        panic("wide trie invariants violated after merge");
+    }
+
+    // Intersection of the two key sets.
+    var shared_keys = intersect_tries{int, 128}(wide, wide);
+    println(to_string(shared_keys.size()));
+    destroy shared_keys;
+
+    // --- Text pipeline -------------------------------------------------------
+
+    var document = string();
+    document.append("the trie indexes the text; ");
+    document.append("the text indexes the trie.\n");
+    document.append("prefix queries over the trie beat scanning the text.");
+    var from_text = trie_from_text{int, 26}(document, 0);
+    println(describe_index{int, 26}(from_text));
+
+    var vocabulary = from_text.to_pairs();
+    var just_keys = vector{string}();
+    for entry: &const in vocabulary: {
+        just_keys.push_back(entry.first);
+    }
+    var shared_prefix = common_prefix_of_all(just_keys);
+    println(to_string(shared_prefix.size()));
+    destroy shared_prefix;
+    destroy just_keys;
+    destroy vocabulary;
+
+    // Ageing decays every weight and evicts whatever fell through the floor.
+    println(to_string(engine.age()));
+    println(engine.describe());
+
+    destroy from_text;
+    destroy document;
+    destroy wide;
+    destroy replayed;
+    destroy engine;
+    destroy ternary;
+    destroy compressed;
+    destroy index;
+    destroy weights;
+    destroy words;
+}
+
+}

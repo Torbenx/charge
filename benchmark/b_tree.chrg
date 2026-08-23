@@ -1,0 +1,2359 @@
+// Generic B-tree implementing an ordered map from K to V.
+//
+// The tree is parameterised three ways:
+//
+//   * `K`     -- the key type, ordered by `compare_keys`,
+//   * `V`     -- the mapped value type,
+//   * `ORDER` -- the branching factor, i.e. the maximum number of children a
+//                single node may have.  A node therefore stores at most
+//                `ORDER - 1` keys and, unless it is the root, at least
+//                `ORDER / 2 - 1` keys.
+//
+// Every node lives in a flat arena (`nodes`) and every link is an integer
+// index into that arena; `BTREE_NIL` (-1) stands for "no such node".  Keeping
+// the links as indices means a whole tree can be copied, serialised or
+// relocated without touching a single pointer.
+//
+// The structural invariants, restated by `check_validity` with `assert` and
+// `prove`, are:
+//
+//   1. Keys inside a node are strictly increasing.
+//   2. A node with `n` keys has either `0` or `n + 1` children.
+//   3. Every non-root node holds between `min_keys()` and `max_keys()` keys.
+//   4. All leaves sit at exactly the same depth.
+//   5. The subtree hanging off child `i` contains only keys that are greater
+//      than key `i - 1` and smaller than key `i`.
+//
+// Insertion splits full nodes on the way down (proactive splitting), so a
+// split never has to propagate back towards the root.  Deletion mirrors that
+// by refilling any child that is about to become minimal *before* descending
+// into it, either by borrowing a separator from a sibling or by merging with
+// one.
+namespace b_tree: {
+
+// --- Enumerations ---------------------------------------------------------
+
+// What happened while making room for a new key.
+enum SplitOutcome: {
+    NoSplit;
+    SplitPerformed;
+    RootGrew = 2;
+}
+
+// How a child was rescued from dropping below the minimum occupancy.
+enum RebalanceAction: {
+    BorrowedFromLeft;
+    BorrowedFromRight;
+    MergedWithLeft;
+    MergedWithRight;
+    NoActionNeeded = 4;
+}
+
+// Result classification for a search inside a single node.
+enum SlotKind: {
+    ExactMatch;
+    DescendLeft;
+    DescendRight;
+    MissingSlot = 3;
+}
+
+// Direction of a traversal or of a range scan.
+enum ScanOrder: {
+    Ascending;
+    Descending = 1;
+}
+
+// --- Tuning constants -----------------------------------------------------
+
+// Sentinel index meaning "no node".  Negative so it can never index the arena.
+static BTREE_NIL: int = -1;
+
+// Branching factor used when a tree is created without an explicit order.
+static BTREE_DEFAULT_ORDER: int = 6;
+
+// Upper bound on the height of any tree we are willing to build.  Only used
+// to size traversal stacks up front so they never reallocate.
+static BTREE_MAX_HEIGHT: int = 48;
+
+// Arena capacity used when a tree is created without a size hint.
+static BTREE_INITIAL_CAPACITY: int = 32;
+
+// Growth factor for the arena, expressed as a percentage so that no floating
+// point is required anywhere in the container.
+static BTREE_GROWTH_PERCENT: int = 200;
+
+// Target fill level, in percent, used by `bulk_load` when it decides how many
+// keys to pack into each freshly built leaf.  Leaving a little slack means the
+// first few insertions after a bulk load do not immediately split anything.
+static BTREE_BULK_FILL_PERCENT: int = 75;
+
+// Number of key/value samples the statistics pass is allowed to retain.
+static BTREE_SAMPLE_LIMIT: int = 8;
+
+// --- Node -----------------------------------------------------------------
+
+// A single B-tree node.
+//
+// `keys` and `values` are parallel arrays of length `count`; `children` is
+// either empty (a leaf) or of length `count + 1` (an internal node).  The node
+// is generic over the branching factor as well as the key and value types, so
+// `max_keys()` and `min_keys()` are compile-time constants rather than fields.
+template(K: type, V: type, ORDER: int)
+struct BTreeNode: {
+
+    // --- Capacity ---------------------------------------------------------
+
+    fn max_children(self: &const shared) -> int: {
+        return ORDER;
+    }
+
+    fn max_keys(self: &const shared) -> int: {
+        return ORDER - 1;
+    }
+
+    // Minimum occupancy for every node except the root.  Written as a
+    // division so that both even and odd branching factors behave.
+    fn min_keys(self: &const shared) -> int: {
+        return ORDER / 2 - 1;
+    }
+
+    fn min_children(self: &const shared) -> int: {
+        return ORDER / 2;
+    }
+
+    fn is_full(self: &const shared) -> bool: {
+        return .count >= ORDER - 1;
+    }
+
+    fn is_minimal(self: &const shared) -> bool: {
+        return .count <= ORDER / 2 - 1;
+    }
+
+    // True when a key can be taken away without violating rule 3.
+    fn has_spare_key(self: &const shared) -> bool: {
+        return .count > ORDER / 2 - 1;
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .leaf;
+    }
+
+    fn key_count(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn child_count(self: &const shared) -> int: {
+        if .leaf: {
+            return 0;
+        }
+        return .count + 1;
+    }
+
+    fn occupancy_percent(self: &const shared) -> int: {
+        if ORDER <= 1: {
+            return 0;
+        }
+        return .count * 100 / (ORDER - 1);
+    }
+
+    // --- Slot access ------------------------------------------------------
+
+    fn key_at(self: &shared, index: int) -> &shared[self] K: {
+        return .keys[index];
+    }
+
+    fn value_at(self: &shared, index: int) -> &shared[self] V: {
+        return .values[index];
+    }
+
+    fn child_at(self: &const shared, index: int) -> int: {
+        if .leaf: {
+            return BTREE_NIL;
+        }
+        if index < 0 || index > .count: {
+            return BTREE_NIL;
+        }
+        return .children[index];
+    }
+
+    // Materialises slot `index` as a `pair{K, V}`; the pair is the unit every
+    // bulk operation in this file trades in.
+    fn entry_at(self: &const shared, index: int) -> pair{K, V}: {
+        return pair{K, V}(first: .keys[index], second: .values[index]);
+    }
+
+    // Copies the whole node out as a vector of pairs.  Used by the bulk
+    // loader, by `in_order` and by the statistics pass.
+    fn entries(self: &const shared) -> vector{pair{K, V}}: {
+        var out = vector{pair{K, V}}();
+        out.reserve(.count);
+        var i: int = 0;
+        while i < .count: {
+            out.push_back(pair{K, V}(first: .keys[i], second: .values[i]));
+            i += 1;
+        }
+        return out;
+    }
+
+    // The node's separator keys paired with the child that sits to their left.
+    fn separators(self: &const shared) -> vector{pair{K, int}}: {
+        var out = vector{pair{K, int}}();
+        if .leaf: {
+            return out;
+        }
+        var i: int = 0;
+        while i < .count: {
+            out.push_back(pair{K, int}(first: .keys[i], second: .children[i]));
+            i += 1;
+        }
+        return out;
+    }
+
+    // --- Search inside one node -------------------------------------------
+
+    // Index of the first key that is not smaller than `key`.  This is the
+    // classic branch point: on an exact hit it is the matching slot, otherwise
+    // it is the index of the child that must be descended into.
+    fn lower_bound(self: &const shared, key: &const K) -> int: {
+        var lo: int = 0;
+        var hi: int = .count;
+        while lo < hi: {
+            let mid = lo + (hi - lo) / 2;
+            if compare_keys(.keys[mid], *key) < 0: {
+                lo = mid + 1;
+            } else: {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    // Index of the first key that is strictly greater than `key`.
+    fn upper_bound(self: &const shared, key: &const K) -> int: {
+        var lo: int = 0;
+        var hi: int = .count;
+        while lo < hi: {
+            let mid = lo + (hi - lo) / 2;
+            if compare_keys(.keys[mid], *key) <= 0: {
+                lo = mid + 1;
+            } else: {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    // A linear scan, kept because it is what the validity checker uses: the
+    // binary search above is only correct if rule 1 holds, and the checker
+    // must not assume the invariant it is trying to prove.
+    fn linear_find(self: &const shared, key: &const K) -> int: {
+        var i: int = 0;
+        while i < .count: {
+            if compare_keys(.keys[i], *key) == 0: {
+                return i;
+            }
+            i += 1;
+        }
+        return -1;
+    }
+
+    fn contains_key(self: &const shared, key: &const K) -> bool: {
+        let slot = .lower_bound(key);
+        if slot >= .count: {
+            return false;
+        }
+        return compare_keys(.keys[slot], *key) == 0;
+    }
+
+    // Classifies a search without performing it, so callers can branch on an
+    // enum rather than on a pair of integers.
+    fn classify(self: &const shared, key: &const K) -> SlotKind: {
+        if .count == 0: {
+            return SlotKind::MissingSlot;
+        }
+        let slot = .lower_bound(key);
+        if slot < .count: {
+            if compare_keys(.keys[slot], *key) == 0: {
+                return SlotKind::ExactMatch;
+            } else: {
+                return SlotKind::DescendLeft;
+            }
+        } else: {
+            return SlotKind::DescendRight;
+        }
+    }
+
+    // Search returning both the slot and whether it was a hit.  The `pair`
+    // return type is what every caller in `BTree` destructures.
+    fn probe(self: &const shared, key: &const K) -> pair{int, bool}: {
+        let slot = .lower_bound(key);
+        if slot < .count: {
+            if compare_keys(.keys[slot], *key) == 0: {
+                return pair{int, bool}(first: slot, second: true);
+            }
+        }
+        return pair{int, bool}(first: slot, second: false);
+    }
+
+    // --- Array shuffling --------------------------------------------------
+    //
+    // Every mutation below moves elements by hand instead of calling
+    // `vector::insert` / `vector::erase`, because the key, value and child
+    // arrays have to stay in step with each other and with `count`.
+
+    // Opens a hole at `at` by shifting keys and values one slot to the right.
+    fn shift_keys_right(self: &unique, at: int): {
+        .keys.push_back(.keys[.count - 1]);
+        .values.push_back(.values[.count - 1]);
+        var i = .count - 1;
+        while i > at: {
+            .keys[i] = .keys[i - 1];
+            .values[i] = .values[i - 1];
+            i -= 1;
+        }
+    }
+
+    // Closes the hole at `at` by shifting keys and values one slot left.
+    fn shift_keys_left(self: &unique, at: int): {
+        var i = at;
+        while i + 1 < .count: {
+            .keys[i] = .keys[i + 1];
+            .values[i] = .values[i + 1];
+            i += 1;
+        }
+        .keys.pop_back();
+        .values.pop_back();
+    }
+
+    fn shift_children_right(self: &unique, at: int): {
+        if .leaf: {
+            return;
+        }
+        .children.push_back(.children[.count]);
+        var i = .count;
+        while i > at: {
+            .children[i] = .children[i - 1];
+            i -= 1;
+        }
+    }
+
+    fn shift_children_left(self: &unique, at: int): {
+        if .leaf: {
+            return;
+        }
+        var i = at;
+        while i + 1 <= .count: {
+            .children[i] = .children[i + 1];
+            i += 1;
+        }
+        .children.pop_back();
+    }
+
+    // --- Primitive edits --------------------------------------------------
+
+    fn insert_entry_at(self: &unique, at: int, key: K, value: V): {
+        if .count == 0: {
+            .keys.push_back(key);
+            .values.push_back(value);
+            .count = 1;
+            return;
+        }
+        if at >= .count: {
+            .keys.push_back(key);
+            .values.push_back(value);
+            .count += 1;
+            return;
+        }
+        .shift_keys_right(at);
+        .keys[at] = key;
+        .values[at] = value;
+        .count += 1;
+    }
+
+    fn remove_entry_at(self: &unique, at: int) -> pair{K, V}: {
+        let taken = pair{K, V}(first: .keys[at], second: .values[at]);
+        .shift_keys_left(at);
+        .count -= 1;
+        return taken;
+    }
+
+    fn insert_child_at(self: &unique, at: int, child: int): {
+        if .leaf: {
+            return;
+        }
+        if at > .count: {
+            .children.push_back(child);
+            return;
+        }
+        .shift_children_right(at);
+        .children[at] = child;
+    }
+
+    fn remove_child_at(self: &unique, at: int) -> int: {
+        if .leaf: {
+            return BTREE_NIL;
+        }
+        let taken = .children[at];
+        .shift_children_left(at);
+        return taken;
+    }
+
+    fn push_entry(self: &unique, key: K, value: V): {
+        .keys.push_back(key);
+        .values.push_back(value);
+        .count += 1;
+    }
+
+    fn push_pair(self: &unique, entry: pair{K, V}): {
+        .keys.push_back(entry.first);
+        .values.push_back(entry.second);
+        .count += 1;
+    }
+
+    fn pop_entry(self: &unique) -> pair{K, V}: {
+        let taken = pair{K, V}(first: .keys[.count - 1], second: .values[.count - 1]);
+        .keys.pop_back();
+        .values.pop_back();
+        .count -= 1;
+        return taken;
+    }
+
+    fn reset_slots(self: &unique): {
+        .keys.clear();
+        .values.clear();
+        .children.clear();
+        .count = 0;
+        .leaf = true;
+        .parent = BTREE_NIL;
+        .depth = 0;
+    }
+
+    keys: vector{K};
+    values: vector{V};
+    children: vector{int};
+    count: int = 0;
+    leaf: bool = true;
+    parent: int = -1;
+    depth: int = 0;
+    live: bool = true;
+}
+
+// --- Statistics -----------------------------------------------------------
+
+// Everything the shape pass measures.  It is generic over K and V purely so
+// that it can carry a handful of sampled entries alongside the numbers, which
+// makes the struct useful for debugging as well as for testing.
+template(K: type, V: type)
+struct BTreeStats: {
+
+    fn average_occupancy(self: &const shared) -> int: {
+        if .node_count == 0: {
+            return 0;
+        }
+        return .key_count * 100 / .node_count;
+    }
+
+    fn leaf_fraction_percent(self: &const shared) -> int: {
+        if .node_count == 0: {
+            return 0;
+        }
+        return .leaf_count * 100 / .node_count;
+    }
+
+    fn balanced(self: &const shared) -> bool: {
+        return .min_leaf_depth == .max_leaf_depth;
+    }
+
+    fn record_sample(self: &unique, entry: pair{K, V}): {
+        if .samples.size() < BTREE_SAMPLE_LIMIT: {
+            .samples.push_back(entry);
+        }
+    }
+
+    // One `(depth, node count)` pair per level, in increasing depth order.
+    fn level_widths(self: &const shared) -> vector{pair{int, int}}: {
+        var out = vector{pair{int, int}}();
+        for row: &const in .per_depth: {
+            out.push_back(pair{int, int}(first: row.first, second: row.second));
+        }
+        return out;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = string();
+        text.append("height=");
+        text.append(to_string(.height));
+        text.append(" nodes=");
+        text.append(to_string(.node_count));
+        text.append(" keys=");
+        text.append(to_string(.key_count));
+        text.append(" fill=");
+        text.append(to_string(.average_occupancy()));
+        return text;
+    }
+
+    height: int = 0;
+    node_count: int = 0;
+    leaf_count: int = 0;
+    key_count: int = 0;
+    min_occupancy: int = 0;
+    max_occupancy: int = 0;
+    min_leaf_depth: int = 0;
+    max_leaf_depth: int = 0;
+    splits_seen: int = 0;
+    merges_seen: int = 0;
+    per_depth: vector{pair{int, int}};
+    occupancy_histogram: vector{pair{int, int}};
+    samples: vector{pair{K, V}};
+}
+
+// --- Cursor ---------------------------------------------------------------
+
+// A position inside a tree: the node, the slot within that node, and the full
+// root-to-node path as `(node, child index)` pairs.  Predecessor and successor
+// are both implemented on top of this.
+template(K: type, V: type, ORDER: int)
+struct BTreeCursor: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .node != BTREE_NIL && .slot >= 0;
+    }
+
+    fn depth(self: &const shared) -> int: {
+        return .path.size();
+    }
+
+    fn push_step(self: &unique, node: int, child: int): {
+        .path.push_back(pair{int, int}(first: node, second: child));
+    }
+
+    fn pop_step(self: &unique) -> pair{int, int}: {
+        if .path.size() == 0: {
+            return pair{int, int}(first: BTREE_NIL, second: -1);
+        }
+        let top = .path.back();
+        .path.pop_back();
+        return pair{int, int}(first: top.first, second: top.second);
+    }
+
+    fn parent_step(self: &const shared) -> pair{int, int}: {
+        if .path.size() == 0: {
+            return pair{int, int}(first: BTREE_NIL, second: -1);
+        }
+        return .path[.path.size() - 1];
+    }
+
+    fn invalidate(self: &unique): {
+        .node = BTREE_NIL;
+        .slot = -1;
+        .path.clear();
+    }
+
+    node: int = -1;
+    slot: int = -1;
+    order: ScanOrder = ScanOrder::Ascending;
+    path: vector{pair{int, int}};
+    pending: vector{pair{K, V}};
+}
+
+// --- Tree -----------------------------------------------------------------
+
+template(K: type, V: type, ORDER: int)
+struct BTree: {
+
+    // --- Size and shape queries -------------------------------------------
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn order(self: &const shared) -> int: {
+        return ORDER;
+    }
+
+    fn max_keys(self: &const shared) -> int: {
+        return ORDER - 1;
+    }
+
+    fn min_keys(self: &const shared) -> int: {
+        return ORDER / 2 - 1;
+    }
+
+    fn arena_size(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn is_nil(self: &const shared, i: int) -> bool: {
+        return i == BTREE_NIL;
+    }
+
+    fn alive(self: &const shared, i: int) -> bool: {
+        if i == BTREE_NIL: {
+            return false;
+        }
+        return .nodes[i].live;
+    }
+
+    fn node_at(self: &shared, i: int) -> &shared[self] BTreeNode{K, V, ORDER}: {
+        return .nodes[i];
+    }
+
+    fn root_node(self: &shared) -> &shared[self] BTreeNode{K, V, ORDER}: {
+        return .nodes[.root];
+    }
+
+    // --- Arena management --------------------------------------------------
+
+    fn reserve(self: &unique, capacity: int): {
+        .nodes.reserve(capacity);
+    }
+
+    fn grow_if_needed(self: &unique): {
+        if .nodes.size() >= .nodes.capacity(): {
+            let target = .nodes.capacity() * BTREE_GROWTH_PERCENT / 100;
+            if target <= .nodes.size(): {
+                .nodes.reserve(.nodes.size() + BTREE_INITIAL_CAPACITY);
+            } else: {
+                .nodes.reserve(target);
+            }
+        }
+    }
+
+    // Hands back a fresh node, recycling a released slot when one exists.
+    fn allocate_node(self: &unique, leaf: bool, depth: int) -> int: {
+        if .free_list != BTREE_NIL: {
+            let recycled = .free_list;
+            .free_list = .nodes[recycled].parent;
+            .nodes[recycled].reset_slots();
+            .nodes[recycled].leaf = leaf;
+            .nodes[recycled].depth = depth;
+            .nodes[recycled].live = true;
+            return recycled;
+        }
+        .grow_if_needed();
+        var fresh = BTreeNode{K, V, ORDER}(leaf: leaf, depth: depth);
+        .nodes.push_back(fresh);
+        return .nodes.size() - 1;
+    }
+
+    // Returns a node to the free list.  The free list threads itself through
+    // the `parent` field, which is unused while a node is dead.
+    fn release_node(self: &unique, i: int): {
+        if i == BTREE_NIL: {
+            return;
+        }
+        .nodes[i].reset_slots();
+        .nodes[i].live = false;
+        .nodes[i].parent = .free_list;
+        .free_list = i;
+    }
+
+    fn set_parent(self: &unique, child: int, parent: int): {
+        if child != BTREE_NIL: {
+            .nodes[child].parent = parent;
+        }
+    }
+
+    // Re-stamps `depth` on a whole subtree.  Called after a merge or a root
+    // change, both of which move entire subtrees one level up or down.
+    fn restamp_depths(self: &unique, start: int, depth: int): {
+        if start == BTREE_NIL: {
+            return;
+        }
+        var stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}(first: start, second: depth));
+        while stack.size() > 0: {
+            let top = stack.back();
+            stack.pop_back();
+            .nodes[top.first].depth = top.second;
+            if !.nodes[top.first].leaf: {
+                var c: int = 0;
+                while c <= .nodes[top.first].count: {
+                    let child = .nodes[top.first].children[c];
+                    if child != BTREE_NIL: {
+                        stack.push_back(pair{int, int}(first: child, second: top.second + 1));
+                    }
+                    c += 1;
+                }
+            }
+        }
+        destroy stack;
+    }
+
+    // --- Search ------------------------------------------------------------
+
+    // Search within a single node, delegated so callers can stay index-free.
+    fn find_in_node(self: &const shared, node: int, key: &const K) -> pair{int, bool}: {
+        if node == BTREE_NIL: {
+            return pair{int, bool}(first: -1, second: false);
+        }
+        return .nodes[node].probe(key);
+    }
+
+    // Walks down the tree and returns `(node, slot)` for an exact hit, or
+    // `(BTREE_NIL, -1)` when the key is absent.
+    fn locate(self: &const shared, key: &const K) -> pair{int, int}: {
+        var current = .root;
+        while current != BTREE_NIL: {
+            let hit = .nodes[current].probe(key);
+            if hit.second: {
+                return pair{int, int}(first: current, second: hit.first);
+            }
+            if .nodes[current].leaf: {
+                return pair{int, int}(first: BTREE_NIL, second: -1);
+            }
+            current = .nodes[current].children[hit.first];
+        }
+        return pair{int, int}(first: BTREE_NIL, second: -1);
+    }
+
+    // Same walk as `locate`, but recording every step so the caller can climb
+    // back up afterwards.  This is what feeds `BTreeCursor`.
+    fn locate_with_path(self: &const shared, key: &const K) -> BTreeCursor{K, V, ORDER}: {
+        var cursor = BTreeCursor{K, V, ORDER}();
+        var current = .root;
+        while current != BTREE_NIL: {
+            let hit = .nodes[current].probe(key);
+            if hit.second: {
+                cursor.node = current;
+                cursor.slot = hit.first;
+                return cursor;
+            }
+            if .nodes[current].leaf: {
+                cursor.node = BTREE_NIL;
+                cursor.slot = -1;
+                return cursor;
+            }
+            cursor.push_step(current, hit.first);
+            current = .nodes[current].children[hit.first];
+        }
+        cursor.invalidate();
+        return cursor;
+    }
+
+    fn contains(self: &const shared, key: &const K) -> bool: {
+        let found = .locate(key);
+        return found.first != BTREE_NIL;
+    }
+
+    fn find(self: &shared, key: &const K) -> &shared[self] V: {
+        let found = .locate(key);
+        if found.first == BTREE_NIL: {
+            return .missing;
+        }
+        return .nodes[found.first].values[found.second];
+    }
+
+    // Depth at which `key` lives, or -1 when it is absent.  Cheap proxy for
+    // "how many comparisons did that lookup cost".
+    fn depth_of(self: &const shared, key: &const K) -> int: {
+        var current = .root;
+        var depth: int = 0;
+        while current != BTREE_NIL: {
+            let hit = .nodes[current].probe(key);
+            if hit.second: {
+                return depth;
+            }
+            if .nodes[current].leaf: {
+                return -1;
+            }
+            current = .nodes[current].children[hit.first];
+            depth += 1;
+        }
+        return -1;
+    }
+
+    // --- Minimum and maximum ------------------------------------------------
+
+    fn minimum_in(self: &const shared, start: int) -> pair{int, int}: {
+        var current = start;
+        while current != BTREE_NIL: {
+            if .nodes[current].leaf: {
+                if .nodes[current].count == 0: {
+                    return pair{int, int}(first: BTREE_NIL, second: -1);
+                }
+                return pair{int, int}(first: current, second: 0);
+            }
+            current = .nodes[current].children[0];
+        }
+        return pair{int, int}(first: BTREE_NIL, second: -1);
+    }
+
+    fn maximum_in(self: &const shared, start: int) -> pair{int, int}: {
+        var current = start;
+        while current != BTREE_NIL: {
+            if .nodes[current].leaf: {
+                if .nodes[current].count == 0: {
+                    return pair{int, int}(first: BTREE_NIL, second: -1);
+                }
+                return pair{int, int}(first: current, second: .nodes[current].count - 1);
+            }
+            current = .nodes[current].children[.nodes[current].count];
+        }
+        return pair{int, int}(first: BTREE_NIL, second: -1);
+    }
+
+    fn minimum(self: &const shared) -> pair{int, int}: {
+        return .minimum_in(.root);
+    }
+
+    fn maximum(self: &const shared) -> pair{int, int}: {
+        return .maximum_in(.root);
+    }
+
+    fn min_key(self: &shared) -> &shared[self] K: {
+        let at = .minimum();
+        if at.first == BTREE_NIL: {
+            return .missing_key;
+        }
+        return .nodes[at.first].keys[at.second];
+    }
+
+    fn max_key(self: &shared) -> &shared[self] K: {
+        let at = .maximum();
+        if at.first == BTREE_NIL: {
+            return .missing_key;
+        }
+        return .nodes[at.first].keys[at.second];
+    }
+
+    fn min_entry(self: &const shared) -> pair{K, V}: {
+        let at = .minimum();
+        if at.first == BTREE_NIL: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        return .nodes[at.first].entry_at(at.second);
+    }
+
+    fn max_entry(self: &const shared) -> pair{K, V}: {
+        let at = .maximum();
+        if at.first == BTREE_NIL: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        return .nodes[at.first].entry_at(at.second);
+    }
+
+    // --- Insertion ----------------------------------------------------------
+    //
+    // Proactive splitting: on the way down, any full node is split before it
+    // is entered, which guarantees the node a new key lands in always has room
+    // and removes the need to propagate a split upwards.
+
+    // Splits `.nodes[parent].children[index]`, which must be full.  The median
+    // key moves up into `parent` at slot `index`, and the upper half of the
+    // child becomes a brand new sibling at `index + 1`.
+    fn split_child(self: &unique, parent: int, index: int) -> int: {
+        let full = .nodes[parent].children[index];
+        let median = (ORDER - 1) / 2;
+        let sibling = .allocate_node(.nodes[full].leaf, .nodes[full].depth);
+
+        // Move everything above the median into the new sibling.
+        var i = median + 1;
+        while i < .nodes[full].count: {
+            .nodes[sibling].push_entry(.nodes[full].keys[i], .nodes[full].values[i]);
+            i += 1;
+        }
+
+        // Internal nodes carry one more child than they carry keys.
+        if !.nodes[full].leaf: {
+            var c = median + 1;
+            while c <= .nodes[full].count: {
+                let moved = .nodes[full].children[c];
+                .nodes[sibling].children.push_back(moved);
+                .set_parent(moved, sibling);
+                c += 1;
+            }
+            var trim = .nodes[full].count;
+            while trim > median: {
+                .nodes[full].children.pop_back();
+                trim -= 1;
+            }
+        }
+
+        // The median itself is promoted, so the left half keeps `median` keys.
+        let promoted_key = .nodes[full].keys[median];
+        let promoted_value = .nodes[full].values[median];
+        var drop = .nodes[full].count;
+        while drop > median: {
+            .nodes[full].keys.pop_back();
+            .nodes[full].values.pop_back();
+            drop -= 1;
+        }
+        .nodes[full].count = median;
+
+        .nodes[parent].insert_entry_at(index, promoted_key, promoted_value);
+        .nodes[parent].insert_child_at(index + 1, sibling);
+        .set_parent(sibling, parent);
+        .set_parent(full, parent);
+        .splits += 1;
+        return sibling;
+    }
+
+    // Grows the tree by one level.  Only ever called when the root is full.
+    fn grow_root(self: &unique) -> int: {
+        let old_root = .root;
+        let fresh = .allocate_node(false, 0);
+        .nodes[fresh].children.push_back(old_root);
+        .set_parent(old_root, fresh);
+        .root = fresh;
+        .restamp_depths(fresh, 0);
+        let sibling = .split_child(fresh, 0);
+        discard sibling;
+        .height_hint += 1;
+        return fresh;
+    }
+
+    // Inserts into a subtree whose root is known not to be full.
+    fn insert_non_full(self: &unique, start: int, key: K, value: V) -> bool: {
+        var current = start;
+        loop: {
+            let hit = .nodes[current].probe(key);
+            if hit.second: {
+                // Existing key: overwrite the mapped value in place.
+                .nodes[current].values[hit.first] = value;
+                return false;
+            }
+            if .nodes[current].leaf: {
+                .nodes[current].insert_entry_at(hit.first, key, value);
+                .count += 1;
+                return true;
+            } else: {
+                var slot = hit.first;
+                let child = .nodes[current].children[slot];
+                if .nodes[child].is_full(): {
+                    let sibling = .split_child(current, slot);
+                    discard sibling;
+                    // The promoted separator may itself be the key we want.
+                    if compare_keys(.nodes[current].keys[slot], key) == 0: {
+                        .nodes[current].values[slot] = value;
+                        return false;
+                    }
+                    if compare_keys(key, .nodes[current].keys[slot]) > 0: {
+                        slot += 1;
+                    }
+                }
+                current = .nodes[current].children[slot];
+            }
+        }
+    }
+
+    fn insert(self: &unique, key: K, value: V) -> bool: {
+        if .root == BTREE_NIL: {
+            .root = .allocate_node(true, 0);
+            .nodes[.root].push_entry(key, value);
+            .count += 1;
+            .height_hint = 1;
+            return true;
+        }
+        if .nodes[.root].is_full(): {
+            let grown = .grow_root();
+            discard grown;
+        }
+        return .insert_non_full(.root, key, value);
+    }
+
+    fn insert_pair(self: &unique, entry: pair{K, V}) -> bool: {
+        return .insert(entry.first, entry.second);
+    }
+
+    // Inserts every element of a `vector{pair{K, V}}` and reports how many of
+    // them were genuinely new keys.
+    fn insert_all(self: &unique, entries: &const shared vector{pair{K, V}}) -> int: {
+        var added: int = 0;
+        for entry: &const in entries: {
+            if .insert(entry.first, entry.second): {
+                added += 1;
+            }
+        }
+        return added;
+    }
+
+    // Insert-or-append semantics for a multimap-flavoured tree whose values
+    // are themselves vectors.
+    fn append_value(self: &unique, key: K, value: V) -> bool: {
+        let found = .locate(key);
+        if found.first == BTREE_NIL: {
+            return .insert(key, value);
+        }
+        .nodes[found.first].values[found.second] = value;
+        return false;
+    }
+
+    // --- Deletion -----------------------------------------------------------
+    //
+    // Deletion is the mirror image of insertion: on the way down, any child
+    // that is already minimal is refilled *before* it is entered, so the node
+    // a key is finally removed from always has a key to spare.
+
+    // Moves the parent separator at `index - 1` down into child `index` and
+    // pulls the left sibling's last key up to replace it.
+    fn borrow_from_left(self: &unique, parent: int, index: int): {
+        let child = .nodes[parent].children[index];
+        let left = .nodes[parent].children[index - 1];
+
+        // Separator comes down to the front of the child.
+        .nodes[child].insert_entry_at(0, .nodes[parent].keys[index - 1],
+                                      .nodes[parent].values[index - 1]);
+
+        // The left sibling's last key goes up into the separator slot.
+        let lifted = .nodes[left].pop_entry();
+        .nodes[parent].keys[index - 1] = lifted.first;
+        .nodes[parent].values[index - 1] = lifted.second;
+
+        // Internal nodes also hand over the corresponding child pointer.
+        if !.nodes[child].leaf: {
+            let moved = .nodes[left].children[.nodes[left].count + 1];
+            .nodes[left].children.pop_back();
+            .nodes[child].insert_child_at(0, moved);
+            .set_parent(moved, child);
+            .restamp_depths(moved, .nodes[child].depth + 1);
+        }
+        .borrows += 1;
+    }
+
+    // The symmetric operation on the right-hand sibling.
+    fn borrow_from_right(self: &unique, parent: int, index: int): {
+        let child = .nodes[parent].children[index];
+        let right = .nodes[parent].children[index + 1];
+
+        // Separator comes down to the back of the child.
+        .nodes[child].push_entry(.nodes[parent].keys[index], .nodes[parent].values[index]);
+
+        // The right sibling's first key goes up into the separator slot.
+        let lifted = .nodes[right].remove_entry_at(0);
+        .nodes[parent].keys[index] = lifted.first;
+        .nodes[parent].values[index] = lifted.second;
+
+        if !.nodes[child].leaf: {
+            let moved = .nodes[right].remove_child_at(0);
+            .nodes[child].children.push_back(moved);
+            .set_parent(moved, child);
+            .restamp_depths(moved, .nodes[child].depth + 1);
+        }
+        .borrows += 1;
+    }
+
+    // Folds child `index + 1` into child `index`, pulling the separator at
+    // `index` down between them.  The right-hand child is released.
+    fn merge_children(self: &unique, parent: int, index: int) -> int: {
+        let left = .nodes[parent].children[index];
+        let right = .nodes[parent].children[index + 1];
+
+        // The separator becomes the first of the merged keys.
+        let separator = .nodes[parent].remove_entry_at(index);
+        .nodes[left].push_entry(separator.first, separator.second);
+
+        // Then everything the right sibling was holding.
+        var i: int = 0;
+        while i < .nodes[right].count: {
+            .nodes[left].push_entry(.nodes[right].keys[i], .nodes[right].values[i]);
+            i += 1;
+        }
+
+        if !.nodes[right].leaf: {
+            var c: int = 0;
+            while c <= .nodes[right].count: {
+                let moved = .nodes[right].children[c];
+                if moved != BTREE_NIL: {
+                    .nodes[left].children.push_back(moved);
+                    .set_parent(moved, left);
+                    .restamp_depths(moved, .nodes[left].depth + 1);
+                }
+                c += 1;
+            }
+        }
+
+        // Drop the now-empty right child from the parent's child array.
+        let dropped = .nodes[parent].remove_child_at(index + 1);
+        discard dropped;
+        .release_node(right);
+        .merges += 1;
+
+        // Merging away the last separator of the root shrinks the tree.
+        if parent == .root && .nodes[parent].count == 0: {
+            .release_node(.root);
+            .root = left;
+            .set_parent(left, BTREE_NIL);
+            .restamp_depths(left, 0);
+            if .height_hint > 0: {
+                .height_hint -= 1;
+            }
+        }
+        return left;
+    }
+
+    // Guarantees child `index` has more than the minimum number of keys, by
+    // borrowing from whichever sibling can spare one and merging otherwise.
+    // Returns both the action taken and the index the child now lives at.
+    fn fill_child(self: &unique, parent: int, index: int) -> pair{RebalanceAction, int}: {
+        let child = .nodes[parent].children[index];
+        if .nodes[child].has_spare_key(): {
+            return pair{RebalanceAction, int}(first: RebalanceAction::NoActionNeeded,
+                                              second: index);
+        }
+
+        if index > 0: {
+            let left = .nodes[parent].children[index - 1];
+            if .nodes[left].has_spare_key(): {
+                .borrow_from_left(parent, index);
+                return pair{RebalanceAction, int}(first: RebalanceAction::BorrowedFromLeft,
+                                                  second: index);
+            } else: {
+                if index < .nodes[parent].count: {
+                    let right = .nodes[parent].children[index + 1];
+                    if .nodes[right].has_spare_key(): {
+                        .borrow_from_right(parent, index);
+                        return pair{RebalanceAction, int}(
+                            first: RebalanceAction::BorrowedFromRight, second: index);
+                    } else: {
+                        // Neither sibling can spare a key, so merge with the
+                        // left one; the child slides one slot to the left.
+                        let merged = .merge_children(parent, index - 1);
+                        discard merged;
+                        return pair{RebalanceAction, int}(
+                            first: RebalanceAction::MergedWithLeft, second: index - 1);
+                    }
+                } else: {
+                    let merged = .merge_children(parent, index - 1);
+                    discard merged;
+                    return pair{RebalanceAction, int}(
+                        first: RebalanceAction::MergedWithLeft, second: index - 1);
+                }
+            }
+        } else: {
+            // Leftmost child: the right sibling is the only candidate.
+            if index < .nodes[parent].count: {
+                let right = .nodes[parent].children[index + 1];
+                if .nodes[right].has_spare_key(): {
+                    .borrow_from_right(parent, index);
+                    return pair{RebalanceAction, int}(
+                        first: RebalanceAction::BorrowedFromRight, second: index);
+                } else: {
+                    let merged = .merge_children(parent, index);
+                    discard merged;
+                    return pair{RebalanceAction, int}(
+                        first: RebalanceAction::MergedWithRight, second: index);
+                }
+            } else: {
+                return pair{RebalanceAction, int}(first: RebalanceAction::NoActionNeeded,
+                                                  second: index);
+            }
+        }
+    }
+
+    // Removes slot `slot` of a leaf.  The caller has already ensured the leaf
+    // is either the root or holds more than the minimum number of keys.
+    fn remove_from_leaf(self: &unique, node: int, slot: int) -> pair{K, V}: {
+        let taken = .nodes[node].remove_entry_at(slot);
+        .count -= 1;
+        return taken;
+    }
+
+    // Removes slot `slot` of an internal node by replacing it with either its
+    // in-order predecessor or its in-order successor, whichever comes from the
+    // side that can afford to lose a key, then deleting that key recursively.
+    fn remove_from_branch(self: &unique, node: int, slot: int) -> bool: {
+        let left = .nodes[node].children[slot];
+        let right = .nodes[node].children[slot + 1];
+
+        if .nodes[left].has_spare_key(): {
+            let at = .maximum_in(left);
+            let replacement = .nodes[at.first].entry_at(at.second);
+            .nodes[node].keys[slot] = replacement.first;
+            .nodes[node].values[slot] = replacement.second;
+            return .erase_from(left, replacement.first);
+        } else: {
+            if .nodes[right].has_spare_key(): {
+                let at = .minimum_in(right);
+                let replacement = .nodes[at.first].entry_at(at.second);
+                .nodes[node].keys[slot] = replacement.first;
+                .nodes[node].values[slot] = replacement.second;
+                return .erase_from(right, replacement.first);
+            } else: {
+                // Both children are minimal: fold them together and delete the
+                // key from the merged node instead.
+                let doomed_key = .nodes[node].keys[slot];
+                let merged = .merge_children(node, slot);
+                return .erase_from(merged, doomed_key);
+            }
+        }
+    }
+
+    // Deletes `key` from the subtree rooted at `start`, refilling children on
+    // the way down so no node ever underflows behind us.
+    fn erase_from(self: &unique, start: int, key: K) -> bool: {
+        var current = start;
+        loop: {
+            if current == BTREE_NIL: {
+                return false;
+            }
+            let hit = .nodes[current].probe(key);
+            if hit.second: {
+                if .nodes[current].leaf: {
+                    let taken = .remove_from_leaf(current, hit.first);
+                    discard taken;
+                    return true;
+                } else: {
+                    return .remove_from_branch(current, hit.first);
+                }
+            }
+            if .nodes[current].leaf: {
+                return false;
+            }
+            var slot = hit.first;
+            let child = .nodes[current].children[slot];
+            if .nodes[child].is_minimal(): {
+                let action = .fill_child(current, slot);
+                slot = action.second;
+                if action.first == RebalanceAction::MergedWithLeft: {
+                    // The merge may have collapsed the root beneath us.
+                    if .nodes[current].count == 0 && current == .root: {
+                        current = .root;
+                        slot = 0;
+                    }
+                }
+                if slot > .nodes[current].count: {
+                    slot = .nodes[current].count;
+                }
+            }
+            current = .nodes[current].children[slot];
+        }
+    }
+
+    fn erase(self: &unique, key: K) -> bool: {
+        if .root == BTREE_NIL: {
+            return false;
+        }
+        let removed = .erase_from(.root, key);
+        if .root != BTREE_NIL: {
+            if .nodes[.root].count == 0 && .nodes[.root].leaf: {
+                .release_node(.root);
+                .root = BTREE_NIL;
+                .height_hint = 0;
+            }
+        }
+        return removed;
+    }
+
+    fn erase_min(self: &unique) -> pair{K, V}: {
+        let at = .minimum();
+        if at.first == BTREE_NIL: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        let entry = .nodes[at.first].entry_at(at.second);
+        discard .erase(entry.first);
+        return entry;
+    }
+
+    fn erase_max(self: &unique) -> pair{K, V}: {
+        let at = .maximum();
+        if at.first == BTREE_NIL: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        let entry = .nodes[at.first].entry_at(at.second);
+        discard .erase(entry.first);
+        return entry;
+    }
+
+    // --- Predecessor and successor ------------------------------------------
+    //
+    // Both walk down to the key first, recording the path, and then either
+    // dive into the neighbouring subtree or climb back up until the step they
+    // came from was not the extreme child.
+
+    fn predecessor(self: &const shared, key: &const K) -> pair{K, V}: {
+        var cursor = .locate_with_path(key);
+        if !cursor.valid(): {
+            // The key is absent: fall back to the largest key below it.
+            return .largest_below(key);
+        }
+        if !.nodes[cursor.node].leaf: {
+            let at = .maximum_in(.nodes[cursor.node].children[cursor.slot]);
+            if at.first != BTREE_NIL: {
+                return .nodes[at.first].entry_at(at.second);
+            }
+        }
+        if cursor.slot > 0: {
+            return .nodes[cursor.node].entry_at(cursor.slot - 1);
+        }
+        // Climb: the predecessor is the separator left of the child we
+        // descended through, at the first level where that index was non-zero.
+        while cursor.depth() > 0: {
+            let step = cursor.pop_step();
+            if step.second > 0: {
+                return .nodes[step.first].entry_at(step.second - 1);
+            }
+        }
+        return pair{K, V}(first: .missing_key, second: .missing);
+    }
+
+    fn successor(self: &const shared, key: &const K) -> pair{K, V}: {
+        var cursor = .locate_with_path(key);
+        if !cursor.valid(): {
+            return .smallest_above(key);
+        }
+        if !.nodes[cursor.node].leaf: {
+            let at = .minimum_in(.nodes[cursor.node].children[cursor.slot + 1]);
+            if at.first != BTREE_NIL: {
+                return .nodes[at.first].entry_at(at.second);
+            }
+        }
+        if cursor.slot + 1 < .nodes[cursor.node].count: {
+            return .nodes[cursor.node].entry_at(cursor.slot + 1);
+        }
+        while cursor.depth() > 0: {
+            let step = cursor.pop_step();
+            if step.second < .nodes[step.first].count: {
+                return .nodes[step.first].entry_at(step.second);
+            }
+        }
+        return pair{K, V}(first: .missing_key, second: .missing);
+    }
+
+    // Largest key strictly smaller than `key`, for keys that are not present.
+    fn largest_below(self: &const shared, key: &const K) -> pair{K, V}: {
+        var current = .root;
+        var best = pair{K, V}(first: .missing_key, second: .missing);
+        var found: bool = false;
+        while current != BTREE_NIL: {
+            let slot = .nodes[current].lower_bound(key);
+            if slot > 0: {
+                best = .nodes[current].entry_at(slot - 1);
+                found = true;
+            }
+            if .nodes[current].leaf: {
+                current = BTREE_NIL;
+            } else: {
+                current = .nodes[current].children[slot];
+            }
+        }
+        if !found: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        return best;
+    }
+
+    // Smallest key strictly greater than `key`.
+    fn smallest_above(self: &const shared, key: &const K) -> pair{K, V}: {
+        var current = .root;
+        var best = pair{K, V}(first: .missing_key, second: .missing);
+        var found: bool = false;
+        while current != BTREE_NIL: {
+            let slot = .nodes[current].upper_bound(key);
+            if slot < .nodes[current].count: {
+                best = .nodes[current].entry_at(slot);
+                found = true;
+            }
+            if .nodes[current].leaf: {
+                current = BTREE_NIL;
+            } else: {
+                current = .nodes[current].children[slot];
+            }
+        }
+        if !found: {
+            return pair{K, V}(first: .missing_key, second: .missing);
+        }
+        return best;
+    }
+
+    // --- Traversal ------------------------------------------------------------
+    //
+    // The in-order walk keeps an explicit `(node, child index)` stack instead
+    // of recursing, which bounds the stack depth by BTREE_MAX_HEIGHT and makes
+    // the ordering of the interleaved key/child visits obvious.
+
+    fn in_order(self: &const shared, out: &unique vector{pair{K, V}}): {
+        if .root == BTREE_NIL: {
+            return;
+        }
+        var stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}(first: .root, second: 0));
+        while stack.size() > 0: {
+            let top = stack.back();
+            stack.pop_back();
+            let node = top.first;
+            let step = top.second;
+            if .nodes[node].leaf: {
+                var i: int = 0;
+                while i < .nodes[node].count: {
+                    out.push_back(.nodes[node].entry_at(i));
+                    i += 1;
+                }
+            } else: {
+                if step <= .nodes[node].count: {
+                    // Come back to this node once the child has been walked.
+                    stack.push_back(pair{int, int}(first: node, second: step + 1));
+                    if step > 0: {
+                        // Emit the separator that precedes the upcoming child.
+                        out.push_back(.nodes[node].entry_at(step - 1));
+                    }
+                    let child = .nodes[node].children[step];
+                    if child != BTREE_NIL: {
+                        stack.push_back(pair{int, int}(first: child, second: 0));
+                    }
+                }
+            }
+        }
+        destroy stack;
+    }
+
+    fn keys_in_order(self: &const shared, out: &unique vector{K}): {
+        var entries = vector{pair{K, V}}();
+        .in_order(entries);
+        for entry: &const in entries: {
+            out.push_back(entry.first);
+        }
+        destroy entries;
+    }
+
+    fn values_in_order(self: &const shared, out: &unique vector{V}): {
+        var entries = vector{pair{K, V}}();
+        .in_order(entries);
+        for entry: &const in entries: {
+            out.push_back(entry.second);
+        }
+        destroy entries;
+    }
+
+    fn to_pairs(self: &const shared) -> vector{pair{K, V}}: {
+        var out = vector{pair{K, V}}();
+        out.reserve(.count);
+        .in_order(out);
+        return out;
+    }
+
+    // Level order, returned as one `vector{int}` of node indices per level.
+    fn level_order(self: &const shared) -> vector{vector{int}}: {
+        var levels = vector{vector{int}}();
+        if .root == BTREE_NIL: {
+            return levels;
+        }
+        var frontier = vector{int}();
+        frontier.push_back(.root);
+        while frontier.size() > 0: {
+            var next = vector{int}();
+            var row = vector{int}();
+            for node: &const in frontier: {
+                row.push_back(node);
+                if !.nodes[node].leaf: {
+                    var c: int = 0;
+                    while c <= .nodes[node].count: {
+                        let child = .nodes[node].children[c];
+                        if child != BTREE_NIL: {
+                            next.push_back(child);
+                        }
+                        c += 1;
+                    }
+                }
+            }
+            levels.push_back(row);
+            frontier = next;
+        }
+        return levels;
+    }
+
+    // Every leaf, left to right.
+    fn leaves(self: &const shared) -> vector{int}: {
+        var out = vector{int}();
+        if .root == BTREE_NIL: {
+            return out;
+        }
+        var stack = vector{int}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(.root);
+        while stack.size() > 0: {
+            let node = stack.back();
+            stack.pop_back();
+            if .nodes[node].leaf: {
+                out.push_back(node);
+            } else: {
+                var c = .nodes[node].count;
+                while c >= 0: {
+                    let child = .nodes[node].children[c];
+                    if child != BTREE_NIL: {
+                        stack.push_back(child);
+                    }
+                    c -= 1;
+                }
+            }
+        }
+        destroy stack;
+        return out;
+    }
+
+    // --- Range queries --------------------------------------------------------
+
+    // Collects every entry whose key lies in the half-open range
+    // `[low, high)`.  The walk prunes any subtree that cannot intersect the
+    // range, which is the whole point of doing it on the tree rather than on
+    // the flattened `to_pairs()` output.
+    fn range_query(self: &const shared, low: &const K, high: &const K,
+                   out: &unique vector{pair{K, V}}) -> int: {
+        if .root == BTREE_NIL: {
+            return 0;
+        }
+        var emitted: int = 0;
+        var stack = vector{int}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(.root);
+        while stack.size() > 0: {
+            let node = stack.back();
+            stack.pop_back();
+            let first = .nodes[node].lower_bound(low);
+            var i = first;
+            while i < .nodes[node].count: {
+                if compare_keys(.nodes[node].keys[i], *high) >= 0: {
+                    i = .nodes[node].count;
+                } else: {
+                    out.push_back(.nodes[node].entry_at(i));
+                    emitted += 1;
+                    i += 1;
+                }
+            }
+            if !.nodes[node].leaf: {
+                let last = .nodes[node].upper_bound(high);
+                var c = first;
+                while c <= last: {
+                    if c <= .nodes[node].count: {
+                        let child = .nodes[node].children[c];
+                        if child != BTREE_NIL: {
+                            stack.push_back(child);
+                        }
+                    }
+                    c += 1;
+                }
+            }
+        }
+        destroy stack;
+        return emitted;
+    }
+
+    // How many keys fall in `[low, high)`, without materialising them.
+    fn count_range(self: &const shared, low: &const K, high: &const K) -> int: {
+        var scratch = vector{pair{K, V}}();
+        let total = .range_query(low, high, scratch);
+        destroy scratch;
+        return total;
+    }
+
+    // Range query that buckets its results by the leaf they came from, giving
+    // one `vector{pair{K, V}}` per leaf index.
+    fn range_by_leaf(self: &const shared, low: &const K,
+                     high: &const K) -> map{int, vector{pair{K, V}}}: {
+        var buckets = map{int, vector{pair{K, V}}}();
+        let leaf_list = .leaves();
+        for leaf: &const in leaf_list: {
+            var row = vector{pair{K, V}}();
+            var i: int = 0;
+            while i < .nodes[leaf].count: {
+                let entry = .nodes[leaf].entry_at(i);
+                if compare_keys(entry.first, *low) >= 0 &&
+                   compare_keys(entry.first, *high) < 0: {
+                    row.push_back(entry);
+                }
+                i += 1;
+            }
+            if row.size() > 0: {
+                discard buckets.insert(leaf, row);
+            }
+            destroy row;
+        }
+        return buckets;
+    }
+
+    // Every key in the range, grouped under the separator key of the subtree
+    // it was found in.  Deliberately built as a
+    // `map{K, vector{pair{K, vector{V}}}}` to exercise nested value types.
+    fn range_grouped(self: &const shared, low: &const K,
+                     high: &const K) -> map{K, vector{pair{K, vector{V}}}}: {
+        var grouped = map{K, vector{pair{K, vector{V}}}}();
+        var hits = vector{pair{K, V}}();
+        let total = .range_query(low, high, hits);
+        if total == 0: {
+            destroy hits;
+            return grouped;
+        }
+        var current_group = vector{pair{K, vector{V}}}();
+        var group_key = hits[0].first;
+        var index: int = 0;
+        while index < hits.size(): {
+            let entry = hits[index];
+            var bag = vector{V}();
+            bag.push_back(entry.second);
+            current_group.push_back(pair{K, vector{V}}(first: entry.first, second: bag));
+            if current_group.size() >= ORDER - 1: {
+                discard grouped.insert(group_key, current_group);
+                current_group.clear();
+                if index + 1 < hits.size(): {
+                    group_key = hits[index + 1].first;
+                }
+            }
+            destroy bag;
+            index += 1;
+        }
+        if current_group.size() > 0: {
+            discard grouped.insert(group_key, current_group);
+        }
+        destroy current_group;
+        destroy hits;
+        return grouped;
+    }
+
+    // Classic lower/upper bound over the whole tree rather than one node.
+    fn lower_bound(self: &const shared, key: &const K) -> pair{K, V}: {
+        let found = .locate(key);
+        if found.first != BTREE_NIL: {
+            return .nodes[found.first].entry_at(found.second);
+        }
+        return .smallest_above(key);
+    }
+
+    fn upper_bound(self: &const shared, key: &const K) -> pair{K, V}: {
+        return .smallest_above(key);
+    }
+
+    // --- Bulk loading ---------------------------------------------------------
+    //
+    // Building bottom-up from an already sorted input is much cheaper than
+    // repeated insertion: each level is packed to `BTREE_BULK_FILL_PERCENT` of
+    // capacity and then the separators are lifted into a freshly built parent
+    // level, repeating until a single node remains.
+
+    fn bulk_fill_width(self: &const shared) -> int: {
+        let width = (ORDER - 1) * BTREE_BULK_FILL_PERCENT / 100;
+        if width < 1: {
+            return 1;
+        }
+        return width;
+    }
+
+    // Packs a sorted run of entries into a row of leaves, returning the leaf
+    // indices together with the separator that must sit above each gap.
+    fn build_leaf_level(self: &unique, sorted: &const shared vector{pair{K, V}},
+                        out_separators: &unique vector{pair{K, V}}) -> vector{int}: {
+        var level = vector{int}();
+        let width = .bulk_fill_width();
+        var index: int = 0;
+        while index < sorted.size(): {
+            let leaf = .allocate_node(true, 0);
+            var packed: int = 0;
+            while packed < width && index < sorted.size(): {
+                .nodes[leaf].push_pair(sorted[index]);
+                .count += 1;
+                packed += 1;
+                index += 1;
+            }
+            level.push_back(leaf);
+            // The next entry becomes the separator between this leaf and the
+            // one that follows it, unless the input is exhausted.
+            if index < sorted.size(): {
+                out_separators.push_back(sorted[index]);
+                index += 1;
+            }
+        }
+        return level;
+    }
+
+    // Lifts one finished level into the level above it.
+    fn build_branch_level(self: &unique, children: &const shared vector{int},
+                          separators: &const shared vector{pair{K, V}},
+                          out_separators: &unique vector{pair{K, V}}) -> vector{int}: {
+        var level = vector{int}();
+        let width = .bulk_fill_width();
+        var index: int = 0;
+        var sep_index: int = 0;
+        while index < children.size(): {
+            let branch = .allocate_node(false, 0);
+            .nodes[branch].children.push_back(children[index]);
+            .set_parent(children[index], branch);
+            index += 1;
+            var packed: int = 0;
+            while packed < width && index < children.size(): {
+                if sep_index < separators.size(): {
+                    .nodes[branch].push_pair(separators[sep_index]);
+                    sep_index += 1;
+                }
+                .nodes[branch].children.push_back(children[index]);
+                .set_parent(children[index], branch);
+                packed += 1;
+                index += 1;
+            }
+            level.push_back(branch);
+            // One separator is consumed by the gap between two branch nodes.
+            if index < children.size() && sep_index < separators.size(): {
+                out_separators.push_back(separators[sep_index]);
+                sep_index += 1;
+            }
+        }
+        return level;
+    }
+
+    // Replaces the whole tree with one built from `sorted`, which must already
+    // be in increasing key order.
+    fn bulk_load(self: &unique, sorted: &const shared vector{pair{K, V}}) -> bool: {
+        .clear();
+        if sorted.size() == 0: {
+            return true;
+        }
+        var separators = vector{pair{K, V}}();
+        var level = .build_leaf_level(sorted, separators);
+        var depth: int = 1;
+        while level.size() > 1: {
+            var next_separators = vector{pair{K, V}}();
+            let parents = .build_branch_level(level, separators, next_separators);
+            separators = next_separators;
+            level = parents;
+            depth += 1;
+            if depth > BTREE_MAX_HEIGHT: {
+                // Defensive stop; a correctly shrinking level list can never
+                // reach this, but bailing out beats looping forever.
+                panic("bulk load exceeded the maximum supported height");
+            }
+            destroy next_separators;
+        }
+        .root = level[0];
+        .set_parent(.root, BTREE_NIL);
+        .restamp_depths(.root, 0);
+        .height_hint = depth;
+        destroy separators;
+        destroy level;
+        return true;
+    }
+
+    // Convenience wrapper: sort-free rebuild from the tree's own contents,
+    // used after a long run of deletions has left the tree sparse.
+    fn compact(self: &unique) -> bool: {
+        var entries = .to_pairs();
+        let ok = .bulk_load(entries);
+        destroy entries;
+        return ok;
+    }
+
+    // --- Height and occupancy statistics -------------------------------------
+
+    fn height(self: &const shared) -> int: {
+        if .root == BTREE_NIL: {
+            return 0;
+        }
+        var current = .root;
+        var levels: int = 0;
+        while current != BTREE_NIL: {
+            levels += 1;
+            if .nodes[current].leaf: {
+                current = BTREE_NIL;
+            } else: {
+                current = .nodes[current].children[0];
+            }
+        }
+        return levels;
+    }
+
+    // Depth of every leaf, which rule 4 says must all be equal.
+    fn leaf_depths(self: &const shared) -> vector{pair{int, int}}: {
+        var out = vector{pair{int, int}}();
+        if .root == BTREE_NIL: {
+            return out;
+        }
+        var stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}(first: .root, second: 0));
+        while stack.size() > 0: {
+            let top = stack.back();
+            stack.pop_back();
+            if .nodes[top.first].leaf: {
+                out.push_back(pair{int, int}(first: top.first, second: top.second));
+            } else: {
+                var c: int = 0;
+                while c <= .nodes[top.first].count: {
+                    let child = .nodes[top.first].children[c];
+                    if child != BTREE_NIL: {
+                        stack.push_back(pair{int, int}(first: child, second: top.second + 1));
+                    }
+                    c += 1;
+                }
+            }
+        }
+        destroy stack;
+        return out;
+    }
+
+    // One `(occupancy, node count)` bucket per distinct key count seen.
+    fn occupancy_histogram(self: &const shared) -> vector{pair{int, int}}: {
+        var buckets = vector{pair{int, int}}();
+        var slot: int = 0;
+        while slot < ORDER: {
+            buckets.push_back(pair{int, int}(first: slot, second: 0));
+            slot += 1;
+        }
+        let levels = .level_order();
+        for row: &const in levels: {
+            for node: &const in row: {
+                let filled = .nodes[node].count;
+                if filled >= 0 && filled < buckets.size(): {
+                    buckets[filled].second += 1;
+                }
+            }
+        }
+        return buckets;
+    }
+
+    // Single pass collecting everything `BTreeStats` reports.
+    fn statistics(self: &const shared) -> BTreeStats{K, V}: {
+        var stats = BTreeStats{K, V}();
+        stats.splits_seen = .splits;
+        stats.merges_seen = .merges;
+        if .root == BTREE_NIL: {
+            return stats;
+        }
+
+        let levels = .level_order();
+        stats.height = levels.size();
+        var depth: int = 0;
+        var lowest = ORDER;
+        var highest: int = 0;
+        while depth < levels.size(): {
+            let row = levels[depth];
+            var row_keys: int = 0;
+            for node: &const in row: {
+                stats.node_count += 1;
+                row_keys += .nodes[node].count;
+                stats.key_count += .nodes[node].count;
+                if .nodes[node].leaf: {
+                    stats.leaf_count += 1;
+                }
+                if .nodes[node].count < lowest: {
+                    lowest = .nodes[node].count;
+                }
+                if .nodes[node].count > highest: {
+                    highest = .nodes[node].count;
+                }
+            }
+            stats.per_depth.push_back(pair{int, int}(first: depth, second: row.size()));
+            depth += 1;
+        }
+        stats.min_occupancy = lowest;
+        stats.max_occupancy = highest;
+
+        let depths = .leaf_depths();
+        var shallowest = BTREE_MAX_HEIGHT;
+        var deepest: int = 0;
+        for row: &const in depths: {
+            if row.second < shallowest: {
+                shallowest = row.second;
+            }
+            if row.second > deepest: {
+                deepest = row.second;
+            }
+        }
+        stats.min_leaf_depth = shallowest;
+        stats.max_leaf_depth = deepest;
+        stats.occupancy_histogram = .occupancy_histogram();
+
+        // A handful of entries for eyeballing in a debugger.
+        var entries = vector{pair{K, V}}();
+        .in_order(entries);
+        var taken: int = 0;
+        while taken < entries.size() && taken < BTREE_SAMPLE_LIMIT: {
+            stats.record_sample(entries[taken]);
+            taken += 1;
+        }
+        destroy entries;
+        return stats;
+    }
+
+    // --- Validity -------------------------------------------------------------
+    //
+    // Every B-tree rule from the file header is restated here as an explicit
+    // proposition so the verifier can reason about it directly.
+
+    fn check_node_ordering(self: &const shared, node: int) -> bool: {
+        var i: int = 1;
+        while i < .nodes[node].count: {
+            // Rule 1: keys inside a node strictly increase.
+            assert compare_keys(.nodes[node].keys[i - 1], .nodes[node].keys[i]) < 0;
+            prove compare_keys(.nodes[node].keys[i - 1], .nodes[node].keys[i]) < 0;
+            i += 1;
+        }
+        return true;
+    }
+
+    fn check_node_arity(self: &const shared, node: int) -> bool: {
+        // Rule 2: a node has either no children at all or exactly one more
+        // child than it has keys.
+        if .nodes[node].leaf: {
+            assert .nodes[node].children.size() == 0;
+            prove .nodes[node].child_count() == 0;
+        } else: {
+            assert .nodes[node].children.size() == .nodes[node].count + 1;
+            prove .nodes[node].child_count() == .nodes[node].key_count() + 1;
+        }
+        return true;
+    }
+
+    fn check_occupancy(self: &const shared, node: int) -> bool: {
+        // Rule 3: occupancy bounds, relaxed for the root.
+        assert .nodes[node].count <= ORDER - 1;
+        prove .nodes[node].count <= .nodes[node].max_keys();
+        if node == .root: {
+            assert .nodes[node].count >= 1 || .count == 0;
+        } else: {
+            assert .nodes[node].count >= ORDER / 2 - 1;
+            prove .nodes[node].count >= .nodes[node].min_keys();
+        }
+        return true;
+    }
+
+    fn check_separator_bounds(self: &const shared, node: int) -> bool: {
+        if .nodes[node].leaf: {
+            return true;
+        }
+        var slot: int = 0;
+        while slot <= .nodes[node].count: {
+            let child = .nodes[node].children[slot];
+            assert child != BTREE_NIL;
+            assert .nodes[child].parent == node;
+            assert .nodes[child].depth == .nodes[node].depth + 1;
+
+            // Rule 5: the subtree below child `slot` sits strictly between the
+            // separators on either side of it.
+            if slot > 0: {
+                let lower = .nodes[node].keys[slot - 1];
+                let least = .minimum_in(child);
+                if least.first != BTREE_NIL: {
+                    assert compare_keys(lower, .nodes[least.first].keys[least.second]) < 0;
+                    prove compare_keys(lower, .nodes[least.first].keys[least.second]) < 0;
+                }
+            }
+            if slot < .nodes[node].count: {
+                let upper = .nodes[node].keys[slot];
+                let greatest = .maximum_in(child);
+                if greatest.first != BTREE_NIL: {
+                    assert compare_keys(.nodes[greatest.first].keys[greatest.second],
+                                        upper) < 0;
+                    prove compare_keys(.nodes[greatest.first].keys[greatest.second],
+                                       upper) < 0;
+                }
+            }
+            slot += 1;
+        }
+        return true;
+    }
+
+    fn check_validity(self: &const shared) -> bool: {
+        assert .count >= 0;
+        assert .count <= .nodes.size() * (ORDER - 1);
+        assert ORDER >= 3;
+
+        if .root == BTREE_NIL: {
+            // An empty tree trivially satisfies every rule.
+            assert .count == 0;
+            prove .count == 0;
+            return true;
+        }
+
+        assert .nodes[.root].live;
+        assert .nodes[.root].parent == BTREE_NIL;
+        assert .nodes[.root].depth == 0;
+        prove .nodes[.root].parent == BTREE_NIL;
+
+        let levels = .level_order();
+        var depth: int = 0;
+        while depth < levels.size(): {
+            let row = levels[depth];
+            for node: &const in row: {
+                assert .nodes[node].live;
+                assert .nodes[node].depth == depth;
+                discard .check_node_ordering(node);
+                discard .check_node_arity(node);
+                discard .check_occupancy(node);
+                discard .check_separator_bounds(node);
+            }
+            depth += 1;
+        }
+
+        // Rule 4: every leaf sits at the same depth.
+        let depths = .leaf_depths();
+        assert depths.size() > 0;
+        var index: int = 1;
+        while index < depths.size(): {
+            assert depths[index].second == depths[0].second;
+            prove depths[index].second == depths[0].second;
+            index += 1;
+        }
+        prove depths.size() > 0;
+
+        // The in-order walk must be strictly increasing and must visit every
+        // live key exactly once.
+        var entries = vector{pair{K, V}}();
+        .in_order(entries);
+        assert entries.size() == .count;
+        prove entries.size() == .count;
+        var walk: int = 1;
+        while walk < entries.size(): {
+            assert compare_keys(entries[walk - 1].first, entries[walk].first) < 0;
+            prove compare_keys(entries[walk - 1].first, entries[walk].first) < 0;
+            walk += 1;
+        }
+        destroy entries;
+
+        // Height bound: a tree of `count` keys and branching factor ORDER can
+        // be no taller than log base (ORDER / 2) of the key count.
+        let measured = .height();
+        assert measured > 0;
+        assert measured <= BTREE_MAX_HEIGHT;
+        prove measured <= BTREE_MAX_HEIGHT;
+        return true;
+    }
+
+    // --- Wholesale operations -------------------------------------------------
+
+    fn clear(self: &unique): {
+        for node: &unique in .nodes: {
+            node.reset_slots();
+            node.live = false;
+        }
+        .nodes.clear();
+        .root = BTREE_NIL;
+        .free_list = BTREE_NIL;
+        .count = 0;
+        .height_hint = 0;
+        .splits = 0;
+        .merges = 0;
+        .borrows = 0;
+    }
+
+    fn copy_into(self: &const shared, target: &unique BTree{K, V, ORDER}) -> int: {
+        var entries = .to_pairs();
+        let added = target.insert_all(entries);
+        destroy entries;
+        return added;
+    }
+
+    nodes: vector{BTreeNode{K, V, ORDER}};
+    overflow: map{K, vector{pair{K, V}}};
+    pending: vector{pair{K, vector{V}}};
+    root: int = -1;
+    free_list: int = -1;
+    count: int = 0;
+    height_hint: int = 0;
+    splits: int = 0;
+    merges: int = 0;
+    borrows: int = 0;
+    missing: V;
+    missing_key: K;
+}
+
+// --- Free functions ---------------------------------------------------------
+
+// Three-way comparison used by every ordered operation above.  Free rather
+// than a method so it can be specialised per key type without touching the
+// container.
+template(T: type)
+fn compare_keys(a: &const T, b: &const T) -> int: {
+    if a < b: {
+        return -1;
+    } else: {
+        if b < a: {
+            return 1;
+        } else: {
+            return 0;
+        }
+    }
+}
+
+// True when `entries` is sorted strictly increasing, which is the precondition
+// `bulk_load` relies on.
+template(K: type, V: type)
+fn is_sorted_by_key(entries: &const shared vector{pair{K, V}}) -> bool: {
+    var i: int = 1;
+    while i < entries.size(): {
+        if compare_keys(entries[i - 1].first, entries[i].first) >= 0: {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// Merge of two sorted `vector{pair{K, V}}` runs, dropping duplicates in favour
+// of the left-hand side.  Used to prepare input for `bulk_load`.
+template(K: type, V: type)
+fn merge_sorted(left: &const shared vector{pair{K, V}},
+                right: &const shared vector{pair{K, V}}) -> vector{pair{K, V}}: {
+    var out = vector{pair{K, V}}();
+    out.reserve(left.size() + right.size());
+    var i: int = 0;
+    var j: int = 0;
+    while i < left.size() && j < right.size(): {
+        let order = compare_keys(left[i].first, right[j].first);
+        if order < 0: {
+            out.push_back(left[i]);
+            i += 1;
+        } else: {
+            if order > 0: {
+                out.push_back(right[j]);
+                j += 1;
+            } else: {
+                out.push_back(left[i]);
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    while i < left.size(): {
+        out.push_back(left[i]);
+        i += 1;
+    }
+    while j < right.size(): {
+        out.push_back(right[j]);
+        j += 1;
+    }
+    return out;
+}
+
+// Copies every entry of `source` into `target`, preserving order.
+template(K: type, V: type, ORDER: int)
+fn merge_into(target: &unique BTree{K, V, ORDER},
+              source: &const shared BTree{K, V, ORDER}) -> int: {
+    var entries = source.to_pairs();
+    let added = target.insert_all(entries);
+    destroy entries;
+    return added;
+}
+
+// Builds a fresh tree holding the union of two trees.  The result is bulk
+// loaded from the merged run rather than inserted key by key.
+template(K: type, V: type, ORDER: int)
+fn union_of(left: &const shared BTree{K, V, ORDER},
+            right: &const shared BTree{K, V, ORDER}) -> BTree{K, V, ORDER}: {
+    var out = BTree{K, V, ORDER}();
+    var a = left.to_pairs();
+    var b = right.to_pairs();
+    var merged = merge_sorted{K, V}(a, b);
+    discard out.bulk_load(merged);
+    destroy merged;
+    destroy a;
+    destroy b;
+    return out;
+}
+
+// Keys present in both trees, paired with the left tree's value.
+template(K: type, V: type, ORDER: int)
+fn intersection_of(left: &const shared BTree{K, V, ORDER},
+                   right: &const shared BTree{K, V, ORDER}) -> vector{pair{K, V}}: {
+    var out = vector{pair{K, V}}();
+    var entries = left.to_pairs();
+    for entry: &const in entries: {
+        if right.contains(entry.first): {
+            out.push_back(entry);
+        }
+    }
+    destroy entries;
+    return out;
+}
+
+// Removes every key in the half-open range `[low, high)`, returning the number
+// of entries that were actually erased.
+template(K: type, V: type, ORDER: int)
+fn erase_range(tree: &unique BTree{K, V, ORDER}, low: &const K, high: &const K) -> int: {
+    var doomed = vector{pair{K, V}}();
+    let found = tree.range_query(low, high, doomed);
+    var removed: int = 0;
+    if found == 0: {
+        destroy doomed;
+        return 0;
+    }
+    for entry: &const in doomed: {
+        if tree.erase(entry.first): {
+            removed += 1;
+        }
+    }
+    destroy doomed;
+    return removed;
+}
+
+// Groups the whole tree into buckets of at most `width` consecutive entries,
+// keyed by the first key of each bucket.  The deeply nested return type is
+// what makes this useful as a stress case for the generic machinery.
+template(K: type, V: type, ORDER: int)
+fn chunk_by_width(tree: &const shared BTree{K, V, ORDER},
+                  width: int) -> map{K, vector{pair{K, vector{V}}}}: {
+    var chunks = map{K, vector{pair{K, vector{V}}}}();
+    var entries = tree.to_pairs();
+    if entries.size() == 0: {
+        destroy entries;
+        return chunks;
+    }
+    var bucket = vector{pair{K, vector{V}}}();
+    var bucket_key = entries[0].first;
+    var index: int = 0;
+    while index < entries.size(): {
+        var values = vector{V}();
+        values.push_back(entries[index].second);
+        bucket.push_back(pair{K, vector{V}}(first: entries[index].first, second: values));
+        destroy values;
+        if bucket.size() >= width: {
+            discard chunks.insert(bucket_key, bucket);
+            bucket.clear();
+            if index + 1 < entries.size(): {
+                bucket_key = entries[index + 1].first;
+            }
+        }
+        index += 1;
+    }
+    if bucket.size() > 0: {
+        discard chunks.insert(bucket_key, bucket);
+    }
+    destroy bucket;
+    destroy entries;
+    return chunks;
+}
+
+// Flattens the nested grouping above back into a flat run of pairs.
+template(K: type, V: type)
+fn flatten_groups(groups: &const shared vector{pair{K, vector{V}}}) -> vector{pair{K, V}}: {
+    var out = vector{pair{K, V}}();
+    for group: &const in groups: {
+        for value: &const in group.second: {
+            out.push_back(pair{K, V}(first: group.first, second: value));
+        }
+    }
+    return out;
+}
+
+// Structural equality: same size and the same in-order key sequence.
+template(K: type, V: type, ORDER: int)
+fn tree_equal(left: &const shared BTree{K, V, ORDER},
+              right: &const shared BTree{K, V, ORDER}) -> bool: {
+    if left.size() != right.size(): {
+        return false;
+    }
+    var a = left.to_pairs();
+    var b = right.to_pairs();
+    var index: int = 0;
+    var same: bool = true;
+    while index < a.size(): {
+        if compare_keys(a[index].first, b[index].first) != 0: {
+            same = false;
+            index = a.size();
+        } else: {
+            index += 1;
+        }
+    }
+    destroy a;
+    destroy b;
+    return same;
+}
+
+// Rebuilds `tree` at a different branching factor by streaming its contents
+// through a sorted run.  The two branching factors are independent template
+// parameters, so this is the one place both instantiations meet.
+template(K: type, V: type, FROM: int, TO: int)
+fn rebalance_to_order(source: &const shared BTree{K, V, FROM},
+                      target: &unique BTree{K, V, TO}) -> bool: {
+    var entries = source.to_pairs();
+    if !is_sorted_by_key{K, V}(entries): {
+        destroy entries;
+        return false;
+    }
+    let ok = target.bulk_load(entries);
+    destroy entries;
+    return ok;
+}
+
+// Summarises a tree's shape as a single line of text.
+template(K: type, V: type, ORDER: int)
+fn describe_shape(tree: &const shared BTree{K, V, ORDER}) -> string: {
+    var stats = tree.statistics();
+    var text = stats.describe();
+    text.append(" order=");
+    text.append(to_string(ORDER));
+    text.append(" balanced=");
+    if stats.balanced(): {
+        text.append("yes");
+    } else: {
+        text.append("no");
+    }
+    return text;
+}
+
+// --- Demo -------------------------------------------------------------------
+
+// Exercises the container end to end at two different branching factors, which
+// is also the cheapest way to force both instantiations to be checked.
+fn demo_b_tree(): {
+    var tree = BTree{int, string, 6}();
+    tree.reserve(BTREE_INITIAL_CAPACITY);
+
+    // Insert a pseudo-random permutation of [0, 64).
+    for i in range(0, 64): {
+        discard tree.insert(i * 37 % 64, to_string(i));
+    }
+    println(describe_shape{int, string, 6}(tree));
+    if !tree.check_validity(): {
+        panic("B-tree invariants violated after bulk insert");
+    }
+
+    // Delete every third key and re-check.
+    var index: int = 0;
+    while index < 64: {
+        if index % 3 == 0: {
+            discard tree.erase(index);
+        }
+        index += 1;
+    }
+    if !tree.check_validity(): {
+        panic("B-tree invariants violated after bulk erase");
+    }
+
+    // Range query over the middle half of the key space.
+    var window = vector{pair{int, string}}();
+    let hits = tree.range_query(16, 48, window);
+    println(to_string(hits));
+    for entry: &const in window: {
+        println(entry.second);
+    }
+    destroy window;
+
+    // Grouped range query, exercising the nested map/vector/pair return type.
+    var grouped = tree.range_grouped(0, 64);
+    println(to_string(grouped.size()));
+    destroy grouped;
+
+    // Bulk load a wider tree from the narrow one's sorted contents.
+    var wide = BTree{int, string, 16}();
+    if !rebalance_to_order{int, string, 6, 16}(tree, wide): {
+        panic("rebalance produced an unsorted run");
+    }
+    if !wide.check_validity(): {
+        panic("B-tree invariants violated after bulk load");
+    }
+    println(describe_shape{int, string, 16}(wide));
+
+    // Predecessor and successor around a key that is definitely present.
+    let before = tree.predecessor(32);
+    let after = tree.successor(32);
+    println(to_string(before.first));
+    println(to_string(after.first));
+
+    // Statistics pass.
+    var stats = tree.statistics();
+    println(to_string(stats.height));
+    println(to_string(stats.average_occupancy()));
+    println(to_string(stats.leaf_fraction_percent()));
+    for bucket: &const in stats.occupancy_histogram: {
+        println(to_string(bucket.second));
+    }
+    destroy stats;
+
+    destroy wide;
+    destroy tree;
+}
+
+}
