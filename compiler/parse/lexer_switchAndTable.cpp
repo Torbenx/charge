@@ -224,9 +224,14 @@ const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken
             break;
         case '\'':
             tok = LexerToken::CharacterLiteral;
-            sourcePosition += 1;
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
+            sourcePosition += 1;
+            break;
+        case '\"':
+            tok = LexerToken::StringLiteral;
+            sourcePosition = skipToEndOfStringLiteral(sourcePosition);
+            VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
             break;
         case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':

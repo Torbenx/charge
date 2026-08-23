@@ -47,6 +47,7 @@ enum class Result : uint8_t {
     Word,
     NumbericLiteral,
     CharacterLiteral,
+    StringLiteral,
 };
 
 struct Input {
@@ -129,6 +130,7 @@ constexpr auto makeTable(std::initializer_list<Input> inputs) {
 constexpr auto table = makeTable({
     { { '0', '9' }, Result::NumbericLiteral },
     { '\'', Result::CharacterLiteral },
+    { '\"', Result::StringLiteral },
 
     { '$', Result::Word },
     { '#', Result::Word },
@@ -162,7 +164,7 @@ const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& o
         if (c0 < 0 || c0 > 127) [[unlikely]] {
             VERIFY_NOT_REACHED();
         }
-        if (c1 < 0 || c1 > 127) [[unlikely]] {
+        if (c0 != '\0' && (c1 < 0 || c1 > 127)) [[unlikely]] {
             VERIFY_NOT_REACHED();
         }
 
@@ -243,9 +245,15 @@ const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& o
         }
         case std::to_underlying(Result::CharacterLiteral): {
             tok = LexerToken::CharacterLiteral;
-            sourcePosition += 1;
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
+            sourcePosition += 1;
+            break;
+        }
+        case std::to_underlying(Result::StringLiteral): {
+            tok = LexerToken::StringLiteral;
+            sourcePosition = skipToEndOfStringLiteral(sourcePosition);
+            VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
             break;
         }
