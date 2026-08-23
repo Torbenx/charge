@@ -1,0 +1,2262 @@
+// A stack-based bytecode virtual machine for a small dynamic language.
+//
+// The design follows the classic single-pass compiler / register-less VM
+// layout: a `Chunk` holds a flat instruction array plus a constant pool, a
+// `CallFrame` records the return address and the base of the local window,
+// and `VM::run` walks the instruction stream with an explicit dispatch
+// cascade. The language has no `switch`, so every dispatch site below is a
+// hand-rolled `if op == OpCode::X: { } else: { ... }` chain. The nested
+// `else` blocks are written on the same line as the enclosing brace so the
+// chain stays readable instead of drifting a hundred columns to the right.
+//
+// Values are dynamically typed and reference-counted objects are tracked by
+// a mark-sweep collector rooted at the value stack, the frame array and the
+// globals table. Fractional numbers are represented as fixed-point integers
+// scaled by FIXED_SCALE; the VM never sees a floating point value.
+namespace vm: {
+
+// --- Tunables ------------------------------------------------------------
+
+static STACK_MAX: int = 4096;
+static FRAMES_MAX: int = 256;
+static UPVALUE_MAX: int = 128;
+static CONSTANTS_MAX: int = 65536;
+static LOCALS_MAX: int = 256;
+
+// Fixed-point scale: a "number" value of 1500 means 1.5.
+static FIXED_SCALE: int = 1000;
+
+// Bit masks used when packing a 24 bit operand next to an 8 bit opcode.
+static OPCODE_MASK: int = 255;            // 0xFF
+static OPERAND_MASK: int = 16777215;      // 0xFFFFFF
+static OPERAND_SHIFT: int = 8;
+static SHORT_MASK: int = 65535;           // 0xFFFF
+static BYTE_BITS: int = 8;
+
+// Collector heuristics.
+static GC_INITIAL_THRESHOLD: int = 1048576;
+static GC_GROWTH_PERCENT: int = 200;
+static GC_MIN_THRESHOLD: int = 8192;
+static GC_GRAY_INITIAL: int = 64;
+
+// --- Value model ---------------------------------------------------------
+
+enum ValueKind: {
+    Nil;
+    Bool;
+    Number;
+    Object;
+}
+
+enum ObjectKind: {
+    String;
+    Array;
+    Map;
+    Function;
+    Closure;
+    Upvalue;
+    Native;
+    BoundMethod;
+    Instance;
+    Class;
+}
+
+// The garbage collected header shared by every heap object. Real objects
+// embed one of these as their first field so the collector can walk them
+// without knowing the concrete type.
+struct Obj: {
+    kind: ObjectKind = ObjectKind::String;
+    marked: bool = false;
+    // Intrusive linked list of every object the collector knows about.
+    next: int = -1;
+    // Index into VM::objects; -1 means "not yet registered".
+    handle: int = -1;
+}
+
+// A dynamically typed slot. Only one payload field is meaningful at a time
+// and `kind` says which; the VM asserts on every access.
+struct Value: {
+
+    fn is_nil(self: &const shared) -> bool: {
+        return .kind == ValueKind::Nil;
+    }
+
+    fn is_bool(self: &const shared) -> bool: {
+        return .kind == ValueKind::Bool;
+    }
+
+    fn is_number(self: &const shared) -> bool: {
+        return .kind == ValueKind::Number;
+    }
+
+    fn is_object(self: &const shared) -> bool: {
+        return .kind == ValueKind::Object;
+    }
+
+    // Everything except `nil` and `false` is truthy, matching the source
+    // language's semantics.
+    fn is_truthy(self: &const shared) -> bool: {
+        if .kind == ValueKind::Nil: {
+            return false;
+        } else: {
+            if .kind == ValueKind::Bool: {
+                return .boolean;
+            } else: {
+                return true;
+            }
+        }
+    }
+
+    fn as_number(self: &const shared) -> int: {
+        assert .kind == ValueKind::Number;
+        return .number;
+    }
+
+    fn as_object(self: &const shared) -> int: {
+        assert .kind == ValueKind::Object;
+        return .object;
+    }
+
+    kind: ValueKind = ValueKind::Nil;
+    boolean: bool = false;
+    number: int = 0;
+    // Handle into VM::objects rather than a raw pointer, so the collector
+    // may relocate the object table without patching the stack.
+    object: int = -1;
+}
+
+fn make_nil() -> Value: {
+    var v: Value;
+    v.kind = ValueKind::Nil;
+    return v;
+}
+
+fn make_bool(b: bool) -> Value: {
+    var v: Value;
+    v.kind = ValueKind::Bool;
+    v.boolean = b;
+    return v;
+}
+
+fn make_number(n: int) -> Value: {
+    var v: Value;
+    v.kind = ValueKind::Number;
+    v.number = n;
+    return v;
+}
+
+fn make_object(handle: int) -> Value: {
+    var v: Value;
+    v.kind = ValueKind::Object;
+    v.object = handle;
+    return v;
+}
+
+fn values_equal(a: &const shared Value, b: &const shared Value) -> bool: {
+    if a.kind != b.kind: {
+        return false;
+    }
+    if a.kind == ValueKind::Nil: {
+        return true;
+    } else: {
+        if a.kind == ValueKind::Bool: {
+            return a.boolean == b.boolean;
+        } else: {
+            if a.kind == ValueKind::Number: {
+                return a.number == b.number;
+            } else: {
+                return a.object == b.object;
+            }
+        }
+    }
+}
+
+// --- Instruction set -----------------------------------------------------
+
+// The complete instruction set. Values are fixed because serialized
+// chunks are written to disk; never renumber an existing opcode, only
+// append. The trailing comment on each line is the byte as it appears
+// in a hex dump of the code section.
+enum OpCode: {
+    // Constants, literals and raw stack shuffling.
+    Constant = 0;                         // 0x00
+    ConstantLong = 1;                     // 0x01
+    Nil = 2;                              // 0x02
+    True = 3;                             // 0x03
+    False = 4;                            // 0x04
+    Pop = 5;                              // 0x05
+    PopN = 6;                             // 0x06
+    Dup = 7;                              // 0x07
+    Swap = 8;                             // 0x08
+    Rotate = 9;                           // 0x09
+
+    // Locals, globals, upvalues, properties and subscripts.
+    GetLocal = 10;                        // 0x0A
+    SetLocal = 11;                        // 0x0B
+    GetGlobal = 12;                       // 0x0C
+    SetGlobal = 13;                       // 0x0D
+    DefineGlobal = 14;                    // 0x0E
+    GetUpvalue = 15;                      // 0x0F
+    SetUpvalue = 16;                      // 0x10
+    GetProperty = 17;                     // 0x11
+    SetProperty = 18;                     // 0x12
+    GetIndex = 19;                        // 0x13
+    SetIndex = 20;                        // 0x14
+
+    // Comparison; every one of these pops two and pushes a bool.
+    Equal = 21;                           // 0x15
+    NotEqual = 22;                        // 0x16
+    Greater = 23;                         // 0x17
+    GreaterEqual = 24;                    // 0x18
+    Less = 25;                            // 0x19
+    LessEqual = 26;                       // 0x1A
+
+    // Binary arithmetic on fixed-point numbers.
+    Add = 27;                             // 0x1B
+    Subtract = 28;                        // 0x1C
+    Multiply = 29;                        // 0x1D
+    Divide = 30;                          // 0x1E
+    Modulo = 31;                          // 0x1F
+    Power = 32;                           // 0x20
+
+    // Unary operators; they rewrite the slot in place.
+    Negate = 33;                          // 0x21
+    Increment = 34;                       // 0x22
+    Decrement = 35;                       // 0x23
+    Not = 36;                             // 0x24
+
+    // Bitwise operators. Operands are truncated to integers first.
+    BitAnd = 37;                          // 0x25
+    BitOr = 38;                           // 0x26
+    BitXor = 39;                          // 0x27
+    BitNot = 40;                          // 0x28
+    ShiftLeft = 41;                       // 0x29
+    ShiftRight = 42;                      // 0x2A
+    ShiftRightLogical = 43;               // 0x2B
+
+    // Control flow. The operand is an absolute instruction index.
+    Jump = 44;                            // 0x2C
+    JumpIfFalse = 45;                     // 0x2D
+    JumpIfTrue = 46;                      // 0x2E
+    JumpIfNil = 47;                       // 0x2F
+    JumpIfNotNil = 48;                    // 0x30
+    Loop = 49;                            // 0x31
+
+    // Call forms. The operand is the argument count.
+    Call = 50;                            // 0x32
+    Invoke = 51;                          // 0x33
+    TailCall = 52;                        // 0x34
+    CallNative = 53;                      // 0x35
+
+    // Closure construction and function exit.
+    Closure = 54;                         // 0x36
+    CloseUpvalue = 55;                    // 0x37
+    Return = 56;                          // 0x38
+    ReturnNil = 57;                       // 0x39
+
+    // Array intrinsics.
+    NewArray = 58;                        // 0x3A
+    ArrayPush = 59;                       // 0x3B
+    ArrayLength = 60;                     // 0x3C
+    ArraySlice = 61;                      // 0x3D
+    ArrayConcat = 62;                     // 0x3E
+
+    // Map intrinsics.
+    NewMap = 63;                          // 0x3F
+    MapInsert = 64;                       // 0x40
+    MapLookup = 65;                       // 0x41
+    MapErase = 66;                        // 0x42
+    MapLength = 67;                       // 0x43
+
+    // Builtins, diagnostics and terminators.
+    Concat = 68;                          // 0x44
+    Length = 69;                          // 0x45
+    TypeOf = 70;                          // 0x46
+    Print = 71;                           // 0x47
+    Assert = 72;                          // 0x48
+    Import = 73;                          // 0x49
+    Nop = 74;                             // 0x4A
+    Halt = 75;                            // 0x4B
+}
+
+// A decoded instruction. The on-disk form packs `op` into the low byte and
+// `operand` into the upper three bytes of a single word; `extra` is only
+// materialised for the two-operand forms such as OpCode::Invoke.
+struct Instruction: {
+
+    fn packed(self: &const shared) -> int: {
+        return (.operand << OPERAND_SHIFT) | (.opcode_byte() & OPCODE_MASK);
+    }
+
+    fn opcode_byte(self: &const shared) -> int: {
+        return .raw & OPCODE_MASK;
+    }
+
+    fn is_jump(self: &const shared) -> bool: {
+        if .op == OpCode::Jump: {
+            return true;
+        }
+        if .op == OpCode::JumpIfFalse: {
+            return true;
+        }
+        if .op == OpCode::JumpIfTrue: {
+            return true;
+        }
+        if .op == OpCode::JumpIfNil: {
+            return true;
+        }
+        if .op == OpCode::JumpIfNotNil: {
+            return true;
+        }
+        return .op == OpCode::Loop;
+    }
+
+    op: OpCode = OpCode::Nop;
+    operand: int = 0;
+    extra: int = 0;
+    raw: int = 0;
+    line: int = 0;
+}
+
+fn decode(raw: int) -> Instruction: {
+    var ins: Instruction;
+    ins.raw = raw;
+    ins.operand = (raw >> OPERAND_SHIFT) & OPERAND_MASK;
+    return ins;
+}
+
+// Run-length encoded line table: `count` consecutive instructions all
+// originate from source line `line`.
+struct LineRun: {
+    line: int = 0;
+    count: int = 0;
+}
+
+// --- Chunks --------------------------------------------------------------
+
+// A compiled unit: code, the constant pool it indexes into, and enough
+// debug information to reconstruct a stack trace.
+struct Chunk: {
+
+    fn size(self: &const shared) -> int: {
+        return .code.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .code.empty();
+    }
+
+    fn write(self: &unique, op: OpCode, operand: int, line: int) -> int: {
+        var ins: Instruction;
+        ins.op = op;
+        ins.operand = operand;
+        ins.line = line;
+        ins.raw = ins.packed();
+        .code.push_back(ins);
+        .note_line(line);
+        return .code.size() - 1;
+    }
+
+    fn write_simple(self: &unique, op: OpCode, line: int) -> int: {
+        return .write(op, 0, line);
+    }
+
+    fn write_invoke(self: &unique, name_slot: int, argc: int, line: int) -> int: {
+        let index = .write(OpCode::Invoke, name_slot, line);
+        let slot: &unique = .code.at(index);
+        slot.extra = argc;
+        return index;
+    }
+
+    // Append to the run-length encoded line table.
+    fn note_line(self: &unique, line: int): {
+        if .lines.empty(): {
+            .lines.push_back(LineRun(line: line, count: 1));
+            return;
+        }
+        let last: &unique = .lines.back();
+        if last.line == line: {
+            last.count += 1;
+        } else: {
+            .lines.push_back(LineRun(line: line, count: 1));
+        }
+    }
+
+    fn line_at(self: &const shared, offset: int) -> int: {
+        var seen: int = 0;
+        for run: &const in .lines: {
+            seen += run.count;
+            if offset < seen: {
+                return run.line;
+            }
+        }
+        return 0;
+    }
+
+    // Interning: identical constants share a slot so the pool stays small.
+    fn add_constant(self: &unique, value: Value) -> int: {
+        var i: int = 0;
+        while i < .constants.size(): {
+            if values_equal(.constants.at(i), value): {
+                return i;
+            }
+            i += 1;
+        }
+        assert .constants.size() < CONSTANTS_MAX;
+        .constants.push_back(value);
+        return .constants.size() - 1;
+    }
+
+    fn constant_at(self: &const shared, index: int) -> &const[self] Value: {
+        assert index >= 0;
+        assert index < .constants.size();
+        return .constants.at(index);
+    }
+
+    fn patch_jump(self: &unique, offset: int, target: int): {
+        let slot: &unique = .code.at(offset);
+        assert slot.is_jump();
+        slot.operand = target;
+        slot.raw = slot.packed();
+    }
+
+    fn emit_loop(self: &unique, start: int, line: int) -> int: {
+        return .write(OpCode::Loop, start, line);
+    }
+
+    fn clear(self: &unique): {
+        .code.clear();
+        .constants.clear();
+        .lines.clear();
+    }
+
+    code: vector{Instruction};
+    constants: vector{Value};
+    lines: vector{LineRun};
+    name: string;
+    arity: int = 0;
+    upvalue_count: int = 0;
+}
+
+// --- Disassembly ---------------------------------------------------------
+
+// Canonical mnemonic for every opcode, used by the disassembler and by
+// the error reporter. There is no `switch` in the language, so this is a
+// straight cascade; the nested `else` blocks are all closed in one run at
+// the bottom of the function.
+fn opcode_name(op: OpCode) -> string: {
+    // constants and stack shuffling
+    if op == OpCode::Constant: {
+        return "OP_CONSTANT";
+    } else: { if op == OpCode::ConstantLong: {
+        return "OP_CONSTANT_LONG";
+    } else: { if op == OpCode::Nil: {
+        return "OP_NIL";
+    } else: { if op == OpCode::True: {
+        return "OP_TRUE";
+    } else: { if op == OpCode::False: {
+        return "OP_FALSE";
+    } else: { if op == OpCode::Pop: {
+        return "OP_POP";
+    } else: { if op == OpCode::PopN: {
+        return "OP_POP_N";
+    } else: { if op == OpCode::Dup: {
+        return "OP_DUP";
+    } else: { if op == OpCode::Swap: {
+        return "OP_SWAP";
+    } else: { if op == OpCode::Rotate: {
+        return "OP_ROTATE";
+    // variable access
+    } else: { if op == OpCode::GetLocal: {
+        return "OP_GET_LOCAL";
+    } else: { if op == OpCode::SetLocal: {
+        return "OP_SET_LOCAL";
+    } else: { if op == OpCode::GetGlobal: {
+        return "OP_GET_GLOBAL";
+    } else: { if op == OpCode::SetGlobal: {
+        return "OP_SET_GLOBAL";
+    } else: { if op == OpCode::DefineGlobal: {
+        return "OP_DEFINE_GLOBAL";
+    } else: { if op == OpCode::GetUpvalue: {
+        return "OP_GET_UPVALUE";
+    } else: { if op == OpCode::SetUpvalue: {
+        return "OP_SET_UPVALUE";
+    } else: { if op == OpCode::GetProperty: {
+        return "OP_GET_PROPERTY";
+    } else: { if op == OpCode::SetProperty: {
+        return "OP_SET_PROPERTY";
+    } else: { if op == OpCode::GetIndex: {
+        return "OP_GET_INDEX";
+    } else: { if op == OpCode::SetIndex: {
+        return "OP_SET_INDEX";
+    // comparison
+    } else: { if op == OpCode::Equal: {
+        return "OP_EQUAL";
+    } else: { if op == OpCode::NotEqual: {
+        return "OP_NOT_EQUAL";
+    } else: { if op == OpCode::Greater: {
+        return "OP_GREATER";
+    } else: { if op == OpCode::GreaterEqual: {
+        return "OP_GREATER_EQUAL";
+    } else: { if op == OpCode::Less: {
+        return "OP_LESS";
+    } else: { if op == OpCode::LessEqual: {
+        return "OP_LESS_EQUAL";
+    // binary arithmetic
+    } else: { if op == OpCode::Add: {
+        return "OP_ADD";
+    } else: { if op == OpCode::Subtract: {
+        return "OP_SUBTRACT";
+    } else: { if op == OpCode::Multiply: {
+        return "OP_MULTIPLY";
+    } else: { if op == OpCode::Divide: {
+        return "OP_DIVIDE";
+    } else: { if op == OpCode::Modulo: {
+        return "OP_MODULO";
+    } else: { if op == OpCode::Power: {
+        return "OP_POWER";
+    // unary operators
+    } else: { if op == OpCode::Negate: {
+        return "OP_NEGATE";
+    } else: { if op == OpCode::Increment: {
+        return "OP_INCREMENT";
+    } else: { if op == OpCode::Decrement: {
+        return "OP_DECREMENT";
+    } else: { if op == OpCode::Not: {
+        return "OP_NOT";
+    // bitwise
+    } else: { if op == OpCode::BitAnd: {
+        return "OP_BIT_AND";
+    } else: { if op == OpCode::BitOr: {
+        return "OP_BIT_OR";
+    } else: { if op == OpCode::BitXor: {
+        return "OP_BIT_XOR";
+    } else: { if op == OpCode::BitNot: {
+        return "OP_BIT_NOT";
+    } else: { if op == OpCode::ShiftLeft: {
+        return "OP_SHIFT_LEFT";
+    } else: { if op == OpCode::ShiftRight: {
+        return "OP_SHIFT_RIGHT";
+    } else: { if op == OpCode::ShiftRightLogical: {
+        return "OP_SHIFT_RIGHT_LOGICAL";
+    // control flow
+    } else: { if op == OpCode::Jump: {
+        return "OP_JUMP";
+    } else: { if op == OpCode::JumpIfFalse: {
+        return "OP_JUMP_IF_FALSE";
+    } else: { if op == OpCode::JumpIfTrue: {
+        return "OP_JUMP_IF_TRUE";
+    } else: { if op == OpCode::JumpIfNil: {
+        return "OP_JUMP_IF_NIL";
+    } else: { if op == OpCode::JumpIfNotNil: {
+        return "OP_JUMP_IF_NOT_NIL";
+    } else: { if op == OpCode::Loop: {
+        return "OP_LOOP";
+    // calls
+    } else: { if op == OpCode::Call: {
+        return "OP_CALL";
+    } else: { if op == OpCode::Invoke: {
+        return "OP_INVOKE";
+    } else: { if op == OpCode::TailCall: {
+        return "OP_TAIL_CALL";
+    } else: { if op == OpCode::CallNative: {
+        return "OP_CALL_NATIVE";
+    // closures and returns
+    } else: { if op == OpCode::Closure: {
+        return "OP_CLOSURE";
+    } else: { if op == OpCode::CloseUpvalue: {
+        return "OP_CLOSE_UPVALUE";
+    } else: { if op == OpCode::Return: {
+        return "OP_RETURN";
+    } else: { if op == OpCode::ReturnNil: {
+        return "OP_RETURN_NIL";
+    // arrays
+    } else: { if op == OpCode::NewArray: {
+        return "OP_NEW_ARRAY";
+    } else: { if op == OpCode::ArrayPush: {
+        return "OP_ARRAY_PUSH";
+    } else: { if op == OpCode::ArrayLength: {
+        return "OP_ARRAY_LENGTH";
+    } else: { if op == OpCode::ArraySlice: {
+        return "OP_ARRAY_SLICE";
+    } else: { if op == OpCode::ArrayConcat: {
+        return "OP_ARRAY_CONCAT";
+    // maps
+    } else: { if op == OpCode::NewMap: {
+        return "OP_NEW_MAP";
+    } else: { if op == OpCode::MapInsert: {
+        return "OP_MAP_INSERT";
+    } else: { if op == OpCode::MapLookup: {
+        return "OP_MAP_LOOKUP";
+    } else: { if op == OpCode::MapErase: {
+        return "OP_MAP_ERASE";
+    } else: { if op == OpCode::MapLength: {
+        return "OP_MAP_LENGTH";
+    // builtins and terminators
+    } else: { if op == OpCode::Concat: {
+        return "OP_CONCAT";
+    } else: { if op == OpCode::Length: {
+        return "OP_LENGTH";
+    } else: { if op == OpCode::TypeOf: {
+        return "OP_TYPE_OF";
+    } else: { if op == OpCode::Print: {
+        return "OP_PRINT";
+    } else: { if op == OpCode::Assert: {
+        return "OP_ASSERT";
+    } else: { if op == OpCode::Import: {
+        return "OP_IMPORT";
+    } else: { if op == OpCode::Nop: {
+        return "OP_NOP";
+    } else: { if op == OpCode::Halt: {
+        return "OP_HALT";
+    } else: {
+        // Unreachable for a well-formed chunk, but the chunk verifier
+        // calls this on raw bytes read straight off disk.
+        return "OP_UNKNOWN";
+    }
+    } } } } } } } } } } } } } } } } } } }
+    } } } } } } } } } } } } } } } } } } }
+    } } } } } } } } } } } } } } } } } } }
+    } } } } } } } } } } } } } } } } } }
+}
+
+// How many operands follow the opcode byte in the serialized form. Grouped
+// rather than fully expanded because the answer only takes three values.
+fn opcode_operand_count(op: OpCode) -> int: {
+    if op == OpCode::Invoke: {
+        // Constant slot for the method name plus the argument count.
+        return 2;
+    }
+    if op == OpCode::Constant || op == OpCode::ConstantLong || op == OpCode::PopN: {
+        return 1;
+    }
+    if op == OpCode::Rotate || op == OpCode::GetLocal || op == OpCode::SetLocal: {
+        return 1;
+    }
+    if op == OpCode::GetGlobal || op == OpCode::SetGlobal || op == OpCode::DefineGlobal: {
+        return 1;
+    }
+    if op == OpCode::GetUpvalue || op == OpCode::SetUpvalue: {
+        return 1;
+    }
+    if op == OpCode::GetProperty || op == OpCode::SetProperty: {
+        return 1;
+    }
+    if op == OpCode::Jump || op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue: {
+        return 1;
+    }
+    if op == OpCode::JumpIfNil || op == OpCode::JumpIfNotNil || op == OpCode::Loop: {
+        return 1;
+    }
+    if op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative: {
+        return 1;
+    }
+    if op == OpCode::Closure || op == OpCode::NewArray || op == OpCode::NewMap: {
+        return 1;
+    }
+    if op == OpCode::Assert || op == OpCode::Import: {
+        return 1;
+    }
+    return 0;
+}
+
+// What the operand means, for the annotated disassembly listing.
+enum OperandKind: {
+    None;
+    ConstantSlot;
+    LocalSlot;
+    UpvalueSlot;
+    GlobalSlot;
+    JumpTarget;
+    ArgumentCount;
+    Count;
+}
+
+fn opcode_operand_kind(op: OpCode) -> OperandKind: {
+    if op == OpCode::Constant || op == OpCode::ConstantLong: {
+        return OperandKind::ConstantSlot;
+    }
+    if op == OpCode::GetProperty || op == OpCode::SetProperty || op == OpCode::Invoke: {
+        return OperandKind::ConstantSlot;
+    }
+    if op == OpCode::GetLocal || op == OpCode::SetLocal: {
+        return OperandKind::LocalSlot;
+    }
+    if op == OpCode::GetUpvalue || op == OpCode::SetUpvalue: {
+        return OperandKind::UpvalueSlot;
+    }
+    if op == OpCode::GetGlobal || op == OpCode::SetGlobal || op == OpCode::DefineGlobal: {
+        return OperandKind::GlobalSlot;
+    }
+    if op == OpCode::Jump || op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue: {
+        return OperandKind::JumpTarget;
+    }
+    if op == OpCode::JumpIfNil || op == OpCode::JumpIfNotNil || op == OpCode::Loop: {
+        return OperandKind::JumpTarget;
+    }
+    if op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative: {
+        return OperandKind::ArgumentCount;
+    }
+    if op == OpCode::PopN || op == OpCode::Rotate: {
+        return OperandKind::Count;
+    }
+    if op == OpCode::NewArray || op == OpCode::NewMap: {
+        return OperandKind::Count;
+    }
+    return OperandKind::None;
+}
+
+fn operand_kind_name(kind: OperandKind) -> string: {
+    if kind == OperandKind::ConstantSlot: {
+        return "const";
+    } else: { if kind == OperandKind::LocalSlot: {
+        return "local";
+    } else: { if kind == OperandKind::UpvalueSlot: {
+        return "upval";
+    } else: { if kind == OperandKind::GlobalSlot: {
+        return "global";
+    } else: { if kind == OperandKind::JumpTarget: {
+        return "->";
+    } else: { if kind == OperandKind::ArgumentCount: {
+        return "argc";
+    } else: { if kind == OperandKind::Count: {
+        return "n";
+    } else: {
+        return "";
+    }
+    } } } } } }
+}
+
+// Net effect of an instruction on the value stack depth. The verifier walks
+// the chunk with this to prove the stack never underflows.
+fn stack_effect(op: OpCode, operand: int) -> int: {
+    if op == OpCode::PopN: {
+        return -operand;
+    }
+    if op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative: {
+        return -operand;
+    }
+    if op == OpCode::Invoke: {
+        return -operand;
+    }
+    if op == OpCode::NewArray: {
+        return 1 - operand;
+    }
+    if op == OpCode::NewMap: {
+        return 1 - operand * 2;
+    }
+    if op == OpCode::SetIndex || op == OpCode::MapInsert: {
+        return -2;
+    }
+    if op == OpCode::ArraySlice: {
+        return -2;
+    }
+    if is_binary_op(op): {
+        return -1;
+    }
+    if is_unary_op(op): {
+        return 0;
+    }
+    if pushes_value(op): {
+        return 1;
+    }
+    if pops_value(op): {
+        return -1;
+    }
+    return 0;
+}
+
+fn is_binary_op(op: OpCode) -> bool: {
+    if op == OpCode::Add || op == OpCode::Subtract || op == OpCode::Multiply: {
+        return true;
+    }
+    if op == OpCode::Divide || op == OpCode::Modulo || op == OpCode::Power: {
+        return true;
+    }
+    if op == OpCode::Equal || op == OpCode::NotEqual: {
+        return true;
+    }
+    if op == OpCode::Greater || op == OpCode::GreaterEqual: {
+        return true;
+    }
+    if op == OpCode::Less || op == OpCode::LessEqual: {
+        return true;
+    }
+    if op == OpCode::BitAnd || op == OpCode::BitOr || op == OpCode::BitXor: {
+        return true;
+    }
+    if op == OpCode::ShiftLeft || op == OpCode::ShiftRight: {
+        return true;
+    }
+    if op == OpCode::ShiftRightLogical || op == OpCode::Concat: {
+        return true;
+    }
+    return op == OpCode::GetIndex || op == OpCode::ArrayConcat;
+}
+
+fn is_unary_op(op: OpCode) -> bool: {
+    if op == OpCode::Negate || op == OpCode::Not || op == OpCode::BitNot: {
+        return true;
+    }
+    if op == OpCode::Increment || op == OpCode::Decrement: {
+        return true;
+    }
+    if op == OpCode::Length || op == OpCode::TypeOf || op == OpCode::ArrayLength: {
+        return true;
+    }
+    return op == OpCode::MapLength;
+}
+
+fn pushes_value(op: OpCode) -> bool: {
+    if op == OpCode::Constant || op == OpCode::ConstantLong: {
+        return true;
+    }
+    if op == OpCode::Nil || op == OpCode::True || op == OpCode::False: {
+        return true;
+    }
+    if op == OpCode::Dup || op == OpCode::Closure || op == OpCode::Import: {
+        return true;
+    }
+    return op == OpCode::GetLocal || op == OpCode::GetGlobal || op == OpCode::GetUpvalue;
+}
+
+fn pops_value(op: OpCode) -> bool: {
+    if op == OpCode::Pop || op == OpCode::Print || op == OpCode::Assert: {
+        return true;
+    }
+    if op == OpCode::DefineGlobal || op == OpCode::SetProperty: {
+        return true;
+    }
+    if op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue: {
+        return true;
+    }
+    if op == OpCode::ArrayPush || op == OpCode::MapLookup || op == OpCode::MapErase: {
+        return true;
+    }
+    return op == OpCode::CloseUpvalue || op == OpCode::Return;
+}
+
+// Render a single instruction as `0042  12 OP_GET_LOCAL   local 3`.
+fn disassemble_instruction(chunk: &const shared Chunk, offset: int) -> string: {
+    let ins: &const = chunk.code.at(offset);
+    var text = to_string(offset);
+    text.append("  ");
+    text.append(to_string(chunk.line_at(offset)));
+    text.append("  ");
+    text.append(opcode_name(ins.op));
+    let count = opcode_operand_count(ins.op);
+    if count > 0: {
+        text.append(" ");
+        text.append(operand_kind_name(opcode_operand_kind(ins.op)));
+        text.append(" ");
+        text.append(to_string(ins.operand));
+    }
+    if count > 1: {
+        text.append(" argc ");
+        text.append(to_string(ins.extra));
+    }
+    return text;
+}
+
+fn disassemble_chunk(chunk: &const shared Chunk): {
+    println(chunk.name);
+    var depth: int = 0;
+    for i in range(0, chunk.size()): {
+        println(disassemble_instruction(chunk, i));
+        let ins: &const = chunk.code.at(i);
+        depth += stack_effect(ins.op, ins.operand);
+        assert depth >= 0;
+    }
+    println("-- end of chunk --");
+}
+
+// --- Heap objects --------------------------------------------------------
+
+// Interned string object. `hash` is cached because the globals table and the
+// property lookup path both key on it.
+struct ObjString: {
+
+    fn size(self: &const shared) -> int: {
+        return .text.size();
+    }
+
+    fn rehash(self: &unique): {
+        .hash = hash_of(.text);
+    }
+
+    header: Obj;
+    text: string;
+    hash: int = 0;
+}
+
+// A growable value array. `items` is the only field the collector has to
+// trace, but it may be arbitrarily deep so tracing is iterative.
+struct ObjArray: {
+
+    fn size(self: &const shared) -> int: {
+        return .items.size();
+    }
+
+    fn in_bounds(self: &const shared, index: int) -> bool: {
+        return index >= 0 && index < .items.size();
+    }
+
+    fn at(self: &shared, index: int) -> &shared[self] Value: {
+        assert .in_bounds(index);
+        return .items.at(index);
+    }
+
+    header: Obj;
+    items: vector{Value};
+}
+
+// Key/value pair storage for OpCode::NewMap. Keys are restricted to strings
+// and numbers by the compiler, so a linear scan is good enough in practice.
+struct ObjMap: {
+
+    fn size(self: &const shared) -> int: {
+        return .keys.size();
+    }
+
+    fn find(self: &const shared, key: &const shared Value) -> int: {
+        for i in range(0, .keys.size()): {
+            if values_equal(.keys.at(i), key): {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    header: Obj;
+    keys: vector{Value};
+    values: vector{Value};
+}
+
+// A compiled function before it is captured into a closure.
+struct ObjFunction: {
+
+    fn name(self: &const shared) -> &const[self] string: {
+        return .chunk.name;
+    }
+
+    header: Obj;
+    chunk: Chunk;
+    arity: int = 0;
+    upvalue_count: int = 0;
+    is_variadic: bool = false;
+}
+
+// An upvalue is either open (pointing at a live stack slot) or closed
+// (owning its value). `location` is -1 once the upvalue has been closed.
+struct ObjUpvalue: {
+
+    fn is_open(self: &const shared) -> bool: {
+        return .location >= 0;
+    }
+
+    fn read(self: &shared) -> &shared[self] Value: {
+        return .closed;
+    }
+
+    header: Obj;
+    location: int = -1;
+    closed: Value;
+    next_open: int = -1;
+}
+
+// A function plus the upvalues it captured at the point of creation.
+struct ObjClosure: {
+
+    fn arity(self: &const shared) -> int: {
+        return .function.arity;
+    }
+
+    header: Obj;
+    function: ObjFunction;
+    upvalues: vector{int};
+}
+
+// A builtin implemented outside the VM. `slot` indexes the native table.
+struct ObjNative: {
+    header: Obj;
+    slot: int = 0;
+    arity: int = 0;
+    name: string;
+}
+
+// --- Call frames ---------------------------------------------------------
+
+// One activation record. `slot_base` is the index in VM::stack of local 0;
+// arguments were pushed by the caller and become the first locals.
+struct CallFrame: {
+
+    fn local(self: &shared, index: int) -> int: {
+        assert index >= 0;
+        assert index < LOCALS_MAX;
+        return .slot_base + index;
+    }
+
+    fn advance(self: &unique) -> int: {
+        let here = .ip;
+        .ip += 1;
+        return here;
+    }
+
+    fn jump_to(self: &unique, target: int): {
+        assert target >= 0;
+        .ip = target;
+    }
+
+    // Index into VM::closures rather than a borrow, so a frame may outlive
+    // the borrow checker's view of the closure table during a collection.
+    closure: int = -1;
+    ip: int = 0;
+    slot_base: int = 0;
+    argument_count: int = 0;
+    is_tail: bool = false;
+}
+
+enum InterpretResult: {
+    Ok;
+    CompileError;
+    RuntimeError;
+    Halted;
+}
+
+// --- The virtual machine -------------------------------------------------
+
+// The interpreter. One instance owns the value stack, the frame array, the
+// globals table and every heap object reachable from them.
+struct VM: {
+
+    // --- Stack primitives ------------------------------------------------
+
+    fn push(self: &unique, value: Value): {
+        assert .stack_top < STACK_MAX;
+        .stack.push_back(value);
+        .stack_top += 1;
+    }
+
+    fn pop(self: &unique) -> Value: {
+        assert .stack_top > 0;
+        .stack_top -= 1;
+        let value = .stack.back();
+        .stack.pop_back();
+        return value;
+    }
+
+    fn pop_n(self: &unique, count: int): {
+        var i: int = 0;
+        while i < count: {
+            discard .pop();
+            i += 1;
+        }
+    }
+
+    // `distance` counts from the top: peek(0) is the topmost slot.
+    fn peek(self: &shared, distance: int) -> &shared[self] Value: {
+        assert distance < .stack_top;
+        return .stack.at(.stack_top - 1 - distance);
+    }
+
+    fn store_slot(self: &unique, index: int, value: &const shared Value): {
+        assert index >= 0;
+        assert index < .stack_top;
+        let slot: &unique = .stack.at(index);
+        slot.kind = value.kind;
+        slot.boolean = value.boolean;
+        slot.number = value.number;
+        slot.object = value.object;
+    }
+
+    fn swap_top(self: &unique): {
+        let a = .pop();
+        let b = .pop();
+        .push(a);
+        .push(b);
+    }
+
+    // Move the slot `depth` below the top up to the top.
+    fn rotate(self: &unique, depth: int): {
+        if depth <= 0: {
+            return;
+        }
+        let lifted = .stack.at(.stack_top - 1 - depth);
+        var i = .stack_top - 1 - depth;
+        while i < .stack_top - 1: {
+            .store_slot(i, .stack.at(i + 1));
+            i += 1;
+        }
+        .store_slot(.stack_top - 1, lifted);
+    }
+
+    fn reset_stack(self: &unique): {
+        .stack.clear();
+        .stack_top = 0;
+        .frame_count = 0;
+        .open_upvalues.clear();
+    }
+
+    // --- Diagnostics -----------------------------------------------------
+
+    fn runtime_error(self: &unique, message: &const shared string, line: int): {
+        var text = string();
+        text.append("runtime error: ");
+        text.append(message);
+        text.append(" (line ");
+        text.append(to_string(line));
+        text.append(")");
+        println(text);
+        .print_backtrace();
+        .had_error = true;
+    }
+
+    fn print_backtrace(self: &const shared): {
+        var i = .frame_count - 1;
+        while i >= 0: {
+            let frame: &const = .frames.at(i);
+            var line = string();
+            line.append("  at frame ");
+            line.append(to_string(i));
+            line.append(" ip ");
+            line.append(to_string(frame.ip));
+            println(line);
+            i -= 1;
+        }
+    }
+
+    fn print_stack(self: &const shared): {
+        for value: &const in .stack: {
+            print(.to_display(value));
+            print(" ");
+        }
+        println("");
+    }
+
+    // --- Globals ---------------------------------------------------------
+
+    fn load_global(self: &unique, name: &const shared Value): {
+        let key = .string_of(name);
+        if !.globals.contains(key): {
+            .runtime_error("undefined variable", 0);
+            return;
+        }
+        .push(.globals.at(key));
+    }
+
+    fn assign_global(self: &unique, name: &const shared Value): {
+        let key = .string_of(name);
+        if !.globals.contains(key): {
+            .runtime_error("assignment to undefined variable", 0);
+            return;
+        }
+        discard .globals.insert(key, .peek(0));
+    }
+
+    fn define_global(self: &unique, name: &const shared Value): {
+        discard .globals.insert(.string_of(name), .pop());
+    }
+
+    fn string_of(self: &const shared, value: &const shared Value) -> string: {
+        assert value.is_object();
+        return .strings_by_handle.at(value.object);
+    }
+
+    // --- Properties and subscripts ---------------------------------------
+
+    fn get_property(self: &unique, name: &const shared Value): {
+        let target = .pop();
+        if !target.is_object(): {
+            .runtime_error("only objects have properties", 0);
+            return;
+        }
+        .push(.lookup_field(target.object, .string_of(name)));
+    }
+
+    fn set_property(self: &unique, name: &const shared Value): {
+        let value = .pop();
+        let target = .peek(0);
+        if !target.is_object(): {
+            .runtime_error("only objects have properties", 0);
+            return;
+        }
+        .store_field(target.object, .string_of(name), value);
+    }
+
+    fn lookup_field(self: &shared, handle: int, name: &const shared string) -> Value: {
+        discard handle;
+        discard name;
+        return make_nil();
+    }
+
+    fn store_field(self: &unique, handle: int, name: &const shared string, value: &const shared Value): {
+        discard handle;
+        discard name;
+        discard value;
+    }
+
+    fn index_get(self: &unique): {
+        let key = .pop();
+        let target = .pop();
+        if !target.is_object(): {
+            .runtime_error("value is not indexable", 0);
+            return;
+        }
+        let container: &shared = .arrays.at(target.object);
+        let index = key.as_number() / FIXED_SCALE;
+        if !container.in_bounds(index): {
+            .runtime_error("index out of range", 0);
+            return;
+        }
+        .push(container.at(index));
+    }
+
+    fn index_set(self: &unique): {
+        let value = .pop();
+        let key = .pop();
+        let target = .pop();
+        let container: &unique = .arrays.at(target.object);
+        let index = key.as_number() / FIXED_SCALE;
+        if !container.in_bounds(index): {
+            .runtime_error("index out of range", 0);
+            return;
+        }
+        let slot: &unique = container.at(index);
+        slot.kind = value.kind;
+        slot.number = value.number;
+        slot.object = value.object;
+        .push(value);
+    }
+
+    // --- Comparison ------------------------------------------------------
+
+    fn compare_equal(self: &unique, invert: bool): {
+        let b = .pop();
+        let a = .pop();
+        let same = values_equal(a, b);
+        if invert: {
+            .push(make_bool(!same));
+        } else: {
+            .push(make_bool(same));
+        }
+    }
+
+    fn compare_order(self: &unique, op: OpCode): {
+        let b = .pop();
+        let a = .pop();
+        if !a.is_number() || !b.is_number(): {
+            .runtime_error("operands must be numbers", 0);
+            return;
+        }
+        let l = a.as_number();
+        let r = b.as_number();
+        if op == OpCode::Greater: {
+            .push(make_bool(l > r));
+        } else: { if op == OpCode::GreaterEqual: {
+            .push(make_bool(l >= r));
+        } else: { if op == OpCode::Less: {
+            .push(make_bool(l < r));
+        } else: {
+            .push(make_bool(l <= r));
+        }
+        } }
+    }
+
+    // --- Arithmetic ------------------------------------------------------
+
+    // All numbers are fixed-point with FIXED_SCALE fractional units, so
+    // multiplication and division need a rescale afterwards.
+    fn arith(self: &unique, op: OpCode): {
+        let b = .pop();
+        let a = .pop();
+        if !a.is_number() || !b.is_number(): {
+            .runtime_error("operands must be numbers", 0);
+            return;
+        }
+        let l = a.as_number();
+        let r = b.as_number();
+        if op == OpCode::Add: {
+            .push(make_number(l + r));
+        } else: { if op == OpCode::Subtract: {
+            .push(make_number(l - r));
+        } else: { if op == OpCode::Multiply: {
+            .push(make_number(l * r / FIXED_SCALE));
+        } else: { if op == OpCode::Divide: {
+            .push(make_number(l * FIXED_SCALE / r));
+        } else: { if op == OpCode::Modulo: {
+            .push(make_number(l % r));
+        } else: {
+            .push(make_number(.power(l, r / FIXED_SCALE)));
+        }
+        } } } }
+    }
+
+    fn power(self: &const shared, base: int, exponent: int) -> int: {
+        var result = FIXED_SCALE;
+        var i: int = 0;
+        while i < exponent: {
+            result = result * base / FIXED_SCALE;
+            i += 1;
+        }
+        return result;
+    }
+
+    fn negate(self: &unique): {
+        let value = .pop();
+        if !value.is_number(): {
+            .runtime_error("operand must be a number", 0);
+            return;
+        }
+        .push(make_number(-value.as_number()));
+    }
+
+    fn adjust(self: &unique, delta: int): {
+        let value = .pop();
+        .push(make_number(value.as_number() + delta));
+    }
+
+    // --- Bitwise ---------------------------------------------------------
+
+    fn bitwise(self: &unique, op: OpCode): {
+        let b = .pop();
+        let a = .pop();
+        let l = a.as_number() / FIXED_SCALE;
+        let r = b.as_number() / FIXED_SCALE;
+        if op == OpCode::BitAnd: {
+            .push(make_number((l & r) * FIXED_SCALE));
+        } else: { if op == OpCode::BitOr: {
+            .push(make_number((l | r) * FIXED_SCALE));
+        } else: { if op == OpCode::BitXor: {
+            .push(make_number((l ^ r) * FIXED_SCALE));
+        } else: { if op == OpCode::ShiftLeft: {
+            .push(make_number((l << r) * FIXED_SCALE));
+        } else: { if op == OpCode::ShiftRight: {
+            .push(make_number((l >> r) * FIXED_SCALE));
+        } else: {
+            .push(make_number(((l >> r) & OPERAND_MASK) * FIXED_SCALE));
+        }
+        } } } }
+    }
+
+    fn bit_not(self: &unique): {
+        let value = .pop();
+        let raw = value.as_number() / FIXED_SCALE;
+        .push(make_number(~raw * FIXED_SCALE));
+    }
+
+    // --- Strings, arrays and maps ----------------------------------------
+
+    fn concat_strings(self: &unique): {
+        let b = .pop();
+        let a = .pop();
+        var joined = .string_of(a);
+        joined.append(.string_of(b));
+        .push(.intern(joined));
+    }
+
+    fn intern(self: &unique, text: &const shared string) -> Value: {
+        if .interned.contains(text): {
+            return make_object(.interned.at(text));
+        }
+        let handle = .allocate(ObjectKind::String, text.size());
+        discard .interned.insert(text, handle);
+        discard .strings_by_handle.insert(handle, text);
+        return make_object(handle);
+    }
+
+    fn new_array(self: &unique, count: int): {
+        let handle = .allocate(ObjectKind::Array, count);
+        let target: &unique = .arrays.at(handle);
+        var i: int = 0;
+        while i < count: {
+            target.items.push_back(.peek(count - 1 - i));
+            i += 1;
+        }
+        .pop_n(count);
+        .push(make_object(handle));
+    }
+
+    fn array_push(self: &unique): {
+        let value = .pop();
+        let target: &unique = .arrays.at(.peek(0).as_object());
+        target.items.push_back(value);
+    }
+
+    fn array_length(self: &unique): {
+        let target = .pop();
+        .push(make_number(.arrays.at(target.as_object()).size() * FIXED_SCALE));
+    }
+
+    fn array_slice(self: &unique): {
+        let length = .pop().as_number() / FIXED_SCALE;
+        let begin = .pop().as_number() / FIXED_SCALE;
+        let source = .pop();
+        let handle = .allocate(ObjectKind::Array, length);
+        let target: &unique = .arrays.at(handle);
+        let original: &const = .arrays.at(source.as_object());
+        for i in range(begin, begin + length): {
+            if original.in_bounds(i): {
+                target.items.push_back(original.at(i));
+            }
+        }
+        .push(make_object(handle));
+    }
+
+    fn array_concat(self: &unique): {
+        let b = .pop();
+        let a = .pop();
+        let handle = .allocate(ObjectKind::Array, 0);
+        let target: &unique = .arrays.at(handle);
+        for value: &const in .arrays.at(a.as_object()).items: {
+            target.items.push_back(value);
+        }
+        for value: &const in .arrays.at(b.as_object()).items: {
+            target.items.push_back(value);
+        }
+        .push(make_object(handle));
+    }
+
+    fn new_map(self: &unique, pair_count: int): {
+        let handle = .allocate(ObjectKind::Map, pair_count);
+        let target: &unique = .maps.at(handle);
+        var i: int = 0;
+        while i < pair_count: {
+            target.values.push_back(.pop());
+            target.keys.push_back(.pop());
+            i += 1;
+        }
+        .push(make_object(handle));
+    }
+
+    fn map_insert(self: &unique): {
+        let value = .pop();
+        let key = .pop();
+        let target: &unique = .maps.at(.peek(0).as_object());
+        let existing = target.find(key);
+        if existing >= 0: {
+            .store_slot_in(target.values, existing, value);
+        } else: {
+            target.keys.push_back(key);
+            target.values.push_back(value);
+        }
+    }
+
+    fn store_slot_in(self: &unique, slots: &unique vector{Value}, index: int, value: &const shared Value): {
+        let slot: &unique = slots.at(index);
+        slot.kind = value.kind;
+        slot.number = value.number;
+        slot.object = value.object;
+        slot.boolean = value.boolean;
+    }
+
+    fn map_lookup(self: &unique): {
+        let key = .pop();
+        let target: &const = .maps.at(.pop().as_object());
+        let index = target.find(key);
+        if index < 0: {
+            .push(make_nil());
+        } else: {
+            .push(target.values.at(index));
+        }
+    }
+
+    fn map_erase(self: &unique): {
+        let key = .pop();
+        let target: &unique = .maps.at(.peek(0).as_object());
+        let index = target.find(key);
+        if index >= 0: {
+            target.keys.erase(index);
+            target.values.erase(index);
+        }
+    }
+
+    fn map_length(self: &unique): {
+        let target = .pop();
+        .push(make_number(.maps.at(target.as_object()).size() * FIXED_SCALE));
+    }
+
+    fn length_of(self: &unique): {
+        let value = .peek(0);
+        if !value.is_object(): {
+            .runtime_error("value has no length", 0);
+            return;
+        }
+        let kind = .objects.at(value.as_object()).kind;
+        if kind == ObjectKind::Array: {
+            .array_length();
+        } else: { if kind == ObjectKind::Map: {
+            .map_length();
+        } else: {
+            let text = .string_of(.pop());
+            .push(make_number(text.size() * FIXED_SCALE));
+        }
+        }
+    }
+
+    fn type_of(self: &unique): {
+        let value = .pop();
+        .push(.intern(.type_name(value)));
+    }
+
+    fn type_name(self: &const shared, value: &const shared Value) -> string: {
+        if value.is_nil(): {
+            return "nil";
+        } else: { if value.is_bool(): {
+            return "bool";
+        } else: { if value.is_number(): {
+            return "number";
+        } else: {
+            return object_kind_name(.objects.at(value.object).kind);
+        }
+        } }
+    }
+
+    fn to_display(self: &const shared, value: &const shared Value) -> string: {
+        if value.is_nil(): {
+            return "nil";
+        }
+        if value.is_bool(): {
+            if value.boolean: {
+                return "true";
+            } else: {
+                return "false";
+            }
+        }
+        if value.is_number(): {
+            return format_fixed(value.number);
+        }
+        return .string_of(value);
+    }
+
+    fn import_module(self: &unique, name: &const shared Value) -> Value: {
+        let key = .string_of(name);
+        if .modules.contains(key): {
+            return .modules.at(key);
+        }
+        .runtime_error("no such module", 0);
+        return make_nil();
+    }
+
+    // A cooperative yield point so long-running loops stay interruptible.
+    fn check_interrupt(self: &unique): {
+        .steps += 1;
+        if .steps % 4096 == 0: {
+            if .interrupted: {
+                .runtime_error("execution interrupted", 0);
+            }
+        }
+    }
+
+    // --- Calls -----------------------------------------------------------
+
+    fn call_value(self: &unique, callee: &const shared Value, argument_count: int): {
+        if !callee.is_object(): {
+            .runtime_error("can only call functions", 0);
+            return;
+        }
+        let kind = .objects.at(callee.as_object()).kind;
+        if kind == ObjectKind::Closure: {
+            .call_closure(callee.as_object(), argument_count, false);
+        } else: { if kind == ObjectKind::Native: {
+            .call_native(argument_count);
+        } else: { if kind == ObjectKind::BoundMethod: {
+            .call_closure(.bound_target(callee.as_object()), argument_count, false);
+        } else: {
+            .runtime_error("value is not callable", 0);
+        }
+        } }
+    }
+
+    fn call_closure(self: &unique, handle: int, argument_count: int, tail: bool): {
+        let closure: &const = .closures.at(handle);
+        if argument_count != closure.arity(): {
+            .runtime_error("wrong number of arguments", 0);
+            return;
+        }
+        if .frame_count >= FRAMES_MAX: {
+            .runtime_error("stack overflow", 0);
+            return;
+        }
+        var frame: CallFrame;
+        frame.closure = handle;
+        frame.ip = 0;
+        frame.slot_base = .stack_top - argument_count - 1;
+        frame.argument_count = argument_count;
+        frame.is_tail = tail;
+        .frames.push_back(frame);
+        .frame_count += 1;
+    }
+
+    fn tail_call(self: &unique, argument_count: int): {
+        let callee = .peek(argument_count);
+        let frame: &unique = .frames.at(.frame_count - 1);
+        let base = frame.slot_base;
+        .frame_count -= 1;
+        .frames.pop_back();
+        .shift_arguments(base, argument_count);
+        .call_closure(callee.as_object(), argument_count, true);
+    }
+
+    // Slide the pending arguments down over the frame being replaced.
+    fn shift_arguments(self: &unique, base: int, argument_count: int): {
+        var i: int = 0;
+        while i <= argument_count: {
+            .store_slot(base + i, .stack.at(.stack_top - argument_count - 1 + i));
+            i += 1;
+        }
+        .stack_top = base + argument_count + 1;
+    }
+
+    fn invoke(self: &unique, name: &const shared Value, argument_count: int): {
+        let receiver = .peek(argument_count);
+        if !receiver.is_object(): {
+            .runtime_error("only objects have methods", 0);
+            return;
+        }
+        let method = .lookup_field(receiver.as_object(), .string_of(name));
+        .call_value(method, argument_count);
+    }
+
+    fn call_native(self: &unique, argument_count: int): {
+        let callee = .peek(argument_count);
+        let slot = .natives.at(callee.as_object()).slot;
+        let result = .dispatch_native(slot, argument_count);
+        .pop_n(argument_count + 1);
+        .push(result);
+    }
+
+    fn dispatch_native(self: &unique, slot: int, argument_count: int) -> Value: {
+        discard slot;
+        discard argument_count;
+        return make_nil();
+    }
+
+    fn bound_target(self: &const shared, handle: int) -> int: {
+        return .bound_methods.at(handle);
+    }
+
+    fn return_from(self: &unique, result: Value): {
+        let frame: &const = .frames.at(.frame_count - 1);
+        let base = frame.slot_base;
+        .close_upvalues(base);
+        .frame_count -= 1;
+        .frames.pop_back();
+        while .stack_top > base: {
+            discard .pop();
+        }
+        if .frame_count > 0: {
+            .push(result);
+        } else: {
+            .last_result = result;
+        }
+    }
+
+    // --- Upvalues --------------------------------------------------------
+
+    // Capture the stack slot at `index`, reusing an existing open upvalue if
+    // one already points there. The open list is kept sorted by slot so the
+    // scan stops early.
+    fn capture_upvalue(self: &unique, index: int) -> int: {
+        for handle: &const in .open_upvalues: {
+            if .upvalues.at(handle).location == index: {
+                return handle;
+            }
+        }
+        let created = .allocate(ObjectKind::Upvalue, 0);
+        let target: &unique = .upvalues.at(created);
+        target.location = index;
+        .open_upvalues.push_back(created);
+        return created;
+    }
+
+    // Close every open upvalue at or above `floor`, copying the live stack
+    // slot into the upvalue itself.
+    fn close_upvalues(self: &unique, floor: int): {
+        var i: int = 0;
+        while i < .open_upvalues.size(): {
+            let handle = .open_upvalues.at(i);
+            let target: &unique = .upvalues.at(handle);
+            if target.location >= floor: {
+                target.closed = .stack.at(target.location);
+                target.location = -1;
+                .open_upvalues.erase(i);
+            } else: {
+                i += 1;
+            }
+        }
+    }
+
+    fn read_upvalue(self: &shared, closure: int, index: int) -> Value: {
+        let handle = .closures.at(closure).upvalues.at(index);
+        let target: &const = .upvalues.at(handle);
+        if target.is_open(): {
+            return .stack.at(target.location);
+        }
+        return target.closed;
+    }
+
+    fn write_upvalue(self: &unique, closure: int, index: int, value: &const shared Value): {
+        let handle = .closures.at(closure).upvalues.at(index);
+        let target: &unique = .upvalues.at(handle);
+        if target.is_open(): {
+            .store_slot(target.location, value);
+        } else: {
+            target.closed = value;
+        }
+    }
+
+    fn make_closure(self: &unique, function: &const shared Value, frame: &const shared CallFrame): {
+        let handle = .allocate(ObjectKind::Closure, 0);
+        let created: &unique = .closures.at(handle);
+        created.function = .functions.at(function.as_object());
+        for i in range(0, created.function.upvalue_count): {
+            let descriptor: &const = .upvalue_plan.at(i);
+            if descriptor.first: {
+                created.upvalues.push_back(.capture_upvalue(frame.slot_base + descriptor.second));
+            } else: {
+                created.upvalues.push_back(.closures.at(frame.closure).upvalues.at(descriptor.second));
+            }
+        }
+        .push(make_object(handle));
+    }
+
+    // --- The interpreter loop --------------------------------------------
+
+    // Ordering in the cascade below matters for throughput: the hottest
+    // opcodes (constants, locals, arithmetic) are tested first and the cold
+    // ones (import, halt) last. There is no `switch` in the language, so
+    // this is a plain chain of equality tests whose nested `else` blocks are
+    // all closed in one run of braces at the bottom.
+    fn run(self: &unique) -> InterpretResult: {
+        .steps = 0;
+        .had_error = false;
+        loop: {
+            if .frame_count == 0: {
+                break;
+            }
+            let frame: &unique = .frames.at(.frame_count - 1);
+            let chunk: &const = .closures.at(frame.closure).function.chunk;
+            if frame.ip >= chunk.size(): {
+                // Falling off the end of a chunk is an implicit `return nil`.
+                .return_from(make_nil());
+                continue;
+            }
+            if .trace_execution: {
+                .print_stack();
+                println(disassemble_instruction(chunk, frame.ip));
+            }
+            let ins: &const = chunk.code.at(frame.ip);
+            let op = ins.op;
+            frame.ip += 1;
+            if .bytes_allocated > .next_gc: {
+                .collect_garbage();
+            }
+
+            // --- constants, literals and stack shuffling ---
+            if op == OpCode::Constant: {
+                .push(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::ConstantLong: {
+                .push(chunk.constant_at(ins.operand & OPERAND_MASK));
+            } else: { if op == OpCode::Nil: {
+                .push(make_nil());
+            } else: { if op == OpCode::True: {
+                .push(make_bool(true));
+            } else: { if op == OpCode::False: {
+                .push(make_bool(false));
+            } else: { if op == OpCode::Pop: {
+                discard .pop();
+            } else: { if op == OpCode::PopN: {
+                .pop_n(ins.operand);
+            } else: { if op == OpCode::Dup: {
+                .push(.peek(0));
+            } else: { if op == OpCode::Swap: {
+                .swap_top();
+            } else: { if op == OpCode::Rotate: {
+                // Bring the n-th slot to the top, sliding the rest down.
+                .rotate(ins.operand);
+            // --- variable access: locals, globals, upvalues, members ---
+            } else: { if op == OpCode::GetLocal: {
+                .push(.stack.at(frame.local(ins.operand)));
+            } else: { if op == OpCode::SetLocal: {
+                .store_slot(frame.local(ins.operand), .peek(0));
+            } else: { if op == OpCode::GetGlobal: {
+                .load_global(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::SetGlobal: {
+                .assign_global(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::DefineGlobal: {
+                .define_global(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::GetUpvalue: {
+                .push(.read_upvalue(frame.closure, ins.operand));
+            } else: { if op == OpCode::SetUpvalue: {
+                .write_upvalue(frame.closure, ins.operand, .peek(0));
+            } else: { if op == OpCode::GetProperty: {
+                .get_property(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::SetProperty: {
+                .set_property(chunk.constant_at(ins.operand));
+            } else: { if op == OpCode::GetIndex: {
+                .index_get();
+            } else: { if op == OpCode::SetIndex: {
+                .index_set();
+            // --- comparison ---
+            } else: { if op == OpCode::Equal: {
+                .compare_equal(false);
+            } else: { if op == OpCode::NotEqual: {
+                .compare_equal(true);
+            } else: { if op == OpCode::Greater: {
+                .compare_order(OpCode::Greater);
+            } else: { if op == OpCode::GreaterEqual: {
+                .compare_order(OpCode::GreaterEqual);
+            } else: { if op == OpCode::Less: {
+                .compare_order(OpCode::Less);
+            } else: { if op == OpCode::LessEqual: {
+                .compare_order(OpCode::LessEqual);
+            // --- arithmetic; operands are fixed-point, scaled by FIXED_SCALE ---
+            } else: { if op == OpCode::Add: {
+                // Add is overloaded: strings concatenate, numbers add.
+                if .peek(0).is_object() && .peek(1).is_object(): {
+                    .concat_strings();
+                } else: {
+                    .arith(OpCode::Add);
+                }
+            } else: { if op == OpCode::Subtract: {
+                .arith(OpCode::Subtract);
+            } else: { if op == OpCode::Multiply: {
+                .arith(OpCode::Multiply);
+            } else: { if op == OpCode::Divide: {
+                if .peek(0).as_number() == 0: {
+                    .runtime_error("division by zero", chunk.line_at(frame.ip));
+                } else: {
+                    .arith(OpCode::Divide);
+                }
+            } else: { if op == OpCode::Modulo: {
+                if .peek(0).as_number() == 0: {
+                    .runtime_error("modulo by zero", chunk.line_at(frame.ip));
+                } else: {
+                    .arith(OpCode::Modulo);
+                }
+            } else: { if op == OpCode::Power: {
+                .arith(OpCode::Power);
+            // --- unary operators ---
+            } else: { if op == OpCode::Negate: {
+                .negate();
+            } else: { if op == OpCode::Increment: {
+                .adjust(FIXED_SCALE);
+            } else: { if op == OpCode::Decrement: {
+                .adjust(-FIXED_SCALE);
+            } else: { if op == OpCode::Not: {
+                let value = .pop();
+                .push(make_bool(!value.is_truthy()));
+            // --- bitwise; operands are truncated to whole integers first ---
+            } else: { if op == OpCode::BitAnd: {
+                .bitwise(OpCode::BitAnd);
+            } else: { if op == OpCode::BitOr: {
+                .bitwise(OpCode::BitOr);
+            } else: { if op == OpCode::BitXor: {
+                .bitwise(OpCode::BitXor);
+            } else: { if op == OpCode::BitNot: {
+                .bit_not();
+            } else: { if op == OpCode::ShiftLeft: {
+                .bitwise(OpCode::ShiftLeft);
+            } else: { if op == OpCode::ShiftRight: {
+                .bitwise(OpCode::ShiftRight);
+            } else: { if op == OpCode::ShiftRightLogical: {
+                .bitwise(OpCode::ShiftRightLogical);
+            // --- control flow ---
+            } else: { if op == OpCode::Jump: {
+                frame.jump_to(ins.operand);
+            } else: { if op == OpCode::JumpIfFalse: {
+                let cond = .pop();
+                if !cond.is_truthy(): {
+                    frame.jump_to(ins.operand);
+                }
+            } else: { if op == OpCode::JumpIfTrue: {
+                let cond = .pop();
+                if cond.is_truthy(): {
+                    frame.jump_to(ins.operand);
+                }
+            } else: { if op == OpCode::JumpIfNil: {
+                // Peeks rather than pops: this backs the nil-coalescing lowering.
+                if .peek(0).is_nil(): {
+                    frame.jump_to(ins.operand);
+                }
+            } else: { if op == OpCode::JumpIfNotNil: {
+                if !.peek(0).is_nil(): {
+                    frame.jump_to(ins.operand);
+                }
+            } else: { if op == OpCode::Loop: {
+                // Backwards edge; the operand is an absolute index, not a delta.
+                frame.jump_to(ins.operand);
+                .check_interrupt();
+            // --- calls ---
+            } else: { if op == OpCode::Call: {
+                .call_value(.peek(ins.operand), ins.operand);
+            } else: { if op == OpCode::Invoke: {
+                .invoke(chunk.constant_at(ins.operand), ins.extra);
+            } else: { if op == OpCode::TailCall: {
+                // Reuses the current frame instead of pushing a new one.
+                .tail_call(ins.operand);
+            } else: { if op == OpCode::CallNative: {
+                .call_native(ins.operand);
+            // --- closures and returns ---
+            } else: { if op == OpCode::Closure: {
+                .make_closure(chunk.constant_at(ins.operand), frame);
+            } else: { if op == OpCode::CloseUpvalue: {
+                .close_upvalues(.stack_top - 1);
+                discard .pop();
+            } else: { if op == OpCode::Return: {
+                .return_from(.pop());
+            } else: { if op == OpCode::ReturnNil: {
+                .return_from(make_nil());
+            // --- arrays ---
+            } else: { if op == OpCode::NewArray: {
+                .new_array(ins.operand);
+            } else: { if op == OpCode::ArrayPush: {
+                .array_push();
+            } else: { if op == OpCode::ArrayLength: {
+                .array_length();
+            } else: { if op == OpCode::ArraySlice: {
+                .array_slice();
+            } else: { if op == OpCode::ArrayConcat: {
+                .array_concat();
+            // --- maps ---
+            } else: { if op == OpCode::NewMap: {
+                .new_map(ins.operand);
+            } else: { if op == OpCode::MapInsert: {
+                .map_insert();
+            } else: { if op == OpCode::MapLookup: {
+                .map_lookup();
+            } else: { if op == OpCode::MapErase: {
+                .map_erase();
+            } else: { if op == OpCode::MapLength: {
+                .map_length();
+            // --- builtins, diagnostics and terminators ---
+            } else: { if op == OpCode::Concat: {
+                .concat_strings();
+            } else: { if op == OpCode::Length: {
+                .length_of();
+            } else: { if op == OpCode::TypeOf: {
+                .type_of();
+            } else: { if op == OpCode::Print: {
+                let value = .pop();
+                println(.to_display(value));
+            } else: { if op == OpCode::Assert: {
+                let cond = .pop();
+                if !cond.is_truthy(): {
+                    .runtime_error("assertion failed", ins.operand);
+                }
+            } else: { if op == OpCode::Import: {
+                .push(.import_module(chunk.constant_at(ins.operand)));
+            } else: { if op == OpCode::Nop: {
+                // Alignment padding left behind by the peephole pass.
+                discard ins.operand;
+            } else: { if op == OpCode::Halt: {
+                .frame_count = 0;
+                break;
+            } else: {
+                // An opcode this build does not know about. Serialized chunks
+                // carry a version stamp, so this only fires on corruption.
+                .runtime_error("unknown opcode", chunk.line_at(frame.ip));
+            }
+            } } } } } } } } } } } } } } } } } } }
+            } } } } } } } } } } } } } } } } } } }
+            } } } } } } } } } } } } } } } } } } }
+            } } } } } } } } } } } } } } } } } }
+
+            if .had_error: {
+                .reset_stack();
+                return InterpretResult::RuntimeError;
+            }
+        }
+        return InterpretResult::Ok;
+    }
+
+    // --- Allocation and the mark-sweep collector -------------------------
+
+    // Every heap object is registered here so the sweep phase can walk them
+    // all. Allocation is also the only place a collection can start, which
+    // keeps the set of live roots easy to reason about.
+    fn allocate(self: &unique, kind: ObjectKind, hint: int) -> int: {
+        .bytes_allocated += 32 + hint * 16;
+        if .bytes_allocated > .next_gc: {
+            .collect_garbage();
+        }
+        var header: Obj;
+        header.kind = kind;
+        header.marked = false;
+        header.handle = .objects.size();
+        .objects.push_back(header);
+        return header.handle;
+    }
+
+    fn collect_garbage(self: &unique): {
+        let before = .bytes_allocated;
+        .gray_stack.clear();
+        .mark_roots();
+        .trace_references();
+        .sweep();
+        .next_gc = .bytes_allocated * GC_GROWTH_PERCENT / 100;
+        if .next_gc < GC_MIN_THRESHOLD: {
+            .next_gc = GC_MIN_THRESHOLD;
+        }
+        if .trace_gc: {
+            var line = string();
+            line.append("gc: reclaimed ");
+            line.append(to_string(before - .bytes_allocated));
+            line.append(" bytes");
+            println(line);
+        }
+    }
+
+    // Roots are the value stack, every live call frame, the open upvalue
+    // list, the globals table and the module cache.
+    fn mark_roots(self: &unique): {
+        for value: &const in .stack: {
+            .mark_value(value);
+        }
+        for frame: &const in .frames: {
+            if frame.closure >= 0: {
+                .mark_object(frame.closure);
+            }
+        }
+        for handle: &const in .open_upvalues: {
+            .mark_object(handle);
+        }
+        for entry: &const in .globals: {
+            .mark_value(entry.second);
+        }
+        for entry: &const in .modules: {
+            .mark_value(entry.second);
+        }
+        .mark_value(.last_result);
+    }
+
+    fn mark_value(self: &unique, value: &const shared Value): {
+        if !value.is_object(): {
+            return;
+        }
+        .mark_object(value.object);
+    }
+
+    fn mark_object(self: &unique, handle: int): {
+        if handle < 0: {
+            return;
+        }
+        let header: &unique = .objects.at(handle);
+        if header.marked: {
+            return;
+        }
+        header.marked = true;
+        .gray_stack.push_back(handle);
+    }
+
+    // Tri-colour marking: gray objects still have unvisited children.
+    fn trace_references(self: &unique): {
+        while !.gray_stack.empty(): {
+            let handle = .gray_stack.back();
+            .gray_stack.pop_back();
+            .blacken_object(handle);
+        }
+    }
+
+    fn blacken_object(self: &unique, handle: int): {
+        let kind = .objects.at(handle).kind;
+        if kind == ObjectKind::Array: {
+            for value: &const in .arrays.at(handle).items: {
+                .mark_value(value);
+            }
+        } else: { if kind == ObjectKind::Map: {
+            for value: &const in .maps.at(handle).keys: {
+                .mark_value(value);
+            }
+            for value: &const in .maps.at(handle).values: {
+                .mark_value(value);
+            }
+        } else: { if kind == ObjectKind::Closure: {
+            for upvalue: &const in .closures.at(handle).upvalues: {
+                .mark_object(upvalue);
+            }
+            .mark_chunk(.closures.at(handle).function.chunk);
+        } else: { if kind == ObjectKind::Upvalue: {
+            .mark_value(.upvalues.at(handle).closed);
+        } else: { if kind == ObjectKind::Function: {
+            .mark_chunk(.functions.at(handle).chunk);
+        } else: { if kind == ObjectKind::BoundMethod: {
+            .mark_object(.bound_methods.at(handle));
+        } else: {
+            // Strings and natives have no outgoing references.
+            discard handle;
+        }
+        } } } } }
+    }
+
+    fn mark_chunk(self: &unique, chunk: &const shared Chunk): {
+        for value: &const in chunk.constants: {
+            .mark_value(value);
+        }
+    }
+
+    // Unmarked objects are released; survivors are cleared for the next
+    // cycle. The object table itself is compacted lazily.
+    fn sweep(self: &unique): {
+        var i: int = 0;
+        while i < .objects.size(): {
+            let header: &unique = .objects.at(i);
+            if header.marked: {
+                header.marked = false;
+                i += 1;
+            } else: {
+                .free_object(i);
+                i += 1;
+            }
+        }
+    }
+
+    fn free_object(self: &unique, handle: int): {
+        let header: &unique = .objects.at(handle);
+        .bytes_allocated -= 32;
+        if header.kind == ObjectKind::Array: {
+            .arrays.at(handle).items.clear();
+        } else: { if header.kind == ObjectKind::Map: {
+            .maps.at(handle).keys.clear();
+            .maps.at(handle).values.clear();
+        } else: { if header.kind == ObjectKind::Closure: {
+            .closures.at(handle).upvalues.clear();
+        } else: {
+            discard handle;
+        }
+        } }
+        header.handle = -1;
+    }
+
+    // --- State -----------------------------------------------------------
+
+    stack: vector{Value};
+    stack_top: int = 0;
+    frames: vector{CallFrame};
+    frame_count: int = 0;
+
+    globals: map{string, Value};
+    modules: map{string, Value};
+    interned: map{string, int};
+    strings_by_handle: map{int, string};
+
+    // Parallel object tables, indexed by the handle stored in a Value.
+    objects: vector{Obj};
+    arrays: vector{ObjArray};
+    maps: vector{ObjMap};
+    closures: vector{ObjClosure};
+    functions: vector{ObjFunction};
+    upvalues: vector{ObjUpvalue};
+    natives: vector{ObjNative};
+    bound_methods: vector{int};
+
+    // Capture plan for the closure currently being built: `first` is true
+    // when the upvalue comes from the enclosing frame's locals.
+    upvalue_plan: vector{pair{bool, int}};
+    open_upvalues: vector{int};
+    gray_stack: vector{int};
+
+    bytes_allocated: int = 0;
+    next_gc: int = 1048576;
+    steps: int = 0;
+    last_result: Value;
+
+    had_error: bool = false;
+    interrupted: bool = false;
+    trace_execution: bool = false;
+    trace_gc: bool = false;
+}
+
+// --- Free helpers --------------------------------------------------------
+
+fn object_kind_name(kind: ObjectKind) -> string: {
+    if kind == ObjectKind::String: {
+        return "string";
+    } else: { if kind == ObjectKind::Array: {
+        return "array";
+    } else: { if kind == ObjectKind::Map: {
+        return "map";
+    } else: { if kind == ObjectKind::Function: {
+        return "function";
+    } else: { if kind == ObjectKind::Closure: {
+        return "closure";
+    } else: { if kind == ObjectKind::Upvalue: {
+        return "upvalue";
+    } else: { if kind == ObjectKind::Native: {
+        return "native";
+    } else: { if kind == ObjectKind::BoundMethod: {
+        return "method";
+    } else: { if kind == ObjectKind::Instance: {
+        return "instance";
+    } else: {
+        return "class";
+    }
+    } } } } } } } }
+}
+
+// Render a fixed-point number: 1500 becomes "1.500".
+fn format_fixed(value: int) -> string: {
+    var text = string();
+    if value < 0: {
+        text.append("-");
+    }
+    let magnitude = abs(value);
+    text.append(to_string(magnitude / FIXED_SCALE));
+    let fraction = magnitude % FIXED_SCALE;
+    if fraction != 0: {
+        text.append(".");
+        var divisor = FIXED_SCALE / 10;
+        while divisor > 0: {
+            text.append(to_string(fraction / divisor % 10));
+            divisor /= 10;
+        }
+    }
+    return text;
+}
+
+// --- Entry point ---------------------------------------------------------
+
+// Load a top-level chunk into a fresh frame and run it to completion.
+fn interpret(machine: &unique VM, chunk: Chunk) -> InterpretResult: {
+    machine.reset_stack();
+    let handle = machine.allocate(ObjectKind::Closure, 0);
+    let entry: &unique = machine.closures.at(handle);
+    entry.function.chunk = chunk;
+    entry.function.arity = 0;
+    machine.push(make_object(handle));
+    machine.call_closure(handle, 0, false);
+    let result = machine.run();
+    if result == InterpretResult::RuntimeError: {
+        println("execution aborted");
+    }
+    return result;
+}
+
+// Verify a chunk before running it: the stack depth must never go negative
+// and every jump target must land inside the chunk.
+fn verify_chunk(chunk: &const shared Chunk) -> bool: {
+    var depth: int = 0;
+    for i in range(0, chunk.size()): {
+        let ins: &const = chunk.code.at(i);
+        depth += stack_effect(ins.op, ins.operand);
+        if depth < 0: {
+            return false;
+        }
+        if ins.is_jump(): {
+            if ins.operand < 0 || ins.operand >= chunk.size(): {
+                return false;
+            }
+        }
+        if opcode_operand_count(ins.op) > 0: {
+            if opcode_operand_kind(ins.op) == OperandKind::ConstantSlot: {
+                if ins.operand >= chunk.constants.size(): {
+                    return false;
+                }
+            }
+        }
+    }
+    prove depth >= 0;
+    return true;
+}
+
+}

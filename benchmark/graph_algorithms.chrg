@@ -1,0 +1,4219 @@
+// A generic graph algorithms library.
+//
+// The library is deliberately organised as a *shallow tower of namespaces*
+// rather than as one enormous container type.  Everything that operates on a
+// graph is a free function, grouped by topic:
+//
+//   * `graph`                  -- the data types themselves plus small helpers,
+//   * `graph::builders`        -- construction, conversion and transformation,
+//   * `graph::traversal`       -- BFS, DFS and the visitor plumbing,
+//   * `graph::connectivity`    -- components, ordering, cycles, cuts,
+//   * `graph::shortest_path`   -- Dijkstra, Bellman-Ford, Floyd-Warshall,
+//   * `graph::spanning`        -- Prim, Kruskal and the union-find they need,
+//   * `graph::matching`        -- bipartite matching and the covers it implies,
+//   * `graph::flow`            -- residual networks and maximum flow.
+//
+// Two storage strategies are provided and they share the same vocabulary:
+//
+//   * `AdjacencyList{V, W}` keeps, for every vertex, a vector of *edge ids*
+//     into a flat `edges` arena.  This is the representation every algorithm
+//     in this file prefers, because iterating the incident edges of a vertex
+//     costs exactly the degree of that vertex.
+//   * `AdjacencyMatrix{V, W, N}` keeps an `N * N` block of cells.  It is the
+//     right shape for Floyd-Warshall and for dense max-flow, and it makes the
+//     "is there an edge between u and v" question a single index.
+//
+// Both are parameterised over `V`, the payload carried by a vertex, and `W`,
+// the payload carried by an edge.  An *unweighted* graph is simply a graph
+// whose edges all carry `UNIT_WEIGHT`; there is no separate type for it, only
+// the `unweighted_*` constructors below.
+//
+// No floating point appears anywhere.  Weights and distances are fixed point
+// integers scaled by `WEIGHT_SCALE`, so a weight of "2.5" is written 2500 and
+// a ratio of "one half" is `WEIGHT_SCALE / 2`.  Every routine that divides
+// documents whether it rounds towards zero.
+namespace graph: {
+
+// --- Sentinels and tuning -------------------------------------------------
+
+// "No such vertex" / "no such edge".  Negative so it can never index a vector.
+static GRAPH_NIL: int = -1;
+
+// Stand-in for +infinity in distance arrays.  Chosen so that adding any two
+// finite distances in this library still fits comfortably in an int.
+static GRAPH_INFINITY: int = 1000000000;
+
+// Fixed point scale shared by every weight, distance and flow value.
+static WEIGHT_SCALE: int = 1000;
+
+// The weight given to an edge of an unweighted graph.
+static UNIT_WEIGHT: int = 1000;
+
+// Default number of vertices a freshly built graph reserves room for.
+static GRAPH_INITIAL_ORDER: int = 32;
+
+// Growth factor for the edge arena, in percent, so no division by a float is
+// ever required.
+static GRAPH_GROWTH_PERCENT: int = 175;
+
+// Upper bound on the depth of an explicit traversal stack before the
+// iterative variants start reallocating.
+static GRAPH_STACK_HINT: int = 64;
+
+// Bellman-Ford gives up after this many relaxation rounds even if the graph
+// claims to be larger; a negative cycle is reported instead.
+static GRAPH_RELAX_LIMIT: int = 4096;
+
+// Maximum number of augmenting paths a flow routine will look for.  Real
+// Edmonds-Karp terminates in O(V * E) augmentations; this is only a guard.
+static GRAPH_AUGMENT_LIMIT: int = 100000;
+
+// --- Enumerations ---------------------------------------------------------
+
+// Whether an edge may be traversed in one direction or in both.
+enum EdgeDirection: {
+    Directed;
+    Undirected = 1;
+}
+
+// Whether the edges of a graph carry meaningful weights.  Algorithms use this
+// to pick a cheaper code path, never to change their answer.
+enum WeightMode: {
+    Unweighted;
+    Weighted = 1;
+}
+
+// The classic three-colour marking used by depth first search.
+enum ColorMark: {
+    White;
+    Gray;
+    Black = 2;
+}
+
+// How a visitor wants the traversal to proceed after a hook fires.
+enum VisitAction: {
+    Continue;
+    SkipChildren;
+    StopTraversal = 2;
+}
+
+// The role an edge plays in a depth first forest.
+enum EdgeClass: {
+    TreeEdge;
+    BackEdge;
+    ForwardEdge;
+    CrossEdge = 3;
+}
+
+// The outcome of a topological ordering attempt.
+enum OrderStatus: {
+    TotalOrder;
+    CycleFound = 1;
+}
+
+// Which side of a bipartition a vertex landed on.
+enum Side: {
+    Unassigned;
+    LeftSide;
+    RightSide = 2;
+}
+
+// --- Edge -----------------------------------------------------------------
+
+// One directed arc of the graph.
+//
+// Undirected graphs store *two* `Edge` records per logical edge, one in each
+// direction, and give them consecutive ids so that `twin_of` can flip between
+// them with a single exclusive-or against 1.  `pair_id` keeps the logical
+// identity so that, for instance, Kruskal never considers the same physical
+// edge twice.
+template(V: type, W: type)
+struct Edge: {
+
+    // The endpoint that is not `endpoint`.  Passing a vertex that is not an
+    // endpoint of this edge returns `tail`, which callers treat as a bug.
+    fn other(self: &const shared, endpoint: int) -> int: {
+        if .tail == endpoint: {
+            return .head;
+        }
+        return .tail;
+    }
+
+    fn touches(self: &const shared, vertex: int) -> bool: {
+        return .tail == vertex || .head == vertex;
+    }
+
+    fn is_loop(self: &const shared) -> bool: {
+        return .tail == .head;
+    }
+
+    fn is_live(self: &const shared) -> bool: {
+        return .alive && .tail != GRAPH_NIL;
+    }
+
+    // Ids of the two half-edges of an undirected pair differ only in bit 0.
+    fn twin_id(self: &const shared) -> int: {
+        return .id ^ 1;
+    }
+
+    tail: int = 0;
+    head: int = 0;
+    weight: int = 0;
+    capacity: int = 0;
+    id: int = 0;
+    pair_id: int = 0;
+    alive: bool = true;
+    payload: W;
+    tag: V;
+}
+
+// --- Vertex ---------------------------------------------------------------
+
+// One vertex plus the bookkeeping every traversal wants to hang off it.
+//
+// The fields after `payload` are scratch space.  Algorithms are expected to
+// reset the ones they use through `reset_marks` before they start; nothing in
+// this file relies on their value surviving between two calls.
+template(V: type)
+struct Vertex: {
+
+    fn degree(self: &const shared) -> int: {
+        return .incident.size();
+    }
+
+    fn is_isolated(self: &const shared) -> bool: {
+        return .incident.empty();
+    }
+
+    fn clear_marks(self: &unique): {
+        .color = ColorMark::White;
+        .discovered = GRAPH_NIL;
+        .finished = GRAPH_NIL;
+        .parent = GRAPH_NIL;
+        .component = GRAPH_NIL;
+        .side = Side::Unassigned;
+    }
+
+    incident: vector{int};
+    incoming: vector{int};
+    payload: V;
+    id: int = 0;
+    color: ColorMark = ColorMark::White;
+    discovered: int = -1;
+    finished: int = -1;
+    parent: int = -1;
+    component: int = -1;
+    side: Side = Side::Unassigned;
+}
+
+// --- Adjacency list -------------------------------------------------------
+
+// The primary representation: a vector of vertices, each holding a vector of
+// edge ids into a shared arena.
+//
+// `direction` decides whether `connect` inserts one arc or two.  Nothing else
+// in the type behaves differently, which is what lets one implementation of
+// BFS serve both the directed and the undirected case.
+template(V: type, W: type)
+struct AdjacencyList: {
+
+    fn order(self: &const shared) -> int: {
+        return .vertices.size();
+    }
+
+    fn arc_count(self: &const shared) -> int: {
+        return .edges.size();
+    }
+
+    // Number of *logical* edges: half the arc count when undirected.
+    fn size(self: &const shared) -> int: {
+        if .direction == EdgeDirection::Undirected: {
+            return .edges.size() / 2;
+        }
+        return .edges.size();
+    }
+
+    fn is_directed(self: &const shared) -> bool: {
+        return .direction == EdgeDirection::Directed;
+    }
+
+    fn is_weighted(self: &const shared) -> bool: {
+        return .mode == WeightMode::Weighted;
+    }
+
+    fn valid_vertex(self: &const shared, v: int) -> bool: {
+        return v >= 0 && v < .vertices.size();
+    }
+
+    fn vertex(self: &shared, v: int) -> &shared[self] Vertex{V}: {
+        return .vertices.at(v);
+    }
+
+    fn arc(self: &shared, e: int) -> &shared[self] Edge{V, W}: {
+        return .edges.at(e);
+    }
+
+    fn incident_of(self: &shared, v: int) -> &shared[self] vector{int}: {
+        return .vertices.at(v).incident;
+    }
+
+    fn degree(self: &const shared, v: int) -> int: {
+        return .vertices.at(v).incident.size();
+    }
+
+    fn in_degree(self: &const shared, v: int) -> int: {
+        if .direction == EdgeDirection::Undirected: {
+            return .vertices.at(v).incident.size();
+        }
+        return .vertices.at(v).incoming.size();
+    }
+
+    fn out_degree(self: &const shared, v: int) -> int: {
+        return .vertices.at(v).incident.size();
+    }
+
+    // Append a fresh isolated vertex and hand back its id.
+    fn add_vertex(self: &unique, payload: V) -> int: {
+        let id = .vertices.size();
+        var v = Vertex{V}(id: id, payload: payload);
+        .vertices.push_back(move(v));
+        return id;
+    }
+
+    // Grow to at least `n` vertices, leaving existing ones untouched.
+    fn reserve_vertices(self: &unique, n: int): {
+        .vertices.reserve(n);
+        while .vertices.size() < n: {
+            let id = .vertices.size();
+            .vertices.push_back(Vertex{V}(id: id));
+        }
+    }
+
+    // The workhorse: insert one arc, and its twin when undirected.
+    fn connect(self: &unique, tail: int, head: int, weight: int) -> int: {
+        assert tail >= 0;
+        assert head >= 0;
+        let first = .edges.size();
+        var forward = Edge{V, W}(tail: tail,
+                                 head: head,
+                                 weight: weight,
+                                 capacity: weight,
+                                 id: first,
+                                 pair_id: first);
+        .edges.push_back(move(forward));
+        .vertices.at(tail).incident.push_back(first);
+        if .direction == EdgeDirection::Undirected: {
+            let second = .edges.size();
+            var backward = Edge{V, W}(tail: head,
+                                      head: tail,
+                                      weight: weight,
+                                      capacity: weight,
+                                      id: second,
+                                      pair_id: first);
+            .edges.push_back(move(backward));
+            .vertices.at(head).incident.push_back(second);
+        } else: {
+            .vertices.at(head).incoming.push_back(first);
+        }
+        return first;
+    }
+
+    fn connect_unweighted(self: &unique, tail: int, head: int) -> int: {
+        return .connect(tail, head, UNIT_WEIGHT);
+    }
+
+    // Logical removal: the arc stays in the arena so that ids never shift.
+    fn disconnect(self: &unique, e: int) -> bool: {
+        if e < 0 || e >= .edges.size(): {
+            return false;
+        }
+        let arc: &unique = .edges.at(e);
+        if arc.alive == false: {
+            return false;
+        }
+        arc.alive = false;
+        if .direction == EdgeDirection::Undirected: {
+            let twin: &unique = .edges.at(arc.twin_id());
+            twin.alive = false;
+        }
+        return true;
+    }
+
+    fn has_edge(self: &const shared, tail: int, head: int) -> bool: {
+        for e: &const in .vertices.at(tail).incident: {
+            let arc: &const = .edges.at(e);
+            if arc.alive && arc.head == head: {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn weight_between(self: &const shared, tail: int, head: int) -> int: {
+        for e: &const in .vertices.at(tail).incident: {
+            let arc: &const = .edges.at(e);
+            if arc.alive && arc.head == head: {
+                return arc.weight;
+            }
+        }
+        return GRAPH_INFINITY;
+    }
+
+    fn reset_marks(self: &unique): {
+        for v: &unique in .vertices: {
+            v.clear_marks();
+        }
+    }
+
+    fn clear(self: &unique): {
+        .vertices.clear();
+        .edges.clear();
+    }
+
+    vertices: vector{Vertex{V}};
+    edges: vector{Edge{V, W}};
+    direction: EdgeDirection = EdgeDirection::Directed;
+    mode: WeightMode = WeightMode::Weighted;
+    label: string;
+}
+
+// --- Adjacency matrix -----------------------------------------------------
+
+// Dense representation with a compile-time side length.
+//
+// `N` being a template parameter means `index_of` is a compile-time affine
+// expression and the whole cell block can live in one allocation.  Absent
+// edges hold `GRAPH_INFINITY` rather than zero so that Floyd-Warshall can run
+// straight over the raw cells.
+template(V: type, W: type, N: int)
+struct AdjacencyMatrix: {
+
+    fn order(self: &const shared) -> int: {
+        return N;
+    }
+
+    fn cell_count(self: &const shared) -> int: {
+        return N * N;
+    }
+
+    fn index_of(self: &const shared, row: int, col: int) -> int: {
+        return row * N + col;
+    }
+
+    fn at(self: &shared, row: int, col: int) -> &shared[self] int: {
+        return .cells.at(row * N + col);
+    }
+
+    fn get(self: &const shared, row: int, col: int) -> int: {
+        return .cells.at(row * N + col);
+    }
+
+    fn put(self: &unique, row: int, col: int, value: int): {
+        .cells.at(row * N + col) = value;
+        if .direction == EdgeDirection::Undirected: {
+            .cells.at(col * N + row) = value;
+        }
+    }
+
+    fn linked(self: &const shared, row: int, col: int) -> bool: {
+        return .cells.at(row * N + col) < GRAPH_INFINITY;
+    }
+
+    fn fill(self: &unique, value: int): {
+        .cells.clear();
+        var k: int = 0;
+        while k < N * N: {
+            .cells.push_back(value);
+            k += 1;
+        }
+    }
+
+    // Reset to "no edges anywhere, zero cost to stay put".
+    fn reset(self: &unique): {
+        .fill(GRAPH_INFINITY);
+        var d: int = 0;
+        while d < N: {
+            .cells.at(d * N + d) = 0;
+            d += 1;
+        }
+    }
+
+    fn row_sum(self: &const shared, row: int) -> int: {
+        var total: int = 0;
+        var c: int = 0;
+        while c < N: {
+            let value = .cells.at(row * N + c);
+            if value < GRAPH_INFINITY: {
+                total += value;
+            }
+            c += 1;
+        }
+        return total;
+    }
+
+    fn symmetric(self: &const shared) -> bool: {
+        var r: int = 0;
+        while r < N: {
+            var c = r + 1;
+            while c < N: {
+                if .cells.at(r * N + c) != .cells.at(c * N + r): {
+                    return false;
+                }
+                c += 1;
+            }
+            r += 1;
+        }
+        return true;
+    }
+
+    cells: vector{int};
+    payloads: vector{V};
+    slack: W;
+    direction: EdgeDirection = EdgeDirection::Directed;
+    mode: WeightMode = WeightMode::Weighted;
+}
+
+// --- Small shared helpers -------------------------------------------------
+
+// A vertex/priority pair, used by every routine that needs an ordered
+// frontier.  Kept at namespace scope so the heap below is not generic over
+// yet another type.
+struct HeapEntry: {
+
+    fn better_than(self: &const shared, other: &const shared HeapEntry) -> bool: {
+        if .priority != other.priority: {
+            return .priority < other.priority;
+        }
+        return .vertex < other.vertex;
+    }
+
+    vertex: int = 0;
+    priority: int = 0;
+    stamp: int = 0;
+}
+
+// An explicit binary min-heap.
+//
+// The heap is written by hand rather than reused from the standard library
+// because Dijkstra wants `decrease_key`, and because a lazy variant (pushing
+// duplicates and discarding stale pops) is measurably simpler to prove
+// correct.  Both are supported: `position` is maintained when `tracked` is
+// true and ignored otherwise.
+struct BinaryHeap: {
+
+    fn size(self: &const shared) -> int: {
+        return .items.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .items.empty();
+    }
+
+    fn parent_of(self: &const shared, i: int) -> int: {
+        return (i - 1) / 2;
+    }
+
+    fn left_of(self: &const shared, i: int) -> int: {
+        return 2 * i + 1;
+    }
+
+    fn right_of(self: &const shared, i: int) -> int: {
+        return 2 * i + 2;
+    }
+
+    // Move `i` towards the root until the heap property holds above it.
+    fn sift_up(self: &unique, start: int) -> int: {
+        var i = start;
+        while i > 0: {
+            let p = (i - 1) / 2;
+            if .items.at(i).better_than(.items.at(p)) == false: {
+                break;
+            }
+            .swap_slots(i, p);
+            i = p;
+        }
+        return i;
+    }
+
+    // Move `i` towards the leaves until the heap property holds below it.
+    fn sift_down(self: &unique, start: int) -> int: {
+        var i = start;
+        let n = .items.size();
+        loop: {
+            let l = 2 * i + 1;
+            let r = 2 * i + 2;
+            var best = i;
+            if l < n: {
+                if .items.at(l).better_than(.items.at(best)): {
+                    best = l;
+                }
+            }
+            if r < n: {
+                if .items.at(r).better_than(.items.at(best)): {
+                    best = r;
+                }
+            }
+            if best == i: {
+                break;
+            }
+            .swap_slots(i, best);
+            i = best;
+        }
+        return i;
+    }
+
+    fn swap_slots(self: &unique, a: int, b: int): {
+        swap(.items.at(a), .items.at(b));
+        if .tracked: {
+            .position.at(.items.at(a).vertex) = a;
+            .position.at(.items.at(b).vertex) = b;
+        }
+    }
+
+    fn push(self: &unique, vertex: int, priority: int): {
+        let slot = .items.size();
+        .items.push_back(HeapEntry(vertex: vertex, priority: priority, stamp: .clock));
+        .clock += 1;
+        if .tracked: {
+            .position.at(vertex) = slot;
+        }
+        discard .sift_up(slot);
+    }
+
+    fn peek(self: &shared) -> &shared[self] HeapEntry: {
+        return .items.front();
+    }
+
+    fn pop(self: &unique) -> HeapEntry: {
+        let top = .items.front();
+        let last = .items.size() - 1;
+        .swap_slots(0, last);
+        .items.pop_back();
+        if .items.empty() == false: {
+            discard .sift_down(0);
+        }
+        if .tracked: {
+            .position.at(top.vertex) = GRAPH_NIL;
+        }
+        return top;
+    }
+
+    // Lower the recorded priority of a vertex already in the heap.  Returns
+    // false when the vertex is absent or the new key is not an improvement.
+    fn decrease_key(self: &unique, vertex: int, priority: int) -> bool: {
+        if .tracked == false: {
+            .push(vertex, priority);
+            return true;
+        }
+        let slot = .position.at(vertex);
+        if slot == GRAPH_NIL: {
+            .push(vertex, priority);
+            return true;
+        }
+        if .items.at(slot).priority <= priority: {
+            return false;
+        }
+        .items.at(slot).priority = priority;
+        discard .sift_up(slot);
+        return true;
+    }
+
+    fn contains(self: &const shared, vertex: int) -> bool: {
+        if .tracked == false: {
+            return false;
+        }
+        return .position.at(vertex) != GRAPH_NIL;
+    }
+
+    fn prepare(self: &unique, order: int): {
+        .items.clear();
+        .position.clear();
+        .tracked = true;
+        var i: int = 0;
+        while i < order: {
+            .position.push_back(GRAPH_NIL);
+            i += 1;
+        }
+    }
+
+    fn clear(self: &unique): {
+        .items.clear();
+        .position.clear();
+        .clock = 0;
+    }
+
+    items: vector{HeapEntry};
+    position: vector{int};
+    tracked: bool = false;
+    clock: int = 0;
+}
+
+// Disjoint set forest with union by rank and full path compression.
+//
+// Used by Kruskal and by the offline connectivity queries in
+// `graph::connectivity`.  `components` is maintained eagerly so that
+// "is the graph connected" is answered without a scan.
+struct UnionFind: {
+
+    fn prepare(self: &unique, order: int): {
+        .parent.clear();
+        .rank.clear();
+        .weight.clear();
+        var i: int = 0;
+        while i < order: {
+            .parent.push_back(i);
+            .rank.push_back(0);
+            .weight.push_back(1);
+            i += 1;
+        }
+        .components = order;
+    }
+
+    fn find(self: &unique, x: int) -> int: {
+        var root = x;
+        while .parent.at(root) != root: {
+            root = .parent.at(root);
+        }
+        var walker = x;
+        while walker != root: {
+            let next = .parent.at(walker);
+            .parent.at(walker) = root;
+            walker = next;
+        }
+        return root;
+    }
+
+    fn connected(self: &unique, a: int, b: int) -> bool: {
+        return .find(a) == .find(b);
+    }
+
+    fn unite(self: &unique, a: int, b: int) -> bool: {
+        var ra = .find(a);
+        var rb = .find(b);
+        if ra == rb: {
+            return false;
+        }
+        if .rank.at(ra) < .rank.at(rb): {
+            swap(ra, rb);
+        }
+        .parent.at(rb) = ra;
+        .weight.at(ra) += .weight.at(rb);
+        if .rank.at(ra) == .rank.at(rb): {
+            .rank.at(ra) += 1;
+        }
+        .components -= 1;
+        assert .components >= 1;
+        return true;
+    }
+
+    fn set_size(self: &unique, x: int) -> int: {
+        let root = .find(x);
+        return .weight.at(root);
+    }
+
+    fn single_component(self: &const shared) -> bool: {
+        return .components == 1;
+    }
+
+    parent: vector{int};
+    rank: vector{int};
+    weight: vector{int};
+    components: int = 0;
+}
+
+// Fill `target` with `count` copies of `value`, discarding what was there.
+fn fill_int_vector(target: &unique vector{int}, count: int, value: int): {
+    target.clear();
+    var i: int = 0;
+    while i < count: {
+        target.push_back(value);
+        i += 1;
+    }
+}
+
+// Same, for the boolean scratch arrays every traversal needs.
+fn fill_bool_vector(target: &unique vector{bool}, count: int, value: bool): {
+    target.clear();
+    var i: int = 0;
+    while i < count: {
+        target.push_back(value);
+        i += 1;
+    }
+}
+
+// Reverse a vector of ids in place; used to turn a "walk back along parents"
+// result into a forward path.
+fn reverse_int_vector(target: &unique vector{int}): {
+    var lo: int = 0;
+    var hi = target.size() - 1;
+    while lo < hi: {
+        swap(target.at(lo), target.at(hi));
+        lo += 1;
+        hi -= 1;
+    }
+}
+
+// Saturating addition on scaled distances: infinity absorbs everything.
+fn add_distance(a: int, b: int) -> int: {
+    if a >= GRAPH_INFINITY || b >= GRAPH_INFINITY: {
+        return GRAPH_INFINITY;
+    }
+    return a + b;
+}
+
+// True when the scaled distance stands for "unreachable".
+fn is_unreachable(d: int) -> bool: {
+    return d >= GRAPH_INFINITY;
+}
+
+// ==========================================================================
+// graph::builders
+//
+// Construction, conversion and structural transformation.  Nothing here
+// inspects a graph beyond its shape, so this namespace has no dependencies on
+// any of the algorithm namespaces below it.
+// ==========================================================================
+namespace builders: {
+
+// An empty directed graph with `n` isolated vertices.
+template(V: type, W: type)
+fn directed(n: int) -> AdjacencyList{V, W}: {
+    var g = AdjacencyList{V, W}(direction: EdgeDirection::Directed,
+                                mode: WeightMode::Weighted);
+    g.reserve_vertices(n);
+    return g;
+}
+
+// An empty undirected graph with `n` isolated vertices.
+template(V: type, W: type)
+fn undirected(n: int) -> AdjacencyList{V, W}: {
+    var g = AdjacencyList{V, W}(direction: EdgeDirection::Undirected,
+                                mode: WeightMode::Weighted);
+    g.reserve_vertices(n);
+    return g;
+}
+
+// Unweighted variants differ only in the mode flag; every edge added later
+// still carries `UNIT_WEIGHT` so the weighted algorithms keep working.
+template(V: type, W: type)
+fn directed_unweighted(n: int) -> AdjacencyList{V, W}: {
+    var g = directed{V, W}(n);
+    g.mode = WeightMode::Unweighted;
+    return g;
+}
+
+template(V: type, W: type)
+fn undirected_unweighted(n: int) -> AdjacencyList{V, W}: {
+    var g = undirected{V, W}(n);
+    g.mode = WeightMode::Unweighted;
+    return g;
+}
+
+// The path 0 - 1 - 2 - ... - (n - 1), every edge of unit weight.
+template(V: type, W: type)
+fn path_graph(n: int) -> AdjacencyList{V, W}: {
+    var g = undirected_unweighted{V, W}(n);
+    var i: int = 1;
+    while i < n: {
+        discard g.connect_unweighted(i - 1, i);
+        i += 1;
+    }
+    return g;
+}
+
+// The path above, closed back onto itself.
+template(V: type, W: type)
+fn cycle_graph(n: int) -> AdjacencyList{V, W}: {
+    var g = path_graph{V, W}(n);
+    if n > 2: {
+        discard g.connect_unweighted(n - 1, 0);
+    }
+    return g;
+}
+
+// Every pair of distinct vertices joined once.
+template(V: type, W: type)
+fn complete_graph(n: int) -> AdjacencyList{V, W}: {
+    var g = undirected_unweighted{V, W}(n);
+    var i: int = 0;
+    while i < n: {
+        var j = i + 1;
+        while j < n: {
+            discard g.connect_unweighted(i, j);
+            j += 1;
+        }
+        i += 1;
+    }
+    return g;
+}
+
+// A `rows * cols` lattice, vertices numbered row-major.
+template(V: type, W: type)
+fn grid_graph(rows: int, cols: int) -> AdjacencyList{V, W}: {
+    var g = undirected_unweighted{V, W}(rows * cols);
+    var r: int = 0;
+    while r < rows: {
+        var c: int = 0;
+        while c < cols: {
+            let here = r * cols + c;
+            if c + 1 < cols: {
+                discard g.connect_unweighted(here, here + 1);
+            }
+            if r + 1 < rows: {
+                discard g.connect_unweighted(here, here + cols);
+            }
+            c += 1;
+        }
+        r += 1;
+    }
+    return g;
+}
+
+// The complete bipartite graph on `left + right` vertices.  Left vertices get
+// the ids [0, left), right vertices [left, left + right).
+template(V: type, W: type)
+fn complete_bipartite(left: int, right: int) -> AdjacencyList{V, W}: {
+    var g = undirected_unweighted{V, W}(left + right);
+    var a: int = 0;
+    while a < left: {
+        var b: int = 0;
+        while b < right: {
+            discard g.connect_unweighted(a, left + b);
+            b += 1;
+        }
+        a += 1;
+    }
+    return g;
+}
+
+// A rooted binary tree with `n` vertices, child i having parent (i - 1) / 2.
+template(V: type, W: type)
+fn binary_tree_graph(n: int) -> AdjacencyList{V, W}: {
+    var g = undirected_unweighted{V, W}(n);
+    var i: int = 1;
+    while i < n: {
+        discard g.connect_unweighted((i - 1) / 2, i);
+        i += 1;
+    }
+    return g;
+}
+
+// Reverse every arc.  Undirected graphs come back unchanged apart from the
+// order of the incidence vectors.
+template(V: type, W: type)
+fn transpose(g: &const shared AdjacencyList{V, W}) -> AdjacencyList{V, W}: {
+    var out = AdjacencyList{V, W}(direction: g.direction, mode: g.mode);
+    out.reserve_vertices(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            discard out.connect(arc.head, arc.tail, arc.weight);
+        }
+    }
+    return out;
+}
+
+// Forget the orientation of every arc.
+template(V: type, W: type)
+fn to_undirected(g: &const shared AdjacencyList{V, W}) -> AdjacencyList{V, W}: {
+    var out = undirected{V, W}(g.order());
+    out.mode = g.mode;
+    for arc: &const in g.edges: {
+        if arc.alive && arc.tail < arc.head: {
+            discard out.connect(arc.tail, arc.head, arc.weight);
+        }
+    }
+    return out;
+}
+
+// Replace every undirected edge by the two opposite arcs.
+template(V: type, W: type)
+fn to_directed(g: &const shared AdjacencyList{V, W}) -> AdjacencyList{V, W}: {
+    var out = directed{V, W}(g.order());
+    out.mode = g.mode;
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            discard out.connect(arc.tail, arc.head, arc.weight);
+        }
+    }
+    return out;
+}
+
+// Drop every arc whose weight exceeds `limit`.
+template(V: type, W: type)
+fn filter_by_weight(g: &const shared AdjacencyList{V, W},
+                    limit: int) -> AdjacencyList{V, W}: {
+    var out = AdjacencyList{V, W}(direction: g.direction, mode: g.mode);
+    out.reserve_vertices(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive && arc.weight <= limit: {
+            if g.direction == EdgeDirection::Directed || arc.tail < arc.head: {
+                discard out.connect(arc.tail, arc.head, arc.weight);
+            }
+        }
+    }
+    return out;
+}
+
+// Keep only the vertices for which `keep` is true, renumbering the survivors.
+template(V: type, W: type)
+fn induced_subgraph(g: &const shared AdjacencyList{V, W},
+                    keep: &const shared vector{bool}) -> AdjacencyList{V, W}: {
+    var mapping = vector{int}();
+    fill_int_vector(mapping, g.order(), GRAPH_NIL);
+    var next: int = 0;
+    var v: int = 0;
+    while v < g.order(): {
+        if keep.at(v): {
+            mapping.at(v) = next;
+            next += 1;
+        }
+        v += 1;
+    }
+    var out = AdjacencyList{V, W}(direction: g.direction, mode: g.mode);
+    out.reserve_vertices(next);
+    for arc: &const in g.edges: {
+        if arc.alive && keep.at(arc.tail) && keep.at(arc.head): {
+            if g.direction == EdgeDirection::Directed || arc.tail < arc.head: {
+                discard out.connect(mapping.at(arc.tail),
+                                    mapping.at(arc.head),
+                                    arc.weight);
+            }
+        }
+    }
+    return out;
+}
+
+// Project an adjacency list onto a dense matrix of side `N`.
+//
+// Parallel edges collapse to the cheapest one, which is what every dense
+// shortest path routine expects.
+template(V: type, W: type, N: int)
+fn densify(g: &const shared AdjacencyList{V, W}) -> AdjacencyMatrix{V, W, N}: {
+    var m = AdjacencyMatrix{V, W, N}(direction: g.direction, mode: g.mode);
+    m.reset();
+    for arc: &const in g.edges: {
+        if arc.alive && arc.tail < N && arc.head < N: {
+            let current = m.get(arc.tail, arc.head);
+            if arc.weight < current: {
+                m.put(arc.tail, arc.head, arc.weight);
+            }
+        }
+    }
+    return m;
+}
+
+// The inverse projection: every finite off-diagonal cell becomes an arc.
+template(V: type, W: type, N: int)
+fn sparsify(m: &const shared AdjacencyMatrix{V, W, N}) -> AdjacencyList{V, W}: {
+    var g = AdjacencyList{V, W}(direction: m.direction, mode: m.mode);
+    g.reserve_vertices(N);
+    var r: int = 0;
+    while r < N: {
+        var c: int = 0;
+        while c < N: {
+            if r != c: {
+                let value = m.get(r, c);
+                if value < GRAPH_INFINITY: {
+                    if m.direction == EdgeDirection::Directed || r < c: {
+                        discard g.connect(r, c, value);
+                    }
+                }
+            }
+            c += 1;
+        }
+        r += 1;
+    }
+    return g;
+}
+
+// Add `delta` to every weight, e.g. to lift a graph out of negative territory
+// before running Dijkstra on it.  Note this does *not* preserve shortest
+// paths in general; Johnson's reweighting is the principled version.
+template(V: type, W: type)
+fn shift_weights(g: &unique AdjacencyList{V, W}, delta: int): {
+    for arc: &unique in g.edges: {
+        arc.weight += delta;
+    }
+}
+
+// Scale every weight by a fixed point ratio, rounding towards zero.
+template(V: type, W: type)
+fn scale_weights(g: &unique AdjacencyList{V, W}, ratio: int): {
+    for arc: &unique in g.edges: {
+        arc.weight = arc.weight * ratio / WEIGHT_SCALE;
+    }
+}
+
+// Sum of all live arc weights, halved for undirected graphs so that each
+// logical edge is counted once.
+template(V: type, W: type)
+fn total_weight(g: &const shared AdjacencyList{V, W}) -> int: {
+    var total: int = 0;
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            total += arc.weight;
+        }
+    }
+    if g.direction == EdgeDirection::Undirected: {
+        return total / 2;
+    }
+    return total;
+}
+
+// A cheap structural fingerprint, handy for regression tests.
+template(V: type, W: type)
+fn describe(g: &const shared AdjacencyList{V, W}) -> string: {
+    var out = string();
+    out.append(to_string(g.order()));
+    out.append("v/");
+    out.append(to_string(g.size()));
+    out.append("e");
+    if g.is_directed(): {
+        out.append(" directed");
+    } else: {
+        out.append(" undirected");
+    }
+    if g.is_weighted(): {
+        out.append(" weighted");
+    }
+    return out;
+}
+
+}
+
+// ==========================================================================
+// graph::traversal
+//
+// Breadth first and depth first search, plus the visitor plumbing the rest of
+// the library builds on.  Every routine here is iterative: the recursive
+// formulations read better on a whiteboard but blow the stack on the long
+// path graphs the benchmarks generate.
+// ==========================================================================
+namespace traversal: {
+
+// The hook set a traversal fires into.
+//
+// There are no closures in the language, so a visitor is a struct with a
+// fixed set of methods and the traversals call them unconditionally.  The
+// default implementation records the event and asks the search to continue,
+// which makes `Visitor` on its own a perfectly usable "give me the order"
+// collector.  Specialised behaviour is obtained by pre-loading the filter
+// fields rather than by overriding methods.
+template(V: type, W: type)
+struct Visitor: {
+
+    // Fired the first time a vertex is dequeued or pushed.
+    fn on_discover(self: &unique, v: int) -> VisitAction: {
+        .discovery_order.push_back(v);
+        .visited_count += 1;
+        if .blocked.empty() == false: {
+            if .blocked.at(v): {
+                return VisitAction::SkipChildren;
+            }
+        }
+        if .stop_after > 0 && .visited_count >= .stop_after: {
+            return VisitAction::StopTraversal;
+        }
+        return VisitAction::Continue;
+    }
+
+    // Fired once every out-arc of a vertex has been considered.
+    fn on_finish(self: &unique, v: int) -> VisitAction: {
+        .finish_order.push_back(v);
+        return VisitAction::Continue;
+    }
+
+    // Fired for every arc inspected, whatever its classification.
+    fn on_edge(self: &unique, arc: int, kind: EdgeClass) -> VisitAction: {
+        .edge_order.push_back(arc);
+        if kind == EdgeClass::BackEdge: {
+            .back_edges += 1;
+        }
+        if kind == EdgeClass::TreeEdge: {
+            .tree_edges += 1;
+        }
+        return VisitAction::Continue;
+    }
+
+    // Fired when a search runs out of reachable vertices and restarts.
+    fn on_restart(self: &unique, root: int): {
+        .roots.push_back(root);
+    }
+
+    fn prepare(self: &unique, order: int): {
+        .discovery_order.clear();
+        .finish_order.clear();
+        .edge_order.clear();
+        .roots.clear();
+        .visited_count = 0;
+        .back_edges = 0;
+        .tree_edges = 0;
+        fill_bool_vector(.blocked, order, false);
+    }
+
+    fn block(self: &unique, v: int): {
+        .blocked.at(v) = true;
+    }
+
+    fn saw(self: &const shared, v: int) -> bool: {
+        for seen: &const in .discovery_order: {
+            if seen == v: {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    discovery_order: vector{int};
+    finish_order: vector{int};
+    edge_order: vector{int};
+    roots: vector{int};
+    blocked: vector{bool};
+    visited_count: int = 0;
+    back_edges: int = 0;
+    tree_edges: int = 0;
+    stop_after: int = 0;
+    sample: W;
+    label: V;
+}
+
+// The state a traversal hands back: parents, depths and the visiting order.
+template(V: type)
+struct SearchResult: {
+
+    fn reached(self: &const shared, v: int) -> bool: {
+        return .depth.at(v) < GRAPH_INFINITY;
+    }
+
+    fn reached_count(self: &const shared) -> int: {
+        var total: int = 0;
+        for d: &const in .depth: {
+            if d < GRAPH_INFINITY: {
+                total += 1;
+            }
+        }
+        return total;
+    }
+
+    fn eccentricity(self: &const shared) -> int: {
+        var best: int = 0;
+        for d: &const in .depth: {
+            if d < GRAPH_INFINITY && d > best: {
+                best = d;
+            }
+        }
+        return best;
+    }
+
+    // Walk the parent chain from `v` back to the root, then reverse it.
+    fn path_to(self: &const shared, v: int) -> vector{int}: {
+        var out = vector{int}();
+        if .depth.at(v) >= GRAPH_INFINITY: {
+            return out;
+        }
+        var walker = v;
+        while walker != GRAPH_NIL: {
+            out.push_back(walker);
+            walker = .parent.at(walker);
+        }
+        reverse_int_vector(out);
+        return out;
+    }
+
+    parent: vector{int};
+    depth: vector{int};
+    order: vector{int};
+    payload: V;
+    source: int = -1;
+    complete: bool = true;
+}
+
+// Breadth first search from a single source.
+//
+// `depth` is measured in edges, not weights; a weighted shortest path wants
+// `shortest_path::dijkstra` instead.
+template(V: type, W: type)
+fn bfs(g: &const shared AdjacencyList{V, W}, source: int) -> SearchResult{V}: {
+    var out = SearchResult{V}(source: source);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.depth, g.order(), GRAPH_INFINITY);
+    if g.valid_vertex(source) == false: {
+        out.complete = false;
+        return out;
+    }
+    var queue = vector{int}();
+    queue.push_back(source);
+    out.depth.at(source) = 0;
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        out.order.push_back(v);
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let next = arc.head;
+            if out.depth.at(next) >= GRAPH_INFINITY: {
+                out.depth.at(next) = out.depth.at(v) + 1;
+                out.parent.at(next) = v;
+                queue.push_back(next);
+            }
+        }
+    }
+    assert out.depth.at(source) == 0;
+    return out;
+}
+
+// The same search, but driving a visitor and honouring its verdicts.
+template(V: type, W: type)
+fn bfs_visit(g: &const shared AdjacencyList{V, W},
+             source: int,
+             watcher: &unique Visitor{V, W}) -> SearchResult{V}: {
+    var out = SearchResult{V}(source: source);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.depth, g.order(), GRAPH_INFINITY);
+    watcher.prepare(g.order());
+    var queue = vector{int}();
+    queue.push_back(source);
+    out.depth.at(source) = 0;
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        let verdict = watcher.on_discover(v);
+        if verdict == VisitAction::StopTraversal: {
+            out.complete = false;
+            return out;
+        }
+        if verdict == VisitAction::SkipChildren: {
+            continue;
+        }
+        out.order.push_back(v);
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let next = arc.head;
+            if out.depth.at(next) >= GRAPH_INFINITY: {
+                discard watcher.on_edge(e, EdgeClass::TreeEdge);
+                out.depth.at(next) = out.depth.at(v) + 1;
+                out.parent.at(next) = v;
+                queue.push_back(next);
+            } else: {
+                discard watcher.on_edge(e, EdgeClass::CrossEdge);
+            }
+        }
+        discard watcher.on_finish(v);
+    }
+    return out;
+}
+
+// Multi-source BFS: every source starts at depth zero.  Useful for "distance
+// to the nearest hospital" style queries.
+template(V: type, W: type)
+fn bfs_multi(g: &const shared AdjacencyList{V, W},
+             sources: &const shared vector{int}) -> SearchResult{V}: {
+    var out = SearchResult{V}(source: GRAPH_NIL);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.depth, g.order(), GRAPH_INFINITY);
+    var queue = vector{int}();
+    for s: &const in sources: {
+        if out.depth.at(s) >= GRAPH_INFINITY: {
+            out.depth.at(s) = 0;
+            queue.push_back(s);
+        }
+    }
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        out.order.push_back(v);
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            if out.depth.at(arc.head) >= GRAPH_INFINITY: {
+                out.depth.at(arc.head) = out.depth.at(v) + 1;
+                out.parent.at(arc.head) = v;
+                queue.push_back(arc.head);
+            }
+        }
+    }
+    return out;
+}
+
+// Group the vertices by their BFS depth.  Slot `i` of the result holds every
+// vertex at distance exactly `i` from the source.
+template(V: type, W: type)
+fn bfs_levels(g: &const shared AdjacencyList{V, W},
+              source: int) -> vector{vector{int}}: {
+    let found = bfs{V, W}(g, source);
+    var levels = vector{vector{int}}();
+    let reach = found.eccentricity();
+    var d: int = 0;
+    while d <= reach: {
+        levels.push_back(vector{int}());
+        d += 1;
+    }
+    var v: int = 0;
+    while v < g.order(): {
+        let depth = found.depth.at(v);
+        if depth < GRAPH_INFINITY: {
+            levels.at(depth).push_back(v);
+        }
+        v += 1;
+    }
+    return levels;
+}
+
+// Depth first search, expressed with an explicit stack of (vertex, cursor)
+// pairs so that `on_finish` still fires in true post-order.
+template(V: type, W: type)
+fn dfs(g: &const shared AdjacencyList{V, W}, source: int) -> SearchResult{V}: {
+    var out = SearchResult{V}(source: source);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.depth, g.order(), GRAPH_INFINITY);
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    stack.push_back(source);
+    cursor.push_back(0);
+    out.depth.at(source) = 0;
+    out.order.push_back(source);
+    while stack.empty() == false: {
+        let v = stack.back();
+        let at = cursor.back();
+        let incident: &const = g.vertices.at(v).incident;
+        if at >= incident.size(): {
+            stack.pop_back();
+            cursor.pop_back();
+            continue;
+        }
+        cursor.at(cursor.size() - 1) = at + 1;
+        let arc: &const = g.edges.at(incident.at(at));
+        if arc.alive == false: {
+            continue;
+        }
+        let next = arc.head;
+        if out.depth.at(next) >= GRAPH_INFINITY: {
+            out.depth.at(next) = out.depth.at(v) + 1;
+            out.parent.at(next) = v;
+            out.order.push_back(next);
+            stack.push_back(next);
+            cursor.push_back(0);
+        }
+    }
+    return out;
+}
+
+// Depth first search driving a visitor, with proper edge classification.
+//
+// An arc into a gray vertex is a back edge (and therefore evidence of a
+// cycle); an arc into a black vertex is forward or cross depending on the
+// discovery stamps.
+template(V: type, W: type)
+fn dfs_visit(g: &const shared AdjacencyList{V, W},
+             source: int,
+             watcher: &unique Visitor{V, W}) -> SearchResult{V}: {
+    var out = SearchResult{V}(source: source);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.depth, g.order(), GRAPH_INFINITY);
+    var color = vector{int}();
+    var entered = vector{int}();
+    fill_int_vector(color, g.order(), 0);
+    fill_int_vector(entered, g.order(), GRAPH_NIL);
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var clock: int = 0;
+    stack.push_back(source);
+    cursor.push_back(0);
+    color.at(source) = 1;
+    entered.at(source) = clock;
+    clock += 1;
+    out.depth.at(source) = 0;
+    discard watcher.on_discover(source);
+    while stack.empty() == false: {
+        let v = stack.back();
+        let at = cursor.back();
+        let incident: &const = g.vertices.at(v).incident;
+        if at >= incident.size(): {
+            color.at(v) = 2;
+            discard watcher.on_finish(v);
+            stack.pop_back();
+            cursor.pop_back();
+            continue;
+        }
+        cursor.at(cursor.size() - 1) = at + 1;
+        let e = incident.at(at);
+        let arc: &const = g.edges.at(e);
+        if arc.alive == false: {
+            continue;
+        }
+        let next = arc.head;
+        if color.at(next) == 0: {
+            discard watcher.on_edge(e, EdgeClass::TreeEdge);
+            color.at(next) = 1;
+            entered.at(next) = clock;
+            clock += 1;
+            out.parent.at(next) = v;
+            out.depth.at(next) = out.depth.at(v) + 1;
+            let verdict = watcher.on_discover(next);
+            if verdict == VisitAction::StopTraversal: {
+                out.complete = false;
+                return out;
+            }
+            if verdict == VisitAction::Continue: {
+                stack.push_back(next);
+                cursor.push_back(0);
+            }
+        } else: {
+            if color.at(next) == 1: {
+                discard watcher.on_edge(e, EdgeClass::BackEdge);
+            } else: {
+                if entered.at(v) < entered.at(next): {
+                    discard watcher.on_edge(e, EdgeClass::ForwardEdge);
+                } else: {
+                    discard watcher.on_edge(e, EdgeClass::CrossEdge);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// Run a depth first search from every undiscovered vertex, producing the
+// full DFS forest and restarting the visitor's root list as it goes.
+template(V: type, W: type)
+fn dfs_forest(g: &const shared AdjacencyList{V, W},
+              watcher: &unique Visitor{V, W}) -> vector{int}: {
+    var parent = vector{int}();
+    fill_int_vector(parent, g.order(), GRAPH_NIL);
+    var seen = vector{bool}();
+    fill_bool_vector(seen, g.order(), false);
+    watcher.prepare(g.order());
+    var v: int = 0;
+    while v < g.order(): {
+        if seen.at(v) == false: {
+            watcher.on_restart(v);
+            let tree = dfs{V, W}(g, v);
+            for u: &const in tree.order: {
+                if seen.at(u) == false: {
+                    seen.at(u) = true;
+                    parent.at(u) = tree.parent.at(u);
+                }
+            }
+        }
+        v += 1;
+    }
+    return parent;
+}
+
+// Post-order finishing times over the whole graph, the ingredient Kosaraju
+// and the DFS topological sort both need.
+template(V: type, W: type)
+fn finish_order(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    var out = vector{int}();
+    var color = vector{int}();
+    fill_int_vector(color, g.order(), 0);
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var root: int = 0;
+    while root < g.order(): {
+        if color.at(root) == 0: {
+            stack.push_back(root);
+            cursor.push_back(0);
+            color.at(root) = 1;
+            while stack.empty() == false: {
+                let v = stack.back();
+                let at = cursor.back();
+                let incident: &const = g.vertices.at(v).incident;
+                if at >= incident.size(): {
+                    color.at(v) = 2;
+                    out.push_back(v);
+                    stack.pop_back();
+                    cursor.pop_back();
+                    continue;
+                }
+                cursor.at(cursor.size() - 1) = at + 1;
+                let arc: &const = g.edges.at(incident.at(at));
+                if arc.alive && color.at(arc.head) == 0: {
+                    color.at(arc.head) = 1;
+                    stack.push_back(arc.head);
+                    cursor.push_back(0);
+                }
+            }
+        }
+        root += 1;
+    }
+    return out;
+}
+
+// Every vertex reachable from `source`, as a set.
+template(V: type, W: type)
+fn reachable_from(g: &const shared AdjacencyList{V, W}, source: int) -> set{int}: {
+    let found = bfs{V, W}(g, source);
+    var out = set{int}();
+    var v: int = 0;
+    while v < g.order(): {
+        if found.depth.at(v) < GRAPH_INFINITY: {
+            discard out.insert(v);
+        }
+        v += 1;
+    }
+    return out;
+}
+
+// Shortest *hop* count between two vertices, or `GRAPH_INFINITY`.
+template(V: type, W: type)
+fn hop_distance(g: &const shared AdjacencyList{V, W},
+                source: int,
+                target: int) -> int: {
+    let found = bfs{V, W}(g, source);
+    return found.depth.at(target);
+}
+
+// The vertex sequence of one shortest hop path, empty when unreachable.
+template(V: type, W: type)
+fn hop_path(g: &const shared AdjacencyList{V, W},
+            source: int,
+            target: int) -> vector{int}: {
+    let found = bfs{V, W}(g, source);
+    return found.path_to(target);
+}
+
+}
+
+// ==========================================================================
+// graph::connectivity
+//
+// Everything that answers a question about how the graph hangs together:
+// components, orderings, cycles, cut vertices and two-colourings.
+// ==========================================================================
+namespace connectivity: {
+
+// The labelling produced by a component decomposition.
+template(V: type)
+struct Components: {
+
+    fn count(self: &const shared) -> int: {
+        return .total;
+    }
+
+    fn same(self: &const shared, a: int, b: int) -> bool: {
+        return .label.at(a) == .label.at(b);
+    }
+
+    fn size_of(self: &const shared, component: int) -> int: {
+        var total: int = 0;
+        for l: &const in .label: {
+            if l == component: {
+                total += 1;
+            }
+        }
+        return total;
+    }
+
+    fn largest(self: &const shared) -> int: {
+        var best: int = 0;
+        var best_size: int = 0;
+        var c: int = 0;
+        while c < .total: {
+            let n = .size_of(c);
+            if n > best_size: {
+                best_size = n;
+                best = c;
+            }
+            c += 1;
+        }
+        return best;
+    }
+
+    // Regroup the flat labelling into one vector of members per component.
+    fn buckets(self: &const shared) -> vector{vector{int}}: {
+        var out = vector{vector{int}}();
+        var c: int = 0;
+        while c < .total: {
+            out.push_back(vector{int}());
+            c += 1;
+        }
+        var v: int = 0;
+        while v < .label.size(): {
+            let l = .label.at(v);
+            if l != GRAPH_NIL: {
+                out.at(l).push_back(v);
+            }
+            v += 1;
+        }
+        return out;
+    }
+
+    label: vector{int};
+    payload: V;
+    total: int = 0;
+}
+
+// Undirected connected components, found with repeated breadth first search.
+template(V: type, W: type)
+fn connected_components(g: &const shared AdjacencyList{V, W}) -> Components{V}: {
+    var out = Components{V}();
+    fill_int_vector(out.label, g.order(), GRAPH_NIL);
+    var next: int = 0;
+    var root: int = 0;
+    while root < g.order(): {
+        if out.label.at(root) == GRAPH_NIL: {
+            var queue = vector{int}();
+            queue.push_back(root);
+            out.label.at(root) = next;
+            var head: int = 0;
+            while head < queue.size(): {
+                let v = queue.at(head);
+                head += 1;
+                for e: &const in g.vertices.at(v).incident: {
+                    let arc: &const = g.edges.at(e);
+                    if arc.alive && out.label.at(arc.head) == GRAPH_NIL: {
+                        out.label.at(arc.head) = next;
+                        queue.push_back(arc.head);
+                    }
+                }
+            }
+            next += 1;
+        }
+        root += 1;
+    }
+    out.total = next;
+    return out;
+}
+
+// The same decomposition, computed with a union-find instead.  Cheaper when
+// the caller already has to merge sets for another reason.
+template(V: type, W: type)
+fn components_by_union(g: &const shared AdjacencyList{V, W}) -> Components{V}: {
+    var forest = UnionFind();
+    forest.prepare(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            discard forest.unite(arc.tail, arc.head);
+        }
+    }
+    var out = Components{V}();
+    fill_int_vector(out.label, g.order(), GRAPH_NIL);
+    var next: int = 0;
+    var v: int = 0;
+    while v < g.order(): {
+        let root = forest.find(v);
+        if out.label.at(root) == GRAPH_NIL: {
+            out.label.at(root) = next;
+            next += 1;
+        }
+        out.label.at(v) = out.label.at(root);
+        v += 1;
+    }
+    out.total = next;
+    return out;
+}
+
+template(V: type, W: type)
+fn component_count(g: &const shared AdjacencyList{V, W}) -> int: {
+    let found = connected_components{V, W}(g);
+    return found.total;
+}
+
+template(V: type, W: type)
+fn is_connected(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if g.order() == 0: {
+        return true;
+    }
+    return component_count{V, W}(g) == 1;
+}
+
+// A tree is a connected acyclic graph, i.e. connected with exactly n-1 edges.
+template(V: type, W: type)
+fn is_tree(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if is_connected{V, W}(g) == false: {
+        return false;
+    }
+    return g.size() == g.order() - 1;
+}
+
+// --- Topological ordering -------------------------------------------------
+
+// The answer to an ordering request.
+template(V: type)
+struct Ordering: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .status == OrderStatus::TotalOrder;
+    }
+
+    fn length(self: &const shared) -> int: {
+        return .sequence.size();
+    }
+
+    // Position of each vertex in the order, or NIL when it was never placed.
+    fn ranks(self: &const shared, order: int) -> vector{int}: {
+        var out = vector{int}();
+        fill_int_vector(out, order, GRAPH_NIL);
+        var i: int = 0;
+        while i < .sequence.size(): {
+            out.at(.sequence.at(i)) = i;
+            i += 1;
+        }
+        return out;
+    }
+
+    sequence: vector{int};
+    payload: V;
+    status: OrderStatus = OrderStatus::TotalOrder;
+}
+
+// Kahn's algorithm: repeatedly emit a vertex of in-degree zero.
+//
+// When the queue empties before every vertex has been emitted, the leftovers
+// all sit on cycles and the status is set accordingly.
+template(V: type, W: type)
+fn topological_sort_kahn(g: &const shared AdjacencyList{V, W}) -> Ordering{V}: {
+    var out = Ordering{V}();
+    var indegree = vector{int}();
+    fill_int_vector(indegree, g.order(), 0);
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            indegree.at(arc.head) += 1;
+        }
+    }
+    var queue = vector{int}();
+    var v: int = 0;
+    while v < g.order(): {
+        if indegree.at(v) == 0: {
+            queue.push_back(v);
+        }
+        v += 1;
+    }
+    var head: int = 0;
+    while head < queue.size(): {
+        let u = queue.at(head);
+        head += 1;
+        out.sequence.push_back(u);
+        for e: &const in g.vertices.at(u).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            indegree.at(arc.head) -= 1;
+            if indegree.at(arc.head) == 0: {
+                queue.push_back(arc.head);
+            }
+        }
+    }
+    if out.sequence.size() != g.order(): {
+        out.status = OrderStatus::CycleFound;
+    }
+    return out;
+}
+
+// The lexicographically smallest topological order, obtained by feeding
+// Kahn's frontier through a min-heap instead of a plain queue.
+template(V: type, W: type)
+fn topological_sort_smallest(g: &const shared AdjacencyList{V, W}) -> Ordering{V}: {
+    var out = Ordering{V}();
+    var indegree = vector{int}();
+    fill_int_vector(indegree, g.order(), 0);
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            indegree.at(arc.head) += 1;
+        }
+    }
+    var frontier = BinaryHeap();
+    frontier.prepare(g.order());
+    var v: int = 0;
+    while v < g.order(): {
+        if indegree.at(v) == 0: {
+            frontier.push(v, v);
+        }
+        v += 1;
+    }
+    while frontier.empty() == false: {
+        let top = frontier.pop();
+        out.sequence.push_back(top.vertex);
+        for e: &const in g.vertices.at(top.vertex).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            indegree.at(arc.head) -= 1;
+            if indegree.at(arc.head) == 0: {
+                frontier.push(arc.head, arc.head);
+            }
+        }
+    }
+    if out.sequence.size() != g.order(): {
+        out.status = OrderStatus::CycleFound;
+    }
+    return out;
+}
+
+// The depth first variant: reverse post-order finishing times.
+//
+// Cheaper than Kahn by a constant factor because no in-degree array is built,
+// but it cannot report *which* vertices form the cycle, only that one exists.
+template(V: type, W: type)
+fn topological_sort_dfs(g: &const shared AdjacencyList{V, W}) -> Ordering{V}: {
+    var out = Ordering{V}();
+    let finished = traversal::finish_order{V, W}(g);
+    var i = finished.size() - 1;
+    while i >= 0: {
+        out.sequence.push_back(finished.at(i));
+        i -= 1;
+    }
+    if has_directed_cycle{V, W}(g): {
+        out.status = OrderStatus::CycleFound;
+    }
+    return out;
+}
+
+// --- Cycles ---------------------------------------------------------------
+
+// Directed cycle detection via three-colour depth first search.
+template(V: type, W: type)
+fn has_directed_cycle(g: &const shared AdjacencyList{V, W}) -> bool: {
+    var color = vector{int}();
+    fill_int_vector(color, g.order(), 0);
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var root: int = 0;
+    while root < g.order(): {
+        if color.at(root) == 0: {
+            stack.push_back(root);
+            cursor.push_back(0);
+            color.at(root) = 1;
+            while stack.empty() == false: {
+                let v = stack.back();
+                let at = cursor.back();
+                let incident: &const = g.vertices.at(v).incident;
+                if at >= incident.size(): {
+                    color.at(v) = 2;
+                    stack.pop_back();
+                    cursor.pop_back();
+                    continue;
+                }
+                cursor.at(cursor.size() - 1) = at + 1;
+                let arc: &const = g.edges.at(incident.at(at));
+                if arc.alive == false: {
+                    continue;
+                }
+                if color.at(arc.head) == 1: {
+                    return true;
+                }
+                if color.at(arc.head) == 0: {
+                    color.at(arc.head) = 1;
+                    stack.push_back(arc.head);
+                    cursor.push_back(0);
+                }
+            }
+        }
+        root += 1;
+    }
+    return false;
+}
+
+// Undirected cycle detection.  A union-find is the shortest correct answer:
+// the first edge whose endpoints already share a root closes a cycle.
+template(V: type, W: type)
+fn has_undirected_cycle(g: &const shared AdjacencyList{V, W}) -> bool: {
+    var forest = UnionFind();
+    forest.prepare(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive && arc.tail < arc.head: {
+            if forest.unite(arc.tail, arc.head) == false: {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Recover one directed cycle as a vertex sequence, or an empty vector.
+template(V: type, W: type)
+fn find_directed_cycle(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    var color = vector{int}();
+    var parent = vector{int}();
+    fill_int_vector(color, g.order(), 0);
+    fill_int_vector(parent, g.order(), GRAPH_NIL);
+    var found = vector{int}();
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var root: int = 0;
+    while root < g.order(): {
+        if color.at(root) == 0: {
+            stack.push_back(root);
+            cursor.push_back(0);
+            color.at(root) = 1;
+            while stack.empty() == false: {
+                let v = stack.back();
+                let at = cursor.back();
+                let incident: &const = g.vertices.at(v).incident;
+                if at >= incident.size(): {
+                    color.at(v) = 2;
+                    stack.pop_back();
+                    cursor.pop_back();
+                    continue;
+                }
+                cursor.at(cursor.size() - 1) = at + 1;
+                let arc: &const = g.edges.at(incident.at(at));
+                if arc.alive == false: {
+                    continue;
+                }
+                if color.at(arc.head) == 1: {
+                    var walker = v;
+                    while walker != arc.head && walker != GRAPH_NIL: {
+                        found.push_back(walker);
+                        walker = parent.at(walker);
+                    }
+                    found.push_back(arc.head);
+                    reverse_int_vector(found);
+                    return found;
+                }
+                if color.at(arc.head) == 0: {
+                    color.at(arc.head) = 1;
+                    parent.at(arc.head) = v;
+                    stack.push_back(arc.head);
+                    cursor.push_back(0);
+                }
+            }
+        }
+        root += 1;
+    }
+    return found;
+}
+
+template(V: type, W: type)
+fn is_acyclic(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if g.is_directed(): {
+        return has_directed_cycle{V, W}(g) == false;
+    }
+    return has_undirected_cycle{V, W}(g) == false;
+}
+
+// --- Strongly connected components ----------------------------------------
+
+// Scratch state for the iterative Tarjan pass.
+//
+// Tarjan is normally written recursively; the loop below keeps the call frame
+// in `frames` and `cursor` so that a million-vertex graph does not need a
+// million native stack frames.
+struct TarjanState: {
+
+    fn prepare(self: &unique, order: int): {
+        fill_int_vector(.index, order, GRAPH_NIL);
+        fill_int_vector(.low, order, GRAPH_NIL);
+        fill_bool_vector(.on_stack, order, false);
+        .pending.clear();
+        .frames.clear();
+        .cursor.clear();
+        .clock = 0;
+        .total = 0;
+    }
+
+    fn visited(self: &const shared, v: int) -> bool: {
+        return .index.at(v) != GRAPH_NIL;
+    }
+
+    fn enter(self: &unique, v: int): {
+        .index.at(v) = .clock;
+        .low.at(v) = .clock;
+        .clock += 1;
+        .pending.push_back(v);
+        .on_stack.at(v) = true;
+    }
+
+    // Pop one component off the pending stack, down to and including `root`.
+    fn close(self: &unique, root: int, label: &unique vector{int}) -> int: {
+        var members: int = 0;
+        loop: {
+            let top = .pending.back();
+            .pending.pop_back();
+            .on_stack.at(top) = false;
+            label.at(top) = .total;
+            members += 1;
+            if top == root: {
+                break;
+            }
+        }
+        .total += 1;
+        return members;
+    }
+
+    index: vector{int};
+    low: vector{int};
+    on_stack: vector{bool};
+    pending: vector{int};
+    frames: vector{int};
+    cursor: vector{int};
+    clock: int = 0;
+    total: int = 0;
+}
+
+// Tarjan's strongly connected components, one depth first pass.
+//
+// The component labels come out in reverse topological order of the
+// condensation, which is exactly what `condensation` relies on.
+template(V: type, W: type)
+fn tarjan_scc(g: &const shared AdjacencyList{V, W}) -> Components{V}: {
+    var out = Components{V}();
+    fill_int_vector(out.label, g.order(), GRAPH_NIL);
+    var state = TarjanState();
+    state.prepare(g.order());
+    var root: int = 0;
+    while root < g.order(): {
+        if state.visited(root) == false: {
+            state.enter(root);
+            state.frames.push_back(root);
+            state.cursor.push_back(0);
+            while state.frames.empty() == false: {
+                let v = state.frames.back();
+                let at = state.cursor.back();
+                let incident: &const = g.vertices.at(v).incident;
+                if at < incident.size(): {
+                    state.cursor.at(state.cursor.size() - 1) = at + 1;
+                    let arc: &const = g.edges.at(incident.at(at));
+                    if arc.alive == false: {
+                        continue;
+                    }
+                    let next = arc.head;
+                    if state.visited(next) == false: {
+                        state.enter(next);
+                        state.frames.push_back(next);
+                        state.cursor.push_back(0);
+                    } else: {
+                        if state.on_stack.at(next): {
+                            if state.index.at(next) < state.low.at(v): {
+                                state.low.at(v) = state.index.at(next);
+                            }
+                        }
+                    }
+                } else: {
+                    state.frames.pop_back();
+                    state.cursor.pop_back();
+                    if state.low.at(v) == state.index.at(v): {
+                        discard state.close(v, out.label);
+                    }
+                    if state.frames.empty() == false: {
+                        let up = state.frames.back();
+                        if state.low.at(v) < state.low.at(up): {
+                            state.low.at(up) = state.low.at(v);
+                        }
+                    }
+                }
+            }
+        }
+        root += 1;
+    }
+    out.total = state.total;
+    return out;
+}
+
+// Kosaraju's two-pass alternative: finishing times on `g`, then components on
+// the transpose visited in decreasing finishing time.
+//
+// Slower than Tarjan by a constant factor because it builds the transpose,
+// but far easier to convince yourself of.
+template(V: type, W: type)
+fn kosaraju_scc(g: &const shared AdjacencyList{V, W}) -> Components{V}: {
+    let finished = traversal::finish_order{V, W}(g);
+    let reversed = builders::transpose{V, W}(g);
+    var out = Components{V}();
+    fill_int_vector(out.label, g.order(), GRAPH_NIL);
+    var next: int = 0;
+    var i = finished.size() - 1;
+    while i >= 0: {
+        let root = finished.at(i);
+        i -= 1;
+        if out.label.at(root) != GRAPH_NIL: {
+            continue;
+        }
+        var stack = vector{int}();
+        stack.push_back(root);
+        out.label.at(root) = next;
+        while stack.empty() == false: {
+            let v = stack.back();
+            stack.pop_back();
+            for e: &const in reversed.vertices.at(v).incident: {
+                let arc: &const = reversed.edges.at(e);
+                if arc.alive && out.label.at(arc.head) == GRAPH_NIL: {
+                    out.label.at(arc.head) = next;
+                    stack.push_back(arc.head);
+                }
+            }
+        }
+        next += 1;
+    }
+    out.total = next;
+    return out;
+}
+
+// Collapse every strongly connected component to a single vertex.  The result
+// is always a directed acyclic graph.
+template(V: type, W: type)
+fn condensation(g: &const shared AdjacencyList{V, W},
+                parts: &const shared Components{V}) -> AdjacencyList{V, W}: {
+    var out = builders::directed{V, W}(parts.total);
+    for arc: &const in g.edges: {
+        if arc.alive == false: {
+            continue;
+        }
+        let a = parts.label.at(arc.tail);
+        let b = parts.label.at(arc.head);
+        if a != b: {
+            if out.has_edge(a, b) == false: {
+                discard out.connect(a, b, arc.weight);
+            }
+        }
+    }
+    assert is_acyclic{V, W}(out);
+    return out;
+}
+
+template(V: type, W: type)
+fn is_strongly_connected(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if g.order() == 0: {
+        return true;
+    }
+    let parts = tarjan_scc{V, W}(g);
+    return parts.total == 1;
+}
+
+// --- Bridges and articulation points --------------------------------------
+
+// The output of one low-link pass over an undirected graph.
+template(V: type)
+struct CutInfo: {
+
+    fn bridge_count(self: &const shared) -> int: {
+        return .bridges.size();
+    }
+
+    fn is_articulation(self: &const shared, v: int) -> bool: {
+        return .articulation.at(v);
+    }
+
+    fn articulation_list(self: &const shared) -> vector{int}: {
+        var out = vector{int}();
+        var v: int = 0;
+        while v < .articulation.size(): {
+            if .articulation.at(v): {
+                out.push_back(v);
+            }
+            v += 1;
+        }
+        return out;
+    }
+
+    bridges: vector{int};
+    articulation: vector{bool};
+    low: vector{int};
+    discovery: vector{int};
+    payload: V;
+}
+
+// Find every bridge and every articulation point in one iterative low-link
+// depth first search.
+//
+// An arc (u, v) is a bridge when `low[v] > discovery[u]`; `u` is an
+// articulation point when it is the root with two or more children, or a
+// non-root with a child satisfying `low[v] >= discovery[u]`.
+template(V: type, W: type)
+fn find_cuts(g: &const shared AdjacencyList{V, W}) -> CutInfo{V}: {
+    var out = CutInfo{V}();
+    fill_int_vector(out.low, g.order(), GRAPH_NIL);
+    fill_int_vector(out.discovery, g.order(), GRAPH_NIL);
+    fill_bool_vector(out.articulation, g.order(), false);
+    var parent_arc = vector{int}();
+    fill_int_vector(parent_arc, g.order(), GRAPH_NIL);
+    var children = vector{int}();
+    fill_int_vector(children, g.order(), 0);
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var clock: int = 0;
+    var root: int = 0;
+    while root < g.order(): {
+        if out.discovery.at(root) != GRAPH_NIL: {
+            root += 1;
+            continue;
+        }
+        out.discovery.at(root) = clock;
+        out.low.at(root) = clock;
+        clock += 1;
+        stack.push_back(root);
+        cursor.push_back(0);
+        while stack.empty() == false: {
+            let v = stack.back();
+            let at = cursor.back();
+            let incident: &const = g.vertices.at(v).incident;
+            if at < incident.size(): {
+                cursor.at(cursor.size() - 1) = at + 1;
+                let e = incident.at(at);
+                let arc: &const = g.edges.at(e);
+                if arc.alive == false: {
+                    continue;
+                }
+                if e == parent_arc.at(v) ^ 1 && parent_arc.at(v) != GRAPH_NIL: {
+                    continue;
+                }
+                let next = arc.head;
+                if out.discovery.at(next) == GRAPH_NIL: {
+                    parent_arc.at(next) = e;
+                    children.at(v) += 1;
+                    out.discovery.at(next) = clock;
+                    out.low.at(next) = clock;
+                    clock += 1;
+                    stack.push_back(next);
+                    cursor.push_back(0);
+                } else: {
+                    if out.discovery.at(next) < out.low.at(v): {
+                        out.low.at(v) = out.discovery.at(next);
+                    }
+                }
+            } else: {
+                stack.pop_back();
+                cursor.pop_back();
+                if stack.empty() == false: {
+                    let up = stack.back();
+                    if out.low.at(v) < out.low.at(up): {
+                        out.low.at(up) = out.low.at(v);
+                    }
+                    if out.low.at(v) > out.discovery.at(up): {
+                        out.bridges.push_back(parent_arc.at(v));
+                    }
+                    if up != root && out.low.at(v) >= out.discovery.at(up): {
+                        out.articulation.at(up) = true;
+                    }
+                }
+            }
+        }
+        if children.at(root) > 1: {
+            out.articulation.at(root) = true;
+        }
+        root += 1;
+    }
+    return out;
+}
+
+template(V: type, W: type)
+fn bridges(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    let cuts = find_cuts{V, W}(g);
+    return cuts.bridges;
+}
+
+template(V: type, W: type)
+fn articulation_points(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    let cuts = find_cuts{V, W}(g);
+    return cuts.articulation_list();
+}
+
+// A graph is two-edge-connected when it is connected and has no bridge.
+template(V: type, W: type)
+fn is_two_edge_connected(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if is_connected{V, W}(g) == false: {
+        return false;
+    }
+    let cuts = find_cuts{V, W}(g);
+    return cuts.bridges.empty();
+}
+
+// --- Bipartiteness --------------------------------------------------------
+
+// Try to two-colour the graph.  On success every vertex carries a side; on
+// failure `sides` is left partially filled and the witness edge is recorded.
+template(V: type)
+struct Coloring: {
+
+    fn bipartite(self: &const shared) -> bool: {
+        return .conflict == GRAPH_NIL;
+    }
+
+    fn side_of(self: &const shared, v: int) -> Side: {
+        return .sides.at(v);
+    }
+
+    fn left_vertices(self: &const shared) -> vector{int}: {
+        var out = vector{int}();
+        var v: int = 0;
+        while v < .sides.size(): {
+            if .sides.at(v) == Side::LeftSide: {
+                out.push_back(v);
+            }
+            v += 1;
+        }
+        return out;
+    }
+
+    fn right_vertices(self: &const shared) -> vector{int}: {
+        var out = vector{int}();
+        var v: int = 0;
+        while v < .sides.size(): {
+            if .sides.at(v) == Side::RightSide: {
+                out.push_back(v);
+            }
+            v += 1;
+        }
+        return out;
+    }
+
+    sides: vector{Side};
+    payload: V;
+    conflict: int = -1;
+}
+
+// Breadth first two-colouring, one component at a time.
+template(V: type, W: type)
+fn two_coloring(g: &const shared AdjacencyList{V, W}) -> Coloring{V}: {
+    var out = Coloring{V}();
+    out.sides.clear();
+    var i: int = 0;
+    while i < g.order(): {
+        out.sides.push_back(Side::Unassigned);
+        i += 1;
+    }
+    var root: int = 0;
+    while root < g.order(): {
+        if out.sides.at(root) != Side::Unassigned: {
+            root += 1;
+            continue;
+        }
+        out.sides.at(root) = Side::LeftSide;
+        var queue = vector{int}();
+        queue.push_back(root);
+        var head: int = 0;
+        while head < queue.size(): {
+            let v = queue.at(head);
+            head += 1;
+            for e: &const in g.vertices.at(v).incident: {
+                let arc: &const = g.edges.at(e);
+                if arc.alive == false: {
+                    continue;
+                }
+                let next = arc.head;
+                if out.sides.at(next) == Side::Unassigned: {
+                    if out.sides.at(v) == Side::LeftSide: {
+                        out.sides.at(next) = Side::RightSide;
+                    } else: {
+                        out.sides.at(next) = Side::LeftSide;
+                    }
+                    queue.push_back(next);
+                } else: {
+                    if out.sides.at(next) == out.sides.at(v): {
+                        out.conflict = e;
+                        return out;
+                    }
+                }
+            }
+        }
+        root += 1;
+    }
+    return out;
+}
+
+template(V: type, W: type)
+fn is_bipartite(g: &const shared AdjacencyList{V, W}) -> bool: {
+    let colors = two_coloring{V, W}(g);
+    return colors.bipartite();
+}
+
+// An odd cycle, which exists exactly when the graph is not bipartite.
+template(V: type, W: type)
+fn odd_cycle_witness(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    let colors = two_coloring{V, W}(g);
+    var out = vector{int}();
+    if colors.bipartite(): {
+        return out;
+    }
+    let arc: &const = g.edges.at(colors.conflict);
+    let left = traversal::hop_path{V, W}(g, arc.tail, arc.head);
+    for v: &const in left: {
+        out.push_back(v);
+    }
+    return out;
+}
+
+}
+
+// ==========================================================================
+// graph::shortest_path
+//
+// Single source and all pairs shortest paths.  Every distance in this
+// namespace is a fixed point value scaled by `WEIGHT_SCALE`, and
+// `GRAPH_INFINITY` means "no path".
+// ==========================================================================
+namespace shortest_path: {
+
+// The result of a single source computation.
+template(V: type)
+struct Distances: {
+
+    fn reachable(self: &const shared, v: int) -> bool: {
+        return .dist.at(v) < GRAPH_INFINITY;
+    }
+
+    fn to(self: &const shared, v: int) -> int: {
+        return .dist.at(v);
+    }
+
+    // The vertex sequence of one optimal path, empty when unreachable.
+    fn path_to(self: &const shared, v: int) -> vector{int}: {
+        var out = vector{int}();
+        if .dist.at(v) >= GRAPH_INFINITY: {
+            return out;
+        }
+        var walker = v;
+        while walker != GRAPH_NIL: {
+            out.push_back(walker);
+            walker = .parent.at(walker);
+        }
+        reverse_int_vector(out);
+        return out;
+    }
+
+    // The arc ids along that path, which is what a router actually wants.
+    fn arcs_to(self: &const shared, v: int) -> vector{int}: {
+        var out = vector{int}();
+        var walker = v;
+        while walker != GRAPH_NIL && .parent_arc.at(walker) != GRAPH_NIL: {
+            out.push_back(.parent_arc.at(walker));
+            walker = .parent.at(walker);
+        }
+        reverse_int_vector(out);
+        return out;
+    }
+
+    fn farthest(self: &const shared) -> int: {
+        var best = GRAPH_NIL;
+        var best_dist: int = -1;
+        var v: int = 0;
+        while v < .dist.size(): {
+            let d = .dist.at(v);
+            if d < GRAPH_INFINITY && d > best_dist: {
+                best_dist = d;
+                best = v;
+            }
+            v += 1;
+        }
+        return best;
+    }
+
+    fn total_reachable(self: &const shared) -> int: {
+        var total: int = 0;
+        for d: &const in .dist: {
+            if d < GRAPH_INFINITY: {
+                total += 1;
+            }
+        }
+        return total;
+    }
+
+    dist: vector{int};
+    parent: vector{int};
+    parent_arc: vector{int};
+    payload: V;
+    source: int = -1;
+    negative_cycle: bool = false;
+    relaxations: int = 0;
+}
+
+// Dijkstra's algorithm over the tracked binary heap.
+//
+// Requires every weight to be non-negative; `bellman_ford` handles the rest.
+// The `decrease_key` form is used rather than the lazy "push duplicates"
+// form, so the heap never grows past `order` entries.
+template(V: type, W: type)
+fn dijkstra(g: &const shared AdjacencyList{V, W}, source: int) -> Distances{V}: {
+    var out = Distances{V}(source: source);
+    fill_int_vector(out.dist, g.order(), GRAPH_INFINITY);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.parent_arc, g.order(), GRAPH_NIL);
+    if g.valid_vertex(source) == false: {
+        return out;
+    }
+    var settled = vector{bool}();
+    fill_bool_vector(settled, g.order(), false);
+    var frontier = BinaryHeap();
+    frontier.prepare(g.order());
+    out.dist.at(source) = 0;
+    frontier.push(source, 0);
+    while frontier.empty() == false: {
+        let top = frontier.pop();
+        let v = top.vertex;
+        if settled.at(v): {
+            continue;
+        }
+        settled.at(v) = true;
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            assert arc.weight >= 0;
+            let candidate = add_distance(out.dist.at(v), arc.weight);
+            if candidate < out.dist.at(arc.head): {
+                out.dist.at(arc.head) = candidate;
+                out.parent.at(arc.head) = v;
+                out.parent_arc.at(arc.head) = e;
+                out.relaxations += 1;
+                discard frontier.decrease_key(arc.head, candidate);
+            }
+        }
+    }
+    prove out.dist.at(source) == 0;
+    return out;
+}
+
+// Dijkstra that stops as soon as `target` is settled.  On a large graph with
+// a nearby target this is the difference between milliseconds and seconds.
+template(V: type, W: type)
+fn dijkstra_to(g: &const shared AdjacencyList{V, W},
+               source: int,
+               target: int) -> Distances{V}: {
+    var out = Distances{V}(source: source);
+    fill_int_vector(out.dist, g.order(), GRAPH_INFINITY);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.parent_arc, g.order(), GRAPH_NIL);
+    var settled = vector{bool}();
+    fill_bool_vector(settled, g.order(), false);
+    var frontier = BinaryHeap();
+    frontier.prepare(g.order());
+    out.dist.at(source) = 0;
+    frontier.push(source, 0);
+    while frontier.empty() == false: {
+        let top = frontier.pop();
+        let v = top.vertex;
+        if v == target: {
+            return out;
+        }
+        if settled.at(v): {
+            continue;
+        }
+        settled.at(v) = true;
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let candidate = add_distance(out.dist.at(v), arc.weight);
+            if candidate < out.dist.at(arc.head): {
+                out.dist.at(arc.head) = candidate;
+                out.parent.at(arc.head) = v;
+                out.parent_arc.at(arc.head) = e;
+                discard frontier.decrease_key(arc.head, candidate);
+            }
+        }
+    }
+    return out;
+}
+
+// The cheapest path between two vertices as a vertex sequence.
+template(V: type, W: type)
+fn shortest_route(g: &const shared AdjacencyList{V, W},
+                  source: int,
+                  target: int) -> vector{int}: {
+    let found = dijkstra_to{V, W}(g, source, target);
+    return found.path_to(target);
+}
+
+// Bellman-Ford: `order - 1` full relaxation rounds, then one more to detect a
+// negative cycle.  Handles negative weights, unlike Dijkstra.
+template(V: type, W: type)
+fn bellman_ford(g: &const shared AdjacencyList{V, W}, source: int) -> Distances{V}: {
+    var out = Distances{V}(source: source);
+    fill_int_vector(out.dist, g.order(), GRAPH_INFINITY);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.parent_arc, g.order(), GRAPH_NIL);
+    if g.valid_vertex(source) == false: {
+        return out;
+    }
+    out.dist.at(source) = 0;
+    var rounds: int = 0;
+    let limit = min(g.order() - 1, GRAPH_RELAX_LIMIT);
+    while rounds < limit: {
+        var changed = false;
+        var e: int = 0;
+        while e < g.edges.size(): {
+            let arc: &const = g.edges.at(e);
+            if arc.alive && out.dist.at(arc.tail) < GRAPH_INFINITY: {
+                let candidate = add_distance(out.dist.at(arc.tail), arc.weight);
+                if candidate < out.dist.at(arc.head): {
+                    out.dist.at(arc.head) = candidate;
+                    out.parent.at(arc.head) = arc.tail;
+                    out.parent_arc.at(arc.head) = e;
+                    out.relaxations += 1;
+                    changed = true;
+                }
+            }
+            e += 1;
+        }
+        if changed == false: {
+            return out;
+        }
+        rounds += 1;
+    }
+    var e: int = 0;
+    while e < g.edges.size(): {
+        let arc: &const = g.edges.at(e);
+        if arc.alive && out.dist.at(arc.tail) < GRAPH_INFINITY: {
+            if add_distance(out.dist.at(arc.tail), arc.weight) < out.dist.at(arc.head): {
+                out.negative_cycle = true;
+                return out;
+            }
+        }
+        e += 1;
+    }
+    return out;
+}
+
+template(V: type, W: type)
+fn has_negative_cycle(g: &const shared AdjacencyList{V, W}) -> bool: {
+    var v: int = 0;
+    while v < g.order(): {
+        let found = bellman_ford{V, W}(g, v);
+        if found.negative_cycle: {
+            return true;
+        }
+        v += 1;
+    }
+    return false;
+}
+
+// SPFA, the queue-driven refinement of Bellman-Ford.  Same worst case, much
+// better behaviour on the sparse graphs this library is aimed at.
+template(V: type, W: type)
+fn spfa(g: &const shared AdjacencyList{V, W}, source: int) -> Distances{V}: {
+    var out = Distances{V}(source: source);
+    fill_int_vector(out.dist, g.order(), GRAPH_INFINITY);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.parent_arc, g.order(), GRAPH_NIL);
+    var queued = vector{bool}();
+    var pushes = vector{int}();
+    fill_bool_vector(queued, g.order(), false);
+    fill_int_vector(pushes, g.order(), 0);
+    var queue = vector{int}();
+    out.dist.at(source) = 0;
+    queue.push_back(source);
+    queued.at(source) = true;
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        queued.at(v) = false;
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let candidate = add_distance(out.dist.at(v), arc.weight);
+            if candidate < out.dist.at(arc.head): {
+                out.dist.at(arc.head) = candidate;
+                out.parent.at(arc.head) = v;
+                out.parent_arc.at(arc.head) = e;
+                if queued.at(arc.head) == false: {
+                    queued.at(arc.head) = true;
+                    pushes.at(arc.head) += 1;
+                    if pushes.at(arc.head) > g.order(): {
+                        out.negative_cycle = true;
+                        return out;
+                    }
+                    queue.push_back(arc.head);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// Shortest paths on a directed acyclic graph, in linear time: relax the arcs
+// in topological order and every distance is final on first sight.
+template(V: type, W: type)
+fn dag_shortest_path(g: &const shared AdjacencyList{V, W},
+                     source: int) -> Distances{V}: {
+    var out = Distances{V}(source: source);
+    fill_int_vector(out.dist, g.order(), GRAPH_INFINITY);
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    fill_int_vector(out.parent_arc, g.order(), GRAPH_NIL);
+    let order = connectivity::topological_sort_kahn{V, W}(g);
+    if order.valid() == false: {
+        return out;
+    }
+    out.dist.at(source) = 0;
+    for v: &const in order.sequence: {
+        if out.dist.at(v) >= GRAPH_INFINITY: {
+            continue;
+        }
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let candidate = add_distance(out.dist.at(v), arc.weight);
+            if candidate < out.dist.at(arc.head): {
+                out.dist.at(arc.head) = candidate;
+                out.parent.at(arc.head) = v;
+                out.parent_arc.at(arc.head) = e;
+            }
+        }
+    }
+    return out;
+}
+
+// The longest path in a DAG, obtained by negating every weight.  Undefined
+// for graphs with cycles, which is why the topological check comes first.
+template(V: type, W: type)
+fn dag_longest_path(g: &const shared AdjacencyList{V, W}, source: int) -> int: {
+    var flipped = builders::to_directed{V, W}(g);
+    for arc: &unique in flipped.edges: {
+        arc.weight = -arc.weight;
+    }
+    let found = dag_shortest_path{V, W}(flipped, source);
+    var best: int = 0;
+    for d: &const in found.dist: {
+        if d < GRAPH_INFINITY && -d > best: {
+            best = -d;
+        }
+    }
+    return best;
+}
+
+// --- All pairs ------------------------------------------------------------
+
+// The dense all-pairs result: a distance matrix plus the successor matrix
+// needed to reconstruct any of the paths.
+template(V: type, W: type, N: int)
+struct AllPairs: {
+
+    fn distance(self: &const shared, from: int, to: int) -> int: {
+        return .dist.at(from * N + to);
+    }
+
+    fn linked(self: &const shared, from: int, to: int) -> bool: {
+        return .dist.at(from * N + to) < GRAPH_INFINITY;
+    }
+
+    // Walk the successor matrix from `from` to `to`.
+    fn route(self: &const shared, from: int, to: int) -> vector{int}: {
+        var out = vector{int}();
+        if .dist.at(from * N + to) >= GRAPH_INFINITY: {
+            return out;
+        }
+        var walker = from;
+        out.push_back(walker);
+        var guard: int = 0;
+        while walker != to && guard < N: {
+            walker = .next.at(walker * N + to);
+            if walker == GRAPH_NIL: {
+                out.clear();
+                return out;
+            }
+            out.push_back(walker);
+            guard += 1;
+        }
+        return out;
+    }
+
+    // The largest finite distance, i.e. the diameter of the graph.
+    fn diameter(self: &const shared) -> int: {
+        var best: int = 0;
+        var i: int = 0;
+        while i < N * N: {
+            let d = .dist.at(i);
+            if d < GRAPH_INFINITY && d > best: {
+                best = d;
+            }
+            i += 1;
+        }
+        return best;
+    }
+
+    // The vertex whose greatest distance to anyone else is smallest.
+    fn center(self: &const shared) -> int: {
+        var best = GRAPH_NIL;
+        var best_ecc = GRAPH_INFINITY;
+        var r: int = 0;
+        while r < N: {
+            var ecc: int = 0;
+            var c: int = 0;
+            while c < N: {
+                let d = .dist.at(r * N + c);
+                if d < GRAPH_INFINITY && d > ecc: {
+                    ecc = d;
+                }
+                c += 1;
+            }
+            if ecc < best_ecc: {
+                best_ecc = ecc;
+                best = r;
+            }
+            r += 1;
+        }
+        return best;
+    }
+
+    dist: vector{int};
+    next: vector{int};
+    payload: V;
+    slack: W;
+    negative_cycle: bool = false;
+}
+
+// Floyd-Warshall over a dense matrix: three nested loops, `k` outermost.
+//
+// After the pass, `dist[i][i] < 0` for some `i` exactly when the graph holds
+// a negative cycle reachable from `i`.
+template(V: type, W: type, N: int)
+fn floyd_warshall(m: &const shared AdjacencyMatrix{V, W, N}) -> AllPairs{V, W, N}: {
+    var out = AllPairs{V, W, N}();
+    out.dist.clear();
+    out.next.clear();
+    var r: int = 0;
+    while r < N: {
+        var c: int = 0;
+        while c < N: {
+            let value = m.get(r, c);
+            out.dist.push_back(value);
+            if value < GRAPH_INFINITY && r != c: {
+                out.next.push_back(c);
+            } else: {
+                out.next.push_back(GRAPH_NIL);
+            }
+            c += 1;
+        }
+        r += 1;
+    }
+    var k: int = 0;
+    while k < N: {
+        var i: int = 0;
+        while i < N: {
+            let left = out.dist.at(i * N + k);
+            if left >= GRAPH_INFINITY: {
+                i += 1;
+                continue;
+            }
+            var j: int = 0;
+            while j < N: {
+                let right = out.dist.at(k * N + j);
+                if right < GRAPH_INFINITY: {
+                    let candidate = left + right;
+                    if candidate < out.dist.at(i * N + j): {
+                        out.dist.at(i * N + j) = candidate;
+                        out.next.at(i * N + j) = out.next.at(i * N + k);
+                    }
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        k += 1;
+    }
+    var d: int = 0;
+    while d < N: {
+        if out.dist.at(d * N + d) < 0: {
+            out.negative_cycle = true;
+        }
+        d += 1;
+    }
+    return out;
+}
+
+// The reachability relation, computed with the boolean specialisation of the
+// same triple loop (Warshall's original formulation).
+template(V: type, W: type, N: int)
+fn transitive_closure(m: &const shared AdjacencyMatrix{V, W, N}) -> vector{bool}: {
+    var reach = vector{bool}();
+    var r: int = 0;
+    while r < N: {
+        var c: int = 0;
+        while c < N: {
+            reach.push_back(r == c || m.linked(r, c));
+            c += 1;
+        }
+        r += 1;
+    }
+    var k: int = 0;
+    while k < N: {
+        var i: int = 0;
+        while i < N: {
+            if reach.at(i * N + k): {
+                var j: int = 0;
+                while j < N: {
+                    if reach.at(k * N + j): {
+                        reach.at(i * N + j) = true;
+                    }
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        k += 1;
+    }
+    return reach;
+}
+
+// Johnson's algorithm: reweight with a Bellman-Ford potential so that every
+// weight becomes non-negative, then run Dijkstra from every vertex.
+//
+// Faster than Floyd-Warshall on sparse graphs and, unlike plain Dijkstra,
+// correct in the presence of negative (but not negatively cyclic) weights.
+template(V: type, W: type)
+fn johnson(g: &const shared AdjacencyList{V, W}) -> vector{vector{int}}: {
+    var rows = vector{vector{int}}();
+    var augmented = builders::to_directed{V, W}(g);
+    let extra = augmented.add_vertex(V());
+    var v: int = 0;
+    while v < g.order(): {
+        discard augmented.connect(extra, v, 0);
+        v += 1;
+    }
+    let potential = bellman_ford{V, W}(augmented, extra);
+    if potential.negative_cycle: {
+        return rows;
+    }
+    var reweighted = builders::to_directed{V, W}(g);
+    for arc: &unique in reweighted.edges: {
+        arc.weight = arc.weight + potential.dist.at(arc.tail) - potential.dist.at(arc.head);
+    }
+    var source: int = 0;
+    while source < g.order(): {
+        let found = dijkstra{V, W}(reweighted, source);
+        var row = vector{int}();
+        var target: int = 0;
+        while target < g.order(): {
+            let d = found.dist.at(target);
+            if d >= GRAPH_INFINITY: {
+                row.push_back(GRAPH_INFINITY);
+            } else: {
+                row.push_back(d - potential.dist.at(source) + potential.dist.at(target));
+            }
+            target += 1;
+        }
+        rows.push_back(move(row));
+        source += 1;
+    }
+    return rows;
+}
+
+// The bottleneck (widest path) variant: maximise the smallest weight along a
+// path rather than minimising their sum.
+template(V: type, W: type)
+fn widest_path(g: &const shared AdjacencyList{V, W}, source: int) -> vector{int}: {
+    var width = vector{int}();
+    fill_int_vector(width, g.order(), 0);
+    width.at(source) = GRAPH_INFINITY;
+    var frontier = BinaryHeap();
+    frontier.prepare(g.order());
+    frontier.push(source, 0);
+    var settled = vector{bool}();
+    fill_bool_vector(settled, g.order(), false);
+    while frontier.empty() == false: {
+        let top = frontier.pop();
+        let v = top.vertex;
+        if settled.at(v): {
+            continue;
+        }
+        settled.at(v) = true;
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            var candidate = width.at(v);
+            if arc.weight < candidate: {
+                candidate = arc.weight;
+            }
+            if candidate > width.at(arc.head): {
+                width.at(arc.head) = candidate;
+                discard frontier.decrease_key(arc.head, -candidate);
+            }
+        }
+    }
+    return width;
+}
+
+}
+
+// ==========================================================================
+// graph::spanning
+//
+// Minimum spanning trees and forests.  Both classic algorithms are here
+// because they suit different densities: Prim with a heap is O(E log V) and
+// likes dense graphs, Kruskal with a union-find likes sparse ones and gives
+// the edges back already sorted by weight.
+// ==========================================================================
+namespace spanning: {
+
+// A spanning tree or forest, described by the arcs it selected.
+template(V: type)
+struct SpanningTree: {
+
+    fn edge_count(self: &const shared) -> int: {
+        return .arcs.size();
+    }
+
+    fn spans(self: &const shared, order: int) -> bool: {
+        return .arcs.size() == order - 1;
+    }
+
+    fn average_weight(self: &const shared) -> int: {
+        if .arcs.empty(): {
+            return 0;
+        }
+        return .weight / .arcs.size();
+    }
+
+    // The selected arcs, grouped by the component they belong to.
+    fn contains_arc(self: &const shared, e: int) -> bool: {
+        for a: &const in .arcs: {
+            if a == e: {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    arcs: vector{int};
+    parent: vector{int};
+    payload: V;
+    weight: int = 0;
+    components: int = 1;
+}
+
+// Prim's algorithm from a single root, growing the tree one cheapest crossing
+// edge at a time.
+//
+// Only reaches the component containing `root`; `prim_forest` below loops it
+// over every component.
+template(V: type, W: type)
+fn prim(g: &const shared AdjacencyList{V, W}, root: int) -> SpanningTree{V}: {
+    var out = SpanningTree{V}();
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    var best = vector{int}();
+    var best_arc = vector{int}();
+    var inside = vector{bool}();
+    fill_int_vector(best, g.order(), GRAPH_INFINITY);
+    fill_int_vector(best_arc, g.order(), GRAPH_NIL);
+    fill_bool_vector(inside, g.order(), false);
+    var frontier = BinaryHeap();
+    frontier.prepare(g.order());
+    best.at(root) = 0;
+    frontier.push(root, 0);
+    while frontier.empty() == false: {
+        let top = frontier.pop();
+        let v = top.vertex;
+        if inside.at(v): {
+            continue;
+        }
+        inside.at(v) = true;
+        if best_arc.at(v) != GRAPH_NIL: {
+            out.arcs.push_back(best_arc.at(v));
+            out.weight += best.at(v);
+        }
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            let next = arc.head;
+            if inside.at(next) == false && arc.weight < best.at(next): {
+                best.at(next) = arc.weight;
+                best_arc.at(next) = e;
+                out.parent.at(next) = v;
+                discard frontier.decrease_key(next, arc.weight);
+            }
+        }
+    }
+    return out;
+}
+
+// Prim restarted on every component, giving a minimum spanning forest.
+template(V: type, W: type)
+fn prim_forest(g: &const shared AdjacencyList{V, W}) -> SpanningTree{V}: {
+    var out = SpanningTree{V}();
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    var seen = vector{bool}();
+    fill_bool_vector(seen, g.order(), false);
+    var trees: int = 0;
+    var root: int = 0;
+    while root < g.order(): {
+        if seen.at(root) == false: {
+            let piece = prim{V, W}(g, root);
+            for e: &const in piece.arcs: {
+                out.arcs.push_back(e);
+                let arc: &const = g.edges.at(e);
+                out.weight += arc.weight;
+                seen.at(arc.tail) = true;
+                seen.at(arc.head) = true;
+            }
+            seen.at(root) = true;
+            trees += 1;
+        }
+        root += 1;
+    }
+    out.components = trees;
+    return out;
+}
+
+// Sort the logical edges of `g` by weight and hand back their ids.
+//
+// A plain insertion sort: the corpus deliberately avoids pulling in a sorting
+// library, and the edge counts these benchmarks use stay small.
+template(V: type, W: type)
+fn edges_by_weight(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    var ids = vector{int}();
+    var e: int = 0;
+    while e < g.edges.size(): {
+        let arc: &const = g.edges.at(e);
+        if arc.alive: {
+            if g.is_directed() || arc.tail <= arc.head: {
+                ids.push_back(e);
+            }
+        }
+        e += 1;
+    }
+    var i: int = 1;
+    while i < ids.size(): {
+        let current = ids.at(i);
+        let key = g.edges.at(current).weight;
+        var j = i - 1;
+        while j >= 0 && g.edges.at(ids.at(j)).weight > key: {
+            ids.at(j + 1) = ids.at(j);
+            j -= 1;
+        }
+        ids.at(j + 1) = current;
+        i += 1;
+    }
+    return ids;
+}
+
+// Kruskal's algorithm: take the cheapest edge that joins two distinct
+// components, until only one component remains.
+template(V: type, W: type)
+fn kruskal(g: &const shared AdjacencyList{V, W}) -> SpanningTree{V}: {
+    var out = SpanningTree{V}();
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    var forest = UnionFind();
+    forest.prepare(g.order());
+    let sorted = edges_by_weight{V, W}(g);
+    for e: &const in sorted: {
+        let arc: &const = g.edges.at(e);
+        if forest.unite(arc.tail, arc.head): {
+            out.arcs.push_back(e);
+            out.weight += arc.weight;
+            out.parent.at(arc.head) = arc.tail;
+        }
+        if forest.single_component(): {
+            break;
+        }
+    }
+    out.components = forest.components;
+    return out;
+}
+
+// The total weight of a minimum spanning tree, without materialising it.
+template(V: type, W: type)
+fn mst_weight(g: &const shared AdjacencyList{V, W}) -> int: {
+    let tree = kruskal{V, W}(g);
+    return tree.weight;
+}
+
+// A maximum spanning tree: Kruskal driven from the heaviest edge down.
+template(V: type, W: type)
+fn maximum_spanning_tree(g: &const shared AdjacencyList{V, W}) -> SpanningTree{V}: {
+    var out = SpanningTree{V}();
+    fill_int_vector(out.parent, g.order(), GRAPH_NIL);
+    var forest = UnionFind();
+    forest.prepare(g.order());
+    var sorted = edges_by_weight{V, W}(g);
+    reverse_int_vector(sorted);
+    for e: &const in sorted: {
+        let arc: &const = g.edges.at(e);
+        if forest.unite(arc.tail, arc.head): {
+            out.arcs.push_back(e);
+            out.weight += arc.weight;
+        }
+    }
+    out.components = forest.components;
+    return out;
+}
+
+// Verify the cut property on the produced tree: no non-tree edge may be
+// cheaper than the heaviest edge on the tree path joining its endpoints.
+template(V: type, W: type)
+fn verify_minimality(g: &const shared AdjacencyList{V, W},
+                     tree: &const shared SpanningTree{V}) -> bool: {
+    var e: int = 0;
+    while e < g.edges.size(): {
+        let arc: &const = g.edges.at(e);
+        if arc.alive && tree.contains_arc(e) == false: {
+            var heaviest: int = 0;
+            for t: &const in tree.arcs: {
+                let chosen: &const = g.edges.at(t);
+                if chosen.weight > heaviest: {
+                    heaviest = chosen.weight;
+                }
+            }
+            if arc.weight < heaviest - g.order(): {
+                return false;
+            }
+        }
+        e += 1;
+    }
+    return true;
+}
+
+// The second best spanning tree, found by forcing each tree edge out in turn.
+template(V: type, W: type)
+fn second_best_tree(g: &const shared AdjacencyList{V, W}) -> int: {
+    let base = kruskal{V, W}(g);
+    var best = GRAPH_INFINITY;
+    for banned: &const in base.arcs: {
+        var trimmed = builders::to_directed{V, W}(g);
+        trimmed.direction = g.direction;
+        discard trimmed.disconnect(banned);
+        let candidate = kruskal{V, W}(trimmed);
+        if candidate.components == 1 && candidate.weight < best: {
+            if candidate.weight > base.weight: {
+                best = candidate.weight;
+            }
+        }
+    }
+    return best;
+}
+
+}
+
+// ==========================================================================
+// graph::matching
+//
+// Bipartite matching and the covers that follow from it.  Everything here
+// assumes `connectivity::two_coloring` has already established which side of
+// the bipartition each vertex belongs to.
+// ==========================================================================
+namespace matching: {
+
+// A partial matching, stored as an involution on the vertex ids.
+template(V: type)
+struct Pairing: {
+
+    fn size(self: &const shared) -> int: {
+        var total: int = 0;
+        var v: int = 0;
+        while v < .partner.size(): {
+            if .partner.at(v) != GRAPH_NIL && .partner.at(v) > v: {
+                total += 1;
+            }
+            v += 1;
+        }
+        return total;
+    }
+
+    fn covered(self: &const shared, v: int) -> bool: {
+        return .partner.at(v) != GRAPH_NIL;
+    }
+
+    fn partner_of(self: &const shared, v: int) -> int: {
+        return .partner.at(v);
+    }
+
+    fn perfect(self: &const shared) -> bool: {
+        for p: &const in .partner: {
+            if p == GRAPH_NIL: {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // The matched pairs, as a flat list of (left, right) ids.
+    fn pairs(self: &const shared) -> vector{pair{int, int}}: {
+        var out = vector{pair{int, int}}();
+        var v: int = 0;
+        while v < .partner.size(): {
+            let p = .partner.at(v);
+            if p != GRAPH_NIL && p > v: {
+                out.push_back(pair{int, int}(first: v, second: p));
+            }
+            v += 1;
+        }
+        return out;
+    }
+
+    partner: vector{int};
+    payload: V;
+    augmentations: int = 0;
+}
+
+// One Kuhn augmenting search from `v`, iterative rather than recursive.
+//
+// Returns true when an augmenting path was found and applied, which raises
+// the size of the matching by exactly one.
+template(V: type, W: type)
+fn augment_from(g: &const shared AdjacencyList{V, W},
+                v: int,
+                state: &unique Pairing{V},
+                seen: &unique vector{bool}) -> bool: {
+    var stack = vector{int}();
+    var cursor = vector{int}();
+    var trail = vector{int}();
+    stack.push_back(v);
+    cursor.push_back(0);
+    while stack.empty() == false: {
+        let u = stack.back();
+        let at = cursor.back();
+        let incident: &const = g.vertices.at(u).incident;
+        if at >= incident.size(): {
+            stack.pop_back();
+            cursor.pop_back();
+            if trail.empty() == false: {
+                trail.pop_back();
+            }
+            continue;
+        }
+        cursor.at(cursor.size() - 1) = at + 1;
+        let arc: &const = g.edges.at(incident.at(at));
+        if arc.alive == false: {
+            continue;
+        }
+        let target = arc.head;
+        if seen.at(target): {
+            continue;
+        }
+        seen.at(target) = true;
+        let held = state.partner.at(target);
+        if held == GRAPH_NIL: {
+            state.partner.at(target) = u;
+            state.partner.at(u) = target;
+            state.augmentations += 1;
+            return true;
+        }
+        trail.push_back(target);
+        stack.push_back(held);
+        cursor.push_back(0);
+    }
+    return false;
+}
+
+// Maximum bipartite matching by Kuhn's algorithm: one augmenting search per
+// left vertex, each of which either grows the matching or proves the vertex
+// cannot be matched at this stage.
+template(V: type, W: type)
+fn maximum_bipartite_matching(g: &const shared AdjacencyList{V, W}) -> Pairing{V}: {
+    var out = Pairing{V}();
+    fill_int_vector(out.partner, g.order(), GRAPH_NIL);
+    let colors = connectivity::two_coloring{V, W}(g);
+    if colors.bipartite() == false: {
+        return out;
+    }
+    let left = colors.left_vertices();
+    for v: &const in left: {
+        if out.partner.at(v) == GRAPH_NIL: {
+            var seen = vector{bool}();
+            fill_bool_vector(seen, g.order(), false);
+            discard augment_from{V, W}(g, v, out, seen);
+        }
+    }
+    assert out.size() >= 0;
+    return out;
+}
+
+// A greedy matching, used to warm-start Kuhn.  Cheap and typically gets
+// within a factor of two of the optimum before any augmentation runs.
+template(V: type, W: type)
+fn greedy_matching(g: &const shared AdjacencyList{V, W}) -> Pairing{V}: {
+    var out = Pairing{V}();
+    fill_int_vector(out.partner, g.order(), GRAPH_NIL);
+    var v: int = 0;
+    while v < g.order(): {
+        if out.partner.at(v) == GRAPH_NIL: {
+            for e: &const in g.vertices.at(v).incident: {
+                let arc: &const = g.edges.at(e);
+                if arc.alive && out.partner.at(arc.head) == GRAPH_NIL: {
+                    if arc.head != v: {
+                        out.partner.at(v) = arc.head;
+                        out.partner.at(arc.head) = v;
+                        break;
+                    }
+                }
+            }
+        }
+        v += 1;
+    }
+    return out;
+}
+
+// Kuhn again, but starting from a greedy matching.  Same answer, fewer
+// augmenting searches.
+template(V: type, W: type)
+fn matching_with_warm_start(g: &const shared AdjacencyList{V, W}) -> Pairing{V}: {
+    var out = greedy_matching{V, W}(g);
+    let colors = connectivity::two_coloring{V, W}(g);
+    if colors.bipartite() == false: {
+        return out;
+    }
+    for v: &const in colors.left_vertices(): {
+        if out.partner.at(v) == GRAPH_NIL: {
+            var seen = vector{bool}();
+            fill_bool_vector(seen, g.order(), false);
+            discard augment_from{V, W}(g, v, out, seen);
+        }
+    }
+    return out;
+}
+
+// Koenig's theorem: in a bipartite graph the minimum vertex cover has exactly
+// the size of the maximum matching, and can be read off an alternating BFS
+// from the unmatched left vertices.
+template(V: type, W: type)
+fn minimum_vertex_cover(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    let paired = maximum_bipartite_matching{V, W}(g);
+    let colors = connectivity::two_coloring{V, W}(g);
+    var visited = vector{bool}();
+    fill_bool_vector(visited, g.order(), false);
+    var queue = vector{int}();
+    for v: &const in colors.left_vertices(): {
+        if paired.partner.at(v) == GRAPH_NIL: {
+            visited.at(v) = true;
+            queue.push_back(v);
+        }
+    }
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive == false: {
+                continue;
+            }
+            if visited.at(arc.head) == false && paired.partner.at(v) != arc.head: {
+                visited.at(arc.head) = true;
+                let held = paired.partner.at(arc.head);
+                if held != GRAPH_NIL && visited.at(held) == false: {
+                    visited.at(held) = true;
+                    queue.push_back(held);
+                }
+            }
+        }
+    }
+    var cover = vector{int}();
+    for v: &const in colors.left_vertices(): {
+        if visited.at(v) == false: {
+            cover.push_back(v);
+        }
+    }
+    for v: &const in colors.right_vertices(): {
+        if visited.at(v): {
+            cover.push_back(v);
+        }
+    }
+    return cover;
+}
+
+// The complement of the cover is a maximum independent set.
+template(V: type, W: type)
+fn maximum_independent_set(g: &const shared AdjacencyList{V, W}) -> vector{int}: {
+    let cover = minimum_vertex_cover{V, W}(g);
+    var inside = vector{bool}();
+    fill_bool_vector(inside, g.order(), true);
+    for v: &const in cover: {
+        inside.at(v) = false;
+    }
+    var out = vector{int}();
+    var v: int = 0;
+    while v < g.order(): {
+        if inside.at(v): {
+            out.push_back(v);
+        }
+        v += 1;
+    }
+    return out;
+}
+
+// Hall's condition, checked directly: every subset of the left side must have
+// at least as many distinct neighbours as it has members.  Only the singleton
+// and full subsets are tested here, which is a necessary condition rather
+// than a sufficient one.
+template(V: type, W: type)
+fn hall_condition_holds(g: &const shared AdjacencyList{V, W}) -> bool: {
+    let colors = connectivity::two_coloring{V, W}(g);
+    let left = colors.left_vertices();
+    var neighbours = set{int}();
+    for v: &const in left: {
+        if g.degree(v) == 0: {
+            return false;
+        }
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive: {
+                discard neighbours.insert(arc.head);
+            }
+        }
+    }
+    return neighbours.size() >= left.size();
+}
+
+}
+
+// ==========================================================================
+// graph::flow
+//
+// Residual networks and maximum flow.  The network keeps arcs in twin pairs
+// exactly like the undirected adjacency list does, so pushing flow along an
+// arc and returning capacity to its reverse is a single exclusive-or.
+// ==========================================================================
+namespace flow: {
+
+// One residual arc.
+struct FlowArc: {
+
+    fn residual(self: &const shared) -> int: {
+        return .capacity - .flow;
+    }
+
+    fn saturated(self: &const shared) -> bool: {
+        return .capacity - .flow <= 0;
+    }
+
+    fn twin_id(self: &const shared) -> int: {
+        return .id ^ 1;
+    }
+
+    tail: int = 0;
+    head: int = 0;
+    capacity: int = 0;
+    flow: int = 0;
+    id: int = 0;
+}
+
+// A flow network: vertices with incidence lists over a flat arc arena.
+//
+// Every call to `add_arc` appends two arcs, the forward one with the given
+// capacity and the reverse one with zero, so `twin_id` always works.
+struct FlowNetwork: {
+
+    fn order(self: &const shared) -> int: {
+        return .incident.size();
+    }
+
+    fn arc_count(self: &const shared) -> int: {
+        return .arcs.size();
+    }
+
+    fn prepare(self: &unique, order: int): {
+        .incident.clear();
+        .arcs.clear();
+        var i: int = 0;
+        while i < order: {
+            .incident.push_back(vector{int}());
+            i += 1;
+        }
+        .total_flow = 0;
+    }
+
+    fn add_arc(self: &unique, tail: int, head: int, capacity: int) -> int: {
+        let forward = .arcs.size();
+        .arcs.push_back(FlowArc(tail: tail,
+                                head: head,
+                                capacity: capacity,
+                                id: forward));
+        .incident.at(tail).push_back(forward);
+        let backward = .arcs.size();
+        .arcs.push_back(FlowArc(tail: head,
+                                head: tail,
+                                capacity: 0,
+                                id: backward));
+        .incident.at(head).push_back(backward);
+        return forward;
+    }
+
+    // An arc that can carry flow in both directions at full capacity.
+    fn add_bidirectional(self: &unique, a: int, b: int, capacity: int) -> int: {
+        let first = .add_arc(a, b, capacity);
+        .arcs.at(first ^ 1).capacity = capacity;
+        return first;
+    }
+
+    fn push(self: &unique, arc: int, amount: int): {
+        .arcs.at(arc).flow += amount;
+        .arcs.at(arc ^ 1).flow -= amount;
+    }
+
+    fn residual_of(self: &const shared, arc: int) -> int: {
+        return .arcs.at(arc).capacity - .arcs.at(arc).flow;
+    }
+
+    fn reset_flow(self: &unique): {
+        for a: &unique in .arcs: {
+            a.flow = 0;
+        }
+        .total_flow = 0;
+    }
+
+    // Total flow leaving `source`, which must equal `total_flow` once a
+    // maximum flow computation has converged.
+    fn outflow(self: &const shared, source: int) -> int: {
+        var total: int = 0;
+        for e: &const in .incident.at(source): {
+            let a: &const = .arcs.at(e);
+            if a.flow > 0: {
+                total += a.flow;
+            }
+        }
+        return total;
+    }
+
+    incident: vector{vector{int}};
+    arcs: vector{FlowArc};
+    total_flow: int = 0;
+}
+
+// Build a flow network from a weighted directed graph, weights as capacities.
+template(V: type, W: type)
+fn network_from(g: &const shared AdjacencyList{V, W}) -> FlowNetwork: {
+    var net = FlowNetwork();
+    net.prepare(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            if g.is_directed(): {
+                discard net.add_arc(arc.tail, arc.head, arc.weight);
+            } else: {
+                if arc.tail < arc.head: {
+                    discard net.add_bidirectional(arc.tail, arc.head, arc.weight);
+                }
+            }
+        }
+    }
+    return net;
+}
+
+// One breadth first search over the residual network, recording the arc used
+// to reach each vertex.  Returns the bottleneck of the found path, or zero.
+fn find_augmenting_path(net: &unique FlowNetwork,
+                        source: int,
+                        sink: int,
+                        used: &unique vector{int}) -> int: {
+    fill_int_vector(used, net.order(), GRAPH_NIL);
+    var queue = vector{int}();
+    queue.push_back(source);
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        if v == sink: {
+            break;
+        }
+        for e: &const in net.incident.at(v): {
+            let a: &const = net.arcs.at(e);
+            if a.capacity - a.flow <= 0: {
+                continue;
+            }
+            if a.head != source && used.at(a.head) == GRAPH_NIL: {
+                used.at(a.head) = e;
+                queue.push_back(a.head);
+            }
+        }
+    }
+    if used.at(sink) == GRAPH_NIL: {
+        return 0;
+    }
+    var bottleneck = GRAPH_INFINITY;
+    var walker = sink;
+    while walker != source: {
+        let e = used.at(walker);
+        let slack = net.residual_of(e);
+        if slack < bottleneck: {
+            bottleneck = slack;
+        }
+        walker = net.arcs.at(e).tail;
+    }
+    return bottleneck;
+}
+
+// Edmonds-Karp: repeatedly augment along a shortest residual path.
+//
+// Choosing the *shortest* path is what bounds the number of augmentations by
+// O(V * E) independently of the capacities.
+fn max_flow(net: &unique FlowNetwork, source: int, sink: int) -> int: {
+    net.reset_flow();
+    var used = vector{int}();
+    var total: int = 0;
+    var rounds: int = 0;
+    while rounds < GRAPH_AUGMENT_LIMIT: {
+        let bottleneck = find_augmenting_path(net, source, sink, used);
+        if bottleneck <= 0: {
+            break;
+        }
+        var walker = sink;
+        while walker != source: {
+            let e = used.at(walker);
+            net.push(e, bottleneck);
+            walker = net.arcs.at(e).tail;
+        }
+        total += bottleneck;
+        rounds += 1;
+    }
+    net.total_flow = total;
+    assert total >= 0;
+    return total;
+}
+
+// Depth first blocking flow, the inner loop of Dinic's algorithm.  Kept
+// iterative for the same stack-depth reason as everything else here.
+fn blocking_flow(net: &unique FlowNetwork,
+                 level: &const shared vector{int},
+                 source: int,
+                 sink: int) -> int: {
+    var pushed: int = 0;
+    var cursor = vector{int}();
+    fill_int_vector(cursor, net.order(), 0);
+    loop: {
+        var trail = vector{int}();
+        var v = source;
+        var blocked = false;
+        while v != sink && blocked == false: {
+            var advanced = false;
+            while cursor.at(v) < net.incident.at(v).size() && advanced == false: {
+                let e = net.incident.at(v).at(cursor.at(v));
+                let a: &const = net.arcs.at(e);
+                if a.capacity - a.flow > 0 && level.at(a.head) == level.at(v) + 1: {
+                    trail.push_back(e);
+                    v = a.head;
+                    advanced = true;
+                } else: {
+                    cursor.at(v) += 1;
+                }
+            }
+            if advanced == false: {
+                if trail.empty(): {
+                    blocked = true;
+                } else: {
+                    let last = trail.back();
+                    trail.pop_back();
+                    v = net.arcs.at(last).tail;
+                    cursor.at(v) += 1;
+                }
+            }
+        }
+        if blocked: {
+            break;
+        }
+        var bottleneck = GRAPH_INFINITY;
+        for e: &const in trail: {
+            let slack = net.residual_of(e);
+            if slack < bottleneck: {
+                bottleneck = slack;
+            }
+        }
+        for e: &const in trail: {
+            net.push(e, bottleneck);
+        }
+        pushed += bottleneck;
+    }
+    return pushed;
+}
+
+// The level graph used by Dinic: BFS distances in the residual network.
+fn level_graph(net: &const shared FlowNetwork, source: int) -> vector{int}: {
+    var level = vector{int}();
+    fill_int_vector(level, net.order(), GRAPH_NIL);
+    var queue = vector{int}();
+    level.at(source) = 0;
+    queue.push_back(source);
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        for e: &const in net.incident.at(v): {
+            let a: &const = net.arcs.at(e);
+            if a.capacity - a.flow > 0 && level.at(a.head) == GRAPH_NIL: {
+                level.at(a.head) = level.at(v) + 1;
+                queue.push_back(a.head);
+            }
+        }
+    }
+    return level;
+}
+
+// Dinic's algorithm: alternate level graph construction with blocking flow.
+fn dinic_max_flow(net: &unique FlowNetwork, source: int, sink: int) -> int: {
+    net.reset_flow();
+    var total: int = 0;
+    var phases: int = 0;
+    while phases < net.order() + 1: {
+        let level = level_graph(net, source);
+        if level.at(sink) == GRAPH_NIL: {
+            break;
+        }
+        let pushed = blocking_flow(net, level, source, sink);
+        if pushed <= 0: {
+            break;
+        }
+        total += pushed;
+        phases += 1;
+    }
+    net.total_flow = total;
+    return total;
+}
+
+// The source side of a minimum cut: every vertex still reachable from the
+// source in the residual network once the flow is maximal.
+fn min_cut_side(net: &const shared FlowNetwork, source: int) -> vector{bool}: {
+    var side = vector{bool}();
+    fill_bool_vector(side, net.order(), false);
+    var queue = vector{int}();
+    side.at(source) = true;
+    queue.push_back(source);
+    var head: int = 0;
+    while head < queue.size(): {
+        let v = queue.at(head);
+        head += 1;
+        for e: &const in net.incident.at(v): {
+            let a: &const = net.arcs.at(e);
+            if a.capacity - a.flow > 0 && side.at(a.head) == false: {
+                side.at(a.head) = true;
+                queue.push_back(a.head);
+            }
+        }
+    }
+    return side;
+}
+
+// The arcs crossing the minimum cut, whose capacities sum to the max flow.
+fn min_cut_arcs(net: &const shared FlowNetwork, source: int) -> vector{int}: {
+    let side = min_cut_side(net, source);
+    var out = vector{int}();
+    var e: int = 0;
+    while e < net.arcs.size(): {
+        let a: &const = net.arcs.at(e);
+        if a.capacity > 0 && side.at(a.tail) && side.at(a.head) == false: {
+            out.push_back(e);
+        }
+        e += 1;
+    }
+    return out;
+}
+
+// Max-flow min-cut, restated as an assertion: the capacity crossing the cut
+// equals the flow value.
+fn cut_capacity(net: &const shared FlowNetwork, source: int) -> int: {
+    let crossing = min_cut_arcs(net, source);
+    var total: int = 0;
+    for e: &const in crossing: {
+        total += net.arcs.at(e).capacity;
+    }
+    return total;
+}
+
+// Maximum bipartite matching expressed as a unit-capacity flow problem.
+// Slower than Kuhn in practice but a useful cross-check in the tests.
+template(V: type, W: type)
+fn matching_by_flow(g: &const shared AdjacencyList{V, W}) -> int: {
+    let colors = connectivity::two_coloring{V, W}(g);
+    if colors.bipartite() == false: {
+        return 0;
+    }
+    var net = FlowNetwork();
+    let super_source = g.order();
+    let super_sink = g.order() + 1;
+    net.prepare(g.order() + 2);
+    for v: &const in colors.left_vertices(): {
+        discard net.add_arc(super_source, v, 1);
+        for e: &const in g.vertices.at(v).incident: {
+            let arc: &const = g.edges.at(e);
+            if arc.alive: {
+                discard net.add_arc(v, arc.head, 1);
+            }
+        }
+    }
+    for v: &const in colors.right_vertices(): {
+        discard net.add_arc(v, super_sink, 1);
+    }
+    return max_flow(net, super_source, super_sink);
+}
+
+// Edge connectivity between two vertices: the number of arc-disjoint paths,
+// which by Menger's theorem is the unit-capacity max flow.
+template(V: type, W: type)
+fn edge_connectivity(g: &const shared AdjacencyList{V, W},
+                     source: int,
+                     sink: int) -> int: {
+    var net = FlowNetwork();
+    net.prepare(g.order());
+    for arc: &const in g.edges: {
+        if arc.alive: {
+            discard net.add_arc(arc.tail, arc.head, 1);
+        }
+    }
+    return max_flow(net, source, sink);
+}
+
+// The global minimum cut, obtained by fixing vertex zero and running a max
+// flow to every other vertex in turn.
+template(V: type, W: type)
+fn global_min_cut(g: &const shared AdjacencyList{V, W}) -> int: {
+    if g.order() < 2: {
+        return 0;
+    }
+    var best = GRAPH_INFINITY;
+    var sink: int = 1;
+    while sink < g.order(): {
+        var net = network_from{V, W}(g);
+        let value = max_flow(net, 0, sink);
+        if value < best: {
+            best = value;
+        }
+        sink += 1;
+    }
+    return best;
+}
+
+}
+
+// ==========================================================================
+// Top level convenience wrappers
+//
+// The entry points a caller is most likely to reach for, hoisted out of the
+// nested namespaces so that the common cases read as one-liners.
+// ==========================================================================
+
+// Shortest hop path between two vertices of an unweighted graph.
+template(V: type, W: type)
+fn shortest_hops(g: &const shared AdjacencyList{V, W},
+                 source: int,
+                 target: int) -> int: {
+    return traversal::hop_distance{V, W}(g, source, target);
+}
+
+// Cheapest route in a weighted graph, as a vertex sequence.
+template(V: type, W: type)
+fn cheapest_route(g: &const shared AdjacencyList{V, W},
+                  source: int,
+                  target: int) -> vector{int}: {
+    return shortest_path::shortest_route{V, W}(g, source, target);
+}
+
+// True when every vertex can reach every other vertex.
+template(V: type, W: type)
+fn fully_connected(g: &const shared AdjacencyList{V, W}) -> bool: {
+    if g.is_directed(): {
+        return connectivity::is_strongly_connected{V, W}(g);
+    }
+    return connectivity::is_connected{V, W}(g);
+}
+
+// A one-line health check used by the test suite: run every major algorithm
+// and confirm none of them contradicts another.
+template(V: type, W: type)
+fn cross_check(g: &const shared AdjacencyList{V, W}) -> bool: {
+    let by_bfs = connectivity::connected_components{V, W}(g);
+    let by_union = connectivity::components_by_union{V, W}(g);
+    if by_bfs.total != by_union.total: {
+        return false;
+    }
+    let tarjan = connectivity::tarjan_scc{V, W}(g);
+    let kosaraju = connectivity::kosaraju_scc{V, W}(g);
+    if tarjan.total != kosaraju.total: {
+        return false;
+    }
+    let prim_tree = spanning::prim{V, W}(g, 0);
+    let kruskal_tree = spanning::kruskal{V, W}(g);
+    if by_bfs.total == 1 && prim_tree.weight != kruskal_tree.weight: {
+        return false;
+    }
+    return true;
+}
+
+// A compact textual summary of everything this library can say about a graph.
+template(V: type, W: type)
+fn report(g: &const shared AdjacencyList{V, W}) -> string: {
+    var out = string();
+    out.append(builders::describe{V, W}(g));
+    out.append(" components=");
+    out.append(to_string(connectivity::component_count{V, W}(g)));
+    out.append(" acyclic=");
+    if connectivity::is_acyclic{V, W}(g): {
+        out.append("yes");
+    } else: {
+        out.append("no");
+    }
+    out.append(" bipartite=");
+    if connectivity::is_bipartite{V, W}(g): {
+        out.append("yes");
+    } else: {
+        out.append("no");
+    }
+    out.append(" mst=");
+    out.append(to_string(spanning::mst_weight{V, W}(g)));
+    return out;
+}
+
+// --- Demonstration --------------------------------------------------------
+
+// Exercise the traversal namespace on a small grid.
+fn demo_traversal(): {
+    let grid = builders::grid_graph{int, int}(4, 4);
+    let found = traversal::bfs{int, int}(grid, 0);
+    println(to_string(found.reached_count()));
+    println(to_string(found.eccentricity()));
+    var watcher = traversal::Visitor{int, int}();
+    watcher.stop_after = 8;
+    let limited = traversal::bfs_visit{int, int}(grid, 0, watcher);
+    assert limited.complete == false;
+    let levels = traversal::bfs_levels{int, int}(grid, 0);
+    for level: &const in levels: {
+        println(to_string(level.size()));
+    }
+}
+
+// Build a small weighted DAG and run every ordering and distance routine.
+fn demo_shortest_paths(): {
+    var dag = builders::directed{int, int}(6);
+    discard dag.connect(0, 1, 2000);
+    discard dag.connect(0, 2, 4000);
+    discard dag.connect(1, 2, 1000);
+    discard dag.connect(1, 3, 7000);
+    discard dag.connect(2, 4, 3000);
+    discard dag.connect(3, 5, 1000);
+    discard dag.connect(4, 3, 2000);
+    discard dag.connect(4, 5, 5000);
+
+    let kahn = connectivity::topological_sort_kahn{int, int}(dag);
+    assert kahn.valid();
+    let by_dfs = connectivity::topological_sort_dfs{int, int}(dag);
+    assert by_dfs.length() == kahn.length();
+
+    let quick = shortest_path::dijkstra{int, int}(dag, 0);
+    let careful = shortest_path::bellman_ford{int, int}(dag, 0);
+    var v: int = 0;
+    while v < dag.order(): {
+        assert quick.dist.at(v) == careful.dist.at(v);
+        v += 1;
+    }
+    prove careful.negative_cycle == false;
+
+    let linear = shortest_path::dag_shortest_path{int, int}(dag, 0);
+    println(to_string(linear.to(5)));
+    let route = shortest_path::shortest_route{int, int}(dag, 0, 5);
+    println(to_string(route.size()));
+
+    let dense = builders::densify{int, int, 6}(dag);
+    let pairs = shortest_path::floyd_warshall{int, int, 6}(dense);
+    println(to_string(pairs.diameter()));
+    println(to_string(pairs.center()));
+    discard shortest_path::transitive_closure{int, int, 6}(dense);
+}
+
+// Spanning trees over an undirected weighted graph.
+fn demo_spanning(): {
+    var net = builders::undirected{int, int}(6);
+    discard net.connect(0, 1, 4000);
+    discard net.connect(0, 2, 3000);
+    discard net.connect(1, 2, 1000);
+    discard net.connect(1, 3, 2000);
+    discard net.connect(2, 3, 4000);
+    discard net.connect(3, 4, 2000);
+    discard net.connect(4, 5, 6000);
+
+    let grown = spanning::prim{int, int}(net, 0);
+    let sorted = spanning::kruskal{int, int}(net);
+    assert grown.weight == sorted.weight;
+    assert sorted.spans(net.order());
+    println(to_string(sorted.average_weight()));
+    let heaviest = spanning::maximum_spanning_tree{int, int}(net);
+    assert heaviest.weight >= sorted.weight;
+    assert spanning::verify_minimality{int, int}(net, sorted);
+}
+
+// Components, cuts and colourings.
+fn demo_connectivity(): {
+    var web = builders::directed{int, int}(8);
+    discard web.connect_unweighted(0, 1);
+    discard web.connect_unweighted(1, 2);
+    discard web.connect_unweighted(2, 0);
+    discard web.connect_unweighted(2, 3);
+    discard web.connect_unweighted(3, 4);
+    discard web.connect_unweighted(4, 5);
+    discard web.connect_unweighted(5, 3);
+    discard web.connect_unweighted(6, 7);
+
+    let strong = connectivity::tarjan_scc{int, int}(web);
+    let also_strong = connectivity::kosaraju_scc{int, int}(web);
+    assert strong.total == also_strong.total;
+    let collapsed = connectivity::condensation{int, int}(web, strong);
+    assert connectivity::is_acyclic{int, int}(collapsed);
+    for bucket: &const in strong.buckets(): {
+        println(to_string(bucket.size()));
+    }
+
+    let ring = builders::cycle_graph{int, int}(7);
+    assert connectivity::has_undirected_cycle{int, int}(ring);
+    assert connectivity::is_bipartite{int, int}(ring) == false;
+    let even_ring = builders::cycle_graph{int, int}(8);
+    assert connectivity::is_bipartite{int, int}(even_ring);
+
+    let chain = builders::path_graph{int, int}(6);
+    let cuts = connectivity::find_cuts{int, int}(chain);
+    println(to_string(cuts.bridge_count()));
+    println(to_string(cuts.articulation_list().size()));
+}
+
+// Matching and flow on the same bipartite instance.
+fn demo_matching_and_flow(): {
+    let jobs = builders::complete_bipartite{int, int}(3, 4);
+    let paired = matching::maximum_bipartite_matching{int, int}(jobs);
+    let warm = matching::matching_with_warm_start{int, int}(jobs);
+    assert paired.size() == warm.size();
+    let by_flow = flow::matching_by_flow{int, int}(jobs);
+    assert by_flow == paired.size();
+    for entry: &const in paired.pairs(): {
+        println(to_string(entry.first));
+        println(to_string(entry.second));
+    }
+    let cover = matching::minimum_vertex_cover{int, int}(jobs);
+    assert cover.size() == paired.size();
+    discard matching::maximum_independent_set{int, int}(jobs);
+    assert matching::hall_condition_holds{int, int}(jobs);
+
+    var pipes = FlowNetwork();
+    pipes.prepare(6);
+    discard pipes.add_arc(0, 1, 16000);
+    discard pipes.add_arc(0, 2, 13000);
+    discard pipes.add_arc(1, 3, 12000);
+    discard pipes.add_arc(2, 1, 4000);
+    discard pipes.add_arc(2, 4, 14000);
+    discard pipes.add_arc(3, 2, 9000);
+    discard pipes.add_arc(3, 5, 20000);
+    discard pipes.add_arc(4, 3, 7000);
+    discard pipes.add_arc(4, 5, 4000);
+
+    let value = flow::max_flow(pipes, 0, 5);
+    assert value == pipes.outflow(0);
+    assert value == flow::cut_capacity(pipes, 0);
+    let fast = flow::dinic_max_flow(pipes, 0, 5);
+    assert fast == value;
+    let crossing = flow::min_cut_arcs(pipes, 0);
+    println(to_string(crossing.size()));
+}
+
+// The whole library, in the order the chapters of a textbook would use it.
+fn demo_graph_algorithms(): {
+    demo_traversal();
+    demo_shortest_paths();
+    demo_spanning();
+    demo_connectivity();
+    demo_matching_and_flow();
+
+    let sample = builders::complete_graph{int, int}(5);
+    println(report{int, int}(sample));
+    assert cross_check{int, int}(sample);
+    assert fully_connected{int, int}(sample);
+    println(to_string(cheapest_route{int, int}(sample, 0, 4).size()));
+    println(to_string(shortest_hops{int, int}(sample, 0, 4)));
+}
+
+}

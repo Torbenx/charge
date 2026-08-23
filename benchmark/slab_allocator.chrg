@@ -1,0 +1,1067 @@
+// Slab and free-list memory allocator.
+//
+// The allocator is organised in three layers:
+//
+//   * an Arena owns a run of pages and hands out raw, page-aligned extents,
+//   * a Slab carves one extent into equally sized blocks tracked by a bitmap,
+//   * a FreeList recycles individual blocks and coalesces adjacent neighbours.
+//
+// Every hot path is written against explicit reference categories so that the
+// borrow checker can see exactly which layer owns which byte range at any
+// point in time.
+namespace memory: {
+
+// --- Tuning constants ----------------------------------------------------
+
+static PAGE_SIZE: int = 4096;
+static PAGE_SHIFT: int = 12;
+static PAGE_MASK: int = 4095;              // 0xFFF
+static WORD_BITS: int = 64;
+static WORD_SHIFT: int = 6;
+static WORD_MASK: int = 63;                // 0x3F
+static ALL_ONES: int = -1;                 // every bit set
+
+static MIN_ALIGNMENT: int = 8;
+static MAX_ALIGNMENT: int = 4096;
+static MIN_BLOCK_SIZE: int = 16;
+static MAX_SMALL_SIZE: int = 2048;
+
+static SLAB_TARGET_BLOCKS: int = 64;
+static SLAB_MIN_BLOCKS: int = 4;
+static SLAB_MAX_BLOCKS: int = 1024;
+
+static ARENA_INITIAL_PAGES: int = 64;
+static ARENA_GROWTH_NUMERATOR: int = 3;
+static ARENA_GROWTH_DENOMINATOR: int = 2;
+
+// Fixed-point scale for every ratio in this file. A value of 1000 means
+// "1.000", a value of 875 means "0.875". No floating point is used anywhere.
+static PERMILLE: int = 1000;
+
+// A slab is evicted once its occupancy drops below this permille value and
+// the owning cache already holds more than EVICT_KEEP_SLABS partial slabs.
+static EVICT_THRESHOLD_PERMILLE: int = 125;
+static EVICT_KEEP_SLABS: int = 2;
+
+// Poison patterns written over freed payloads when debug fill is enabled.
+static POISON_FREED: int = 221;            // 0xDD
+static POISON_FRESH: int = 205;            // 0xCD
+static GUARD_MAGIC: int = 3735928559;      // 0xDEADBEEF
+
+static INVALID_INDEX: int = -1;
+
+// --- Enumerations --------------------------------------------------------
+
+enum BlockState: {
+    Free;
+    Allocated;
+    Split;
+    Quarantined = 3;
+}
+
+enum SlabState: {
+    Fresh;
+    Partial;
+    Full;
+    Retired = 3;
+}
+
+enum ClassKind: {
+    Tiny;
+    Small;
+    Medium;
+    Large = 3;
+}
+
+enum ValidationCode: {
+    Ok;
+    BitmapCountMismatch;
+    OverlappingBlocks;
+    UnalignedBase;
+    DanglingFreeNode;
+    GuardCorrupted;
+    OccupancyOutOfRange;
+    ClassSizeMismatch = 7;
+}
+
+enum RefillOutcome: {
+    Reused;
+    GrewArena;
+    Failed = 2;
+}
+
+// --- Alignment helpers ---------------------------------------------------
+
+// Round `value` up to the next multiple of `alignment`. The alignment is
+// assumed to be a power of two; callers go through `normalize_alignment`.
+fn align_up(value: int, alignment: int) -> int: {
+    assert alignment > 0;
+    let mask = alignment - 1;
+    return (value + mask) & ~mask;
+}
+
+fn align_down(value: int, alignment: int) -> int: {
+    assert alignment > 0;
+    let mask = alignment - 1;
+    return value & ~mask;
+}
+
+fn is_aligned(value: int, alignment: int) -> bool: {
+    let mask = alignment - 1;
+    return (value & mask) == 0;
+}
+
+fn alignment_mask(alignment: int) => alignment - 1;
+
+fn is_power_of_two(value: int) -> bool: {
+    if value <= 0: {
+        return false;
+    }
+    return (value & (value - 1)) == 0;
+}
+
+// Smallest power of two that is greater than or equal to `value`.
+fn next_power_of_two(value: int) -> int: {
+    var result: int = 1;
+    while result < value: {
+        result <<= 1;
+    }
+    return result;
+}
+
+fn normalize_alignment(requested: int) -> int: {
+    if requested < MIN_ALIGNMENT: {
+        return MIN_ALIGNMENT;
+    }
+    if requested > MAX_ALIGNMENT: {
+        return MAX_ALIGNMENT;
+    }
+    if is_power_of_two(requested): {
+        return requested;
+    }
+    return next_power_of_two(requested);
+}
+
+fn page_of(offset: int) => offset >> PAGE_SHIFT;
+
+fn page_base(offset: int) -> int: {
+    return offset & ~PAGE_MASK;
+}
+
+fn pages_for(bytes: int) -> int: {
+    return (bytes + PAGE_MASK) >> PAGE_SHIFT;
+}
+
+// Fixed-point ratio helper: returns `part / whole` scaled by PERMILLE.
+fn permille_of(part: int, whole: int) -> int: {
+    if whole <= 0: {
+        return 0;
+    }
+    return (part * PERMILLE) / whole;
+}
+
+fn word_index(bit: int) => bit >> WORD_SHIFT;
+
+fn bit_within_word(bit: int) => bit & WORD_MASK;
+
+// Population count over a single machine word, using the classic shift and
+// mask reduction rather than an intrinsic.
+fn popcount_word(word: int) -> int: {
+    var value = word;
+    var count: int = 0;
+    while value != 0: {
+        value &= value - 1;
+        count += 1;
+    }
+    return count;
+}
+
+fn trailing_zeros(word: int) -> int: {
+    if word == 0: {
+        return WORD_BITS;
+    }
+    var value = word;
+    var count: int = 0;
+    while (value & 1) == 0: {
+        value >>= 1;
+        count += 1;
+    }
+    return count;
+}
+
+// --- Size classes --------------------------------------------------------
+
+// One row of the size-class table. `stride` is the distance between two
+// consecutive block starts and already accounts for the header guard, while
+// `payload` is what the caller actually gets to use.
+struct SizeClass: {
+
+    fn stride_of(self: &const shared) -> int: {
+        return .stride;
+    }
+
+    fn payload_of(self: &const shared) -> int: {
+        return .payload;
+    }
+
+    fn waste_per_block(self: &const shared) -> int: {
+        return .stride - .payload;
+    }
+
+    fn waste_permille(self: &const shared) -> int: {
+        return permille_of(.waste_per_block(), .stride);
+    }
+
+    fn slab_bytes(self: &const shared) -> int: {
+        return align_up(.stride * .blocks_per_slab, PAGE_SIZE);
+    }
+
+    fn slab_pages(self: &const shared) -> int: {
+        return pages_for(.stride * .blocks_per_slab);
+    }
+
+    fn accepts(self: &const shared, bytes: int, alignment: int) -> bool: {
+        if bytes > .payload: {
+            return false;
+        }
+        return alignment <= .alignment;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = to_string(.index);
+        text.append(": ");
+        text.append(to_string(.payload));
+        text.append(" bytes, stride ");
+        text.append(to_string(.stride));
+        return text;
+    }
+
+    index: int = 0;
+    payload: int = 0;
+    stride: int = 0;
+    alignment: int = 8;
+    blocks_per_slab: int = 0;
+    kind: ClassKind = ClassKind::Tiny;
+}
+
+// The size-class table is immutable once built; every lookup therefore takes
+// `&const shared` and returns a `&const` borrow tied to the table itself.
+struct SizeClassTable: {
+
+    fn count(self: &const shared) -> int: {
+        return .classes.size();
+    }
+
+    fn largest_payload(self: &const shared) -> int: {
+        if .classes.empty(): {
+            return 0;
+        }
+        return .classes.back().payload;
+    }
+
+    // Borrow a row out of the table. The returned reference lives exactly as
+    // long as the table it came from.
+    fn row(self: &const shared, index: int) -> &const[self] SizeClass: {
+        assert index >= 0;
+        assert index < .classes.size();
+        return .classes[index];
+    }
+
+    // Linear scan over a table that is deliberately kept short; the branchy
+    // version below beats a binary search for the tiny classes.
+    fn class_for(self: &const shared, bytes: int, alignment: int) -> int: {
+        if bytes <= 0: {
+            return INVALID_INDEX;
+        }
+        if bytes > MAX_SMALL_SIZE: {
+            return INVALID_INDEX;
+        }
+        var index: int = 0;
+        while index < .classes.size(): {
+            let candidate: &const shared = .classes[index];
+            if candidate.accepts(bytes, alignment): {
+                return index;
+            }
+            index += 1;
+        }
+        return INVALID_INDEX;
+    }
+
+    // Pick the row directly, returning a borrow rather than an index. Callers
+    // that already hold the table alive prefer this form.
+    fn best_fit(self: &const shared, bytes: int) -> &const[self] SizeClass: {
+        var index = .class_for(bytes, MIN_ALIGNMENT);
+        if index == INVALID_INDEX: {
+            index = .classes.size() - 1;
+        }
+        return .classes[index];
+    }
+
+    fn build(self: &unique): {
+        .classes.clear();
+        var payload = MIN_BLOCK_SIZE;
+        var index: int = 0;
+        while payload <= MAX_SMALL_SIZE: {
+            var row = SizeClass();
+            row.index = index;
+            row.payload = payload;
+            row.stride = align_up(payload + 8, MIN_ALIGNMENT);
+            row.alignment = .alignment_for(payload);
+            row.blocks_per_slab = .blocks_for(row.stride);
+            row.kind = .kind_for(payload);
+            .classes.push_back(row);
+            index += 1;
+            payload = .next_payload(payload);
+        }
+        prove .classes.size() == index;
+    }
+
+    fn next_payload(self: &const shared, payload: int) -> int: {
+        if payload < 128: {
+            return payload + 16;
+        }
+        if payload < 512: {
+            return payload + 64;
+        }
+        return payload * 2;
+    }
+
+    fn alignment_for(self: &const shared, payload: int) -> int: {
+        if payload <= 32: {
+            return 8;
+        }
+        if payload <= 256: {
+            return 16;
+        }
+        return 64;
+    }
+
+    fn kind_for(self: &const shared, payload: int) -> ClassKind: {
+        if payload <= 64: {
+            return ClassKind::Tiny;
+        }
+        if payload <= 512: {
+            return ClassKind::Small;
+        }
+        if payload <= MAX_SMALL_SIZE: {
+            return ClassKind::Medium;
+        }
+        return ClassKind::Large;
+    }
+
+    fn blocks_for(self: &const shared, stride: int) -> int: {
+        var blocks = SLAB_TARGET_BLOCKS;
+        if stride * blocks < PAGE_SIZE: {
+            blocks = PAGE_SIZE / stride;
+        }
+        if blocks < SLAB_MIN_BLOCKS: {
+            blocks = SLAB_MIN_BLOCKS;
+        }
+        if blocks > SLAB_MAX_BLOCKS: {
+            blocks = SLAB_MAX_BLOCKS;
+        }
+        return blocks;
+    }
+
+    fn total_stride(self: &const shared) -> int: {
+        var sum: int = 0;
+        for row: &const in .classes: {
+            sum += row.stride;
+        }
+        return sum;
+    }
+
+    classes: vector{SizeClass};
+}
+
+// --- Free bitmap ---------------------------------------------------------
+
+// Dense bit vector: a set bit means "block in use". The inverse convention
+// would make `find_first_free` cheaper but makes the occupancy statistics
+// read backwards, and those are consulted far more often in practice.
+struct Bitmap: {
+
+    fn bit_count(self: &const shared) -> int: {
+        return .bits;
+    }
+
+    fn word_count(self: &const shared) -> int: {
+        return .words.size();
+    }
+
+    fn reset(self: &unique, bits: int): {
+        .bits = bits;
+        .words.clear();
+        .words.resize(word_index(bits + WORD_MASK));
+        for word: &unique in .words: {
+            *word = 0;
+        }
+        .set_bits = 0;
+        prove .set_bits == 0;
+    }
+
+    fn test(self: &const shared, bit: int) -> bool: {
+        assert bit >= 0;
+        assert bit < .bits;
+        let word = .words[word_index(bit)];
+        return ((word >> bit_within_word(bit)) & 1) == 1;
+    }
+
+    fn mark(self: &unique, bit: int): {
+        assert bit < .bits;
+        let slot: &unique = .words[word_index(bit)];
+        let before = *slot;
+        *slot = before | (1 << bit_within_word(bit));
+        if *slot != before: {
+            .set_bits += 1;
+        }
+        prove .set_bits <= .bits;
+    }
+
+    fn unmark(self: &unique, bit: int): {
+        assert bit < .bits;
+        let slot: &unique = .words[word_index(bit)];
+        let before = *slot;
+        *slot = before & ~(1 << bit_within_word(bit));
+        if *slot != before: {
+            .set_bits -= 1;
+        }
+        prove .set_bits >= 0;
+    }
+
+    // Returns the index of the first zero bit, or INVALID_INDEX when the
+    // bitmap is saturated.
+    fn find_first_free(self: &const shared) -> int: {
+        var index: int = 0;
+        while index < .words.size(): {
+            let word = .words[index];
+            if word != ALL_ONES: {
+                let bit = trailing_zeros(~word);
+                let absolute = (index << WORD_SHIFT) + bit;
+                if absolute < .bits: {
+                    return absolute;
+                }
+            }
+            index += 1;
+        }
+        return INVALID_INDEX;
+    }
+
+    // Scan for a run of `length` consecutive free bits. Used by the medium
+    // classes, where a single request can span several blocks.
+    fn find_free_run(self: &const shared, length: int) -> int: {
+        var start: int = 0;
+        var run: int = 0;
+        var index: int = 0;
+        while index < .bits: {
+            if .test(index): {
+                run = 0;
+                start = index + 1;
+            } else: {
+                run += 1;
+                if run >= length: {
+                    return start;
+                }
+            }
+            index += 1;
+        }
+        return INVALID_INDEX;
+    }
+
+    fn mark_run(self: &unique, start: int, length: int): {
+        var index = start;
+        while index < start + length: {
+            .mark(index);
+            index += 1;
+        }
+    }
+
+    fn unmark_run(self: &unique, start: int, length: int): {
+        var index = start;
+        while index < start + length: {
+            .unmark(index);
+            index += 1;
+        }
+    }
+
+    fn popcount(self: &const shared) -> int: {
+        var total: int = 0;
+        for word: &const in .words: {
+            total += popcount_word(*word);
+        }
+        return total;
+    }
+
+    fn free_count(self: &const shared) -> int: {
+        return .bits - .set_bits;
+    }
+
+    fn saturated(self: &const shared) -> bool: {
+        return .set_bits >= .bits;
+    }
+
+    fn drained(self: &const shared) -> bool: {
+        return .set_bits == 0;
+    }
+
+    // Cheap self-check used by the debug validation pass: the cached counter
+    // and the real population count must agree.
+    fn counter_is_consistent(self: &const shared) -> bool: {
+        return .popcount() == .set_bits;
+    }
+
+    fn clone_into(self: &const shared, target: &unique Bitmap): {
+        target.reset(.bits);
+        var index: int = 0;
+        while index < .bits: {
+            if .test(index): {
+                target.mark(index);
+            }
+            index += 1;
+        }
+    }
+
+    words: vector{int};
+    bits: int = 0;
+    set_bits: int = 0;
+}
+
+// --- Blocks and the recycled free list -----------------------------------
+
+// A single tracked extent inside an arena. Blocks form an implicit doubly
+// linked list ordered by offset so that `coalesce` can merge neighbours in
+// constant time.
+struct Block: {
+
+    fn end_offset(self: &const shared) -> int: {
+        return .offset + .size;
+    }
+
+    fn contains(self: &const shared, address: int) -> bool: {
+        if address < .offset: {
+            return false;
+        }
+        return address < .end_offset();
+    }
+
+    fn adjacent_to(self: &const shared, other: &const shared Block) -> bool: {
+        if .end_offset() == other.offset: {
+            return true;
+        }
+        return other.end_offset() == .offset;
+    }
+
+    fn is_free(self: &const shared) -> bool: {
+        return .state == BlockState::Free;
+    }
+
+    fn guard_is_intact(self: &const shared) -> bool: {
+        return .guard == GUARD_MAGIC;
+    }
+
+    fn stamp_guard(self: &unique): {
+        .guard = GUARD_MAGIC;
+    }
+
+    fn absorb(self: &unique, other: &unique const Block): {
+        assert .adjacent_to(other);
+        if other.offset < .offset: {
+            .offset = other.offset;
+        }
+        .size += other.size;
+        .next = other.next;
+    }
+
+    offset: int = 0;
+    size: int = 0;
+    state: BlockState = BlockState::Free;
+    class_index: int = INVALID_INDEX;
+    slab_index: int = INVALID_INDEX;
+    prev: int = INVALID_INDEX;
+    next: int = INVALID_INDEX;
+    guard: int = 0;
+}
+
+// Recycled blocks live here between a `deallocate` and the next matching
+// `allocate`. The list is kept sorted by offset, which is what makes the
+// adjacent-neighbour coalescing pass a single linear sweep.
+struct FreeList: {
+
+    fn size(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .nodes.empty();
+    }
+
+    fn total_bytes(self: &const shared) -> int: {
+        var sum: int = 0;
+        for node: &const in .nodes: {
+            sum += node.size;
+        }
+        return sum;
+    }
+
+    fn largest_block(self: &const shared) -> int: {
+        var best: int = 0;
+        for node: &const in .nodes: {
+            if node.size > best: {
+                best = node.size;
+            }
+        }
+        return best;
+    }
+
+    // Borrow the node at `index`. The borrow keeps the whole list pinned
+    // because the backing vector may reallocate on the next push.
+    fn node_at(self: &shared, index: int) -> &shared[self] Block: {
+        assert index >= 0;
+        assert index < .nodes.size();
+        return .nodes[index];
+    }
+
+    // Mutable variant: exclusive access to one node, still tied to the list.
+    fn node_mut(self: &unique, index: int) -> &unique[self] Block: {
+        assert index < .nodes.size();
+        return .nodes[index];
+    }
+
+    // The head is the lowest-addressed free block, so it is the one the
+    // bump path prefers.
+    fn head(self: &shared) -> &shared[unique self] Block: {
+        assert .nodes.empty() == false;
+        return .nodes.front();
+    }
+
+    fn tail(self: &shared) -> &shared[unique self] Block: {
+        assert .nodes.empty() == false;
+        return .nodes.back();
+    }
+
+    fn insertion_point(self: &const shared, offset: int) -> int: {
+        var index: int = 0;
+        while index < .nodes.size(): {
+            let node: &const shared = .nodes[index];
+            if node.offset > offset: {
+                return index;
+            }
+            index += 1;
+        }
+        return .nodes.size();
+    }
+
+    fn push_sorted(self: &unique, block: Block): {
+        let at = .insertion_point(block.offset);
+        .nodes.insert(at, block);
+        .bytes += block.size;
+        prove .bytes >= 0;
+    }
+
+    fn push_back_raw(self: &unique, block: Block): {
+        .bytes += block.size;
+        .nodes.push_back(block);
+    }
+
+    fn pop_front(self: &unique) -> Block: {
+        assert .nodes.empty() == false;
+        var result = .nodes.front();
+        .bytes -= result.size;
+        .nodes.erase(0);
+        return move(result);
+    }
+
+    fn remove_at(self: &unique, index: int) -> Block: {
+        assert index < .nodes.size();
+        var result = .nodes[index];
+        .bytes -= result.size;
+        .nodes.erase(index);
+        return move(result);
+    }
+
+    // First-fit search. Returns an index rather than a borrow so that the
+    // caller stays free to mutate the list immediately afterwards.
+    fn find_fit(self: &const shared, bytes: int, alignment: int) -> int: {
+        var index: int = 0;
+        while index < .nodes.size(): {
+            let node: &const shared = .nodes[index];
+            if node.is_free(): {
+                let aligned = align_up(node.offset, alignment);
+                let overhead = aligned - node.offset;
+                if node.size >= bytes + overhead: {
+                    return index;
+                }
+            }
+            index += 1;
+        }
+        return INVALID_INDEX;
+    }
+
+    // Best-fit search: smallest block that still satisfies the request.
+    fn find_best(self: &const shared, bytes: int) -> int: {
+        var best = INVALID_INDEX;
+        var best_size: int = 0;
+        var index: int = 0;
+        while index < .nodes.size(): {
+            let node: &const shared = .nodes[index];
+            if node.is_free() && node.size >= bytes: {
+                if best == INVALID_INDEX || node.size < best_size: {
+                    best = index;
+                    best_size = node.size;
+                }
+            }
+            index += 1;
+        }
+        return best;
+    }
+
+    // Split `index` into an allocated prefix of `bytes` and a free remainder.
+    // The remainder is only kept when it is large enough to ever be handed
+    // out again; otherwise the slack is charged to the allocation.
+    fn split_at(self: &unique, index: int, bytes: int) -> Block: {
+        var node = .remove_at(index);
+        let leftover = node.size - bytes;
+        if leftover >= MIN_BLOCK_SIZE: {
+            var remainder = Block();
+            remainder.offset = node.offset + bytes;
+            remainder.size = leftover;
+            remainder.state = BlockState::Free;
+            remainder.slab_index = node.slab_index;
+            remainder.class_index = node.class_index;
+            remainder.stamp_guard();
+            node.size = bytes;
+            .push_sorted(remainder);
+        }
+        node.state = BlockState::Allocated;
+        return move(node);
+    }
+
+    // Single linear sweep merging every pair of touching free blocks. The
+    // list is sorted, so one pass is enough; the returned count feeds the
+    // fragmentation statistics.
+    fn coalesce(self: &unique) -> int: {
+        if .nodes.size() < 2: {
+            return 0;
+        }
+        var merged: int = 0;
+        var index: int = 0;
+        while index + 1 < .nodes.size(): {
+            let left: &const shared = .nodes[index];
+            let right: &const shared = .nodes[index + 1];
+            var can_merge = left.is_free() && right.is_free();
+            if can_merge: {
+                can_merge = left.end_offset() == right.offset;
+            }
+            if can_merge: {
+                can_merge = left.slab_index == right.slab_index;
+            }
+            if can_merge: {
+                var absorbed = .remove_at(index + 1);
+                let target: &unique = .nodes[index];
+                target.size += absorbed.size;
+                target.next = absorbed.next;
+                .bytes += absorbed.size;
+                destroy absorbed;
+                merged += 1;
+            } else: {
+                index += 1;
+            }
+        }
+        .merge_events += merged;
+        prove .merge_events >= merged;
+        return merged;
+    }
+
+    // Drop every node that belongs to a slab which is going away.
+    fn evict_slab(self: &unique, slab_index: int) -> int: {
+        var removed: int = 0;
+        var index: int = 0;
+        while index < .nodes.size(): {
+            let node: &const shared = .nodes[index];
+            if node.slab_index == slab_index: {
+                var dead = .remove_at(index);
+                discard dead;
+                removed += 1;
+            } else: {
+                index += 1;
+            }
+        }
+        return removed;
+    }
+
+    fn quarantine(self: &unique, index: int): {
+        let node: &unique = .nodes[index];
+        node.state = BlockState::Quarantined;
+        .quarantined += 1;
+    }
+
+    fn release_quarantine(self: &unique) -> int: {
+        var released: int = 0;
+        for node: &unique in .nodes: {
+            if node.state == BlockState::Quarantined: {
+                node.state = BlockState::Free;
+                released += 1;
+            }
+        }
+        .quarantined -= released;
+        prove .quarantined >= 0;
+        return released;
+    }
+
+    fn clear(self: &unique): {
+        .nodes.clear();
+        .bytes = 0;
+        .quarantined = 0;
+    }
+
+    nodes: vector{Block};
+    bytes: int = 0;
+    quarantined: int = 0;
+    merge_events: int = 0;
+}
+
+// --- Slabs ---------------------------------------------------------------
+
+// One slab owns a contiguous run of blocks of a single size class. The
+// bitmap is the authority on which blocks are live; the free list only ever
+// holds blocks that were handed back out of order.
+struct Slab: {
+
+    fn block_count(self: &const shared) -> int: {
+        return .blocks;
+    }
+
+    fn free_count(self: &const shared) -> int: {
+        return .blocks - .used;
+    }
+
+    fn used_count(self: &const shared) -> int: {
+        return .used;
+    }
+
+    fn is_empty(self: &const shared) -> bool: {
+        return .used == 0;
+    }
+
+    fn is_full(self: &const shared) -> bool: {
+        return .used >= .blocks;
+    }
+
+    fn base(self: &const shared) -> int: {
+        return .base_offset;
+    }
+
+    fn limit(self: &const shared) -> int: {
+        return .base_offset + .blocks * .stride;
+    }
+
+    fn owns(self: &const shared, offset: int) -> bool: {
+        if offset < .base_offset: {
+            return false;
+        }
+        return offset < .limit();
+    }
+
+    fn block_index_of(self: &const shared, offset: int) -> int: {
+        assert .owns(offset);
+        return (offset - .base_offset) / .stride;
+    }
+
+    fn offset_of_block(self: &const shared, index: int) -> int: {
+        assert index >= 0;
+        assert index < .blocks;
+        return .base_offset + index * .stride;
+    }
+
+    fn occupancy_permille(self: &const shared) -> int: {
+        return permille_of(.used, .blocks);
+    }
+
+    fn bytes_live(self: &const shared) -> int: {
+        return .used * .payload;
+    }
+
+    fn bytes_reserved(self: &const shared) -> int: {
+        return .blocks * .stride;
+    }
+
+    fn internal_waste(self: &const shared) -> int: {
+        return .used * (.stride - .payload);
+    }
+
+    // Borrow the bitmap for reading. Statistics code walks it without ever
+    // needing write access.
+    fn map(self: &shared) -> &shared[unique self] Bitmap: {
+        return .bitmap;
+    }
+
+    // Exclusive borrow used by the allocation fast path.
+    fn map_mut(self: &unique) -> &unique[self] Bitmap: {
+        return .bitmap;
+    }
+
+    fn recycled(self: &shared) -> &shared[unique self] FreeList: {
+        return .local_free;
+    }
+
+    fn initialize(self: &unique, base: int, row: &const shared SizeClass, index: int): {
+        .base_offset = align_up(base, row.alignment);
+        .stride = row.stride;
+        .payload = row.payload;
+        .alignment = row.alignment;
+        .class_index = row.index;
+        .slab_index = index;
+        .blocks = row.blocks_per_slab;
+        .used = 0;
+        .state = SlabState::Fresh;
+        .bitmap.reset(.blocks);
+        .local_free.clear();
+        assert is_aligned(.base_offset, .alignment);
+        prove .used <= .blocks;
+    }
+
+    // Fast path: take the lowest free bit. Returns the byte offset, or
+    // INVALID_INDEX when the slab is saturated.
+    fn take_block(self: &unique) -> int: {
+        if .is_full(): {
+            return INVALID_INDEX;
+        }
+        if .local_free.empty() == false: {
+            var recycled_block = .local_free.pop_front();
+            let offset = recycled_block.offset;
+            let index = .block_index_of(offset);
+            .bitmap.mark(index);
+            .used += 1;
+            .hits += 1;
+            destroy recycled_block;
+            return offset;
+        }
+        let index = .bitmap.find_first_free();
+        if index == INVALID_INDEX: {
+            .state = SlabState::Full;
+            return INVALID_INDEX;
+        }
+        .bitmap.mark(index);
+        .used += 1;
+        .misses += 1;
+        if .is_full(): {
+            .state = SlabState::Full;
+        } else: {
+            .state = SlabState::Partial;
+        }
+        prove .used <= .blocks;
+        return .offset_of_block(index);
+    }
+
+    // Multi-block reservation for the medium classes.
+    fn take_run(self: &unique, count: int) -> int: {
+        if .free_count() < count: {
+            return INVALID_INDEX;
+        }
+        let start = .bitmap.find_free_run(count);
+        if start == INVALID_INDEX: {
+            return INVALID_INDEX;
+        }
+        .bitmap.mark_run(start, count);
+        .used += count;
+        prove .used <= .blocks;
+        return .offset_of_block(start);
+    }
+
+    fn give_block(self: &unique, offset: int): {
+        assert .owns(offset);
+        let index = .block_index_of(offset);
+        if .bitmap.test(index) == false: {
+            panic("double free detected in slab");
+            return;
+        }
+        .bitmap.unmark(index);
+        .used -= 1;
+        if .used == 0: {
+            .state = SlabState::Fresh;
+        } else: {
+            .state = SlabState::Partial;
+        }
+        prove .used >= 0;
+    }
+
+    // Hand the block back through the local free list instead of clearing
+    // the bit immediately. Keeps recently freed blocks hot in cache.
+    fn defer_block(self: &unique, offset: int): {
+        assert .owns(offset);
+        var node = Block();
+        node.offset = offset;
+        node.size = .stride;
+        node.state = BlockState::Free;
+        node.slab_index = .slab_index;
+        node.class_index = .class_index;
+        node.stamp_guard();
+        .bitmap.unmark(.block_index_of(offset));
+        .used -= 1;
+        .local_free.push_sorted(node);
+        prove .used >= 0;
+    }
+
+    fn give_run(self: &unique, offset: int, count: int): {
+        let start = .block_index_of(offset);
+        .bitmap.unmark_run(start, count);
+        .used -= count;
+        prove .used >= 0;
+    }
+
+    fn drain_local(self: &unique) -> int: {
+        let merged = .local_free.coalesce();
+        .local_free.clear();
+        return merged;
+    }
+
+    fn retire(self: &unique): {
+        assert .is_empty();
+        .state = SlabState::Retired;
+        .local_free.clear();
+        .bitmap.reset(0);
+        .blocks = 0;
+    }
+
+    fn should_evict(self: &const shared) -> bool: {
+        if .state == SlabState::Retired: {
+            return false;
+        }
+        if .is_empty(): {
+            return true;
+        }
+        return .occupancy_permille() < EVICT_THRESHOLD_PERMILLE;
+    }
+
+    fn hit_ratio_permille(self: &const shared) -> int: {
+        return permille_of(.hits, .hits + .misses);
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = "slab ";
+        text.append(to_string(.slab_index));
+        text.append(" class ");
+        text.append(to_string(.class_index));
+        text.append(" used ");
+        text.append(to_string(.used));
+        text.append("/");
+        text.append(to_string(.blocks));
+        return text;
+    }
+
+    bitmap: Bitmap;
+    local_free: FreeList;
+    base_offset: int = 0;
+    stride: int = 0;
+    payload: int = 0;
+    alignment: int = 8;
+    blocks: int = 0;
+    used: int = 0;
+    class_index: int = INVALID_INDEX;
+    slab_index: int = INVALID_INDEX;
+    state: SlabState = SlabState::Fresh;
+    hits: int = 0;
+    misses: int = 0;
+}
+
+}

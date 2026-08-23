@@ -1,0 +1,1225 @@
+// Generic red-black tree providing an ordered map from K to V.
+//
+// The tree is stored in a flat node arena (`nodes`) and every link is an
+// integer index into that arena.  The sentinel index `RB_NIL` (-1) plays the
+// role of the traditional NIL leaf, which keeps the structure free of raw
+// pointers and makes the whole container trivially relocatable.
+//
+// Invariants maintained by every mutating operation:
+//   1. Every node is either red or black.
+//   2. The root is black.
+//   3. A red node never has a red child.
+//   4. Every path from a node down to a NIL leaf contains the same number of
+//      black nodes (the "black height" of that node).
+//   5. NIL leaves count as black.
+//
+// `check_validity` restates those invariants with `assert` and `prove` so the
+// verifier can reason about them directly.
+namespace red_black_tree: {
+
+// --- Colours and helper enums -------------------------------------------
+
+enum Colour: {
+    Red;
+    Black = 1;
+}
+
+enum ChildSide: {
+    LeftChild;
+    RightChild;
+    NoChild = 2;
+}
+
+// Result of a lookup: the slot index plus whether the key was actually there.
+enum FindOutcome: {
+    FoundExact;
+    FoundPredecessor;
+    FoundSuccessor;
+    NotFound = 3;
+}
+
+// The sentinel used for "no such node".  Written as a negative literal so the
+// arena can never accidentally address it.
+static RB_NIL: int = -1;
+
+// A red-black tree of n nodes has height at most 2 * log2(n + 1); this bound
+// is only used to size traversal stacks up front.
+static RB_MAX_HEIGHT: int = 96;
+
+// Arena capacity used when a tree is created without a size hint.
+static RB_INITIAL_CAPACITY: int = 32;
+
+// Growth factor, expressed as a percentage so no floating point is needed.
+static RB_GROWTH_PERCENT: int = 200;
+
+// --- Node ----------------------------------------------------------------
+
+template(K: type, V: type)
+struct RbNode: {
+
+    fn has_left(self: &const shared) -> bool: {
+        return .left != RB_NIL;
+    }
+
+    fn has_right(self: &const shared) -> bool: {
+        return .right != RB_NIL;
+    }
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .left == RB_NIL && .right == RB_NIL;
+    }
+
+    fn child_count(self: &const shared) -> int: {
+        var n: int = 0;
+        if .left != RB_NIL: {
+            n += 1;
+        }
+        if .right != RB_NIL: {
+            n += 1;
+        }
+        return n;
+    }
+
+    fn reset_links(self: &unique): {
+        .left = RB_NIL;
+        .right = RB_NIL;
+        .parent = RB_NIL;
+    }
+
+    key: K;
+    value: V;
+    left: int = -1;
+    right: int = -1;
+    parent: int = -1;
+    colour: Colour = Colour::Red;
+    live: bool = true;
+}
+
+// --- Tree ----------------------------------------------------------------
+
+template(K: type, V: type)
+struct RedBlackTree: {
+
+    // --- Size and shape queries ------------------------------------------
+
+    fn size(self: &const shared) -> int: {
+        return .count;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .count == 0;
+    }
+
+    fn arena_size(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn is_nil(self: &const shared, i: int) -> bool: {
+        return i == RB_NIL;
+    }
+
+    fn alive(self: &const shared, i: int) -> bool: {
+        if i == RB_NIL: {
+            return false;
+        }
+        return .nodes[i].live;
+    }
+
+    // --- Colour helpers ---------------------------------------------------
+    //
+    // NIL leaves are black by rule 5, so every colour query has to funnel
+    // through these helpers rather than touching `.colour` directly.
+
+    fn colour_of(self: &const shared, i: int) -> Colour: {
+        if i == RB_NIL: {
+            return Colour::Black;
+        }
+        return .nodes[i].colour;
+    }
+
+    fn is_red(self: &const shared, i: int) -> bool: {
+        if i == RB_NIL: {
+            return false;
+        }
+        return .nodes[i].colour == Colour::Red;
+    }
+
+    fn is_black(self: &const shared, i: int) -> bool: {
+        if i == RB_NIL: {
+            return true;
+        }
+        return .nodes[i].colour == Colour::Black;
+    }
+
+    fn set_colour(self: &unique, i: int, c: Colour): {
+        if i != RB_NIL: {
+            .nodes[i].colour = c;
+        }
+    }
+
+    fn paint_red(self: &unique, i: int): {
+        .set_colour(i, Colour::Red);
+    }
+
+    fn paint_black(self: &unique, i: int): {
+        .set_colour(i, Colour::Black);
+    }
+
+    fn swap_colours(self: &unique, a: int, b: int): {
+        if a != RB_NIL && b != RB_NIL: {
+            swap(.nodes[a].colour, .nodes[b].colour);
+        }
+    }
+
+    // --- Link helpers -----------------------------------------------------
+
+    fn left_of(self: &const shared, i: int) -> int: {
+        if i == RB_NIL: {
+            return RB_NIL;
+        }
+        return .nodes[i].left;
+    }
+
+    fn right_of(self: &const shared, i: int) -> int: {
+        if i == RB_NIL: {
+            return RB_NIL;
+        }
+        return .nodes[i].right;
+    }
+
+    fn parent_of(self: &const shared, i: int) -> int: {
+        if i == RB_NIL: {
+            return RB_NIL;
+        }
+        return .nodes[i].parent;
+    }
+
+    fn grandparent_of(self: &const shared, i: int) -> int: {
+        return .parent_of(.parent_of(i));
+    }
+
+    // Which side of its parent a node hangs off, or NoChild for the root.
+    fn side_of(self: &const shared, i: int) -> ChildSide: {
+        let p = .parent_of(i);
+        if p == RB_NIL: {
+            return ChildSide::NoChild;
+        } else: {
+            if .nodes[p].left == i: {
+                return ChildSide::LeftChild;
+            } else: {
+                return ChildSide::RightChild;
+            }
+        }
+    }
+
+    fn sibling_of(self: &const shared, i: int) -> int: {
+        let p = .parent_of(i);
+        if p == RB_NIL: {
+            return RB_NIL;
+        } else: {
+            if .nodes[p].left == i: {
+                return .nodes[p].right;
+            } else: {
+                return .nodes[p].left;
+            }
+        }
+    }
+
+    fn uncle_of(self: &const shared, i: int) -> int: {
+        return .sibling_of(.parent_of(i));
+    }
+
+    fn is_left_child(self: &const shared, i: int) -> bool: {
+        return .side_of(i) == ChildSide::LeftChild;
+    }
+
+    fn is_right_child(self: &const shared, i: int) -> bool: {
+        return .side_of(i) == ChildSide::RightChild;
+    }
+
+    // Re-point whatever used to reference `old` at `fresh`.
+    fn attach(self: &unique, parent: int, child: int, side: ChildSide): {
+        if parent == RB_NIL: {
+            .root = child;
+        } else: {
+            if side == ChildSide::LeftChild: {
+                .nodes[parent].left = child;
+            } else: {
+                .nodes[parent].right = child;
+            }
+        }
+        if child != RB_NIL: {
+            .nodes[child].parent = parent;
+        }
+    }
+
+    // --- Rotations --------------------------------------------------------
+    //
+    //        x                y
+    //       / \              / \
+    //      a   y    ==>     x   c
+    //         / \          / \
+    //        b   c        a   b
+
+    fn rotate_left(self: &unique, x: int): {
+        if x == RB_NIL: {
+            return;
+        }
+        let y = .nodes[x].right;
+        if y == RB_NIL: {
+            // Nothing to pivot on; a well-formed caller never gets here.
+            return;
+        }
+        .nodes[x].right = .nodes[y].left;
+        if .nodes[y].left != RB_NIL: {
+            .nodes[.nodes[y].left].parent = x;
+        }
+        .nodes[y].parent = .nodes[x].parent;
+        if .nodes[x].parent == RB_NIL: {
+            .root = y;
+        } else: {
+            if x == .nodes[.nodes[x].parent].left: {
+                .nodes[.nodes[x].parent].left = y;
+            } else: {
+                .nodes[.nodes[x].parent].right = y;
+            }
+        }
+        .nodes[y].left = x;
+        .nodes[x].parent = y;
+        .rotations += 1;
+    }
+
+    //        y                x
+    //       / \              / \
+    //      x   c    ==>     a   y
+    //     / \                  / \
+    //    a   b                b   c
+
+    fn rotate_right(self: &unique, y: int): {
+        if y == RB_NIL: {
+            return;
+        }
+        let x = .nodes[y].left;
+        if x == RB_NIL: {
+            return;
+        }
+        .nodes[y].left = .nodes[x].right;
+        if .nodes[x].right != RB_NIL: {
+            .nodes[.nodes[x].right].parent = y;
+        }
+        .nodes[x].parent = .nodes[y].parent;
+        if .nodes[y].parent == RB_NIL: {
+            .root = x;
+        } else: {
+            if y == .nodes[.nodes[y].parent].right: {
+                .nodes[.nodes[y].parent].right = x;
+            } else: {
+                .nodes[.nodes[y].parent].left = x;
+            }
+        }
+        .nodes[x].right = y;
+        .nodes[y].parent = x;
+        .rotations += 1;
+    }
+
+    // Rotate `i` in whichever direction brings its subtree back into balance.
+    fn rotate_towards(self: &unique, i: int, side: ChildSide): {
+        if side == ChildSide::LeftChild: {
+            .rotate_right(i);
+        } else: {
+            if side == ChildSide::RightChild: {
+                .rotate_left(i);
+            } else: {
+                discard i;
+            }
+        }
+    }
+
+    // --- Arena management -------------------------------------------------
+
+    fn reserve(self: &unique, capacity: int): {
+        if capacity > .nodes.size(): {
+            .nodes.reserve(capacity);
+        }
+    }
+
+    fn allocate(self: &unique, key: K, value: V) -> int: {
+        if .free_list != RB_NIL: {
+            // Recycle a slot released by a previous erase.
+            let slot = .free_list;
+            .free_list = .nodes[slot].right;
+            .nodes[slot].key = key;
+            .nodes[slot].value = value;
+            .nodes[slot].reset_links();
+            .nodes[slot].colour = Colour::Red;
+            .nodes[slot].live = true;
+            return slot;
+        }
+        var fresh = RbNode{K, V}(key: key, value: value);
+        fresh.colour = Colour::Red;
+        .nodes.push_back(fresh);
+        return .nodes.size() - 1;
+    }
+
+    fn release(self: &unique, i: int): {
+        if i == RB_NIL: {
+            return;
+        }
+        .nodes[i].live = false;
+        .nodes[i].left = RB_NIL;
+        .nodes[i].parent = RB_NIL;
+        .nodes[i].right = .free_list;
+        .free_list = i;
+    }
+
+    // --- Search -----------------------------------------------------------
+
+    fn find_index(self: &const shared, key: &const K) -> int: {
+        var current = .root;
+        while current != RB_NIL: {
+            let order = compare_keys(.nodes[current].key, *key);
+            if order == 0: {
+                return current;
+            } else: {
+                if order > 0: {
+                    current = .nodes[current].left;
+                } else: {
+                    current = .nodes[current].right;
+                }
+            }
+        }
+        return RB_NIL;
+    }
+
+    fn contains(self: &const shared, key: &const K) -> bool: {
+        return .find_index(key) != RB_NIL;
+    }
+
+    fn at(self: &shared, key: &const K) -> &shared[self] V: {
+        let i = .find_index(key);
+        if i == RB_NIL: {
+            return .missing;
+        }
+        return .nodes[i].value;
+    }
+
+    // Smallest node whose key is >= `key`, or RB_NIL when none exists.
+    fn lower_bound(self: &const shared, key: &const K) -> int: {
+        var current = .root;
+        var best = RB_NIL;
+        while current != RB_NIL: {
+            let order = compare_keys(.nodes[current].key, *key);
+            if order < 0: {
+                current = .nodes[current].right;
+            } else: {
+                best = current;
+                if order == 0: {
+                    // Exact hit: nothing to the left can be smaller and still
+                    // satisfy the bound.
+                    return current;
+                } else: {
+                    current = .nodes[current].left;
+                }
+            }
+        }
+        return best;
+    }
+
+    // Smallest node whose key is strictly greater than `key`.
+    fn upper_bound(self: &const shared, key: &const K) -> int: {
+        var current = .root;
+        var best = RB_NIL;
+        while current != RB_NIL: {
+            let order = compare_keys(.nodes[current].key, *key);
+            if order > 0: {
+                best = current;
+                current = .nodes[current].left;
+            } else: {
+                current = .nodes[current].right;
+            }
+        }
+        return best;
+    }
+
+    // --- Extremes and stepping -------------------------------------------
+
+    fn subtree_minimum(self: &const shared, start: int) -> int: {
+        var current = start;
+        if current == RB_NIL: {
+            return RB_NIL;
+        }
+        while .nodes[current].left != RB_NIL: {
+            current = .nodes[current].left;
+        }
+        return current;
+    }
+
+    fn subtree_maximum(self: &const shared, start: int) -> int: {
+        var current = start;
+        if current == RB_NIL: {
+            return RB_NIL;
+        }
+        while .nodes[current].right != RB_NIL: {
+            current = .nodes[current].right;
+        }
+        return current;
+    }
+
+    fn minimum(self: &const shared) -> int: {
+        return .subtree_minimum(.root);
+    }
+
+    fn maximum(self: &const shared) -> int: {
+        return .subtree_maximum(.root);
+    }
+
+    fn successor(self: &const shared, i: int) -> int: {
+        if i == RB_NIL: {
+            return RB_NIL;
+        }
+        if .nodes[i].right != RB_NIL: {
+            return .subtree_minimum(.nodes[i].right);
+        }
+        var current = i;
+        var up = .nodes[i].parent;
+        while up != RB_NIL && current == .nodes[up].right: {
+            current = up;
+            up = .nodes[up].parent;
+        }
+        return up;
+    }
+
+    fn predecessor(self: &const shared, i: int) -> int: {
+        if i == RB_NIL: {
+            return RB_NIL;
+        }
+        if .nodes[i].left != RB_NIL: {
+            return .subtree_maximum(.nodes[i].left);
+        }
+        var current = i;
+        var up = .nodes[i].parent;
+        while up != RB_NIL && current == .nodes[up].left: {
+            current = up;
+            up = .nodes[up].parent;
+        }
+        return up;
+    }
+
+    // --- Insertion --------------------------------------------------------
+    //
+    // Ordinary binary-search-tree descent, then `insert_fixup` restores the
+    // colour invariants that the freshly painted red node may have broken.
+
+    fn insert(self: &unique, key: K, value: V) -> bool: {
+        if .nodes.size() == 0: {
+            .reserve(RB_INITIAL_CAPACITY);
+        }
+
+        var parent = RB_NIL;
+        var current = .root;
+        var side = ChildSide::NoChild;
+
+        while current != RB_NIL: {
+            parent = current;
+            let order = compare_keys(.nodes[current].key, key);
+            if order == 0: {
+                // Key already present: overwrite in place, shape unchanged.
+                .nodes[current].value = value;
+                return false;
+            } else: {
+                if order > 0: {
+                    side = ChildSide::LeftChild;
+                    current = .nodes[current].left;
+                } else: {
+                    side = ChildSide::RightChild;
+                    current = .nodes[current].right;
+                }
+            }
+        }
+
+        let fresh = .allocate(key, value);
+        .nodes[fresh].parent = parent;
+        if parent == RB_NIL: {
+            .root = fresh;
+        } else: {
+            if side == ChildSide::LeftChild: {
+                .nodes[parent].left = fresh;
+            } else: {
+                .nodes[parent].right = fresh;
+            }
+        }
+        .count += 1;
+        .insert_fixup(fresh);
+        .paint_black(.root);
+        return true;
+    }
+
+    // Restore rules 2 and 3 after a red node was spliced in at `start`.
+    //
+    // The case analysis is deliberately written as a nested tree rather than
+    // a flat chain: outer level picks the parent's side, the next level
+    // distinguishes a red uncle from a black one, and the innermost level
+    // separates the "inner" triangle case from the "outer" line case.
+    fn insert_fixup(self: &unique, start: int): {
+        var z = start;
+        var guard: int = 0;
+
+        while z != RB_NIL && guard < RB_MAX_HEIGHT: {
+            guard += 1;
+            let parent = .nodes[z].parent;
+
+            if parent == RB_NIL: {
+                // z is the root; rule 2 is restored by the caller.
+                .paint_black(z);
+                break;
+            } else: {
+                if .is_black(parent): {
+                    // No red-red violation left to repair.
+                    break;
+                } else: {
+                    let grand = .nodes[parent].parent;
+                    if grand == RB_NIL: {
+                        // A red root with a red child: blacken the root.
+                        .paint_black(parent);
+                        break;
+                    } else: {
+                        if parent == .nodes[grand].left: {
+                            // --- Parent is the LEFT child of grandparent ---
+                            let uncle = .nodes[grand].right;
+                            if uncle != RB_NIL && .is_red(uncle): {
+                                // Case 1: recolour and push the problem up.
+                                .paint_black(parent);
+                                .paint_black(uncle);
+                                .paint_red(grand);
+                                .recolours += 3;
+                                z = grand;
+                            } else: {
+                                // Uncle is black (possibly NIL).
+                                if z == .nodes[parent].right: {
+                                    // Case 2: inner triangle.  Rotate left at
+                                    // the parent to turn it into case 3, then
+                                    // fall straight through to that case.
+                                    z = parent;
+                                    .rotate_left(z);
+                                    let np = .nodes[z].parent;
+                                    if np == RB_NIL: {
+                                        .paint_black(z);
+                                        break;
+                                    } else: {
+                                        let ng = .nodes[np].parent;
+                                        if ng == RB_NIL: {
+                                            .paint_black(np);
+                                            break;
+                                        } else: {
+                                            // Case 3 after the pre-rotation.
+                                            .paint_black(np);
+                                            .paint_red(ng);
+                                            .recolours += 2;
+                                            .rotate_right(ng);
+                                        }
+                                    }
+                                } else: {
+                                    // Case 3: outer line, single rotation.
+                                    .paint_black(parent);
+                                    .paint_red(grand);
+                                    .recolours += 2;
+                                    .rotate_right(grand);
+                                }
+                            }
+                        } else: {
+                            // --- Parent is the RIGHT child (mirror image) --
+                            let uncle = .nodes[grand].left;
+                            if uncle != RB_NIL && .is_red(uncle): {
+                                // Case 1 mirrored.
+                                .paint_black(parent);
+                                .paint_black(uncle);
+                                .paint_red(grand);
+                                .recolours += 3;
+                                z = grand;
+                            } else: {
+                                if z == .nodes[parent].left: {
+                                    // Case 2 mirrored: inner triangle.
+                                    z = parent;
+                                    .rotate_right(z);
+                                    let np = .nodes[z].parent;
+                                    if np == RB_NIL: {
+                                        .paint_black(z);
+                                        break;
+                                    } else: {
+                                        let ng = .nodes[np].parent;
+                                        if ng == RB_NIL: {
+                                            .paint_black(np);
+                                            break;
+                                        } else: {
+                                            // Case 3 mirrored.
+                                            .paint_black(np);
+                                            .paint_red(ng);
+                                            .recolours += 2;
+                                            .rotate_left(ng);
+                                        }
+                                    }
+                                } else: {
+                                    // Case 3 mirrored: outer line.
+                                    .paint_black(parent);
+                                    .paint_red(grand);
+                                    .recolours += 2;
+                                    .rotate_left(grand);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        .paint_black(.root);
+    }
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Replace the subtree rooted at `target` with the subtree rooted at
+    // `replacement`.  The replacement's own children are left untouched.
+    fn transplant(self: &unique, target: int, replacement: int): {
+        let parent = .parent_of(target);
+        if parent == RB_NIL: {
+            .root = replacement;
+        } else: {
+            if target == .nodes[parent].left: {
+                .nodes[parent].left = replacement;
+            } else: {
+                .nodes[parent].right = replacement;
+            }
+        }
+        if replacement != RB_NIL: {
+            .nodes[replacement].parent = parent;
+        }
+    }
+
+    fn erase(self: &unique, key: &const K) -> bool: {
+        let victim = .find_index(key);
+        if victim == RB_NIL: {
+            return false;
+        }
+        .erase_index(victim);
+        return true;
+    }
+
+    fn erase_index(self: &unique, victim: int): {
+        if victim == RB_NIL: {
+            return;
+        }
+
+        // `removed` is the node that physically leaves its position, which
+        // for a two-child victim is the in-order successor rather than the
+        // victim itself.
+        var removed = victim;
+        var removed_colour = .nodes[victim].colour;
+        var fixup_at = RB_NIL;
+        var fixup_parent = RB_NIL;
+
+        if .nodes[victim].left == RB_NIL: {
+            // At most a right child: splice it up directly.
+            fixup_at = .nodes[victim].right;
+            fixup_parent = .nodes[victim].parent;
+            .transplant(victim, .nodes[victim].right);
+        } else: {
+            if .nodes[victim].right == RB_NIL: {
+                // At most a left child.
+                fixup_at = .nodes[victim].left;
+                fixup_parent = .nodes[victim].parent;
+                .transplant(victim, .nodes[victim].left);
+            } else: {
+                // Two children: hoist the in-order successor into place.
+                removed = .subtree_minimum(.nodes[victim].right);
+                removed_colour = .nodes[removed].colour;
+                fixup_at = .nodes[removed].right;
+                if .nodes[removed].parent == victim: {
+                    // Successor is the victim's direct right child.
+                    fixup_parent = removed;
+                    if fixup_at != RB_NIL: {
+                        .nodes[fixup_at].parent = removed;
+                    }
+                } else: {
+                    fixup_parent = .nodes[removed].parent;
+                    .transplant(removed, .nodes[removed].right);
+                    .nodes[removed].right = .nodes[victim].right;
+                    .nodes[.nodes[removed].right].parent = removed;
+                }
+                .transplant(victim, removed);
+                .nodes[removed].left = .nodes[victim].left;
+                .nodes[.nodes[removed].left].parent = removed;
+                .nodes[removed].colour = .nodes[victim].colour;
+            }
+        }
+
+        .release(victim);
+        .count -= 1;
+
+        if removed_colour == Colour::Black: {
+            // Removing a black node shortens one path by one black link, so
+            // rule 4 has to be repaired.
+            .delete_fixup(fixup_at, fixup_parent);
+        }
+        .paint_black(.root);
+    }
+
+    // Rebalance after a black node was removed from below `parent`.
+    //
+    // `x` carries an extra conceptual "black token"; the loop pushes that
+    // token up the tree until it can be absorbed.  `x` may legitimately be
+    // RB_NIL, which is why the parent is threaded through explicitly.
+    fn delete_fixup(self: &unique, start: int, start_parent: int): {
+        var x = start;
+        var parent = start_parent;
+        var guard: int = 0;
+
+        while x != .root && guard < RB_MAX_HEIGHT: {
+            guard += 1;
+            if .is_red(x): {
+                // Absorb the extra black into a red node.
+                .paint_black(x);
+                break;
+            } else: {
+                if parent == RB_NIL: {
+                    // Reached the root through the parent chain.
+                    break;
+                } else: {
+                    if x == .nodes[parent].left: {
+                        // --- x is the LEFT child ---------------------------
+                        var w = .nodes[parent].right;
+                        if .is_red(w): {
+                            // Case 1: red sibling.  Rotate it out of the way
+                            // so the remaining cases see a black sibling.
+                            .paint_black(w);
+                            .paint_red(parent);
+                            .recolours += 2;
+                            .rotate_left(parent);
+                            w = .nodes[parent].right;
+                        }
+                        if w == RB_NIL: {
+                            // Degenerate shape: push the token upwards.
+                            x = parent;
+                            parent = .nodes[x].parent;
+                        } else: {
+                            if .is_black(.nodes[w].left) && .is_black(.nodes[w].right): {
+                                // Case 2: both of the sibling's children are
+                                // black.  Recolour and move the token up.
+                                .paint_red(w);
+                                .recolours += 1;
+                                x = parent;
+                                parent = .nodes[x].parent;
+                            } else: {
+                                if .is_black(.nodes[w].right): {
+                                    // Case 3: the sibling's far child is
+                                    // black but its near child is red.
+                                    // Rotate right to convert into case 4.
+                                    if .nodes[w].left != RB_NIL: {
+                                        .paint_black(.nodes[w].left);
+                                        .recolours += 1;
+                                    }
+                                    .paint_red(w);
+                                    .rotate_right(w);
+                                    w = .nodes[parent].right;
+                                }
+                                if w == RB_NIL: {
+                                    x = parent;
+                                    parent = .nodes[x].parent;
+                                } else: {
+                                    // Case 4: the sibling's far child is red.
+                                    // One rotation finishes the repair.
+                                    .set_colour(w, .colour_of(parent));
+                                    .paint_black(parent);
+                                    if .nodes[w].right != RB_NIL: {
+                                        .paint_black(.nodes[w].right);
+                                        .recolours += 1;
+                                    }
+                                    .rotate_left(parent);
+                                    x = .root;
+                                    parent = RB_NIL;
+                                }
+                            }
+                        }
+                    } else: {
+                        // --- x is the RIGHT child (mirror image) -----------
+                        var w = .nodes[parent].left;
+                        if .is_red(w): {
+                            // Case 1 mirrored.
+                            .paint_black(w);
+                            .paint_red(parent);
+                            .recolours += 2;
+                            .rotate_right(parent);
+                            w = .nodes[parent].left;
+                        }
+                        if w == RB_NIL: {
+                            x = parent;
+                            parent = .nodes[x].parent;
+                        } else: {
+                            if .is_black(.nodes[w].left) && .is_black(.nodes[w].right): {
+                                // Case 2 mirrored.
+                                .paint_red(w);
+                                .recolours += 1;
+                                x = parent;
+                                parent = .nodes[x].parent;
+                            } else: {
+                                if .is_black(.nodes[w].left): {
+                                    // Case 3 mirrored.
+                                    if .nodes[w].right != RB_NIL: {
+                                        .paint_black(.nodes[w].right);
+                                        .recolours += 1;
+                                    }
+                                    .paint_red(w);
+                                    .rotate_left(w);
+                                    w = .nodes[parent].left;
+                                }
+                                if w == RB_NIL: {
+                                    x = parent;
+                                    parent = .nodes[x].parent;
+                                } else: {
+                                    // Case 4 mirrored.
+                                    .set_colour(w, .colour_of(parent));
+                                    .paint_black(parent);
+                                    if .nodes[w].left != RB_NIL: {
+                                        .paint_black(.nodes[w].left);
+                                        .recolours += 1;
+                                    }
+                                    .rotate_right(parent);
+                                    x = .root;
+                                    parent = RB_NIL;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        .paint_black(x);
+    }
+
+    // --- Traversals -------------------------------------------------------
+    //
+    // Both traversals are iterative: the arena representation makes an
+    // explicit index stack cheaper than recursion, and it keeps the worst
+    // case stack depth bounded by RB_MAX_HEIGHT.
+
+    fn in_order(self: &const shared, out: &unique vector{int}): {
+        var stack = vector{int}();
+        stack.reserve(RB_MAX_HEIGHT);
+        var current = .root;
+        while current != RB_NIL || stack.size() > 0: {
+            if current != RB_NIL: {
+                stack.push_back(current);
+                current = .nodes[current].left;
+            } else: {
+                let top = stack.back();
+                stack.pop_back();
+                out.push_back(top);
+                current = .nodes[top].right;
+            }
+        }
+        destroy stack;
+    }
+
+    fn pre_order(self: &const shared, out: &unique vector{int}): {
+        if .root == RB_NIL: {
+            return;
+        }
+        var stack = vector{int}();
+        stack.reserve(RB_MAX_HEIGHT);
+        stack.push_back(.root);
+        while stack.size() > 0: {
+            let top = stack.back();
+            stack.pop_back();
+            out.push_back(top);
+            // Right first so the left child is popped next.
+            if .nodes[top].right != RB_NIL: {
+                stack.push_back(.nodes[top].right);
+            }
+            if .nodes[top].left != RB_NIL: {
+                stack.push_back(.nodes[top].left);
+            }
+        }
+        destroy stack;
+    }
+
+    fn keys_in_order(self: &const shared, out: &unique vector{K}): {
+        var order = vector{int}();
+        .in_order(order);
+        for i: &const in order: {
+            out.push_back(.nodes[i].key);
+        }
+        destroy order;
+    }
+
+    // --- Height and shape metrics ----------------------------------------
+
+    fn height(self: &const shared) -> int: {
+        return .subtree_height(.root);
+    }
+
+    fn subtree_height(self: &const shared, start: int) -> int: {
+        if start == RB_NIL: {
+            return 0;
+        }
+        var stack = vector{int}();
+        var depths = vector{int}();
+        stack.push_back(start);
+        depths.push_back(1);
+        var best: int = 0;
+        while stack.size() > 0: {
+            let node = stack.back();
+            let depth = depths.back();
+            stack.pop_back();
+            depths.pop_back();
+            if depth > best: {
+                best = depth;
+            }
+            if .nodes[node].left != RB_NIL: {
+                stack.push_back(.nodes[node].left);
+                depths.push_back(depth + 1);
+            }
+            if .nodes[node].right != RB_NIL: {
+                stack.push_back(.nodes[node].right);
+                depths.push_back(depth + 1);
+            }
+        }
+        destroy stack;
+        destroy depths;
+        return best;
+    }
+
+    // Number of black nodes on the leftmost spine, which by rule 4 equals the
+    // black height of every other root-to-leaf path.
+    fn black_height(self: &const shared) -> int: {
+        var current = .root;
+        var blacks: int = 0;
+        while current != RB_NIL: {
+            if .is_black(current): {
+                blacks += 1;
+            }
+            current = .nodes[current].left;
+        }
+        // The NIL leaf itself counts as black.
+        return blacks + 1;
+    }
+
+    // Recomputes the black height of a subtree, returning -1 when the paths
+    // below `start` disagree.  Used only by the validity checker.
+    fn measured_black_height(self: &const shared, start: int) -> int: {
+        if start == RB_NIL: {
+            return 1;
+        }
+        let left = .measured_black_height(.nodes[start].left);
+        if left < 0: {
+            return -1;
+        } else: {
+            let right = .measured_black_height(.nodes[start].right);
+            if right < 0: {
+                return -1;
+            } else: {
+                if left != right: {
+                    return -1;
+                } else: {
+                    if .is_black(start): {
+                        return left + 1;
+                    } else: {
+                        return left;
+                    }
+                }
+            }
+        }
+    }
+
+    fn min_key(self: &shared) -> &shared[self] K: {
+        let i = .minimum();
+        if i == RB_NIL: {
+            return .missing_key;
+        }
+        return .nodes[i].key;
+    }
+
+    fn max_key(self: &shared) -> &shared[self] K: {
+        let i = .maximum();
+        if i == RB_NIL: {
+            return .missing_key;
+        }
+        return .nodes[i].key;
+    }
+
+    // --- Validity checker -------------------------------------------------
+    //
+    // Every red-black rule is restated here so the verifier has the
+    // invariants available as explicit propositions.
+
+    fn check_validity(self: &const shared) -> bool: {
+        assert .count >= 0;
+        assert .count <= .nodes.size();
+
+        if .root == RB_NIL: {
+            // An empty tree trivially satisfies every rule.
+            assert .count == 0;
+            prove .count == 0;
+            return true;
+        }
+
+        // Rule 2: the root is black.
+        assert .is_black(.root);
+        prove .colour_of(.root) == Colour::Black;
+
+        // Rule 5: the sentinel leaf is black.
+        assert .is_black(RB_NIL);
+        prove .colour_of(RB_NIL) == Colour::Black;
+
+        var order = vector{int}();
+        .in_order(order);
+
+        // The in-order walk must visit exactly the live nodes.
+        assert order.size() == .count;
+        prove order.size() == .count;
+
+        var index: int = 0;
+        while index < order.size(): {
+            let node = order[index];
+            assert .nodes[node].live;
+
+            // Rule 1: the colour is one of exactly two values.
+            assert .colour_of(node) == Colour::Red || .colour_of(node) == Colour::Black;
+
+            // Rule 3: a red node has no red child.
+            if .is_red(node): {
+                assert .is_black(.nodes[node].left);
+                assert .is_black(.nodes[node].right);
+                prove .is_black(.left_of(node)) && .is_black(.right_of(node));
+            } else: {
+                // Black nodes constrain nothing about their children's colour,
+                // but the parent links must still be consistent.
+                if .nodes[node].left != RB_NIL: {
+                    assert .parent_of(.nodes[node].left) == node;
+                }
+                if .nodes[node].right != RB_NIL: {
+                    assert .parent_of(.nodes[node].right) == node;
+                }
+            }
+
+            // Search-tree ordering: the walk is strictly increasing.
+            if index > 0: {
+                let previous = order[index - 1];
+                assert compare_keys(.nodes[previous].key, .nodes[node].key) < 0;
+                prove compare_keys(.nodes[previous].key, .nodes[node].key) < 0;
+            }
+
+            index += 1;
+        }
+        destroy order;
+
+        // Rule 4: every root-to-leaf path carries the same black count.
+        let measured = .measured_black_height(.root);
+        assert measured > 0;
+        assert measured == .black_height();
+        prove measured == .black_height();
+
+        // The classic height bound follows from rules 3 and 4.
+        assert .height() <= 2 * measured;
+        prove .height() <= 2 * .black_height();
+
+        return true;
+    }
+
+    // --- Bulk operations --------------------------------------------------
+
+    fn clear(self: &unique): {
+        for node: &unique in .nodes: {
+            node.live = false;
+            node.reset_links();
+        }
+        .nodes.clear();
+        .root = RB_NIL;
+        .free_list = RB_NIL;
+        .count = 0;
+        .rotations = 0;
+        .recolours = 0;
+    }
+
+    nodes: vector{RbNode{K, V}};
+    root: int = -1;
+    free_list: int = -1;
+    count: int = 0;
+    rotations: int = 0;
+    recolours: int = 0;
+    missing: V;
+    missing_key: K;
+}
+
+// --- Free functions -------------------------------------------------------
+
+// Three-way comparison used by every ordered operation above.
+template(T: type)
+fn compare_keys(a: &const T, b: &const T) -> int: {
+    if a < b: {
+        return -1;
+    } else: {
+        if b < a: {
+            return 1;
+        } else: {
+            return 0;
+        }
+    }
+}
+
+// Copies every key/value pair of `source` into `target`, preserving order.
+template(K: type, V: type)
+fn merge_into(target: &unique RedBlackTree{K, V}, source: &const shared RedBlackTree{K, V}): {
+    var order = vector{int}();
+    source.in_order(order);
+    for i: &const in order: {
+        target.insert(source.nodes[i].key, source.nodes[i].value);
+    }
+    destroy order;
+}
+
+// Removes every key in the half-open range [low, high).
+template(K: type, V: type)
+fn erase_range(tree: &unique RedBlackTree{K, V}, low: &const K, high: &const K) -> int: {
+    var removed: int = 0;
+    loop: {
+        let node = tree.lower_bound(low);
+        if node == RB_NIL: {
+            break;
+        } else: {
+            if compare_keys(tree.nodes[node].key, *high) >= 0: {
+                break;
+            } else: {
+                tree.erase_index(node);
+                removed += 1;
+            }
+        }
+    }
+    return removed;
+}
+
+fn describe_tree(): {
+    var tree = RedBlackTree{int, string}();
+    tree.reserve(RB_INITIAL_CAPACITY);
+    for i in range(0, 32): {
+        tree.insert(i * 7 % 32, to_string(i));
+    }
+    println(to_string(tree.size()));
+    println(to_string(tree.height()));
+    println(to_string(tree.black_height()));
+    if !tree.check_validity(): {
+        panic("red-black invariants violated after bulk insert");
+    }
+    var index: int = 0;
+    while index < 32: {
+        if index % 2 == 0: {
+            discard tree.erase(index);
+        }
+        index += 1;
+    }
+    if !tree.check_validity(): {
+        panic("red-black invariants violated after bulk erase");
+    }
+    destroy tree;
+}
+
+}

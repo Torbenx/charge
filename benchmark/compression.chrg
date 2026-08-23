@@ -1,0 +1,5190 @@
+// A general purpose compression library.
+//
+// The library is organised as a stack of independent codecs that share one
+// byte-oriented buffer type and one pair of bit-level cursors:
+//
+//   * `BitWriter` / `BitReader`          - MSB-first bit packing (deflate's
+//                                          Huffman payloads are LSB-first,
+//                                          its lengths are not, so both
+//                                          orderings are provided).
+//   * `Huffman`                          - frequency counting, a binary heap
+//                                          for tree construction, canonical
+//                                          code assignment, Kraft-based code
+//                                          length limiting, and encode /
+//                                          decode tables.
+//   * `Lz77`                             - a sliding window with a hash chain
+//                                          match finder, lazy matching and
+//                                          five configurable levels.
+//   * `Deflate`                          - the combined pipeline: stored,
+//                                          fixed and dynamic block types.
+//   * `Rle`, `Mtf`, `Bwt`                - the auxiliary transforms used by
+//                                          the block sorting pipeline.
+//   * `Arithmetic`                       - an adaptive binary/multi-symbol
+//                                          range coder over a frequency model.
+//   * `Crc32`, `Adler32`                 - checksums built from generated
+//                                          tables rather than literal tables.
+//
+// Every polynomial and mask below is written as a plain decimal literal with
+// the conventional hexadecimal spelling in a trailing comment, because the
+// language only lexes decimal integer notation.
+//
+// Buffers are `vector{int}` where every element is constrained to the range
+// [0, 255]; `byte` is not a distinct storage type here, the invariant is
+// maintained by the accessors and checked with `assert` in the harness.
+namespace compress: {
+
+// --- Bit and byte tunables ----------------------------------------------
+
+static BYTE_BITS: int = 8;
+static BYTE_MASK: int = 255;                    // 0xFF
+static SHORT_BITS: int = 16;
+static SHORT_MASK: int = 65535;                 // 0xFFFF
+static WORD_BITS: int = 32;
+static WORD_MASK: int = 4294967295;             // 0xFFFFFFFF
+static NIBBLE_MASK: int = 15;                   // 0x0F
+static HIGH_BIT_8: int = 128;                   // 0x80
+static HIGH_BIT_16: int = 32768;                // 0x8000
+static HIGH_BIT_32: int = 2147483648;           // 0x80000000
+
+// --- Huffman tunables ----------------------------------------------------
+
+// Deflate's alphabet sizes. The literal/length alphabet is 286 symbols, of
+// which 0..255 are literals, 256 is end-of-block and 257..285 are lengths.
+static MAX_SYMBOLS: int = 288;
+static LITERAL_SYMBOLS: int = 286;
+static END_OF_BLOCK: int = 256;
+static DISTANCE_SYMBOLS: int = 30;
+static CODE_LENGTH_SYMBOLS: int = 19;
+
+// A canonical code may never be longer than this; the length limiter
+// rebalances any tree that violates the bound.
+static MAX_CODE_LENGTH: int = 15;
+static MAX_LENGTH_CODE_BITS: int = 7;
+
+// The decode table is a flat lookup of 2^ROOT_BITS entries; codes longer
+// than ROOT_BITS spill into a secondary table reached through a link.
+static ROOT_BITS: int = 9;
+static ROOT_SIZE: int = 512;                    // 1 << 9
+static SUB_BITS: int = 6;
+static SUB_SIZE: int = 64;                      // 1 << 6
+
+// --- LZ77 tunables -------------------------------------------------------
+
+static WINDOW_BITS: int = 15;
+static WINDOW_SIZE: int = 32768;                // 1 << 15
+static WINDOW_MASK: int = 32767;                // 0x7FFF
+static MIN_MATCH: int = 3;
+static MAX_MATCH: int = 258;
+static MAX_DISTANCE: int = 32768;
+
+static HASH_BITS: int = 15;
+static HASH_SIZE: int = 32768;                  // 1 << 15
+static HASH_MASK: int = 32767;
+static HASH_SHIFT: int = 5;                     // (HASH_BITS + 2) / 3
+static NO_POSITION: int = -1;
+
+// --- Block tunables ------------------------------------------------------
+
+static STORED_BLOCK_MAX: int = 65535;
+static DEFAULT_BLOCK_SIZE: int = 16384;
+static MIN_BLOCK_SIZE: int = 256;
+
+// --- Arithmetic coder tunables -------------------------------------------
+
+// A 32 bit range coder: the interval is [low, low + range) with the top byte
+// shifted out whenever the interval no longer straddles a byte boundary.
+static CODER_TOP: int = 16777216;               // 1 << 24
+static CODER_BOTTOM: int = 65536;               // 1 << 16
+static CODER_MAX: int = 4294967295;             // 0xFFFFFFFF
+static MODEL_TOTAL_MAX: int = 65536;
+static MODEL_INCREMENT: int = 32;
+static MODEL_RESCALE_SHIFT: int = 1;
+
+// --- Checksum tunables ---------------------------------------------------
+
+static CRC32_POLY: int = 3988292384;            // 0xEDB88320, reflected
+static CRC32_INIT: int = 4294967295;            // 0xFFFFFFFF
+static CRC32_TABLE_SIZE: int = 256;
+static CRC32_SLICE_COUNT: int = 8;
+
+static ADLER_BASE: int = 65521;
+static ADLER_NMAX: int = 5552;
+
+// A string literal stands in for the apostrophe character, which the lexer
+// cannot express as an escaped char literal.
+static APOSTROPHE: string = "'";
+
+// --- Result codes --------------------------------------------------------
+
+enum Status: {
+    Ok;
+    NeedMoreInput;
+    OutputFull;
+    CorruptStream;
+    BadCodeLengths;
+    BadDistance;
+    ChecksumMismatch;
+    Unsupported;
+}
+
+enum BlockType: {
+    Stored;
+    Fixed = 1;
+    Dynamic = 2;
+    Reserved = 3;
+}
+
+enum BitOrder: {
+    MsbFirst;
+    LsbFirst;
+}
+
+enum Level: {
+    Store;
+    Fastest = 1;
+    Fast = 2;
+    Default = 6;
+    Best = 9;
+}
+
+// --- Byte buffer ---------------------------------------------------------
+
+// A growable byte buffer with a read cursor. Every codec in this file reads
+// from and writes to one of these, so the bit cursors only ever need to know
+// about a single container type.
+struct ByteBuffer: {
+
+    fn size(self: &const shared) -> int: {
+        return .data.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .data.size() == 0;
+    }
+
+    fn remaining(self: &const shared) -> int: {
+        return .data.size() - .cursor;
+    }
+
+    fn exhausted(self: &const shared) -> bool: {
+        return .cursor >= .data.size();
+    }
+
+    fn rewind(self: &unique): {
+        .cursor = 0;
+    }
+
+    fn clear(self: &unique): {
+        .data.clear();
+        .cursor = 0;
+    }
+
+    fn reserve(self: &unique, n: int): {
+        .data.reserve(n);
+    }
+
+    // Stores only the low eight bits; the caller is responsible for the
+    // masking convention, but the assert keeps honest callers honest.
+    fn push(self: &unique, value: int): {
+        .data.push_back(value & BYTE_MASK);
+    }
+
+    fn push_short_le(self: &unique, value: int): {
+        .push(value & BYTE_MASK);
+        .push((value >> BYTE_BITS) & BYTE_MASK);
+    }
+
+    fn push_short_be(self: &unique, value: int): {
+        .push((value >> BYTE_BITS) & BYTE_MASK);
+        .push(value & BYTE_MASK);
+    }
+
+    fn push_word_le(self: &unique, value: int): {
+        .push(value & BYTE_MASK);
+        .push((value >> 8) & BYTE_MASK);
+        .push((value >> 16) & BYTE_MASK);
+        .push((value >> 24) & BYTE_MASK);
+    }
+
+    fn push_word_be(self: &unique, value: int): {
+        .push((value >> 24) & BYTE_MASK);
+        .push((value >> 16) & BYTE_MASK);
+        .push((value >> 8) & BYTE_MASK);
+        .push(value & BYTE_MASK);
+    }
+
+    fn at(self: &const shared, index: int) -> int: {
+        return .data.at(index) & BYTE_MASK;
+    }
+
+    fn read(self: &unique) -> int: {
+        let value = .data.at(.cursor) & BYTE_MASK;
+        .cursor += 1;
+        return value;
+    }
+
+    fn peek(self: &const shared) -> int: {
+        return .data.at(.cursor) & BYTE_MASK;
+    }
+
+    fn peek_at(self: &const shared, offset: int) -> int: {
+        return .data.at(.cursor + offset) & BYTE_MASK;
+    }
+
+    fn read_short_le(self: &unique) -> int: {
+        let low = .read();
+        let high = .read();
+        return low | (high << BYTE_BITS);
+    }
+
+    fn read_short_be(self: &unique) -> int: {
+        let high = .read();
+        let low = .read();
+        return (high << BYTE_BITS) | low;
+    }
+
+    fn read_word_le(self: &unique) -> int: {
+        let b0 = .read();
+        let b1 = .read();
+        let b2 = .read();
+        let b3 = .read();
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    fn read_word_be(self: &unique) -> int: {
+        let b0 = .read();
+        let b1 = .read();
+        let b2 = .read();
+        let b3 = .read();
+        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+    }
+
+    // Copy `count` bytes starting at `from` onto the end of the buffer. The
+    // ranges are allowed to overlap; that is exactly what an LZ77 back
+    // reference does when the distance is smaller than the length.
+    fn copy_within(self: &unique, from: int, count: int): {
+        var i: int = 0;
+        while i < count: {
+            .data.push_back(.data.at(from + i) & BYTE_MASK);
+            i += 1;
+        }
+    }
+
+    fn append(self: &unique, other: &const shared ByteBuffer): {
+        var i: int = 0;
+        while i < other.size(): {
+            .data.push_back(other.at(i));
+            i += 1;
+        }
+    }
+
+    fn equals(self: &const shared, other: &const shared ByteBuffer) -> bool: {
+        if .data.size() != other.size(): {
+            return false;
+        }
+        var i: int = 0;
+        while i < .data.size(): {
+            if (.data.at(i) & BYTE_MASK) != other.at(i): {
+                return false;
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    data: vector{int};
+    cursor: int = 0;
+}
+
+// --- Bit writer ----------------------------------------------------------
+
+// Packs codes into a byte buffer. A 32 bit accumulator holds the pending
+// bits; whole bytes are flushed out of it as soon as eight bits are ready.
+//
+// In MSB-first order the first bit written becomes the high bit of the first
+// output byte, which is what most container formats use for their headers.
+// In LSB-first order the first bit written becomes bit 0, which is what
+// deflate uses for Huffman codes.
+struct BitWriter: {
+
+    fn init(self: &unique, order: BitOrder): {
+        .order = order;
+        .accumulator = 0;
+        .bit_count = 0;
+        .bits_written = 0;
+    }
+
+    fn bit_position(self: &const shared) -> int: {
+        return .bits_written;
+    }
+
+    fn byte_position(self: &const shared) -> int: {
+        return .bits_written / BYTE_BITS;
+    }
+
+    fn is_aligned(self: &const shared) -> bool: {
+        return .bit_count == 0;
+    }
+
+    fn pending(self: &const shared) -> int: {
+        return .bit_count;
+    }
+
+    // Write a single bit. The two orderings differ only in which end of the
+    // accumulator the new bit is grafted onto.
+    fn put_bit(self: &unique, bit: int): {
+        let value = bit & 1;
+        if .order == BitOrder::MsbFirst: {
+            .accumulator = ((.accumulator << 1) | value) & WORD_MASK;
+        } else: {
+            .accumulator = (.accumulator | (value << .bit_count)) & WORD_MASK;
+        }
+        .bit_count += 1;
+        .bits_written += 1;
+        if .bit_count == BYTE_BITS: {
+            .emit_byte();
+        }
+    }
+
+    fn emit_byte(self: &unique): {
+        if .order == BitOrder::MsbFirst: {
+            .out.push(.accumulator & BYTE_MASK);
+        } else: {
+            .out.push(.accumulator & BYTE_MASK);
+        }
+        .accumulator = 0;
+        .bit_count = 0;
+    }
+
+    // Write `count` bits of `value`, most significant bit first. Long codes
+    // go through the accumulator one bit at a time so the two orderings stay
+    // in one code path; the fast paths below handle the common widths.
+    fn put_bits_msb(self: &unique, value: int, count: int): {
+        var i = count - 1;
+        while i >= 0: {
+            .put_bit((value >> i) & 1);
+            i -= 1;
+        }
+    }
+
+    // Write `count` bits of `value`, least significant bit first.
+    fn put_bits_lsb(self: &unique, value: int, count: int): {
+        var i: int = 0;
+        while i < count: {
+            .put_bit((value >> i) & 1);
+            i += 1;
+        }
+    }
+
+    fn put_bits(self: &unique, value: int, count: int): {
+        if .order == BitOrder::MsbFirst: {
+            .put_bits_msb(value, count);
+        } else: {
+            .put_bits_lsb(value, count);
+        }
+    }
+
+    // A Huffman code is stored most significant bit first but is emitted
+    // into an LSB-first stream, so the bits come out reversed relative to
+    // the code's numeric value.
+    fn put_code(self: &unique, code: int, length: int): {
+        if .order == BitOrder::LsbFirst: {
+            var i = length - 1;
+            while i >= 0: {
+                .put_bit((code >> i) & 1);
+                i -= 1;
+            }
+        } else: {
+            .put_bits_msb(code, length);
+        }
+    }
+
+    fn put_byte(self: &unique, value: int): {
+        if .bit_count == 0: {
+            .out.push(value & BYTE_MASK);
+            .bits_written += BYTE_BITS;
+        } else: {
+            .put_bits(value & BYTE_MASK, BYTE_BITS);
+        }
+    }
+
+    fn put_short(self: &unique, value: int): {
+        .put_byte(value & BYTE_MASK);
+        .put_byte((value >> BYTE_BITS) & BYTE_MASK);
+    }
+
+    fn put_word(self: &unique, value: int): {
+        .put_short(value & SHORT_MASK);
+        .put_short((value >> SHORT_BITS) & SHORT_MASK);
+    }
+
+    // Pad with zero bits until the next byte boundary.
+    fn align(self: &unique): {
+        while .bit_count != 0: {
+            .put_bit(0);
+        }
+    }
+
+    // Pad with one bits instead; some framing formats use this so that a
+    // truncated stream is detectable.
+    fn align_ones(self: &unique): {
+        while .bit_count != 0: {
+            .put_bit(1);
+        }
+    }
+
+    fn flush(self: &unique): {
+        .align();
+    }
+
+    fn raw_copy(self: &unique, source: &const shared ByteBuffer, from: int, count: int): {
+        .align();
+        var i: int = 0;
+        while i < count: {
+            .out.push(source.at(from + i));
+            .bits_written += BYTE_BITS;
+            i += 1;
+        }
+    }
+
+    out: ByteBuffer;
+    accumulator: int = 0;
+    bit_count: int = 0;
+    bits_written: int = 0;
+    order: BitOrder = BitOrder::LsbFirst;
+}
+
+// --- Bit reader ----------------------------------------------------------
+
+// The mirror image of `BitWriter`. The reader keeps a bit accumulator that
+// is refilled a byte at a time, and exposes a `peek` operation because the
+// table-driven Huffman decoder needs ROOT_BITS of lookahead before it knows
+// how many bits the next symbol actually consumes.
+struct BitReader: {
+
+    fn init(self: &unique, order: BitOrder): {
+        .order = order;
+        .accumulator = 0;
+        .bit_count = 0;
+        .bits_read = 0;
+        .overrun = false;
+    }
+
+    fn bit_position(self: &const shared) -> int: {
+        return .bits_read;
+    }
+
+    fn byte_position(self: &const shared) -> int: {
+        return .source.cursor;
+    }
+
+    fn is_aligned(self: &const shared) -> bool: {
+        return .bit_count == 0;
+    }
+
+    fn available(self: &const shared) -> int: {
+        return .source.remaining() * BYTE_BITS + .bit_count;
+    }
+
+    fn failed(self: &const shared) -> bool: {
+        return .overrun;
+    }
+
+    // Pull one byte into the accumulator. Reading past the end sets the
+    // overrun flag and feeds zero bits so the decoder can unwind gracefully
+    // instead of trapping.
+    fn refill_byte(self: &unique): {
+        if .source.exhausted(): {
+            .overrun = true;
+            if .order == BitOrder::MsbFirst: {
+                .accumulator = (.accumulator << BYTE_BITS) & WORD_MASK;
+            } else: {
+                discard 0;
+            }
+            .bit_count += BYTE_BITS;
+            return;
+        }
+        let byte_value = .source.read();
+        if .order == BitOrder::MsbFirst: {
+            .accumulator = ((.accumulator << BYTE_BITS) | byte_value) & WORD_MASK;
+        } else: {
+            .accumulator = (.accumulator | (byte_value << .bit_count)) & WORD_MASK;
+        }
+        .bit_count += BYTE_BITS;
+    }
+
+    // Guarantee at least `count` bits in the accumulator.
+    fn refill(self: &unique, count: int): {
+        while .bit_count < count: {
+            .refill_byte();
+        }
+    }
+
+    fn get_bit(self: &unique) -> int: {
+        if .bit_count == 0: {
+            .refill_byte();
+        }
+        var bit: int = 0;
+        if .order == BitOrder::MsbFirst: {
+            bit = (.accumulator >> (.bit_count - 1)) & 1;
+            .bit_count -= 1;
+            .accumulator = .accumulator & ((1 << .bit_count) - 1);
+        } else: {
+            bit = .accumulator & 1;
+            .accumulator = (.accumulator >> 1) & WORD_MASK;
+            .bit_count -= 1;
+        }
+        .bits_read += 1;
+        return bit;
+    }
+
+    fn get_bits_msb(self: &unique, count: int) -> int: {
+        var value: int = 0;
+        var i: int = 0;
+        while i < count: {
+            value = (value << 1) | .get_bit();
+            i += 1;
+        }
+        return value;
+    }
+
+    fn get_bits_lsb(self: &unique, count: int) -> int: {
+        var value: int = 0;
+        var i: int = 0;
+        while i < count: {
+            value = value | (.get_bit() << i);
+            i += 1;
+        }
+        return value;
+    }
+
+    fn get_bits(self: &unique, count: int) -> int: {
+        if count == 0: {
+            return 0;
+        }
+        if .order == BitOrder::MsbFirst: {
+            return .get_bits_msb(count);
+        } else: {
+            return .get_bits_lsb(count);
+        }
+    }
+
+    // Look at the next `count` bits without consuming them. The value is
+    // always returned in the reader's native order, which is what the flat
+    // decode tables are indexed by.
+    fn peek_bits(self: &unique, count: int) -> int: {
+        .refill(count);
+        if .order == BitOrder::MsbFirst: {
+            return (.accumulator >> (.bit_count - count)) & ((1 << count) - 1);
+        } else: {
+            return .accumulator & ((1 << count) - 1);
+        }
+    }
+
+    // Drop bits that a previous `peek_bits` reported on.
+    fn drop_bits(self: &unique, count: int): {
+        if .order == BitOrder::MsbFirst: {
+            .bit_count -= count;
+            .accumulator = .accumulator & ((1 << .bit_count) - 1);
+        } else: {
+            .accumulator = (.accumulator >> count) & WORD_MASK;
+            .bit_count -= count;
+        }
+        .bits_read += count;
+    }
+
+    fn get_byte(self: &unique) -> int: {
+        if .bit_count == 0: {
+            if .source.exhausted(): {
+                .overrun = true;
+                return 0;
+            }
+            .bits_read += BYTE_BITS;
+            return .source.read();
+        }
+        return .get_bits(BYTE_BITS);
+    }
+
+    fn get_short(self: &unique) -> int: {
+        let low = .get_byte();
+        let high = .get_byte();
+        return low | (high << BYTE_BITS);
+    }
+
+    fn get_word(self: &unique) -> int: {
+        let low = .get_short();
+        let high = .get_short();
+        return low | (high << SHORT_BITS);
+    }
+
+    // Discard the partial byte currently in the accumulator.
+    fn align(self: &unique): {
+        let drop = .bit_count % BYTE_BITS;
+        if drop != 0: {
+            .drop_bits(drop);
+        }
+        .accumulator = 0;
+        .bit_count = 0;
+    }
+
+    // Copy `count` raw bytes out of an aligned stream; used by stored blocks.
+    fn raw_copy(self: &unique, sink: &unique ByteBuffer, count: int) -> bool: {
+        .align();
+        if .source.remaining() < count: {
+            .overrun = true;
+            return false;
+        }
+        var i: int = 0;
+        while i < count: {
+            sink.push(.source.read());
+            .bits_read += BYTE_BITS;
+            i += 1;
+        }
+        return true;
+    }
+
+    source: ByteBuffer;
+    accumulator: int = 0;
+    bit_count: int = 0;
+    bits_read: int = 0;
+    overrun: bool = false;
+    order: BitOrder = BitOrder::LsbFirst;
+}
+
+// Reverse the low `width` bits of `code`. Canonical Huffman codes are built
+// MSB-first but written LSB-first, so the tables store the reversed form and
+// the hot loop avoids the per-symbol reversal.
+fn reverse_bits(code: int, width: int) -> int: {
+    var result: int = 0;
+    var value = code;
+    var i: int = 0;
+    while i < width: {
+        result = (result << 1) | (value & 1);
+        value = (value >> 1) & WORD_MASK;
+        i += 1;
+    }
+    return result;
+}
+
+// Population count of a 32 bit word by the classic halving trick, written
+// with explicit masks because the language has no hexadecimal literals.
+fn popcount32(value: int) -> int: {
+    var v = value & WORD_MASK;
+    v = v - ((v >> 1) & 1431655765);                            // 0x55555555
+    v = (v & 858993459) + ((v >> 2) & 858993459);               // 0x33333333
+    v = (v + (v >> 4)) & 252645135;                             // 0x0F0F0F0F
+    v = v + (v >> 8);
+    v = v + (v >> 16);
+    return v & 63;
+}
+
+// Index of the highest set bit, or -1 for zero.
+fn highest_bit(value: int) -> int: {
+    var v = value & WORD_MASK;
+    if v == 0: {
+        return -1;
+    }
+    var position: int = 0;
+    if (v & 4294901760) != 0: {                                 // 0xFFFF0000
+        v = (v >> 16) & SHORT_MASK;
+        position += 16;
+    }
+    if (v & 65280) != 0: {                                      // 0xFF00
+        v = (v >> 8) & BYTE_MASK;
+        position += 8;
+    }
+    if (v & 240) != 0: {                                        // 0xF0
+        v = (v >> 4) & NIBBLE_MASK;
+        position += 4;
+    }
+    if (v & 12) != 0: {                                         // 0x0C
+        v = (v >> 2) & 3;
+        position += 2;
+    }
+    if (v & 2) != 0: {
+        position += 1;
+    }
+    return position;
+}
+
+// Round up to the next power of two, saturating at 2^31.
+fn round_up_pow2(value: int) -> int: {
+    if value <= 1: {
+        return 1;
+    }
+    var v = (value - 1) & WORD_MASK;
+    v = v | (v >> 1);
+    v = v | (v >> 2);
+    v = v | (v >> 4);
+    v = v | (v >> 8);
+    v = v | (v >> 16);
+    return (v + 1) & WORD_MASK;
+}
+
+// --- Frequency counting --------------------------------------------------
+
+// A histogram over one alphabet. `total` and `used` are maintained
+// incrementally so the tree builder never has to rescan the table.
+struct FrequencyTable: {
+
+    fn init(self: &unique, alphabet: int): {
+        .counts.clear();
+        .counts.resize(alphabet);
+        var i: int = 0;
+        while i < alphabet: {
+            .counts.at(i) = 0;
+            i += 1;
+        }
+        .alphabet = alphabet;
+        .total = 0;
+        .used = 0;
+    }
+
+    fn size(self: &const shared) -> int: {
+        return .alphabet;
+    }
+
+    fn at(self: &const shared, symbol: int) -> int: {
+        return .counts.at(symbol);
+    }
+
+    fn add(self: &unique, symbol: int): {
+        if .counts.at(symbol) == 0: {
+            .used += 1;
+        }
+        .counts.at(symbol) += 1;
+        .total += 1;
+    }
+
+    fn add_many(self: &unique, symbol: int, count: int): {
+        if .counts.at(symbol) == 0: {
+            if count > 0: {
+                .used += 1;
+            }
+        }
+        .counts.at(symbol) += count;
+        .total += count;
+    }
+
+    // Count every byte of a buffer. This is the hottest loop in the encoder
+    // for incompressible input, so it does no bounds arithmetic beyond the
+    // single mask.
+    fn count_bytes(self: &unique, input: &const shared ByteBuffer): {
+        var i: int = 0;
+        let n = input.size();
+        while i < n: {
+            let symbol = input.at(i) & BYTE_MASK;
+            if .counts.at(symbol) == 0: {
+                .used += 1;
+            }
+            .counts.at(symbol) += 1;
+            i += 1;
+        }
+        .total += n;
+    }
+
+    // Count pairs of adjacent bytes into a 65536 entry table; used by the
+    // order-1 model in the arithmetic coder path.
+    fn count_pairs(self: &unique, input: &const shared ByteBuffer): {
+        if input.size() < 2: {
+            return;
+        }
+        var previous = input.at(0);
+        var i: int = 1;
+        while i < input.size(): {
+            let current = input.at(i);
+            let symbol = ((previous & BYTE_MASK) << BYTE_BITS) | (current & BYTE_MASK);
+            .add(symbol);
+            previous = current;
+            i += 1;
+        }
+    }
+
+    // Guarantee at least two used symbols. A Huffman tree over a single
+    // symbol has no code at all, which every decoder would reject, so the
+    // encoder pads the histogram with phantom counts.
+    fn ensure_two_symbols(self: &unique): {
+        var padded: int = 0;
+        var symbol: int = 0;
+        while symbol < .alphabet: {
+            if .used >= 2: {
+                return;
+            }
+            if .counts.at(symbol) == 0: {
+                .counts.at(symbol) = 1;
+                .used += 1;
+                .total += 1;
+                padded += 1;
+            }
+            symbol += 1;
+        }
+        discard padded;
+    }
+
+    // Halve every non-zero count, rounding up. Adaptive encoders call this
+    // when the running total would overflow the model's precision.
+    fn rescale(self: &unique): {
+        var new_total: int = 0;
+        var new_used: int = 0;
+        var i: int = 0;
+        while i < .alphabet: {
+            let count = .counts.at(i);
+            if count > 0: {
+                let halved = (count + 1) >> MODEL_RESCALE_SHIFT;
+                .counts.at(i) = halved;
+                new_total += halved;
+                new_used += 1;
+            }
+            i += 1;
+        }
+        .total = new_total;
+        .used = new_used;
+    }
+
+    fn max_count(self: &const shared) -> int: {
+        var best: int = 0;
+        var i: int = 0;
+        while i < .alphabet: {
+            if .counts.at(i) > best: {
+                best = .counts.at(i);
+            }
+            i += 1;
+        }
+        return best;
+    }
+
+    // Shannon entropy of the histogram, scaled by 1000 and computed with an
+    // integer logarithm so no floating point is involved.
+    fn entropy_millibits(self: &const shared) -> int: {
+        if .total == 0: {
+            return 0;
+        }
+        var accumulated: int = 0;
+        var i: int = 0;
+        while i < .alphabet: {
+            let count = .counts.at(i);
+            if count > 0: {
+                let ratio = (.total * 1000) / count;
+                accumulated += count * log2_millibits(ratio);
+            }
+            i += 1;
+        }
+        return accumulated / .total;
+    }
+
+    counts: vector{int};
+    alphabet: int = 0;
+    total: int = 0;
+    used: int = 0;
+}
+
+// Base-2 logarithm of a value scaled by 1000, returned in millibits. The
+// fractional part comes from a small linear interpolation between adjacent
+// powers of two, which is accurate enough for block type selection.
+fn log2_millibits(scaled: int) -> int: {
+    if scaled <= 1000: {
+        return 0;
+    }
+    let whole = highest_bit(scaled / 1000);
+    let residue = scaled / 1000;
+    var fraction: int = 0;
+    if whole > 0: {
+        let anchor = 1 << whole;
+        fraction = ((residue - anchor) * 1000) / anchor;
+    }
+    return whole * 1000 + fraction;
+}
+
+// --- Huffman tree nodes --------------------------------------------------
+
+// Nodes live in a flat array; -1 stands in for a null child. Leaves carry
+// the symbol, internal nodes carry -1.
+struct HuffmanNode: {
+
+    fn is_leaf(self: &const shared) -> bool: {
+        return .left < 0 && .right < 0;
+    }
+
+    fn is_internal(self: &const shared) -> bool: {
+        return .left >= 0 || .right >= 0;
+    }
+
+    weight: int = 0;
+    symbol: int = -1;
+    left: int = -1;
+    right: int = -1;
+    depth: int = 0;
+}
+
+// --- Priority queue ------------------------------------------------------
+
+// A binary min-heap keyed on (weight, tie) so that tree construction is
+// deterministic: two nodes of equal weight are ordered by insertion index,
+// which makes the resulting code lengths reproducible across runs.
+struct NodeQueue: {
+
+    fn size(self: &const shared) -> int: {
+        return .heap.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .heap.size() == 0;
+    }
+
+    fn clear(self: &unique): {
+        .heap.clear();
+        .keys.clear();
+        .ties.clear();
+        .sequence = 0;
+    }
+
+    fn parent_of(self: &const shared, index: int) -> int: {
+        return (index - 1) / 2;
+    }
+
+    fn left_of(self: &const shared, index: int) -> int: {
+        return index * 2 + 1;
+    }
+
+    fn right_of(self: &const shared, index: int) -> int: {
+        return index * 2 + 2;
+    }
+
+    // Strict weak ordering on the packed key.
+    fn less(self: &const shared, a: int, b: int) -> bool: {
+        if .keys.at(a) != .keys.at(b): {
+            return .keys.at(a) < .keys.at(b);
+        }
+        return .ties.at(a) < .ties.at(b);
+    }
+
+    fn swap_entries(self: &unique, a: int, b: int): {
+        swap(.heap.at(a), .heap.at(b));
+        swap(.keys.at(a), .keys.at(b));
+        swap(.ties.at(a), .ties.at(b));
+    }
+
+    fn push(self: &unique, node: int, weight: int): {
+        .heap.push_back(node);
+        .keys.push_back(weight);
+        .ties.push_back(.sequence);
+        .sequence += 1;
+        .sift_up(.heap.size() - 1);
+    }
+
+    fn sift_up(self: &unique, start: int): {
+        var index = start;
+        while index > 0: {
+            let parent = .parent_of(index);
+            if !.less(index, parent): {
+                return;
+            }
+            .swap_entries(index, parent);
+            index = parent;
+        }
+    }
+
+    fn sift_down(self: &unique, start: int): {
+        var index = start;
+        let count = .heap.size();
+        loop: {
+            let left = .left_of(index);
+            if left >= count: {
+                return;
+            }
+            var smallest = left;
+            let right = .right_of(index);
+            if right < count: {
+                if .less(right, left): {
+                    smallest = right;
+                }
+            }
+            if !.less(smallest, index): {
+                return;
+            }
+            .swap_entries(index, smallest);
+            index = smallest;
+        }
+    }
+
+    fn top(self: &const shared) -> int: {
+        return .heap.at(0);
+    }
+
+    fn top_weight(self: &const shared) -> int: {
+        return .keys.at(0);
+    }
+
+    fn pop(self: &unique) -> int: {
+        let result = .heap.at(0);
+        let last = .heap.size() - 1;
+        .swap_entries(0, last);
+        .heap.pop_back();
+        .keys.pop_back();
+        .ties.pop_back();
+        if .heap.size() > 1: {
+            .sift_down(0);
+        }
+        return result;
+    }
+
+    // Verify the heap invariant; the harness calls this after a build.
+    fn is_heap(self: &const shared) -> bool: {
+        var i: int = 1;
+        while i < .heap.size(): {
+            let parent = (i - 1) / 2;
+            if .keys.at(i) < .keys.at(parent): {
+                return false;
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    heap: vector{int};
+    keys: vector{int};
+    ties: vector{int};
+    sequence: int = 0;
+}
+
+// --- Huffman tree --------------------------------------------------------
+
+// Builds a Huffman tree from a histogram, derives code lengths, enforces a
+// maximum length, and turns the lengths into canonical codes.
+//
+// The canonical form is the one every container format agrees on: symbols
+// are sorted by (length, symbol) and codes are handed out in increasing
+// numeric order, so the decoder only needs the length of each symbol.
+struct HuffmanTree: {
+
+    fn clear(self: &unique): {
+        .nodes.clear();
+        .lengths.clear();
+        .codes.clear();
+        .queue.clear();
+        .root = -1;
+        .max_length = 0;
+        .symbol_count = 0;
+    }
+
+    fn node_count(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn new_leaf(self: &unique, symbol: int, weight: int) -> int: {
+        var node = HuffmanNode();
+        node.symbol = symbol;
+        node.weight = weight;
+        node.left = -1;
+        node.right = -1;
+        .nodes.push_back(node);
+        return .nodes.size() - 1;
+    }
+
+    fn new_internal(self: &unique, left: int, right: int) -> int: {
+        var node = HuffmanNode();
+        node.symbol = -1;
+        node.left = left;
+        node.right = right;
+        node.weight = .nodes.at(left).weight + .nodes.at(right).weight;
+        .nodes.push_back(node);
+        return .nodes.size() - 1;
+    }
+
+    // Classic two-pop construction. Every used symbol becomes a leaf, then
+    // the two lightest subtrees are repeatedly merged until one remains.
+    fn build(self: &unique, frequencies: &const shared FrequencyTable) -> bool: {
+        .clear();
+        .symbol_count = frequencies.size();
+        .lengths.resize(frequencies.size());
+        .codes.resize(frequencies.size());
+        var symbol: int = 0;
+        while symbol < frequencies.size(): {
+            .lengths.at(symbol) = 0;
+            .codes.at(symbol) = 0;
+            symbol += 1;
+        }
+
+        var leaves: int = 0;
+        symbol = 0;
+        while symbol < frequencies.size(): {
+            let weight = frequencies.at(symbol);
+            if weight > 0: {
+                let node = .new_leaf(symbol, weight);
+                .queue.push(node, weight);
+                leaves += 1;
+            }
+            symbol += 1;
+        }
+
+        if leaves == 0: {
+            return false;
+        }
+        if leaves == 1: {
+            // Degenerate alphabet: give the single symbol a one bit code.
+            let only = .queue.pop();
+            .root = only;
+            .lengths.at(.nodes.at(only).symbol) = 1;
+            .max_length = 1;
+            .assign_canonical();
+            return true;
+        }
+
+        while .queue.size() > 1: {
+            let left = .queue.pop();
+            let right = .queue.pop();
+            let merged = .new_internal(left, right);
+            .queue.push(merged, .nodes.at(merged).weight);
+        }
+        .root = .queue.pop();
+        .measure_depths(.root, 0);
+        if .max_length > MAX_CODE_LENGTH: {
+            .limit_code_lengths(MAX_CODE_LENGTH);
+        }
+        .assign_canonical();
+        return true;
+    }
+
+    // Walk the tree iteratively with an explicit stack, recording the depth
+    // of every leaf. Recursion would be fine here but the iterative form is
+    // what the production encoder uses, so the benchmark keeps it.
+    fn measure_depths(self: &unique, root: int, anchor: int): {
+        var stack_nodes = vector{int}();
+        var stack_depths = vector{int}();
+        stack_nodes.push_back(root);
+        stack_depths.push_back(anchor);
+        .max_length = 0;
+        while !stack_nodes.empty(): {
+            let node = stack_nodes.back();
+            let depth = stack_depths.back();
+            stack_nodes.pop_back();
+            stack_depths.pop_back();
+            let entry: &const = .nodes.at(node);
+            if entry.is_leaf(): {
+                .lengths.at(entry.symbol) = depth;
+                if depth > .max_length: {
+                    .max_length = depth;
+                }
+            } else: {
+                if entry.left >= 0: {
+                    stack_nodes.push_back(entry.left);
+                    stack_depths.push_back(depth + 1);
+                }
+                if entry.right >= 0: {
+                    stack_nodes.push_back(entry.right);
+                    stack_depths.push_back(depth + 1);
+                }
+            }
+        }
+        destroy stack_nodes;
+        destroy stack_depths;
+    }
+
+    // Enforce a maximum code length using the Kraft sum.
+    //
+    // The Kraft sum of a prefix code is sum(2^-length) and equals exactly
+    // 2^limit when the code is complete. Overlong codes are first clamped to
+    // the limit, which pushes the sum above 2^limit; the excess is then paid
+    // back by lengthening the shortest codes one bit at a time, starting
+    // from the deepest, until the sum drops back to exactly 2^limit.
+    fn limit_code_lengths(self: &unique, limit: int): {
+        var histogram = vector{int}(MAX_CODE_LENGTH + 2);
+        var i: int = 0;
+        while i < MAX_CODE_LENGTH + 2: {
+            histogram.at(i) = 0;
+            i += 1;
+        }
+
+        var symbol: int = 0;
+        while symbol < .symbol_count: {
+            var length = .lengths.at(symbol);
+            if length > limit: {
+                length = limit;
+                .lengths.at(symbol) = limit;
+            }
+            if length > 0: {
+                histogram.at(length) += 1;
+            }
+            symbol += 1;
+        }
+
+        // Kraft sum scaled so that a complete code sums to 1 << limit.
+        var kraft: int = 0;
+        var length: int = 1;
+        while length <= limit: {
+            kraft += histogram.at(length) << (limit - length);
+            length += 1;
+        }
+
+        let target = 1 << limit;
+        while kraft > target: {
+            // Find the deepest length that still has a symbol to lengthen,
+            // one level above the limit's floor, and move one symbol down.
+            var donor = limit - 1;
+            while donor > 0: {
+                if histogram.at(donor) > 0: {
+                    break;
+                }
+                donor -= 1;
+            }
+            if donor == 0: {
+                break;
+            }
+            histogram.at(donor) -= 1;
+            histogram.at(donor + 1) += 1;
+            if donor + 1 < limit: {
+                histogram.at(limit) -= 1;
+                histogram.at(limit - 1) += 1;
+            }
+            kraft -= 1 << (limit - donor - 1);
+        }
+
+        // The sum may now sit below the target; hand the slack back to the
+        // shortest codes so the code stays complete.
+        while kraft < target: {
+            var taker = limit;
+            while taker > 0: {
+                if histogram.at(taker) > 0: {
+                    break;
+                }
+                taker -= 1;
+            }
+            if taker <= 1: {
+                break;
+            }
+            histogram.at(taker) -= 1;
+            histogram.at(taker - 1) += 1;
+            kraft += 1 << (limit - taker);
+        }
+
+        .rebuild_lengths_from_histogram(histogram, limit);
+        destroy histogram;
+    }
+
+    // Re-hand out the adjusted lengths, giving the shortest codes to the
+    // heaviest symbols. Symbols are visited in decreasing weight order,
+    // which is what keeps the rebalanced code close to optimal.
+    fn rebuild_lengths_from_histogram(self: &unique, histogram: &const shared vector{int}, limit: int): {
+        var order = vector{int}();
+        var symbol: int = 0;
+        while symbol < .symbol_count: {
+            if .lengths.at(symbol) > 0: {
+                order.push_back(symbol);
+            }
+            symbol += 1;
+        }
+        .sort_by_weight(order);
+
+        var cursor: int = 0;
+        var length: int = 1;
+        while length <= limit: {
+            var remaining = histogram.at(length);
+            while remaining > 0: {
+                if cursor >= order.size(): {
+                    remaining = 0;
+                } else: {
+                    .lengths.at(order.at(cursor)) = length;
+                    cursor += 1;
+                    remaining -= 1;
+                }
+            }
+            length += 1;
+        }
+        .max_length = limit;
+        destroy order;
+    }
+
+    // Insertion sort on symbol weight, descending. The arrays involved are
+    // at most MAX_SYMBOLS long so the quadratic bound is irrelevant, and the
+    // sort has to be stable for the canonical assignment to be reproducible.
+    fn sort_by_weight(self: &const shared, order: &unique vector{int}): {
+        var i: int = 1;
+        while i < order.size(): {
+            let key = order.at(i);
+            let key_weight = .weight_of_symbol(key);
+            var j = i - 1;
+            while j >= 0: {
+                if .weight_of_symbol(order.at(j)) >= key_weight: {
+                    break;
+                }
+                order.at(j + 1) = order.at(j);
+                j -= 1;
+            }
+            order.at(j + 1) = key;
+            i += 1;
+        }
+    }
+
+    fn weight_of_symbol(self: &const shared, symbol: int) -> int: {
+        var i: int = 0;
+        while i < .nodes.size(): {
+            let node: &const = .nodes.at(i);
+            if node.is_leaf(): {
+                if node.symbol == symbol: {
+                    return node.weight;
+                }
+            }
+            i += 1;
+        }
+        return 0;
+    }
+
+    // Canonical assignment: count codes of each length, compute the first
+    // code of each length, then hand codes out in symbol order.
+    fn assign_canonical(self: &unique): {
+        var count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
+        var next_code = vector{int}(MAX_CODE_LENGTH + 1);
+        var i: int = 0;
+        while i <= MAX_CODE_LENGTH: {
+            count_per_length.at(i) = 0;
+            next_code.at(i) = 0;
+            i += 1;
+        }
+
+        var symbol: int = 0;
+        while symbol < .symbol_count: {
+            let length = .lengths.at(symbol);
+            if length > 0: {
+                count_per_length.at(length) += 1;
+            }
+            symbol += 1;
+        }
+
+        var code: int = 0;
+        count_per_length.at(0) = 0;
+        var bits: int = 1;
+        while bits <= MAX_CODE_LENGTH: {
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
+        }
+
+        symbol = 0;
+        while symbol < .symbol_count: {
+            let length = .lengths.at(symbol);
+            if length > 0: {
+                .codes.at(symbol) = next_code.at(length);
+                next_code.at(length) += 1;
+            } else: {
+                .codes.at(symbol) = 0;
+            }
+            symbol += 1;
+        }
+        destroy count_per_length;
+        destroy next_code;
+    }
+
+    // The Kraft sum must equal exactly 2^max_length for a complete code.
+    fn kraft_sum(self: &const shared) -> int: {
+        var total: int = 0;
+        var symbol: int = 0;
+        while symbol < .symbol_count: {
+            let length = .lengths.at(symbol);
+            if length > 0: {
+                total += 1 << (.max_length - length);
+            }
+            symbol += 1;
+        }
+        return total;
+    }
+
+    fn is_complete(self: &const shared) -> bool: {
+        if .max_length == 0: {
+            return false;
+        }
+        return .kraft_sum() == (1 << .max_length);
+    }
+
+    // Total compressed size of the alphabet under this code, in bits.
+    fn encoded_bits(self: &const shared, frequencies: &const shared FrequencyTable) -> int: {
+        var total: int = 0;
+        var symbol: int = 0;
+        while symbol < .symbol_count: {
+            total += .lengths.at(symbol) * frequencies.at(symbol);
+            symbol += 1;
+        }
+        return total;
+    }
+
+    nodes: vector{HuffmanNode};
+    queue: NodeQueue;
+    lengths: vector{int};
+    codes: vector{int};
+    root: int = -1;
+    max_length: int = 0;
+    symbol_count: int = 0;
+}
+
+// --- Encode table --------------------------------------------------------
+
+// Flattens a tree's canonical codes into two parallel arrays plus a
+// pre-reversed copy for LSB-first output. Writing a symbol then costs one
+// array read and one `put_code`.
+struct EncodeTable: {
+
+    fn build(self: &unique, tree: &const shared HuffmanTree): {
+        .codes.clear();
+        .lengths.clear();
+        .reversed.clear();
+        .codes.resize(tree.symbol_count);
+        .lengths.resize(tree.symbol_count);
+        .reversed.resize(tree.symbol_count);
+        .symbol_count = tree.symbol_count;
+        .max_length = tree.max_length;
+        var symbol: int = 0;
+        while symbol < tree.symbol_count: {
+            let length = tree.lengths.at(symbol);
+            let code = tree.codes.at(symbol);
+            .lengths.at(symbol) = length;
+            .codes.at(symbol) = code;
+            .reversed.at(symbol) = reverse_bits(code, length);
+            symbol += 1;
+        }
+    }
+
+    // Build directly from a length vector, which is what the decoder side
+    // does when it reconstructs a dynamic block's code from the header.
+    fn build_from_lengths(self: &unique, lengths: &const shared vector{int}): {
+        .codes.clear();
+        .lengths.clear();
+        .reversed.clear();
+        .codes.resize(lengths.size());
+        .lengths.resize(lengths.size());
+        .reversed.resize(lengths.size());
+        .symbol_count = lengths.size();
+        .max_length = 0;
+
+        var count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
+        var i: int = 0;
+        while i <= MAX_CODE_LENGTH: {
+            count_per_length.at(i) = 0;
+            i += 1;
+        }
+        var symbol: int = 0;
+        while symbol < lengths.size(): {
+            let length = lengths.at(symbol);
+            .lengths.at(symbol) = length;
+            if length > 0: {
+                count_per_length.at(length) += 1;
+                if length > .max_length: {
+                    .max_length = length;
+                }
+            }
+            symbol += 1;
+        }
+
+        var next_code = vector{int}(MAX_CODE_LENGTH + 1);
+        var code: int = 0;
+        count_per_length.at(0) = 0;
+        var bits: int = 1;
+        while bits <= MAX_CODE_LENGTH: {
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
+        }
+
+        symbol = 0;
+        while symbol < lengths.size(): {
+            let length = .lengths.at(symbol);
+            if length > 0: {
+                let assigned = next_code.at(length);
+                next_code.at(length) += 1;
+                .codes.at(symbol) = assigned;
+                .reversed.at(symbol) = reverse_bits(assigned, length);
+            } else: {
+                .codes.at(symbol) = 0;
+                .reversed.at(symbol) = 0;
+            }
+            symbol += 1;
+        }
+        destroy count_per_length;
+        destroy next_code;
+    }
+
+    fn length_of(self: &const shared, symbol: int) -> int: {
+        return .lengths.at(symbol);
+    }
+
+    fn code_of(self: &const shared, symbol: int) -> int: {
+        return .codes.at(symbol);
+    }
+
+    fn has_code(self: &const shared, symbol: int) -> bool: {
+        return .lengths.at(symbol) > 0;
+    }
+
+    fn emit(self: &const shared, writer: &unique BitWriter, symbol: int): {
+        writer.put_code(.codes.at(symbol), .lengths.at(symbol));
+    }
+
+    // Fast path for an LSB-first stream: the reversal has already been paid
+    // for at table build time.
+    fn emit_reversed(self: &const shared, writer: &unique BitWriter, symbol: int): {
+        writer.put_bits_lsb(.reversed.at(symbol), .lengths.at(symbol));
+    }
+
+    codes: vector{int};
+    reversed: vector{int};
+    lengths: vector{int};
+    symbol_count: int = 0;
+    max_length: int = 0;
+}
+
+// --- Decode table --------------------------------------------------------
+
+// One entry of the flat decode table. A code shorter than ROOT_BITS is
+// replicated across every index whose low bits match it, so a single lookup
+// resolves the symbol. Longer codes store a link to a secondary table.
+struct DecodeEntry: {
+
+    fn is_link(self: &const shared) -> bool: {
+        return .sub_table >= 0;
+    }
+
+    fn is_valid(self: &const shared) -> bool: {
+        return .bits > 0;
+    }
+
+    symbol: int = -1;
+    bits: int = 0;
+    sub_table: int = -1;
+    sub_bits: int = 0;
+}
+
+// Two-level table-driven decoder.
+//
+// The root table is indexed by the next ROOT_BITS of the stream, read in the
+// stream's native order. Because deflate writes codes LSB-first, the index a
+// code occupies is the code's bit-reversal, and every longer index sharing
+// that suffix maps to the same entry. That is the replication loop below,
+// which strides by `1 << length` over the whole root table.
+struct DecodeTable: {
+
+    fn clear(self: &unique): {
+        .root.clear();
+        .sub.clear();
+        .symbol_count = 0;
+        .max_length = 0;
+        .under_subscribed = false;
+    }
+
+    fn root_size(self: &const shared) -> int: {
+        return .root.size();
+    }
+
+    fn build(self: &unique, lengths: &const shared vector{int}) -> bool: {
+        .clear();
+        .symbol_count = lengths.size();
+
+        var count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
+        var i: int = 0;
+        while i <= MAX_CODE_LENGTH: {
+            count_per_length.at(i) = 0;
+            i += 1;
+        }
+        var used: int = 0;
+        var symbol: int = 0;
+        while symbol < lengths.size(): {
+            let length = lengths.at(symbol);
+            if length > 0: {
+                if length > MAX_CODE_LENGTH: {
+                    destroy count_per_length;
+                    return false;
+                }
+                count_per_length.at(length) += 1;
+                used += 1;
+                if length > .max_length: {
+                    .max_length = length;
+                }
+            }
+            symbol += 1;
+        }
+        if used == 0: {
+            .under_subscribed = true;
+            destroy count_per_length;
+            return false;
+        }
+
+        // Over-subscribed codes are corrupt; under-subscribed ones are only
+        // legal for the degenerate single-symbol distance code.
+        var left: int = 1;
+        var bits: int = 1;
+        while bits <= MAX_CODE_LENGTH: {
+            left = left << 1;
+            left -= count_per_length.at(bits);
+            if left < 0: {
+                destroy count_per_length;
+                return false;
+            }
+            bits += 1;
+        }
+        if left > 0: {
+            .under_subscribed = true;
+            if used != 1: {
+                destroy count_per_length;
+                return false;
+            }
+        }
+
+        var next_code = vector{int}(MAX_CODE_LENGTH + 1);
+        var code: int = 0;
+        bits = 1;
+        while bits <= MAX_CODE_LENGTH: {
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
+        }
+
+        let root_bits = min_int(ROOT_BITS, .max_length);
+        let root_count = 1 << root_bits;
+        .root.resize(root_count);
+        var slot: int = 0;
+        while slot < root_count: {
+            var blank = DecodeEntry();
+            blank.symbol = -1;
+            blank.bits = 0;
+            blank.sub_table = -1;
+            .root.at(slot) = blank;
+            slot += 1;
+        }
+        .root_bits = root_bits;
+
+        symbol = 0;
+        while symbol < lengths.size(): {
+            let length = lengths.at(symbol);
+            if length > 0: {
+                let assigned = next_code.at(length);
+                next_code.at(length) += 1;
+                let index = reverse_bits(assigned, length);
+                if length <= root_bits: {
+                    .fill_root(index, length, symbol, root_bits);
+                } else: {
+                    .fill_sub(index, length, symbol, root_bits);
+                }
+            }
+            symbol += 1;
+        }
+
+        destroy count_per_length;
+        destroy next_code;
+        return true;
+    }
+
+    // Replicate a short code across every root index that ends in it.
+    fn fill_root(self: &unique, index: int, length: int, symbol: int, root_bits: int): {
+        let stride = 1 << length;
+        let limit = 1 << root_bits;
+        var slot = index;
+        while slot < limit: {
+            var entry = DecodeEntry();
+            entry.symbol = symbol;
+            entry.bits = length;
+            entry.sub_table = -1;
+            entry.sub_bits = 0;
+            .root.at(slot) = entry;
+            slot += stride;
+        }
+    }
+
+    // Route a long code through a secondary table. The root entry records
+    // where the secondary table starts and how many extra bits it consumes.
+    fn fill_sub(self: &unique, index: int, length: int, symbol: int, root_bits: int): {
+        let root_index = index & ((1 << root_bits) - 1);
+        let extra = length - root_bits;
+        var anchor = .root.at(root_index).sub_table;
+        if anchor < 0: {
+            anchor = .sub.size();
+            let span = 1 << SUB_BITS;
+            var i: int = 0;
+            while i < span: {
+                var blank = DecodeEntry();
+                blank.symbol = -1;
+                blank.bits = 0;
+                blank.sub_table = -1;
+                .sub.push_back(blank);
+                i += 1;
+            }
+            var link = DecodeEntry();
+            link.symbol = -1;
+            link.bits = root_bits;
+            link.sub_table = anchor;
+            link.sub_bits = SUB_BITS;
+            .root.at(root_index) = link;
+        }
+
+        let sub_index = (index >> root_bits) & ((1 << SUB_BITS) - 1);
+        let stride = 1 << extra;
+        let limit = 1 << SUB_BITS;
+        var slot = sub_index;
+        while slot < limit: {
+            var entry = DecodeEntry();
+            entry.symbol = symbol;
+            entry.bits = extra;
+            entry.sub_table = -1;
+            entry.sub_bits = 0;
+            .sub.at(anchor + slot) = entry;
+            slot += stride;
+        }
+    }
+
+    // Decode one symbol. Peek enough bits for the root lookup, consume only
+    // as many as the code actually uses, and follow a link if present.
+    fn decode(self: &const shared, reader: &unique BitReader) -> int: {
+        let peeked = reader.peek_bits(.root_bits);
+        let entry: &const = .root.at(peeked);
+        if entry.bits == 0: {
+            return -1;
+        }
+        if !entry.is_link(): {
+            reader.drop_bits(entry.bits);
+            return entry.symbol;
+        }
+        reader.drop_bits(.root_bits);
+        let extra = reader.peek_bits(entry.sub_bits);
+        let leaf: &const = .sub.at(entry.sub_table + extra);
+        if leaf.bits == 0: {
+            return -1;
+        }
+        reader.drop_bits(leaf.bits);
+        return leaf.symbol;
+    }
+
+    // Slow reference decoder that walks the code bit by bit. Used by the
+    // harness to cross-check the table-driven path.
+    fn decode_slow(self: &const shared, reader: &unique BitReader, lengths: &const shared vector{int}) -> int: {
+        var code: int = 0;
+        var length: int = 0;
+        var first: int = 0;
+        var index: int = 0;
+        var count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
+        var i: int = 0;
+        while i <= MAX_CODE_LENGTH: {
+            count_per_length.at(i) = 0;
+            i += 1;
+        }
+        var symbol: int = 0;
+        while symbol < lengths.size(): {
+            if lengths.at(symbol) > 0: {
+                count_per_length.at(lengths.at(symbol)) += 1;
+            }
+            symbol += 1;
+        }
+
+        while length < MAX_CODE_LENGTH: {
+            length += 1;
+            code = code | reader.get_bit();
+            let count = count_per_length.at(length);
+            if code - first < count: {
+                destroy count_per_length;
+                return index + (code - first);
+            }
+            index += count;
+            first = (first + count) << 1;
+            code = code << 1;
+        }
+        destroy count_per_length;
+        return -1;
+    }
+
+    root: vector{DecodeEntry};
+    sub: vector{DecodeEntry};
+    root_bits: int = 9;
+    max_length: int = 0;
+    symbol_count: int = 0;
+    under_subscribed: bool = false;
+}
+
+fn min_int(a: int, b: int) -> int: {
+    if a < b: {
+        return a;
+    }
+    return b;
+}
+
+fn max_int(a: int, b: int) -> int: {
+    if a > b: {
+        return a;
+    }
+    return b;
+}
+
+fn clamp_int(value: int, low: int, high: int) -> int: {
+    if value < low: {
+        return low;
+    }
+    if value > high: {
+        return high;
+    }
+    return value;
+}
+
+// --- LZ77 tokens ---------------------------------------------------------
+
+// A token is either a literal byte or a (length, distance) back reference.
+// Packing both into one struct keeps the token stream contiguous, which
+// matters because the block splitter walks it several times.
+struct Token: {
+
+    fn is_literal(self: &const shared) -> bool: {
+        return .length < MIN_MATCH;
+    }
+
+    fn is_match(self: &const shared) -> bool: {
+        return .length >= MIN_MATCH;
+    }
+
+    fn cost_estimate(self: &const shared) -> int: {
+        if .is_literal(): {
+            return 8;
+        }
+        // A rough model: the length code plus the distance code plus their
+        // extra bits. Good enough to decide between block types.
+        return 24 + extra_length_bits(length_code_of(.length)) + extra_distance_bits(distance_code_of(.distance));
+    }
+
+    literal: int = 0;
+    length: int = 0;
+    distance: int = 0;
+}
+
+// A candidate match returned by the match finder.
+struct Match: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .length >= MIN_MATCH && .distance > 0 && .distance <= MAX_DISTANCE;
+    }
+
+    fn better_than(self: &const shared, other: &const shared Match) -> bool: {
+        if .length != other.length: {
+            return .length > other.length;
+        }
+        // Equal lengths: prefer the nearer match, its distance code is
+        // cheaper to encode.
+        return .distance < other.distance;
+    }
+
+    length: int = 0;
+    distance: int = 0;
+    position: int = 0;
+}
+
+// --- Compression levels --------------------------------------------------
+
+// The knobs the match finder honours. Higher levels search longer chains and
+// enable lazy matching; the lowest level skips the finder entirely.
+struct LevelConfig: {
+
+    fn from_level(self: &unique, level: int): {
+        let clamped = clamp_int(level, 0, 9);
+        if clamped == 0: {
+            .good_length = 0;
+            .max_lazy = 0;
+            .nice_length = 0;
+            .max_chain = 0;
+            .use_lazy = false;
+            .stored_only = true;
+        } else: { if clamped <= 2: {
+            .good_length = 4;
+            .max_lazy = 4;
+            .nice_length = 8;
+            .max_chain = 4;
+            .use_lazy = false;
+            .stored_only = false;
+        } else: { if clamped <= 4: {
+            .good_length = 4;
+            .max_lazy = 5;
+            .nice_length = 16;
+            .max_chain = 16;
+            .use_lazy = true;
+            .stored_only = false;
+        } else: { if clamped <= 6: {
+            .good_length = 8;
+            .max_lazy = 16;
+            .nice_length = 32;
+            .max_chain = 32;
+            .use_lazy = true;
+            .stored_only = false;
+        } else: { if clamped <= 8: {
+            .good_length = 8;
+            .max_lazy = 32;
+            .nice_length = 128;
+            .max_chain = 128;
+            .use_lazy = true;
+            .stored_only = false;
+        } else: {
+            .good_length = 32;
+            .max_lazy = 258;
+            .nice_length = 258;
+            .max_chain = 4096;
+            .use_lazy = true;
+            .stored_only = false;
+        }
+        } } } }
+        .level = clamped;
+    }
+
+    // When the previous match was already long, the chain search is cut
+    // short: the odds of finding something better do not pay for the walk.
+    fn chain_limit_for(self: &const shared, previous_length: int) -> int: {
+        if previous_length >= .good_length: {
+            return .max_chain >> 2;
+        }
+        return .max_chain;
+    }
+
+    level: int = 6;
+    good_length: int = 8;
+    max_lazy: int = 16;
+    nice_length: int = 32;
+    max_chain: int = 32;
+    use_lazy: bool = true;
+    stored_only: bool = false;
+}
+
+// --- Hash chain match finder ---------------------------------------------
+
+// The classic deflate finder: a rolling three-byte hash indexes a head
+// table, and every head entry starts a chain of earlier positions with the
+// same hash, threaded through a `previous` array indexed by window offset.
+struct HashChain: {
+
+    fn init(self: &unique): {
+        .head.clear();
+        .head.resize(HASH_SIZE);
+        var i: int = 0;
+        while i < HASH_SIZE: {
+            .head.at(i) = NO_POSITION;
+            i += 1;
+        }
+        .previous.clear();
+        .previous.resize(WINDOW_SIZE);
+        i = 0;
+        while i < WINDOW_SIZE: {
+            .previous.at(i) = NO_POSITION;
+            i += 1;
+        }
+        .running_hash = 0;
+        .inserted = 0;
+    }
+
+    // Rolling hash update: shift the accumulator left by HASH_SHIFT, mix in
+    // the new byte, and mask back down to HASH_BITS. After MIN_MATCH updates
+    // the accumulator depends on exactly the last three bytes.
+    fn update_hash(self: &unique, next_byte: int) -> int: {
+        .running_hash = ((.running_hash << HASH_SHIFT) ^ (next_byte & BYTE_MASK)) & HASH_MASK;
+        return .running_hash;
+    }
+
+    // Compute the hash of the three bytes at `position` without touching the
+    // rolling state; used when the finder skips ahead.
+    fn hash_at(self: &const shared, input: &const shared ByteBuffer, position: int) -> int: {
+        if position + MIN_MATCH > input.size(): {
+            return 0;
+        }
+        var h: int = 0;
+        h = ((h << HASH_SHIFT) ^ input.at(position)) & HASH_MASK;
+        h = ((h << HASH_SHIFT) ^ input.at(position + 1)) & HASH_MASK;
+        h = ((h << HASH_SHIFT) ^ input.at(position + 2)) & HASH_MASK;
+        return h;
+    }
+
+    fn insert(self: &unique, hash_value: int, position: int): {
+        let slot = position & WINDOW_MASK;
+        .previous.at(slot) = .head.at(hash_value);
+        .head.at(hash_value) = position;
+        .inserted += 1;
+    }
+
+    // Insert every position in [from, to) so that later searches see them.
+    // The encoder calls this after emitting a long match, because the bytes
+    // covered by the match still need to be hashed.
+    fn insert_range(self: &unique, input: &const shared ByteBuffer, from: int, to: int): {
+        var position = from;
+        while position < to: {
+            if position + MIN_MATCH <= input.size(): {
+                .insert(.hash_at(input, position), position);
+            }
+            position += 1;
+        }
+    }
+
+    // Length of the common prefix of the two positions, capped at `limit`.
+    // This is the innermost loop of the whole encoder.
+    fn match_length(self: &const shared, input: &const shared ByteBuffer, a: int, b: int, limit: int) -> int: {
+        var length: int = 0;
+        while length < limit: {
+            if input.at(a + length) != input.at(b + length): {
+                return length;
+            }
+            length += 1;
+        }
+        return limit;
+    }
+
+    // Walk the chain for `position`, returning the best match found. The
+    // walk stops at the chain limit, at the window edge, or as soon as a
+    // match reaches `nice_length`.
+    fn find_best(self: &const shared, input: &const shared ByteBuffer, position: int, previous_length: int, config: &const shared LevelConfig) -> Match: {
+        var best = Match();
+        best.length = 0;
+        best.distance = 0;
+        best.position = position;
+
+        if position + MIN_MATCH > input.size(): {
+            return best;
+        }
+        let limit = min_int(MAX_MATCH, input.size() - position);
+        if limit < MIN_MATCH: {
+            return best;
+        }
+
+        let hash_value = .hash_at(input, position);
+        var candidate = .head.at(hash_value);
+        var chain_left = .chain_limit_of(previous_length, config);
+        let window_floor = max_int(0, position - MAX_DISTANCE);
+
+        while candidate >= 0: {
+            if chain_left <= 0: {
+                break;
+            }
+            chain_left -= 1;
+            if candidate < window_floor: {
+                break;
+            }
+            if candidate >= position: {
+                break;
+            }
+
+            // Cheap rejection: the byte one past the current best has to
+            // match, otherwise the candidate cannot possibly be longer.
+            var worth_trying = true;
+            if best.length > 0: {
+                if input.at(candidate + best.length) != input.at(position + best.length): {
+                    worth_trying = false;
+                }
+            }
+            if worth_trying: {
+                let length = .match_length(input, candidate, position, limit);
+                if length >= MIN_MATCH: {
+                    if length > best.length: {
+                        best.length = length;
+                        best.distance = position - candidate;
+                        if length >= config.nice_length: {
+                            return best;
+                        }
+                    }
+                }
+            }
+            candidate = .previous.at(candidate & WINDOW_MASK);
+        }
+        return best;
+    }
+
+    fn chain_limit_of(self: &const shared, previous_length: int, config: &const shared LevelConfig) -> int: {
+        return config.chain_limit_for(previous_length);
+    }
+
+    // Diagnostic: average chain length over the whole head table.
+    fn average_chain(self: &const shared) -> int: {
+        var total: int = 0;
+        var chains: int = 0;
+        var i: int = 0;
+        while i < HASH_SIZE: {
+            var node = .head.at(i);
+            if node >= 0: {
+                chains += 1;
+                var depth: int = 0;
+                while node >= 0: {
+                    if depth >= 64: {
+                        break;
+                    }
+                    depth += 1;
+                    node = .previous.at(node & WINDOW_MASK);
+                }
+                total += depth;
+            }
+            i += 1;
+        }
+        if chains == 0: {
+            return 0;
+        }
+        return total / chains;
+    }
+
+    head: vector{int};
+    previous: vector{int};
+    running_hash: int = 0;
+    inserted: int = 0;
+}
+
+// --- Sliding window ------------------------------------------------------
+
+// A circular history buffer of WINDOW_SIZE bytes. The decoder needs one to
+// resolve back references; the encoder keeps the whole input in memory and
+// uses absolute positions instead, so the window is decode-side only.
+struct SlidingWindow: {
+
+    fn init(self: &unique, capacity: int): {
+        .bytes.clear();
+        .bytes.resize(capacity);
+        var i: int = 0;
+        while i < capacity: {
+            .bytes.at(i) = 0;
+            i += 1;
+        }
+        .capacity = capacity;
+        .mask = capacity - 1;
+        .write_position = 0;
+        .filled = 0;
+    }
+
+    fn size(self: &const shared) -> int: {
+        return .filled;
+    }
+
+    fn full(self: &const shared) -> bool: {
+        return .filled >= .capacity;
+    }
+
+    fn wrap(self: &const shared, position: int) -> int: {
+        return position & .mask;
+    }
+
+    fn push(self: &unique, value: int): {
+        .bytes.at(.write_position) = value & BYTE_MASK;
+        .write_position = (.write_position + 1) & .mask;
+        if .filled < .capacity: {
+            .filled += 1;
+        }
+    }
+
+    // Byte `distance` positions back from the write cursor.
+    fn behind(self: &const shared, distance: int) -> int: {
+        let index = (.write_position - distance) & .mask;
+        return .bytes.at(index) & BYTE_MASK;
+    }
+
+    fn can_reference(self: &const shared, distance: int) -> bool: {
+        return distance > 0 && distance <= .filled;
+    }
+
+    // Copy a back reference out of the window and into the sink, feeding
+    // every copied byte back into the window. Overlapping copies work
+    // because each byte is written before the byte that references it is
+    // read, which is exactly the run-extension trick LZ77 relies on.
+    fn copy_match(self: &unique, sink: &unique ByteBuffer, distance: int, length: int) -> bool: {
+        if !.can_reference(distance): {
+            return false;
+        }
+        var i: int = 0;
+        while i < length: {
+            let value = .behind(distance);
+            sink.push(value);
+            .push(value);
+            i += 1;
+        }
+        return true;
+    }
+
+    fn emit_literal(self: &unique, sink: &unique ByteBuffer, value: int): {
+        sink.push(value & BYTE_MASK);
+        .push(value & BYTE_MASK);
+    }
+
+    bytes: vector{int};
+    capacity: int = 32768;
+    mask: int = 32767;
+    write_position: int = 0;
+    filled: int = 0;
+}
+
+// --- LZ77 encoder --------------------------------------------------------
+
+// Produces a token stream from a byte buffer using the hash chain finder.
+//
+// Lazy matching: after finding a match at position p, the encoder also looks
+// at p+1. If the later match is strictly longer, the byte at p is emitted as
+// a literal and the longer match is taken instead. This costs one extra
+// chain walk per position but typically buys a few percent.
+struct Lz77Encoder: {
+
+    fn init(self: &unique, level: int): {
+        .config.from_level(level);
+        .chain.init();
+        .tokens.clear();
+        .literal_count = 0;
+        .match_count = 0;
+        .matched_bytes = 0;
+        .literal_bytes = 0;
+    }
+
+    fn token_count(self: &const shared) -> int: {
+        return .tokens.size();
+    }
+
+    fn push_literal(self: &unique, value: int): {
+        var token = Token();
+        token.literal = value & BYTE_MASK;
+        token.length = 0;
+        token.distance = 0;
+        .tokens.push_back(token);
+        .literal_count += 1;
+        .literal_bytes += 1;
+    }
+
+    fn push_match(self: &unique, length: int, distance: int): {
+        var token = Token();
+        token.literal = 0;
+        token.length = length;
+        token.distance = distance;
+        .tokens.push_back(token);
+        .match_count += 1;
+        .matched_bytes += length;
+    }
+
+    // The main loop. `position` is the next byte to encode; `pending`
+    // carries the match found at the previous position while the encoder
+    // decides whether to keep it.
+    fn encode(self: &unique, input: &const shared ByteBuffer): {
+        .tokens.clear();
+        if .config.stored_only: {
+            var i: int = 0;
+            while i < input.size(): {
+                .push_literal(input.at(i));
+                i += 1;
+            }
+            return;
+        }
+
+        var position: int = 0;
+        var have_pending = false;
+        var pending = Match();
+        pending.length = 0;
+        pending.distance = 0;
+        pending.position = 0;
+
+        while position < input.size(): {
+            var current = Match();
+            current.length = 0;
+            current.distance = 0;
+            current.position = position;
+            if position + MIN_MATCH <= input.size(): {
+                var previous_length: int = 0;
+                if have_pending: {
+                    previous_length = pending.length;
+                }
+                current = .chain.find_best(input, position, previous_length, .config);
+            }
+
+            if have_pending: {
+                if current.length > pending.length: {
+                    // The later match wins: flush the deferred byte as a
+                    // literal and defer again on the new candidate.
+                    .push_literal(input.at(pending.position));
+                    .insert_position(input, pending.position);
+                    pending = current;
+                    pending.position = position;
+                    position += 1;
+                } else: {
+                    // Keep the deferred match.
+                    .push_match(pending.length, pending.distance);
+                    let start = pending.position;
+                    let stop = start + pending.length;
+                    .chain.insert_range(input, start, stop);
+                    have_pending = false;
+                    position = stop;
+                }
+            } else: {
+                if current.valid(): {
+                    if .config.use_lazy && current.length < .config.max_lazy: {
+                        pending = current;
+                        pending.position = position;
+                        have_pending = true;
+                        .insert_position(input, position);
+                        position += 1;
+                    } else: {
+                        .push_match(current.length, current.distance);
+                        .chain.insert_range(input, position, position + current.length);
+                        position += current.length;
+                    }
+                } else: {
+                    .push_literal(input.at(position));
+                    .insert_position(input, position);
+                    position += 1;
+                }
+            }
+        }
+
+        if have_pending: {
+            .push_literal(input.at(pending.position));
+        }
+    }
+
+    fn insert_position(self: &unique, input: &const shared ByteBuffer, position: int): {
+        if position + MIN_MATCH <= input.size(): {
+            .chain.insert(.chain.hash_at(input, position), position);
+        }
+    }
+
+    // Ratio of matched bytes to total bytes, in percent. The block splitter
+    // uses it to decide whether a stored block would be smaller.
+    fn match_percent(self: &const shared) -> int: {
+        let total = .matched_bytes + .literal_bytes;
+        if total == 0: {
+            return 0;
+        }
+        return (.matched_bytes * 100) / total;
+    }
+
+    fn estimated_bits(self: &const shared) -> int: {
+        var total: int = 0;
+        var i: int = 0;
+        while i < .tokens.size(): {
+            total += .tokens.at(i).cost_estimate();
+            i += 1;
+        }
+        return total;
+    }
+
+    config: LevelConfig;
+    chain: HashChain;
+    tokens: vector{Token};
+    literal_count: int = 0;
+    match_count: int = 0;
+    matched_bytes: int = 0;
+    literal_bytes: int = 0;
+}
+
+// --- LZ77 decoder --------------------------------------------------------
+
+// Replays a token stream through a sliding window.
+fn lz77_decode(tokens: &const shared vector{Token}, output: &unique ByteBuffer) -> Status: {
+    var window = SlidingWindow();
+    window.init(WINDOW_SIZE);
+    var i: int = 0;
+    while i < tokens.size(): {
+        let token: &const = tokens.at(i);
+        if token.is_literal(): {
+            window.emit_literal(output, token.literal);
+        } else: {
+            if !window.can_reference(token.distance): {
+                destroy window;
+                return Status::BadDistance;
+            }
+            if !window.copy_match(output, token.distance, token.length): {
+                destroy window;
+                return Status::CorruptStream;
+            }
+        }
+        i += 1;
+    }
+    destroy window;
+    return Status::Ok;
+}
+
+// --- Deflate symbol tables ----------------------------------------------
+
+// Deflate maps a match length in [3, 258] onto one of 29 length codes plus
+// up to five extra bits, and a distance in [1, 32768] onto one of 30
+// distance codes plus up to 13 extra bits. Both tables are generated here
+// rather than transcribed, because the structure is entirely regular:
+//
+//   length code i has (i - 4) / 4 extra bits, clamped to [0, 5]
+//   distance code i has (i / 2) - 1 extra bits, clamped to [0, 13]
+//
+// and each base is the previous base plus 2^extra of the previous code.
+struct DeflateTables: {
+
+    fn init(self: &unique): {
+        .build_length_tables();
+        .build_distance_tables();
+        .build_code_length_order();
+        .build_reverse_maps();
+        .ready = true;
+    }
+
+    fn build_length_tables(self: &unique): {
+        .length_base.clear();
+        .length_extra.clear();
+        .length_base.resize(29);
+        .length_extra.resize(29);
+
+        var running: int = 3;
+        var code: int = 0;
+        while code < 28: {
+            var extra = (code - 4) / 4;
+            if code < 8: {
+                extra = 0;
+            }
+            if extra > 5: {
+                extra = 5;
+            }
+            .length_extra.at(code) = extra;
+            .length_base.at(code) = running;
+            running += 1 << extra;
+            code += 1;
+        }
+        // The final code is the special case: length 258 with no extra bits.
+        .length_extra.at(28) = 0;
+        .length_base.at(28) = MAX_MATCH;
+    }
+
+    fn build_distance_tables(self: &unique): {
+        .distance_base.clear();
+        .distance_extra.clear();
+        .distance_base.resize(DISTANCE_SYMBOLS);
+        .distance_extra.resize(DISTANCE_SYMBOLS);
+
+        var running: int = 1;
+        var code: int = 0;
+        while code < DISTANCE_SYMBOLS: {
+            var extra = (code / 2) - 1;
+            if code < 4: {
+                extra = 0;
+            }
+            if extra > 13: {
+                extra = 13;
+            }
+            .distance_extra.at(code) = extra;
+            .distance_base.at(code) = running;
+            running += 1 << extra;
+            code += 1;
+        }
+    }
+
+    // The code length alphabet is transmitted in a permuted order chosen so
+    // that the rarely used lengths sit at the end and can be truncated.
+    fn build_code_length_order(self: &unique): {
+        .code_length_order.clear();
+        .code_length_order.push_back(16);
+        .code_length_order.push_back(17);
+        .code_length_order.push_back(18);
+        .code_length_order.push_back(0);
+        var offset: int = 8;
+        var step: int = 0;
+        while step < 8: {
+            .code_length_order.push_back(offset);
+            .code_length_order.push_back(BYTE_BITS - 1 - step - 1 + 1);
+            offset += 1;
+            step += 1;
+        }
+        // Regenerate the tail deterministically: 8,7,9,6,10,5,11,4,12,3,
+        // 13,2,14,1,15 alternates outward from the middle of the alphabet.
+        .code_length_order.clear();
+        .code_length_order.push_back(16);
+        .code_length_order.push_back(17);
+        .code_length_order.push_back(18);
+        .code_length_order.push_back(0);
+        var high: int = 8;
+        var low: int = 7;
+        while high <= 15: {
+            .code_length_order.push_back(high);
+            .code_length_order.push_back(low);
+            high += 1;
+            low -= 1;
+        }
+    }
+
+    // Invert the base tables into direct lookups so the encoder does not
+    // binary search on every token. `length_to_code` has MAX_MATCH + 1
+    // entries; `distance_to_code` uses a split lookup because a full table
+    // over 32768 distances would be wasteful: the low 256 distances index
+    // directly, the rest index by distance >> 7.
+    fn build_reverse_maps(self: &unique): {
+        .length_to_code.clear();
+        .length_to_code.resize(MAX_MATCH + 1);
+        var length: int = 0;
+        while length <= MAX_MATCH: {
+            .length_to_code.at(length) = 0;
+            length += 1;
+        }
+        var code: int = 0;
+        while code < 29: {
+            let anchor = .length_base.at(code);
+            let span = 1 << .length_extra.at(code);
+            var offset: int = 0;
+            while offset < span: {
+                let value = anchor + offset;
+                if value <= MAX_MATCH: {
+                    .length_to_code.at(value) = code;
+                }
+                offset += 1;
+            }
+            code += 1;
+        }
+        .length_to_code.at(MAX_MATCH) = 28;
+
+        .distance_to_code_low.clear();
+        .distance_to_code_low.resize(257);
+        .distance_to_code_high.clear();
+        .distance_to_code_high.resize(257);
+        var i: int = 0;
+        while i <= 256: {
+            .distance_to_code_low.at(i) = 0;
+            .distance_to_code_high.at(i) = 0;
+            i += 1;
+        }
+        code = 0;
+        while code < DISTANCE_SYMBOLS: {
+            let anchor = .distance_base.at(code);
+            let span = 1 << .distance_extra.at(code);
+            var offset: int = 0;
+            while offset < span: {
+                let distance = anchor + offset;
+                if distance <= 256: {
+                    .distance_to_code_low.at(distance) = code;
+                } else: {
+                    if distance <= MAX_DISTANCE: {
+                        let bucket = (distance - 1) >> 7;
+                        if bucket <= 256: {
+                            .distance_to_code_high.at(bucket) = code;
+                        }
+                    }
+                }
+                offset += 1;
+            }
+            code += 1;
+        }
+    }
+
+    fn length_code(self: &const shared, length: int) -> int: {
+        return .length_to_code.at(clamp_int(length, MIN_MATCH, MAX_MATCH));
+    }
+
+    fn distance_code(self: &const shared, distance: int) -> int: {
+        if distance <= 256: {
+            return .distance_to_code_low.at(distance);
+        }
+        return .distance_to_code_high.at((distance - 1) >> 7);
+    }
+
+    fn length_extra_value(self: &const shared, length: int) -> int: {
+        let code = .length_code(length);
+        return length - .length_base.at(code);
+    }
+
+    fn distance_extra_value(self: &const shared, distance: int) -> int: {
+        let code = .distance_code(distance);
+        return distance - .distance_base.at(code);
+    }
+
+    length_base: vector{int};
+    length_extra: vector{int};
+    distance_base: vector{int};
+    distance_extra: vector{int};
+    length_to_code: vector{int};
+    distance_to_code_low: vector{int};
+    distance_to_code_high: vector{int};
+    code_length_order: vector{int};
+    ready: bool = false;
+}
+
+// Free-function forms used by `Token::cost_estimate`, which has no access to
+// a table instance. They recompute the same regular structure arithmetically.
+fn extra_length_bits(code: int) -> int: {
+    if code >= 28: {
+        return 0;
+    }
+    if code < 8: {
+        return 0;
+    }
+    return clamp_int((code - 4) / 4, 0, 5);
+}
+
+fn extra_distance_bits(code: int) -> int: {
+    if code < 4: {
+        return 0;
+    }
+    return clamp_int((code / 2) - 1, 0, 13);
+}
+
+fn length_code_of(length: int) -> int: {
+    if length >= MAX_MATCH: {
+        return 28;
+    }
+    var code: int = 0;
+    var anchor: int = 3;
+    while code < 28: {
+        let span = 1 << extra_length_bits(code);
+        if length < anchor + span: {
+            return code;
+        }
+        anchor += span;
+        code += 1;
+    }
+    return 28;
+}
+
+fn distance_code_of(distance: int) -> int: {
+    var code: int = 0;
+    var anchor: int = 1;
+    while code < DISTANCE_SYMBOLS: {
+        let span = 1 << extra_distance_bits(code);
+        if distance < anchor + span: {
+            return code;
+        }
+        anchor += span;
+        code += 1;
+    }
+    return DISTANCE_SYMBOLS - 1;
+}
+
+// The fixed Huffman code of a deflate stream is defined by a fixed length
+// assignment rather than by a transmitted table: literals 0..143 get 8 bits,
+// 144..255 get 9, 256..279 get 7 and 280..287 get 8. Distances are all 5.
+fn build_fixed_literal_lengths(lengths: &unique vector{int}): {
+    lengths.clear();
+    lengths.resize(MAX_SYMBOLS);
+    var symbol: int = 0;
+    while symbol < MAX_SYMBOLS: {
+        if symbol < 144: {
+            lengths.at(symbol) = 8;
+        } else: { if symbol < 256: {
+            lengths.at(symbol) = 9;
+        } else: { if symbol < 280: {
+            lengths.at(symbol) = 7;
+        } else: {
+            lengths.at(symbol) = 8;
+        }
+        } }
+        symbol += 1;
+    }
+}
+
+fn build_fixed_distance_lengths(lengths: &unique vector{int}): {
+    lengths.clear();
+    lengths.resize(DISTANCE_SYMBOLS + 2);
+    var symbol: int = 0;
+    while symbol < DISTANCE_SYMBOLS + 2: {
+        lengths.at(symbol) = 5;
+        symbol += 1;
+    }
+}
+
+// --- Code length run encoding -------------------------------------------
+
+// A dynamic block transmits its two code length vectors compressed with a
+// third Huffman code over the alphabet {0..15, 16, 17, 18}, where
+//
+//   16 = repeat the previous length 3..6 more times (2 extra bits)
+//   17 = a run of 3..10 zero lengths            (3 extra bits)
+//   18 = a run of 11..138 zero lengths          (7 extra bits)
+//
+// `RunEncoder` turns a length vector into that symbol stream.
+struct RunEncoder: {
+
+    fn clear(self: &unique): {
+        .symbols.clear();
+        .extras.clear();
+        .extra_bits.clear();
+    }
+
+    fn count(self: &const shared) -> int: {
+        return .symbols.size();
+    }
+
+    fn emit(self: &unique, symbol: int, extra: int, bits: int): {
+        .symbols.push_back(symbol);
+        .extras.push_back(extra);
+        .extra_bits.push_back(bits);
+    }
+
+    fn encode(self: &unique, lengths: &const shared vector{int}, used: int): {
+        .clear();
+        var index: int = 0;
+        var previous: int = -1;
+        while index < used: {
+            let current = lengths.at(index);
+            // Measure the run of equal lengths starting here.
+            var run: int = 1;
+            while index + run < used: {
+                if lengths.at(index + run) != current: {
+                    break;
+                }
+                run += 1;
+            }
+
+            if current == 0: {
+                // Zero runs use the dedicated 17 / 18 symbols.
+                while run >= 11: {
+                    let take = min_int(run, 138);
+                    .emit(18, take - 11, 7);
+                    run -= take;
+                    index += take;
+                }
+                while run >= 3: {
+                    let take = min_int(run, 10);
+                    .emit(17, take - 3, 3);
+                    run -= take;
+                    index += take;
+                }
+                while run > 0: {
+                    .emit(0, 0, 0);
+                    run -= 1;
+                    index += 1;
+                }
+                previous = 0;
+            } else: {
+                // A non-zero run repeats the literal length once, then uses
+                // symbol 16 for the remainder.
+                var remaining = run;
+                if previous != current: {
+                    .emit(current, 0, 0);
+                    remaining -= 1;
+                    index += 1;
+                }
+                while remaining >= 3: {
+                    let take = min_int(remaining, 6);
+                    .emit(16, take - 3, 2);
+                    remaining -= take;
+                    index += take;
+                }
+                while remaining > 0: {
+                    .emit(current, 0, 0);
+                    remaining -= 1;
+                    index += 1;
+                }
+                previous = current;
+            }
+        }
+    }
+
+    // Histogram over the code length alphabet, used to build its own code.
+    fn count_symbols(self: &const shared, frequencies: &unique FrequencyTable): {
+        var i: int = 0;
+        while i < .symbols.size(): {
+            frequencies.add(.symbols.at(i));
+            i += 1;
+        }
+    }
+
+    symbols: vector{int};
+    extras: vector{int};
+    extra_bits: vector{int};
+}
+
+// --- Deflate encoder -----------------------------------------------------
+
+// The full pipeline: LZ77 the input, histogram the resulting tokens, build
+// dynamic codes, compare the three block encodings and emit the cheapest.
+struct DeflateEncoder: {
+
+    fn init(self: &unique, level: int): {
+        .tables.init();
+        .lz.init(level);
+        .writer.init(BitOrder::LsbFirst);
+        .config.from_level(level);
+        .blocks_stored = 0;
+        .blocks_fixed = 0;
+        .blocks_dynamic = 0;
+    }
+
+    // --- Cost models -----------------------------------------------------
+
+    // Bits needed for a stored block: three header bits, padding to the byte
+    // boundary, a four byte length header and the payload.
+    fn stored_cost(self: &const shared, byte_count: int) -> int: {
+        return 3 + 7 + 32 + byte_count * BYTE_BITS;
+    }
+
+    fn fixed_cost(self: &const shared, literals: &const shared FrequencyTable, distances: &const shared FrequencyTable) -> int: {
+        var total: int = 3;
+        var symbol: int = 0;
+        while symbol < LITERAL_SYMBOLS: {
+            let count = literals.at(symbol);
+            if count > 0: {
+                var bits: int = 8;
+                if symbol >= 144: {
+                    bits = 9;
+                }
+                if symbol >= 256: {
+                    bits = 7;
+                }
+                if symbol >= 280: {
+                    bits = 8;
+                }
+                total += count * bits;
+                total += count * extra_length_bits(symbol - 257);
+            }
+            symbol += 1;
+        }
+        symbol = 0;
+        while symbol < DISTANCE_SYMBOLS: {
+            let count = distances.at(symbol);
+            if count > 0: {
+                total += count * (5 + extra_distance_bits(symbol));
+            }
+            symbol += 1;
+        }
+        return total;
+    }
+
+    fn dynamic_cost(self: &const shared, literal_tree: &const shared HuffmanTree, distance_tree: &const shared HuffmanTree, literals: &const shared FrequencyTable, distances: &const shared FrequencyTable, header_bits: int) -> int: {
+        var total = 3 + header_bits;
+        total += literal_tree.encoded_bits(literals);
+        total += distance_tree.encoded_bits(distances);
+        var symbol: int = 257;
+        while symbol < LITERAL_SYMBOLS: {
+            total += literals.at(symbol) * extra_length_bits(symbol - 257);
+            symbol += 1;
+        }
+        symbol = 0;
+        while symbol < DISTANCE_SYMBOLS: {
+            total += distances.at(symbol) * extra_distance_bits(symbol);
+            symbol += 1;
+        }
+        return total;
+    }
+
+    // --- Histograms ------------------------------------------------------
+
+    fn histogram_tokens(self: &const shared, tokens: &const shared vector{Token}, literals: &unique FrequencyTable, distances: &unique FrequencyTable): {
+        var i: int = 0;
+        while i < tokens.size(): {
+            let token: &const = tokens.at(i);
+            if token.is_literal(): {
+                literals.add(token.literal & BYTE_MASK);
+            } else: {
+                literals.add(257 + .tables.length_code(token.length));
+                distances.add(.tables.distance_code(token.distance));
+            }
+            i += 1;
+        }
+        literals.add(END_OF_BLOCK);
+    }
+
+    // --- Block emission --------------------------------------------------
+
+    fn write_block_header(self: &unique, kind: BlockType, final_block: bool): {
+        var flag: int = 0;
+        if final_block: {
+            flag = 1;
+        }
+        .writer.put_bits_lsb(flag, 1);
+        if kind == BlockType::Stored: {
+            .writer.put_bits_lsb(0, 2);
+        } else: { if kind == BlockType::Fixed: {
+            .writer.put_bits_lsb(1, 2);
+        } else: {
+            .writer.put_bits_lsb(2, 2);
+        }
+        }
+    }
+
+    fn write_stored_block(self: &unique, input: &const shared ByteBuffer, from: int, count: int, final_block: bool): {
+        .write_block_header(BlockType::Stored, final_block);
+        .writer.align();
+        .writer.put_short(count & SHORT_MASK);
+        .writer.put_short((~count) & SHORT_MASK);
+        .writer.raw_copy(input, from, count);
+        .blocks_stored += 1;
+    }
+
+    fn write_fixed_block(self: &unique, tokens: &const shared vector{Token}, final_block: bool): {
+        .write_block_header(BlockType::Fixed, final_block);
+        var literal_lengths = vector{int}();
+        var distance_lengths = vector{int}();
+        build_fixed_literal_lengths(literal_lengths);
+        build_fixed_distance_lengths(distance_lengths);
+        var literal_table = EncodeTable();
+        var distance_table = EncodeTable();
+        literal_table.build_from_lengths(literal_lengths);
+        distance_table.build_from_lengths(distance_lengths);
+        .write_token_stream(tokens, literal_table, distance_table);
+        .blocks_fixed += 1;
+        destroy literal_lengths;
+        destroy distance_lengths;
+    }
+
+    // Emit the dynamic header: the two truncated length counts, the code
+    // length code lengths in permuted order, and the run encoded lengths.
+    fn write_dynamic_header(self: &unique, literal_lengths: &const shared vector{int}, distance_lengths: &const shared vector{int}, literal_used: int, distance_used: int, runs: &const shared RunEncoder, code_length_table: &const shared EncodeTable, code_length_lengths: &const shared vector{int}) -> int: {
+        var bits_written: int = 0;
+        .writer.put_bits_lsb(literal_used - 257, 5);
+        .writer.put_bits_lsb(distance_used - 1, 5);
+
+        // Trim trailing zero entries from the permuted code length vector.
+        var transmitted = CODE_LENGTH_SYMBOLS;
+        while transmitted > 4: {
+            let slot = .tables.code_length_order.at(transmitted - 1);
+            if code_length_lengths.at(slot) != 0: {
+                break;
+            }
+            transmitted -= 1;
+        }
+        .writer.put_bits_lsb(transmitted - 4, 4);
+        bits_written += 14;
+
+        var i: int = 0;
+        while i < transmitted: {
+            let slot = .tables.code_length_order.at(i);
+            .writer.put_bits_lsb(code_length_lengths.at(slot), 3);
+            bits_written += 3;
+            i += 1;
+        }
+
+        i = 0;
+        while i < runs.symbols.size(): {
+            let symbol = runs.symbols.at(i);
+            code_length_table.emit_reversed(.writer, symbol);
+            bits_written += code_length_table.length_of(symbol);
+            let extra_count = runs.extra_bits.at(i);
+            if extra_count > 0: {
+                .writer.put_bits_lsb(runs.extras.at(i), extra_count);
+                bits_written += extra_count;
+            }
+            i += 1;
+        }
+        discard literal_lengths;
+        discard distance_lengths;
+        return bits_written;
+    }
+
+    fn write_token_stream(self: &unique, tokens: &const shared vector{Token}, literal_table: &const shared EncodeTable, distance_table: &const shared EncodeTable): {
+        var i: int = 0;
+        while i < tokens.size(): {
+            let token: &const = tokens.at(i);
+            if token.is_literal(): {
+                literal_table.emit_reversed(.writer, token.literal & BYTE_MASK);
+            } else: {
+                let length_code = .tables.length_code(token.length);
+                literal_table.emit_reversed(.writer, 257 + length_code);
+                let length_extra = .tables.length_extra.at(length_code);
+                if length_extra > 0: {
+                    .writer.put_bits_lsb(token.length - .tables.length_base.at(length_code), length_extra);
+                }
+                let distance_code = .tables.distance_code(token.distance);
+                distance_table.emit_reversed(.writer, distance_code);
+                let distance_extra = .tables.distance_extra.at(distance_code);
+                if distance_extra > 0: {
+                    .writer.put_bits_lsb(token.distance - .tables.distance_base.at(distance_code), distance_extra);
+                }
+            }
+            i += 1;
+        }
+        literal_table.emit_reversed(.writer, END_OF_BLOCK);
+    }
+
+    // Build the dynamic codes for a token stream and emit the block.
+    fn write_dynamic_block(self: &unique, tokens: &const shared vector{Token}, final_block: bool) -> bool: {
+        var literals = FrequencyTable();
+        var distances = FrequencyTable();
+        literals.init(MAX_SYMBOLS);
+        distances.init(DISTANCE_SYMBOLS);
+        .histogram_tokens(tokens, literals, distances);
+        distances.ensure_two_symbols();
+
+        var literal_tree = HuffmanTree();
+        var distance_tree = HuffmanTree();
+        if !literal_tree.build(literals): {
+            return false;
+        }
+        if !distance_tree.build(distances): {
+            return false;
+        }
+
+        var literal_used = LITERAL_SYMBOLS;
+        while literal_used > 257: {
+            if literal_tree.lengths.at(literal_used - 1) != 0: {
+                break;
+            }
+            literal_used -= 1;
+        }
+        var distance_used = DISTANCE_SYMBOLS;
+        while distance_used > 1: {
+            if distance_tree.lengths.at(distance_used - 1) != 0: {
+                break;
+            }
+            distance_used -= 1;
+        }
+
+        // Concatenate the two length vectors and run encode them together,
+        // which is what lets a run straddle the boundary.
+        var combined = vector{int}();
+        var i: int = 0;
+        while i < literal_used: {
+            combined.push_back(literal_tree.lengths.at(i));
+            i += 1;
+        }
+        i = 0;
+        while i < distance_used: {
+            combined.push_back(distance_tree.lengths.at(i));
+            i += 1;
+        }
+
+        var runs = RunEncoder();
+        runs.encode(combined, combined.size());
+
+        var code_length_frequencies = FrequencyTable();
+        code_length_frequencies.init(CODE_LENGTH_SYMBOLS);
+        runs.count_symbols(code_length_frequencies);
+        code_length_frequencies.ensure_two_symbols();
+
+        var code_length_tree = HuffmanTree();
+        if !code_length_tree.build(code_length_frequencies): {
+            return false;
+        }
+        code_length_tree.limit_code_lengths(MAX_LENGTH_CODE_BITS);
+        code_length_tree.assign_canonical();
+
+        var code_length_table = EncodeTable();
+        code_length_table.build(code_length_tree);
+
+        var literal_table = EncodeTable();
+        var distance_table = EncodeTable();
+        literal_table.build(literal_tree);
+        distance_table.build(distance_tree);
+
+        .write_block_header(BlockType::Dynamic, final_block);
+        .write_dynamic_header(literal_tree.lengths, distance_tree.lengths, literal_used, distance_used, runs, code_length_table, code_length_tree.lengths);
+        .write_token_stream(tokens, literal_table, distance_table);
+        .blocks_dynamic += 1;
+
+        destroy combined;
+        return true;
+    }
+
+    // Compress a whole buffer, splitting it into blocks of at most
+    // DEFAULT_BLOCK_SIZE bytes and picking a block type per chunk.
+    fn compress(self: &unique, input: &const shared ByteBuffer) -> Status: {
+        .writer.init(BitOrder::LsbFirst);
+        if input.empty(): {
+            .write_block_header(BlockType::Stored, true);
+            .writer.align();
+            .writer.put_short(0);
+            .writer.put_short(SHORT_MASK);
+            return Status::Ok;
+        }
+
+        var offset: int = 0;
+        while offset < input.size(): {
+            let span = min_int(DEFAULT_BLOCK_SIZE, input.size() - offset);
+            let final_block = (offset + span) >= input.size();
+
+            var chunk = ByteBuffer();
+            var i: int = 0;
+            while i < span: {
+                chunk.push(input.at(offset + i));
+                i += 1;
+            }
+
+            .lz.init(.config.level);
+            .lz.encode(chunk);
+
+            var literals = FrequencyTable();
+            var distances = FrequencyTable();
+            literals.init(MAX_SYMBOLS);
+            distances.init(DISTANCE_SYMBOLS);
+            .histogram_tokens(.lz.tokens, literals, distances);
+
+            let cost_stored = .stored_cost(span);
+            let cost_fixed = .fixed_cost(literals, distances);
+
+            if .config.stored_only: {
+                .write_stored_block(input, offset, span, final_block);
+            } else: { if cost_stored <= cost_fixed: {
+                .write_stored_block(input, offset, span, final_block);
+            } else: {
+                if !.write_dynamic_block(.lz.tokens, final_block): {
+                    .write_fixed_block(.lz.tokens, final_block);
+                }
+            }
+            }
+
+            destroy chunk;
+            offset += span;
+        }
+        .writer.flush();
+        return Status::Ok;
+    }
+
+    tables: DeflateTables;
+    lz: Lz77Encoder;
+    writer: BitWriter;
+    config: LevelConfig;
+    blocks_stored: int = 0;
+    blocks_fixed: int = 0;
+    blocks_dynamic: int = 0;
+}
+
+// --- Deflate decoder -----------------------------------------------------
+
+// Reads a deflate stream back into bytes. The decoder is table driven: each
+// block builds a `DecodeTable` for its literal/length and distance codes,
+// then the inner loop is peek, look up, drop, and either append a literal or
+// run a window copy.
+struct DeflateDecoder: {
+
+    fn init(self: &unique): {
+        .tables.init();
+        .reader.init(BitOrder::LsbFirst);
+        .window.init(WINDOW_SIZE);
+        .blocks_read = 0;
+        .last_status = Status::Ok;
+    }
+
+    fn fail(self: &unique, status: Status) -> Status: {
+        .last_status = status;
+        return status;
+    }
+
+    // Read a stored block: align, read the length and its complement, and
+    // copy the payload straight through.
+    fn read_stored_block(self: &unique, output: &unique ByteBuffer) -> Status: {
+        .reader.align();
+        let count = .reader.get_short();
+        let complement = .reader.get_short();
+        if ((count ^ SHORT_MASK) & SHORT_MASK) != (complement & SHORT_MASK): {
+            return .fail(Status::CorruptStream);
+        }
+        var i: int = 0;
+        while i < count: {
+            if .reader.source.exhausted(): {
+                return .fail(Status::NeedMoreInput);
+            }
+            let value = .reader.get_byte();
+            .window.emit_literal(output, value);
+            i += 1;
+        }
+        return Status::Ok;
+    }
+
+    // Rebuild the code length code, then decode the two length vectors from
+    // the run encoded stream.
+    fn read_dynamic_tables(self: &unique, literal_table: &unique DecodeTable, distance_table: &unique DecodeTable) -> Status: {
+        let literal_used = .reader.get_bits_lsb(5) + 257;
+        let distance_used = .reader.get_bits_lsb(5) + 1;
+        let transmitted = .reader.get_bits_lsb(4) + 4;
+        if literal_used > LITERAL_SYMBOLS: {
+            return .fail(Status::BadCodeLengths);
+        }
+        if distance_used > DISTANCE_SYMBOLS: {
+            return .fail(Status::BadCodeLengths);
+        }
+
+        var code_length_lengths = vector{int}(CODE_LENGTH_SYMBOLS);
+        var i: int = 0;
+        while i < CODE_LENGTH_SYMBOLS: {
+            code_length_lengths.at(i) = 0;
+            i += 1;
+        }
+        i = 0;
+        while i < transmitted: {
+            let slot = .tables.code_length_order.at(i);
+            code_length_lengths.at(slot) = .reader.get_bits_lsb(3);
+            i += 1;
+        }
+
+        var code_length_table = DecodeTable();
+        if !code_length_table.build(code_length_lengths): {
+            return .fail(Status::BadCodeLengths);
+        }
+
+        let total = literal_used + distance_used;
+        var combined = vector{int}(total);
+        i = 0;
+        while i < total: {
+            combined.at(i) = 0;
+            i += 1;
+        }
+
+        var index: int = 0;
+        var previous: int = 0;
+        while index < total: {
+            let symbol = code_length_table.decode(.reader);
+            if symbol < 0: {
+                return .fail(Status::BadCodeLengths);
+            }
+            if symbol < 16: {
+                combined.at(index) = symbol;
+                previous = symbol;
+                index += 1;
+            } else: { if symbol == 16: {
+                let repeat = .reader.get_bits_lsb(2) + 3;
+                if index + repeat > total: {
+                    return .fail(Status::BadCodeLengths);
+                }
+                var k: int = 0;
+                while k < repeat: {
+                    combined.at(index) = previous;
+                    index += 1;
+                    k += 1;
+                }
+            } else: { if symbol == 17: {
+                let repeat = .reader.get_bits_lsb(3) + 3;
+                if index + repeat > total: {
+                    return .fail(Status::BadCodeLengths);
+                }
+                var k: int = 0;
+                while k < repeat: {
+                    combined.at(index) = 0;
+                    index += 1;
+                    k += 1;
+                }
+                previous = 0;
+            } else: {
+                let repeat = .reader.get_bits_lsb(7) + 11;
+                if index + repeat > total: {
+                    return .fail(Status::BadCodeLengths);
+                }
+                var k: int = 0;
+                while k < repeat: {
+                    combined.at(index) = 0;
+                    index += 1;
+                    k += 1;
+                }
+                previous = 0;
+            }
+            } }
+        }
+
+        var literal_lengths = vector{int}(literal_used);
+        var distance_lengths = vector{int}(distance_used);
+        i = 0;
+        while i < literal_used: {
+            literal_lengths.at(i) = combined.at(i);
+            i += 1;
+        }
+        i = 0;
+        while i < distance_used: {
+            distance_lengths.at(i) = combined.at(literal_used + i);
+            i += 1;
+        }
+
+        if !literal_table.build(literal_lengths): {
+            return .fail(Status::BadCodeLengths);
+        }
+        if !distance_table.build(distance_lengths): {
+            if !distance_table.under_subscribed: {
+                return .fail(Status::BadCodeLengths);
+            }
+        }
+        destroy combined;
+        destroy code_length_lengths;
+        return Status::Ok;
+    }
+
+    // The hot decode loop for one compressed block.
+    fn read_compressed_block(self: &unique, output: &unique ByteBuffer, literal_table: &const shared DecodeTable, distance_table: &const shared DecodeTable) -> Status: {
+        loop: {
+            if .reader.failed(): {
+                return .fail(Status::NeedMoreInput);
+            }
+            let symbol = literal_table.decode(.reader);
+            if symbol < 0: {
+                return .fail(Status::CorruptStream);
+            }
+            if symbol < 256: {
+                .window.emit_literal(output, symbol);
+            } else: { if symbol == END_OF_BLOCK: {
+                return Status::Ok;
+            } else: {
+                let length_code = symbol - 257;
+                if length_code >= 29: {
+                    return .fail(Status::CorruptStream);
+                }
+                let length_extra = .tables.length_extra.at(length_code);
+                var length = .tables.length_base.at(length_code);
+                if length_extra > 0: {
+                    length += .reader.get_bits_lsb(length_extra);
+                }
+
+                let distance_symbol = distance_table.decode(.reader);
+                if distance_symbol < 0: {
+                    return .fail(Status::CorruptStream);
+                }
+                if distance_symbol >= DISTANCE_SYMBOLS: {
+                    return .fail(Status::BadDistance);
+                }
+                let distance_extra = .tables.distance_extra.at(distance_symbol);
+                var distance = .tables.distance_base.at(distance_symbol);
+                if distance_extra > 0: {
+                    distance += .reader.get_bits_lsb(distance_extra);
+                }
+                if distance > MAX_DISTANCE: {
+                    return .fail(Status::BadDistance);
+                }
+                if !.window.copy_match(output, distance, length): {
+                    return .fail(Status::BadDistance);
+                }
+            }
+            }
+        }
+    }
+
+    fn decompress(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer) -> Status: {
+        .reader.init(BitOrder::LsbFirst);
+        .reader.source = input;
+        .reader.source.rewind();
+        .window.init(WINDOW_SIZE);
+
+        var final_block = false;
+        while !final_block: {
+            if .reader.failed(): {
+                return .fail(Status::NeedMoreInput);
+            }
+            final_block = .reader.get_bits_lsb(1) == 1;
+            let kind = .reader.get_bits_lsb(2);
+            .blocks_read += 1;
+
+            if kind == 0: {
+                let status = .read_stored_block(output);
+                if status != Status::Ok: {
+                    return status;
+                }
+            } else: { if kind == 1: {
+                var literal_lengths = vector{int}();
+                var distance_lengths = vector{int}();
+                build_fixed_literal_lengths(literal_lengths);
+                build_fixed_distance_lengths(distance_lengths);
+                var literal_table = DecodeTable();
+                var distance_table = DecodeTable();
+                if !literal_table.build(literal_lengths): {
+                    return .fail(Status::BadCodeLengths);
+                }
+                if !distance_table.build(distance_lengths): {
+                    return .fail(Status::BadCodeLengths);
+                }
+                let status = .read_compressed_block(output, literal_table, distance_table);
+                if status != Status::Ok: {
+                    return status;
+                }
+                destroy literal_lengths;
+                destroy distance_lengths;
+            } else: { if kind == 2: {
+                var literal_table = DecodeTable();
+                var distance_table = DecodeTable();
+                let header = .read_dynamic_tables(literal_table, distance_table);
+                if header != Status::Ok: {
+                    return header;
+                }
+                let status = .read_compressed_block(output, literal_table, distance_table);
+                if status != Status::Ok: {
+                    return status;
+                }
+            } else: {
+                return .fail(Status::CorruptStream);
+            }
+            } }
+        }
+        return Status::Ok;
+    }
+
+    tables: DeflateTables;
+    reader: BitReader;
+    window: SlidingWindow;
+    blocks_read: int = 0;
+    last_status: Status = Status::Ok;
+}
+
+// --- Run length encoding -------------------------------------------------
+
+// A byte oriented RLE with an escape byte. A run of three or more identical
+// bytes becomes <escape, count, value>; a literal equal to the escape byte
+// is emitted as <escape, 0>. Runs longer than 255 are split.
+static RLE_ESCAPE: int = 144;                   // 0x90
+static RLE_MIN_RUN: int = 3;
+static RLE_MAX_RUN: int = 255;
+
+struct RleCodec: {
+
+    fn encode(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer): {
+        var i: int = 0;
+        .runs_emitted = 0;
+        .literals_emitted = 0;
+        while i < input.size(): {
+            let value = input.at(i);
+            var run: int = 1;
+            while i + run < input.size(): {
+                if input.at(i + run) != value: {
+                    break;
+                }
+                if run >= RLE_MAX_RUN: {
+                    break;
+                }
+                run += 1;
+            }
+
+            if run >= RLE_MIN_RUN: {
+                output.push(RLE_ESCAPE);
+                output.push(run);
+                output.push(value);
+                .runs_emitted += 1;
+                i += run;
+            } else: {
+                var k: int = 0;
+                while k < run: {
+                    if value == RLE_ESCAPE: {
+                        output.push(RLE_ESCAPE);
+                        output.push(0);
+                    } else: {
+                        output.push(value);
+                    }
+                    .literals_emitted += 1;
+                    k += 1;
+                }
+                i += run;
+            }
+        }
+    }
+
+    fn decode(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer) -> Status: {
+        var i: int = 0;
+        while i < input.size(): {
+            let value = input.at(i);
+            if value != RLE_ESCAPE: {
+                output.push(value);
+                i += 1;
+            } else: {
+                if i + 1 >= input.size(): {
+                    return Status::NeedMoreInput;
+                }
+                let count = input.at(i + 1);
+                if count == 0: {
+                    output.push(RLE_ESCAPE);
+                    i += 2;
+                } else: {
+                    if i + 2 >= input.size(): {
+                        return Status::NeedMoreInput;
+                    }
+                    let repeated = input.at(i + 2);
+                    var k: int = 0;
+                    while k < count: {
+                        output.push(repeated);
+                        k += 1;
+                    }
+                    i += 3;
+                }
+            }
+        }
+        return Status::Ok;
+    }
+
+    // Longest run in the input; the pipeline uses it to decide whether RLE
+    // is worth applying before the block sorting stage.
+    fn longest_run(self: &const shared, input: &const shared ByteBuffer) -> int: {
+        if input.empty(): {
+            return 0;
+        }
+        var best: int = 1;
+        var current: int = 1;
+        var i: int = 1;
+        while i < input.size(): {
+            if input.at(i) == input.at(i - 1): {
+                current += 1;
+                if current > best: {
+                    best = current;
+                }
+            } else: {
+                current = 1;
+            }
+            i += 1;
+        }
+        return best;
+    }
+
+    runs_emitted: int = 0;
+    literals_emitted: int = 0;
+}
+
+// --- Move to front -------------------------------------------------------
+
+// MTF turns a stream with local symbol locality into a stream dominated by
+// small indices, which is exactly what a Huffman or arithmetic stage wants
+// after a Burrows-Wheeler transform.
+struct MoveToFront: {
+
+    fn init(self: &unique): {
+        .order.clear();
+        .order.resize(256);
+        var i: int = 0;
+        while i < 256: {
+            .order.at(i) = i;
+            i += 1;
+        }
+    }
+
+    // Find the current rank of a symbol and pull it to the front, shifting
+    // everything above it down by one.
+    fn rank_of(self: &unique, value: int) -> int: {
+        var position: int = 0;
+        while position < 256: {
+            if .order.at(position) == value: {
+                break;
+            }
+            position += 1;
+        }
+        var i = position;
+        while i > 0: {
+            .order.at(i) = .order.at(i - 1);
+            i -= 1;
+        }
+        .order.at(0) = value;
+        return position;
+    }
+
+    fn symbol_at(self: &unique, rank: int) -> int: {
+        let value = .order.at(rank);
+        var i = rank;
+        while i > 0: {
+            .order.at(i) = .order.at(i - 1);
+            i -= 1;
+        }
+        .order.at(0) = value;
+        return value;
+    }
+
+    fn encode(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer): {
+        .init();
+        var i: int = 0;
+        while i < input.size(): {
+            output.push(.rank_of(input.at(i)));
+            i += 1;
+        }
+    }
+
+    fn decode(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer): {
+        .init();
+        var i: int = 0;
+        while i < input.size(): {
+            output.push(.symbol_at(input.at(i)));
+            i += 1;
+        }
+    }
+
+    order: vector{int};
+}
+
+// --- Burrows-Wheeler transform -------------------------------------------
+
+// The forward transform sorts every rotation of the input and emits the last
+// column plus the index of the original string. The inverse rebuilds the
+// input from the last column alone using the standard LF mapping.
+//
+// The rotation sort here is a plain comparison sort with an explicit
+// comparison function rather than a suffix array construction; the point of
+// the benchmark is the tight comparison loop, not asymptotics.
+struct BurrowsWheeler: {
+
+    // Compare rotations `a` and `b` of `input` lexicographically.
+    fn compare_rotations(self: &const shared, input: &const shared ByteBuffer, a: int, b: int) -> int: {
+        let n = input.size();
+        var offset: int = 0;
+        while offset < n: {
+            let left = input.at((a + offset) % n);
+            let right = input.at((b + offset) % n);
+            if left != right: {
+                if left < right: {
+                    return -1;
+                }
+                return 1;
+            }
+            offset += 1;
+        }
+        return 0;
+    }
+
+    // Binary insertion sort over rotation indices.
+    fn sort_rotations(self: &const shared, input: &const shared ByteBuffer, order: &unique vector{int}): {
+        var i: int = 1;
+        while i < order.size(): {
+            let key = order.at(i);
+            var low: int = 0;
+            var high = i;
+            while low < high: {
+                let middle = (low + high) / 2;
+                if .compare_rotations(input, order.at(middle), key) <= 0: {
+                    low = middle + 1;
+                } else: {
+                    high = middle;
+                }
+            }
+            var j = i;
+            while j > low: {
+                order.at(j) = order.at(j - 1);
+                j -= 1;
+            }
+            order.at(low) = key;
+            i += 1;
+        }
+    }
+
+    fn transform(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer) -> int: {
+        let n = input.size();
+        if n == 0: {
+            return 0;
+        }
+        var order = vector{int}(n);
+        var i: int = 0;
+        while i < n: {
+            order.at(i) = i;
+            i += 1;
+        }
+        .sort_rotations(input, order);
+
+        var primary: int = 0;
+        i = 0;
+        while i < n: {
+            let rotation = order.at(i);
+            if rotation == 0: {
+                primary = i;
+            }
+            output.push(input.at((rotation + n - 1) % n));
+            i += 1;
+        }
+        .primary_index = primary;
+        destroy order;
+        return primary;
+    }
+
+    // Inverse transform via the LF mapping: count the occurrences of each
+    // byte, turn the counts into starting offsets, then thread the next
+    // pointers through the last column.
+    fn inverse(self: &const shared, last_column: &const shared ByteBuffer, primary: int, output: &unique ByteBuffer) -> Status: {
+        let n = last_column.size();
+        if n == 0: {
+            return Status::Ok;
+        }
+        if primary < 0 || primary >= n: {
+            return Status::CorruptStream;
+        }
+
+        var counts = vector{int}(257);
+        var i: int = 0;
+        while i <= 256: {
+            counts.at(i) = 0;
+            i += 1;
+        }
+        i = 0;
+        while i < n: {
+            counts.at(last_column.at(i) + 1) += 1;
+            i += 1;
+        }
+        i = 1;
+        while i <= 256: {
+            counts.at(i) += counts.at(i - 1);
+            i += 1;
+        }
+
+        var next = vector{int}(n);
+        i = 0;
+        while i < n: {
+            let value = last_column.at(i);
+            next.at(counts.at(value)) = i;
+            counts.at(value) += 1;
+            i += 1;
+        }
+
+        var position = next.at(primary);
+        i = 0;
+        while i < n: {
+            output.push(last_column.at(position));
+            position = next.at(position);
+            i += 1;
+        }
+        destroy counts;
+        destroy next;
+        return Status::Ok;
+    }
+
+    primary_index: int = 0;
+}
+
+// --- Adaptive frequency model -------------------------------------------
+
+// A cumulative frequency model over a small alphabet, maintained as a Fenwick
+// tree so that both the cumulative query and the update are logarithmic. The
+// arithmetic coder needs the cumulative frequency below a symbol, the
+// symbol's own frequency, and the running total, on every single symbol.
+struct AdaptiveModel: {
+
+    fn init(self: &unique, alphabet: int): {
+        .alphabet = alphabet;
+        .frequencies.clear();
+        .frequencies.resize(alphabet + 1);
+        .tree.clear();
+        .tree.resize(alphabet + 1);
+        var i: int = 0;
+        while i <= alphabet: {
+            .frequencies.at(i) = 0;
+            .tree.at(i) = 0;
+            i += 1;
+        }
+        // Every symbol starts with a count of one so nothing is unencodable.
+        i = 0;
+        while i < alphabet: {
+            .frequencies.at(i + 1) = 1;
+            i += 1;
+        }
+        .rebuild_tree();
+        .total = alphabet;
+        .updates = 0;
+    }
+
+    // Rebuild the Fenwick tree from the raw frequency array in linear time:
+    // every node absorbs its immediate child's partial sum.
+    fn rebuild_tree(self: &unique): {
+        var i: int = 1;
+        while i <= .alphabet: {
+            .tree.at(i) = .frequencies.at(i);
+            i += 1;
+        }
+        i = 1;
+        while i <= .alphabet: {
+            let parent = i + (i & (-i));
+            if parent <= .alphabet: {
+                .tree.at(parent) += .tree.at(i);
+            }
+            i += 1;
+        }
+    }
+
+    // Sum of frequencies for symbols strictly below `symbol`.
+    fn cumulative_below(self: &const shared, symbol: int) -> int: {
+        var index = symbol;
+        var sum: int = 0;
+        while index > 0: {
+            sum += .tree.at(index);
+            index -= index & (-index);
+        }
+        return sum;
+    }
+
+    fn frequency_of(self: &const shared, symbol: int) -> int: {
+        return .frequencies.at(symbol + 1);
+    }
+
+    fn total_frequency(self: &const shared) -> int: {
+        return .total;
+    }
+
+    // Locate the symbol whose cumulative interval contains `target`, by
+    // descending the Fenwick tree one power of two at a time.
+    fn symbol_for(self: &const shared, target: int) -> int: {
+        var index: int = 0;
+        var remaining = target;
+        var step = round_up_pow2(.alphabet);
+        while step > 0: {
+            let candidate = index + step;
+            if candidate <= .alphabet: {
+                if .tree.at(candidate) <= remaining: {
+                    index = candidate;
+                    remaining -= .tree.at(candidate);
+                }
+            }
+            step = (step >> 1) & WORD_MASK;
+        }
+        return index;
+    }
+
+    fn update(self: &unique, symbol: int): {
+        var index = symbol + 1;
+        .frequencies.at(index) += MODEL_INCREMENT;
+        while index <= .alphabet: {
+            .tree.at(index) += MODEL_INCREMENT;
+            index += index & (-index);
+        }
+        .total += MODEL_INCREMENT;
+        .updates += 1;
+        if .total >= MODEL_TOTAL_MAX: {
+            .rescale();
+        }
+    }
+
+    // Halve every count, keeping a floor of one so no symbol drops out of
+    // the model, then rebuild the tree in one pass.
+    fn rescale(self: &unique): {
+        var new_total: int = 0;
+        var i: int = 1;
+        while i <= .alphabet: {
+            var value = (.frequencies.at(i) + 1) >> 1;
+            if value < 1: {
+                value = 1;
+            }
+            .frequencies.at(i) = value;
+            new_total += value;
+            i += 1;
+        }
+        .total = new_total;
+        .rebuild_tree();
+    }
+
+    frequencies: vector{int};
+    tree: vector{int};
+    alphabet: int = 256;
+    total: int = 0;
+    updates: int = 0;
+}
+
+// --- Arithmetic encoder --------------------------------------------------
+
+// A carry-less range coder over 32 bit arithmetic. The interval [low, high)
+// is narrowed by each symbol; whenever the two ends share a top byte, that
+// byte is shifted out. The underflow counter handles the case where the
+// interval straddles the midpoint without converging.
+struct ArithmeticEncoder: {
+
+    fn init(self: &unique): {
+        .low = 0;
+        .high = CODER_MAX;
+        .underflow = 0;
+        .out.clear();
+        .writer.init(BitOrder::MsbFirst);
+        .symbols_written = 0;
+    }
+
+    fn range(self: &const shared) -> int: {
+        return .high - .low + 1;
+    }
+
+    // Narrow the interval to the sub-range assigned to `symbol` by `model`.
+    fn encode_symbol(self: &unique, model: &unique AdaptiveModel, symbol: int): {
+        let total = model.total_frequency();
+        let low_count = model.cumulative_below(symbol);
+        let high_count = low_count + model.frequency_of(symbol);
+        let span = .high - .low + 1;
+
+        .high = .low + (span * high_count) / total - 1;
+        .low = .low + (span * low_count) / total;
+        .normalise();
+        model.update(symbol);
+        .symbols_written += 1;
+    }
+
+    // Shift out every bit the two ends now agree on, and absorb straddling
+    // intervals into the underflow counter.
+    fn normalise(self: &unique): {
+        loop: {
+            if ((.low ^ .high) & HIGH_BIT_32) == 0: {
+                // Top bits agree: emit it, plus any pending underflow bits
+                // with the opposite value.
+                let bit = (.low >> 31) & 1;
+                .writer.put_bit(bit);
+                while .underflow > 0: {
+                    .writer.put_bit((~bit) & 1);
+                    .underflow -= 1;
+                }
+            } else: {
+                if (.low & 1073741824) != 0 && (.high & 1073741824) == 0: {
+                    // 0x40000000: straddling the midpoint. Defer the
+                    // decision by removing the second bit and counting it.
+                    .underflow += 1;
+                    .low = .low & 1073741823;                       // 0x3FFFFFFF
+                    .high = .high | 1073741824;                     // 0x40000000
+                } else: {
+                    return;
+                }
+            }
+            .low = (.low << 1) & WORD_MASK;
+            .high = ((.high << 1) | 1) & WORD_MASK;
+        }
+    }
+
+    // Flush enough bits to disambiguate the final interval.
+    fn finish(self: &unique): {
+        let bit = (.low >> 30) & 1;
+        .writer.put_bit(bit);
+        .underflow += 1;
+        while .underflow > 0: {
+            .writer.put_bit((~bit) & 1);
+            .underflow -= 1;
+        }
+        .writer.align();
+    }
+
+    fn encode_buffer(self: &unique, input: &const shared ByteBuffer, model: &unique AdaptiveModel): {
+        .init();
+        var i: int = 0;
+        while i < input.size(): {
+            .encode_symbol(model, input.at(i));
+            i += 1;
+        }
+        // A dedicated stop symbol marks the end of the stream so the decoder
+        // does not need an explicit length.
+        .encode_symbol(model, 256);
+        .finish();
+    }
+
+    writer: BitWriter;
+    out: ByteBuffer;
+    low: int = 0;
+    high: int = 4294967295;
+    underflow: int = 0;
+    symbols_written: int = 0;
+}
+
+// --- Arithmetic decoder --------------------------------------------------
+
+struct ArithmeticDecoder: {
+
+    fn init(self: &unique, input: &const shared ByteBuffer): {
+        .low = 0;
+        .high = CODER_MAX;
+        .code = 0;
+        .reader.init(BitOrder::MsbFirst);
+        .reader.source = input;
+        .reader.source.rewind();
+        var i: int = 0;
+        while i < WORD_BITS: {
+            .code = ((.code << 1) | .reader.get_bit()) & WORD_MASK;
+            i += 1;
+        }
+        .symbols_read = 0;
+    }
+
+    // Map the current code point back onto a cumulative frequency, ask the
+    // model which symbol owns it, then narrow exactly as the encoder did.
+    fn decode_symbol(self: &unique, model: &unique AdaptiveModel) -> int: {
+        let total = model.total_frequency();
+        let span = .high - .low + 1;
+        let offset = .code - .low;
+        let target = ((offset + 1) * total - 1) / span;
+
+        let symbol = model.symbol_for(target);
+        let low_count = model.cumulative_below(symbol);
+        let high_count = low_count + model.frequency_of(symbol);
+
+        .high = .low + (span * high_count) / total - 1;
+        .low = .low + (span * low_count) / total;
+        .normalise();
+        model.update(symbol);
+        .symbols_read += 1;
+        return symbol;
+    }
+
+    fn normalise(self: &unique): {
+        loop: {
+            if ((.low ^ .high) & HIGH_BIT_32) == 0: {
+                discard 0;
+            } else: {
+                if (.low & 1073741824) != 0 && (.high & 1073741824) == 0: {
+                    .code = .code ^ 1073741824;                     // 0x40000000
+                    .low = .low & 1073741823;                       // 0x3FFFFFFF
+                    .high = .high | 1073741824;
+                } else: {
+                    return;
+                }
+            }
+            .low = (.low << 1) & WORD_MASK;
+            .high = ((.high << 1) | 1) & WORD_MASK;
+            .code = ((.code << 1) | .reader.get_bit()) & WORD_MASK;
+        }
+    }
+
+    fn decode_buffer(self: &unique, model: &unique AdaptiveModel, output: &unique ByteBuffer, limit: int) -> Status: {
+        var produced: int = 0;
+        loop: {
+            let symbol = .decode_symbol(model);
+            if symbol == 256: {
+                return Status::Ok;
+            }
+            if symbol < 0 || symbol > 256: {
+                return Status::CorruptStream;
+            }
+            output.push(symbol);
+            produced += 1;
+            if produced > limit: {
+                return Status::OutputFull;
+            }
+            if .reader.failed(): {
+                return Status::NeedMoreInput;
+            }
+        }
+    }
+
+    reader: BitReader;
+    low: int = 0;
+    high: int = 4294967295;
+    code: int = 0;
+    symbols_read: int = 0;
+}
+
+// --- CRC32 ---------------------------------------------------------------
+
+// The table is generated rather than transcribed. Entry i is the remainder
+// of the reflected polynomial division of i, computed by shifting the byte
+// through eight times and folding in the polynomial whenever a one falls off
+// the bottom.
+struct Crc32: {
+
+    fn init(self: &unique): {
+        .build_table();
+        .build_slices();
+        .value = CRC32_INIT;
+    }
+
+    fn build_table(self: &unique): {
+        .table.clear();
+        .table.resize(CRC32_TABLE_SIZE);
+        var i: int = 0;
+        while i < CRC32_TABLE_SIZE: {
+            var remainder = i;
+            var bit: int = 0;
+            while bit < BYTE_BITS: {
+                if (remainder & 1) != 0: {
+                    remainder = ((remainder >> 1) & 2147483647) ^ CRC32_POLY;
+                } else: {
+                    remainder = (remainder >> 1) & 2147483647;
+                }
+                bit += 1;
+            }
+            .table.at(i) = remainder & WORD_MASK;
+            i += 1;
+        }
+    }
+
+    // Slicing-by-eight: table k holds the effect of a byte that is k
+    // positions further back in the stream, so eight bytes can be folded per
+    // iteration. Each slice is derived from the previous one.
+    fn build_slices(self: &unique): {
+        .slices.clear();
+        .slices.resize(CRC32_SLICE_COUNT * CRC32_TABLE_SIZE);
+        var i: int = 0;
+        while i < CRC32_TABLE_SIZE: {
+            .slices.at(i) = .table.at(i);
+            i += 1;
+        }
+        var slice: int = 1;
+        while slice < CRC32_SLICE_COUNT: {
+            i = 0;
+            while i < CRC32_TABLE_SIZE: {
+                let previous = .slices.at((slice - 1) * CRC32_TABLE_SIZE + i);
+                let folded = .table.at(previous & BYTE_MASK) ^ ((previous >> BYTE_BITS) & 16777215);
+                .slices.at(slice * CRC32_TABLE_SIZE + i) = folded & WORD_MASK;
+                i += 1;
+            }
+            slice += 1;
+        }
+    }
+
+    fn reset(self: &unique): {
+        .value = CRC32_INIT;
+    }
+
+    fn update_byte(self: &unique, byte_value: int): {
+        let index = (.value ^ (byte_value & BYTE_MASK)) & BYTE_MASK;
+        .value = (.table.at(index) ^ ((.value >> BYTE_BITS) & 16777215)) & WORD_MASK;
+    }
+
+    fn update(self: &unique, input: &const shared ByteBuffer): {
+        var i: int = 0;
+        while i < input.size(): {
+            .update_byte(input.at(i));
+            i += 1;
+        }
+    }
+
+    // The eight-byte-at-a-time inner loop. Each of the eight tables is
+    // indexed by one byte of the combined running value, and the eight
+    // results are exclusive-ored together.
+    fn update_fast(self: &unique, input: &const shared ByteBuffer): {
+        var i: int = 0;
+        let n = input.size();
+        while i + CRC32_SLICE_COUNT <= n: {
+            let word_low = input.at(i) | (input.at(i + 1) << 8) | (input.at(i + 2) << 16) | (input.at(i + 3) << 24);
+            let word_high = input.at(i + 4) | (input.at(i + 5) << 8) | (input.at(i + 6) << 16) | (input.at(i + 7) << 24);
+            let mixed = (.value ^ word_low) & WORD_MASK;
+
+            var folded: int = 0;
+            folded = folded ^ .slices.at(7 * CRC32_TABLE_SIZE + (mixed & BYTE_MASK));
+            folded = folded ^ .slices.at(6 * CRC32_TABLE_SIZE + ((mixed >> 8) & BYTE_MASK));
+            folded = folded ^ .slices.at(5 * CRC32_TABLE_SIZE + ((mixed >> 16) & BYTE_MASK));
+            folded = folded ^ .slices.at(4 * CRC32_TABLE_SIZE + ((mixed >> 24) & BYTE_MASK));
+            folded = folded ^ .slices.at(3 * CRC32_TABLE_SIZE + (word_high & BYTE_MASK));
+            folded = folded ^ .slices.at(2 * CRC32_TABLE_SIZE + ((word_high >> 8) & BYTE_MASK));
+            folded = folded ^ .slices.at(1 * CRC32_TABLE_SIZE + ((word_high >> 16) & BYTE_MASK));
+            folded = folded ^ .slices.at((word_high >> 24) & BYTE_MASK);
+
+            .value = folded & WORD_MASK;
+            i += CRC32_SLICE_COUNT;
+        }
+        while i < n: {
+            .update_byte(input.at(i));
+            i += 1;
+        }
+    }
+
+    fn digest(self: &const shared) -> int: {
+        return (.value ^ CRC32_INIT) & WORD_MASK;
+    }
+
+    fn checksum(self: &unique, input: &const shared ByteBuffer) -> int: {
+        .reset();
+        .update(input);
+        return .digest();
+    }
+
+    // Combine the checksums of two concatenated buffers without rescanning
+    // either, by advancing the first checksum through `length` zero bytes.
+    fn combine(self: &unique, first: int, second: int, length: int) -> int: {
+        var running = (first ^ CRC32_INIT) & WORD_MASK;
+        var i: int = 0;
+        while i < length: {
+            let index = running & BYTE_MASK;
+            running = (.table.at(index) ^ ((running >> BYTE_BITS) & 16777215)) & WORD_MASK;
+            i += 1;
+        }
+        return ((running ^ CRC32_INIT) ^ second) & WORD_MASK;
+    }
+
+    table: vector{int};
+    slices: vector{int};
+    value: int = 4294967295;
+}
+
+// --- Adler32 -------------------------------------------------------------
+
+// Two running sums modulo 65521: `a` accumulates the bytes and `b`
+// accumulates `a`. The modulo is deferred for up to ADLER_NMAX bytes, which
+// is the largest run that provably cannot overflow 32 bits.
+struct Adler32: {
+
+    fn reset(self: &unique): {
+        .a = 1;
+        .b = 0;
+    }
+
+    fn update_byte(self: &unique, byte_value: int): {
+        .a = (.a + (byte_value & BYTE_MASK)) % ADLER_BASE;
+        .b = (.b + .a) % ADLER_BASE;
+    }
+
+    fn update(self: &unique, input: &const shared ByteBuffer): {
+        var i: int = 0;
+        let n = input.size();
+        while i < n: {
+            let span = min_int(ADLER_NMAX, n - i);
+            var k: int = 0;
+            while k < span: {
+                .a += input.at(i + k) & BYTE_MASK;
+                .b += .a;
+                k += 1;
+            }
+            .a = .a % ADLER_BASE;
+            .b = .b % ADLER_BASE;
+            i += span;
+        }
+    }
+
+    fn digest(self: &const shared) -> int: {
+        return ((.b << SHORT_BITS) | .a) & WORD_MASK;
+    }
+
+    fn checksum(self: &unique, input: &const shared ByteBuffer) -> int: {
+        .reset();
+        .update(input);
+        return .digest();
+    }
+
+    // Combine two Adler sums the way the zlib helper does: the second half's
+    // `a` contribution is folded in and `b` is advanced by length * a.
+    fn combine(self: &unique, first: int, second: int, length: int) -> int: {
+        let remainder = length % ADLER_BASE;
+        let first_a = first & SHORT_MASK;
+        let first_b = (first >> SHORT_BITS) & SHORT_MASK;
+        let second_a = second & SHORT_MASK;
+        let second_b = (second >> SHORT_BITS) & SHORT_MASK;
+
+        var combined_a = (first_a + second_a - 1) % ADLER_BASE;
+        var combined_b = (remainder * first_a + first_b + second_b - remainder) % ADLER_BASE;
+        if combined_a < 0: {
+            combined_a += ADLER_BASE;
+        }
+        if combined_b < 0: {
+            combined_b += ADLER_BASE;
+        }
+        return ((combined_b << SHORT_BITS) | combined_a) & WORD_MASK;
+    }
+
+    a: int = 1;
+    b: int = 0;
+}
+
+// --- Block sorting pipeline ---------------------------------------------
+
+// The bzip-style stack: RLE, then the Burrows-Wheeler transform, then
+// move-to-front, then a second RLE over the zero runs MTF produces, then a
+// Huffman stage. Each step is reversible on its own, so the harness can
+// round-trip any prefix of the chain.
+struct BlockSortPipeline: {
+
+    fn compress(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer) -> Status: {
+        var after_rle = ByteBuffer();
+        var rle = RleCodec();
+        rle.encode(input, after_rle);
+
+        var after_bwt = ByteBuffer();
+        var bwt = BurrowsWheeler();
+        let primary = bwt.transform(after_rle, after_bwt);
+
+        var after_mtf = ByteBuffer();
+        var mtf = MoveToFront();
+        mtf.encode(after_bwt, after_mtf);
+
+        var after_second_rle = ByteBuffer();
+        var second = RleCodec();
+        second.encode(after_mtf, after_second_rle);
+
+        // The header records the primary index and the two intermediate
+        // lengths so the inverse can be driven without re-deriving them.
+        output.push_word_le(primary);
+        output.push_word_le(after_rle.size());
+        output.push_word_le(after_mtf.size());
+
+        var frequencies = FrequencyTable();
+        frequencies.init(257);
+        frequencies.count_bytes(after_second_rle);
+        frequencies.add(256);
+        frequencies.ensure_two_symbols();
+
+        var tree = HuffmanTree();
+        if !tree.build(frequencies): {
+            return Status::BadCodeLengths;
+        }
+        var table = EncodeTable();
+        table.build(tree);
+
+        var writer = BitWriter();
+        writer.init(BitOrder::MsbFirst);
+        var symbol: int = 0;
+        while symbol < 257: {
+            writer.put_bits_msb(tree.lengths.at(symbol), 4);
+            symbol += 1;
+        }
+        var i: int = 0;
+        while i < after_second_rle.size(): {
+            table.emit(writer, after_second_rle.at(i));
+            i += 1;
+        }
+        table.emit(writer, 256);
+        writer.flush();
+        output.append(writer.out);
+
+        .primary_index = primary;
+        .stage_sizes.clear();
+        .stage_sizes.push_back(input.size());
+        .stage_sizes.push_back(after_rle.size());
+        .stage_sizes.push_back(after_bwt.size());
+        .stage_sizes.push_back(after_mtf.size());
+        .stage_sizes.push_back(after_second_rle.size());
+        .stage_sizes.push_back(output.size());
+
+        destroy after_rle;
+        destroy after_bwt;
+        destroy after_mtf;
+        destroy after_second_rle;
+        return Status::Ok;
+    }
+
+    fn decompress(self: &unique, input: &const shared ByteBuffer, output: &unique ByteBuffer) -> Status: {
+        var source = input;
+        source.rewind();
+        let primary = source.read_word_le();
+        let rle_size = source.read_word_le();
+        let mtf_size = source.read_word_le();
+        discard rle_size;
+
+        var reader = BitReader();
+        reader.init(BitOrder::MsbFirst);
+        reader.source = source;
+
+        var lengths = vector{int}(257);
+        var symbol: int = 0;
+        while symbol < 257: {
+            lengths.at(symbol) = reader.get_bits_msb(4);
+            symbol += 1;
+        }
+        var table = DecodeTable();
+        if !table.build(lengths): {
+            return Status::BadCodeLengths;
+        }
+
+        var after_second_rle = ByteBuffer();
+        loop: {
+            let decoded = table.decode(reader);
+            if decoded < 0: {
+                return Status::CorruptStream;
+            }
+            if decoded == 256: {
+                break;
+            }
+            after_second_rle.push(decoded);
+            if reader.failed(): {
+                return Status::NeedMoreInput;
+            }
+        }
+
+        var after_mtf = ByteBuffer();
+        var second = RleCodec();
+        let second_status = second.decode(after_second_rle, after_mtf);
+        if second_status != Status::Ok: {
+            return second_status;
+        }
+        discard mtf_size;
+
+        var after_bwt = ByteBuffer();
+        var mtf = MoveToFront();
+        mtf.decode(after_mtf, after_bwt);
+
+        var after_rle = ByteBuffer();
+        var bwt = BurrowsWheeler();
+        let inverse_status = bwt.inverse(after_bwt, primary, after_rle);
+        if inverse_status != Status::Ok: {
+            return inverse_status;
+        }
+
+        var rle = RleCodec();
+        return rle.decode(after_rle, output);
+    }
+
+    stage_sizes: vector{int};
+    primary_index: int = 0;
+}
+
+// --- Test data generation ------------------------------------------------
+
+// A small xorshift generator so the harness has reproducible pseudo-random
+// input without depending on anything outside this file.
+struct Xorshift: {
+
+    fn init(self: &unique, seed: int): {
+        if seed == 0: {
+            .state = 2463534242;                // 0x92D68CA2
+        } else: {
+            .state = seed & WORD_MASK;
+        }
+    }
+
+    fn next(self: &unique) -> int: {
+        var x = .state & WORD_MASK;
+        x = x ^ ((x << 13) & WORD_MASK);
+        x = x ^ ((x >> 17) & 32767);
+        x = x ^ ((x << 5) & WORD_MASK);
+        .state = x & WORD_MASK;
+        return .state;
+    }
+
+    fn next_byte(self: &unique) -> int: {
+        return .next() & BYTE_MASK;
+    }
+
+    fn next_below(self: &unique, bound: int) -> int: {
+        if bound <= 0: {
+            return 0;
+        }
+        return .next() % bound;
+    }
+
+    state: int = 2463534242;
+}
+
+// Highly compressible input: long runs of a small alphabet.
+fn make_runny_buffer(length: int, seed: int) -> ByteBuffer: {
+    var out = ByteBuffer();
+    var rng = Xorshift();
+    rng.init(seed);
+    while out.size() < length: {
+        let value = 97 + rng.next_below(4);          // 'a' .. 'd'
+        let run = 1 + rng.next_below(40);
+        var i: int = 0;
+        while i < run: {
+            if out.size() >= length: {
+                return out;
+            }
+            out.push(value);
+            i += 1;
+        }
+    }
+    return out;
+}
+
+// Input with strong long-range repetition: a random block repeated with
+// small mutations, which is what exercises the hash chain finder.
+fn make_repetitive_buffer(length: int, period: int, seed: int) -> ByteBuffer: {
+    var out = ByteBuffer();
+    var rng = Xorshift();
+    rng.init(seed);
+    var pattern = ByteBuffer();
+    var i: int = 0;
+    while i < period: {
+        pattern.push(rng.next_byte());
+        i += 1;
+    }
+    i = 0;
+    while i < length: {
+        var value = pattern.at(i % period);
+        if rng.next_below(64) == 0: {
+            value = rng.next_byte();
+        }
+        out.push(value);
+        i += 1;
+    }
+    destroy pattern;
+    return out;
+}
+
+// Incompressible input: uniform random bytes. The block splitter should
+// choose stored blocks for this.
+fn make_random_buffer(length: int, seed: int) -> ByteBuffer: {
+    var out = ByteBuffer();
+    var rng = Xorshift();
+    rng.init(seed);
+    var i: int = 0;
+    while i < length: {
+        out.push(rng.next_byte());
+        i += 1;
+    }
+    return out;
+}
+
+// Text-like input drawn from a skewed alphabet, which is where Huffman
+// coding earns its keep.
+fn make_texty_buffer(length: int, seed: int) -> ByteBuffer: {
+    var out = ByteBuffer();
+    var rng = Xorshift();
+    rng.init(seed);
+    var i: int = 0;
+    while i < length: {
+        let roll = rng.next_below(100);
+        if roll < 60: {
+            out.push(101);                           // 'e'
+        } else: { if roll < 80: {
+            out.push(116);                           // 't'
+        } else: { if roll < 90: {
+            out.push(32);                            // space
+        } else: {
+            out.push(97 + rng.next_below(26));
+        }
+        } }
+        i += 1;
+    }
+    return out;
+}
+
+// --- Round-trip harness --------------------------------------------------
+
+// Every codec in the file is exercised the same way: compress, decompress,
+// compare byte for byte, and assert the structural invariants that the
+// implementation is supposed to maintain.
+
+fn verify_bit_round_trip(order: BitOrder, seed: int) -> bool: {
+    var writer = BitWriter();
+    writer.init(order);
+    var rng = Xorshift();
+    rng.init(seed);
+
+    var values = vector{int}();
+    var widths = vector{int}();
+    var i: int = 0;
+    while i < 512: {
+        let width = 1 + rng.next_below(16);
+        let value = rng.next() & ((1 << width) - 1);
+        values.push_back(value);
+        widths.push_back(width);
+        writer.put_bits(value, width);
+        i += 1;
+    }
+    let expected_bits = writer.bit_position();
+    writer.flush();
+    assert writer.is_aligned();
+
+    var reader = BitReader();
+    reader.init(order);
+    reader.source = writer.out;
+    reader.source.rewind();
+
+    i = 0;
+    while i < values.size(): {
+        let decoded = reader.get_bits(widths.at(i));
+        if decoded != values.at(i): {
+            destroy values;
+            destroy widths;
+            return false;
+        }
+        i += 1;
+    }
+    prove reader.bit_position() == expected_bits;
+    assert !reader.failed();
+    destroy values;
+    destroy widths;
+    return true;
+}
+
+fn verify_reverse_bits() -> bool: {
+    var width: int = 1;
+    while width <= 15: {
+        var value: int = 0;
+        let limit = 1 << width;
+        while value < limit: {
+            let there = reverse_bits(value, width);
+            let back = reverse_bits(there, width);
+            if back != value: {
+                return false;
+            }
+            value += 1;
+            if value > 4096: {
+                break;
+            }
+        }
+        width += 1;
+    }
+    prove reverse_bits(1, 8) == 128;
+    prove reverse_bits(0, 8) == 0;
+    return true;
+}
+
+fn verify_popcount() -> bool: {
+    var i: int = 0;
+    while i < 4096: {
+        var manual: int = 0;
+        var bit: int = 0;
+        while bit < 32: {
+            manual += (i >> bit) & 1;
+            bit += 1;
+        }
+        if popcount32(i) != manual: {
+            return false;
+        }
+        i += 1;
+    }
+    prove popcount32(0) == 0;
+    prove popcount32(255) == 8;
+    return true;
+}
+
+// The Kraft equality is the structural invariant of a complete prefix code:
+// after building and after length limiting, the sum must be exact.
+fn verify_huffman_tree(input: &const shared ByteBuffer) -> bool: {
+    var frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
+    assert frequencies.used >= 2;
+
+    var tree = HuffmanTree();
+    if !tree.build(frequencies): {
+        return false;
+    }
+    assert tree.max_length <= MAX_CODE_LENGTH;
+    assert tree.max_length > 0;
+    prove tree.kraft_sum() == (1 << tree.max_length);
+
+    // Every used symbol must have a length, and no unused symbol may.
+    var symbol: int = 0;
+    while symbol < 257: {
+        if frequencies.at(symbol) > 0: {
+            if tree.lengths.at(symbol) == 0: {
+                return false;
+            }
+        } else: {
+            if tree.lengths.at(symbol) != 0: {
+                return false;
+            }
+        }
+        symbol += 1;
+    }
+
+    // Canonical codes must be strictly increasing within a length class.
+    var length: int = 1;
+    while length <= tree.max_length: {
+        var previous: int = -1;
+        symbol = 0;
+        while symbol < 257: {
+            if tree.lengths.at(symbol) == length: {
+                if tree.codes.at(symbol) <= previous: {
+                    return false;
+                }
+                previous = tree.codes.at(symbol);
+            }
+            symbol += 1;
+        }
+        length += 1;
+    }
+    return true;
+}
+
+// Encode every symbol through the encode table and decode it back through
+// the two-level decode table, checking that the tables agree.
+fn verify_huffman_tables(input: &const shared ByteBuffer) -> bool: {
+    var frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
+
+    var tree = HuffmanTree();
+    if !tree.build(frequencies): {
+        return false;
+    }
+    var encode_table = EncodeTable();
+    encode_table.build(tree);
+    var decode_table = DecodeTable();
+    if !decode_table.build(tree.lengths): {
+        return false;
+    }
+
+    var writer = BitWriter();
+    writer.init(BitOrder::LsbFirst);
+    var i: int = 0;
+    while i < input.size(): {
+        encode_table.emit_reversed(writer, input.at(i));
+        i += 1;
+    }
+    encode_table.emit_reversed(writer, 256);
+    writer.flush();
+
+    var reader = BitReader();
+    reader.init(BitOrder::LsbFirst);
+    reader.source = writer.out;
+    reader.source.rewind();
+
+    i = 0;
+    loop: {
+        let decoded = decode_table.decode(reader);
+        if decoded < 0: {
+            return false;
+        }
+        if decoded == 256: {
+            break;
+        }
+        if i >= input.size(): {
+            return false;
+        }
+        if decoded != input.at(i): {
+            return false;
+        }
+        i += 1;
+    }
+    assert i == input.size();
+    return true;
+}
+
+// Code length limiting must not break completeness, and the limited code can
+// only ever be worse than the unlimited one by a bounded amount.
+fn verify_length_limiting(input: &const shared ByteBuffer, limit: int) -> bool: {
+    var frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
+
+    var tree = HuffmanTree();
+    if !tree.build(frequencies): {
+        return false;
+    }
+    let unlimited_bits = tree.encoded_bits(frequencies);
+
+    tree.limit_code_lengths(limit);
+    tree.assign_canonical();
+    var symbol: int = 0;
+    while symbol < 257: {
+        if tree.lengths.at(symbol) > limit: {
+            return false;
+        }
+        symbol += 1;
+    }
+    let limited_bits = tree.encoded_bits(frequencies);
+    assert limited_bits >= 0;
+    prove unlimited_bits >= 0;
+    return true;
+}
+
+fn verify_lz77_round_trip(input: &const shared ByteBuffer, level: int) -> bool: {
+    var encoder = Lz77Encoder();
+    encoder.init(level);
+    encoder.encode(input);
+
+    // Every token must reference something already produced.
+    var produced: int = 0;
+    var i: int = 0;
+    while i < encoder.tokens.size(): {
+        let token: &const = encoder.tokens.at(i);
+        if token.is_match(): {
+            if token.distance > produced: {
+                return false;
+            }
+            if token.length < MIN_MATCH || token.length > MAX_MATCH: {
+                return false;
+            }
+            produced += token.length;
+        } else: {
+            produced += 1;
+        }
+        i += 1;
+    }
+    assert produced == input.size();
+
+    var output = ByteBuffer();
+    let status = lz77_decode(encoder.tokens, output);
+    if status != Status::Ok: {
+        return false;
+    }
+    if !output.equals(input): {
+        return false;
+    }
+    prove output.size() == input.size();
+    destroy output;
+    return true;
+}
+
+fn verify_deflate_round_trip(input: &const shared ByteBuffer, level: int) -> bool: {
+    var encoder = DeflateEncoder();
+    encoder.init(level);
+    let compress_status = encoder.compress(input);
+    if compress_status != Status::Ok: {
+        return false;
+    }
+
+    var decoder = DeflateDecoder();
+    decoder.init();
+    var output = ByteBuffer();
+    let decompress_status = decoder.decompress(encoder.writer.out, output);
+    if decompress_status != Status::Ok: {
+        return false;
+    }
+    if !output.equals(input): {
+        return false;
+    }
+
+    assert decoder.blocks_read >= 1;
+    prove output.size() == input.size();
+    destroy output;
+    return true;
+}
+
+fn verify_rle_round_trip(input: &const shared ByteBuffer) -> bool: {
+    var codec = RleCodec();
+    var encoded = ByteBuffer();
+    codec.encode(input, encoded);
+
+    var decoded = ByteBuffer();
+    let status = codec.decode(encoded, decoded);
+    if status != Status::Ok: {
+        return false;
+    }
+    if !decoded.equals(input): {
+        return false;
+    }
+    prove decoded.size() == input.size();
+    destroy encoded;
+    destroy decoded;
+    return true;
+}
+
+fn verify_mtf_round_trip(input: &const shared ByteBuffer) -> bool: {
+    var mtf = MoveToFront();
+    var encoded = ByteBuffer();
+    mtf.encode(input, encoded);
+    assert encoded.size() == input.size();
+
+    var decoded = ByteBuffer();
+    mtf.decode(encoded, decoded);
+    if !decoded.equals(input): {
+        return false;
+    }
+    prove decoded.size() == input.size();
+    destroy encoded;
+    destroy decoded;
+    return true;
+}
+
+fn verify_bwt_round_trip(input: &const shared ByteBuffer) -> bool: {
+    var bwt = BurrowsWheeler();
+    var transformed = ByteBuffer();
+    let primary = bwt.transform(input, transformed);
+    assert transformed.size() == input.size();
+    assert primary >= 0;
+
+    var restored = ByteBuffer();
+    let status = bwt.inverse(transformed, primary, restored);
+    if status != Status::Ok: {
+        return false;
+    }
+    if !restored.equals(input): {
+        return false;
+    }
+    prove restored.size() == input.size();
+    destroy transformed;
+    destroy restored;
+    return true;
+}
+
+fn verify_arithmetic_round_trip(input: &const shared ByteBuffer) -> bool: {
+    var encode_model = AdaptiveModel();
+    encode_model.init(257);
+    var encoder = ArithmeticEncoder();
+    encoder.encode_buffer(input, encode_model);
+
+    var decode_model = AdaptiveModel();
+    decode_model.init(257);
+    var decoder = ArithmeticDecoder();
+    decoder.init(encoder.writer.out);
+    var output = ByteBuffer();
+    let status = decoder.decode_buffer(decode_model, output, input.size() + 16);
+    if status != Status::Ok: {
+        return false;
+    }
+    if !output.equals(input): {
+        return false;
+    }
+    assert decoder.symbols_read == encoder.symbols_written;
+    prove output.size() == input.size();
+    destroy output;
+    return true;
+}
+
+// The Fenwick tree inside the model must agree with a naive scan of the raw
+// frequency array at every point.
+fn verify_model_consistency() -> bool: {
+    var model = AdaptiveModel();
+    model.init(257);
+    var rng = Xorshift();
+    rng.init(9187);
+
+    var step: int = 0;
+    while step < 2000: {
+        let symbol = rng.next_below(257);
+        model.update(symbol);
+        step += 1;
+    }
+
+    var running: int = 0;
+    var symbol: int = 0;
+    while symbol < 257: {
+        if model.cumulative_below(symbol) != running: {
+            return false;
+        }
+        running += model.frequency_of(symbol);
+        symbol += 1;
+    }
+    assert running == model.total_frequency();
+
+    // Every point in the cumulative range must map back to a symbol whose
+    // interval contains it.
+    var target: int = 0;
+    while target < model.total_frequency(): {
+        let found = model.symbol_for(target);
+        let low = model.cumulative_below(found);
+        let high = low + model.frequency_of(found);
+        if target < low || target >= high: {
+            return false;
+        }
+        target += 37;
+    }
+    return true;
+}
+
+fn verify_checksums(input: &const shared ByteBuffer) -> bool: {
+    var crc = Crc32();
+    crc.init();
+    let simple = crc.checksum(input);
+
+    crc.reset();
+    crc.update_fast(input);
+    let sliced = crc.digest();
+    if simple != sliced: {
+        return false;
+    }
+
+    // The generated table must reproduce the known check value for the
+    // string "123456789".
+    var digits = ByteBuffer();
+    var i: int = 0;
+    while i < 9: {
+        digits.push(49 + i);                          // '1' .. '9'
+        i += 1;
+    }
+    let check = crc.checksum(digits);
+    assert check == 3421780262;                       // 0xCBF43926
+
+    var adler = Adler32();
+    let adler_value = adler.checksum(digits);
+    assert adler_value == 152961502;                  // 0x091E01DE
+    prove adler_value > 0;
+
+    // An empty buffer has the identity Adler value.
+    var empty = ByteBuffer();
+    let empty_adler = adler.checksum(empty);
+    assert empty_adler == 1;
+
+    destroy digits;
+    destroy empty;
+    return true;
+}
+
+fn verify_block_sort_round_trip(input: &const shared ByteBuffer) -> bool: {
+    var pipeline = BlockSortPipeline();
+    var compressed = ByteBuffer();
+    let status = pipeline.compress(input, compressed);
+    if status != Status::Ok: {
+        return false;
+    }
+
+    var output = ByteBuffer();
+    let inverse_status = pipeline.decompress(compressed, output);
+    if inverse_status != Status::Ok: {
+        return false;
+    }
+    if !output.equals(input): {
+        return false;
+    }
+    assert pipeline.stage_sizes.size() == 6;
+    prove output.size() == input.size();
+    destroy compressed;
+    destroy output;
+    return true;
+}
+
+// The deflate symbol tables are regular by construction; check that the
+// generated bases and the arithmetic free functions agree everywhere.
+fn verify_deflate_tables() -> bool: {
+    var tables = DeflateTables();
+    tables.init();
+    assert tables.ready;
+    assert tables.code_length_order.size() == CODE_LENGTH_SYMBOLS;
+
+    var length = MIN_MATCH;
+    while length <= MAX_MATCH: {
+        let code = tables.length_code(length);
+        if code != length_code_of(length): {
+            return false;
+        }
+        let anchor = tables.length_base.at(code);
+        let extra = tables.length_extra.at(code);
+        if length < anchor: {
+            return false;
+        }
+        if code < 28: {
+            if length >= anchor + (1 << extra): {
+                return false;
+            }
+        }
+        if extra != extra_length_bits(code): {
+            return false;
+        }
+        length += 1;
+    }
+
+    var distance: int = 1;
+    while distance <= MAX_DISTANCE: {
+        let code = tables.distance_code(distance);
+        if code != distance_code_of(distance): {
+            return false;
+        }
+        let anchor = tables.distance_base.at(code);
+        let extra = tables.distance_extra.at(code);
+        if distance < anchor: {
+            return false;
+        }
+        if distance >= anchor + (1 << extra): {
+            return false;
+        }
+        distance += 1;
+    }
+
+    prove tables.length_base.at(0) == MIN_MATCH;
+    prove tables.distance_base.at(0) == 1;
+    return true;
+}
+
+// The heap has to remain a heap after every operation, and popping must
+// yield a non-decreasing sequence of weights.
+fn verify_priority_queue() -> bool: {
+    var queue = NodeQueue();
+    var rng = Xorshift();
+    rng.init(4242);
+
+    var i: int = 0;
+    while i < 500: {
+        queue.push(i, rng.next_below(10000));
+        i += 1;
+    }
+    assert queue.is_heap();
+    assert queue.size() == 500;
+
+    var previous: int = -1;
+    while !queue.empty(): {
+        let weight = queue.top_weight();
+        if weight < previous: {
+            return false;
+        }
+        previous = weight;
+        discard queue.pop();
+    }
+    prove queue.size() == 0;
+    return true;
+}
+
+// --- Entry point ---------------------------------------------------------
+
+// Run every verifier over every kind of input at every level.
+fn run_all_checks() -> int: {
+    var failures: int = 0;
+
+    if !verify_bit_round_trip(BitOrder::MsbFirst, 1): {
+        failures += 1;
+    }
+    if !verify_bit_round_trip(BitOrder::LsbFirst, 2): {
+        failures += 1;
+    }
+    if !verify_reverse_bits(): {
+        failures += 1;
+    }
+    if !verify_popcount(): {
+        failures += 1;
+    }
+    if !verify_deflate_tables(): {
+        failures += 1;
+    }
+    if !verify_priority_queue(): {
+        failures += 1;
+    }
+    if !verify_model_consistency(): {
+        failures += 1;
+    }
+
+    var inputs = vector{ByteBuffer}();
+    inputs.push_back(make_runny_buffer(4096, 11));
+    inputs.push_back(make_repetitive_buffer(8192, 61, 12));
+    inputs.push_back(make_random_buffer(2048, 13));
+    inputs.push_back(make_texty_buffer(8192, 14));
+
+    var index: int = 0;
+    while index < inputs.size(): {
+        let sample: &const = inputs.at(index);
+
+        if !verify_huffman_tree(sample): {
+            failures += 1;
+        }
+        if !verify_huffman_tables(sample): {
+            failures += 1;
+        }
+        if !verify_length_limiting(sample, 12): {
+            failures += 1;
+        }
+        if !verify_rle_round_trip(sample): {
+            failures += 1;
+        }
+        if !verify_mtf_round_trip(sample): {
+            failures += 1;
+        }
+        if !verify_arithmetic_round_trip(sample): {
+            failures += 1;
+        }
+        if !verify_checksums(sample): {
+            failures += 1;
+        }
+
+        var level: int = 0;
+        while level <= 9: {
+            if !verify_lz77_round_trip(sample, level): {
+                failures += 1;
+            }
+            if !verify_deflate_round_trip(sample, level): {
+                failures += 1;
+            }
+            level += 1;
+        }
+
+        index += 1;
+    }
+
+    // The Burrows-Wheeler round trip is quadratic in the block size, so it
+    // only runs over a short prefix.
+    var small = make_runny_buffer(512, 21);
+    if !verify_bwt_round_trip(small): {
+        failures += 1;
+    }
+    if !verify_block_sort_round_trip(small): {
+        failures += 1;
+    }
+
+    assert failures >= 0;
+    prove failures == 0;
+    destroy small;
+    destroy inputs;
+    return failures;
+}
+
+// Human readable name for a status code, used by the report below.
+fn status_name(status: Status) -> string: {
+    if status == Status::Ok: {
+        return "ok";
+    } else: { if status == Status::NeedMoreInput: {
+        return "need more input";
+    } else: { if status == Status::OutputFull: {
+        return "output full";
+    } else: { if status == Status::CorruptStream: {
+        return "corrupt stream";
+    } else: { if status == Status::BadCodeLengths: {
+        return "bad code lengths";
+    } else: { if status == Status::BadDistance: {
+        return "bad distance";
+    } else: { if status == Status::ChecksumMismatch: {
+        return "checksum mismatch";
+    } else: {
+        return "unsupported";
+    }
+    } } } } } }
+}
+
+// Compression ratio in percent, rounded down. A ratio above 100 means the
+// codec expanded the input, which stored blocks exist to prevent.
+fn ratio_percent(original: int, compressed: int) -> int: {
+    if original == 0: {
+        return 100;
+    }
+    return (compressed * 100) / original;
+}
+
+// One line of the summary table. The apostrophe is spelled through a string
+// constant because the lexer has no escaped single-quote char literal.
+fn report_line(label: &const shared string, original: int, compressed: int) -> string: {
+    var text = string();
+    text.append(label);
+    text.append(APOSTROPHE);
+    text.append("s ratio: ");
+    text.append(to_string(ratio_percent(original, compressed)));
+    text.append("% (");
+    text.append(to_string(original));
+    text.append(" -> ");
+    text.append(to_string(compressed));
+    text.append(" bytes)");
+    return text;
+}
+
+// Compress one sample at every level and print the resulting ratios.
+fn report_levels(sample: &const shared ByteBuffer, label: &const shared string): {
+    var level: int = 0;
+    while level <= 9: {
+        var encoder = DeflateEncoder();
+        encoder.init(level);
+        let status = encoder.compress(sample);
+        if status != Status::Ok: {
+            println(status_name(status));
+        } else: {
+            println(report_line(label, sample.size(), encoder.writer.out.size()));
+        }
+        level += 1;
+    }
+}
+
+fn main() -> int: {
+    let failures = run_all_checks();
+    if failures == 0: {
+        println("compression: all round trips verified");
+        var sample = make_texty_buffer(8192, 77);
+        report_levels(sample, "texty");
+        var repetitive = make_repetitive_buffer(8192, 61, 78);
+        report_levels(repetitive, "repetitive");
+        destroy sample;
+        destroy repetitive;
+    } else: {
+        println("compression: failures detected");
+        println(to_string(failures));
+    }
+    return failures;
+}
+
+}

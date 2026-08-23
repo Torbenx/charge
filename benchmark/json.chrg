@@ -1,0 +1,2074 @@
+// A complete JSON reader and writer: lexer, recursive descent parser and
+// serializer with compact and pretty output modes.
+//
+// Numbers are stored as a scaled integer mantissa plus a decimal exponent,
+// because the charge lexer only accepts plain decimal integer literals.
+// The value of a number is  sign * mantissa * 10^exponent.
+namespace json: {
+
+// --- Character constants -------------------------------------------------
+//
+// The lexer compares raw characters constantly, so every delimiter gets a
+// name here instead of being spelled out at each use site.
+
+static CHAR_QUOTE: char = '"';
+static CHAR_BACKSLASH: char = '\\';
+static CHAR_SLASH: char = '/';
+static CHAR_NEWLINE: char = '\n';
+static CHAR_RETURN: char = '\r';
+static CHAR_TAB: char = '\t';
+static CHAR_BACKSPACE: char = '\b';
+static CHAR_FORMFEED: char = '\f';
+static CHAR_SPACE: char = ' ';
+static CHAR_NUL: char = '\0';
+
+static CHAR_LBRACE: char = '{';
+static CHAR_RBRACE: char = '}';
+static CHAR_LBRACKET: char = '[';
+static CHAR_RBRACKET: char = ']';
+static CHAR_COLON: char = ':';
+static CHAR_COMMA: char = ',';
+
+static CHAR_MINUS: char = '-';
+static CHAR_PLUS: char = '+';
+static CHAR_DOT: char = '.';
+static CHAR_ZERO: char = '0';
+static CHAR_NINE: char = '9';
+static CHAR_LOWER_A: char = 'a';
+static CHAR_LOWER_B: char = 'b';
+static CHAR_LOWER_E: char = 'e';
+static CHAR_LOWER_F: char = 'f';
+static CHAR_LOWER_N: char = 'n';
+static CHAR_LOWER_R: char = 'r';
+static CHAR_LOWER_T: char = 't';
+static CHAR_LOWER_U: char = 'u';
+static CHAR_LOWER_Z: char = 'z';
+static CHAR_UPPER_A: char = 'A';
+static CHAR_UPPER_E: char = 'E';
+static CHAR_UPPER_F: char = 'F';
+static CHAR_UPPER_Z: char = 'Z';
+
+// --- Keyword and punctuation spellings -----------------------------------
+
+static WORD_TRUE: string = "true";
+static WORD_FALSE: string = "false";
+static WORD_NULL: string = "null";
+
+static TEXT_LBRACE: string = "{";
+static TEXT_RBRACE: string = "}";
+static TEXT_LBRACKET: string = "[";
+static TEXT_RBRACKET: string = "]";
+static TEXT_COLON: string = ":";
+static TEXT_COMMA: string = ",";
+static TEXT_COLON_SPACE: string = ": ";
+static TEXT_COMMA_SPACE: string = ", ";
+static TEXT_EMPTY: string = "";
+static TEXT_EMPTY_ARRAY: string = "[]";
+static TEXT_EMPTY_OBJECT: string = "{}";
+static TEXT_SPACE: string = " ";
+static TEXT_NEWLINE: string = "\n";
+static TEXT_TWO_SPACES: string = "  ";
+static TEXT_FOUR_SPACES: string = "    ";
+static TEXT_TAB: string = "\t";
+
+// The literal two-character sequences that JSON uses inside strings. Note the
+// doubled backslash: the charge source escape produces one real backslash.
+static ESCAPE_QUOTE: string = "\\\"";
+static ESCAPE_BACKSLASH: string = "\\\\";
+static ESCAPE_SLASH: string = "\\/";
+static ESCAPE_NEWLINE: string = "\\n";
+static ESCAPE_RETURN: string = "\\r";
+static ESCAPE_TAB: string = "\\t";
+static ESCAPE_BACKSPACE: string = "\\b";
+static ESCAPE_FORMFEED: string = "\\f";
+static ESCAPE_UNICODE: string = "\\u";
+
+// Limits. JSON itself has none, but a real reader needs guard rails.
+static MAX_DEPTH: int = 128;
+static MAX_MANTISSA_DIGITS: int = 17;
+static MAX_EXPONENT: int = 308;
+static MIN_EXPONENT: int = -308;
+static UNICODE_ESCAPE_DIGITS: int = 4;
+static SURROGATE_HIGH_BEGIN: int = 55296;
+static SURROGATE_HIGH_END: int = 56319;
+static SURROGATE_LOW_BEGIN: int = 56320;
+static SURROGATE_LOW_END: int = 57343;
+static SURROGATE_OFFSET: int = 65536;
+static REPLACEMENT_CODEPOINT: int = 65533;
+static ASCII_LIMIT: int = 128;
+static CONTROL_LIMIT: int = 32;
+
+// --- Value and token kinds -----------------------------------------------
+
+enum JsonKind: {
+    Null;
+    Bool;
+    Number;
+    String;
+    Array;
+    Object;
+}
+
+enum TokenKind: {
+    End;
+    ObjectBegin;
+    ObjectEnd;
+    ArrayBegin;
+    ArrayEnd;
+    Colon;
+    Comma;
+    String;
+    Number;
+    True;
+    False;
+    Null;
+    Invalid = 100;
+}
+
+enum ErrorCode: {
+    None;
+    UnexpectedEnd;
+    UnexpectedCharacter;
+    UnterminatedString;
+    BadEscape;
+    BadUnicodeEscape;
+    ControlCharacterInString;
+    LeadingZero;
+    MissingFraction;
+    MissingExponent;
+    NumberOverflow;
+    TrailingContent;
+    ExpectedColon;
+    ExpectedCommaOrEnd;
+    ExpectedKey;
+    ExpectedValue;
+    DepthExceeded;
+    LoneSurrogate;
+}
+
+// --- Source positions ----------------------------------------------------
+
+// Every token and every error carries one of these so diagnostics can point
+// at a line and column rather than a bare byte offset.
+struct Position: {
+
+    fn advance_over(self: &unique, c: char): {
+        .offset += 1;
+        if c == CHAR_NEWLINE: {
+            .line += 1;
+            .column = 1;
+        } else: {
+            .column += 1;
+        }
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out: string = "line ";
+        out.append(to_string(.line));
+        out.append(", column ");
+        out.append(to_string(.column));
+        out.append(" (offset ");
+        out.append(to_string(.offset));
+        out.append(")");
+        return out;
+    }
+
+    offset: int = 0;
+    line: int = 1;
+    column: int = 1;
+}
+
+// --- Escape tables -------------------------------------------------------
+
+// One row of the escape table: the character that follows a backslash, the
+// character it decodes to, and the human readable name used in diagnostics.
+struct EscapeRow: {
+    marker: char = CHAR_NUL;
+    decoded: char = CHAR_NUL;
+    spelling: string;
+    name: string;
+}
+
+fn escape_table() -> vector{EscapeRow}: {
+    var rows: vector{EscapeRow};
+    rows.push_back(EscapeRow(marker: '"', decoded: '"', spelling: "\\\"", name: "quotation mark"));
+    rows.push_back(EscapeRow(marker: '\\', decoded: '\\', spelling: "\\\\", name: "reverse solidus"));
+    rows.push_back(EscapeRow(marker: '/', decoded: '/', spelling: "\\/", name: "solidus"));
+    rows.push_back(EscapeRow(marker: 'b', decoded: '\b', spelling: "\\b", name: "backspace"));
+    rows.push_back(EscapeRow(marker: 'f', decoded: '\f', spelling: "\\f", name: "form feed"));
+    rows.push_back(EscapeRow(marker: 'n', decoded: '\n', spelling: "\\n", name: "line feed"));
+    rows.push_back(EscapeRow(marker: 'r', decoded: '\r', spelling: "\\r", name: "carriage return"));
+    rows.push_back(EscapeRow(marker: 't', decoded: '\t', spelling: "\\t", name: "tab"));
+    return rows;
+}
+
+// Decode a single escape marker. Returns the NUL character when the marker is
+// not one of the eight single-character escapes; \u is handled separately.
+fn decode_escape(marker: char) -> char: {
+    if marker == '"': {
+        return '"';
+    }
+    if marker == '\\': {
+        return '\\';
+    }
+    if marker == '/': {
+        return '/';
+    }
+    if marker == 'b': {
+        return '\b';
+    }
+    if marker == 'f': {
+        return '\f';
+    }
+    if marker == 'n': {
+        return '\n';
+    }
+    if marker == 'r': {
+        return '\r';
+    }
+    if marker == 't': {
+        return '\t';
+    }
+    return CHAR_NUL;
+}
+
+// The inverse mapping, used by the serializer.
+fn encode_escape(c: char) -> string: {
+    if c == '"': {
+        return "\\\"";
+    }
+    if c == '\\': {
+        return "\\\\";
+    }
+    if c == '\n': {
+        return "\\n";
+    }
+    if c == '\r': {
+        return "\\r";
+    }
+    if c == '\t': {
+        return "\\t";
+    }
+    if c == '\b': {
+        return "\\b";
+    }
+    if c == '\f': {
+        return "\\f";
+    }
+    return "";
+}
+
+fn escape_name(marker: char) -> string: {
+    if marker == 'n': {
+        return "line feed";
+    }
+    if marker == 't': {
+        return "tab";
+    }
+    if marker == 'r': {
+        return "carriage return";
+    }
+    if marker == 'b': {
+        return "backspace";
+    }
+    if marker == 'f': {
+        return "form feed";
+    }
+    if marker == 'u': {
+        return "unicode escape";
+    }
+    if marker == '/': {
+        return "solidus";
+    }
+    if marker == '"': {
+        return "quotation mark";
+    }
+    if marker == '\\': {
+        return "reverse solidus";
+    }
+    return "unknown escape";
+}
+
+// --- Character classification --------------------------------------------
+
+fn is_whitespace(c: char) => c == ' ' || c == '\t' || c == '\n' || c == '\r';
+
+fn is_digit(c: char) => c >= '0' && c <= '9';
+
+fn is_nonzero_digit(c: char) => c >= '1' && c <= '9';
+
+fn is_hex_digit(c: char) -> bool: {
+    if c >= '0' && c <= '9': {
+        return true;
+    }
+    if c >= 'a' && c <= 'f': {
+        return true;
+    }
+    if c >= 'A' && c <= 'F': {
+        return true;
+    }
+    return false;
+}
+
+fn is_structural(c: char) -> bool: {
+    return c == '{' || c == '}' || c == '[' || c == ']' || c == ':' || c == ',';
+}
+
+fn is_control(c: char) -> bool: {
+    return int(c) < CONTROL_LIMIT;
+}
+
+fn is_letter(c: char) -> bool: {
+    if c >= 'a' && c <= 'z': {
+        return true;
+    }
+    if c >= 'A' && c <= 'Z': {
+        return true;
+    }
+    return false;
+}
+
+fn digit_value(c: char) -> int: {
+    return int(c) - int('0');
+}
+
+fn hex_value(c: char) -> int: {
+    if c >= '0' && c <= '9': {
+        return int(c) - int('0');
+    }
+    if c >= 'a' && c <= 'f': {
+        return int(c) - int('a') + 10;
+    }
+    if c >= 'A' && c <= 'F': {
+        return int(c) - int('A') + 10;
+    }
+    return -1;
+}
+
+// Lower case hexadecimal digits, indexed by value. Used when the serializer
+// has to emit a \u escape for a control character.
+fn hex_digit(value: int) -> char: {
+    if value == 0: { return '0'; }
+    if value == 1: { return '1'; }
+    if value == 2: { return '2'; }
+    if value == 3: { return '3'; }
+    if value == 4: { return '4'; }
+    if value == 5: { return '5'; }
+    if value == 6: { return '6'; }
+    if value == 7: { return '7'; }
+    if value == 8: { return '8'; }
+    if value == 9: { return '9'; }
+    if value == 10: { return 'a'; }
+    if value == 11: { return 'b'; }
+    if value == 12: { return 'c'; }
+    if value == 13: { return 'd'; }
+    if value == 14: { return 'e'; }
+    if value == 15: { return 'f'; }
+    return '?';
+}
+
+// --- Diagnostics ---------------------------------------------------------
+
+fn error_text(code: ErrorCode) -> string: {
+    if code == ErrorCode::None: {
+        return "no error";
+    }
+    if code == ErrorCode::UnexpectedEnd: {
+        return "unexpected end of input";
+    }
+    if code == ErrorCode::UnexpectedCharacter: {
+        return "unexpected character";
+    }
+    if code == ErrorCode::UnterminatedString: {
+        return "unterminated string literal, expected a closing '\"'";
+    }
+    if code == ErrorCode::BadEscape: {
+        return "invalid escape sequence after '\\'";
+    }
+    if code == ErrorCode::BadUnicodeEscape: {
+        return "invalid \\uXXXX escape, expected four hexadecimal digits";
+    }
+    if code == ErrorCode::ControlCharacterInString: {
+        return "raw control character in string, use \\u00XX instead";
+    }
+    if code == ErrorCode::LeadingZero: {
+        return "numbers may not have a leading zero";
+    }
+    if code == ErrorCode::MissingFraction: {
+        return "expected at least one digit after '.'";
+    }
+    if code == ErrorCode::MissingExponent: {
+        return "expected at least one digit after 'e'";
+    }
+    if code == ErrorCode::NumberOverflow: {
+        return "number is out of the representable range";
+    }
+    if code == ErrorCode::TrailingContent: {
+        return "trailing content after the top level value";
+    }
+    if code == ErrorCode::ExpectedColon: {
+        return "expected ':' between an object key and its value";
+    }
+    if code == ErrorCode::ExpectedCommaOrEnd: {
+        return "expected ',' or a closing bracket";
+    }
+    if code == ErrorCode::ExpectedKey: {
+        return "expected a string key";
+    }
+    if code == ErrorCode::ExpectedValue: {
+        return "expected a value";
+    }
+    if code == ErrorCode::DepthExceeded: {
+        return "maximum nesting depth exceeded";
+    }
+    if code == ErrorCode::LoneSurrogate: {
+        return "lone surrogate in \\u escape";
+    }
+    return "unknown error";
+}
+
+struct Diagnostic: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .code == ErrorCode::None;
+    }
+
+    fn render(self: &const shared) -> string: {
+        if .code == ErrorCode::None: {
+            return "ok";
+        }
+        var out: string = "json: ";
+        out.append(error_text(.code));
+        out.append(" at ");
+        out.append(.where.describe());
+        if !.detail.empty(): {
+            out.append(" [");
+            out.append(.detail);
+            out.append("]");
+        }
+        return out;
+    }
+
+    code: ErrorCode = ErrorCode::None;
+    where: Position;
+    detail: string;
+}
+
+fn make_error(code: ErrorCode, where: Position, detail: string) -> Diagnostic: {
+    return Diagnostic(code: code, where: where, detail: detail);
+}
+
+// --- Numbers -------------------------------------------------------------
+
+// A JSON number as sign * mantissa * 10^exponent. Storing the mantissa as an
+// integer keeps the whole reader free of floating point.
+struct Number: {
+
+    fn is_integral(self: &const shared) -> bool: {
+        return .exponent >= 0;
+    }
+
+    fn signed_mantissa(self: &const shared) -> int: {
+        if .negative: {
+            return -.mantissa;
+        }
+        return .mantissa;
+    }
+
+    fn render(self: &const shared) -> string: {
+        var out: string = "";
+        if .negative: {
+            out.append("-");
+        }
+        out.append(to_string(.mantissa));
+        if .exponent != 0: {
+            out.append("e");
+            out.append(to_string(.exponent));
+        }
+        return out;
+    }
+
+    negative: bool = false;
+    mantissa: int = 0;
+    exponent: int = 0;
+    digits: int = 0;
+}
+
+fn number_from_int(value: int) -> Number: {
+    if value < 0: {
+        return Number(negative: true, mantissa: -value, exponent: 0);
+    }
+    return Number(negative: false, mantissa: value, exponent: 0);
+}
+
+// --- Tokens --------------------------------------------------------------
+
+struct Token: {
+
+    fn is_value_start(self: &const shared) -> bool: {
+        if .kind == TokenKind::String: { return true; }
+        if .kind == TokenKind::Number: { return true; }
+        if .kind == TokenKind::True: { return true; }
+        if .kind == TokenKind::False: { return true; }
+        if .kind == TokenKind::Null: { return true; }
+        if .kind == TokenKind::ArrayBegin: { return true; }
+        if .kind == TokenKind::ObjectBegin: { return true; }
+        return false;
+    }
+
+    fn spelling(self: &const shared) -> string: {
+        if .kind == TokenKind::End: { return "<end of input>"; }
+        if .kind == TokenKind::ObjectBegin: { return "{"; }
+        if .kind == TokenKind::ObjectEnd: { return "}"; }
+        if .kind == TokenKind::ArrayBegin: { return "["; }
+        if .kind == TokenKind::ArrayEnd: { return "]"; }
+        if .kind == TokenKind::Colon: { return ":"; }
+        if .kind == TokenKind::Comma: { return ","; }
+        if .kind == TokenKind::True: { return "true"; }
+        if .kind == TokenKind::False: { return "false"; }
+        if .kind == TokenKind::Null: { return "null"; }
+        if .kind == TokenKind::String: { return .text; }
+        if .kind == TokenKind::Number: { return .number.render(); }
+        return "<invalid>";
+    }
+
+    kind: TokenKind = TokenKind::End;
+    text: string;
+    number: Number;
+    begin: Position;
+    end: Position;
+}
+
+fn punctuation_token(c: char) -> TokenKind: {
+    if c == '{': {
+        return TokenKind::ObjectBegin;
+    }
+    if c == '}': {
+        return TokenKind::ObjectEnd;
+    }
+    if c == '[': {
+        return TokenKind::ArrayBegin;
+    }
+    if c == ']': {
+        return TokenKind::ArrayEnd;
+    }
+    if c == ':': {
+        return TokenKind::Colon;
+    }
+    if c == ',': {
+        return TokenKind::Comma;
+    }
+    return TokenKind::Invalid;
+}
+
+// --- Lexer ---------------------------------------------------------------
+
+// A character level scanner. It owns the source text and a cursor, and hands
+// out one token at a time. All string decoding happens here so the parser
+// never sees a backslash.
+struct Lexer: {
+
+    fn at_end(self: &const shared) -> bool: {
+        return .cursor.offset >= .source.size();
+    }
+
+    fn remaining(self: &const shared) -> int: {
+        return .source.size() - .cursor.offset;
+    }
+
+    fn peek(self: &const shared) -> char: {
+        if .at_end(): {
+            return '\0';
+        }
+        return .source.at(.cursor.offset);
+    }
+
+    fn peek_at(self: &const shared, ahead: int) -> char: {
+        let index = .cursor.offset + ahead;
+        if index >= .source.size(): {
+            return '\0';
+        }
+        return .source.at(index);
+    }
+
+    fn advance(self: &unique) -> char: {
+        if .at_end(): {
+            return '\0';
+        }
+        let c = .source.at(.cursor.offset);
+        .cursor.advance_over(c);
+        return c;
+    }
+
+    fn accept(self: &unique, expected: char) -> bool: {
+        if .peek() == expected: {
+            discard .advance();
+            return true;
+        }
+        return false;
+    }
+
+    fn fail(self: &unique, code: ErrorCode, detail: string) -> Token: {
+        .problem = make_error(code, .cursor, detail);
+        return Token(kind: TokenKind::Invalid, begin: .cursor, end: .cursor);
+    }
+
+    // Skip spaces, tabs, carriage returns and newlines. JSON allows nothing
+    // else between tokens, comments in particular are not part of the grammar.
+    fn skip_whitespace(self: &unique): {
+        while !.at_end(): {
+            let c = .peek();
+            if c == ' ' || c == '\t' || c == '\n' || c == '\r': {
+                discard .advance();
+            } else: {
+                break;
+            }
+        }
+    }
+
+    // A relaxed mode that also swallows // and /* */ comments, for reading
+    // configuration files that are "JSON with comments".
+    fn skip_trivia(self: &unique): {
+        loop: {
+            .skip_whitespace();
+            if !.allow_comments: {
+                break;
+            }
+            if .peek() != '/': {
+                break;
+            }
+            let after = .peek_at(1);
+            if after == '/': {
+                discard .advance();
+                discard .advance();
+                while !.at_end() && .peek() != '\n': {
+                    discard .advance();
+                }
+            } else: {
+                if after == '*': {
+                    discard .advance();
+                    discard .advance();
+                    while !.at_end(): {
+                        if .peek() == '*' && .peek_at(1) == '/': {
+                            discard .advance();
+                            discard .advance();
+                            break;
+                        }
+                        discard .advance();
+                    }
+                } else: {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Read four hexadecimal digits and fold them into a code point. The
+    // leading "\u" has already been consumed by the caller.
+    fn scan_hex_quad(self: &unique, out: &unique int) -> bool: {
+        var value: int = 0;
+        var read: int = 0;
+        while read < UNICODE_ESCAPE_DIGITS: {
+            if .at_end(): {
+                return false;
+            }
+            let c = .peek();
+            if !is_hex_digit(c): {
+                return false;
+            }
+            discard .advance();
+            value = value * 16 + hex_value(c);
+            read += 1;
+        }
+        assert read == UNICODE_ESCAPE_DIGITS;
+        out = value;
+        return true;
+    }
+
+    // Encode a code point as UTF-8 and append it to the destination. The
+    // charge string is a byte sequence, so this writes one to four bytes.
+    fn append_utf8(self: &const shared, out: &unique string, codepoint: int): {
+        if codepoint < ASCII_LIMIT: {
+            out.push_back(char(codepoint));
+            return;
+        }
+        if codepoint < 2048: {
+            out.push_back(char(192 + (codepoint >> 6)));
+            out.push_back(char(128 + (codepoint & 63)));
+            return;
+        }
+        if codepoint < 65536: {
+            out.push_back(char(224 + (codepoint >> 12)));
+            out.push_back(char(128 + ((codepoint >> 6) & 63)));
+            out.push_back(char(128 + (codepoint & 63)));
+            return;
+        }
+        out.push_back(char(240 + (codepoint >> 18)));
+        out.push_back(char(128 + ((codepoint >> 12) & 63)));
+        out.push_back(char(128 + ((codepoint >> 6) & 63)));
+        out.push_back(char(128 + (codepoint & 63)));
+    }
+
+    // Handle everything after a backslash inside a string literal.
+    fn scan_escape(self: &unique, out: &unique string) -> bool: {
+        if .at_end(): {
+            discard .fail(ErrorCode::UnterminatedString, "input ended after a backslash");
+            return false;
+        }
+        let marker = .advance();
+        if marker == 'u': {
+            var codepoint: int = 0;
+            if !.scan_hex_quad(codepoint): {
+                discard .fail(ErrorCode::BadUnicodeEscape, "expected four hex digits after \\u");
+                return false;
+            }
+            // A high surrogate must be followed by a matching low surrogate,
+            // spelled as a second \u escape.
+            if codepoint >= SURROGATE_HIGH_BEGIN && codepoint <= SURROGATE_HIGH_END: {
+                if .peek() != '\\' || .peek_at(1) != 'u': {
+                    if .strict_surrogates: {
+                        discard .fail(ErrorCode::LoneSurrogate, "high surrogate without a pair");
+                        return false;
+                    }
+                    .append_utf8(out, REPLACEMENT_CODEPOINT);
+                    return true;
+                }
+                discard .advance();
+                discard .advance();
+                var low: int = 0;
+                if !.scan_hex_quad(low): {
+                    discard .fail(ErrorCode::BadUnicodeEscape, "bad low surrogate escape");
+                    return false;
+                }
+                if low < SURROGATE_LOW_BEGIN || low > SURROGATE_LOW_END: {
+                    if .strict_surrogates: {
+                        discard .fail(ErrorCode::LoneSurrogate, "second escape is not a low surrogate");
+                        return false;
+                    }
+                    .append_utf8(out, REPLACEMENT_CODEPOINT);
+                    return true;
+                }
+                let high_part = (codepoint - SURROGATE_HIGH_BEGIN) << 10;
+                let low_part = low - SURROGATE_LOW_BEGIN;
+                .append_utf8(out, SURROGATE_OFFSET + high_part + low_part);
+                return true;
+            }
+            if codepoint >= SURROGATE_LOW_BEGIN && codepoint <= SURROGATE_LOW_END: {
+                if .strict_surrogates: {
+                    discard .fail(ErrorCode::LoneSurrogate, "unpaired low surrogate");
+                    return false;
+                }
+                .append_utf8(out, REPLACEMENT_CODEPOINT);
+                return true;
+            }
+            .append_utf8(out, codepoint);
+            return true;
+        }
+        let decoded = decode_escape(marker);
+        if decoded == '\0': {
+            var detail: string = "unknown escape '\\";
+            detail.push_back(marker);
+            detail.append("'");
+            discard .fail(ErrorCode::BadEscape, detail);
+            return false;
+        }
+        out.push_back(decoded);
+        return true;
+    }
+
+    // Scan a complete string literal. The opening quote is consumed by the
+    // caller; the closing quote is consumed here.
+    fn scan_string(self: &unique) -> Token: {
+        let begin = .cursor;
+        var text: string = "";
+        loop: {
+            if .at_end(): {
+                return .fail(ErrorCode::UnterminatedString, "reached end of input inside a string");
+            }
+            let c = .peek();
+            if c == '"': {
+                discard .advance();
+                break;
+            }
+            if c == '\\': {
+                discard .advance();
+                if !.scan_escape(text): {
+                    return Token(kind: TokenKind::Invalid, begin: begin, end: .cursor);
+                }
+                continue;
+            }
+            if is_control(c): {
+                var detail: string = "control byte ";
+                detail.append(to_string(int(c)));
+                return .fail(ErrorCode::ControlCharacterInString, detail);
+            }
+            discard .advance();
+            text.push_back(c);
+        }
+        return Token(kind: TokenKind::String, text: text, begin: begin, end: .cursor);
+    }
+
+    // Scan an integer, fraction and exponent into a scaled mantissa.
+    fn scan_number(self: &unique) -> Token: {
+        let begin = .cursor;
+        var result: Number;
+        if .peek() == '-': {
+            discard .advance();
+            result.negative = true;
+        }
+        if .at_end(): {
+            return .fail(ErrorCode::UnexpectedEnd, "input ended after '-'");
+        }
+        var seen: int = 0;
+        if .peek() == '0': {
+            discard .advance();
+            seen += 1;
+            if is_digit(.peek()): {
+                return .fail(ErrorCode::LeadingZero, "digit follows a leading '0'");
+            }
+        } else: {
+            if !is_digit(.peek()): {
+                return .fail(ErrorCode::UnexpectedCharacter, "expected a digit");
+            }
+            while is_digit(.peek()): {
+                let c = .advance();
+                if seen < MAX_MANTISSA_DIGITS: {
+                    result.mantissa = result.mantissa * 10 + digit_value(c);
+                } else: {
+                    // Past the precision limit the digit only shifts the
+                    // decimal point, it no longer changes the mantissa.
+                    result.exponent += 1;
+                }
+                seen += 1;
+            }
+        }
+        result.digits = seen;
+        // The fractional part scales the mantissa up and the exponent down.
+        if .peek() == '.': {
+            discard .advance();
+            if !is_digit(.peek()): {
+                return .fail(ErrorCode::MissingFraction, "expected a digit after '.'");
+            }
+            while is_digit(.peek()): {
+                let c = .advance();
+                if seen < MAX_MANTISSA_DIGITS: {
+                    result.mantissa = result.mantissa * 10 + digit_value(c);
+                    result.exponent -= 1;
+                    seen += 1;
+                }
+            }
+            result.digits = seen;
+        }
+        if .peek() == 'e' || .peek() == 'E': {
+            discard .advance();
+            var exponent_negative: bool = false;
+            if .peek() == '+': {
+                discard .advance();
+            } else: {
+                if .peek() == '-': {
+                    discard .advance();
+                    exponent_negative = true;
+                }
+            }
+            if !is_digit(.peek()): {
+                return .fail(ErrorCode::MissingExponent, "expected a digit after the exponent marker");
+            }
+            var exponent: int = 0;
+            while is_digit(.peek()): {
+                let c = .advance();
+                exponent = exponent * 10 + digit_value(c);
+                if exponent > MAX_EXPONENT: {
+                    return .fail(ErrorCode::NumberOverflow, "exponent is too large");
+                }
+            }
+            if exponent_negative: {
+                result.exponent -= exponent;
+            } else: {
+                result.exponent += exponent;
+            }
+        }
+        if result.exponent > MAX_EXPONENT || result.exponent < MIN_EXPONENT: {
+            return .fail(ErrorCode::NumberOverflow, "scaled exponent is out of range");
+        }
+        return Token(kind: TokenKind::Number, number: result, begin: begin, end: .cursor);
+    }
+
+    // Match one of the three bare keywords.
+    fn scan_keyword(self: &unique) -> Token: {
+        let begin = .cursor;
+        var word: string = "";
+        while is_letter(.peek()): {
+            word.push_back(.advance());
+        }
+        if word == "true": {
+            return Token(kind: TokenKind::True, text: "true", begin: begin, end: .cursor);
+        }
+        if word == "false": {
+            return Token(kind: TokenKind::False, text: "false", begin: begin, end: .cursor);
+        }
+        if word == "null": {
+            return Token(kind: TokenKind::Null, text: "null", begin: begin, end: .cursor);
+        }
+        var detail: string = "expected 'true', 'false' or 'null', found '";
+        detail.append(word);
+        detail.append("'");
+        return .fail(ErrorCode::UnexpectedCharacter, detail);
+    }
+
+    fn next_token(self: &unique) -> Token: {
+        .skip_trivia();
+        let begin = .cursor;
+        if .at_end(): {
+            return Token(kind: TokenKind::End, begin: begin, end: begin);
+        }
+        let c = .peek();
+        if c == '"': {
+            discard .advance();
+            return .scan_string();
+        }
+        if c == '-' || is_digit(c): {
+            return .scan_number();
+        }
+        if is_letter(c): {
+            return .scan_keyword();
+        }
+        if is_structural(c): {
+            discard .advance();
+            return Token(kind: punctuation_token(c), text: .source.substr(begin.offset, 1), begin: begin, end: .cursor);
+        }
+        var detail: string = "stray byte ";
+        detail.append(to_string(int(c)));
+        discard .advance();
+        return .fail(ErrorCode::UnexpectedCharacter, detail);
+    }
+
+    source: string;
+    cursor: Position;
+    problem: Diagnostic;
+    allow_comments: bool = false;
+    strict_surrogates: bool = true;
+}
+
+
+// --- Values --------------------------------------------------------------
+
+// A JSON value is a tagged union. charge has no variant type yet, so every
+// payload gets its own field and `kind` decides which one is meaningful.
+//
+// Objects keep two parallel vectors instead of a map because JSON member
+// order is observable: a document that is read and written back out should
+// come out spelled the same way it went in.
+struct JsonValue: {
+
+    fn is_null(self: &const shared) -> bool: {
+        return .kind == JsonKind::Null;
+    }
+
+    fn is_bool(self: &const shared) -> bool: {
+        return .kind == JsonKind::Bool;
+    }
+
+    fn is_number(self: &const shared) -> bool: {
+        return .kind == JsonKind::Number;
+    }
+
+    fn is_string(self: &const shared) -> bool: {
+        return .kind == JsonKind::String;
+    }
+
+    fn is_array(self: &const shared) -> bool: {
+        return .kind == JsonKind::Array;
+    }
+
+    fn is_object(self: &const shared) -> bool: {
+        return .kind == JsonKind::Object;
+    }
+
+    // True for everything that cannot contain another value.
+    fn is_scalar(self: &const shared) -> bool: {
+        if .kind == JsonKind::Array: {
+            return false;
+        }
+        if .kind == JsonKind::Object: {
+            return false;
+        }
+        return true;
+    }
+
+    fn kind_name(self: &const shared) -> string: {
+        if .kind == JsonKind::Null: { return "null"; }
+        if .kind == JsonKind::Bool: { return "bool"; }
+        if .kind == JsonKind::Number: { return "number"; }
+        if .kind == JsonKind::String: { return "string"; }
+        if .kind == JsonKind::Array: { return "array"; }
+        if .kind == JsonKind::Object: { return "object"; }
+        return "<unknown>";
+    }
+
+    // The number of children. Scalars report zero rather than failing, which
+    // makes the tree walkers below a lot shorter.
+    fn size(self: &const shared) -> int: {
+        if .kind == JsonKind::Array: {
+            return .items.size();
+        }
+        if .kind == JsonKind::Object: {
+            return .keys.size();
+        }
+        return 0;
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .size() == 0;
+    }
+
+    // --- Array access ----------------------------------------------------
+
+    fn at(self: &shared, index: int) -> &shared[self] JsonValue: {
+        assert index >= 0;
+        if .kind != JsonKind::Array: {
+            return .absent;
+        }
+        if index >= .items.size(): {
+            return .absent;
+        }
+        return .items[index];
+    }
+
+    fn first(self: &shared) -> &shared[self] JsonValue: {
+        return .at(0);
+    }
+
+    fn last(self: &shared) -> &shared[self] JsonValue: {
+        return .at(.size() - 1);
+    }
+
+    fn push_back(self: &unique, value: JsonValue): {
+        .kind = JsonKind::Array;
+        .items.push_back(value);
+    }
+
+    // --- Object access ---------------------------------------------------
+
+    fn index_of(self: &const shared, name: &const shared string) -> int: {
+        if .kind != JsonKind::Object: {
+            return -1;
+        }
+        var slot: int = 0;
+        while slot < .keys.size(): {
+            if .keys[slot] == *name: {
+                return slot;
+            }
+            slot += 1;
+        }
+        return -1;
+    }
+
+    fn has_member(self: &const shared, name: &const shared string) -> bool: {
+        return .index_of(name) >= 0;
+    }
+
+    fn member(self: &shared, name: &const shared string) -> &shared[self] JsonValue: {
+        let slot = .index_of(name);
+        if slot < 0: {
+            return .absent;
+        }
+        return .values[slot];
+    }
+
+    fn key_at(self: &const shared, slot: int) -> string: {
+        if slot < 0 || slot >= .keys.size(): {
+            return "";
+        }
+        return .keys[slot];
+    }
+
+    fn value_at(self: &shared, slot: int) -> &shared[self] JsonValue: {
+        if slot < 0 || slot >= .values.size(): {
+            return .absent;
+        }
+        return .values[slot];
+    }
+
+    // Insert or overwrite. Returns true when the key was new.
+    fn set_member(self: &unique, name: string, value: JsonValue) -> bool: {
+        .kind = JsonKind::Object;
+        let slot = .index_of(name);
+        if slot >= 0: {
+            .values[slot] = value;
+            return false;
+        }
+        .keys.push_back(name);
+        .values.push_back(value);
+        return true;
+    }
+
+    fn remove_member(self: &unique, name: &const shared string) -> bool: {
+        let slot = .index_of(name);
+        if slot < 0: {
+            return false;
+        }
+        .keys.erase(slot);
+        .values.erase(slot);
+        return true;
+    }
+
+    // --- Scalar readers --------------------------------------------------
+
+    fn as_bool(self: &const shared, fallback: bool) -> bool: {
+        if .kind != JsonKind::Bool: {
+            return fallback;
+        }
+        return .boolean;
+    }
+
+    fn as_int(self: &const shared, fallback: int) -> int: {
+        if .kind != JsonKind::Number: {
+            return fallback;
+        }
+        if .number.exponent < 0: {
+            return fallback;
+        }
+        var scaled = .number.signed_mantissa();
+        var steps = .number.exponent;
+        while steps > 0: {
+            scaled = scaled * 10;
+            steps -= 1;
+        }
+        return scaled;
+    }
+
+    fn as_string(self: &const shared, fallback: &const shared string) -> string: {
+        if .kind != JsonKind::String: {
+            return *fallback;
+        }
+        return .text;
+    }
+
+    // A short one line description used in error messages and in tests.
+    fn describe(self: &const shared) -> string: {
+        var out: string = "<";
+        out.append(.kind_name());
+        if .kind == JsonKind::String: {
+            out.append(" \"");
+            out.append(.text);
+            out.append("\"");
+        }
+        if .kind == JsonKind::Number: {
+            out.append(" ");
+            out.append(.number.render());
+        }
+        if .kind == JsonKind::Bool: {
+            if .boolean: {
+                out.append(" true");
+            } else: {
+                out.append(" false");
+            }
+        }
+        if .kind == JsonKind::Array || .kind == JsonKind::Object: {
+            out.append(" of ");
+            out.append(to_string(.size()));
+        }
+        out.append(">");
+        return out;
+    }
+
+    fn clear(self: &unique): {
+        .kind = JsonKind::Null;
+        .boolean = false;
+        .text.clear();
+        .items.clear();
+        .keys.clear();
+        .values.clear();
+    }
+
+    kind: JsonKind = JsonKind::Null;
+    boolean: bool = false;
+    number: Number;
+    text: string;
+    items: vector{JsonValue};
+    keys: vector{string};
+    values: vector{JsonValue};
+    // Returned by at() and member() when the lookup misses, so callers can
+    // chain accessors without checking every step.
+    absent: vector{JsonValue};
+}
+
+// --- Value constructors --------------------------------------------------
+
+fn make_null() -> JsonValue: {
+    return JsonValue(kind: JsonKind::Null);
+}
+
+fn make_bool(value: bool) -> JsonValue: {
+    return JsonValue(kind: JsonKind::Bool, boolean: value);
+}
+
+fn make_number(value: Number) -> JsonValue: {
+    return JsonValue(kind: JsonKind::Number, number: value);
+}
+
+fn make_int(value: int) -> JsonValue: {
+    return JsonValue(kind: JsonKind::Number, number: number_from_int(value));
+}
+
+// Build a scaled number: `mantissa * 10^exponent`, e.g. make_scaled(1505, -2)
+// is the JSON number 15.05.
+fn make_scaled(mantissa: int, exponent: int) -> JsonValue: {
+    var n = number_from_int(mantissa);
+    n.exponent = exponent;
+    return JsonValue(kind: JsonKind::Number, number: n);
+}
+
+fn make_string(value: string) -> JsonValue: {
+    return JsonValue(kind: JsonKind::String, text: value);
+}
+
+fn make_array() -> JsonValue: {
+    return JsonValue(kind: JsonKind::Array);
+}
+
+fn make_object() -> JsonValue: {
+    return JsonValue(kind: JsonKind::Object);
+}
+
+// --- Parser --------------------------------------------------------------
+
+// How a document is allowed to end. Strict JSON wants exactly one value and
+// nothing after it; the streaming mode leaves the cursor where it stopped so
+// a caller can read newline delimited JSON.
+enum DocumentMode: {
+    SingleValue;
+    Streaming;
+}
+
+// Recursive descent over the token stream produced by Lexer. The parser
+// keeps one token of lookahead in `current`; every rule is written so that
+// on entry `current` is the first token of the construct and on exit it is
+// the first token after it.
+struct Parser: {
+
+    fn ok(self: &const shared) -> bool: {
+        return .problem.code == ErrorCode::None;
+    }
+
+    fn diagnostic(self: &const shared) -> Diagnostic: {
+        return .problem;
+    }
+
+    fn position(self: &const shared) -> Position: {
+        return .current.begin;
+    }
+
+    // Pull the next token, forwarding any lexer level error. Once the parser
+    // is in an error state it keeps returning the end token so the recursion
+    // unwinds instead of spinning.
+    fn advance(self: &unique): {
+        if !.ok(): {
+            .current = Token(kind: TokenKind::End, begin: .current.end, end: .current.end);
+            return;
+        }
+        .current = .lexer.next_token();
+        .tokens_read += 1;
+        if .current.kind == TokenKind::Invalid: {
+            .problem = .lexer.problem;
+            if .problem.code == ErrorCode::None: {
+                .problem = make_error(ErrorCode::UnexpectedCharacter, .current.begin, "invalid token");
+            }
+        }
+    }
+
+    fn check(self: &const shared, kind: TokenKind) -> bool: {
+        return .current.kind == kind;
+    }
+
+    fn at_end(self: &const shared) -> bool: {
+        return .current.kind == TokenKind::End;
+    }
+
+    // Consume `kind` if it is next, otherwise raise `code`.
+    fn expect(self: &unique, kind: TokenKind, code: ErrorCode, detail: string) -> bool: {
+        if .current.kind != kind: {
+            .raise(code, detail);
+            return false;
+        }
+        .advance();
+        return true;
+    }
+
+    // Record the first error only. Later errors are almost always fallout
+    // from the first one and just make the report noisier.
+    fn raise(self: &unique, code: ErrorCode, detail: string): {
+        if !.ok(): {
+            return;
+        }
+        var text: string = detail;
+        text.append(", found ");
+        text.append(.quoted_spelling());
+        .problem = make_error(code, .current.begin, text);
+    }
+
+    fn quoted_spelling(self: &const shared) -> string: {
+        if .current.kind == TokenKind::End: {
+            return "end of input";
+        }
+        var out: string = "'";
+        out.append(.current.spelling());
+        out.append("'");
+        return out;
+    }
+
+    // --- Grammar rules ---------------------------------------------------
+
+    // value := object | array | string | number | 'true' | 'false' | 'null'
+    fn parse_value(self: &unique, depth: int) -> JsonValue: {
+        if depth > .depth_limit: {
+            var detail: string = "nesting is deeper than ";
+            detail.append(to_string(.depth_limit));
+            detail.append(" levels");
+            .problem = make_error(ErrorCode::DepthExceeded, .current.begin, detail);
+            return make_null();
+        }
+        if depth > .deepest: {
+            .deepest = depth;
+        }
+        if .current.kind == TokenKind::ObjectBegin: {
+            return .parse_object(depth);
+        }
+        if .current.kind == TokenKind::ArrayBegin: {
+            return .parse_array(depth);
+        }
+        if .current.kind == TokenKind::String: {
+            let text = .current.text;
+            .advance();
+            return make_string(text);
+        }
+        if .current.kind == TokenKind::Number: {
+            let value = .current.number;
+            .advance();
+            return make_number(value);
+        }
+        if .current.kind == TokenKind::True: {
+            .advance();
+            return make_bool(true);
+        }
+        if .current.kind == TokenKind::False: {
+            .advance();
+            return make_bool(false);
+        }
+        if .current.kind == TokenKind::Null: {
+            .advance();
+            return make_null();
+        }
+        .raise(ErrorCode::ExpectedValue, "expected 'null', 'true', 'false', a number, a string, '[' or '{'");
+        return make_null();
+    }
+
+    // array := '[' ']' | '[' value { ',' value } ']'
+    fn parse_array(self: &unique, depth: int) -> JsonValue: {
+        assert .current.kind == TokenKind::ArrayBegin;
+        let opened = .current.begin;
+        .advance();
+        var result = make_array();
+        if .current.kind == TokenKind::ArrayEnd: {
+            .advance();
+            return result;
+        }
+        loop: {
+            if .at_end(): {
+                .problem = make_error(ErrorCode::UnexpectedEnd, opened, "array opened here was never closed with ']'");
+                return result;
+            }
+            let element = .parse_value(depth + 1);
+            if !.ok(): {
+                return result;
+            }
+            result.items.push_back(element);
+            if .current.kind == TokenKind::Comma: {
+                .advance();
+                // A comma directly before ']' is the classic trailing comma.
+                if .current.kind == TokenKind::ArrayEnd: {
+                    if !.allow_trailing_commas: {
+                        .raise(ErrorCode::ExpectedValue, "trailing ',' before ']'");
+                        return result;
+                    }
+                    .advance();
+                    return result;
+                }
+                continue;
+            }
+            if .current.kind == TokenKind::ArrayEnd: {
+                .advance();
+                return result;
+            }
+            .raise(ErrorCode::ExpectedCommaOrEnd, "expected ',' or ']' after an array element");
+            return result;
+        }
+    }
+
+    // member := string ':' value
+    //
+    // The key and the value are written through the out parameters so the
+    // caller can decide what to do with duplicates.
+    fn parse_member(self: &unique, key: &unique string, value: &unique JsonValue, depth: int) -> bool: {
+        if .current.kind != TokenKind::String: {
+            .raise(ErrorCode::ExpectedKey, "expected a '\"' quoted member name");
+            return false;
+        }
+        key = .current.text;
+        .advance();
+        if !.expect(TokenKind::Colon, ErrorCode::ExpectedColon, "expected ':' after the member name"): {
+            return false;
+        }
+        value = .parse_value(depth + 1);
+        return .ok();
+    }
+
+    // object := '{' '}' | '{' member { ',' member } '}'
+    fn parse_object(self: &unique, depth: int) -> JsonValue: {
+        assert .current.kind == TokenKind::ObjectBegin;
+        let opened = .current.begin;
+        .advance();
+        var result = make_object();
+        if .current.kind == TokenKind::ObjectEnd: {
+            .advance();
+            return result;
+        }
+        loop: {
+            if .at_end(): {
+                .problem = make_error(ErrorCode::UnexpectedEnd, opened, "object opened here was never closed with '}'");
+                return result;
+            }
+            var key: string = "";
+            var value = make_null();
+            if !.parse_member(key, value, depth): {
+                return result;
+            }
+            let existing = result.index_of(key);
+            if existing >= 0: {
+                .duplicate_keys += 1;
+                if .reject_duplicate_keys: {
+                    var detail: string = "duplicate member name \"";
+                    detail.append(key);
+                    detail.append("\"");
+                    .problem = make_error(ErrorCode::ExpectedKey, .current.begin, detail);
+                    return result;
+                }
+                // Last one wins, which is what most readers do in practice.
+                result.values[existing] = value;
+            } else: {
+                result.keys.push_back(key);
+                result.values.push_back(value);
+            }
+            if .current.kind == TokenKind::Comma: {
+                .advance();
+                if .current.kind == TokenKind::ObjectEnd: {
+                    if !.allow_trailing_commas: {
+                        .raise(ErrorCode::ExpectedKey, "trailing ',' before '}'");
+                        return result;
+                    }
+                    .advance();
+                    return result;
+                }
+                continue;
+            }
+            if .current.kind == TokenKind::ObjectEnd: {
+                .advance();
+                return result;
+            }
+            .raise(ErrorCode::ExpectedCommaOrEnd, "expected ',' or '}' after a member");
+            return result;
+        }
+    }
+
+    // Entry point. Primes the lookahead, parses one value and, in single
+    // value mode, insists that nothing follows it.
+    fn parse_document(self: &unique) -> JsonValue: {
+        .advance();
+        if .at_end(): {
+            .problem = make_error(ErrorCode::UnexpectedEnd, .current.begin, "the document is empty");
+            return make_null();
+        }
+        var root = .parse_value(1);
+        if !.ok(): {
+            return root;
+        }
+        if .mode == DocumentMode::SingleValue: {
+            if !.at_end(): {
+                .raise(ErrorCode::TrailingContent, "expected end of input after the top level value");
+            }
+        }
+        return root;
+    }
+
+    lexer: Lexer;
+    current: Token;
+    problem: Diagnostic;
+    mode: DocumentMode = DocumentMode::SingleValue;
+    depth_limit: int = MAX_DEPTH;
+    deepest: int = 0;
+    tokens_read: int = 0;
+    duplicate_keys: int = 0;
+    allow_trailing_commas: bool = false;
+    reject_duplicate_keys: bool = false;
+}
+
+// --- Parse front ends ----------------------------------------------------
+
+// The outcome of a parse: the value plus whatever went wrong producing it.
+struct ParseResult: {
+
+    fn ok(self: &const shared) -> bool: {
+        return .problem.code == ErrorCode::None;
+    }
+
+    fn report(self: &const shared) -> string: {
+        if .ok(): {
+            var good: string = "parsed ";
+            good.append(.root.describe());
+            good.append(" from ");
+            good.append(to_string(.tokens));
+            good.append(" tokens");
+            return good;
+        }
+        return .problem.render();
+    }
+
+    root: JsonValue;
+    problem: Diagnostic;
+    tokens: int = 0;
+    depth: int = 0;
+}
+
+fn parse(source: string) -> ParseResult: {
+    var parser = Parser(lexer: Lexer(source: source));
+    var root = parser.parse_document();
+    return ParseResult(root: root, problem: parser.problem, tokens: parser.tokens_read, depth: parser.deepest);
+}
+
+// "JSON with comments" plus trailing commas: the dialect most editors use
+// for their configuration files.
+fn parse_relaxed(source: string) -> ParseResult: {
+    var parser = Parser(lexer: Lexer(source: source, allow_comments: true), allow_trailing_commas: true);
+    var root = parser.parse_document();
+    return ParseResult(root: root, problem: parser.problem, tokens: parser.tokens_read, depth: parser.deepest);
+}
+
+// --- Serializer ----------------------------------------------------------
+
+// Compact writes the shortest legal spelling; Pretty puts one element per
+// line and indents nested levels.
+enum WriteStyle: {
+    Compact;
+    Pretty;
+}
+
+// Which characters get a `\uXXXX` escape rather than being copied through.
+enum EscapePolicy: {
+    Minimal;
+    EscapeSolidus;
+    AsciiOnly;
+}
+
+// Escape one string and wrap it in quotes. This is the only place in the
+// writer that knows about the '"' and '\\' characters.
+fn quote_string(text: &const shared string, policy: EscapePolicy) -> string: {
+    var out: string = "\"";
+    var index: int = 0;
+    while index < text.size(): {
+        let c = text.at(index);
+        let short = encode_escape(c);
+        if !short.empty(): {
+            out.append(short);
+        } else: {
+            if c == '/' && policy == EscapePolicy::EscapeSolidus: {
+                out.append("\\/");
+            } else: {
+                var code = int(c);
+                if code < 0: {
+                    code += 256;
+                }
+                var needs_hex: bool = code < CONTROL_LIMIT;
+                if code >= ASCII_LIMIT && policy == EscapePolicy::AsciiOnly: {
+                    needs_hex = true;
+                }
+                if needs_hex: {
+                    out.append("\\u");
+                    out.push_back(hex_digit((code >> 12) & 15));
+                    out.push_back(hex_digit((code >> 8) & 15));
+                    out.push_back(hex_digit((code >> 4) & 15));
+                    out.push_back(hex_digit(code & 15));
+                } else: {
+                    out.push_back(c);
+                }
+            }
+        }
+        index += 1;
+    }
+    out.append("\"");
+    return out;
+}
+
+// Spell a scaled number back out. Whole numbers print without an exponent;
+// anything else keeps the `<mantissa>e<exponent>` form, which is legal JSON.
+fn spell_number(value: &const shared Number) -> string: {
+    var out: string = "";
+    if value.negative: {
+        out.append("-");
+    }
+    out.append(to_string(value.mantissa));
+    if value.exponent > 0: {
+        // Small positive exponents are cheaper to read as trailing zeroes.
+        if value.exponent <= 6: {
+            var pad = value.exponent;
+            while pad > 0: {
+                out.append("0");
+                pad -= 1;
+            }
+            return out;
+        }
+        out.append("e");
+        out.append(to_string(value.exponent));
+        return out;
+    }
+    if value.exponent < 0: {
+        out.append("e-");
+        out.append(to_string(-value.exponent));
+    }
+    return out;
+}
+
+struct Writer: {
+
+    // One indentation unit repeated `level` times.
+    fn indent(self: &const shared, level: int) -> string: {
+        var out: string = "";
+        if .style == WriteStyle::Compact: {
+            return out;
+        }
+        var step: int = 0;
+        while step < level: {
+            out.append(.indent_unit);
+            step += 1;
+        }
+        return out;
+    }
+
+    fn newline(self: &const shared) -> string: {
+        if .style == WriteStyle::Compact: {
+            return "";
+        }
+        return "\n";
+    }
+
+    // ':' in compact mode, ": " when pretty printing.
+    fn key_separator(self: &const shared) -> string: {
+        if .style == WriteStyle::Compact: {
+            return ":";
+        }
+        return ": ";
+    }
+
+    fn write_value(self: &unique, out: &unique string, value: &const shared JsonValue, level: int): {
+        if value.kind == JsonKind::Null: {
+            out.append("null");
+            return;
+        }
+        if value.kind == JsonKind::Bool: {
+            if value.boolean: {
+                out.append("true");
+            } else: {
+                out.append("false");
+            }
+            return;
+        }
+        if value.kind == JsonKind::Number: {
+            out.append(spell_number(value.number));
+            return;
+        }
+        if value.kind == JsonKind::String: {
+            out.append(quote_string(value.text, .policy));
+            return;
+        }
+        if value.kind == JsonKind::Array: {
+            .write_array(out, value, level);
+            return;
+        }
+        if value.kind == JsonKind::Object: {
+            .write_object(out, value, level);
+            return;
+        }
+        out.append("null");
+    }
+
+    fn write_array(self: &unique, out: &unique string, value: &const shared JsonValue, level: int): {
+        if value.items.empty(): {
+            out.append("[]");
+            return;
+        }
+        out.append("[");
+        out.append(.newline());
+        var index: int = 0;
+        while index < value.items.size(): {
+            out.append(.indent(level + 1));
+            .write_value(out, value.items[index], level + 1);
+            if index + 1 < value.items.size(): {
+                out.append(",");
+            }
+            out.append(.newline());
+            index += 1;
+        }
+        out.append(.indent(level));
+        out.append("]");
+    }
+
+    fn write_object(self: &unique, out: &unique string, value: &const shared JsonValue, level: int): {
+        if value.keys.empty(): {
+            out.append("{}");
+            return;
+        }
+        out.append("{");
+        out.append(.newline());
+        var slot: int = 0;
+        while slot < value.keys.size(): {
+            out.append(.indent(level + 1));
+            out.append(quote_string(value.keys[slot], .policy));
+            out.append(.key_separator());
+            .write_value(out, value.values[slot], level + 1);
+            if slot + 1 < value.keys.size(): {
+                out.append(",");
+            }
+            out.append(.newline());
+            slot += 1;
+        }
+        out.append(.indent(level));
+        out.append("}");
+    }
+
+    fn write_document(self: &unique, value: &const shared JsonValue) -> string: {
+        var out: string = "";
+        .write_value(out, value, 0);
+        if .trailing_newline && .style == WriteStyle::Pretty: {
+            out.append("\n");
+        }
+        return out;
+    }
+
+    style: WriteStyle = WriteStyle::Compact;
+    policy: EscapePolicy = EscapePolicy::Minimal;
+    indent_unit: string = "  ";
+    trailing_newline: bool = true;
+}
+
+// `{"a":[1,2]}` on a single line.
+fn write_compact(value: &const shared JsonValue) -> string: {
+    var writer = Writer(style: WriteStyle::Compact, trailing_newline: false);
+    return writer.write_document(value);
+}
+
+// Two space indentation, one element per line, trailing newline.
+fn write_pretty(value: &const shared JsonValue) -> string: {
+    var writer = Writer(style: WriteStyle::Pretty, indent_unit: "  ");
+    return writer.write_document(value);
+}
+
+// Read and write back out, which normalises spacing, escapes and key order
+// handling. Returns the empty string when the input does not parse.
+fn reformat(source: string, style: WriteStyle) -> string: {
+    let result = parse(source);
+    if !result.ok(): {
+        return "";
+    }
+    if style == WriteStyle::Pretty: {
+        return write_pretty(result.root);
+    }
+    return write_compact(result.root);
+}
+
+// --- Tree walking utilities ----------------------------------------------
+
+// Two numbers are equal when they denote the same value, not when they were
+// spelled the same way: 1e2, 100 and 1000e-1 all compare equal. Normalising
+// means stripping trailing zeroes from the mantissa and raising the
+// exponent to match.
+fn normalize_number(value: &const shared Number) -> Number: {
+    var out = *value;
+    while out.mantissa != 0 && out.mantissa % 10 == 0: {
+        out.mantissa = out.mantissa / 10;
+        out.exponent += 1;
+    }
+    if out.mantissa == 0: {
+        out.exponent = 0;
+        out.negative = false;
+    }
+    return out;
+}
+
+fn number_equal(left: &const shared Number, right: &const shared Number) -> bool: {
+    let a = normalize_number(left);
+    let b = normalize_number(right);
+    if a.mantissa != b.mantissa: {
+        return false;
+    }
+    if a.exponent != b.exponent: {
+        return false;
+    }
+    return a.negative == b.negative;
+}
+
+// Structural equality. Arrays compare element by element in order; objects
+// compare by member name, so key order does not matter.
+fn deep_equal(left: &const shared JsonValue, right: &const shared JsonValue) -> bool: {
+    if left.kind != right.kind: {
+        return false;
+    }
+    if left.kind == JsonKind::Null: {
+        return true;
+    }
+    if left.kind == JsonKind::Bool: {
+        return left.boolean == right.boolean;
+    }
+    if left.kind == JsonKind::Number: {
+        return number_equal(left.number, right.number);
+    }
+    if left.kind == JsonKind::String: {
+        return left.text == right.text;
+    }
+    if left.kind == JsonKind::Array: {
+        if left.items.size() != right.items.size(): {
+            return false;
+        }
+        var index: int = 0;
+        while index < left.items.size(): {
+            if !deep_equal(left.items[index], right.items[index]): {
+                return false;
+            }
+            index += 1;
+        }
+        return true;
+    }
+    // Objects: same member count, and every left member has an equal twin.
+    if left.keys.size() != right.keys.size(): {
+        return false;
+    }
+    var slot: int = 0;
+    while slot < left.keys.size(): {
+        let other = right.index_of(left.keys[slot]);
+        if other < 0: {
+            return false;
+        }
+        if !deep_equal(left.values[slot], right.values[other]): {
+            return false;
+        }
+        slot += 1;
+    }
+    return true;
+}
+
+// --- JSON pointers -------------------------------------------------------
+
+// Inside a pointer token, '~' and '/' are written "~0" and "~1". Undo that.
+fn unescape_pointer_token(token: &const shared string) -> string: {
+    var out: string = "";
+    var index: int = 0;
+    while index < token.size(): {
+        let c = token.at(index);
+        if c == '~' && index + 1 < token.size(): {
+            let next = token.at(index + 1);
+            if next == '0': {
+                out.push_back('~');
+                index += 2;
+                continue;
+            }
+            if next == '1': {
+                out.push_back('/');
+                index += 2;
+                continue;
+            }
+        }
+        out.push_back(c);
+        index += 1;
+    }
+    return out;
+}
+
+fn escape_pointer_token(token: &const shared string) -> string: {
+    var out: string = "";
+    var index: int = 0;
+    while index < token.size(): {
+        let c = token.at(index);
+        if c == '~': {
+            out.append("~0");
+        } else: {
+            if c == '/': {
+                out.append("~1");
+            } else: {
+                out.push_back(c);
+            }
+        }
+        index += 1;
+    }
+    return out;
+}
+
+// "/a/b/0" becomes ["a", "b", "0"]. The empty pointer "" selects the root
+// and yields no tokens at all.
+fn split_pointer(path: &const shared string) -> vector{string}: {
+    var tokens: vector{string};
+    if path.empty(): {
+        return tokens;
+    }
+    var current: string = "";
+    var index: int = 0;
+    if path.at(0) == '/': {
+        index = 1;
+    }
+    while index < path.size(): {
+        let c = path.at(index);
+        if c == '/': {
+            tokens.push_back(unescape_pointer_token(current));
+            current.clear();
+        } else: {
+            current.push_back(c);
+        }
+        index += 1;
+    }
+    tokens.push_back(unescape_pointer_token(current));
+    return tokens;
+}
+
+fn join_pointer(tokens: &const shared vector{string}) -> string: {
+    var out: string = "";
+    for token: &const in tokens: {
+        out.append("/");
+        out.append(escape_pointer_token(token));
+    }
+    return out;
+}
+
+fn is_index_token(token: &const shared string) -> bool: {
+    if token.empty(): {
+        return false;
+    }
+    var index: int = 0;
+    while index < token.size(): {
+        if !is_digit(token.at(index)): {
+            return false;
+        }
+        index += 1;
+    }
+    // "01" is not a valid array index in a JSON pointer.
+    if token.size() > 1 && token.at(0) == '0': {
+        return false;
+    }
+    return true;
+}
+
+// Walk `tokens` starting at `index`. Returns the node itself once the
+// tokens run out, and stops early on a miss, so pair this with
+// pointer_exists() when the difference matters.
+fn resolve_tokens(node: &shared JsonValue, tokens: &const shared vector{string}, index: int) -> &shared[node] JsonValue: {
+    if index >= tokens.size(): {
+        return node;
+    }
+    let step = tokens[index];
+    if node.kind == JsonKind::Object: {
+        return resolve_tokens(node.member(step), tokens, index + 1);
+    }
+    if node.kind == JsonKind::Array: {
+        if !is_index_token(step): {
+            return node;
+        }
+        return resolve_tokens(node.at(parse_int(step)), tokens, index + 1);
+    }
+    return node;
+}
+
+// json::at(root, "/servers/0/host")
+fn at_pointer(root: &shared JsonValue, path: string) -> &shared[root] JsonValue: {
+    let tokens = split_pointer(path);
+    return resolve_tokens(root, tokens, 0);
+}
+
+fn tokens_exist(node: &const shared JsonValue, tokens: &const shared vector{string}, index: int) -> bool: {
+    if index >= tokens.size(): {
+        return true;
+    }
+    let step = tokens[index];
+    if node.kind == JsonKind::Object: {
+        let slot = node.index_of(step);
+        if slot < 0: {
+            return false;
+        }
+        return tokens_exist(node.values[slot], tokens, index + 1);
+    }
+    if node.kind == JsonKind::Array: {
+        if !is_index_token(step): {
+            return false;
+        }
+        let position = parse_int(step);
+        if position >= node.items.size(): {
+            return false;
+        }
+        return tokens_exist(node.items[position], tokens, index + 1);
+    }
+    return false;
+}
+
+fn pointer_exists(root: &const shared JsonValue, path: string) -> bool: {
+    let tokens = split_pointer(path);
+    return tokens_exist(root, tokens, 0);
+}
+
+// --- Merge ---------------------------------------------------------------
+
+// A merge patch in the style of RFC 7386: objects are merged member by
+// member, a null member deletes the key, and everything else replaces the
+// target outright.
+fn merge_patch(target: &const shared JsonValue, patch: &const shared JsonValue) -> JsonValue: {
+    if patch.kind != JsonKind::Object: {
+        return *patch;
+    }
+    var out = make_object();
+    if target.kind == JsonKind::Object: {
+        var slot: int = 0;
+        while slot < target.keys.size(): {
+            out.keys.push_back(target.keys[slot]);
+            out.values.push_back(target.values[slot]);
+            slot += 1;
+        }
+    }
+    var index: int = 0;
+    while index < patch.keys.size(): {
+        let key = patch.keys[index];
+        let update = patch.values[index];
+        if update.kind == JsonKind::Null: {
+            discard out.remove_member(key);
+        } else: {
+            let existing = out.index_of(key);
+            if existing >= 0: {
+                out.values[existing] = merge_patch(out.values[existing], update);
+            } else: {
+                out.keys.push_back(key);
+                out.values.push_back(merge_patch(make_null(), update));
+            }
+        }
+        index += 1;
+    }
+    return out;
+}
+
+// Merge two documents given as text and hand back the pretty printed result.
+fn merge_sources(base: string, overlay: string) -> string: {
+    let left = parse(base);
+    if !left.ok(): {
+        return left.problem.render();
+    }
+    let right = parse(overlay);
+    if !right.ok(): {
+        return right.problem.render();
+    }
+    let merged = merge_patch(left.root, right.root);
+    prove merged.kind == JsonKind::Object || merged.kind == right.root.kind;
+    return write_pretty(merged);
+}
+}

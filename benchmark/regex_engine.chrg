@@ -1,0 +1,5573 @@
+// A complete regular expression engine: pattern lexer, recursive descent
+// pattern parser, Thompson NFA construction, NFA simulation over a state set,
+// a backtracking matcher with capture groups, a compiled instruction program
+// with a small optimiser, and the user facing match/search/replace/split API.
+//
+// The engine works on `string` values and addresses them by integer offsets.
+// Every structure that would normally hold pointers instead holds indices into
+// a flat arena, so patterns are trivially copyable and can be serialised.
+//
+// Supported syntax:
+//
+//     literal        a  b  \+  \{
+//     any            .
+//     class          [abc]  [^abc]  [a-z0-9_]  [[:alpha:]]
+//     shorthand      \d \D \w \W \s \S \h \v
+//     group          (...)  (?:...)  (?<name>...)
+//     alternation    a|b|c
+//     repetition     a*  a+  a?  a{2}  a{2,}  a{2,5}  and lazy forms a*?
+//     anchors        ^  $  \b  \B  \A  \z
+//     backreference  \1 .. \9  \k<name>
+//
+// Nothing here needs floating point: all counters, bounds and scores are plain
+// integers, and where a fraction is required it is expressed in per-mille.
+namespace regex: {
+
+// --- Character constants -------------------------------------------------
+//
+// The lexer and the class parser compare raw characters on almost every line,
+// so each significant character is given a name once and referred to by that
+// name afterwards.  Spelling them out at every use site would make the
+// character-level logic below far harder to read.
+
+static CHAR_NUL: char = '\0';
+static CHAR_TAB: char = '\t';
+static CHAR_NEWLINE: char = '\n';
+static CHAR_RETURN: char = '\r';
+static CHAR_FORMFEED: char = '\f';
+static CHAR_BACKSPACE: char = '\b';
+static CHAR_SPACE: char = ' ';
+
+// Metacharacters.
+static CHAR_BACKSLASH: char = '\\';
+static CHAR_CARET: char = '^';
+static CHAR_DOLLAR: char = '$';
+static CHAR_DOT: char = '.';
+static CHAR_STAR: char = '*';
+static CHAR_PLUS: char = '+';
+static CHAR_QUESTION: char = '?';
+static CHAR_PIPE: char = '|';
+static CHAR_LPAREN: char = '(';
+static CHAR_RPAREN: char = ')';
+static CHAR_LBRACKET: char = '[';
+static CHAR_RBRACKET: char = ']';
+static CHAR_LBRACE: char = '{';
+static CHAR_RBRACE: char = '}';
+static CHAR_COMMA: char = ',';
+static CHAR_MINUS: char = '-';
+static CHAR_COLON: char = ':';
+static CHAR_LESS: char = '<';
+static CHAR_GREATER: char = '>';
+static CHAR_EQUALS: char = '=';
+static CHAR_BANG: char = '!';
+static CHAR_UNDERSCORE: char = '_';
+static CHAR_SLASH: char = '/';
+static CHAR_QUOTE: char = '"';
+
+// Digits and the letter ranges, used by the classification helpers.
+static CHAR_ZERO: char = '0';
+static CHAR_ONE: char = '1';
+static CHAR_SEVEN: char = '7';
+static CHAR_NINE: char = '9';
+static CHAR_LOWER_A: char = 'a';
+static CHAR_LOWER_B: char = 'b';
+static CHAR_LOWER_D: char = 'd';
+static CHAR_LOWER_E: char = 'e';
+static CHAR_LOWER_F: char = 'f';
+static CHAR_LOWER_H: char = 'h';
+static CHAR_LOWER_K: char = 'k';
+static CHAR_LOWER_N: char = 'n';
+static CHAR_LOWER_R: char = 'r';
+static CHAR_LOWER_S: char = 's';
+static CHAR_LOWER_T: char = 't';
+static CHAR_LOWER_U: char = 'u';
+static CHAR_LOWER_V: char = 'v';
+static CHAR_LOWER_W: char = 'w';
+static CHAR_LOWER_X: char = 'x';
+static CHAR_LOWER_Z: char = 'z';
+static CHAR_UPPER_A: char = 'A';
+static CHAR_UPPER_B: char = 'B';
+static CHAR_UPPER_D: char = 'D';
+static CHAR_UPPER_F: char = 'F';
+static CHAR_UPPER_S: char = 'S';
+static CHAR_UPPER_W: char = 'W';
+static CHAR_UPPER_Z: char = 'Z';
+
+// The apostrophe cannot be written as a character escape in this dialect, so
+// it is kept as a one character string and read out of it when needed.
+static TEXT_APOSTROPHE: string = "'";
+
+fn apostrophe() -> char: {
+    return TEXT_APOSTROPHE.at(0);
+}
+
+// --- Numeric limits ------------------------------------------------------
+
+// Character codes are treated as a byte alphabet.
+static ALPHABET_SIZE: int = 256;
+static CODE_MIN: int = 0;
+static CODE_MAX: int = 255;
+
+// Sentinel used wherever "no such index" must be expressed.
+static NONE: int = -1;
+
+// The largest repetition count a `{n,m}` bound may name.  Larger bounds are
+// rejected by the parser rather than expanded, because expansion is linear in
+// the bound and a hostile pattern could otherwise blow up the program.
+static MAX_REPEAT: int = 1000;
+
+// Upper bound on the number of nested groups the recursive descent parser
+// will accept.  This keeps the recursion depth, and therefore the native
+// stack usage, bounded for arbitrary input.
+static MAX_GROUP_DEPTH: int = 64;
+
+// Capture groups are numbered from 1; group 0 is the whole match.
+static MAX_CAPTURES: int = 32;
+
+// Budget for the backtracking matcher, counted in step units.  A pathological
+// pattern such as (a+)+$ against a long run of a's will exhaust it and the
+// matcher reports MatchStatus::Exhausted instead of running forever.
+static BACKTRACK_BUDGET: int = 1000000;
+
+// The optimiser gives up on a pass once it has rewritten this many
+// instructions, so compilation stays linear even for very large programs.
+static OPTIMISER_BUDGET: int = 4096;
+
+// --- Text constants ------------------------------------------------------
+
+static TEXT_EMPTY: string = "";
+static TEXT_DOT: string = ".";
+static TEXT_STAR: string = "*";
+static TEXT_PLUS: string = "+";
+static TEXT_QUESTION: string = "?";
+static TEXT_PIPE: string = "|";
+static TEXT_CARET: string = "^";
+static TEXT_DOLLAR: string = "$";
+static TEXT_LPAREN: string = "(";
+static TEXT_RPAREN: string = ")";
+static TEXT_LBRACKET: string = "[";
+static TEXT_RBRACKET: string = "]";
+static TEXT_LBRACE: string = "{";
+static TEXT_RBRACE: string = "}";
+static TEXT_COMMA: string = ",";
+static TEXT_MINUS: string = "-";
+static TEXT_LAZY_SUFFIX: string = "?";
+
+// Escape spellings.  The doubled backslash in the source produces a single
+// real backslash in the value.
+static ESCAPE_DIGIT: string = "\\d";
+static ESCAPE_NOT_DIGIT: string = "\\D";
+static ESCAPE_WORD: string = "\\w";
+static ESCAPE_NOT_WORD: string = "\\W";
+static ESCAPE_SPACE: string = "\\s";
+static ESCAPE_NOT_SPACE: string = "\\S";
+static ESCAPE_HORIZONTAL: string = "\\h";
+static ESCAPE_VERTICAL: string = "\\v";
+static ESCAPE_WORD_BOUNDARY: string = "\\b";
+static ESCAPE_NOT_WORD_BOUNDARY: string = "\\B";
+static ESCAPE_TEXT_START: string = "\\A";
+static ESCAPE_TEXT_END: string = "\\z";
+static ESCAPE_TAB: string = "\\t";
+static ESCAPE_NEWLINE: string = "\\n";
+static ESCAPE_RETURN: string = "\\r";
+static ESCAPE_FORMFEED: string = "\\f";
+static ESCAPE_BACKSLASH: string = "\\\\";
+
+// POSIX style class names, spelled without their bracket-colon wrapper.
+static POSIX_ALPHA: string = "alpha";
+static POSIX_DIGIT: string = "digit";
+static POSIX_ALNUM: string = "alnum";
+static POSIX_UPPER: string = "upper";
+static POSIX_LOWER: string = "lower";
+static POSIX_SPACE: string = "space";
+static POSIX_BLANK: string = "blank";
+static POSIX_PUNCT: string = "punct";
+static POSIX_PRINT: string = "print";
+static POSIX_GRAPH: string = "graph";
+static POSIX_CNTRL: string = "cntrl";
+static POSIX_XDIGIT: string = "xdigit";
+static POSIX_WORD: string = "word";
+
+// Diagnostic message texts.
+static ERROR_NONE: string = "";
+static ERROR_UNEXPECTED_END: string = "unexpected end of pattern";
+static ERROR_UNBALANCED_PAREN: string = "unbalanced parenthesis";
+static ERROR_UNCLOSED_CLASS: string = "unterminated character class";
+static ERROR_BAD_RANGE: string = "character class range is reversed";
+static ERROR_BAD_REPEAT: string = "repetition bound is malformed";
+static ERROR_REPEAT_TOO_LARGE: string = "repetition bound exceeds the limit";
+static ERROR_NOTHING_TO_REPEAT: string = "nothing to repeat";
+static ERROR_TRAILING_BACKSLASH: string = "pattern ends with a backslash";
+static ERROR_BAD_ESCAPE: string = "unrecognised escape sequence";
+static ERROR_BAD_GROUP: string = "malformed group opening";
+static ERROR_DEPTH_EXCEEDED: string = "group nesting is too deep";
+static ERROR_BAD_BACKREF: string = "backreference names an unknown group";
+static ERROR_UNKNOWN_CLASS: string = "unknown POSIX class name";
+
+// --- Character classification -------------------------------------------
+//
+// Everything downstream of the lexer asks these questions constantly, so they
+// live as free functions rather than as methods on some helper object.  They
+// are written as explicit range tests instead of table lookups because the
+// alphabet is small and the branch layout is what the compiler benchmark is
+// actually meant to measure.
+
+fn is_digit(c: char) -> bool: {
+    if c < CHAR_ZERO: {
+        return false;
+    }
+    if c > CHAR_NINE: {
+        return false;
+    }
+    return true;
+}
+
+fn is_octal_digit(c: char) -> bool: {
+    if c < CHAR_ZERO: {
+        return false;
+    }
+    if c > CHAR_SEVEN: {
+        return false;
+    }
+    return true;
+}
+
+fn is_lower(c: char) -> bool: {
+    if c < CHAR_LOWER_A: {
+        return false;
+    }
+    if c > CHAR_LOWER_Z: {
+        return false;
+    }
+    return true;
+}
+
+fn is_upper(c: char) -> bool: {
+    if c < CHAR_UPPER_A: {
+        return false;
+    }
+    if c > CHAR_UPPER_Z: {
+        return false;
+    }
+    return true;
+}
+
+fn is_alpha(c: char) -> bool: {
+    if is_lower(c): {
+        return true;
+    }
+    if is_upper(c): {
+        return true;
+    }
+    return false;
+}
+
+fn is_alnum(c: char) -> bool: {
+    if is_alpha(c): {
+        return true;
+    }
+    return is_digit(c);
+}
+
+// The word alphabet is the one \w selects: letters, digits and underscore.
+fn is_word_char(c: char) -> bool: {
+    if is_alnum(c): {
+        return true;
+    }
+    if c == CHAR_UNDERSCORE: {
+        return true;
+    }
+    return false;
+}
+
+fn is_hex_digit(c: char) -> bool: {
+    if is_digit(c): {
+        return true;
+    }
+    if c >= CHAR_LOWER_A && c <= CHAR_LOWER_F: {
+        return true;
+    }
+    if c >= CHAR_UPPER_A && c <= CHAR_UPPER_F: {
+        return true;
+    }
+    return false;
+}
+
+// Horizontal whitespace only: space and tab.
+fn is_horizontal_space(c: char) -> bool: {
+    if c == CHAR_SPACE: {
+        return true;
+    }
+    if c == CHAR_TAB: {
+        return true;
+    }
+    return false;
+}
+
+// Vertical whitespace: the line terminators plus form feed.
+fn is_vertical_space(c: char) -> bool: {
+    if c == CHAR_NEWLINE: {
+        return true;
+    }
+    if c == CHAR_RETURN: {
+        return true;
+    }
+    if c == CHAR_FORMFEED: {
+        return true;
+    }
+    return false;
+}
+
+fn is_space_char(c: char) -> bool: {
+    if is_horizontal_space(c): {
+        return true;
+    }
+    if is_vertical_space(c): {
+        return true;
+    }
+    return false;
+}
+
+// Control characters are everything below space, plus the delete code.
+fn is_control(c: char) -> bool: {
+    let code = char_code(c);
+    if code < 32: {
+        return true;
+    }
+    if code == 127: {
+        return true;
+    }
+    return false;
+}
+
+fn is_printable(c: char) -> bool: {
+    let code = char_code(c);
+    if code < 32: {
+        return false;
+    }
+    if code > 126: {
+        return false;
+    }
+    return true;
+}
+
+// Graphic characters are the printable ones minus the space itself.
+fn is_graphic(c: char) -> bool: {
+    if !is_printable(c): {
+        return false;
+    }
+    return c != CHAR_SPACE;
+}
+
+fn is_punctuation(c: char) -> bool: {
+    if !is_graphic(c): {
+        return false;
+    }
+    if is_alnum(c): {
+        return false;
+    }
+    return true;
+}
+
+// The characters that carry a special meaning outside a bracket expression.
+fn is_metacharacter(c: char) -> bool: {
+    if c == CHAR_BACKSLASH: {
+        return true;
+    }
+    if c == CHAR_CARET: {
+        return true;
+    }
+    if c == CHAR_DOLLAR: {
+        return true;
+    }
+    if c == CHAR_DOT: {
+        return true;
+    }
+    if c == CHAR_STAR: {
+        return true;
+    }
+    if c == CHAR_PLUS: {
+        return true;
+    }
+    if c == CHAR_QUESTION: {
+        return true;
+    }
+    if c == CHAR_PIPE: {
+        return true;
+    }
+    if c == CHAR_LPAREN: {
+        return true;
+    }
+    if c == CHAR_RPAREN: {
+        return true;
+    }
+    if c == CHAR_LBRACKET: {
+        return true;
+    }
+    if c == CHAR_RBRACKET: {
+        return true;
+    }
+    if c == CHAR_LBRACE: {
+        return true;
+    }
+    if c == CHAR_RBRACE: {
+        return true;
+    }
+    return false;
+}
+
+// Inside a bracket expression only a handful of characters keep a meaning.
+fn is_class_metacharacter(c: char) -> bool: {
+    if c == CHAR_BACKSLASH: {
+        return true;
+    }
+    if c == CHAR_RBRACKET: {
+        return true;
+    }
+    if c == CHAR_MINUS: {
+        return true;
+    }
+    if c == CHAR_CARET: {
+        return true;
+    }
+    if c == CHAR_LBRACKET: {
+        return true;
+    }
+    return false;
+}
+
+// --- Case and code conversions ------------------------------------------
+
+fn to_lower(c: char) -> char: {
+    if is_upper(c): {
+        return code_char(char_code(c) + 32);
+    }
+    return c;
+}
+
+fn to_upper(c: char) -> char: {
+    if is_lower(c): {
+        return code_char(char_code(c) - 32);
+    }
+    return c;
+}
+
+// Numeric value of a hexadecimal digit, or NONE when the character is not one.
+fn hex_value(c: char) -> int: {
+    if is_digit(c): {
+        return char_code(c) - char_code(CHAR_ZERO);
+    }
+    if c >= CHAR_LOWER_A && c <= CHAR_LOWER_F: {
+        return 10 + char_code(c) - char_code(CHAR_LOWER_A);
+    }
+    if c >= CHAR_UPPER_A && c <= CHAR_UPPER_F: {
+        return 10 + char_code(c) - char_code(CHAR_UPPER_A);
+    }
+    return NONE;
+}
+
+fn digit_value(c: char) -> int: {
+    if !is_digit(c): {
+        return NONE;
+    }
+    return char_code(c) - char_code(CHAR_ZERO);
+}
+
+// The two bridges between the character and integer views of the alphabet.
+fn char_code(c: char) -> int: {
+    var code: int = 0;
+    code = c;
+    return code;
+}
+
+fn code_char(code: int) -> char: {
+    var c: char = CHAR_NUL;
+    c = code;
+    return c;
+}
+
+// Case-insensitive comparison of two characters, used when the
+// MatchFlags::IgnoreCase flag is set on a compiled program.
+fn same_char_folded(a: char, b: char) -> bool: {
+    if a == b: {
+        return true;
+    }
+    return to_lower(a) == to_lower(b);
+}
+
+// --- Pattern tokens ------------------------------------------------------
+//
+// The lexer turns the raw pattern text into a token stream.  It deliberately
+// does *not* understand bracket expressions: a `[` produces a single
+// ClassOpen token and the parser then drives the lexer character by character
+// until the matching `]`.  Bracket expressions have their own tiny grammar in
+// which almost nothing is a metacharacter, and folding it into the main token
+// rules would make both harder to follow.
+
+enum TokenKind: {
+    EndOfPattern;
+    Literal;            // an ordinary character, or an escaped one
+    AnyChar;            // .
+    AlternationBar;     // |
+    GroupOpen;          // ( or (?: or (?<name>
+    GroupClose;         // )
+    ClassOpen;          // [ or [^
+    ClassClose;         // ]
+    Star;               // *
+    Plus;               // +
+    Question;           // ?
+    RepeatOpen;         // {n} {n,} {n,m}
+    CaretAnchor;        // ^
+    DollarAnchor;       // $
+    TextStartAnchor;    // \A
+    TextEndAnchor;      // \z
+    WordBoundary;       // \b
+    NotWordBoundary;    // \B
+    ShorthandClass;     // \d \D \w \W \s \S \h \v
+    Backreference;      // \1 .. \9 or \k<name>
+    Invalid = 21;
+}
+
+// Which shorthand a ShorthandClass token stands for.
+enum Shorthand: {
+    ShortDigit;
+    ShortNotDigit;
+    ShortWord;
+    ShortNotWord;
+    ShortSpace;
+    ShortNotSpace;
+    ShortHorizontal;
+    ShortVertical;
+    ShortNone = 8;
+}
+
+// How a group opening was spelled.
+enum GroupKind: {
+    Capturing;          // (
+    NonCapturing;       // (?:
+    Named;              // (?<name>
+    Atomic = 3;         // (?>
+}
+
+struct Token: {
+
+    fn is_end(self: &const shared) -> bool: {
+        return .kind == TokenKind::EndOfPattern;
+    }
+
+    fn is_literal(self: &const shared) -> bool: {
+        return .kind == TokenKind::Literal;
+    }
+
+    // Quantifiers all bind to the preceding atom, so the parser asks this
+    // question rather than testing three kinds at every call site.
+    fn is_quantifier(self: &const shared) -> bool: {
+        if .kind == TokenKind::Star: {
+            return true;
+        }
+        if .kind == TokenKind::Plus: {
+            return true;
+        }
+        if .kind == TokenKind::Question: {
+            return true;
+        }
+        if .kind == TokenKind::RepeatOpen: {
+            return true;
+        }
+        return false;
+    }
+
+    fn is_anchor(self: &const shared) -> bool: {
+        if .kind == TokenKind::CaretAnchor: {
+            return true;
+        }
+        if .kind == TokenKind::DollarAnchor: {
+            return true;
+        }
+        if .kind == TokenKind::TextStartAnchor: {
+            return true;
+        }
+        if .kind == TokenKind::TextEndAnchor: {
+            return true;
+        }
+        if .kind == TokenKind::WordBoundary: {
+            return true;
+        }
+        if .kind == TokenKind::NotWordBoundary: {
+            return true;
+        }
+        return false;
+    }
+
+    // True when the token can begin an atom.  Used for error recovery and by
+    // the optimiser when it scans for a literal prefix.
+    fn starts_atom(self: &const shared) -> bool: {
+        if .is_literal(): {
+            return true;
+        }
+        if .kind == TokenKind::AnyChar: {
+            return true;
+        }
+        if .kind == TokenKind::ClassOpen: {
+            return true;
+        }
+        if .kind == TokenKind::GroupOpen: {
+            return true;
+        }
+        if .kind == TokenKind::ShorthandClass: {
+            return true;
+        }
+        if .kind == TokenKind::Backreference: {
+            return true;
+        }
+        return .is_anchor();
+    }
+
+    kind: TokenKind = TokenKind::Invalid;
+    value: char = '\0';
+    text: string;
+    shorthand: Shorthand = Shorthand::ShortNone;
+    group_kind: GroupKind = GroupKind::Capturing;
+    lower: int = 0;
+    upper: int = -1;
+    position: int = 0;
+    // Set when the character came from an escape, so `\*` is a literal star
+    // rather than a quantifier even though the value is identical.
+    escaped: bool = false;
+}
+
+// --- Pattern lexer -------------------------------------------------------
+
+struct PatternLexer: {
+
+    fn at_end(self: &const shared) -> bool: {
+        return .pos >= .source.size();
+    }
+
+    fn remaining(self: &const shared) -> int: {
+        return .source.size() - .pos;
+    }
+
+    fn peek(self: &const shared) -> char: {
+        if .at_end(): {
+            return CHAR_NUL;
+        }
+        return .source.at(.pos);
+    }
+
+    fn peek_at(self: &const shared, offset: int) -> char: {
+        let index = .pos + offset;
+        if index < 0: {
+            return CHAR_NUL;
+        }
+        if index >= .source.size(): {
+            return CHAR_NUL;
+        }
+        return .source.at(index);
+    }
+
+    fn advance(self: &unique) -> char: {
+        if .at_end(): {
+            return CHAR_NUL;
+        }
+        let c = .source.at(.pos);
+        .pos += 1;
+        return c;
+    }
+
+    fn accept(self: &unique, expected: char) -> bool: {
+        if .peek() != expected: {
+            return false;
+        }
+        .pos += 1;
+        return true;
+    }
+
+    fn fail(self: &unique, message: &const shared string): {
+        if .ok: {
+            .ok = false;
+            .error = message;
+            .error_position = .pos;
+        }
+    }
+
+    // --- Token construction ----------------------------------------------
+
+    fn make_token(self: &const shared, kind: TokenKind, at: int) -> Token: {
+        var t = Token(kind: kind, position: at);
+        return t;
+    }
+
+    fn make_literal(self: &const shared, c: char, at: int, escaped: bool) -> Token: {
+        var t = Token(kind: TokenKind::Literal, value: c, position: at);
+        t.escaped = escaped;
+        return t;
+    }
+
+    fn make_shorthand(self: &const shared, which: Shorthand, at: int) -> Token: {
+        var t = Token(kind: TokenKind::ShorthandClass, position: at);
+        t.shorthand = which;
+        return t;
+    }
+
+    // --- Driving loop -----------------------------------------------------
+
+    fn tokenize(self: &unique) -> bool: {
+        .tokens.clear();
+        .pos = 0;
+        .ok = true;
+        .error = ERROR_NONE;
+        while !.at_end(): {
+            let t = .next_token();
+            if !.ok: {
+                return false;
+            }
+            .tokens.push_back(t);
+        }
+        .tokens.push_back(.make_token(TokenKind::EndOfPattern, .source.size()));
+        return true;
+    }
+
+    // One token.  The big branch tree below is the heart of the lexer: each
+    // metacharacter is checked in turn and anything that survives is an
+    // ordinary literal.
+    fn next_token(self: &unique) -> Token: {
+        let at = .pos;
+        let c = .advance();
+        if c == CHAR_BACKSLASH: {
+            return .lex_escape(at);
+        }
+        if c == CHAR_DOT: {
+            return .make_token(TokenKind::AnyChar, at);
+        }
+        if c == CHAR_PIPE: {
+            return .make_token(TokenKind::AlternationBar, at);
+        }
+        if c == CHAR_LPAREN: {
+            return .lex_group_open(at);
+        }
+        if c == CHAR_RPAREN: {
+            return .make_token(TokenKind::GroupClose, at);
+        }
+        if c == CHAR_LBRACKET: {
+            return .make_token(TokenKind::ClassOpen, at);
+        }
+        if c == CHAR_RBRACKET: {
+            // A stray `]` outside a bracket expression is an ordinary
+            // character; only the class parser gives it a meaning.
+            return .make_literal(c, at, false);
+        }
+        if c == CHAR_STAR: {
+            return .make_token(TokenKind::Star, at);
+        }
+        if c == CHAR_PLUS: {
+            return .make_token(TokenKind::Plus, at);
+        }
+        if c == CHAR_QUESTION: {
+            return .make_token(TokenKind::Question, at);
+        }
+        if c == CHAR_LBRACE: {
+            return .lex_repeat_bound(at);
+        }
+        if c == CHAR_RBRACE: {
+            return .make_literal(c, at, false);
+        }
+        if c == CHAR_CARET: {
+            return .make_token(TokenKind::CaretAnchor, at);
+        }
+        if c == CHAR_DOLLAR: {
+            return .make_token(TokenKind::DollarAnchor, at);
+        }
+        return .make_literal(c, at, false);
+    }
+
+    // --- Escapes ----------------------------------------------------------
+    //
+    // Called with the backslash already consumed.  Escapes fall into four
+    // families: shorthand classes, anchors, backreferences and single
+    // character substitutions.
+
+    fn lex_escape(self: &unique, at: int) -> Token: {
+        if .at_end(): {
+            .fail(ERROR_TRAILING_BACKSLASH);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        let c = .advance();
+        if c == CHAR_LOWER_D: {
+            return .make_shorthand(Shorthand::ShortDigit, at);
+        }
+        if c == CHAR_UPPER_D: {
+            return .make_shorthand(Shorthand::ShortNotDigit, at);
+        }
+        if c == CHAR_LOWER_W: {
+            return .make_shorthand(Shorthand::ShortWord, at);
+        }
+        if c == CHAR_UPPER_W: {
+            return .make_shorthand(Shorthand::ShortNotWord, at);
+        }
+        if c == CHAR_LOWER_S: {
+            return .make_shorthand(Shorthand::ShortSpace, at);
+        }
+        if c == CHAR_UPPER_S: {
+            return .make_shorthand(Shorthand::ShortNotSpace, at);
+        }
+        if c == CHAR_LOWER_H: {
+            return .make_shorthand(Shorthand::ShortHorizontal, at);
+        }
+        if c == CHAR_LOWER_V: {
+            return .make_shorthand(Shorthand::ShortVertical, at);
+        }
+        if c == CHAR_LOWER_B: {
+            return .make_token(TokenKind::WordBoundary, at);
+        }
+        if c == CHAR_UPPER_B: {
+            return .make_token(TokenKind::NotWordBoundary, at);
+        }
+        if c == CHAR_UPPER_A: {
+            return .make_token(TokenKind::TextStartAnchor, at);
+        }
+        if c == CHAR_LOWER_Z: {
+            return .make_token(TokenKind::TextEndAnchor, at);
+        }
+        if c == CHAR_LOWER_K: {
+            return .lex_named_backreference(at);
+        }
+        if is_digit(c) && c != CHAR_ZERO: {
+            return .lex_numeric_backreference(c, at);
+        }
+        if c == CHAR_LOWER_X: {
+            return .lex_hex_escape(at);
+        }
+        return .make_literal(decode_escape(c), at, true);
+    }
+
+    // \k<name> refers to a named group.  The name is stored on the token and
+    // resolved to an index by the parser, which owns the name table.
+    fn lex_named_backreference(self: &unique, at: int) -> Token: {
+        var t = .make_token(TokenKind::Backreference, at);
+        if !.accept(CHAR_LESS): {
+            .fail(ERROR_BAD_BACKREF);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        var name = TEXT_EMPTY;
+        while !.at_end(): {
+            let c = .peek();
+            if c == CHAR_GREATER: {
+                break;
+            }
+            if !is_word_char(c): {
+                .fail(ERROR_BAD_BACKREF);
+                return .make_token(TokenKind::Invalid, at);
+            }
+            name.push_back(c);
+            .pos += 1;
+        }
+        if !.accept(CHAR_GREATER): {
+            .fail(ERROR_BAD_BACKREF);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        if name.empty(): {
+            .fail(ERROR_BAD_BACKREF);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        t.text = name;
+        t.lower = NONE;
+        return t;
+    }
+
+    // \1 .. \9, and multi-digit forms such as \12 when that many groups are
+    // plausible.  The parser rejects references past the group count.
+    fn lex_numeric_backreference(self: &unique, first: char, at: int) -> Token: {
+        var value = digit_value(first);
+        while !.at_end(): {
+            let c = .peek();
+            if !is_digit(c): {
+                break;
+            }
+            let next = value * 10 + digit_value(c);
+            if next >= MAX_CAPTURES: {
+                break;
+            }
+            value = next;
+            .pos += 1;
+        }
+        var t = .make_token(TokenKind::Backreference, at);
+        t.lower = value;
+        return t;
+    }
+
+    // \xNN.  Exactly two hexadecimal digits; anything else is an error rather
+    // than a silent fallback, because a typo there is almost never intended.
+    fn lex_hex_escape(self: &unique, at: int) -> Token: {
+        if .remaining() < 2: {
+            .fail(ERROR_BAD_ESCAPE);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        let high = .advance();
+        let low = .advance();
+        if !is_hex_digit(high): {
+            .fail(ERROR_BAD_ESCAPE);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        if !is_hex_digit(low): {
+            .fail(ERROR_BAD_ESCAPE);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        let code = hex_value(high) * 16 + hex_value(low);
+        return .make_literal(code_char(code), at, true);
+    }
+
+    // --- Group openings ---------------------------------------------------
+
+    fn lex_group_open(self: &unique, at: int) -> Token: {
+        var t = .make_token(TokenKind::GroupOpen, at);
+        if .peek() != CHAR_QUESTION: {
+            t.group_kind = GroupKind::Capturing;
+            return t;
+        }
+        .pos += 1;
+        let c = .advance();
+        if c == CHAR_COLON: {
+            t.group_kind = GroupKind::NonCapturing;
+            return t;
+        }
+        if c == CHAR_GREATER: {
+            t.group_kind = GroupKind::Atomic;
+            return t;
+        }
+        if c == CHAR_LESS: {
+            var name = TEXT_EMPTY;
+            while !.at_end(): {
+                let n = .peek();
+                if n == CHAR_GREATER: {
+                    break;
+                }
+                if !is_word_char(n): {
+                    .fail(ERROR_BAD_GROUP);
+                    return .make_token(TokenKind::Invalid, at);
+                }
+                name.push_back(n);
+                .pos += 1;
+            }
+            if !.accept(CHAR_GREATER): {
+                .fail(ERROR_BAD_GROUP);
+                return .make_token(TokenKind::Invalid, at);
+            }
+            if name.empty(): {
+                .fail(ERROR_BAD_GROUP);
+                return .make_token(TokenKind::Invalid, at);
+            }
+            t.group_kind = GroupKind::Named;
+            t.text = name;
+            return t;
+        }
+        .fail(ERROR_BAD_GROUP);
+        return .make_token(TokenKind::Invalid, at);
+    }
+
+    // --- Repetition bounds ------------------------------------------------
+    //
+    // Called with the `{` consumed.  A brace that does not open a well formed
+    // bound is treated as a literal brace, which is what every practical
+    // engine does; only a bound that parses but is out of range is an error.
+
+    fn lex_repeat_bound(self: &unique, at: int) -> Token: {
+        let save = .pos;
+        if !is_digit(.peek()): {
+            .pos = save;
+            return .make_literal(CHAR_LBRACE, at, false);
+        }
+        var lower: int = 0;
+        var digits: int = 0;
+        while is_digit(.peek()): {
+            lower = lower * 10 + digit_value(.peek());
+            digits += 1;
+            .pos += 1;
+            if lower > MAX_REPEAT: {
+                .fail(ERROR_REPEAT_TOO_LARGE);
+                return .make_token(TokenKind::Invalid, at);
+            }
+        }
+        var t = .make_token(TokenKind::RepeatOpen, at);
+        t.lower = lower;
+        if .accept(CHAR_RBRACE): {
+            t.upper = lower;
+            return t;
+        }
+        if !.accept(CHAR_COMMA): {
+            .pos = save;
+            return .make_literal(CHAR_LBRACE, at, false);
+        }
+        if .accept(CHAR_RBRACE): {
+            // `{n,}` is an open ended bound.
+            t.upper = NONE;
+            return t;
+        }
+        if !is_digit(.peek()): {
+            .pos = save;
+            return .make_literal(CHAR_LBRACE, at, false);
+        }
+        var upper: int = 0;
+        while is_digit(.peek()): {
+            upper = upper * 10 + digit_value(.peek());
+            .pos += 1;
+            if upper > MAX_REPEAT: {
+                .fail(ERROR_REPEAT_TOO_LARGE);
+                return .make_token(TokenKind::Invalid, at);
+            }
+        }
+        if !.accept(CHAR_RBRACE): {
+            .pos = save;
+            return .make_literal(CHAR_LBRACE, at, false);
+        }
+        if upper < lower: {
+            .fail(ERROR_BAD_REPEAT);
+            return .make_token(TokenKind::Invalid, at);
+        }
+        t.upper = upper;
+        return t;
+    }
+
+    source: string;
+    tokens: vector{Token};
+    pos: int = 0;
+    error: string;
+    error_position: int = 0;
+    ok: bool = true;
+}
+
+// Single character escapes that stand for a control character.  Anything not
+// listed keeps its own value, so `\+` is a plus and `\/` is a slash.
+fn decode_escape(marker: char) -> char: {
+    if marker == CHAR_LOWER_N: {
+        return CHAR_NEWLINE;
+    }
+    if marker == CHAR_LOWER_T: {
+        return CHAR_TAB;
+    }
+    if marker == CHAR_LOWER_R: {
+        return CHAR_RETURN;
+    }
+    if marker == CHAR_LOWER_F: {
+        return CHAR_FORMFEED;
+    }
+    if marker == CHAR_ZERO: {
+        return CHAR_NUL;
+    }
+    if marker == CHAR_LOWER_E: {
+        return code_char(27);
+    }
+    return marker;
+}
+
+// The inverse mapping, used when a pattern is printed back out.
+fn escape_spelling(c: char) -> string: {
+    if c == CHAR_NEWLINE: {
+        return ESCAPE_NEWLINE;
+    }
+    if c == CHAR_TAB: {
+        return ESCAPE_TAB;
+    }
+    if c == CHAR_RETURN: {
+        return ESCAPE_RETURN;
+    }
+    if c == CHAR_FORMFEED: {
+        return ESCAPE_FORMFEED;
+    }
+    if c == CHAR_BACKSLASH: {
+        return ESCAPE_BACKSLASH;
+    }
+    var out = TEXT_EMPTY;
+    if is_metacharacter(c): {
+        out.push_back(CHAR_BACKSLASH);
+    }
+    out.push_back(c);
+    return out;
+}
+
+// --- Character classes ---------------------------------------------------
+//
+// A class is stored as a sorted list of inclusive code ranges plus a negation
+// flag.  Ranges are kept normalised - sorted by low bound, non-overlapping and
+// non-adjacent - which makes membership a short scan and lets the optimiser
+// merge two classes by concatenating and re-normalising.
+
+struct ClassRange: {
+
+    fn contains(self: &const shared, code: int) -> bool: {
+        if code < .low: {
+            return false;
+        }
+        if code > .high: {
+            return false;
+        }
+        return true;
+    }
+
+    fn width(self: &const shared) -> int: {
+        return .high - .low + 1;
+    }
+
+    fn is_single(self: &const shared) -> bool: {
+        return .low == .high;
+    }
+
+    // Two ranges may be fused when they overlap or merely touch.
+    fn touches(self: &const shared, other: &const shared ClassRange) -> bool: {
+        if other.low > .high + 1: {
+            return false;
+        }
+        if .low > other.high + 1: {
+            return false;
+        }
+        return true;
+    }
+
+    fn fuse(self: &unique, other: &const shared ClassRange): {
+        if other.low < .low: {
+            .low = other.low;
+        }
+        if other.high > .high: {
+            .high = other.high;
+        }
+    }
+
+    low: int = 0;
+    high: int = 0;
+}
+
+fn make_range(low: int, high: int) -> ClassRange: {
+    var r = ClassRange(low: low, high: high);
+    if high < low: {
+        r.low = high;
+        r.high = low;
+    }
+    return r;
+}
+
+fn single_range(c: char) -> ClassRange: {
+    let code = char_code(c);
+    return make_range(code, code);
+}
+
+struct CharClass: {
+
+    fn empty(self: &const shared) -> bool: {
+        return .ranges.empty();
+    }
+
+    fn range_count(self: &const shared) -> int: {
+        return .ranges.size();
+    }
+
+    fn add_range(self: &unique, low: int, high: int): {
+        .ranges.push_back(make_range(low, high));
+        .normalised = false;
+    }
+
+    fn add_char(self: &unique, c: char): {
+        let code = char_code(c);
+        .add_range(code, code);
+    }
+
+    fn add_char_range(self: &unique, low: char, high: char): {
+        .add_range(char_code(low), char_code(high));
+    }
+
+    // Pull every range of `other` in.  Used both by the class parser, when it
+    // expands a shorthand inside brackets, and by the optimiser when it merges
+    // sibling classes under an alternation.
+    fn add_class(self: &unique, other: &const shared CharClass): {
+        for r: &const in other.ranges: {
+            .add_range(r.low, r.high);
+        }
+        .normalised = false;
+    }
+
+    fn negate(self: &unique): {
+        .negated = !.negated;
+    }
+
+    // Insertion sort over the range list.  Classes are tiny - a dozen ranges
+    // at the very worst - so the quadratic bound never matters and the code
+    // stays obvious.
+    fn sort_ranges(self: &unique): {
+        var i: int = 1;
+        while i < .ranges.size(): {
+            var j = i;
+            while j > 0: {
+                let left: &const = .ranges[j - 1];
+                let right: &const = .ranges[j];
+                if left.low <= right.low: {
+                    break;
+                }
+                swap(.ranges[j - 1], .ranges[j]);
+                j -= 1;
+            }
+            i += 1;
+        }
+    }
+
+    // Sort, then fuse every pair that touches.  Afterwards the list is a
+    // canonical description of the set, so two classes are equal exactly when
+    // their range lists are.
+    fn normalise(self: &unique): {
+        if .normalised: {
+            return;
+        }
+        if .ranges.empty(): {
+            .normalised = true;
+            return;
+        }
+        .sort_ranges();
+        var merged = vector{ClassRange}();
+        merged.push_back(.ranges[0]);
+        var i: int = 1;
+        while i < .ranges.size(): {
+            let next: &const = .ranges[i];
+            let last: &unique = merged.back();
+            if last.touches(next): {
+                last.fuse(next);
+            } else: {
+                merged.push_back(next);
+            }
+            i += 1;
+        }
+        .ranges = move(merged);
+        .normalised = true;
+    }
+
+    fn contains_code(self: &const shared, code: int) -> bool: {
+        var found = false;
+        for r: &const in .ranges: {
+            if r.contains(code): {
+                found = true;
+                break;
+            }
+        }
+        if .negated: {
+            return !found;
+        }
+        return found;
+    }
+
+    fn matches(self: &const shared, c: char) -> bool: {
+        return .contains_code(char_code(c));
+    }
+
+    // Case-insensitive membership: try the character as written and then its
+    // opposite case.  Folding the class itself would be faster but would lose
+    // the original spelling, which the printer wants.
+    fn matches_folded(self: &const shared, c: char) -> bool: {
+        if .matches(c): {
+            return true;
+        }
+        if is_lower(c): {
+            return .matches(to_upper(c));
+        }
+        if is_upper(c): {
+            return .matches(to_lower(c));
+        }
+        return false;
+    }
+
+    // How many distinct codes the class accepts.  The optimiser uses this to
+    // decide whether a class is worth turning into a single-character test.
+    fn cardinality(self: &const shared) -> int: {
+        var total: int = 0;
+        for r: &const in .ranges: {
+            total += r.width();
+        }
+        if .negated: {
+            return ALPHABET_SIZE - total;
+        }
+        return total;
+    }
+
+    fn is_single_char(self: &const shared) -> bool: {
+        if .negated: {
+            return false;
+        }
+        if .ranges.size() != 1: {
+            return false;
+        }
+        let only: &const = .ranges[0];
+        return only.is_single();
+    }
+
+    fn single_char(self: &const shared) -> char: {
+        let only: &const = .ranges[0];
+        return code_char(only.low);
+    }
+
+    fn equals(self: &const shared, other: &const shared CharClass) -> bool: {
+        if .negated != other.negated: {
+            return false;
+        }
+        if .ranges.size() != other.ranges.size(): {
+            return false;
+        }
+        var i: int = 0;
+        while i < .ranges.size(): {
+            let a: &const = .ranges[i];
+            let b: &const = other.ranges[i];
+            if a.low != b.low: {
+                return false;
+            }
+            if a.high != b.high: {
+                return false;
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Render the class back into bracket notation.
+    fn spell(self: &const shared) -> string: {
+        var out = TEXT_LBRACKET;
+        if .negated: {
+            out.push_back(CHAR_CARET);
+        }
+        for r: &const in .ranges: {
+            out.append(escape_spelling(code_char(r.low)));
+            if !r.is_single(): {
+                out.push_back(CHAR_MINUS);
+                out.append(escape_spelling(code_char(r.high)));
+            }
+        }
+        out.append(TEXT_RBRACKET);
+        return out;
+    }
+
+    ranges: vector{ClassRange};
+    negated: bool = false;
+    normalised: bool = true;
+}
+
+// --- Shorthand and POSIX class tables ------------------------------------
+//
+// Both families are built from the same primitive: fill a class with ranges
+// and optionally flip its negation flag.
+
+fn class_of_digits() -> CharClass: {
+    var c = CharClass();
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
+    return c;
+}
+
+fn class_of_word() -> CharClass: {
+    var c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
+    c.add_char(CHAR_UNDERSCORE);
+    return c;
+}
+
+fn class_of_space() -> CharClass: {
+    var c = CharClass();
+    c.add_char(CHAR_SPACE);
+    c.add_char(CHAR_TAB);
+    c.add_char(CHAR_NEWLINE);
+    c.add_char(CHAR_RETURN);
+    c.add_char(CHAR_FORMFEED);
+    c.add_char(code_char(11));
+    return c;
+}
+
+fn class_of_horizontal() -> CharClass: {
+    var c = CharClass();
+    c.add_char(CHAR_SPACE);
+    c.add_char(CHAR_TAB);
+    return c;
+}
+
+fn class_of_vertical() -> CharClass: {
+    var c = CharClass();
+    c.add_char(CHAR_NEWLINE);
+    c.add_char(CHAR_RETURN);
+    c.add_char(CHAR_FORMFEED);
+    c.add_char(code_char(11));
+    return c;
+}
+
+fn class_of_alpha() -> CharClass: {
+    var c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
+    return c;
+}
+
+fn class_of_alnum() -> CharClass: {
+    var c = class_of_alpha();
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
+    return c;
+}
+
+fn class_of_upper() -> CharClass: {
+    var c = CharClass();
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
+    return c;
+}
+
+fn class_of_lower() -> CharClass: {
+    var c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
+    return c;
+}
+
+fn class_of_xdigit() -> CharClass: {
+    var c = class_of_digits();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_F);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_F);
+    return c;
+}
+
+fn class_of_punct() -> CharClass: {
+    var c = CharClass();
+    c.add_range(33, 47);
+    c.add_range(58, 64);
+    c.add_range(91, 96);
+    c.add_range(123, 126);
+    return c;
+}
+
+fn class_of_print() -> CharClass: {
+    var c = CharClass();
+    c.add_range(32, 126);
+    return c;
+}
+
+fn class_of_graph() -> CharClass: {
+    var c = CharClass();
+    c.add_range(33, 126);
+    return c;
+}
+
+fn class_of_cntrl() -> CharClass: {
+    var c = CharClass();
+    c.add_range(0, 31);
+    c.add_range(127, 127);
+    return c;
+}
+
+fn class_of_any(dot_matches_newline: bool) -> CharClass: {
+    var c = CharClass();
+    if dot_matches_newline: {
+        c.add_range(CODE_MIN, CODE_MAX);
+        return c;
+    }
+    c.add_char(CHAR_NEWLINE);
+    c.negate();
+    return c;
+}
+
+// Expand `\d`, `\W` and friends.  Negated shorthands are the positive class
+// with the flag flipped, which keeps the two spellings in step.
+fn class_of_shorthand(which: Shorthand) -> CharClass: {
+    if which == Shorthand::ShortDigit: {
+        return class_of_digits();
+    }
+    if which == Shorthand::ShortNotDigit: {
+        var c = class_of_digits();
+        c.negate();
+        return c;
+    }
+    if which == Shorthand::ShortWord: {
+        return class_of_word();
+    }
+    if which == Shorthand::ShortNotWord: {
+        var c = class_of_word();
+        c.negate();
+        return c;
+    }
+    if which == Shorthand::ShortSpace: {
+        return class_of_space();
+    }
+    if which == Shorthand::ShortNotSpace: {
+        var c = class_of_space();
+        c.negate();
+        return c;
+    }
+    if which == Shorthand::ShortHorizontal: {
+        return class_of_horizontal();
+    }
+    if which == Shorthand::ShortVertical: {
+        return class_of_vertical();
+    }
+    return CharClass();
+}
+
+// `[[:name:]]`.  `found` is set to false when the name is not one of the
+// thirteen POSIX classes, and the caller raises ERROR_UNKNOWN_CLASS.
+fn class_of_posix_name(name: &const shared string, found: &unique bool) -> CharClass: {
+    found = true;
+    if name.compare(POSIX_ALPHA) == 0: {
+        return class_of_alpha();
+    }
+    if name.compare(POSIX_DIGIT) == 0: {
+        return class_of_digits();
+    }
+    if name.compare(POSIX_ALNUM) == 0: {
+        return class_of_alnum();
+    }
+    if name.compare(POSIX_UPPER) == 0: {
+        return class_of_upper();
+    }
+    if name.compare(POSIX_LOWER) == 0: {
+        return class_of_lower();
+    }
+    if name.compare(POSIX_SPACE) == 0: {
+        return class_of_space();
+    }
+    if name.compare(POSIX_BLANK) == 0: {
+        return class_of_horizontal();
+    }
+    if name.compare(POSIX_PUNCT) == 0: {
+        return class_of_punct();
+    }
+    if name.compare(POSIX_PRINT) == 0: {
+        return class_of_print();
+    }
+    if name.compare(POSIX_GRAPH) == 0: {
+        return class_of_graph();
+    }
+    if name.compare(POSIX_CNTRL) == 0: {
+        return class_of_cntrl();
+    }
+    if name.compare(POSIX_XDIGIT) == 0: {
+        return class_of_xdigit();
+    }
+    if name.compare(POSIX_WORD) == 0: {
+        return class_of_word();
+    }
+    found = false;
+    return CharClass();
+}
+
+// --- Abstract syntax tree ------------------------------------------------
+//
+// Nodes live in a flat arena on the parser and refer to each other by index.
+// A node keeps at most two direct children plus a list, which covers every
+// shape the grammar can produce: concatenation and alternation use the list,
+// repetition uses `first`, and the leaves use neither.
+
+enum NodeKind: {
+    NodeEmpty;          // matches the empty string
+    NodeLiteral;        // one character
+    NodeString;         // a run of characters, produced by the optimiser
+    NodeAny;            // .
+    NodeClass;          // [...] or a shorthand
+    NodeConcat;         // e1 e2 ...
+    NodeAlternate;      // e1 | e2 | ...
+    NodeRepeat;         // e{lower,upper}
+    NodeGroup;          // ( e )
+    NodeAnchor;         // ^ $ \b \B \A \z
+    NodeBackreference;  // \1 or \k<name>
+    NodeInvalid = 11;
+}
+
+enum AnchorKind: {
+    AnchorLineStart;
+    AnchorLineEnd;
+    AnchorTextStart;
+    AnchorTextEnd;
+    AnchorWordBoundary;
+    AnchorNotWordBoundary = 5;
+}
+
+// Whether a quantifier prefers to consume or to stop.
+enum Greediness: {
+    Greedy;
+    Lazy;
+    Possessive = 2;
+}
+
+struct Node: {
+
+    fn is_leaf(self: &const shared) -> bool: {
+        if .kind == NodeKind::NodeLiteral: {
+            return true;
+        }
+        if .kind == NodeKind::NodeString: {
+            return true;
+        }
+        if .kind == NodeKind::NodeAny: {
+            return true;
+        }
+        if .kind == NodeKind::NodeClass: {
+            return true;
+        }
+        if .kind == NodeKind::NodeAnchor: {
+            return true;
+        }
+        if .kind == NodeKind::NodeBackreference: {
+            return true;
+        }
+        if .kind == NodeKind::NodeEmpty: {
+            return true;
+        }
+        return false;
+    }
+
+    fn has_children(self: &const shared) -> bool: {
+        if !.children.empty(): {
+            return true;
+        }
+        return .first != NONE;
+    }
+
+    fn child_count(self: &const shared) -> int: {
+        if .first != NONE: {
+            return 1;
+        }
+        return .children.size();
+    }
+
+    // An anchor consumes nothing, and neither does an empty node or a
+    // repetition whose lower bound is zero.
+    fn is_zero_width(self: &const shared) -> bool: {
+        if .kind == NodeKind::NodeAnchor: {
+            return true;
+        }
+        if .kind == NodeKind::NodeEmpty: {
+            return true;
+        }
+        return false;
+    }
+
+    fn is_unbounded(self: &const shared) -> bool: {
+        return .upper == NONE;
+    }
+
+    fn is_optional(self: &const shared) -> bool: {
+        return .lower == 0;
+    }
+
+    kind: NodeKind = NodeKind::NodeInvalid;
+    value: char = '\0';
+    text: string;
+    charclass: CharClass;
+    anchor: AnchorKind = AnchorKind::AnchorLineStart;
+    greed: Greediness = Greediness::Greedy;
+    group_kind: GroupKind = GroupKind::Capturing;
+    group_index: int = -1;
+    reference: int = -1;
+    lower: int = 0;
+    upper: int = -1;
+    first: int = -1;
+    children: vector{int};
+    position: int = 0;
+}
+
+// --- Recursive descent pattern parser ------------------------------------
+//
+// The grammar the parser implements, in the order the functions appear:
+//
+//     alternation   := concatenation ( '|' concatenation )*
+//     concatenation := quantified*
+//     quantified    := atom quantifier*
+//     quantifier    := ( '*' | '+' | '?' | '{' bound '}' ) '?'?
+//     atom          := literal | '.' | class | group | shorthand
+//                    | anchor | backreference
+//     group         := '(' alternation ')'
+//
+// `parse_alternation` and `parse_atom` are mutually recursive through
+// `parse_group`, which is what gives the parser its depth; `depth` is tracked
+// explicitly so a pattern of ten thousand nested groups fails cleanly rather
+// than exhausting the native stack.
+//
+// Bracket expressions are not tokenised in advance.  When the token stream
+// offers a ClassOpen the parser drops to character mode over the original
+// source text, parses the bracket expression there, and then resynchronises
+// the token index to the offset it stopped at.  Bracket expressions have
+// their own rules for `-`, `^` and `]`, and running them through the outer
+// lexer would mean undoing half of its work.
+
+struct GroupName: {
+    name: string;
+    index: int = 0;
+}
+
+struct PatternParser: {
+
+    // --- Token stream helpers ---------------------------------------------
+
+    fn token_count(self: &const shared) -> int: {
+        return .tokens.size();
+    }
+
+    fn at_end(self: &const shared) -> bool: {
+        if .index >= .tokens.size(): {
+            return true;
+        }
+        let t: &const shared = .tokens[.index];
+        return t.is_end();
+    }
+
+    fn current(self: &shared) -> &shared[self] Token: {
+        return .tokens[.index];
+    }
+
+    fn current_kind(self: &const shared) -> TokenKind: {
+        if .index >= .tokens.size(): {
+            return TokenKind::EndOfPattern;
+        }
+        let t: &const shared = .tokens[.index];
+        return t.kind;
+    }
+
+    fn peek_kind(self: &const shared, offset: int) -> TokenKind: {
+        let at = .index + offset;
+        if at >= .tokens.size(): {
+            return TokenKind::EndOfPattern;
+        }
+        let t: &const shared = .tokens[at];
+        return t.kind;
+    }
+
+    fn current_offset(self: &const shared) -> int: {
+        if .index >= .tokens.size(): {
+            return .source.size();
+        }
+        let t: &const shared = .tokens[.index];
+        return t.position;
+    }
+
+    fn step(self: &unique): {
+        if .index < .tokens.size(): {
+            .index += 1;
+        }
+    }
+
+    fn accept_kind(self: &unique, kind: TokenKind) -> bool: {
+        if .current_kind() != kind: {
+            return false;
+        }
+        .step();
+        return true;
+    }
+
+    // Skip forward until the token stream is positioned at or after `offset`.
+    // Called after the character-mode class parser has consumed a stretch of
+    // the source that the lexer had already turned into tokens.
+    fn sync_to_offset(self: &unique, offset: int): {
+        while .index < .tokens.size(): {
+            let t: &const shared = .tokens[.index];
+            if t.position >= offset: {
+                break;
+            }
+            if t.is_end(): {
+                break;
+            }
+            .index += 1;
+        }
+    }
+
+    fn fail(self: &unique, message: &const shared string) -> int: {
+        if .ok: {
+            .ok = false;
+            .error = message;
+            .error_position = .current_offset();
+        }
+        return NONE;
+    }
+
+    // --- Arena ------------------------------------------------------------
+
+    fn node_count(self: &const shared) -> int: {
+        return .nodes.size();
+    }
+
+    fn node_at(self: &shared, index: int) -> &shared[self] Node: {
+        return .nodes[index];
+    }
+
+    fn new_node(self: &unique, kind: NodeKind) -> int: {
+        let index = .nodes.size();
+        var n = Node(kind: kind);
+        n.position = .current_offset();
+        .nodes.push_back(n);
+        return index;
+    }
+
+    fn new_literal(self: &unique, c: char) -> int: {
+        let index = .new_node(NodeKind::NodeLiteral);
+        let n: &unique = .nodes[index];
+        n.value = c;
+        n.charclass.add_char(c);
+        return index;
+    }
+
+    fn new_class(self: &unique, cls: CharClass) -> int: {
+        let index = .new_node(NodeKind::NodeClass);
+        let n: &unique = .nodes[index];
+        n.charclass = cls;
+        n.charclass.normalise();
+        return index;
+    }
+
+    fn new_anchor(self: &unique, which: AnchorKind) -> int: {
+        let index = .new_node(NodeKind::NodeAnchor);
+        let n: &unique = .nodes[index];
+        n.anchor = which;
+        return index;
+    }
+
+    // --- Group name table -------------------------------------------------
+
+    fn find_group_named(self: &const shared, name: &const shared string) -> int: {
+        for entry: &const in .names: {
+            if entry.name.compare(name) == 0: {
+                return entry.index;
+            }
+        }
+        return NONE;
+    }
+
+    fn register_group_name(self: &unique, name: &const shared string, index: int): {
+        var entry = GroupName(index: index);
+        entry.name = name;
+        .names.push_back(entry);
+    }
+
+    // --- Entry point ------------------------------------------------------
+
+    fn parse(self: &unique, pattern: &const shared string) -> int: {
+        .source = pattern;
+        .nodes.clear();
+        .names.clear();
+        .index = 0;
+        .depth = 0;
+        .group_count = 0;
+        .ok = true;
+        .error = ERROR_NONE;
+
+        var lexer = PatternLexer();
+        lexer.source = pattern;
+        if !lexer.tokenize(): {
+            .ok = false;
+            .error = lexer.error;
+            .error_position = lexer.error_position;
+            return NONE;
+        }
+        .tokens = move(lexer.tokens);
+
+        let root = .parse_alternation();
+        if !.ok: {
+            return NONE;
+        }
+        if !.at_end(): {
+            // The only way to stop early with tokens left is a `)` with no
+            // matching `(`, because every other token starts an atom.
+            return .fail(ERROR_UNBALANCED_PAREN);
+        }
+        .root = root;
+        return root;
+    }
+
+    // --- alternation := concatenation ( '|' concatenation )* --------------
+
+    fn parse_alternation(self: &unique) -> int: {
+        let first = .parse_concatenation();
+        if !.ok: {
+            return NONE;
+        }
+        if .current_kind() != TokenKind::AlternationBar: {
+            return first;
+        }
+        let index = .new_node(NodeKind::NodeAlternate);
+        var branches = vector{int}();
+        branches.push_back(first);
+        while .accept_kind(TokenKind::AlternationBar): {
+            let branch = .parse_concatenation();
+            if !.ok: {
+                return NONE;
+            }
+            branches.push_back(branch);
+        }
+        let n: &unique = .nodes[index];
+        n.children = move(branches);
+        return index;
+    }
+
+    // --- concatenation := quantified* -------------------------------------
+    //
+    // Stops at `|`, at `)` and at the end of the token stream.  An empty
+    // concatenation is legal - it is how `(|a)` and `a||b` get their empty
+    // branches - and yields a NodeEmpty.
+
+    fn parse_concatenation(self: &unique) -> int: {
+        var items = vector{int}();
+        loop: {
+            if .at_end(): {
+                break;
+            }
+            if .current_kind() == TokenKind::AlternationBar: {
+                break;
+            }
+            if .current_kind() == TokenKind::GroupClose: {
+                break;
+            }
+            let item = .parse_quantified();
+            if !.ok: {
+                return NONE;
+            }
+            if item == NONE: {
+                break;
+            }
+            items.push_back(item);
+        }
+        if items.empty(): {
+            return .new_node(NodeKind::NodeEmpty);
+        }
+        if items.size() == 1: {
+            return items[0];
+        }
+        let index = .new_node(NodeKind::NodeConcat);
+        let n: &unique = .nodes[index];
+        n.children = move(items);
+        return index;
+    }
+
+    // --- quantified := atom quantifier* -----------------------------------
+    //
+    // Quantifiers are applied left to right, so `a*+` is `(a*)+`.  Each one
+    // wraps the node produced so far in a fresh NodeRepeat.
+
+    fn parse_quantified(self: &unique) -> int: {
+        var atom = .parse_atom();
+        if !.ok: {
+            return NONE;
+        }
+        if atom == NONE: {
+            return NONE;
+        }
+        loop: {
+            let t: &const shared = .tokens[.index];
+            if !t.is_quantifier(): {
+                break;
+            }
+            let inner: &const shared = .nodes[atom];
+            if inner.kind == NodeKind::NodeAnchor: {
+                // `^*` is meaningless and almost always a typo.
+                return .fail(ERROR_NOTHING_TO_REPEAT);
+            }
+            atom = .parse_quantifier(atom);
+            if !.ok: {
+                return NONE;
+            }
+        }
+        return atom;
+    }
+
+    // Consume one quantifier token and wrap `target` in the repetition it
+    // describes.  A trailing `?` makes the repetition lazy; a trailing `+`
+    // makes it possessive, which the backtracking matcher honours by
+    // discarding the alternatives it would otherwise keep.
+    fn parse_quantifier(self: &unique, target: int) -> int: {
+        let kind = .current_kind();
+        var lower: int = 0;
+        var upper: int = NONE;
+        if kind == TokenKind::Star: {
+            lower = 0;
+            upper = NONE;
+        } else: {
+            if kind == TokenKind::Plus: {
+                lower = 1;
+                upper = NONE;
+            } else: {
+                if kind == TokenKind::Question: {
+                    lower = 0;
+                    upper = 1;
+                } else: {
+                    let t: &const shared = .tokens[.index];
+                    lower = t.lower;
+                    upper = t.upper;
+                    if upper != NONE && upper < lower: {
+                        return .fail(ERROR_BAD_REPEAT);
+                    }
+                    if lower > MAX_REPEAT: {
+                        return .fail(ERROR_REPEAT_TOO_LARGE);
+                    }
+                }
+            }
+        }
+        .step();
+        var greed = Greediness::Greedy;
+        if .current_kind() == TokenKind::Question: {
+            greed = Greediness::Lazy;
+            .step();
+        } else: {
+            if .current_kind() == TokenKind::Plus: {
+                greed = Greediness::Possessive;
+                .step();
+            }
+        }
+        let index = .new_node(NodeKind::NodeRepeat);
+        let n: &unique = .nodes[index];
+        n.first = target;
+        n.lower = lower;
+        n.upper = upper;
+        n.greed = greed;
+        return index;
+    }
+
+    // --- atom -------------------------------------------------------------
+    //
+    // The dispatch point of the parser.  Every branch either produces a node
+    // or reports an error; returning NONE without an error set means "this
+    // token does not begin an atom", which only `)` can do.
+
+    fn parse_atom(self: &unique) -> int: {
+        if .at_end(): {
+            return NONE;
+        }
+        let kind = .current_kind();
+        if kind == TokenKind::Literal: {
+            let t: &const shared = .tokens[.index];
+            let c = t.value;
+            .step();
+            return .new_literal(c);
+        }
+        if kind == TokenKind::AnyChar: {
+            .step();
+            let index = .new_node(NodeKind::NodeAny);
+            let n: &unique = .nodes[index];
+            n.charclass = class_of_any(.dot_matches_newline);
+            return index;
+        }
+        if kind == TokenKind::ShorthandClass: {
+            let t: &const shared = .tokens[.index];
+            let which = t.shorthand;
+            .step();
+            return .new_class(class_of_shorthand(which));
+        }
+        if kind == TokenKind::ClassOpen: {
+            return .parse_class();
+        }
+        if kind == TokenKind::GroupOpen: {
+            return .parse_group();
+        }
+        if kind == TokenKind::Backreference: {
+            return .parse_backreference();
+        }
+        if kind == TokenKind::CaretAnchor: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorLineStart);
+        }
+        if kind == TokenKind::DollarAnchor: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorLineEnd);
+        }
+        if kind == TokenKind::TextStartAnchor: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorTextStart);
+        }
+        if kind == TokenKind::TextEndAnchor: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorTextEnd);
+        }
+        if kind == TokenKind::WordBoundary: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorWordBoundary);
+        }
+        if kind == TokenKind::NotWordBoundary: {
+            .step();
+            return .new_anchor(AnchorKind::AnchorNotWordBoundary);
+        }
+        if kind == TokenKind::Star: {
+            return .fail(ERROR_NOTHING_TO_REPEAT);
+        }
+        if kind == TokenKind::Plus: {
+            return .fail(ERROR_NOTHING_TO_REPEAT);
+        }
+        if kind == TokenKind::RepeatOpen: {
+            return .fail(ERROR_NOTHING_TO_REPEAT);
+        }
+        if kind == TokenKind::Invalid: {
+            return .fail(ERROR_BAD_ESCAPE);
+        }
+        return NONE;
+    }
+
+    // --- group := '(' alternation ')' -------------------------------------
+    //
+    // The recursive step.  Capturing groups take the next free index before
+    // their body is parsed, so `(a(b))` numbers the outer group 1 and the
+    // inner group 2 - the order the spelling suggests.
+
+    fn parse_group(self: &unique) -> int: {
+        let t: &const shared = .tokens[.index];
+        let group_kind = t.group_kind;
+        var name = t.text;
+        .step();
+        .depth += 1;
+        if .depth > MAX_GROUP_DEPTH: {
+            .depth -= 1;
+            return .fail(ERROR_DEPTH_EXCEEDED);
+        }
+        var number = NONE;
+        if group_kind == GroupKind::Capturing: {
+            .group_count += 1;
+            number = .group_count;
+        }
+        if group_kind == GroupKind::Named: {
+            .group_count += 1;
+            number = .group_count;
+            .register_group_name(name, number);
+        }
+        let body = .parse_alternation();
+        if !.ok: {
+            .depth -= 1;
+            return NONE;
+        }
+        if !.accept_kind(TokenKind::GroupClose): {
+            .depth -= 1;
+            return .fail(ERROR_UNBALANCED_PAREN);
+        }
+        .depth -= 1;
+        let index = .new_node(NodeKind::NodeGroup);
+        let n: &unique = .nodes[index];
+        n.first = body;
+        n.group_kind = group_kind;
+        n.group_index = number;
+        n.text = name;
+        return index;
+    }
+
+    // --- backreference ----------------------------------------------------
+
+    fn parse_backreference(self: &unique) -> int: {
+        let t: &const shared = .tokens[.index];
+        var target = t.lower;
+        if target == NONE: {
+            target = .find_group_named(t.text);
+            if target == NONE: {
+                return .fail(ERROR_BAD_BACKREF);
+            }
+        }
+        if target > .group_count: {
+            // Forward references are rejected: a group can only be recalled
+            // once it has been opened, and a group that is still open has no
+            // captured text yet.
+            return .fail(ERROR_BAD_BACKREF);
+        }
+        .step();
+        let index = .new_node(NodeKind::NodeBackreference);
+        let n: &unique = .nodes[index];
+        n.reference = target;
+        return index;
+    }
+
+    // --- Bracket expressions ----------------------------------------------
+    //
+    // Character mode.  On entry the token stream sits on the ClassOpen token
+    // and `offset` addresses the `[` itself in the source text.  The routine
+    // walks the source directly and resynchronises the token index on the way
+    // out.
+    //
+    // The rules a bracket expression obeys:
+    //   * a leading `^` negates the whole class
+    //   * a `]` in first position - after any `^` - is an ordinary character
+    //   * `-` is a range operator except in first or last position
+    //   * `[:name:]` names a POSIX class, but a bare `[` is just a bracket
+    //   * a shorthand such as `\d` contributes all of its ranges
+
+    fn parse_class(self: &unique) -> int: {
+        let open = .current_offset();
+        var at = open + 1;
+        var cls = CharClass();
+        if at < .source.size(): {
+            if .source.at(at) == CHAR_CARET: {
+                cls.negate();
+                at += 1;
+            }
+        }
+        var first = true;
+        var closed = false;
+        loop: {
+            if at >= .source.size(): {
+                break;
+            }
+            let c = .source.at(at);
+            if c == CHAR_RBRACKET && !first: {
+                at += 1;
+                closed = true;
+                break;
+            }
+            first = false;
+            if c == CHAR_RBRACKET: {
+                // Leading `]`: an ordinary member of the class.
+                cls.add_char(c);
+                at += 1;
+                continue;
+            }
+            if c == CHAR_LBRACKET && .looks_like_posix(at): {
+                at = .parse_posix_class(at, cls);
+                if !.ok: {
+                    return NONE;
+                }
+                continue;
+            }
+            if c == CHAR_BACKSLASH: {
+                at = .parse_class_escape(at, cls);
+                if !.ok: {
+                    return NONE;
+                }
+                continue;
+            }
+            // An ordinary character.  It may be the low end of a range, which
+            // is decided by what follows it.
+            let low = c;
+            at += 1;
+            if !.class_range_follows(at): {
+                cls.add_char(low);
+                continue;
+            }
+            // Step over the hyphen and read the upper bound.
+            at += 1;
+            let high_char = .source.at(at);
+            if high_char == CHAR_BACKSLASH: {
+                var scratch = CharClass();
+                let after = .parse_class_escape(at, scratch);
+                if !.ok: {
+                    return NONE;
+                }
+                if !scratch.is_single_char(): {
+                    // `a-\d` has no sensible reading; treat the three parts
+                    // as separate members instead of guessing.
+                    cls.add_char(low);
+                    cls.add_char(CHAR_MINUS);
+                    cls.add_class(scratch);
+                    at = after;
+                    continue;
+                }
+                let high = scratch.single_char();
+                if char_code(high) < char_code(low): {
+                    return .fail(ERROR_BAD_RANGE);
+                }
+                cls.add_char_range(low, high);
+                at = after;
+                continue;
+            }
+            if char_code(high_char) < char_code(low): {
+                return .fail(ERROR_BAD_RANGE);
+            }
+            cls.add_char_range(low, high_char);
+            at += 1;
+        }
+        if !closed: {
+            return .fail(ERROR_UNCLOSED_CLASS);
+        }
+        .sync_to_offset(at);
+        cls.normalise();
+        return .new_class(cls);
+    }
+
+    // True when a `-` at `at` really is a range operator: it must exist, and
+    // it must not be the last character before the closing bracket.
+    fn class_range_follows(self: &const shared, at: int) -> bool: {
+        if at >= .source.size(): {
+            return false;
+        }
+        if .source.at(at) != CHAR_MINUS: {
+            return false;
+        }
+        let next = at + 1;
+        if next >= .source.size(): {
+            return false;
+        }
+        if .source.at(next) == CHAR_RBRACKET: {
+            return false;
+        }
+        return true;
+    }
+
+    // A `[` inside a class opens a POSIX name only when it is followed by a
+    // colon and a closing `:]` appears before the class ends.
+    fn looks_like_posix(self: &const shared, at: int) -> bool: {
+        let colon = at + 1;
+        if colon >= .source.size(): {
+            return false;
+        }
+        if .source.at(colon) != CHAR_COLON: {
+            return false;
+        }
+        var scan = colon + 1;
+        if scan < .source.size(): {
+            if .source.at(scan) == CHAR_CARET: {
+                scan += 1;
+            }
+        }
+        while scan < .source.size(): {
+            let c = .source.at(scan);
+            if c == CHAR_COLON: {
+                let close = scan + 1;
+                if close >= .source.size(): {
+                    return false;
+                }
+                return .source.at(close) == CHAR_RBRACKET;
+            }
+            if !is_alpha(c): {
+                return false;
+            }
+            scan += 1;
+        }
+        return false;
+    }
+
+    // Consume `[:name:]` and add its ranges to `into`.  `[:^name:]` adds the
+    // complement, which is spelled by expanding the class and inverting each
+    // gap rather than by flipping the whole class - the surrounding class may
+    // already carry a negation of its own.
+    fn parse_posix_class(self: &unique, at: int, into: &unique CharClass) -> int: {
+        var scan = at + 2;
+        var complement = false;
+        if scan < .source.size(): {
+            if .source.at(scan) == CHAR_CARET: {
+                complement = true;
+                scan += 1;
+            }
+        }
+        var name = TEXT_EMPTY;
+        while scan < .source.size(): {
+            let c = .source.at(scan);
+            if c == CHAR_COLON: {
+                break;
+            }
+            name.push_back(c);
+            scan += 1;
+        }
+        // Step over the `:]` pair.
+        scan += 2;
+        var known = false;
+        var expanded = class_of_posix_name(name, known);
+        if !known: {
+            discard .fail(ERROR_UNKNOWN_CLASS);
+            return scan;
+        }
+        if complement: {
+            expanded.normalise();
+            var inverted = complement_of(expanded);
+            into.add_class(inverted);
+            return scan;
+        }
+        into.add_class(expanded);
+        return scan;
+    }
+
+    // Consume one `\x` sequence inside a bracket expression and add whatever
+    // it denotes to `into`.  Shorthands contribute their ranges; everything
+    // else contributes a single character.
+    fn parse_class_escape(self: &unique, at: int, into: &unique CharClass) -> int: {
+        let marker_at = at + 1;
+        if marker_at >= .source.size(): {
+            discard .fail(ERROR_TRAILING_BACKSLASH);
+            return .source.size();
+        }
+        let marker = .source.at(marker_at);
+        if marker == CHAR_LOWER_D: {
+            into.add_class(class_of_digits());
+            return marker_at + 1;
+        }
+        if marker == CHAR_UPPER_D: {
+            into.add_class(complement_of(class_of_digits()));
+            return marker_at + 1;
+        }
+        if marker == CHAR_LOWER_W: {
+            into.add_class(class_of_word());
+            return marker_at + 1;
+        }
+        if marker == CHAR_UPPER_W: {
+            into.add_class(complement_of(class_of_word()));
+            return marker_at + 1;
+        }
+        if marker == CHAR_LOWER_S: {
+            into.add_class(class_of_space());
+            return marker_at + 1;
+        }
+        if marker == CHAR_UPPER_S: {
+            into.add_class(complement_of(class_of_space()));
+            return marker_at + 1;
+        }
+        if marker == CHAR_LOWER_H: {
+            into.add_class(class_of_horizontal());
+            return marker_at + 1;
+        }
+        if marker == CHAR_LOWER_V: {
+            into.add_class(class_of_vertical());
+            return marker_at + 1;
+        }
+        if marker == CHAR_LOWER_X: {
+            let high_at = marker_at + 1;
+            let low_at = marker_at + 2;
+            if low_at >= .source.size(): {
+                discard .fail(ERROR_BAD_ESCAPE);
+                return .source.size();
+            }
+            let high = .source.at(high_at);
+            let low = .source.at(low_at);
+            if !is_hex_digit(high) || !is_hex_digit(low): {
+                discard .fail(ERROR_BAD_ESCAPE);
+                return low_at + 1;
+            }
+            into.add_range(hex_value(high) * 16 + hex_value(low), hex_value(high) * 16 + hex_value(low));
+            return low_at + 1;
+        }
+        if marker == CHAR_LOWER_B: {
+            // `\b` is a backspace inside a class, not a word boundary.
+            into.add_char(CHAR_BACKSPACE);
+            return marker_at + 1;
+        }
+        into.add_char(decode_escape(marker));
+        return marker_at + 1;
+    }
+
+    source: string;
+    tokens: vector{Token};
+    nodes: vector{Node};
+    names: vector{GroupName};
+    index: int = 0;
+    depth: int = 0;
+    group_count: int = 0;
+    root: int = -1;
+    error: string;
+    error_position: int = 0;
+    ok: bool = true;
+    dot_matches_newline: bool = false;
+    ignore_case: bool = false;
+}
+
+// Build the set complement of a normalised class as an explicit range list.
+// Flipping the `negated` flag would be cheaper, but a complement built this
+// way can be unioned with other classes, which the bracket parser needs.
+fn complement_of(cls: &const shared CharClass) -> CharClass: {
+    var source = cls;
+    source.normalise();
+    var out = CharClass();
+    var cursor = CODE_MIN;
+    for r: &const in source.ranges: {
+        if r.low > cursor: {
+            out.add_range(cursor, r.low - 1);
+        }
+        if r.high + 1 > cursor: {
+            cursor = r.high + 1;
+        }
+    }
+    if cursor <= CODE_MAX: {
+        out.add_range(cursor, CODE_MAX);
+    }
+    out.normalise();
+    return out;
+}
+
+// --- Thompson NFA construction -------------------------------------------
+//
+// Every AST node is turned into a fragment: a start state plus a list of
+// dangling exits that the caller patches to whatever comes next.  The
+// construction is the classical one, so the resulting automaton has at most
+// two transitions out of any state and no more states than the pattern has
+// characters.
+//
+// Backreferences have no NFA form - they are not regular - so the builder
+// emits a Backref state that only the backtracking matcher understands.  A
+// program containing one is marked `has_backreference` and the simulator
+// refuses to run it.
+
+enum StateKind: {
+    StateChar;          // consume one character from a class
+    StateSplit;         // epsilon to both `out` and `alternate`
+    StateJump;          // epsilon to `out`
+    StateSave;          // record the current offset in capture slot `slot`
+    StateAssert;        // zero width assertion
+    StateBackref;       // re-match the text captured by a group
+    StateMatch = 6;     // accept
+}
+
+struct NfaState: {
+
+    fn consumes(self: &const shared) -> bool: {
+        return .kind == StateKind::StateChar;
+    }
+
+    fn is_epsilon(self: &const shared) -> bool: {
+        if .kind == StateKind::StateSplit: {
+            return true;
+        }
+        if .kind == StateKind::StateJump: {
+            return true;
+        }
+        if .kind == StateKind::StateSave: {
+            return true;
+        }
+        if .kind == StateKind::StateAssert: {
+            return true;
+        }
+        return false;
+    }
+
+    fn is_accepting(self: &const shared) -> bool: {
+        return .kind == StateKind::StateMatch;
+    }
+
+    fn accepts(self: &const shared, c: char, folded: bool) -> bool: {
+        if .kind != StateKind::StateChar: {
+            return false;
+        }
+        if folded: {
+            return .charclass.matches_folded(c);
+        }
+        return .charclass.matches(c);
+    }
+
+    kind: StateKind = StateKind::StateJump;
+    charclass: CharClass;
+    anchor: AnchorKind = AnchorKind::AnchorLineStart;
+    slot: int = 0;
+    reference: int = 0;
+    out: int = -1;
+    alternate: int = -1;
+}
+
+// A dangling exit: state `state`, and which of its two out edges is unset.
+struct Patch: {
+    state: int = 0;
+    second: bool = false;
+}
+
+// A partially built automaton.
+struct Fragment: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .start != NONE;
+    }
+
+    fn exit_count(self: &const shared) -> int: {
+        return .exits.size();
+    }
+
+    fn absorb(self: &unique, other: &const shared Fragment): {
+        for p: &const in other.exits: {
+            .exits.push_back(p);
+        }
+    }
+
+    start: int = -1;
+    exits: vector{Patch};
+}
+
+struct NfaBuilder: {
+
+    fn state_count(self: &const shared) -> int: {
+        return .states.size();
+    }
+
+    fn new_state(self: &unique, kind: StateKind) -> int: {
+        let index = .states.size();
+        .states.push_back(NfaState(kind: kind));
+        return index;
+    }
+
+    // Point every exit of `frag` at `target`.
+    fn patch(self: &unique, frag: &const shared Fragment, target: int): {
+        for p: &const in frag.exits: {
+            let s: &unique = .states[p.state];
+            if p.second: {
+                s.alternate = target;
+            } else: {
+                s.out = target;
+            }
+        }
+    }
+
+    fn single_exit(self: &const shared, state: int, second: bool) -> Fragment: {
+        var frag = Fragment(start: state);
+        frag.exits.push_back(Patch(state: state, second: second));
+        return frag;
+    }
+
+    // --- Entry point ------------------------------------------------------
+
+    fn build(self: &unique, parser: &shared PatternParser, root: int) -> bool: {
+        .states.clear();
+        .has_backreference = false;
+        .ok = true;
+        let frag = .build_node(parser, root);
+        if !.ok: {
+            return false;
+        }
+        let accept = .new_state(StateKind::StateMatch);
+        .patch(frag, accept);
+        .start = frag.start;
+        .accept = accept;
+        return true;
+    }
+
+    // --- The recursive core -----------------------------------------------
+
+    fn build_node(self: &unique, parser: &shared PatternParser, index: int) -> Fragment: {
+        if index == NONE: {
+            return .build_empty();
+        }
+        let n: &const shared = parser.nodes[index];
+        if n.kind == NodeKind::NodeEmpty: {
+            return .build_empty();
+        }
+        if n.kind == NodeKind::NodeLiteral: {
+            return .build_class(n.charclass);
+        }
+        if n.kind == NodeKind::NodeAny: {
+            return .build_class(n.charclass);
+        }
+        if n.kind == NodeKind::NodeClass: {
+            return .build_class(n.charclass);
+        }
+        if n.kind == NodeKind::NodeString: {
+            return .build_string(n.text);
+        }
+        if n.kind == NodeKind::NodeAnchor: {
+            return .build_anchor(n.anchor);
+        }
+        if n.kind == NodeKind::NodeBackreference: {
+            return .build_backreference(n.reference);
+        }
+        if n.kind == NodeKind::NodeConcat: {
+            return .build_concat(parser, index);
+        }
+        if n.kind == NodeKind::NodeAlternate: {
+            return .build_alternate(parser, index);
+        }
+        if n.kind == NodeKind::NodeRepeat: {
+            return .build_repeat(parser, index);
+        }
+        if n.kind == NodeKind::NodeGroup: {
+            return .build_group(parser, index);
+        }
+        .ok = false;
+        return Fragment();
+    }
+
+    fn build_empty(self: &unique) -> Fragment: {
+        let s = .new_state(StateKind::StateJump);
+        return .single_exit(s, false);
+    }
+
+    fn build_class(self: &unique, cls: &const shared CharClass) -> Fragment: {
+        let s = .new_state(StateKind::StateChar);
+        let state: &unique = .states[s];
+        state.charclass = cls;
+        state.charclass.normalise();
+        return .single_exit(s, false);
+    }
+
+    // A literal run compiles to a chain of single character states.  The
+    // simulator has no special case for it, but the compiled program does.
+    fn build_string(self: &unique, text: &const shared string) -> Fragment: {
+        if text.empty(): {
+            return .build_empty();
+        }
+        var head = NONE;
+        var previous = NONE;
+        var i: int = 0;
+        while i < text.size(): {
+            let s = .new_state(StateKind::StateChar);
+            let state: &unique = .states[s];
+            state.charclass.add_char(text.at(i));
+            if head == NONE: {
+                head = s;
+            } else: {
+                let prior: &unique = .states[previous];
+                prior.out = s;
+            }
+            previous = s;
+            i += 1;
+        }
+        var frag = Fragment(start: head);
+        frag.exits.push_back(Patch(state: previous, second: false));
+        return frag;
+    }
+
+    fn build_anchor(self: &unique, which: AnchorKind) -> Fragment: {
+        let s = .new_state(StateKind::StateAssert);
+        let state: &unique = .states[s];
+        state.anchor = which;
+        return .single_exit(s, false);
+    }
+
+    fn build_backreference(self: &unique, group: int) -> Fragment: {
+        .has_backreference = true;
+        let s = .new_state(StateKind::StateBackref);
+        let state: &unique = .states[s];
+        state.reference = group;
+        return .single_exit(s, false);
+    }
+
+    // e1 e2 ... : chain the fragments, patching each one's exits to the next
+    // fragment's start.  The exits of the last fragment become the exits of
+    // the whole.
+    fn build_concat(self: &unique, parser: &shared PatternParser, index: int) -> Fragment: {
+        let n: &const shared = parser.nodes[index];
+        var result = Fragment();
+        var started = false;
+        for child: &const in n.children: {
+            let piece = .build_node(parser, child);
+            if !.ok: {
+                return Fragment();
+            }
+            if !started: {
+                result = piece;
+                started = true;
+            } else: {
+                .patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
+            }
+        }
+        if !started: {
+            return .build_empty();
+        }
+        return result;
+    }
+
+    // e1 | e2 | ... : a chain of Split states, each preferring its left
+    // branch.  The last branch takes the final split's alternate edge, so no
+    // split is ever left with a dangling second edge.
+    fn build_alternate(self: &unique, parser: &shared PatternParser, index: int) -> Fragment: {
+        let n: &const shared = parser.nodes[index];
+        var result = Fragment();
+        var previous_split = NONE;
+        var count: int = 0;
+        let total = n.children.size();
+        for child: &const in n.children: {
+            let piece = .build_node(parser, child);
+            if !.ok: {
+                return Fragment();
+            }
+            count += 1;
+            if count == total: {
+                if previous_split == NONE: {
+                    return piece;
+                }
+                let split: &unique = .states[previous_split];
+                split.alternate = piece.start;
+                result.absorb(piece);
+                return result;
+            }
+            let split = .new_state(StateKind::StateSplit);
+            let s: &unique = .states[split];
+            s.out = piece.start;
+            if previous_split == NONE: {
+                result.start = split;
+            } else: {
+                let prior: &unique = .states[previous_split];
+                prior.alternate = split;
+            }
+            result.absorb(piece);
+            previous_split = split;
+        }
+        return result;
+    }
+
+    fn build_group(self: &unique, parser: &shared PatternParser, index: int) -> Fragment: {
+        let n: &const shared = parser.nodes[index];
+        let group = n.group_index;
+        if group == NONE: {
+            return .build_node(parser, n.first);
+        }
+        let open = .new_state(StateKind::StateSave);
+        let open_state: &unique = .states[open];
+        open_state.slot = group * 2;
+        let body = .build_node(parser, n.first);
+        if !.ok: {
+            return Fragment();
+        }
+        open_state.out = body.start;
+        let close = .new_state(StateKind::StateSave);
+        let close_state: &unique = .states[close];
+        close_state.slot = group * 2 + 1;
+        .patch(body, close);
+        return .single_exit_from(open, close);
+    }
+
+    // Helper for fragments whose start and exit are different states.
+    fn single_exit_from(self: &const shared, start: int, exit: int) -> Fragment: {
+        var frag = Fragment(start: start);
+        frag.exits.push_back(Patch(state: exit, second: false));
+        return frag;
+    }
+
+    // --- Repetition -------------------------------------------------------
+    //
+    // `e{lower,upper}` is expanded into copies of `e`: `lower` mandatory ones
+    // followed by either an unbounded star, when `upper` is NONE, or by
+    // `upper - lower` optional ones.  Expansion keeps the automaton a plain
+    // Thompson NFA with no counters, at the cost of size - which is why the
+    // parser caps the bound at MAX_REPEAT.
+
+    fn build_repeat(self: &unique, parser: &shared PatternParser, index: int) -> Fragment: {
+        let n: &const shared = parser.nodes[index];
+        let lower = n.lower;
+        let upper = n.upper;
+        let body = n.first;
+        let lazy = n.greed == Greediness::Lazy;
+        if lower == 0 && upper == NONE: {
+            return .build_star(parser, body, lazy);
+        }
+        if lower == 1 && upper == NONE: {
+            return .build_plus(parser, body, lazy);
+        }
+        if lower == 0 && upper == 1: {
+            return .build_optional(parser, body, lazy);
+        }
+        var result = Fragment();
+        var started = false;
+        var i: int = 0;
+        while i < lower: {
+            let piece = .build_node(parser, body);
+            if !.ok: {
+                return Fragment();
+            }
+            if !started: {
+                result = piece;
+                started = true;
+            } else: {
+                .patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
+            }
+            i += 1;
+        }
+        if upper == NONE: {
+            let tail = .build_star(parser, body, lazy);
+            if !started: {
+                return tail;
+            }
+            .patch(result, tail.start);
+            result.exits.clear();
+            result.absorb(tail);
+            return result;
+        }
+        var extra = upper - lower;
+        while extra > 0: {
+            let piece = .build_optional(parser, body, lazy);
+            if !.ok: {
+                return Fragment();
+            }
+            if !started: {
+                result = piece;
+                started = true;
+            } else: {
+                .patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
+            }
+            extra -= 1;
+        }
+        if !started: {
+            return .build_empty();
+        }
+        return result;
+    }
+
+    // e* : a split that either enters the body - which loops back - or skips
+    // it.  A lazy star simply swaps the two edges so the skip is preferred.
+    fn build_star(self: &unique, parser: &shared PatternParser, body: int, lazy: bool) -> Fragment: {
+        let split = .new_state(StateKind::StateSplit);
+        let piece = .build_node(parser, body);
+        if !.ok: {
+            return Fragment();
+        }
+        .patch(piece, split);
+        let s: &unique = .states[split];
+        if lazy: {
+            s.alternate = piece.start;
+            return .single_exit(split, false);
+        }
+        s.out = piece.start;
+        return .single_exit(split, true);
+    }
+
+    // e+ : the body first, then a split that loops back or falls through.
+    fn build_plus(self: &unique, parser: &shared PatternParser, body: int, lazy: bool) -> Fragment: {
+        let piece = .build_node(parser, body);
+        if !.ok: {
+            return Fragment();
+        }
+        let split = .new_state(StateKind::StateSplit);
+        .patch(piece, split);
+        let s: &unique = .states[split];
+        if lazy: {
+            s.alternate = piece.start;
+            return .single_exit_from(piece.start, split);
+        }
+        s.out = piece.start;
+        var frag = Fragment(start: piece.start);
+        frag.exits.push_back(Patch(state: split, second: true));
+        return frag;
+    }
+
+    // e? : one split, no loop.
+    fn build_optional(self: &unique, parser: &shared PatternParser, body: int, lazy: bool) -> Fragment: {
+        let split = .new_state(StateKind::StateSplit);
+        let piece = .build_node(parser, body);
+        if !.ok: {
+            return Fragment();
+        }
+        let s: &unique = .states[split];
+        var frag = Fragment(start: split);
+        if lazy: {
+            s.alternate = piece.start;
+            frag.exits.push_back(Patch(state: split, second: false));
+        } else: {
+            s.out = piece.start;
+            frag.exits.push_back(Patch(state: split, second: true));
+        }
+        frag.absorb(piece);
+        return frag;
+    }
+
+    states: vector{NfaState};
+    start: int = -1;
+    accept: int = -1;
+    has_backreference: bool = false;
+    ok: bool = true;
+}
+
+// --- NFA simulation ------------------------------------------------------
+//
+// The simulator runs every alternative at once: it keeps a set of NFA states
+// and advances the whole set one input character at a time.  That gives a
+// running time of O(text * states) with no backtracking at all, which is the
+// point of the construction - but it cannot report capture groups, and it
+// cannot handle backreferences, so the backtracking matcher below still earns
+// its keep.
+//
+// The state set is a sparse set: `dense` lists the members in insertion order
+// and `stamp` records, per state, the generation in which it was added.
+// Clearing the set is then a single increment.
+
+struct StateSet: {
+
+    fn size(self: &const shared) -> int: {
+        return .dense.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .dense.empty();
+    }
+
+    fn prepare(self: &unique, capacity: int): {
+        .stamp.resize(capacity);
+        .generation = 1;
+        var i: int = 0;
+        while i < capacity: {
+            .stamp[i] = 0;
+            i += 1;
+        }
+        .dense.clear();
+    }
+
+    fn clear(self: &unique): {
+        .generation += 1;
+        .dense.clear();
+    }
+
+    fn contains(self: &const shared, state: int) -> bool: {
+        if state < 0: {
+            return false;
+        }
+        if state >= .stamp.size(): {
+            return false;
+        }
+        return .stamp[state] == .generation;
+    }
+
+    // Returns false when the state was already present, which is what stops
+    // the epsilon closure below from looping forever.
+    fn insert(self: &unique, state: int) -> bool: {
+        if .contains(state): {
+            return false;
+        }
+        .stamp[state] = .generation;
+        .dense.push_back(state);
+        return true;
+    }
+
+    fn at(self: &const shared, i: int) -> int: {
+        return .dense[i];
+    }
+
+    dense: vector{int};
+    stamp: vector{int};
+    generation: int = 1;
+}
+
+// The zero width assertions, evaluated against a position in the subject.
+fn assertion_holds(which: AnchorKind, text: &const shared string, pos: int, multiline: bool) -> bool: {
+    if which == AnchorKind::AnchorTextStart: {
+        return pos == 0;
+    }
+    if which == AnchorKind::AnchorTextEnd: {
+        return pos == text.size();
+    }
+    if which == AnchorKind::AnchorLineStart: {
+        if pos == 0: {
+            return true;
+        }
+        if !multiline: {
+            return false;
+        }
+        return text.at(pos - 1) == CHAR_NEWLINE;
+    }
+    if which == AnchorKind::AnchorLineEnd: {
+        if pos == text.size(): {
+            return true;
+        }
+        if !multiline: {
+            return false;
+        }
+        return text.at(pos) == CHAR_NEWLINE;
+    }
+    let before = word_char_before(text, pos);
+    let after = word_char_at(text, pos);
+    if which == AnchorKind::AnchorWordBoundary: {
+        return before != after;
+    }
+    return before == after;
+}
+
+fn word_char_before(text: &const shared string, pos: int) -> bool: {
+    if pos <= 0: {
+        return false;
+    }
+    return is_word_char(text.at(pos - 1));
+}
+
+fn word_char_at(text: &const shared string, pos: int) -> bool: {
+    if pos >= text.size(): {
+        return false;
+    }
+    return is_word_char(text.at(pos));
+}
+
+struct NfaSimulator: {
+
+    fn ready(self: &const shared) -> bool: {
+        if .states.empty(): {
+            return false;
+        }
+        return .start != NONE;
+    }
+
+    fn load(self: &unique, builder: &const shared NfaBuilder): {
+        .states = builder.states;
+        .start = builder.start;
+        .accept = builder.accept;
+        .current.prepare(.states.size());
+        .next.prepare(.states.size());
+    }
+
+    // Add `state` and everything reachable from it without consuming input.
+    // Splits fan out, jumps and saves fall through, and assertions are
+    // evaluated on the spot against `pos`.
+    fn add_state(self: &unique, set: &unique StateSet, state: int, pos: int): {
+        if state == NONE: {
+            return;
+        }
+        if !set.insert(state): {
+            return;
+        }
+        let s: &const shared = .states[state];
+        if s.kind == StateKind::StateSplit: {
+            .add_state(set, s.out, pos);
+            .add_state(set, s.alternate, pos);
+            return;
+        }
+        if s.kind == StateKind::StateJump: {
+            .add_state(set, s.out, pos);
+            return;
+        }
+        if s.kind == StateKind::StateSave: {
+            // The simulator does not record captures, so a save is a jump.
+            .add_state(set, s.out, pos);
+            return;
+        }
+        if s.kind == StateKind::StateAssert: {
+            if assertion_holds(s.anchor, .text, pos, .multiline): {
+                .add_state(set, s.out, pos);
+            }
+            return;
+        }
+    }
+
+    fn set_contains_accept(self: &const shared, set: &const shared StateSet) -> bool: {
+        var i: int = 0;
+        while i < set.size(): {
+            let index = set.at(i);
+            let s: &const shared = .states[index];
+            if s.is_accepting(): {
+                return true;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    // Advance the whole set across one character.
+    fn step(self: &unique, c: char, pos: int): {
+        .next.clear();
+        var i: int = 0;
+        while i < .current.size(): {
+            let index = .current.at(i);
+            let s: &const shared = .states[index];
+            if s.consumes(): {
+                if s.accepts(c, .ignore_case): {
+                    .add_state(.next, s.out, pos + 1);
+                }
+            }
+            i += 1;
+        }
+        swap(.current, .next);
+    }
+
+    // Run from `from` and report the offset just past the longest match that
+    // begins there, or NONE when nothing matches.
+    fn run_from(self: &unique, from: int) -> int: {
+        .current.clear();
+        .add_state(.current, .start, from);
+        var best = NONE;
+        if .set_contains_accept(.current): {
+            best = from;
+        }
+        var pos = from;
+        while pos < .text.size(): {
+            if .current.empty(): {
+                break;
+            }
+            .step(.text.at(pos), pos);
+            pos += 1;
+            if .set_contains_accept(.current): {
+                best = pos;
+            }
+            .steps += 1;
+        }
+        return best;
+    }
+
+    // Leftmost match: try every starting offset in turn.  A pattern anchored
+    // at the text start could skip the loop entirely, and the optimiser marks
+    // such programs so the API can do exactly that.
+    fn search_from(self: &unique, from: int) -> bool: {
+        var start = from;
+        while start <= .text.size(): {
+            let end = .run_from(start);
+            if end != NONE: {
+                .match_begin = start;
+                .match_end = end;
+                return true;
+            }
+            start += 1;
+        }
+        .match_begin = NONE;
+        .match_end = NONE;
+        return false;
+    }
+
+    fn matches_whole(self: &unique) -> bool: {
+        let end = .run_from(0);
+        if end == NONE: {
+            return false;
+        }
+        return end == .text.size();
+    }
+
+    states: vector{NfaState};
+    current: StateSet;
+    next: StateSet;
+    text: string;
+    start: int = -1;
+    accept: int = -1;
+    match_begin: int = -1;
+    match_end: int = -1;
+    steps: int = 0;
+    ignore_case: bool = false;
+    multiline: bool = false;
+}
+
+// --- Backtracking matcher ------------------------------------------------
+//
+// The simulator above is the fast path, but it reports only where a match
+// ended.  This matcher walks the AST directly, keeps a capture table, honours
+// greedy, lazy and possessive quantifiers, and can re-match captured text for
+// a backreference.  In exchange it can backtrack exponentially, so every step
+// is counted against a budget.
+//
+// Continuations are explicit.  Rather than passing a closure - which the
+// language has no form for - the matcher stores frames in a list and passes
+// the index of the head.  A frame says what is still to be matched after the
+// current node succeeds, so `run_continuation` is the "what comes next" half
+// of the recursion and `match_node` is the "what is here" half.  The two call
+// each other, which is exactly the shape a continuation passing matcher has
+// in any language.
+
+enum MatchStatus: {
+    Matched;
+    NoMatch;
+    Exhausted = 2;
+}
+
+enum ContKind: {
+    ContNode;           // match `node`, then continue with `next`
+    ContGroupEnd;       // close capture group `slot`, then continue
+    ContRepeat;         // resume a repetition at iteration `count`
+    ContDone = 3;       // the whole pattern has been matched
+}
+
+struct Capture: {
+
+    fn valid(self: &const shared) -> bool: {
+        if .begin < 0: {
+            return false;
+        }
+        return .end >= .begin;
+    }
+
+    fn length(self: &const shared) -> int: {
+        if !.valid(): {
+            return 0;
+        }
+        return .end - .begin;
+    }
+
+    fn text_of(self: &const shared, subject: &const shared string) -> string: {
+        if !.valid(): {
+            return TEXT_EMPTY;
+        }
+        return subject.substr(.begin, .length());
+    }
+
+    begin: int = -1;
+    end: int = -1;
+}
+
+struct ContFrame: {
+    kind: ContKind = ContKind::ContDone;
+    node: int = -1;
+    next: int = -1;
+    slot: int = -1;
+    mark: int = 0;
+    count: int = 0;
+}
+
+struct BacktrackMatcher: {
+
+    // --- Set up -----------------------------------------------------------
+
+    fn load(self: &unique, parser: &const shared PatternParser): {
+        .nodes = parser.nodes;
+        .root = parser.root;
+        .group_count = parser.group_count;
+        .names = parser.names;
+    }
+
+    fn reset(self: &unique): {
+        .frames.clear();
+        .steps = 0;
+        .status = MatchStatus::NoMatch;
+        .captures.clear();
+        var i: int = 0;
+        while i <= .group_count: {
+            .captures.push_back(Capture());
+            i += 1;
+        }
+    }
+
+    fn capture_count(self: &const shared) -> int: {
+        return .captures.size();
+    }
+
+    fn capture_at(self: &shared, index: int) -> &shared[self] Capture: {
+        return .captures[index];
+    }
+
+    fn group_named(self: &const shared, name: &const shared string) -> int: {
+        for entry: &const in .names: {
+            if entry.name.compare(name) == 0: {
+                return entry.index;
+            }
+        }
+        return NONE;
+    }
+
+    // Charge every recursive step so a runaway pattern stops rather than
+    // hanging.  `spend` returns false once the budget is gone, and every
+    // caller treats that as an immediate failure.
+    fn spend(self: &unique) -> bool: {
+        .steps += 1;
+        if .steps > .budget: {
+            .status = MatchStatus::Exhausted;
+            return false;
+        }
+        return true;
+    }
+
+    fn exhausted(self: &const shared) -> bool: {
+        return .status == MatchStatus::Exhausted;
+    }
+
+    // --- Frame allocation -------------------------------------------------
+
+    fn push_frame(self: &unique, frame: ContFrame) -> int: {
+        let index = .frames.size();
+        .frames.push_back(frame);
+        return index;
+    }
+
+    fn push_node(self: &unique, node: int, next: int) -> int: {
+        var f = ContFrame(kind: ContKind::ContNode, node: node, next: next);
+        return .push_frame(f);
+    }
+
+    fn push_group_end(self: &unique, slot: int, mark: int, next: int) -> int: {
+        var f = ContFrame(kind: ContKind::ContGroupEnd, next: next);
+        f.slot = slot;
+        f.mark = mark;
+        return .push_frame(f);
+    }
+
+    fn push_repeat(self: &unique, node: int, count: int, mark: int, next: int) -> int: {
+        var f = ContFrame(kind: ContKind::ContRepeat, node: node, next: next);
+        f.count = count;
+        f.mark = mark;
+        return .push_frame(f);
+    }
+
+    // --- The continuation half --------------------------------------------
+    //
+    // Returns the offset the whole match reached, or NONE on failure.
+
+    fn run_continuation(self: &unique, cont: int, pos: int) -> int: {
+        if !.spend(): {
+            return NONE;
+        }
+        if cont == NONE: {
+            // Nothing left to match: the pattern has succeeded here.
+            return pos;
+        }
+        let kind = .frames[cont].kind;
+        if kind == ContKind::ContDone: {
+            return pos;
+        }
+        if kind == ContKind::ContNode: {
+            let node = .frames[cont].node;
+            let next = .frames[cont].next;
+            return .match_node(node, pos, next);
+        }
+        if kind == ContKind::ContGroupEnd: {
+            let slot = .frames[cont].slot;
+            let mark = .frames[cont].mark;
+            let next = .frames[cont].next;
+            var saved_begin = NONE;
+            var saved_end = NONE;
+            if slot < .captures.size(): {
+                let existing: &const shared = .captures[slot];
+                saved_begin = existing.begin;
+                saved_end = existing.end;
+                let cap: &unique = .captures[slot];
+                cap.begin = mark;
+                cap.end = pos;
+            }
+            let result = .run_continuation(next, pos);
+            if result == NONE: {
+                // Undo the capture: a group that took part in a failed
+                // attempt must not leak its text into the final table.
+                if slot < .captures.size(): {
+                    let cap: &unique = .captures[slot];
+                    cap.begin = saved_begin;
+                    cap.end = saved_end;
+                }
+            }
+            return result;
+        }
+        let node = .frames[cont].node;
+        let count = .frames[cont].count;
+        let mark = .frames[cont].mark;
+        let next = .frames[cont].next;
+        if pos == mark: {
+            // The body matched the empty string.  Repeating it again would
+            // never terminate, so the repetition ends here.
+            let n: &const shared = .nodes[node];
+            if count >= n.lower: {
+                return .run_continuation(next, pos);
+            }
+            return NONE;
+        }
+        return .match_repeat(node, pos, count, next);
+    }
+
+    // --- The node half ----------------------------------------------------
+
+    fn match_node(self: &unique, node: int, pos: int, cont: int) -> int: {
+        if !.spend(): {
+            return NONE;
+        }
+        if node == NONE: {
+            return .run_continuation(cont, pos);
+        }
+        let kind = .nodes[node].kind;
+        if kind == NodeKind::NodeEmpty: {
+            return .run_continuation(cont, pos);
+        }
+        if kind == NodeKind::NodeLiteral: {
+            return .match_literal(node, pos, cont);
+        }
+        if kind == NodeKind::NodeString: {
+            return .match_string(node, pos, cont);
+        }
+        if kind == NodeKind::NodeAny: {
+            return .match_class(node, pos, cont);
+        }
+        if kind == NodeKind::NodeClass: {
+            return .match_class(node, pos, cont);
+        }
+        if kind == NodeKind::NodeAnchor: {
+            return .match_anchor(node, pos, cont);
+        }
+        if kind == NodeKind::NodeBackreference: {
+            return .match_backreference(node, pos, cont);
+        }
+        if kind == NodeKind::NodeConcat: {
+            return .match_concat(node, pos, cont);
+        }
+        if kind == NodeKind::NodeAlternate: {
+            return .match_alternate(node, pos, cont);
+        }
+        if kind == NodeKind::NodeGroup: {
+            return .match_group(node, pos, cont);
+        }
+        if kind == NodeKind::NodeRepeat: {
+            return .match_repeat(node, pos, 0, cont);
+        }
+        return NONE;
+    }
+
+    fn match_literal(self: &unique, node: int, pos: int, cont: int) -> int: {
+        if pos >= .text.size(): {
+            return NONE;
+        }
+        let expected = .nodes[node].value;
+        let actual = .text.at(pos);
+        if .ignore_case: {
+            if !same_char_folded(expected, actual): {
+                return NONE;
+            }
+        } else: {
+            if expected != actual: {
+                return NONE;
+            }
+        }
+        return .run_continuation(cont, pos + 1);
+    }
+
+    // A literal run, produced by the optimiser when it fuses adjacent
+    // literals.  Matching it in one go saves a continuation hop per
+    // character, which is the whole reason the optimisation exists.
+    fn match_string(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let text: &const shared = .nodes[node].text;
+        if pos + text.size() > .text.size(): {
+            return NONE;
+        }
+        var i: int = 0;
+        while i < text.size(): {
+            let expected = text.at(i);
+            let actual = .text.at(pos + i);
+            if .ignore_case: {
+                if !same_char_folded(expected, actual): {
+                    return NONE;
+                }
+            } else: {
+                if expected != actual: {
+                    return NONE;
+                }
+            }
+            i += 1;
+        }
+        return .run_continuation(cont, pos + text.size());
+    }
+
+    fn match_class(self: &unique, node: int, pos: int, cont: int) -> int: {
+        if pos >= .text.size(): {
+            return NONE;
+        }
+        let c = .text.at(pos);
+        let cls: &const shared = .nodes[node].charclass;
+        var hit = false;
+        if .ignore_case: {
+            hit = cls.matches_folded(c);
+        } else: {
+            hit = cls.matches(c);
+        }
+        if !hit: {
+            return NONE;
+        }
+        return .run_continuation(cont, pos + 1);
+    }
+
+    fn match_anchor(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let which = .nodes[node].anchor;
+        if !assertion_holds(which, .text, pos, .multiline): {
+            return NONE;
+        }
+        return .run_continuation(cont, pos);
+    }
+
+    // Re-match the exact text a group captured earlier.  An unset group
+    // matches the empty string, which is what most engines do.
+    fn match_backreference(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let group = .nodes[node].reference;
+        if group >= .captures.size(): {
+            return NONE;
+        }
+        let cap: &const shared = .captures[group];
+        if !cap.valid(): {
+            return .run_continuation(cont, pos);
+        }
+        let length = cap.length();
+        if pos + length > .text.size(): {
+            return NONE;
+        }
+        var i: int = 0;
+        while i < length: {
+            let expected = .text.at(cap.begin + i);
+            let actual = .text.at(pos + i);
+            if .ignore_case: {
+                if !same_char_folded(expected, actual): {
+                    return NONE;
+                }
+            } else: {
+                if expected != actual: {
+                    return NONE;
+                }
+            }
+            i += 1;
+        }
+        return .run_continuation(cont, pos + length);
+    }
+
+    // Chain the children onto the continuation from the right, so the first
+    // child is matched first and every later child is waiting in a frame.
+    fn match_concat(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let count = .nodes[node].children.size();
+        if count == 0: {
+            return .run_continuation(cont, pos);
+        }
+        var chain = cont;
+        var i = count - 1;
+        while i >= 0: {
+            let child = .nodes[node].children[i];
+            chain = .push_node(child, chain);
+            i -= 1;
+        }
+        return .run_continuation(chain, pos);
+    }
+
+    // Try each branch in order with the same continuation.  Ordering is what
+    // makes alternation leftmost-biased, so `a|ab` matches just `a`.
+    fn match_alternate(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let count = .nodes[node].children.size();
+        var i: int = 0;
+        while i < count: {
+            let child = .nodes[node].children[i];
+            let result = .match_node(child, pos, cont);
+            if result != NONE: {
+                return result;
+            }
+            if .exhausted(): {
+                return NONE;
+            }
+            i += 1;
+        }
+        return NONE;
+    }
+
+    fn match_group(self: &unique, node: int, pos: int, cont: int) -> int: {
+        let body = .nodes[node].first;
+        let group = .nodes[node].group_index;
+        if group == NONE: {
+            return .match_node(body, pos, cont);
+        }
+        let closing = .push_group_end(group, pos, cont);
+        return .match_node(body, pos, closing);
+    }
+
+    // --- Repetition -------------------------------------------------------
+    //
+    // `count` is how many iterations have already succeeded.  A greedy
+    // repetition tries one more iteration before it tries the continuation; a
+    // lazy one tries the continuation first.  A possessive repetition takes
+    // as many iterations as it can and never gives one back.
+
+    fn match_repeat(self: &unique, node: int, pos: int, count: int, cont: int) -> int: {
+        if !.spend(): {
+            return NONE;
+        }
+        let lower = .nodes[node].lower;
+        let upper = .nodes[node].upper;
+        let body = .nodes[node].first;
+        let greed = .nodes[node].greed;
+        var may_continue = count >= lower;
+        var may_repeat = true;
+        if upper != NONE: {
+            if count >= upper: {
+                may_repeat = false;
+            }
+        }
+        if greed == Greediness::Possessive: {
+            return .match_possessive(node, pos, count, cont);
+        }
+        if greed == Greediness::Lazy: {
+            if may_continue: {
+                let stop = .run_continuation(cont, pos);
+                if stop != NONE: {
+                    return stop;
+                }
+                if .exhausted(): {
+                    return NONE;
+                }
+            }
+            if !may_repeat: {
+                return NONE;
+            }
+            let resume = .push_repeat(node, count + 1, pos, cont);
+            return .match_node(body, pos, resume);
+        }
+        if may_repeat: {
+            let resume = .push_repeat(node, count + 1, pos, cont);
+            let more = .match_node(body, pos, resume);
+            if more != NONE: {
+                return more;
+            }
+            if .exhausted(): {
+                return NONE;
+            }
+        }
+        if may_continue: {
+            return .run_continuation(cont, pos);
+        }
+        return NONE;
+    }
+
+    // Consume iterations with an empty continuation until the body stops
+    // matching, then hand the final position to the real continuation.  No
+    // iteration is ever undone, which is the defining property.
+    fn match_possessive(self: &unique, node: int, pos: int, count: int, cont: int) -> int: {
+        let lower = .nodes[node].lower;
+        let upper = .nodes[node].upper;
+        let body = .nodes[node].first;
+        var taken = count;
+        var cursor = pos;
+        loop: {
+            if upper != NONE: {
+                if taken >= upper: {
+                    break;
+                }
+            }
+            let advanced = .match_node(body, cursor, NONE);
+            if advanced == NONE: {
+                break;
+            }
+            if advanced == cursor: {
+                // An empty iteration adds nothing and would loop forever.
+                break;
+            }
+            cursor = advanced;
+            taken += 1;
+            if .exhausted(): {
+                return NONE;
+            }
+        }
+        if taken < lower: {
+            return NONE;
+        }
+        return .run_continuation(cont, cursor);
+    }
+
+    // --- Public entry points ----------------------------------------------
+
+    fn match_at(self: &unique, start: int) -> bool: {
+        .reset();
+        let end = .match_node(.root, start, NONE);
+        if end == NONE: {
+            if !.exhausted(): {
+                .status = MatchStatus::NoMatch;
+            }
+            return false;
+        }
+        .status = MatchStatus::Matched;
+        let whole: &unique = .captures[0];
+        whole.begin = start;
+        whole.end = end;
+        return true;
+    }
+
+    fn search_from(self: &unique, from: int) -> bool: {
+        var start = from;
+        while start <= .text.size(): {
+            if .match_at(start): {
+                return true;
+            }
+            if .exhausted(): {
+                return false;
+            }
+            start += 1;
+        }
+        return false;
+    }
+
+    fn match_whole(self: &unique) -> bool: {
+        if !.match_at(0): {
+            return false;
+        }
+        let whole: &const shared = .captures[0];
+        return whole.end == .text.size();
+    }
+
+    nodes: vector{Node};
+    names: vector{GroupName};
+    frames: vector{ContFrame};
+    captures: vector{Capture};
+    text: string;
+    root: int = -1;
+    group_count: int = 0;
+    steps: int = 0;
+    budget: int = 1000000;
+    status: MatchStatus = MatchStatus::NoMatch;
+    ignore_case: bool = false;
+    multiline: bool = false;
+}
+
+// --- Compiled program ----------------------------------------------------
+//
+// The third representation, after the AST and the NFA.  A program is a flat
+// instruction array in which control flow is expressed by absolute indices,
+// which makes it cheap to store, cheap to copy and easy to rewrite - the
+// optimiser below works on programs, not on trees.
+//
+// The instruction set is deliberately small.  OpString and OpClassSet do not
+// add expressive power; they exist so the optimiser has something to fuse
+// runs of OpChar and adjacent OpClass instructions into.
+
+enum OpCode: {
+    OpChar;             // consume one specific character
+    OpString;           // consume a fixed run of characters
+    OpClass;            // consume one character of a class
+    OpAny;              // consume any character
+    OpSplit;            // try `x`, then `y`
+    OpJump;             // continue at `x`
+    OpSave;             // record the offset in capture slot `slot`
+    OpAssert;           // zero width assertion
+    OpBackref;          // re-match capture group `slot`
+    OpMatch;            // accept
+    OpFail = 10;        // never matches; left behind by the optimiser
+}
+
+struct Instruction: {
+
+    fn consumes_input(self: &const shared) -> bool: {
+        if .op == OpCode::OpChar: {
+            return true;
+        }
+        if .op == OpCode::OpString: {
+            return true;
+        }
+        if .op == OpCode::OpClass: {
+            return true;
+        }
+        if .op == OpCode::OpAny: {
+            return true;
+        }
+        return false;
+    }
+
+    fn is_branch(self: &const shared) -> bool: {
+        if .op == OpCode::OpSplit: {
+            return true;
+        }
+        if .op == OpCode::OpJump: {
+            return true;
+        }
+        return false;
+    }
+
+    fn is_terminal(self: &const shared) -> bool: {
+        if .op == OpCode::OpMatch: {
+            return true;
+        }
+        return .op == OpCode::OpFail;
+    }
+
+    // How much input the instruction always consumes.  OpString reports its
+    // whole length, which is what the prefix scanner wants.
+    fn minimum_width(self: &const shared) -> int: {
+        if .op == OpCode::OpString: {
+            return .text.size();
+        }
+        if .consumes_input(): {
+            return 1;
+        }
+        return 0;
+    }
+
+    op: OpCode = OpCode::OpFail;
+    value: char = '\0';
+    text: string;
+    charclass: CharClass;
+    anchor: AnchorKind = AnchorKind::AnchorLineStart;
+    slot: int = 0;
+    x: int = -1;
+    y: int = -1;
+}
+
+struct Program: {
+
+    fn size(self: &const shared) -> int: {
+        return .code.size();
+    }
+
+    fn empty(self: &const shared) -> bool: {
+        return .code.empty();
+    }
+
+    fn at(self: &shared, pc: int) -> &shared[self] Instruction: {
+        return .code[pc];
+    }
+
+    fn op_at(self: &const shared, pc: int) -> OpCode: {
+        if pc < 0: {
+            return OpCode::OpFail;
+        }
+        if pc >= .code.size(): {
+            return OpCode::OpFail;
+        }
+        return .code[pc].op;
+    }
+
+    fn emit(self: &unique, inst: Instruction) -> int: {
+        let at = .code.size();
+        .code.push_back(inst);
+        return at;
+    }
+
+    fn emit_op(self: &unique, op: OpCode) -> int: {
+        return .emit(Instruction(op: op));
+    }
+
+    fn emit_char(self: &unique, c: char) -> int: {
+        var inst = Instruction(op: OpCode::OpChar, value: c);
+        inst.charclass.add_char(c);
+        return .emit(inst);
+    }
+
+    fn emit_class(self: &unique, cls: &const shared CharClass) -> int: {
+        var inst = Instruction(op: OpCode::OpClass);
+        inst.charclass = cls;
+        inst.charclass.normalise();
+        return .emit(inst);
+    }
+
+    fn emit_save(self: &unique, slot: int) -> int: {
+        var inst = Instruction(op: OpCode::OpSave);
+        inst.slot = slot;
+        return .emit(inst);
+    }
+
+    fn emit_assert(self: &unique, which: AnchorKind) -> int: {
+        var inst = Instruction(op: OpCode::OpAssert);
+        inst.anchor = which;
+        return .emit(inst);
+    }
+
+    fn emit_backref(self: &unique, slot: int) -> int: {
+        var inst = Instruction(op: OpCode::OpBackref);
+        inst.slot = slot;
+        return .emit(inst);
+    }
+
+    fn set_target(self: &unique, pc: int, target: int): {
+        let inst: &unique = .code[pc];
+        inst.x = target;
+    }
+
+    fn set_alternate(self: &unique, pc: int, target: int): {
+        let inst: &unique = .code[pc];
+        inst.y = target;
+    }
+
+    fn instruction_count_of(self: &const shared, op: OpCode) -> int: {
+        var total: int = 0;
+        for inst: &const in .code: {
+            if inst.op == op: {
+                total += 1;
+            }
+        }
+        return total;
+    }
+
+    // Shortest possible match, used to reject subjects that are too short
+    // before any real work happens.  Splits take the smaller of the two
+    // arms, which is a lower bound and therefore always safe.
+    fn minimum_length(self: &const shared) -> int: {
+        var total: int = 0;
+        for inst: &const in .code: {
+            if inst.op == OpCode::OpSplit: {
+                return total;
+            }
+            total += inst.minimum_width();
+            if inst.op == OpCode::OpMatch: {
+                break;
+            }
+        }
+        return total;
+    }
+
+    fn disassemble(self: &const shared) -> string: {
+        var out = TEXT_EMPTY;
+        var pc: int = 0;
+        while pc < .code.size(): {
+            let inst: &const shared = .code[pc];
+            out.append(to_string(pc));
+            out.append(TEXT_SPACE_ARROW);
+            out.append(opcode_name(inst.op));
+            if inst.op == OpCode::OpChar: {
+                out.append(TEXT_SPACE);
+                out.append(escape_spelling(inst.value));
+            }
+            if inst.op == OpCode::OpString: {
+                out.append(TEXT_SPACE);
+                out.append(inst.text);
+            }
+            if inst.op == OpCode::OpClass: {
+                out.append(TEXT_SPACE);
+                out.append(inst.charclass.spell());
+            }
+            if inst.is_branch(): {
+                out.append(TEXT_SPACE);
+                out.append(to_string(inst.x));
+            }
+            if inst.op == OpCode::OpSplit: {
+                out.append(TEXT_COMMA_SPACE);
+                out.append(to_string(inst.y));
+            }
+            out.append(TEXT_NEWLINE);
+            pc += 1;
+        }
+        return out;
+    }
+
+    code: vector{Instruction};
+    names: vector{GroupName};
+    prefix: string;
+    group_count: int = 0;
+    start: int = 0;
+    anchored: bool = false;
+    has_backreference: bool = false;
+    ignore_case: bool = false;
+    multiline: bool = false;
+    dot_matches_newline: bool = false;
+}
+
+static TEXT_SPACE: string = " ";
+static TEXT_NEWLINE: string = "\n";
+static TEXT_COMMA_SPACE: string = ", ";
+static TEXT_SPACE_ARROW: string = ": ";
+
+fn opcode_name(op: OpCode) -> string: {
+    if op == OpCode::OpChar: {
+        return "char";
+    }
+    if op == OpCode::OpString: {
+        return "string";
+    }
+    if op == OpCode::OpClass: {
+        return "class";
+    }
+    if op == OpCode::OpAny: {
+        return "any";
+    }
+    if op == OpCode::OpSplit: {
+        return "split";
+    }
+    if op == OpCode::OpJump: {
+        return "jump";
+    }
+    if op == OpCode::OpSave: {
+        return "save";
+    }
+    if op == OpCode::OpAssert: {
+        return "assert_at";
+    }
+    if op == OpCode::OpBackref: {
+        return "backref";
+    }
+    if op == OpCode::OpMatch: {
+        return "match";
+    }
+    return "fail";
+}
+
+// --- Compiler ------------------------------------------------------------
+//
+// A straight recursive walk of the AST, emitting instructions as it goes.
+// Because targets are absolute indices and a forward branch does not know
+// where it lands, the compiler emits a placeholder and patches it once the
+// destination is known - the same hole-and-patch discipline the NFA builder
+// uses, expressed in indices instead of exit lists.
+
+struct Compiler: {
+
+    fn compile(self: &unique, parser: &const shared PatternParser) -> bool: {
+        .program = Program();
+        .nodes = parser.nodes;
+        .program.group_count = parser.group_count;
+        .program.names = parser.names;
+        .ok = true;
+        discard .program.emit_save(0);
+        .compile_node(parser.root);
+        if !.ok: {
+            return false;
+        }
+        discard .program.emit_save(1);
+        discard .program.emit_op(OpCode::OpMatch);
+        .program.anchored = .starts_anchored(parser.root);
+        return true;
+    }
+
+    fn here(self: &const shared) -> int: {
+        return .program.code.size();
+    }
+
+    fn compile_node(self: &unique, index: int): {
+        if index == NONE: {
+            return;
+        }
+        if !.ok: {
+            return;
+        }
+        let kind = .nodes[index].kind;
+        if kind == NodeKind::NodeEmpty: {
+            return;
+        }
+        if kind == NodeKind::NodeLiteral: {
+            discard .program.emit_char(.nodes[index].value);
+            return;
+        }
+        if kind == NodeKind::NodeString: {
+            var inst = Instruction(op: OpCode::OpString);
+            inst.text = .nodes[index].text;
+            discard .program.emit(inst);
+            return;
+        }
+        if kind == NodeKind::NodeAny: {
+            discard .program.emit_class(.nodes[index].charclass);
+            return;
+        }
+        if kind == NodeKind::NodeClass: {
+            discard .program.emit_class(.nodes[index].charclass);
+            return;
+        }
+        if kind == NodeKind::NodeAnchor: {
+            discard .program.emit_assert(.nodes[index].anchor);
+            return;
+        }
+        if kind == NodeKind::NodeBackreference: {
+            .program.has_backreference = true;
+            discard .program.emit_backref(.nodes[index].reference);
+            return;
+        }
+        if kind == NodeKind::NodeConcat: {
+            .compile_concat(index);
+            return;
+        }
+        if kind == NodeKind::NodeAlternate: {
+            .compile_alternate(index);
+            return;
+        }
+        if kind == NodeKind::NodeGroup: {
+            .compile_group(index);
+            return;
+        }
+        if kind == NodeKind::NodeRepeat: {
+            .compile_repeat(index);
+            return;
+        }
+        .ok = false;
+    }
+
+    fn compile_concat(self: &unique, index: int): {
+        let count = .nodes[index].children.size();
+        var i: int = 0;
+        while i < count: {
+            .compile_node(.nodes[index].children[i]);
+            if !.ok: {
+                return;
+            }
+            i += 1;
+        }
+    }
+
+    // Each branch but the last is guarded by a split and followed by a jump
+    // to the join point.  The jumps are collected and patched together once
+    // the last branch has been emitted.
+    fn compile_alternate(self: &unique, index: int): {
+        let count = .nodes[index].children.size();
+        if count == 0: {
+            return;
+        }
+        var jumps = vector{int}();
+        var i: int = 0;
+        while i < count: {
+            let child = .nodes[index].children[i];
+            if i + 1 == count: {
+                .compile_node(child);
+                i += 1;
+                continue;
+            }
+            let split = .program.emit_op(OpCode::OpSplit);
+            .program.set_target(split, .here());
+            .compile_node(child);
+            if !.ok: {
+                return;
+            }
+            let jump = .program.emit_op(OpCode::OpJump);
+            jumps.push_back(jump);
+            .program.set_alternate(split, .here());
+            i += 1;
+        }
+        let join = .here();
+        for jump: &const in jumps: {
+            .program.set_target(jump, join);
+        }
+    }
+
+    fn compile_group(self: &unique, index: int): {
+        let group = .nodes[index].group_index;
+        if group == NONE: {
+            .compile_node(.nodes[index].first);
+            return;
+        }
+        discard .program.emit_save(group * 2);
+        .compile_node(.nodes[index].first);
+        if !.ok: {
+            return;
+        }
+        discard .program.emit_save(group * 2 + 1);
+    }
+
+    fn compile_repeat(self: &unique, index: int): {
+        let lower = .nodes[index].lower;
+        let upper = .nodes[index].upper;
+        let body = .nodes[index].first;
+        let lazy = .nodes[index].greed == Greediness::Lazy;
+        var i: int = 0;
+        while i < lower: {
+            .compile_node(body);
+            if !.ok: {
+                return;
+            }
+            i += 1;
+        }
+        if upper == NONE: {
+            .compile_star(body, lazy);
+            return;
+        }
+        var extra = upper - lower;
+        var splits = vector{int}();
+        while extra > 0: {
+            let split = .program.emit_op(OpCode::OpSplit);
+            splits.push_back(split);
+            if lazy: {
+                .program.set_alternate(split, .here());
+            } else: {
+                .program.set_target(split, .here());
+            }
+            .compile_node(body);
+            if !.ok: {
+                return;
+            }
+            extra -= 1;
+        }
+        let after = .here();
+        for split: &const in splits: {
+            if lazy: {
+                .program.set_target(split, after);
+            } else: {
+                .program.set_alternate(split, after);
+            }
+        }
+    }
+
+    // The star loop: split, body, jump back, and the split's other arm points
+    // past the jump.  Swapping the arms turns the loop lazy.
+    fn compile_star(self: &unique, body: int, lazy: bool): {
+        let split = .program.emit_op(OpCode::OpSplit);
+        let body_at = .here();
+        .compile_node(body);
+        if !.ok: {
+            return;
+        }
+        let jump = .program.emit_op(OpCode::OpJump);
+        .program.set_target(jump, split);
+        let after = .here();
+        if lazy: {
+            .program.set_target(split, after);
+            .program.set_alternate(split, body_at);
+        } else: {
+            .program.set_target(split, body_at);
+            .program.set_alternate(split, after);
+        }
+    }
+
+    // True when every path through the pattern begins with an anchor that
+    // pins it to the start of the subject.  Such a program never needs to be
+    // retried at later offsets.
+    fn starts_anchored(self: &const shared, index: int) -> bool: {
+        if index == NONE: {
+            return false;
+        }
+        let kind = .nodes[index].kind;
+        if kind == NodeKind::NodeAnchor: {
+            let which = .nodes[index].anchor;
+            if which == AnchorKind::AnchorTextStart: {
+                return true;
+            }
+            return which == AnchorKind::AnchorLineStart;
+        }
+        if kind == NodeKind::NodeGroup: {
+            return .starts_anchored(.nodes[index].first);
+        }
+        if kind == NodeKind::NodeConcat: {
+            if .nodes[index].children.empty(): {
+                return false;
+            }
+            return .starts_anchored(.nodes[index].children[0]);
+        }
+        if kind == NodeKind::NodeAlternate: {
+            // Every branch must be anchored, or the pattern can still match
+            // somewhere in the middle of the subject.
+            if .nodes[index].children.empty(): {
+                return false;
+            }
+            for child: &const in .nodes[index].children: {
+                if !.starts_anchored(child): {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    program: Program;
+    nodes: vector{Node};
+    ok: bool = true;
+}
+
+// --- Optimiser -----------------------------------------------------------
+//
+// Two families of rewrites, both optional: nothing here changes what a
+// pattern matches, only how much work matching it costs.
+//
+// On the tree:
+//   * runs of adjacent literals become one NodeString
+//   * an alternation of single character branches becomes one NodeClass
+//   * degenerate repetitions - {1,1}, {0,0} - collapse
+//
+// On the program:
+//   * a jump to a jump is threaded through to its final destination
+//   * instructions no branch can reach are replaced with OpFail
+//
+// Every pass reports how many rewrites it made, and the driver repeats the
+// set until a round changes nothing or the budget runs out.
+
+struct OptimiserStats: {
+
+    fn total(self: &const shared) -> int: {
+        var sum = .literal_runs + .merged_classes;
+        sum += .collapsed_repeats;
+        sum += .threaded_jumps;
+        sum += .dead_instructions;
+        return sum;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var out = TEXT_EMPTY;
+        out.append("literal runs: ");
+        out.append(to_string(.literal_runs));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("merged classes: ");
+        out.append(to_string(.merged_classes));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("collapsed repeats: ");
+        out.append(to_string(.collapsed_repeats));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("threaded jumps: ");
+        out.append(to_string(.threaded_jumps));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("dead instructions: ");
+        out.append(to_string(.dead_instructions));
+        return out;
+    }
+
+    literal_runs: int = 0;
+    merged_classes: int = 0;
+    collapsed_repeats: int = 0;
+    threaded_jumps: int = 0;
+    dead_instructions: int = 0;
+    rounds: int = 0;
+}
+
+struct Optimiser: {
+
+    fn changed(self: &const shared) -> bool: {
+        return .rewrites > 0;
+    }
+
+    fn spend(self: &unique) -> bool: {
+        .work += 1;
+        return .work <= OPTIMISER_BUDGET;
+    }
+
+    // --- Tree passes ------------------------------------------------------
+
+    fn optimise_tree(self: &unique, parser: &unique PatternParser) -> int: {
+        .rewrites = 0;
+        var round: int = 0;
+        while round < 4: {
+            let before = .rewrites;
+            .fuse_literals(parser, parser.root);
+            .merge_alternate_classes(parser, parser.root);
+            .collapse_repeats(parser, parser.root);
+            .stats.rounds += 1;
+            if .rewrites == before: {
+                break;
+            }
+            round += 1;
+        }
+        return .rewrites;
+    }
+
+    // Walk the tree bottom up, replacing every run of two or more adjacent
+    // NodeLiteral children of a concatenation with a single NodeString.  A
+    // run of one is left alone: OpChar is already the cheapest form.
+    fn fuse_literals(self: &unique, parser: &unique PatternParser, index: int): {
+        if index == NONE: {
+            return;
+        }
+        if !.spend(): {
+            return;
+        }
+        let kind = parser.nodes[index].kind;
+        if kind == NodeKind::NodeRepeat: {
+            .fuse_literals(parser, parser.nodes[index].first);
+            return;
+        }
+        if kind == NodeKind::NodeGroup: {
+            .fuse_literals(parser, parser.nodes[index].first);
+            return;
+        }
+        if kind == NodeKind::NodeAlternate: {
+            let count = parser.nodes[index].children.size();
+            var i: int = 0;
+            while i < count: {
+                .fuse_literals(parser, parser.nodes[index].children[i]);
+                i += 1;
+            }
+            return;
+        }
+        if kind != NodeKind::NodeConcat: {
+            return;
+        }
+        let count = parser.nodes[index].children.size();
+        var i: int = 0;
+        while i < count: {
+            .fuse_literals(parser, parser.nodes[index].children[i]);
+            i += 1;
+        }
+        var rebuilt = vector{int}();
+        var run = TEXT_EMPTY;
+        var run_start = NONE;
+        i = 0;
+        while i < count: {
+            let child = parser.nodes[index].children[i];
+            let child_kind = parser.nodes[child].kind;
+            var literal = child_kind == NodeKind::NodeLiteral;
+            if literal && i + 1 < count: {
+                // A literal followed by a quantifier must stay separate: the
+                // quantifier binds to that one character, not to the run.
+                let next = parser.nodes[index].children[i + 1];
+                if parser.nodes[next].kind == NodeKind::NodeRepeat: {
+                    if parser.nodes[next].first == child: {
+                        literal = false;
+                    }
+                }
+            }
+            if literal: {
+                if run_start == NONE: {
+                    run_start = child;
+                }
+                run.push_back(parser.nodes[child].value);
+            } else: {
+                if run.size() >= 2: {
+                    let fused = .make_string_node(parser, run);
+                    rebuilt.push_back(fused);
+                    .rewrites += 1;
+                    .stats.literal_runs += 1;
+                } else: {
+                    if run_start != NONE: {
+                        rebuilt.push_back(run_start);
+                    }
+                }
+                run = TEXT_EMPTY;
+                run_start = NONE;
+                rebuilt.push_back(child);
+            }
+            i += 1;
+        }
+        if run.size() >= 2: {
+            let fused = .make_string_node(parser, run);
+            rebuilt.push_back(fused);
+            .rewrites += 1;
+            .stats.literal_runs += 1;
+        } else: {
+            if run_start != NONE: {
+                rebuilt.push_back(run_start);
+            }
+        }
+        let n: &unique = parser.nodes[index];
+        n.children = move(rebuilt);
+    }
+
+    fn make_string_node(self: &unique, parser: &unique PatternParser, text: &const shared string) -> int: {
+        let index = parser.nodes.size();
+        var n = Node(kind: NodeKind::NodeString);
+        n.text = text;
+        parser.nodes.push_back(n);
+        return index;
+    }
+
+    // `a|b|c` and `[ab]|[cd]` both describe a set of single characters, and a
+    // single class test is far cheaper than a chain of splits.  The rewrite
+    // only fires when *every* branch is a single character or a class, since
+    // a mixed alternation still needs its control flow.
+    fn merge_alternate_classes(self: &unique, parser: &unique PatternParser, index: int): {
+        if index == NONE: {
+            return;
+        }
+        if !.spend(): {
+            return;
+        }
+        let kind = parser.nodes[index].kind;
+        if kind == NodeKind::NodeRepeat: {
+            .merge_alternate_classes(parser, parser.nodes[index].first);
+            return;
+        }
+        if kind == NodeKind::NodeGroup: {
+            .merge_alternate_classes(parser, parser.nodes[index].first);
+            return;
+        }
+        if kind == NodeKind::NodeConcat: {
+            let count = parser.nodes[index].children.size();
+            var i: int = 0;
+            while i < count: {
+                .merge_alternate_classes(parser, parser.nodes[index].children[i]);
+                i += 1;
+            }
+            return;
+        }
+        if kind != NodeKind::NodeAlternate: {
+            return;
+        }
+        let count = parser.nodes[index].children.size();
+        var i: int = 0;
+        while i < count: {
+            .merge_alternate_classes(parser, parser.nodes[index].children[i]);
+            i += 1;
+        }
+        if count < 2: {
+            return;
+        }
+        var mergeable = true;
+        i = 0;
+        while i < count: {
+            let child = parser.nodes[index].children[i];
+            let child_kind = parser.nodes[child].kind;
+            var fine = false;
+            if child_kind == NodeKind::NodeLiteral: {
+                fine = true;
+            }
+            if child_kind == NodeKind::NodeClass: {
+                // A negated class cannot be unioned by concatenating ranges;
+                // it would have to be complemented first, and that is not
+                // worth doing inside a pass meant to be cheap.
+                if !parser.nodes[child].charclass.negated: {
+                    fine = true;
+                }
+            }
+            if !fine: {
+                mergeable = false;
+                break;
+            }
+            i += 1;
+        }
+        if !mergeable: {
+            return;
+        }
+        var merged = CharClass();
+        i = 0;
+        while i < count: {
+            let child = parser.nodes[index].children[i];
+            merged.add_class(parser.nodes[child].charclass);
+            i += 1;
+        }
+        merged.normalise();
+        let n: &unique = parser.nodes[index];
+        n.kind = NodeKind::NodeClass;
+        n.charclass = merged;
+        n.children.clear();
+        .rewrites += 1;
+        .stats.merged_classes += 1;
+    }
+
+    // `e{1,1}` is `e`, and `e{0,0}` is the empty string.  Both turn up
+    // constantly in generated patterns.
+    fn collapse_repeats(self: &unique, parser: &unique PatternParser, index: int): {
+        if index == NONE: {
+            return;
+        }
+        if !.spend(): {
+            return;
+        }
+        let kind = parser.nodes[index].kind;
+        if kind == NodeKind::NodeConcat: {
+            let count = parser.nodes[index].children.size();
+            var i: int = 0;
+            while i < count: {
+                .collapse_repeats(parser, parser.nodes[index].children[i]);
+                i += 1;
+            }
+            return;
+        }
+        if kind == NodeKind::NodeAlternate: {
+            let count = parser.nodes[index].children.size();
+            var i: int = 0;
+            while i < count: {
+                .collapse_repeats(parser, parser.nodes[index].children[i]);
+                i += 1;
+            }
+            return;
+        }
+        if kind == NodeKind::NodeGroup: {
+            .collapse_repeats(parser, parser.nodes[index].first);
+            return;
+        }
+        if kind != NodeKind::NodeRepeat: {
+            return;
+        }
+        .collapse_repeats(parser, parser.nodes[index].first);
+        let lower = parser.nodes[index].lower;
+        let upper = parser.nodes[index].upper;
+        if lower == 0 && upper == 0: {
+            let n: &unique = parser.nodes[index];
+            n.kind = NodeKind::NodeEmpty;
+            n.first = NONE;
+            .rewrites += 1;
+            .stats.collapsed_repeats += 1;
+            return;
+        }
+        if lower == 1 && upper == 1: {
+            let body = parser.nodes[index].first;
+            let source: &const shared = parser.nodes[body];
+            var copy = source;
+            let n: &unique = parser.nodes[index];
+            n.kind = copy.kind;
+            n.value = copy.value;
+            n.text = copy.text;
+            n.charclass = copy.charclass;
+            n.anchor = copy.anchor;
+            n.group_kind = copy.group_kind;
+            n.group_index = copy.group_index;
+            n.reference = copy.reference;
+            n.lower = copy.lower;
+            n.upper = copy.upper;
+            n.first = copy.first;
+            n.children = copy.children;
+            .rewrites += 1;
+            .stats.collapsed_repeats += 1;
+        }
+    }
+
+    // --- Literal prefix extraction ----------------------------------------
+    //
+    // Walk the front of the pattern collecting characters that every match
+    // must begin with.  A search can then skip to the next occurrence of that
+    // prefix instead of retrying the whole machine at every offset, which is
+    // the single most valuable optimisation for patterns like `error: .*`.
+
+    fn extract_prefix(self: &unique, parser: &const shared PatternParser, index: int) -> string: {
+        var out = TEXT_EMPTY;
+        .collect_prefix(parser, index, out);
+        return out;
+    }
+
+    fn collect_prefix(self: &unique, parser: &const shared PatternParser, index: int, out: &unique string): {
+        if index == NONE: {
+            return;
+        }
+        if !.spend(): {
+            return;
+        }
+        let kind = parser.nodes[index].kind;
+        if kind == NodeKind::NodeLiteral: {
+            out.push_back(parser.nodes[index].value);
+            return;
+        }
+        if kind == NodeKind::NodeString: {
+            out.append(parser.nodes[index].text);
+            return;
+        }
+        if kind == NodeKind::NodeGroup: {
+            if parser.nodes[index].group_kind == GroupKind::NonCapturing: {
+                .collect_prefix(parser, parser.nodes[index].first, out);
+            }
+            return;
+        }
+        if kind == NodeKind::NodeAnchor: {
+            // Anchors consume nothing, so the prefix continues past them.
+            return;
+        }
+        if kind == NodeKind::NodeRepeat: {
+            if parser.nodes[index].lower >= 1: {
+                // The first mandatory iteration contributes its own prefix,
+                // but nothing after it is certain.
+                var inner = TEXT_EMPTY;
+                .collect_prefix(parser, parser.nodes[index].first, inner);
+                out.append(inner);
+            }
+            return;
+        }
+        if kind != NodeKind::NodeConcat: {
+            return;
+        }
+        let count = parser.nodes[index].children.size();
+        var i: int = 0;
+        while i < count: {
+            let child = parser.nodes[index].children[i];
+            let child_kind = parser.nodes[child].kind;
+            if child_kind == NodeKind::NodeLiteral: {
+                out.push_back(parser.nodes[child].value);
+                i += 1;
+                continue;
+            }
+            if child_kind == NodeKind::NodeString: {
+                out.append(parser.nodes[child].text);
+                i += 1;
+                continue;
+            }
+            if child_kind == NodeKind::NodeAnchor: {
+                i += 1;
+                continue;
+            }
+            break;
+        }
+    }
+
+    // --- Program passes ---------------------------------------------------
+
+    fn optimise_program(self: &unique, program: &unique Program) -> int: {
+        .rewrites = 0;
+        var round: int = 0;
+        while round < 3: {
+            let before = .rewrites;
+            .thread_jumps(program);
+            .mark_dead(program);
+            if .rewrites == before: {
+                break;
+            }
+            round += 1;
+        }
+        return .rewrites;
+    }
+
+    // A branch that lands on an unconditional jump can point at the jump's
+    // own destination instead.  Chains are followed with a hop limit so a
+    // loop of jumps - which the compiler cannot emit, but a rewritten program
+    // might - cannot spin forever.
+    fn thread_jumps(self: &unique, program: &unique Program): {
+        var pc: int = 0;
+        while pc < program.code.size(): {
+            if !.spend(): {
+                return;
+            }
+            let inst: &const shared = program.code[pc];
+            if inst.is_branch(): {
+                let target = .final_target(program, inst.x);
+                if target != inst.x: {
+                    program.set_target(pc, target);
+                    .rewrites += 1;
+                    .stats.threaded_jumps += 1;
+                }
+            }
+            let again: &const shared = program.code[pc];
+            if again.op == OpCode::OpSplit: {
+                let target = .final_target(program, again.y);
+                if target != again.y: {
+                    program.set_alternate(pc, target);
+                    .rewrites += 1;
+                    .stats.threaded_jumps += 1;
+                }
+            }
+            pc += 1;
+        }
+    }
+
+    fn final_target(self: &unique, program: &const shared Program, start: int) -> int: {
+        var target = start;
+        var hops: int = 0;
+        while hops < 32: {
+            if target < 0: {
+                return start;
+            }
+            if target >= program.code.size(): {
+                return start;
+            }
+            let inst: &const shared = program.code[target];
+            if inst.op != OpCode::OpJump: {
+                return target;
+            }
+            if inst.x == target: {
+                return target;
+            }
+            target = inst.x;
+            hops += 1;
+        }
+        return target;
+    }
+
+    // Reachability from the entry point.  Anything unvisited is replaced with
+    // OpFail, which keeps the indices stable - renumbering would mean
+    // rewriting every branch in the program.
+    fn mark_dead(self: &unique, program: &unique Program): {
+        var reachable = vector{bool}();
+        reachable.resize(program.code.size());
+        var i: int = 0;
+        while i < program.code.size(): {
+            reachable[i] = false;
+            i += 1;
+        }
+        var stack = vector{int}();
+        stack.push_back(program.start);
+        while !stack.empty(): {
+            if !.spend(): {
+                return;
+            }
+            let pc = stack.back();
+            stack.pop_back();
+            if pc < 0: {
+                continue;
+            }
+            if pc >= program.code.size(): {
+                continue;
+            }
+            if reachable[pc]: {
+                continue;
+            }
+            reachable[pc] = true;
+            let inst: &const shared = program.code[pc];
+            if inst.op == OpCode::OpMatch: {
+                continue;
+            }
+            if inst.op == OpCode::OpFail: {
+                continue;
+            }
+            if inst.op == OpCode::OpJump: {
+                stack.push_back(inst.x);
+                continue;
+            }
+            if inst.op == OpCode::OpSplit: {
+                stack.push_back(inst.x);
+                stack.push_back(inst.y);
+                continue;
+            }
+            stack.push_back(pc + 1);
+        }
+        i = 0;
+        while i < program.code.size(): {
+            if !reachable[i]: {
+                let inst: &unique = program.code[i];
+                if inst.op != OpCode::OpFail: {
+                    inst.op = OpCode::OpFail;
+                    .rewrites += 1;
+                    .stats.dead_instructions += 1;
+                }
+            }
+            i += 1;
+        }
+    }
+
+    stats: OptimiserStats;
+    rewrites: int = 0;
+    work: int = 0;
+}
+
+// --- Match results -------------------------------------------------------
+
+struct MatchResult: {
+
+    fn matched(self: &const shared) -> bool: {
+        return .found;
+    }
+
+    fn begin(self: &const shared) -> int: {
+        let whole: &const shared = .groups[0];
+        return whole.begin;
+    }
+
+    fn end(self: &const shared) -> int: {
+        let whole: &const shared = .groups[0];
+        return whole.end;
+    }
+
+    fn length(self: &const shared) -> int: {
+        return .end() - .begin();
+    }
+
+    fn group_count(self: &const shared) -> int: {
+        return .groups.size();
+    }
+
+    fn group(self: &const shared, index: int) -> string: {
+        if index < 0: {
+            return TEXT_EMPTY;
+        }
+        if index >= .groups.size(): {
+            return TEXT_EMPTY;
+        }
+        let cap: &const shared = .groups[index];
+        return cap.text_of(.subject);
+    }
+
+    fn group_begin(self: &const shared, index: int) -> int: {
+        if index >= .groups.size(): {
+            return NONE;
+        }
+        let cap: &const shared = .groups[index];
+        return cap.begin;
+    }
+
+    fn has_group(self: &const shared, index: int) -> bool: {
+        if index >= .groups.size(): {
+            return false;
+        }
+        let cap: &const shared = .groups[index];
+        return cap.valid();
+    }
+
+    fn text(self: &const shared) -> string: {
+        return .group(0);
+    }
+
+    fn prefix_text(self: &const shared) -> string: {
+        return .subject.substr(0, .begin());
+    }
+
+    fn suffix_text(self: &const shared) -> string: {
+        let from = .end();
+        return .subject.substr(from, .subject.size() - from);
+    }
+
+    subject: string;
+    groups: vector{Capture};
+    names: vector{GroupName};
+    found: bool = false;
+    steps: int = 0;
+    status: MatchStatus = MatchStatus::NoMatch;
+}
+
+fn empty_result(subject: &const shared string) -> MatchResult: {
+    var r = MatchResult();
+    r.subject = subject;
+    r.groups.push_back(Capture());
+    return r;
+}
+
+// --- The engine facade ---------------------------------------------------
+//
+// `Regex` owns every representation at once: the AST for the backtracker, the
+// NFA for the simulator and the compiled program for inspection.  Which one
+// runs is decided per call - a pattern with a backreference or a capture
+// request has to backtrack, anything else can be simulated in linear time.
+
+enum EngineChoice: {
+    ChooseAutomatic;
+    ForceBacktrack;
+    ForceSimulation = 2;
+}
+
+struct Regex: {
+
+    fn valid(self: &const shared) -> bool: {
+        return .ok;
+    }
+
+    fn error_text(self: &const shared) -> string: {
+        return .error;
+    }
+
+    fn error_offset(self: &const shared) -> int: {
+        return .error_position;
+    }
+
+    fn group_count(self: &const shared) -> int: {
+        return .parser.group_count;
+    }
+
+    fn pattern_text(self: &const shared) -> string: {
+        return .pattern;
+    }
+
+    fn program_size(self: &const shared) -> int: {
+        return .compiler.program.size();
+    }
+
+    fn state_count(self: &const shared) -> int: {
+        return .builder.state_count();
+    }
+
+    fn literal_prefix(self: &const shared) -> string: {
+        return .prefix;
+    }
+
+    // --- Compilation ------------------------------------------------------
+
+    fn compile(self: &unique, pattern: &const shared string) -> bool: {
+        .pattern = pattern;
+        .ok = true;
+        .error = ERROR_NONE;
+        .parser = PatternParser();
+        .parser.dot_matches_newline = .dot_matches_newline;
+        .parser.ignore_case = .ignore_case;
+        let root = .parser.parse(pattern);
+        if root == NONE: {
+            .ok = false;
+            .error = .parser.error;
+            .error_position = .parser.error_position;
+            return false;
+        }
+        .optimiser = Optimiser();
+        discard .optimiser.optimise_tree(.parser);
+        .prefix = .optimiser.extract_prefix(.parser, .parser.root);
+        if !.builder.build(.parser, .parser.root): {
+            .ok = false;
+            .error = ERROR_BAD_GROUP;
+            return false;
+        }
+        if !.compiler.compile(.parser): {
+            .ok = false;
+            .error = ERROR_BAD_GROUP;
+            return false;
+        }
+        discard .optimiser.optimise_program(.compiler.program);
+        .compiler.program.prefix = .prefix;
+        .compiler.program.ignore_case = .ignore_case;
+        .compiler.program.multiline = .multiline;
+        .anchored = .compiler.program.anchored;
+        return true;
+    }
+
+    fn prepare_backtracker(self: &unique, subject: &const shared string): {
+        .matcher = BacktrackMatcher();
+        .matcher.load(.parser);
+        .matcher.text = subject;
+        .matcher.ignore_case = .ignore_case;
+        .matcher.multiline = .multiline;
+        .matcher.budget = BACKTRACK_BUDGET;
+    }
+
+    fn prepare_simulator(self: &unique, subject: &const shared string): {
+        .simulator = NfaSimulator();
+        .simulator.load(.builder);
+        .simulator.text = subject;
+        .simulator.ignore_case = .ignore_case;
+        .simulator.multiline = .multiline;
+    }
+
+    // The simulator is only usable when the caller does not need captures and
+    // the pattern has no backreference.
+    fn may_simulate(self: &const shared, want_captures: bool) -> bool: {
+        if .engine == EngineChoice::ForceBacktrack: {
+            return false;
+        }
+        if .engine == EngineChoice::ForceSimulation: {
+            return true;
+        }
+        if .builder.has_backreference: {
+            return false;
+        }
+        if want_captures: {
+            return false;
+        }
+        return true;
+    }
+
+    // --- Prefix acceleration ----------------------------------------------
+    //
+    // Find the next offset at or after `from` where the literal prefix occurs.
+    // With no prefix every offset qualifies, so the scan degenerates to the
+    // naive one.
+
+    fn next_candidate(self: &const shared, subject: &const shared string, from: int) -> int: {
+        if .prefix.empty(): {
+            return from;
+        }
+        var start = from;
+        let limit = subject.size() - .prefix.size();
+        while start <= limit: {
+            var i: int = 0;
+            var hit = true;
+            while i < .prefix.size(): {
+                let expected = .prefix.at(i);
+                let actual = subject.at(start + i);
+                if .ignore_case: {
+                    if !same_char_folded(expected, actual): {
+                        hit = false;
+                        break;
+                    }
+                } else: {
+                    if expected != actual: {
+                        hit = false;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            if hit: {
+                return start;
+            }
+            start += 1;
+        }
+        return NONE;
+    }
+
+    // --- match ------------------------------------------------------------
+    //
+    // Anchored at both ends: the pattern must describe the whole subject.
+
+    fn match_text(self: &unique, subject: &const shared string) -> MatchResult: {
+        var result = empty_result(subject);
+        if !.ok: {
+            return result;
+        }
+        .prepare_backtracker(subject);
+        if !.matcher.match_whole(): {
+            result.status = .matcher.status;
+            result.steps = .matcher.steps;
+            return result;
+        }
+        result.found = true;
+        result.groups = .matcher.captures;
+        result.names = .parser.names;
+        result.steps = .matcher.steps;
+        result.status = MatchStatus::Matched;
+        return result;
+    }
+
+    // --- search -----------------------------------------------------------
+    //
+    // Leftmost match anywhere in the subject.
+
+    fn search(self: &unique, subject: &const shared string) -> MatchResult: {
+        return .search_from(subject, 0);
+    }
+
+    fn search_from(self: &unique, subject: &const shared string, from: int) -> MatchResult: {
+        var result = empty_result(subject);
+        if !.ok: {
+            return result;
+        }
+        if from > subject.size(): {
+            return result;
+        }
+        .prepare_backtracker(subject);
+        var start = from;
+        loop: {
+            if start > subject.size(): {
+                break;
+            }
+            let candidate = .next_candidate(subject, start);
+            if candidate == NONE: {
+                break;
+            }
+            if .matcher.match_at(candidate): {
+                result.found = true;
+                result.groups = .matcher.captures;
+                result.names = .parser.names;
+                result.steps = .matcher.steps;
+                result.status = MatchStatus::Matched;
+                return result;
+            }
+            if .matcher.exhausted(): {
+                result.status = MatchStatus::Exhausted;
+                return result;
+            }
+            if .anchored: {
+                // An anchored pattern that failed at the first candidate can
+                // never succeed later, unless multiline mode makes every line
+                // start a candidate.
+                if !.multiline: {
+                    break;
+                }
+            }
+            start = candidate + 1;
+        }
+        result.steps = .matcher.steps;
+        return result;
+    }
+
+    // Linear time containment test: does the pattern occur at all?  Uses the
+    // simulator when it can, because that is where the asymptotic win is.
+    fn contains(self: &unique, subject: &const shared string) -> bool: {
+        if !.ok: {
+            return false;
+        }
+        if .may_simulate(false): {
+            .prepare_simulator(subject);
+            return .simulator.search_from(0);
+        }
+        let found = .search(subject);
+        return found.matched();
+    }
+
+    // --- find_all ---------------------------------------------------------
+    //
+    // Every non-overlapping match, left to right.  An empty match advances
+    // the cursor by one so the loop always terminates.
+
+    fn find_all(self: &unique, subject: &const shared string) -> vector{MatchResult}: {
+        var out = vector{MatchResult}();
+        if !.ok: {
+            return out;
+        }
+        var cursor: int = 0;
+        var guard: int = 0;
+        while cursor <= subject.size(): {
+            guard += 1;
+            if guard > subject.size() + 2: {
+                break;
+            }
+            let hit = .search_from(subject, cursor);
+            if !hit.matched(): {
+                break;
+            }
+            let stop = hit.end();
+            let begin = hit.begin();
+            out.push_back(hit);
+            if stop == begin: {
+                cursor = stop + 1;
+            } else: {
+                cursor = stop;
+            }
+        }
+        return out;
+    }
+
+    fn count_matches(self: &unique, subject: &const shared string) -> int: {
+        let all = .find_all(subject);
+        return all.size();
+    }
+
+    // --- replace ----------------------------------------------------------
+    //
+    // The replacement text may contain `$0` .. `$9`, which stand for the
+    // corresponding capture group, and `$$` for a literal dollar.
+
+    fn replace_first(self: &unique, subject: &const shared string, replacement: &const shared string) -> string: {
+        var out = TEXT_EMPTY;
+        if !.ok: {
+            return subject;
+        }
+        let hit = .search(subject);
+        if !hit.matched(): {
+            return subject;
+        }
+        out.append(subject.substr(0, hit.begin()));
+        out.append(expand_replacement(replacement, hit));
+        let tail = hit.end();
+        out.append(subject.substr(tail, subject.size() - tail));
+        return out;
+    }
+
+    fn replace_all(self: &unique, subject: &const shared string, replacement: &const shared string) -> string: {
+        var out = TEXT_EMPTY;
+        if !.ok: {
+            return subject;
+        }
+        var cursor: int = 0;
+        var guard: int = 0;
+        while cursor <= subject.size(): {
+            guard += 1;
+            if guard > subject.size() + 2: {
+                break;
+            }
+            let hit = .search_from(subject, cursor);
+            if !hit.matched(): {
+                break;
+            }
+            let begin = hit.begin();
+            let stop = hit.end();
+            out.append(subject.substr(cursor, begin - cursor));
+            out.append(expand_replacement(replacement, hit));
+            if stop == begin: {
+                if begin < subject.size(): {
+                    out.push_back(subject.at(begin));
+                }
+                cursor = begin + 1;
+            } else: {
+                cursor = stop;
+            }
+        }
+        if cursor < subject.size(): {
+            out.append(subject.substr(cursor, subject.size() - cursor));
+        }
+        return out;
+    }
+
+    // --- split ------------------------------------------------------------
+    //
+    // Cut the subject at every match.  A limit of zero means "no limit"; any
+    // other value caps the number of pieces, with the remainder of the
+    // subject forming the last one.
+
+    fn split(self: &unique, subject: &const shared string, limit: int) -> vector{string}: {
+        var out = vector{string}();
+        if !.ok: {
+            out.push_back(subject);
+            return out;
+        }
+        var cursor: int = 0;
+        var guard: int = 0;
+        while cursor <= subject.size(): {
+            guard += 1;
+            if guard > subject.size() + 2: {
+                break;
+            }
+            if limit > 0: {
+                if out.size() + 1 >= limit: {
+                    break;
+                }
+            }
+            let hit = .search_from(subject, cursor);
+            if !hit.matched(): {
+                break;
+            }
+            let begin = hit.begin();
+            let stop = hit.end();
+            if stop == begin: {
+                // A zero width separator would split between every pair of
+                // characters; step over one character instead.
+                if begin >= subject.size(): {
+                    break;
+                }
+                out.push_back(subject.substr(cursor, begin + 1 - cursor));
+                cursor = begin + 1;
+                continue;
+            }
+            out.push_back(subject.substr(cursor, begin - cursor));
+            cursor = stop;
+        }
+        out.push_back(subject.substr(cursor, subject.size() - cursor));
+        return out;
+    }
+
+    // Split and keep only the pieces that are not empty, which is what most
+    // tokenising callers actually want.
+    fn split_nonempty(self: &unique, subject: &const shared string, limit: int) -> vector{string}: {
+        let pieces = .split(subject, limit);
+        var out = vector{string}();
+        for piece: &const in pieces: {
+            if !piece.empty(): {
+                out.push_back(piece);
+            }
+        }
+        return out;
+    }
+
+    // --- Diagnostics ------------------------------------------------------
+
+    fn describe(self: &const shared) -> string: {
+        var out = TEXT_EMPTY;
+        out.append("pattern ");
+        out.append(.pattern);
+        out.append(TEXT_NEWLINE);
+        if !.ok: {
+            out.append("error: ");
+            out.append(.error);
+            out.append(" at ");
+            out.append(to_string(.error_position));
+            out.append(TEXT_NEWLINE);
+            return out;
+        }
+        out.append("groups: ");
+        out.append(to_string(.parser.group_count));
+        out.append(TEXT_NEWLINE);
+        out.append("nfa states: ");
+        out.append(to_string(.builder.state_count()));
+        out.append(TEXT_NEWLINE);
+        out.append("program: ");
+        out.append(to_string(.compiler.program.size()));
+        out.append(TEXT_NEWLINE);
+        out.append("prefix: ");
+        out.append(.prefix);
+        out.append(TEXT_NEWLINE);
+        out.append(.optimiser.stats.describe());
+        out.append(TEXT_NEWLINE);
+        return out;
+    }
+
+    pattern: string;
+    prefix: string;
+    error: string;
+    parser: PatternParser;
+    builder: NfaBuilder;
+    compiler: Compiler;
+    optimiser: Optimiser;
+    matcher: BacktrackMatcher;
+    simulator: NfaSimulator;
+    engine: EngineChoice = EngineChoice::ChooseAutomatic;
+    error_position: int = 0;
+    ok: bool = false;
+    anchored: bool = false;
+    ignore_case: bool = false;
+    multiline: bool = false;
+    dot_matches_newline: bool = false;
+}
+
+// Substitute `$n` references in a replacement template.
+fn expand_replacement(template_text: &const shared string, hit: &const shared MatchResult) -> string: {
+    var out = TEXT_EMPTY;
+    var i: int = 0;
+    while i < template_text.size(): {
+        let c = template_text.at(i);
+        if c != CHAR_DOLLAR: {
+            out.push_back(c);
+            i += 1;
+            continue;
+        }
+        let next = i + 1;
+        if next >= template_text.size(): {
+            out.push_back(c);
+            i += 1;
+            continue;
+        }
+        let marker = template_text.at(next);
+        if marker == CHAR_DOLLAR: {
+            out.push_back(CHAR_DOLLAR);
+            i += 2;
+            continue;
+        }
+        if is_digit(marker): {
+            out.append(hit.group(digit_value(marker)));
+            i += 2;
+            continue;
+        }
+        if marker == CHAR_LBRACE: {
+            // `${name}` refers to a named group.
+            var scan = next + 1;
+            var name = TEXT_EMPTY;
+            while scan < template_text.size(): {
+                let n = template_text.at(scan);
+                if n == CHAR_RBRACE: {
+                    break;
+                }
+                name.push_back(n);
+                scan += 1;
+            }
+            var index = NONE;
+            for entry: &const in hit.names: {
+                if entry.name.compare(name) == 0: {
+                    index = entry.index;
+                    break;
+                }
+            }
+            if index != NONE: {
+                out.append(hit.group(index));
+            }
+            i = scan + 1;
+            continue;
+        }
+        out.push_back(c);
+        i += 1;
+    }
+    return out;
+}
+
+// --- Convenience wrappers ------------------------------------------------
+//
+// One shot helpers for callers that do not want to keep a compiled pattern
+// around.  Each of them pays for compilation, so a loop should build a
+// `Regex` once instead.
+
+fn quick_match(pattern: &const shared string, subject: &const shared string) -> bool: {
+    var re = Regex();
+    if !re.compile(pattern): {
+        return false;
+    }
+    let hit = re.match_text(subject);
+    return hit.matched();
+}
+
+fn quick_search(pattern: &const shared string, subject: &const shared string) -> bool: {
+    var re = Regex();
+    if !re.compile(pattern): {
+        return false;
+    }
+    return re.contains(subject);
+}
+
+fn quick_replace(pattern: &const shared string, subject: &const shared string, replacement: &const shared string) -> string: {
+    var re = Regex();
+    if !re.compile(pattern): {
+        return subject;
+    }
+    return re.replace_all(subject, replacement);
+}
+
+fn quick_split(pattern: &const shared string, subject: &const shared string) -> vector{string}: {
+    var re = Regex();
+    var out = vector{string}();
+    if !re.compile(pattern): {
+        out.push_back(subject);
+        return out;
+    }
+    return re.split(subject, 0);
+}
+
+// Escape every metacharacter in `text` so the result matches it literally.
+fn quote_literal(text: &const shared string) -> string: {
+    var out = TEXT_EMPTY;
+    var i: int = 0;
+    while i < text.size(): {
+        let c = text.at(i);
+        if is_metacharacter(c): {
+            out.push_back(CHAR_BACKSLASH);
+        }
+        out.push_back(c);
+        i += 1;
+    }
+    return out;
+}
+
+// --- Worked examples -----------------------------------------------------
+//
+// These are not tests - nothing here asserts - but they pin down what the API
+// is meant to look like from the outside, and they exercise every entry point
+// at least once.
+
+fn example_tokenise_words(subject: &const shared string) -> vector{string}: {
+    var re = Regex();
+    if !re.compile("[a-zA-Z_][a-zA-Z_0-9]*"): {
+        return vector{string}();
+    }
+    var out = vector{string}();
+    let hits = re.find_all(subject);
+    for hit: &const in hits: {
+        out.push_back(hit.text());
+    }
+    return out;
+}
+
+fn example_strip_comments(subject: &const shared string) -> string: {
+    var re = Regex();
+    if !re.compile("//[^\n]*"): {
+        return subject;
+    }
+    return re.replace_all(subject, TEXT_EMPTY);
+}
+
+fn example_parse_date(subject: &const shared string) -> vector{int}: {
+    var out = vector{int}();
+    var re = Regex();
+    if !re.compile("(\\d{4})-(\\d{2})-(\\d{2})"): {
+        return out;
+    }
+    let hit = re.match_text(subject);
+    if !hit.matched(): {
+        return out;
+    }
+    out.push_back(parse_int(hit.group(1)));
+    out.push_back(parse_int(hit.group(2)));
+    out.push_back(parse_int(hit.group(3)));
+    return out;
+}
+
+fn example_named_groups(subject: &const shared string) -> string: {
+    var re = Regex();
+    if !re.compile("(?<key>\\w+)\\s*=\\s*(?<value>[^;]+);"): {
+        return TEXT_EMPTY;
+    }
+    return re.replace_all(subject, "${value} -> ${key}\n");
+}
+
+fn example_split_csv(subject: &const shared string) -> vector{string}: {
+    return quick_split(",\\s*", subject);
+}
+
+fn example_repeated_word(subject: &const shared string) -> bool: {
+    var re = Regex();
+    // A backreference, so this one has to run on the backtracking matcher.
+    if !re.compile("\\b(\\w+)\\s+\\1\\b"): {
+        return false;
+    }
+    return re.contains(subject);
+}
+
+fn example_report(pattern: &const shared string): {
+    var re = Regex();
+    if !re.compile(pattern): {
+        println(re.error_text());
+        return;
+    }
+    println(re.describe());
+    println(re.compiler.program.disassemble());
+}
+
+// A rough sanity sweep over the whole engine, written as a function so the
+// benchmark corpus contains at least one caller of everything above.
+fn self_check(): {
+    var re = Regex();
+    if !re.compile("^(a|b)+c{2,4}[[:digit:]]*$"): {
+        panic(re.error_text());
+        return;
+    }
+    assert re.group_count() == 1;
+    assert re.program_size() > 0;
+    prove re.state_count() > 0;
+
+    let hit = re.match_text("abbacc42");
+    if hit.matched(): {
+        println(hit.text());
+    }
+    let pieces = quick_split("\\s+", "one two   three");
+    for piece: &const in pieces: {
+        println(piece);
+    }
+    println(quick_replace("[aeiou]", "regular expressions", "*"));
+    if quick_match("\\d+", "12345"): {
+        println("all digits");
+    }
+    if example_repeated_word("the the end"): {
+        println("repeated word found");
+    }
+    println(quote_literal("1 + 2 * (3 - 4)"));
+}
+}
