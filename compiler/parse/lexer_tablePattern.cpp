@@ -85,7 +85,8 @@ static constexpr auto table = makeTable({
     { '>', { .bare = LexerToken::Greater, .repeat = LexerToken::GreaterGreater, .equal = LexerToken::GreaterEqual, .repeatEqual = LexerToken::GreaterGreaterEqual } },
 
     { '0', '9', { LexerToken::NumericLiteral } },
-    { '\'', { LexerToken::CharacterLiteral} },
+    { '\'', { LexerToken::CharacterLiteral } },
+    { '\"', { LexerToken::StringLiteral } },
     { '$', { LexerToken::Identifier } },
     { '#', { LexerToken::Identifier } },
 });
@@ -212,9 +213,13 @@ const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>&
             }
         } else if (tok == LexerToken::CharacterLiteral) {
             tok = LexerToken::CharacterLiteral;
-            sourcePosition += 1;
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
+            sourcePosition += 1;
+        } else if (tok == LexerToken::StringLiteral) {
+            tok = LexerToken::StringLiteral;
+            sourcePosition = skipToEndOfStringLiteral(sourcePosition);
+            VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
         } else if (tok == LINE_COMMENT_PLACEHOLDER) {
             sourcePosition = skipToEndOfLine(sourcePosition);

@@ -26,9 +26,15 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
         }
         case '\'': {
             tok = Token::CharacterLiteral;
-            sourcePosition += 1;
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
+            sourcePosition += 1;
+            break;
+        }
+        case '\"': {
+            tok = LexerToken::StringLiteral;
+            sourcePosition = skipToEndOfStringLiteral(sourcePosition);
+            VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
             break;
         }
