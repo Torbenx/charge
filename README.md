@@ -2,7 +2,7 @@
 
 Charge is an experimental memory-safe systems programming language, most similar to C++ and Rust. It is a personal research project in early development. The primary goals of the language are:
 
-* **Proven memory safety ... :** rigorous and semi-automatic proofs, enabled by formalizing reference guarantees, object invariants, the memory model and more in the project's own intermediate representation Chiral.
+* **Proven memory safety ... :** rigorous and semi-automatic proofs, enabled by formalizing reference guarantees, object invariants and more in the project's own intermediate representation Chiral.
 * **... that doesn't get in the way:** most code should not interact with the proof system directly. Writing manual proofs is the escape hatch from inherently safe borrow-checked semantics.
 * **Extensive proof system:** advanced memory techniques and hacks that are possible in C++ should be possible in Charge too, when accompanied by a proof.
 * **Compact and powerful foundation:** the language is built on few but general concepts, unifying aspects of both C++ and Rust.
@@ -10,7 +10,7 @@ Charge is an experimental memory-safe systems programming language, most similar
 ## Status
 
 It is currently not possible to compile or verify any real programs.
-The current work is focused on developing the safety-related compiler components individually and exercising them with tests. Integration between components is mostly missing and is only planned once they have reached a good level of maturity individually. Some important components, such as a compile-time interpreter and a code generation backend, are completely missing.
+The current work is focused on developing the safety-related compiler components individually and exercising them with tests. Integration between components is mostly missing and is only planned once they have reached a good level of maturity. Some important components, such as a compile-time interpreter and a code generation backend, are completely missing.
 
 Next milestones:
 
