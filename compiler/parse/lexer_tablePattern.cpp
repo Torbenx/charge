@@ -146,20 +146,23 @@ static constexpr LexerToken lookup(uint8_t character) { return table[getOffset(c
 
 namespace parse {
 
-const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>& output) {
+const char* lexTablePattern(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
 
     LexerToken tok;
 
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
 
+        const char* tokBegin = sourcePosition;
         tok = LexerToken::Invalid;
         auto head = sourcePosition[0];
         if (head == '\0') {
+            output.tokens.push_back({ LexerToken::EOS, locationInCurrentLine(sourcePosition, output) });
             return sourcePosition;
         }
         if (head == '\n') {
             sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         }
         if (head == '\r') {
@@ -167,6 +170,7 @@ const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>&
                 sourcePosition += 2;
             else
                 sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         }
         int_t advance = 0;
@@ -223,6 +227,7 @@ const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>&
             sourcePosition += 1;
         } else if (tok == LINE_COMMENT_PLACEHOLDER) {
             sourcePosition = skipToEndOfLine(sourcePosition);
+            output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
             continue;
         } else if (tok == BLOCK_COMMENT_PLACEHOLDER) {
             sourcePosition = skipToEndOfBlockComment(sourcePosition);
@@ -230,11 +235,12 @@ const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>&
                 VERIFY_NOT_REACHED();
             }
             sourcePosition += 2;
+            output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
             continue;
         } else {
             sourcePosition += advance;
         }
-        output.push_back(tok);
+        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }
 }
 

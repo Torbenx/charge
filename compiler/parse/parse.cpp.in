@@ -272,17 +272,17 @@ static Word* addCallArgument(Word* ptr, LexerToken, const NoOutput&) { return pt
 static void updateCallArgument(Word*, LexerToken, const NoOutput&) { }
 static Word* endCall(Word* ptr, const NoOutput&) { return ptr; }
 
-static SourceLocation locationInCurrentLine(const char* position, auto& output) {
-    SourceLocation base = output.tokenBuffer.lastLineStartLocation;
+static SourceLocation locationInCurrentLine(const char* position, auto& tokenBuffer) {
+    SourceLocation base = tokenBuffer.lastLineStartLocation;
     return {
         base.fileId(),
         base.lineIndex(),
-        (uint32_t)(position - output.tokenBuffer.lastLineStartPosition)
+        (uint32_t)(position - tokenBuffer.lastLineStartPosition)
     };
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t data, sema::Context& output) {
-    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), data });
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output.tokenBuffer), data });
 }
 
 static void discardLastToken(sema::Context& output) {
@@ -290,7 +290,7 @@ static void discardLastToken(sema::Context& output) {
 }
 
 NO_INLINE static void emitToken(TokenKind kind, const char* begin, uint32_t, SimpleOutput& output) {
-    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output) });
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output.tokenBuffer) });
 }
 
 static void discardLastToken(SimpleOutput& output) {
@@ -303,7 +303,7 @@ static void discardLastToken(const NoOutput&) { }
 
 NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* begin, sema::Context& output) {
     uint32_t tokenIndex = output.tokenBuffer.tokens.size();
-    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output), 0 });
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output.tokenBuffer), 0 });
 
     auto index = ArgumentBuffer::toIndex(argPos);
     VERIFY(index + 2 < (size_t)ARGUMENT_BUFFER_SIZE);
@@ -313,7 +313,7 @@ NO_INLINE static Word* emitCallToken(Word* argPos, TokenKind kind, const char* b
     return argPos;
 }
 NO_INLINE static Word* emitCallToken(Word* ptr, TokenKind kind, const char* begin, SimpleOutput& output) {
-    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output) });
+    output.tokenBuffer.tokens.push_back({ kind, locationInCurrentLine(begin, output.tokenBuffer) });
     return ptr;
 }
 static Word* emitCallToken(Word* ptr, TokenKind, const char*, const NoOutput&) { return ptr; }
@@ -503,10 +503,10 @@ static constexpr bool isStringLiteralCharacter(uint8_t c) {
 };
 
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, sema::Context& output) {
-    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
+    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output.tokenBuffer) }, (uint32_t)(end - begin) });
 }
 static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, SimpleOutput& output) {
-    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
+    output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output.tokenBuffer) }, (uint32_t)(end - begin) });
 }
 static void emitWhitespace(WhitespaceKind, const char*, const char*, const NoOutput&) { }
 
@@ -564,20 +564,20 @@ template<DeclarationKind kind>
 static sema::DeclarationValue commitDeclaration(Word name, const char* currentPosition, TokenHandle declarationBegin, sema::Context& output) {
     // dbgln("commitDeclaration {}", output.tokenBuffer.wordTable.view(name));
     if constexpr (kind == DeclarationKind::Member || kind == DeclarationKind::BaseMember) {
-        return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output));
+        return output.pushMemberScope(kind == DeclarationKind::BaseMember, name, declarationBegin, locationInCurrentLine(currentPosition, output.tokenBuffer));
     } else if constexpr (kind == DeclarationKind::EnumValue) {
-        return output.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, output));
+        return output.pushEnumValueScope(name, declarationBegin, locationInCurrentLine(currentPosition, output.tokenBuffer));
     } else if constexpr (kind == DeclarationKind::Namespace) {
         return output.pushNamespaceScope(name);
     } else {
-        return output.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, output));
+        return output.pushStaticScope(programKindForDeclaration(kind), name, declarationBegin, locationInCurrentLine(currentPosition, output.tokenBuffer));
     }
 }
 
 template<DeclarationKind kind>
 static sema::DeclarationValue commitImplDeclaration(const char* currentPosition, TokenHandle declarationBegin, sema::Context& output) {
     static_assert(kind == DeclarationKind::Struct || kind == DeclarationKind::Function || kind == DeclarationKind::Enum || kind == DeclarationKind::StaticVariable);
-    return output.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, output));
+    return output.pushStaticImplScope(programKindForDeclaration(kind), declarationBegin, locationInCurrentLine(currentPosition, output.tokenBuffer));
 }
 
 static void endDeclaration(sema::Context& output) {
@@ -764,7 +764,7 @@ void SimpleParser::advanceToToken(const NoOutput& output) {
 }
 
 SourceLocation Parser::location(sema::Context& context) const {
-    return locationInCurrentLine(sourcePosition(), context);
+    return locationInCurrentLine(sourcePosition(), context.tokenBuffer);
 }
 
 }

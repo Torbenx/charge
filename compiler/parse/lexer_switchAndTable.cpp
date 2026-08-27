@@ -43,7 +43,7 @@ struct MultiTable {
 
 namespace parse {
 
-const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken>& output) {
+const char* lexSwitchAndTable(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
     using namespace char_table;
     struct FirstCharEntry {
         LexerToken token;
@@ -131,20 +131,24 @@ const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
 
+        const char* tokBegin = sourcePosition;
         auto head = sourcePosition[0];
         LexerToken tok = LexerToken::Invalid;
 
         switch (head) {
         case '\0':
+            output.tokens.push_back({ LexerToken::EOS, locationInCurrentLine(sourcePosition, output) });
             return sourcePosition;
         case '\n':
             sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         case '\r':
             if (sourcePosition[1] == '\n')
                 sourcePosition += 2;
             else
                 sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         case '[':
         case ']':
@@ -182,9 +186,11 @@ const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken
                     VERIFY_NOT_REACHED();
                 }
                 sourcePosition += 2;
+                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (sourcePosition[1] == '/') {
                 sourcePosition = skipToEndOfLine(sourcePosition + 2);
+                output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (sourcePosition[1] == '=') {
                 tok = LexerToken::SlashEqual;
@@ -251,7 +257,7 @@ const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken
         default:
             VERIFY_NOT_REACHED();
         }
-        output.push_back(tok);
+        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }
 }
 
