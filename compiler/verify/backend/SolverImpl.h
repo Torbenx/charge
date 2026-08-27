@@ -2,6 +2,7 @@
 
 #include <verify/backend/Clauses.h>
 #include <verify/backend/DataManager.h>
+#include <verify/backend/DecisionDriver.h>
 #include <verify/backend/InvariantSets.h>
 #include <verify/backend/Members.h>
 #include <verify/backend/MemorySets.h>
@@ -60,6 +61,8 @@ struct SolverImpl : Solver, SatCore::Interface {
     // Initialize SatCore and Clauses next, some theories may perform assignments during construction
     SatCore sat;
     Clauses clauses;
+    // The driver observes the assignments of the theories, so it has to exist before they do
+    DecisionDriver decisionDriver;
     // Now we can construct the builtin true and false literals, also likely to be used in other theories
     BuiltinTrueFalse builtinTrueFalse;
 

@@ -51,9 +51,6 @@ private:
     //! The operands of a connective, negated when the connective itself is negated
     std::vector<Bool> operandsOf(Bool prop) const;
 
-    //! A variable that no clause has forced a value on yet
-    std::optional<backend::Bool> findUnassignedVariable();
-
     const Function& m_function;
     std::unique_ptr<backend::Solver> m_solver = backend::Solver::make();
     //! The variable of every proposition that is not a connective, keyed without its negation
@@ -158,39 +155,10 @@ void SatEncoder::defineConnective(Bool prop, backend::Bool variable) {
     addClause(std::move(definition));
 }
 
-std::optional<backend::Bool> SatEncoder::findUnassignedVariable() {
-    backend::Solver& solver = *m_solver;
-    int_t count = solver.booleanCount(backend::TheoryId::AuxBooleanVariables);
-    for (int_t i = 0; i < count; i++) {
-        auto lit = backend::Bool(backend::TheoryId::AuxBooleanVariables, i * 2);
-        if (!solver.assignedTrue(lit) && !solver.assignedFalse(lit))
-            return lit;
-    }
-    return std::nullopt;
-}
-
 bool SatEncoder::unsatisfiable() {
-    backend::Solver& solver = *m_solver;
-    if (solver.hasConflicts() || !solver.propagate())
-        return true;
-
-    // Every variable of the problem belongs to the aux theory, so an assignment that leaves
-    // none of them open is a model and the propositions are satisfiable
-    for (;;) {
-        auto lit = findUnassignedVariable();
-        if (!lit.has_value())
-            break;
-
-        solver.decideTrue(lit.value());
-        while (!solver.propagate()) {
-            if (!solver.analyzeConflicts())
-                return true;
-        }
-    }
-
-    // TODO: Missing generic API for:
-    // VERIFY(solver.clauses.checkAssignment(solver));
-    return false;
+    backend::GrindResult result = m_solver->grindDecisions();
+    VERIFY(result != backend::GrindResult::AssumptionsUnsatisfiable);
+    return result == backend::GrindResult::UnconditionallyUnsatisfiable;
 }
 
 bool checkSatProof(const Function& function, Bool prop, const SatProof& proof) {

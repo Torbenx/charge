@@ -57,15 +57,15 @@ struct TheoryData : private TheoryDataBase {
     }
 };
 
-template<typename T, Sort sort = Sort::COUNT>
+template<typename T, Sort sort = Sort::COUNT, int_t groupSize = 1>
 struct SortData : private SortDataBase {
     SortData(Solver& solver) requires (sort < Sort::COUNT)
         : SortData(solver, sort) { }
     SortData(Solver& solver, Sort dynamicSort)
-        : SortDataBase(solver, dynamicSort, sizeof(T), 1, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
+        : SortDataBase(solver, dynamicSort, sizeof(T), groupSize, DataInitializeFunctionFor<T>::F, DataDestroyFunctionFor<T>::F) { }
 
     T& operator[](Value v) const {
-        return *(reinterpret_cast<T*>(theoryData(v.theory())) + v.id());
+        return *(reinterpret_cast<T*>(theoryData(v.theory())) + v.id() / groupSize);
     }
 };
 

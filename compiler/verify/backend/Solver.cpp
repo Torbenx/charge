@@ -22,6 +22,7 @@ SolverImpl::SolverImpl()
     : literalInfos(*this, Sort::Boolean)
     , memberLiteralInvariants(*this)
     , clauses(*this)
+    , decisionDriver(*this)
     , builtinTrueFalse(*this)
     , uninterpConstantEquality(*this, theory_params::eqUninterpretedConstant)
     , members(*this)
@@ -109,6 +110,9 @@ bool Solver::hasConflicts() const {
 }
 bool Solver::analyzeConflicts() {
     return impl().sat.analyzeConflicts();
+}
+GrindResult Solver::grindDecisions() {
+    return impl().decisionDriver.grind(*this);
 }
 Reason Solver::firstReason(Bool lit) {
     return impl().sat.firstReason(lit);
@@ -226,6 +230,7 @@ void SatCore::Interface::propagateAssignment(Literal lit) {
 void SatCore::Interface::unapplyAssignment(Literal lit) {
     auto& impl = static_cast<SolverImpl&>(*this);
     impl.clauses.unapplyAssignment(impl, lit);
+    impl.decisionDriver.unapplyAssignment(lit);
 
     switch (lit.theory()) {
 
@@ -238,6 +243,11 @@ void SatCore::Interface::unapplyAssignment(Literal lit) {
     default:
         break;
     }
+}
+
+void SatCore::Interface::bumpActivity(Literal lit) {
+    auto& impl = static_cast<SolverImpl&>(*this);
+    impl.decisionDriver.bumpActivity(impl, lit);
 }
 
 void SatCore::Interface::learnClause(std::vector<Bool> clause) {
@@ -461,6 +471,10 @@ void Solver::addClause(std::vector<Bool> clause) {
 void Solver::addClause(const ClauseBuilder& builder) {
     auto span = viewClause(builder);
     addClause({ span.begin(), span.end() });
+}
+
+bool Solver::checkAssignment() {
+    return impl().clauses.checkAssignment(*this);
 }
 
 // -------------------------- Data forwards -------------------------

@@ -91,27 +91,6 @@ struct CnfParser {
     }
 };
 
-struct VarSearch {
-    std::optional<Bool> findUnassignedLiteral(Solver& solver) {
-        for (int_t i = find; i < solver.booleanCount(TheoryId::AuxBooleanVariables); i++) {
-            auto lit = Bool(TheoryId::AuxBooleanVariables, i * 2);
-            if (solver.assignedTrue(lit) || solver.assignedFalse(lit))
-                continue;
-            find = i;
-            return !lit;
-        }
-        for (int_t i = 0; i < find; i++) {
-            auto lit = Bool(TheoryId::AuxBooleanVariables, i * 2);
-            if (solver.assignedTrue(lit) || solver.assignedFalse(lit))
-                continue;
-            find = i;
-            return !lit;
-        }
-        return std::nullopt;
-    }
-    int_t find = 0;
-};
-
 static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     // setup
     SolverImpl solver;
@@ -121,34 +100,23 @@ static std::optional<std::vector<bool>> check(const CnfParser& parser) {
     for (int_t varId = 1; varId <= parser.variableCount; varId++)
         VERIFY(solver.newAuxBooleanVariable().id() == varId * 2);
     for (const auto& clause : parser.cnf) {
-        std::vector<Bool> outClause;
+        // The clauses of a problem may spell a literal more than once, which the solver does not
+        // expect: it identifies the literals of a clause by their position in it. The builder
+        // drops the repetitions.
+        ClauseBuilder builder = solver.beginClause();
         for (int_t i = 0; i < (int_t)clause.size(); i++) {
             auto lit = Bool(TheoryId::AuxBooleanVariables, std::abs(clause[i]) * 2);
-            outClause.push_back(clause[i] > 0 ? lit : !lit);
+            builder.add(solver, clause[i] > 0 ? lit : !lit);
         }
-        solver.clauses.addClause(solver, std::move(outClause));
+        solver.addClause(builder);
     }
 
-    if (solver.hasConflicts() || !solver.propagate())
-        return std::nullopt; // unsat
-
-    // solver
-    VarSearch search;
-    for (;;) {
-        auto lit = search.findUnassignedLiteral(solver);
-        if (!lit.has_value())
-            break;
-
-        solver.decideTrue(lit.value());
-        VERIFY(!solver.hasConflicts());
-        while (!solver.propagate()) {
-            if (!solver.analyzeConflicts())
-                return std::nullopt; // unsat
-        }
-    }
+    GrindResult result = solver.grindDecisions();
+    VERIFY(result != GrindResult::AssumptionsUnsatisfiable); // the search began without assumptions
+    if (result == GrindResult::UnconditionallyUnsatisfiable)
+        return std::nullopt;
 
     // sat
-    VERIFY(solver.clauses.checkAssignment(solver));
     std::vector<bool> assignment;
     for (int_t varId = 1; varId <= parser.variableCount; varId++) {
         auto lit = Bool(TheoryId::AuxBooleanVariables, varId * 2);
@@ -171,12 +139,24 @@ static void writeFile(std::filesystem::path file, std::string content) {
     VERIFY(stream.good());
 }
 
+static std::string nameList(const std::vector<std::string>& files) {
+    std::string result;
+    for (const auto& file : files) {
+        if (!result.empty())
+            result += ", ";
+        result += file;
+    }
+    return result;
+}
+
 TEST(VerifyBackend, SatProblems) {
     std::filesystem::path testDir = COMPILER_TEST_DIR "/sat";
     bool overwriteSolutionFiles = false;
 
     namespace fs = std::filesystem;
     int_t count = 0;
+    std::vector<std::string> wrongResults;
+    std::vector<std::string> changedModels;
     for (const auto& entry : fs::directory_iterator(testDir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".cnf")
             continue;
@@ -198,11 +178,20 @@ TEST(VerifyBackend, SatProblems) {
             writeFile(solutionPath, resultString);
 
         auto expectedResultString = server::readFile(solutionPath);
-        EXPECT_TRUE(resultString == expectedResultString);
+        if (resultString != expectedResultString) {
+            if (resultString.empty() != expectedResultString.empty())
+                wrongResults.push_back(entry.path().filename().string());
+            else
+                changedModels.push_back(entry.path().filename().string());
+        }
 
         count += 1;
     }
-    EXPECT_EQ(count, 80);
+    EXPECT_EQ(count, 83);
+    EXPECT_TRUE(wrongResults.empty())
+        << "wrong results: " << nameList(wrongResults);
+    EXPECT_TRUE(changedModels.empty())
+        << "changed models: " << nameList(changedModels);
 }
 
 }

@@ -39,6 +39,9 @@ struct SatCore {
         void propagateAssignment(Literal);
         void unapplyAssignment(Literal);
 
+        //! Reports that \p literal participated in conflict analysis
+        void bumpActivity(Literal);
+
         void learnClause(std::vector<Bool>);
     };
 

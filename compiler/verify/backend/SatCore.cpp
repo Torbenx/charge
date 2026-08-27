@@ -181,6 +181,7 @@ std::pair<std::vector<std::vector<Bool>>, bool> SatCore::tryLearn(Conflict confl
         for (Literal falseLit : conflictClause) {
             Literal trueLit = !falseLit;
             auto& info = infoFor(trueLit);
+            interface().bumpActivity(trueLit);
 
             VERIFY(wasTrue(trueLit));
 
@@ -244,6 +245,7 @@ std::pair<std::vector<std::vector<Bool>>, bool> SatCore::tryLearn(Conflict confl
         for (int_t index = 0; index < (int_t)clause.size(); index++) {
             Literal lit = clause[index];
             auto& info = infoFor(!lit);
+            interface().bumpActivity(lit);
 
             // if (index != forceLiteralIndex)
             //     VERIFY(wasFalse(lit));

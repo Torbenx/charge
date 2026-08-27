@@ -8,6 +8,9 @@ target_sources(${PROJECT_NAME}
     Data.h
     DataManager.cpp
     DataManager.h
+    DecisionDriver.cpp
+    DecisionDriver.h
+    DecisionTests.cpp
     EqualityTests.cpp
     InvariantPrefixTests.cpp
     InvariantSets.cpp

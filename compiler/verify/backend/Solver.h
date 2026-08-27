@@ -10,6 +10,16 @@ namespace verify::backend {
 struct DataManager;
 struct Sets;
 
+//! The state the search of grindDecisions() ended in
+enum class GrindResult {
+    //! Every variable is assigned, the assumptions and clauses are satisfiable
+    Model,
+    //! The decisions that were made before the grind call cannot be satisfied
+    AssumptionsUnsatisfiable,
+    //! A conflict was detected at top-level
+    UnconditionallyUnsatisfiable,
+};
+
 struct Solver {
     static std::unique_ptr<Solver> make();
 
@@ -40,6 +50,16 @@ struct Solver {
     bool propagate();
     bool hasConflicts() const;
     bool analyzeConflicts();
+
+    //! Decide the open variables until a model is found or the problem is refuted
+    GrindResult grindDecisions();
+
+    //! Check that the current assignment satisfies all clauses
+    /*!
+    If this returns false there is an implementation error.
+    The state of the solver must be assumed to be unrecoverable in that case.
+    */
+    bool checkAssignment();
 
     Reason firstReason(Bool lit);
     ClauseAndIndex justifyAssignment(Bool lit);
