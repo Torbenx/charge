@@ -152,11 +152,12 @@ constexpr Result lookup(char c0, char c1) {
 
 namespace parse {
 
-const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& output) {
+const char* lexTable2Char(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
 
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
 
+        const char* tokBegin = sourcePosition;
         LexerToken tok = LexerToken::Invalid;
 
         char c0 = sourcePosition[0];
@@ -193,18 +194,22 @@ const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& o
         case std::to_underlying(Result::Invalid): {
             char c0 = sourcePosition[0];
             if (c0 == '\0') {
+                output.tokens.push_back({ LexerToken::EOS, locationInCurrentLine(sourcePosition, output) });
                 return sourcePosition;
             }
             VERIFY_NOT_REACHED();
         }
         case std::to_underlying(Result::NewlineLF):
             sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         case std::to_underlying(Result::NewlineCRLF):
             sourcePosition += 2;
+            output.addLine(sourcePosition);
             continue;
         case std::to_underlying(Result::LineComment):
             sourcePosition = skipToEndOfLine(sourcePosition);
+            output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
             continue;
         case std::to_underlying(Result::BlockComment):
             sourcePosition = skipToEndOfBlockComment(sourcePosition);
@@ -212,6 +217,7 @@ const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& o
                 VERIFY_NOT_REACHED();
             }
             sourcePosition += 2;
+            output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
             continue;
         case std::to_underlying(Result::PunctuationPossiblyDoubleArrow):
             if (sourcePosition[2] == '>') {
@@ -260,7 +266,7 @@ const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& o
         default:
             VERIFY_NOT_REACHED();
         }
-        output.push_back(tok);
+        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }
 }
 

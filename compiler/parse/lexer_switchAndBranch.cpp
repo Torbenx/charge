@@ -1,6 +1,6 @@
 namespace parse {
 
-const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToken>& output) {
+const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
     using Token = LexerToken;
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
@@ -11,10 +11,11 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
         char c0 = sourcePosition[0];
         switch (c0) {
         case '\0':
-            tok = Token::EOS;
+            output.tokens.push_back({ Token::EOS, locationInCurrentLine(sourcePosition, output) });
             return sourcePosition;
         case '\n': {
             sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         }
         case '\r': {
@@ -22,6 +23,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
                 sourcePosition += 2;
             else
                 sourcePosition += 1;
+            output.addLine(sourcePosition);
             continue;
         }
         case '\'': {
@@ -42,6 +44,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
             char c1 = sourcePosition[1];
             if (c1 == '/') {
                 sourcePosition = skipToEndOfLine(sourcePosition);
+                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (c1 == '*') {
                 sourcePosition = skipToEndOfBlockComment(sourcePosition);
@@ -49,6 +52,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
                     VERIFY_NOT_REACHED();
                 }
                 sourcePosition += 2;
+                output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (c1 == '=') {
                 tok = Token::SlashEqual;
@@ -195,7 +199,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToke
             dbgln("{:.12}", sourcePosition);
             VERIFY_NOT_REACHED();
         }
-        output.push_back(tok);
+        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }
 }
 

@@ -61,16 +61,18 @@ struct ArgumentBuffer {
     }
 };
 
+template<typename TokenEnum>
 struct SimpleTokenInfo {
-    TaggedSourceLocation<TokenKind> m_fields;
-    SimpleTokenInfo(TokenKind kind, SourceLocation location)
+    TaggedSourceLocation<TokenEnum> m_fields;
+    SimpleTokenInfo(TokenEnum kind, SourceLocation location)
         : m_fields(kind, location) { }
-    TokenKind kind() const { return m_fields.tag(); }
-    void setKind(TokenKind kind) { m_fields.setTag(kind); }
+    TokenEnum kind() const { return m_fields.tag(); }
+    void setKind(TokenEnum kind) { m_fields.setTag(kind); }
 };
 
+template<typename TokenEnum>
 struct SimpleTokenBuffer {
-    PageBumpAllocator<SimpleTokenInfo> tokens;
+    PageBumpAllocator<SimpleTokenInfo<TokenEnum>> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
     padded_string_view source;
@@ -97,7 +99,7 @@ struct SimpleTokenBuffer {
 };
 
 struct SimpleOutput {
-    SimpleTokenBuffer tokenBuffer;
+    SimpleTokenBuffer<TokenKind> tokenBuffer;
 
     SimpleOutput(padded_string_view source)
         : tokenBuffer(source) { }

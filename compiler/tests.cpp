@@ -815,12 +815,13 @@ TEST(Charge, BenchmarkNoOutput) {
     }
 }
 
+using LexerOutput = parse::SimpleTokenBuffer<parse::LexerToken>;
 namespace parse {
-    const char* lexSwitchAndBranch(const char* sourcePosition, std::vector<LexerToken>& output);
-    const char* lexTable2Char(const char* sourcePosition, std::vector<LexerToken>& output);
-    const char* lexTablePattern(const char* sourcePosition, std::vector<LexerToken>& output);
-    const char* lexTableHybrid(const char* sourcePosition, std::vector<LexerToken>& output);
-    const char* lexSwitchAndTable(const char* sourcePosition, std::vector<LexerToken>& output);
+    const char* lexSwitchAndBranch(const char* sourcePosition, LexerOutput& output);
+    const char* lexTable2Char(const char* sourcePosition, LexerOutput& output);
+    const char* lexTablePattern(const char* sourcePosition, LexerOutput& output);
+    const char* lexTableHybrid(const char* sourcePosition, LexerOutput& output);
+    const char* lexSwitchAndTable(const char* sourcePosition, LexerOutput& output);
 }
 
 TEST(Charge, BenchmarkLexerSwitchAndBranch) {
@@ -831,8 +832,7 @@ TEST(Charge, BenchmarkLexerSwitchAndBranch) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
-        std::vector<parse::LexerToken> output;
-        output.reserve(4000);
+        LexerOutput output(sourceBuffer);
         auto start = Clock::now();
         const char* finalPos = nullptr;
         {
@@ -841,7 +841,7 @@ TEST(Charge, BenchmarkLexerSwitchAndBranch) {
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
         ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
@@ -854,8 +854,7 @@ TEST(Charge, BenchmarkLexerTablePattern) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
-        std::vector<parse::LexerToken> output;
-        output.reserve(4000);
+        LexerOutput output(sourceBuffer);
         auto start = Clock::now();
         const char* finalPos = nullptr;
         {
@@ -864,7 +863,7 @@ TEST(Charge, BenchmarkLexerTablePattern) {
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
         ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
@@ -877,8 +876,7 @@ TEST(Charge, BenchmarkLexerTable2Char) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
-        std::vector<parse::LexerToken> output;
-        output.reserve(4000);
+        LexerOutput output(sourceBuffer);
         auto start = Clock::now();
         const char* finalPos = nullptr;
         {
@@ -887,7 +885,7 @@ TEST(Charge, BenchmarkLexerTable2Char) {
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
         ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
@@ -900,8 +898,7 @@ TEST(Charge, BenchmarkLexerTableHybrid) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
-        std::vector<parse::LexerToken> output;
-        output.reserve(4000);
+        LexerOutput output(sourceBuffer);
         auto start = Clock::now();
         const char* finalPos = nullptr;
         {
@@ -910,7 +907,7 @@ TEST(Charge, BenchmarkLexerTableHybrid) {
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
         ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
@@ -923,8 +920,7 @@ TEST(Charge, BenchmarkLexerSwitchAndTable) {
     auto sourceBuffer = server::readFile(file);
 
     for (int i = 0; i < BENCHMARK_REPEATS; i++) {
-        std::vector<parse::LexerToken> output;
-        output.reserve(4000);
+        LexerOutput output(sourceBuffer);
         auto start = Clock::now();
         const char* finalPos = nullptr;
         {
@@ -933,7 +929,7 @@ TEST(Charge, BenchmarkLexerSwitchAndTable) {
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-        std::cout << " and produced " << output.size() << " tokens.\n";
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
         ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
     }
 }
