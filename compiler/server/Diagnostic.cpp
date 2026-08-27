@@ -38,17 +38,9 @@ Diagnostic::Result Diagnostic::doRequest(Server& server, const Params& params) {
     auto& context = server.acquireContext(params.textDocument.path());
     std::vector<lsp::Diagnostic> result;
     for (const auto& error : context.parseErrors()) {
-        const char* startPos = error.preRecoveryState.sourcePosition;
-        if (error.recovery.insertTokens.empty())
-            startPos = parse::advanceToToken(startPos);
-        SourceLocation startLoc = context.tokenBuffer.findSourceLocation(startPos);
-
-        const char* endPos = error.preRecoveryState.sourcePosition;
-        for (int_t i = 0; i < (int_t)error.recovery.skipTokens; i++)
-            parse::lexToken(endPos);
-        if (!error.recovery.insertTokens.empty())
-            endPos = parse::advanceToToken(endPos);
-        SourceLocation endLoc = context.tokenBuffer.findSourceLocation(endPos);
+        auto range = error.errorRange();
+        SourceLocation startLoc = context.tokenBuffer.findSourceLocation(range.begin());
+        SourceLocation endLoc = context.tokenBuffer.findSourceLocation(range.end());
 
         auto sug = suggestion(error);
         result.push_back(lsp::Diagnostic {

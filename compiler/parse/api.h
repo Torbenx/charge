@@ -50,6 +50,8 @@ struct RecoveredError : Error {
         RecoveryInstructions recovery,
         bool unanimousAndIsolated = false);
 
+    std::string_view errorRange() const;
+
     SavedParserState preRecoveryState;
     RecoveryInstructions recovery;
     bool unanimousAndIsolated;

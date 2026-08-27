@@ -30,7 +30,7 @@ export function activate(context: ExtensionContext) {
 
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
-	const run: Executable = { command: serverModule, args: ["--server"] };
+	const run: Executable = { command: serverModule, args: ["server"] };
 	const serverOptions: ServerOptions = { run: run, debug: run };
 
 	// Options to control the language client

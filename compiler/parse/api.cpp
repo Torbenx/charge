@@ -69,6 +69,20 @@ RecoveredError::RecoveredError(SavedParserState preRecoveryState, RecoveryInstru
     , unanimousAndIsolated(unanimousAndIsolated) {
 }
 
+std::string_view RecoveredError::errorRange() const {
+    const char* startPos = preRecoveryState.sourcePosition;
+    if (recovery.insertTokens.empty())
+        startPos = parse::advanceToToken(startPos);
+
+    const char* endPos = preRecoveryState.sourcePosition;
+    for (int_t i = 0; i < (int_t)recovery.skipTokens; i++)
+        parse::lexToken(endPos);
+    if (!recovery.insertTokens.empty())
+        endPos = parse::advanceToToken(endPos);
+
+    return { startPos, endPos };
+}
+
 std::optional<Error> tryParse(sema::Context& context) {
     VERIFY(context.tokenBuffer.tokens.empty());
     Parser parser(context.tokenBuffer.source.data());

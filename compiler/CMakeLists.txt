@@ -20,6 +20,7 @@ add_executable(${PROJECT_NAME}
     FlatTreeSet.h
     log.cpp
     log.h
+    main.cpp
     PageBumpAllocator.h
     ReverseMemberPointer.h
     tests.cpp
@@ -51,5 +52,12 @@ else()
         target_link_libraries(${PROJECT_NAME} PRIVATE stdc++exp)
     endif()
 endif()
-target_link_libraries(${PROJECT_NAME} PRIVATE gtest)
+target_link_libraries(${PROJECT_NAME} PRIVATE gtest CLI11::CLI11)
 target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_TEST_DIR="${CMAKE_SOURCE_DIR}/tests")
+
+set(CHARGE_BINARY "$<TARGET_FILE:${PROJECT_NAME}>")
+set(CHIRAL_BINARY "$<TARGET_FILE_DIR:${PROJECT_NAME}>/chiral$<TARGET_FILE_SUFFIX:${PROJECT_NAME}>")
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" ARGS "-E" "create_symlink" "${CHARGE_BINARY}" "${CHIRAL_BINARY}"
+)

@@ -5,7 +5,6 @@
 #include <parse/api.h>
 #include <sema/Generator.h>
 
-#include <server/MessageLog.h>
 #include <server/Server.h>
 
 #include <gtest/gtest.h>
@@ -17,61 +16,6 @@
 #include <list>
 #include <ranges>
 #include <vector>
-
-#ifdef WIN32
-#include <fcntl.h>
-#include <io.h>
-#endif
-
-int main(int argc, char** argv) {
-    if (argc >= 2 && std::string_view(argv[1]) == std::string_view("--server")) {
-        // charge --server [--realtime] [replay_file]
-        bool realtime = false;
-        std::optional<std::string_view> replayFile;
-        for (int i = 2; i < argc; i++) {
-            std::string_view arg = argv[i];
-            if (arg == "--realtime") {
-                realtime = true;
-            } else if (replayFile.has_value()) {
-                dbgln("Only a single replay file is supported");
-                return 1;
-            } else {
-                replayFile = arg;
-            }
-        }
-
-        if (replayFile.has_value()) {
-            server::replayLog(replayFile.value(), realtime);
-            return 0;
-        }
-        if (realtime)
-            dbgln("--realtime only has an effect when a replay file is given");
-
-#ifdef WIN32
-        _setmode(_fileno(stdin), _O_BINARY);
-        _setmode(_fileno(stdout), _O_BINARY);
-#endif
-
-        server::Server s;
-        s.m_messageLog = server::MessageLog::createFromEnvironment();
-        while (!s.shouldExit()) {
-            auto val = std::cin.get();
-            if (std::cin.fail()) {
-                dbgln("Reading stdin failed");
-                break;
-            }
-            s.receiverChacacter(val);
-            if (!s.outputBuffer.empty()) {
-                std::cout.write(s.outputBuffer.data(), s.outputBuffer.size());
-                s.outputBuffer.clear();
-            }
-        }
-        return 0;
-    }
-
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
 
 static bool isBulkCommandChar(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')

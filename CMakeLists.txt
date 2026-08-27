@@ -24,4 +24,12 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+FetchContent_Declare(
+    cli11_proj
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG        cbd58a3696887b34c70949aef21a71735a0c2ad5 # v2.7.2
+)
+set(CLI11_PRECOMPILED ON CACHE BOOL "" FORCE) # Build static library instead of header only
+FetchContent_MakeAvailable(cli11_proj)
+
 add_subdirectory(compiler)
