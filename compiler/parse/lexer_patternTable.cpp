@@ -1,9 +1,12 @@
-namespace parse {
-inline constexpr LexerToken LINE_COMMENT_PLACEHOLDER = (LexerToken)62;
-inline constexpr LexerToken BLOCK_COMMENT_PLACEHOLDER = (LexerToken)63;
-}
 
-namespace parse::lookup_table1 {
+namespace parse::lookup_table0 {
+
+inline constexpr LexerToken LINE_COMMENT_PLACEHOLDER = (LexerToken)58;
+inline constexpr LexerToken BLOCK_COMMENT_PLACEHOLDER = (LexerToken)59;
+inline constexpr LexerToken LF_PLACEHOLDER = (LexerToken)60;
+inline constexpr LexerToken CR_PLACEHOLDER = (LexerToken)61;
+inline constexpr LexerToken EOS_PLACEHOLDER = (LexerToken)62;
+inline constexpr LexerToken INVALID_PLACEHOLDER = (LexerToken)63;
 
 struct Input {
     LexerToken bare;
@@ -26,7 +29,8 @@ struct InputRange : Input {
 struct Output {
     uint8_t token : 6 = 0;
     uint8_t advance : 2 = 0;
-    constexpr Output() = default;
+    constexpr Output()
+        : Output(INVALID_PLACEHOLDER, 0) { }
     constexpr Output(LexerToken token, int_t advance)
         : token(std::to_underlying(token)), advance(advance) {
         VERIFY(std::to_underlying(token) < 64);
@@ -35,12 +39,11 @@ struct Output {
 };
 
 static constexpr int_t getOffset(uint8_t character, bool repeat, bool equal, bool arrow) {
-    VERIFY(character >= 0x20 && character < 0x40);
-    return (character - 0x20) | (repeat << 5) | (equal << 6) | (arrow << 7);
+    return (size_t)character | ((size_t)repeat << 7) | ((size_t)equal << 8) | ((size_t)arrow << 9);
 }
 
 static constexpr auto makeTable(std::initializer_list<InputRange> inputs) {
-    std::array<Output, 0x20 * 8> output = {};
+    std::array<Output, 0x80 * 8> output = {};
     for (auto input : inputs) {
         for (uint8_t c = input.first; c <= input.last; c++) {
             int_t bareAdvance = 1;
@@ -63,14 +66,20 @@ static constexpr auto makeTable(std::initializer_list<InputRange> inputs) {
 static constexpr auto table = makeTable({
     { '(', { LexerToken::LeftParen } },
     { ')', { LexerToken::RightParen } },
+    { '[', { LexerToken::LeftSquare } },
+    { ']', { LexerToken::RightSquare } },
+    { '{', { LexerToken::LeftBrace } },
+    { '}', { LexerToken::RightBrace } },
     { ',', { LexerToken::Comma } },
     { '.', { LexerToken::Point } },
     { ';', { LexerToken::SemiColon } },
+    { '~', { LexerToken::Tilde } },
     { ':', { .bare = LexerToken::Colon, .repeat = LexerToken::ColonColon } },
 
     { '!', { .bare = LexerToken::Exclaim, .equal = LexerToken::ExclaimEqual } },
     { '%', { .bare = LexerToken::Percent, .equal = LexerToken::PercentEqual } },
     { '*', { .bare = LexerToken::Star, .equal = LexerToken::StarEqual } },
+    { '^', { .bare = LexerToken::Hat, .equal = LexerToken::HatEqual } },
 
     { '/', { .bare = LexerToken::Slash, .repeat = LINE_COMMENT_PLACEHOLDER, .equal = LexerToken::SlashEqual, .arrow = BLOCK_COMMENT_PLACEHOLDER } },
 
@@ -80,6 +89,7 @@ static constexpr auto table = makeTable({
     { '-', { .bare = LexerToken::Minus, .repeat = LexerToken::MinusMinus, .equal = LexerToken::MinusEqual, .arrow = LexerToken::MinusGreater } },
 
     { '&', { .bare = LexerToken::Amp, .repeat = LexerToken::AmpAmp, .equal = LexerToken::AmpEqual, .repeatEqual = LexerToken::AmpAmpEqual } },
+    { '|', { .bare = LexerToken::Vert, .repeat = LexerToken::VertVert, .equal = LexerToken::VertEqual, .repeatEqual = LexerToken::VertVertEqual } },
 
     { '<', { .bare = LexerToken::Less, .repeat = LexerToken::LessLess, .equal = LexerToken::LessEqual, .repeatEqual = LexerToken::LessLessEqual, .equalArrow = LexerToken::LessEqualGreater } },
     { '>', { .bare = LexerToken::Greater, .repeat = LexerToken::GreaterGreater, .equal = LexerToken::GreaterEqual, .repeatEqual = LexerToken::GreaterGreaterEqual } },
@@ -89,6 +99,13 @@ static constexpr auto table = makeTable({
     { '\"', { LexerToken::StringLiteral } },
     { '$', { LexerToken::Identifier } },
     { '#', { LexerToken::Identifier } },
+    { '_', { LexerToken::Identifier } },
+    { 'a', 'z', { LexerToken::Identifier } },
+    { 'A', 'Z', { LexerToken::Identifier } },
+
+    { '\0', { EOS_PLACEHOLDER } },
+    { '\r', { CR_PLACEHOLDER } },
+    { '\n', { LF_PLACEHOLDER } },
 });
 
 static constexpr std::pair<LexerToken, int_t> lookup(uint8_t character, bool repeat, bool equal, bool arrow) {
@@ -98,116 +115,56 @@ static constexpr std::pair<LexerToken, int_t> lookup(uint8_t character, bool rep
 
 }
 
-namespace parse::lookup_table2 {
-
-struct Input {
-    uint8_t first;
-    uint8_t last;
-    LexerToken token;
-    constexpr Input(uint8_t character, LexerToken token)
-        : first(character), last(character), token(token) { }
-    constexpr Input(uint8_t first, uint8_t last, LexerToken token)
-        : first(first), last(last), token(token) { }
-};
-
-struct Output {
-    LexerToken token : 8 = LexerToken::Invalid;
-};
-
-static constexpr int_t getOffset(uint8_t character) {
-    VERIFY(character >= 0x40 && character < 0x80);
-    return character - 0x40;
-}
-
-static constexpr auto makeTable(std::initializer_list<Input> inputs) {
-    std::array<Output, 0x40> output = {};
-    for (auto input : inputs) {
-        for (uint8_t c = input.first; c <= input.last; c++) {
-            output[getOffset(c)] = Output { input.token };
-        }
-    }
-    return output;
-}
-
-static constexpr auto table = makeTable({
-    { 'a', 'z', LexerToken::Identifier },
-    { 'A', 'Z', LexerToken::Identifier },
-    { '_', LexerToken::Identifier },
-    { '[', LexerToken::LeftSquare },
-    { ']', LexerToken::RightSquare },
-    { '{', LexerToken::LeftBrace },
-    { '}', LexerToken::RightBrace },
-    { '~', LexerToken::Tilde },
-});
-
-static constexpr LexerToken lookup(uint8_t character) { return table[getOffset(character)].token; }
-
-}
-
 namespace parse {
 
-const char* lexTablePattern(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
-
-    LexerToken tok;
+const char* lexPatternTable(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
+    using namespace lookup_table0;
 
     for (;;) {
         sourcePosition = skipWhitespace(sourcePosition);
 
         const char* tokBegin = sourcePosition;
-        tok = LexerToken::Invalid;
         auto head = sourcePosition[0];
-        if (head == '\0') {
+
+        bool repeat = sourcePosition[1] == head;
+        bool equal = sourcePosition[1 + (repeat ? 1 : 0)] == '=';
+        bool arrow = sourcePosition[1 + (repeat ? 1 : 0) + (equal ? 1 : 0)] == (head == '/' ? '*' : '>');
+        auto [tok, advance] = lookup_table0::lookup(head, repeat, equal, arrow);
+
+        switch (tok) {
+        default:
+            sourcePosition += advance;
+            break;
+        case INVALID_PLACEHOLDER:
+            dbgln("invalid head = '{}' on line {}", head, output.lines.size());
+            VERIFY_NOT_REACHED();
+        case EOS_PLACEHOLDER:
             output.tokens.push_back({ LexerToken::EOS, locationInCurrentLine(sourcePosition, output) });
             return sourcePosition;
-        }
-        if (head == '\n') {
+        case LF_PLACEHOLDER:
             sourcePosition += 1;
             output.addLine(sourcePosition);
             continue;
-        }
-        if (head == '\r') {
+        case CR_PLACEHOLDER:
             if (sourcePosition[1] == '\n')
                 sourcePosition += 2;
             else
                 sourcePosition += 1;
             output.addLine(sourcePosition);
             continue;
-        }
-        int_t advance = 0;
-        if (head <= 0x20 || head >= 0x7f) [[unlikely]] {
-            VERIFY_NOT_REACHED();
-        } else if (head < 0x40) {
-            bool repeat = sourcePosition[1] == head;
-            bool equal = sourcePosition[1 + (repeat ? 1 : 0)] == '=';
-            bool arrow = sourcePosition[1 + (repeat ? 1 : 0) + (equal ? 1 : 0)] == (head == '/' ? '*' : '>');
-            std::tie(tok, advance) = lookup_table1::lookup(head, repeat, equal, arrow);
-            VERIFY(tok != LexerToken::Invalid);
-        } else if (head == '|') {
-            bool repeat = sourcePosition[1] == '|';
-            bool equal = sourcePosition[1 + (repeat ? 1 : 0)] == '=';
-            std::tie(tok, advance) = repeat
-                ? (equal ? std::make_tuple(LexerToken::VertVertEqual, 3) : std::make_tuple(LexerToken::VertVert, 2))
-                : (equal ? std::make_tuple(LexerToken::VertEqual, 2) : std::make_tuple(LexerToken::Vert, 1));
-        } else if (head == '^') {
-            std::tie(tok, advance) = sourcePosition[1] == '='
-                ? std::make_tuple(LexerToken::HatEqual, 2)
-                : std::make_tuple(LexerToken::Hat, 1);
-        } else {
-            tok = lookup_table2::lookup(head);
-            advance = 1;
-            VERIFY(tok != LexerToken::Invalid);
-        }
-
-        if (tok == LexerToken::Identifier) {
-            const char* tokBegin = sourcePosition;
-            do {
-                sourcePosition += 1;
-            } while (isWordBulkCharacter(sourcePosition[0]));
-            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
-            tok = entry == nullptr ? LexerToken::Identifier : entry->token;
-        } else if (tok == LexerToken::NumericLiteral) {
-            // TODO: implement parsing num literals
-            tok = LexerToken::NumericLiteral;
+        case LINE_COMMENT_PLACEHOLDER:
+            sourcePosition = skipToEndOfLine(sourcePosition + 2);
+            output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
+            continue;
+        case BLOCK_COMMENT_PLACEHOLDER:
+            sourcePosition = skipToEndOfBlockComment(sourcePosition + 2);
+            if (sourcePosition[0] == '\0') [[unlikely]] {
+                VERIFY_NOT_REACHED();
+            }
+            sourcePosition += 2;
+            output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
+            continue;
+        case LexerToken::NumericLiteral:
             for (;;) {
                 char c = sourcePosition[0];
                 if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.')
@@ -215,30 +172,26 @@ const char* lexTablePattern(const char* sourcePosition, SimpleTokenBuffer<LexerT
                 else
                     break;
             }
-        } else if (tok == LexerToken::CharacterLiteral) {
-            tok = LexerToken::CharacterLiteral;
+            break;
+        case LexerToken::CharacterLiteral:
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
             sourcePosition += 1;
-        } else if (tok == LexerToken::StringLiteral) {
-            tok = LexerToken::StringLiteral;
+            break;
+        case LexerToken::StringLiteral:
             sourcePosition = skipToEndOfStringLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
-        } else if (tok == LINE_COMMENT_PLACEHOLDER) {
-            sourcePosition = skipToEndOfLine(sourcePosition);
-            output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
-            continue;
-        } else if (tok == BLOCK_COMMENT_PLACEHOLDER) {
-            sourcePosition = skipToEndOfBlockComment(sourcePosition);
-            if (sourcePosition[0] == '\0') [[unlikely]] {
-                VERIFY_NOT_REACHED();
-            }
-            sourcePosition += 2;
-            output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
-            continue;
-        } else {
-            sourcePosition += advance;
+            break;
+        case LexerToken::Identifier: {
+            const char* tokBegin = sourcePosition;
+            do {
+                sourcePosition += 1;
+            } while (isWordBulkCharacter(sourcePosition[0]));
+            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
+            tok = entry == nullptr ? LexerToken::Identifier : entry->token;
+            break;
+        }
         }
         output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }

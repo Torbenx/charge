@@ -745,7 +745,7 @@ TEST(Charge, TokenSpelling) {
 using Clock = std::chrono::high_resolution_clock;
 
 static constexpr int BENCHMARK_REPEATS = 1;
-static constexpr auto BENCHMARK_FILE = COMPILER_TEST_DIR "/../benchmark/benchmark.chrg";
+static constexpr auto BENCHMARK_FILE = COMPILER_TEST_DIR "/../benchmark/utf8_codec.chrg";
 
 TEST(Charge, BenchmarkSema) {
     namespace fs = std::filesystem;
@@ -819,7 +819,8 @@ using LexerOutput = parse::SimpleTokenBuffer<parse::LexerToken>;
 namespace parse {
     const char* lexSwitchAndBranch(const char* sourcePosition, LexerOutput& output);
     const char* lexTable2Char(const char* sourcePosition, LexerOutput& output);
-    const char* lexTablePattern(const char* sourcePosition, LexerOutput& output);
+    const char* lexSwitchAndPatternTable(const char* sourcePosition, LexerOutput& output);
+    const char* lexPatternTable(const char* sourcePosition, LexerOutput& output);
     const char* lexTableHybrid(const char* sourcePosition, LexerOutput& output);
     const char* lexSwitchAndTable(const char* sourcePosition, LexerOutput& output);
 }
@@ -846,7 +847,7 @@ TEST(Charge, BenchmarkLexerSwitchAndBranch) {
     }
 }
 
-TEST(Charge, BenchmarkLexerTablePattern) {
+TEST(Charge, BenchmarkLexerSwitchAndPatternTable) {
     namespace fs = std::filesystem;
     fs::path file { BENCHMARK_FILE };
     ASSERT_TRUE(fs::is_regular_file(file));
@@ -859,7 +860,29 @@ TEST(Charge, BenchmarkLexerTablePattern) {
         const char* finalPos = nullptr;
         {
             PerfEnable enable;
-            finalPos = parse::lexTablePattern(sourceBuffer.data(), output);
+            finalPos = parse::lexSwitchAndPatternTable(sourceBuffer.data(), output);
+        }
+        auto stop = Clock::now();
+        std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
+        ASSERT_EQ(finalPos, sourceBuffer.data() + sourceBuffer.size());
+    }
+}
+
+TEST(Charge, BenchmarkLexerPatternTable) {
+    namespace fs = std::filesystem;
+    fs::path file { BENCHMARK_FILE };
+    ASSERT_TRUE(fs::is_regular_file(file));
+
+    auto sourceBuffer = server::readFile(file);
+
+    for (int i = 0; i < BENCHMARK_REPEATS; i++) {
+        LexerOutput output(sourceBuffer);
+        auto start = Clock::now();
+        const char* finalPos = nullptr;
+        {
+            PerfEnable enable;
+            finalPos = parse::lexPatternTable(sourceBuffer.data(), output);
         }
         auto stop = Clock::now();
         std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
