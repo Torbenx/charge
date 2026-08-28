@@ -20,7 +20,7 @@ export PERF_ACK_FD=${perf_ack_fd}
 
 # start perf with the associated file descriptors
 perf stat \
-    --event=cycles:u,instructions:u,branches:u,branch-misses:u \
+    --event=cycles:u,instructions:u,branches:u,branch-misses:u,cpu-clock:u \
     --delay=-1 --repeat=100 \
     --control fd:${perf_ctl_fd},${perf_ack_fd} \
     -- ./build/charge "$@" > /dev/null
