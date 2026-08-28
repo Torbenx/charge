@@ -1,0 +1,57 @@
+Benchmark on Intel(R) Core(TM) i5-9600K CPU @ 3.70GHz
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkNoOutput' (100 runs):
+        15,642,410      cycles:u                                                                ( +-  0.06% )
+        25,055,744      instructions:u                                                          ( +-  0.00% )
+         6,721,202      branches:u                                                              ( +-  0.00% )
+           259,361      branch-misses:u                                                         ( +-  0.03% )
+              3.67 msec cpu-clock:u                                                             ( +-  0.19% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkLexerTableHybrid' (100 runs):
+        15,874,625      cycles:u                                                                ( +-  0.02% )
+        27,361,248      instructions:u                                                          ( +-  0.00% )
+         5,748,547      branches:u                                                              ( +-  0.00% )
+           283,858      branch-misses:u                                                         ( +-  0.02% )
+              4.27 msec cpu-clock:u                                                             ( +-  0.23% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkLexerSwitchAndBranch' (100 runs):
+        16,669,325      cycles:u                                                                ( +-  0.02% )
+        29,050,800      instructions:u                                                          ( +-  0.00% )
+         5,789,977      branches:u                                                              ( +-  0.00% )
+           283,965      branch-misses:u                                                         ( +-  0.02% )
+              4.48 msec cpu-clock:u                                                             ( +-  0.25% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkLexerSwitchAndTable' (100 runs):
+        17,434,411      cycles:u                                                                ( +-  0.02% )
+        27,592,702      instructions:u                                                          ( +-  0.00% )
+         5,699,806      branches:u                                                              ( +-  0.00% )
+           285,401      branch-misses:u                                                         ( +-  0.02% )
+              4.63 msec cpu-clock:u                                                             ( +-  0.17% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkLexerTable2Char' (100 runs):
+        18,578,315      cycles:u                                                                ( +-  0.02% )
+        32,770,775      instructions:u                                                          ( +-  0.00% )
+         6,963,394      branches:u                                                              ( +-  0.00% )
+           289,246      branch-misses:u                                                         ( +-  0.03% )
+              4.91 msec cpu-clock:u                                                             ( +-  0.20% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkSimple' (100 runs):
+        19,829,846      cycles:u                                                                ( +-  0.02% )
+        35,815,376      instructions:u                                                          ( +-  0.00% )
+         7,604,418      branches:u                                                              ( +-  0.00% )
+           253,337      branch-misses:u                                                         ( +-  0.03% )
+              5.16 msec cpu-clock:u                                                             ( +-  0.18% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkLexerTablePattern' (100 runs):
+        20,932,660      cycles:u                                                                ( +-  0.02% )
+        35,278,322      instructions:u                                                          ( +-  0.00% )
+         6,865,889      branches:u                                                              ( +-  0.00% )
+           300,976      branch-misses:u                                                         ( +-  0.02% )
+              5.44 msec cpu-clock:u                                                             ( +-  0.17% )
+
+ Performance counter stats for './build/charge --gtest_filter=Charge.BenchmarkSema' (100 runs):
+        29,796,415      cycles:u                                                                ( +-  0.04% )
+        59,615,832      instructions:u                                                          ( +-  0.00% )
+        10,041,604      branches:u                                                              ( +-  0.00% )
+           325,401      branch-misses:u                                                         ( +-  0.02% )
+              8.33 msec cpu-clock:u                                                             ( +-  0.18% )
