@@ -41,20 +41,19 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         case '/': {
-            char c1 = sourcePosition[1];
-            if (c1 == '/') {
-                sourcePosition = skipToEndOfLine(sourcePosition);
-                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
-                continue;
-            } else if (c1 == '*') {
-                sourcePosition = skipToEndOfBlockComment(sourcePosition);
+            if (sourcePosition[1] == '*') {
+                sourcePosition = skipToEndOfBlockComment(sourcePosition + 2);
                 if (sourcePosition[0] == '\0') [[unlikely]] {
                     VERIFY_NOT_REACHED();
                 }
                 sourcePosition += 2;
                 output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
-            } else if (c1 == '=') {
+            } else if (sourcePosition[1] == '/') {
+                sourcePosition = skipToEndOfLine(sourcePosition + 2);
+                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
+                continue;
+            } else if (sourcePosition[1] == '=') {
                 tok = Token::SlashEqual;
                 sourcePosition += 2;
             } else {
