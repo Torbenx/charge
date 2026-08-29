@@ -219,16 +219,17 @@ const char* lexSwitchAndPatternTable(const char* sourcePosition, SimpleTokenBuff
                     VERIFY_NOT_REACHED();
                 }
                 sourcePosition += 2;
-                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
+                output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (sourcePosition[1] == '/') {
                 sourcePosition = skipToEndOfLine(sourcePosition + 2);
-                output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
+                output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
                 continue;
             } else if (sourcePosition[1] == '=') {
                 tok = LexerToken::SlashEqual;
                 sourcePosition += 2;
             } else {
+                tok = LexerToken::Slash;
                 sourcePosition += 1;
             }
             break;

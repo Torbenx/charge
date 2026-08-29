@@ -152,6 +152,7 @@ const char* lexTableHybrid(const char* sourcePosition, SimpleTokenBuffer<LexerTo
                 tok = LexerToken::SlashEqual;
                 sourcePosition += 2;
             } else {
+                tok = LexerToken::Slash;
                 sourcePosition += 1;
             }
             break;
@@ -163,6 +164,7 @@ const char* lexTableHybrid(const char* sourcePosition, SimpleTokenBuffer<LexerTo
                 tok = LexerToken::EqualGreater;
                 sourcePosition += 2;
             } else {
+                tok = LexerToken::Equal;
                 sourcePosition += 1;
             }
             break;
@@ -174,6 +176,7 @@ const char* lexTableHybrid(const char* sourcePosition, SimpleTokenBuffer<LexerTo
                 tok = LexerToken::PlusPlus;
                 sourcePosition += 2;
             } else {
+                tok = LexerToken::Plus;
                 sourcePosition += 1;
             }
             break;
@@ -188,6 +191,7 @@ const char* lexTableHybrid(const char* sourcePosition, SimpleTokenBuffer<LexerTo
                 tok = LexerToken::MinusGreater;
                 sourcePosition += 2;
             } else {
+                tok = LexerToken::Minus;
                 sourcePosition += 1;
             }
             break;
