@@ -332,12 +332,12 @@ template<typename ParseOutput>
         tokEnd = skipWhitespace(tokEnd);
         const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
-            tokEnd = skipToEndOfLine(tokEnd);
+            tokEnd = skipToEndOfLine(tokEnd + 2);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
-            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd = skipToEndOfBlockComment(tokEnd + 2);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             continue;

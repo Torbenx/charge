@@ -702,10 +702,8 @@ def linearIf(commonPrefix: str, state):
             possibleContinuations.add(p[len(commonPrefix)])
     assert exactMatch != None
 
-    if possibleContinuations:
-        line("char next = tokEnd[" + str(len(commonPrefix)) + "];")
     for character in sorted(possibleContinuations):
-        line("if (next == '" + character + "') {")
+        line("if (tokEnd[" + str(len(commonPrefix)) + "] == '" + character + "') {")
         with indent():
             linearIf(commonPrefix + character, state)
         line("}")

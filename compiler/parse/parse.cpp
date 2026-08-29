@@ -332,12 +332,12 @@ template<typename ParseOutput>
         tokEnd = skipWhitespace(tokEnd);
         const char* tokBegin = tokEnd;
         if (std::string_view(tokEnd, 2) == "//") {
-            tokEnd = skipToEndOfLine(tokEnd);
+            tokEnd = skipToEndOfLine(tokEnd + 2);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             continue;
         }
         if (std::string_view(tokEnd, 2) == "/*") {
-            tokEnd = skipToEndOfBlockComment(tokEnd);
+            tokEnd = skipToEndOfBlockComment(tokEnd + 2);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             continue;
@@ -454,8 +454,7 @@ lex$retry:
         goto lex$retry;
     }
     case '!': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::ExclaimEqual;
@@ -465,8 +464,7 @@ lex$retry:
         return LexerToken::Exclaim;
     }
     case '%': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::PercentEqual;
@@ -476,10 +474,8 @@ lex$retry:
         return LexerToken::Percent;
     }
     case '&': {
-        char next = tokEnd[1];
-        if (next == '&') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '&') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // lexToken
                 return LexerToken::AmpAmpEqual;
@@ -488,7 +484,7 @@ lex$retry:
             // lexToken
             return LexerToken::AmpAmp;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::AmpEqual;
@@ -508,8 +504,7 @@ lex$retry:
         return LexerToken::RightParen;
     }
     case '*': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::StarEqual;
@@ -519,13 +514,12 @@ lex$retry:
         return LexerToken::Star;
     }
     case '+': {
-        char next = tokEnd[1];
-        if (next == '+') {
+        if (tokEnd[1] == '+') {
             tokEnd += 2;
             // lexToken
             return LexerToken::PlusPlus;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::PlusEqual;
@@ -540,18 +534,17 @@ lex$retry:
         return LexerToken::Comma;
     }
     case '-': {
-        char next = tokEnd[1];
-        if (next == '-') {
+        if (tokEnd[1] == '-') {
             tokEnd += 2;
             // lexToken
             return LexerToken::MinusMinus;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::MinusEqual;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // lexToken
             return LexerToken::MinusGreater;
@@ -566,21 +559,20 @@ lex$retry:
         return LexerToken::Point;
     }
     case '/': {
-        char next = tokEnd[1];
-        if (next == '*') {
+        if (tokEnd[1] == '*') {
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto lex$retry;
         }
-        if (next == '/') {
+        if (tokEnd[1] == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto lex$retry;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::SlashEqual;
@@ -590,8 +582,7 @@ lex$retry:
         return LexerToken::Slash;
     }
     case ':': {
-        char next = tokEnd[1];
-        if (next == ':') {
+        if (tokEnd[1] == ':') {
             tokEnd += 2;
             // lexToken
             return LexerToken::ColonColon;
@@ -606,10 +597,8 @@ lex$retry:
         return LexerToken::SemiColon;
     }
     case '<': {
-        char next = tokEnd[1];
-        if (next == '<') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '<') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // lexToken
                 return LexerToken::LessLessEqual;
@@ -618,9 +607,8 @@ lex$retry:
             // lexToken
             return LexerToken::LessLess;
         }
-        if (next == '=') {
-            char next = tokEnd[2];
-            if (next == '>') {
+        if (tokEnd[1] == '=') {
+            if (tokEnd[2] == '>') {
                 tokEnd += 3;
                 // lexToken
                 return LexerToken::LessEqualGreater;
@@ -634,13 +622,12 @@ lex$retry:
         return LexerToken::Less;
     }
     case '=': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::EqualEqual;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // lexToken
             return LexerToken::EqualGreater;
@@ -650,15 +637,13 @@ lex$retry:
         return LexerToken::Equal;
     }
     case '>': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::GreaterEqual;
         }
-        if (next == '>') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '>') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // lexToken
                 return LexerToken::GreaterGreaterEqual;
@@ -682,8 +667,7 @@ lex$retry:
         return LexerToken::RightSquare;
     }
     case '^': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::HatEqual;
@@ -698,15 +682,13 @@ lex$retry:
         return LexerToken::LeftBrace;
     }
     case '|': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // lexToken
             return LexerToken::VertEqual;
         }
-        if (next == '|') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '|') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // lexToken
                 return LexerToken::VertVertEqual;
@@ -1154,8 +1136,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto expression$retry;
     }
     case '!': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1168,8 +1149,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto expression$with_emit;
     }
     case '%': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1179,10 +1159,8 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '&': {
-        char next = tokEnd[1];
-        if (next == '&') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '&') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -1191,7 +1169,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1213,8 +1191,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '*': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1227,8 +1204,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto expression$with_emit;
     }
     case '+': {
-        char next = tokEnd[1];
-        if (next == '+') {
+        if (tokEnd[1] == '+') {
             tokEnd += 2;
             // emitToken TokenKind::PreIncrementExpr
             carriedEmitTokenKind = TokenKind::PreIncrementExpr;
@@ -1236,7 +1212,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1254,8 +1230,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '-': {
-        char next = tokEnd[1];
-        if (next == '-') {
+        if (tokEnd[1] == '-') {
             tokEnd += 2;
             // emitToken TokenKind::PreDecrementExpr
             carriedEmitTokenKind = TokenKind::PreDecrementExpr;
@@ -1263,12 +1238,12 @@ LABEL_MAYBE_UNUSED expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1289,21 +1264,20 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto member_access$with_emit;
     }
     case '/': {
-        char next = tokEnd[1];
-        if (next == '*') {
+        if (tokEnd[1] == '*') {
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto expression$retry;
         }
-        if (next == '/') {
+        if (tokEnd[1] == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto expression$retry;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1313,8 +1287,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case ':': {
-        char next = tokEnd[1];
-        if (next == ':') {
+        if (tokEnd[1] == ':') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1329,10 +1302,8 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '<': {
-        char next = tokEnd[1];
-        if (next == '<') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '<') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -1341,9 +1312,8 @@ LABEL_MAYBE_UNUSED expression$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '=') {
-            char next = tokEnd[2];
-            if (next == '>') {
+        if (tokEnd[1] == '=') {
+            if (tokEnd[2] == '>') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -1357,13 +1327,12 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '=': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1373,15 +1342,13 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '>': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '>') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -1405,8 +1372,7 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '^': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1421,15 +1387,13 @@ LABEL_MAYBE_UNUSED expression$as_then:
         goto error$as_then;
     }
     case '|': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
         }
-        if (next == '|') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '|') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -1615,8 +1579,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto after_expression$retry;
     }
     case '!': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareNotEqualExpr
             carriedEmitTokenKind = TokenKind::CompareNotEqualExpr;
@@ -1629,8 +1592,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto error$as_then;
     }
     case '%': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -1656,10 +1618,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto expression$with_emit;
     }
     case '&': {
-        char next = tokEnd[1];
-        if (next == '&') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '&') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // popScope ScopeKind::LeftExpr
                 {
@@ -1684,7 +1644,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -1812,8 +1772,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto after_expression$with_emit;
     }
     case '*': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -1839,8 +1798,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto expression$with_emit;
     }
     case '+': {
-        char next = tokEnd[1];
-        if (next == '+') {
+        if (tokEnd[1] == '+') {
             tokEnd += 2;
             // emitToken TokenKind::PostIncrementExpr
             carriedEmitTokenKind = TokenKind::PostIncrementExpr;
@@ -1848,7 +1806,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next after_expression
             goto after_expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -1936,8 +1894,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto comma_after_expression_in_arguments$no_emit;
     }
     case '-': {
-        char next = tokEnd[1];
-        if (next == '-') {
+        if (tokEnd[1] == '-') {
             tokEnd += 2;
             // emitToken TokenKind::PostDecrementExpr
             carriedEmitTokenKind = TokenKind::PostDecrementExpr;
@@ -1945,7 +1902,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next after_expression
             goto after_expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -1963,7 +1920,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // -> error
             goto error$as_then;
@@ -1981,21 +1938,20 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto member_access$no_emit;
     }
     case '/': {
-        char next = tokEnd[1];
-        if (next == '*') {
+        if (tokEnd[1] == '*') {
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto after_expression$retry;
         }
-        if (next == '/') {
+        if (tokEnd[1] == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto after_expression$retry;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -2021,8 +1977,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto expression$with_emit;
     }
     case ':': {
-        char next = tokEnd[1];
-        if (next == ':') {
+        if (tokEnd[1] == ':') {
             tokEnd += 2;
             // next static_access
             goto static_access$no_emit;
@@ -2186,10 +2141,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto after_statement$with_emit;
     }
     case '<': {
-        char next = tokEnd[1];
-        if (next == '<') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '<') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // popScope ScopeKind::LeftExpr
                 {
@@ -2214,9 +2167,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
-            char next = tokEnd[2];
-            if (next == '>') {
+        if (tokEnd[1] == '=') {
+            if (tokEnd[2] == '>') {
                 tokEnd += 3;
                 // -> error
                 goto error$as_then;
@@ -2236,8 +2188,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto expression$with_emit;
     }
     case '=': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareEqualExpr
             carriedEmitTokenKind = TokenKind::CompareEqualExpr;
@@ -2245,7 +2196,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // ifScope ScopeKind::IfExpr, ScopeKind::IfExprOrStmt
             if (scopePosition[0] == ScopeKind::IfExpr || scopePosition[0] == ScopeKind::IfExprOrStmt) {
@@ -2297,8 +2248,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto expression$with_emit;
     }
     case '>': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // emitToken TokenKind::CompareGreaterEqualExpr
             carriedEmitTokenKind = TokenKind::CompareGreaterEqualExpr;
@@ -2306,9 +2256,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '>') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '>') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // popScope ScopeKind::LeftExpr
                 {
@@ -2382,8 +2331,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto after_expression$with_emit;
     }
     case '^': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -2416,8 +2364,7 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
         goto first_argument_brace$no_emit;
     }
     case '|': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // popScope ScopeKind::LeftExpr
             {
@@ -2435,9 +2382,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '|') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '|') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // popScope ScopeKind::LeftExpr
                 {
@@ -3178,8 +3124,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto statement$retry;
     }
     case '!': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3198,8 +3143,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto expression$with_emit;
     }
     case '%': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3215,10 +3159,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '&': {
-        char next = tokEnd[1];
-        if (next == '&') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '&') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // pushScope ScopeKind::LeftExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3233,7 +3175,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3267,8 +3209,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '*': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3287,8 +3228,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto expression$with_emit;
     }
     case '+': {
-        char next = tokEnd[1];
-        if (next == '+') {
+        if (tokEnd[1] == '+') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3299,7 +3239,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3326,8 +3266,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '-': {
-        char next = tokEnd[1];
-        if (next == '-') {
+        if (tokEnd[1] == '-') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3338,7 +3277,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // next expression
             goto expression$with_emit;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3346,7 +3285,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3376,21 +3315,20 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto member_access$with_emit;
     }
     case '/': {
-        char next = tokEnd[1];
-        if (next == '*') {
+        if (tokEnd[1] == '*') {
             tokEnd += 2;
             tokEnd = skipToEndOfBlockComment(tokEnd);
             tokEnd += 2;
             emitWhitespace(WhitespaceKind::BlockComment, tokBegin, tokEnd, output);
             goto statement$retry;
         }
-        if (next == '/') {
+        if (tokEnd[1] == '/') {
             tokEnd += 2;
             tokEnd = skipToEndOfLine(tokEnd);
             emitWhitespace(WhitespaceKind::LineComment, tokBegin, tokEnd, output);
             goto statement$retry;
         }
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3406,8 +3344,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case ':': {
-        char next = tokEnd[1];
-        if (next == ':') {
+        if (tokEnd[1] == ':') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3431,10 +3368,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '<': {
-        char next = tokEnd[1];
-        if (next == '<') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '<') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // pushScope ScopeKind::LeftExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3449,9 +3384,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '=') {
-            char next = tokEnd[2];
-            if (next == '>') {
+        if (tokEnd[1] == '=') {
+            if (tokEnd[2] == '>') {
                 tokEnd += 3;
                 // pushScope ScopeKind::LeftExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3474,8 +3408,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '=': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3483,7 +3416,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
+        if (tokEnd[1] == '>') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3499,8 +3432,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '>': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3508,9 +3440,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '>') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '>') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // pushScope ScopeKind::LeftExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3549,8 +3480,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto error$as_then;
     }
     case '^': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3576,8 +3506,7 @@ LABEL_MAYBE_UNUSED statement$as_then:
         goto statement$with_emit;
     }
     case '|': {
-        char next = tokEnd[1];
-        if (next == '=') {
+        if (tokEnd[1] == '=') {
             tokEnd += 2;
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3585,9 +3514,8 @@ LABEL_MAYBE_UNUSED statement$as_then:
             // -> error
             goto error$as_then;
         }
-        if (next == '|') {
-            char next = tokEnd[2];
-            if (next == '=') {
+        if (tokEnd[1] == '|') {
+            if (tokEnd[2] == '=') {
                 tokEnd += 3;
                 // pushScope ScopeKind::LeftExpr
                 scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
