@@ -1,0 +1,82 @@
+
+.hljs-comment {
+  color: #6A9954;
+}
+
+.reveal h1,
+.reveal h2,
+.reveal h3,
+.reveal h4,
+.reveal h5,
+.reveal h6 {
+  text-transform: none;
+}
+
+.reveal code {
+  max-height: 600px !important;
+  font-size: 85%;
+}
+
+.reveal pre code {
+  font-size: 100%;
+}
+
+.reveal pre {
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  overflow-x: auto;
+}
+
+.token-code-1,
+.token-code-2,
+.ast-tree {
+  font-size: 1rem;
+}
+
+.token-code-1 code,
+.token-code-2 code,
+.ast-tree code {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 3px;
+  background-color: var(--r-background-color);
+  z-index: 1;
+}
+
+.token-code-1 code {
+  border: solid 1px transparent;
+  margin: -4px;
+}
+
+.token-code-2 code,
+.ast-tree code {
+  border: solid 1px var(--r-main-color);
+}
+
+.ast-tree {
+  display: grid;
+  grid-template-columns: repeat(96, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  height: 330px;
+  justify-items: center;
+  align-items: center;
+  position: relative;
+  margin-left: 10%;
+  margin-right: 10%;
+}
+
+.ast-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.ast-edges line {
+  stroke: var(--r-main-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
