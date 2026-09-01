@@ -184,12 +184,9 @@ const char* lexPatternTable(const char* sourcePosition, SimpleTokenBuffer<LexerT
             sourcePosition += 1;
             break;
         case LexerToken::Identifier: {
-            const char* tokBegin = sourcePosition;
-            do {
-                sourcePosition += 1;
-            } while (isWordBulkCharacter(sourcePosition[0]));
-            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
-            tok = entry == nullptr ? LexerToken::Identifier : entry->token;
+            auto [end, token] = readWord(sourcePosition, parse::NoOutput());
+            tok = token;
+            sourcePosition = end;
             break;
         }
         }

@@ -93,11 +93,9 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
         case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M':
         case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
         case '_': case '$': case '#': {
-            do {
-                sourcePosition += 1;
-            } while (isWordBulkCharacter(sourcePosition[0]));
-            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
-            tok = entry == nullptr ? Token::Identifier : entry->token;
+            auto [end, token] = readWord(sourcePosition, parse::NoOutput());
+            tok = token;
+            sourcePosition = end;
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
