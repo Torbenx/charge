@@ -262,12 +262,9 @@ const char* lexSwitchAndPatternTable(const char* sourcePosition, SimpleTokenBuff
         case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J': case 'K': case 'L': case 'M':
         case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
         case '_': case '$': case '#': {
-            const char* tokBegin = sourcePosition;
-            do {
-                sourcePosition += 1;
-            } while (isWordBulkCharacter(sourcePosition[0]));
-            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
-            tok = entry == nullptr ? LexerToken::Identifier : entry->token;
+            auto [end, token] = readWord(sourcePosition, parse::NoOutput());
+            tok = token;
+            sourcePosition = end;
             break;
         }
             // clang-format on
