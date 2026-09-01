@@ -229,12 +229,9 @@ const char* lexTable2Char(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             }
             break;
         case std::to_underlying(Result::Word): {
-            const char* tokBegin = sourcePosition;
-            do {
-                sourcePosition += 1;
-            } while (isWordBulkCharacter(sourcePosition[0]));
-            const auto* entry = KeywordTable::get(tokBegin, sourcePosition - tokBegin);
-            tok = entry == nullptr ? LexerToken::Identifier : entry->token;
+            auto [end, token] = readWord(sourcePosition, parse::NoOutput());
+            tok = token;
+            sourcePosition = end;
             break;
         }
         case std::to_underlying(Result::NumbericLiteral): {
