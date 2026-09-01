@@ -56,7 +56,7 @@ else()
         target_link_libraries(${PROJECT_NAME} PRIVATE stdc++exp)
     endif()
 endif()
-target_link_libraries(${PROJECT_NAME} PRIVATE gtest CLI11::CLI11)
+target_link_libraries(${PROJECT_NAME} PRIVATE gtest benchmark::benchmark CLI11::CLI11)
 target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_TEST_DIR="${CMAKE_SOURCE_DIR}/tests")
 
 set(CHARGE_BINARY "$<TARGET_FILE:${PROJECT_NAME}>")
