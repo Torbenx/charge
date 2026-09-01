@@ -141,7 +141,7 @@ static std::vector<LogEntry> parseLog(std::string_view data) {
 }
 
 void replayLog(const std::filesystem::path& logFile, bool realtime) {
-    std::string logData = readFile(logFile);
+    padded_string logData = readFile(logFile);
     auto entries = parseLog(logData);
 
     int_t messageCount = 0;

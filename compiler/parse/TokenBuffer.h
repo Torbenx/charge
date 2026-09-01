@@ -1,6 +1,7 @@
 #pragma once
 
 #include <PageBumpAllocator.h>
+#include <padded_string.h>
 #include <parse/IdentifierTable.h>
 #include <parse/Token.h>
 
@@ -49,10 +50,10 @@ struct TokenBuffer {
     PageBumpAllocator<WhitespaceInfo> whitespace;
     IdentifierTable wordTable;
     std::vector<Word> callArguments;
-    std::string_view source;
+    padded_string_view source;
     SourceLocation lastLineStartLocation;
     const char* lastLineStartPosition = nullptr;
-    TokenBuffer(std::string_view source);
+    TokenBuffer(padded_string_view source);
 
     void reset() {
         tokens.clear();

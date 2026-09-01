@@ -1468,12 +1468,39 @@ for generatedLine in generatedLines:
     outputLines.append(generatedLine + lineEnding)
 writeTo(currentDir / "parse_gen.cpp", outputLines)
 
+maxKeywordLength = max([len(k) for k in keywords + specialIdentifiers])
+
 gperfFile = """
 %{
 #pragma once
+#include <padded_string_compare.h>
 #include <parse/parse_gen.h>
-#include <cstring>
+#include <algorithm>
+#include <array>
 namespace parse {
+
+struct GPerfFixedString {
+    template<size_t N>
+    consteval GPerfFixedString(const char (&str)[N]) {
+        static_assert(N <= MAX_KEYWORD_LENGTH + 1);
+        storage.fill(0);
+        std::copy_n(str, N, storage.data());
+    }
+    const char& operator*() const { return storage[0]; }
+    operator const char*() const { return storage.data(); }
+    std::array<char, MAX_KEYWORD_LENGTH + 1> storage;
+};
+
+// The gperf generated KeywordTable::get() compares a candidate against a keyword with
+//     *str == *s && !memcmp(str + 1, s + 1, len - 1)
+// Unqualified lookup from inside namespace parse finds this overload first and never
+// reaches ::memcmp, which contains an over-conservative page crossing check. We can
+// avoid a page check because of the added padding.
+inline int memcmp(const char* candidate, const char* keyword, size_t n) {
+    // Undo the offset that gperf applies to both pointers.
+    return padded_small_string_compare_eq(candidate - 1, keyword - 1, (int_t)n + 1) ? 0 : 1;
+}
+
 %}
 
 %language=C++
@@ -1491,12 +1518,15 @@ namespace parse {
 %struct-type
 %define slot-name string
 %define initializer-suffix ,LexerToken::Identifier
-struct KeywordTableEntry { const char* string; LexerToken token; };
+struct KeywordTableEntry { struct alignas(std::bit_ceil(sizeof(GPerfFixedString) + 1)) { GPerfFixedString string; LexerToken token; }; };
 
 %%
 """ + lineEnding.join([keyword + ",LexerToken::" + keywordCppName(keyword) for keyword in keywords + specialIdentifiers]) + """
 %%
 
+static_assert(sizeof(KeywordTableEntry) == alignof(KeywordTableEntry));
+static_assert(alignof(KeywordTableEntry) >= PADDED_STRING_PADDING);
+static_assert(KEYWORD_TABLE_MAX_WORD_LENGTH == GPerfFixedString::MAX_KEYWORD_LENGTH);
 }
 """
 writeTo(currentDir / "keyword_table.gperf", gperfFile.splitlines(True))

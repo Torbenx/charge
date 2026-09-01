@@ -27,7 +27,7 @@ std::string pathToUri(const std::filesystem::path& path) {
     return "file:///" + uri_encode(path.string());
 }
 
-std::string readFile(const std::filesystem::path& file) {
+padded_string readFile(const std::filesystem::path& file) {
     std::ifstream stream;
     stream.open(file, std::ios::binary);
     VERIFY(stream.good()); // TODO: Should not verify on user data
@@ -41,7 +41,7 @@ std::string readFile(const std::filesystem::path& file) {
     stream.close();
     VERIFY(stream.good()); // TODO: Should not verify on user data
 
-    return sourceBuffer;
+    return padded_string(sourceBuffer);
 }
 
 // ----------------------- Document Management ----------------------
@@ -57,7 +57,7 @@ struct DidOpen : Server::Method {
     };
 
     void handleNotification(Server& server, Params params) {
-        server.clientOpenedFile(params.textDocument.path(), std::move(params.textDocument.text));
+        server.clientOpenedFile(params.textDocument.path(), padded_string(params.textDocument.text));
     }
 };
 
@@ -84,7 +84,7 @@ struct DidChange : Server::Method {
             // Incremental updates not supported
             return;
         }
-        server.clientChangedFile(params.textDocument.path(), std::move(params.contentChanges.front().text));
+        server.clientChangedFile(params.textDocument.path(), padded_string(params.contentChanges.front().text));
     }
 };
 
@@ -383,14 +383,14 @@ void Server::updateSource(FileInfo& info) {
     info.lastWriteTime = writeTime;
 }
 
-void Server::clientOpenedFile(const path& filePath, std::string fullSource) {
+void Server::clientOpenedFile(const path& filePath, padded_string fullSource) {
     auto& info = fileInfo(filePath);
     info.openInClient = true;
     info.lastWriteTime = std::nullopt;
     info.setSource(std::move(fullSource));
 }
 
-void Server::clientChangedFile(const path& filePath, std::string fullSource) {
+void Server::clientChangedFile(const path& filePath, padded_string fullSource) {
     auto& info = fileInfo(filePath);
     if (!info.openInClient)
         return;

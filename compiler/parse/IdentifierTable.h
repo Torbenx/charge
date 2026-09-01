@@ -16,8 +16,10 @@ struct IdentifierTable : WordStringTable {
     constexpr IdentifierTable(const ConstWordStringTable<Ts...>& s)
         : WordStringTable(s) { }
 
-    constexpr Word get(std::string_view str) { return getWithHash(str, Word::hash(str)); }
-    constexpr Word getWithHash(std::string_view str, uint32_t hash) {
+    template<StringViewLike S>
+    constexpr Word get(S str) { return getWithHash(str, Word::hash(str)); }
+    template<StringViewLike S>
+    constexpr Word getWithHash(S str, uint32_t hash) {
         return getInIdRange(str, hash, FIRST_REGULAR_IDENTIFIER_WORD_ID, Word::MAX_ID + 1);
     }
 };

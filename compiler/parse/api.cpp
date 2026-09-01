@@ -85,7 +85,7 @@ std::string_view RecoveredError::errorRange() const {
 
 std::optional<Error> tryParse(sema::Context& context) {
     VERIFY(context.tokenBuffer.tokens.empty());
-    Parser parser(context.tokenBuffer.source.data());
+    Parser parser(context.tokenBuffer.source);
     parser.parse(context);
     if (parser.done())
         return std::nullopt;
@@ -102,20 +102,20 @@ void parseOrThrow(sema::Context& context) {
 }
 
 namespace recovery {
-    std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState);
+    std::vector<RecoveredError> recoverAndAnalyze(padded_string_view source, const SavedParserState& rootErrorState);
 }
 
 std::vector<RecoveredError> parseAndRecover(sema::Context& context) {
     VERIFY(context.tokenBuffer.tokens.empty());
     std::vector<RecoveredError> errors;
     {
-        SimpleParser parser(context.tokenBuffer.source.data());
+        SimpleParser parser(context.tokenBuffer.source);
         parser.parse(NoOutput());
         if (!parser.done())
             errors = recovery::recoverAndAnalyze(context.tokenBuffer.source, parser.save());
     }
 
-    Parser parser(context.tokenBuffer.source.data());
+    Parser parser(context.tokenBuffer.source);
     for (const auto& element : errors) {
         parser.parse(context, (int_t)element.preRecoveryState.parsedTokens - parser.parsedTokens());
         VERIFY(SimpleParser::saveStateOf(parser) == element.preRecoveryState);

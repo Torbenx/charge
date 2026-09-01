@@ -4,7 +4,7 @@
 
 namespace parse {
 
-TokenBuffer::TokenBuffer(std::string_view source)
+TokenBuffer::TokenBuffer(padded_string_view source)
     : wordTable { words }, source(source) {
     reset();
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <padded_string.h>
 #include <server/LanguageServerProtocol.h>
 #include <server/MessageLog.h>
 #include <server/SemaContext.h>
@@ -32,7 +33,7 @@ struct RequestHandle {
     constexpr bool valid() const { return value != (uint32_t)limits::max; }
 };
 
-std::string readFile(const path& file);
+padded_string readFile(const path& file);
 
 struct Server {
 
@@ -91,8 +92,7 @@ struct Server {
 
     struct FileInfo {
         const path filePath;
-        // TODO: SSO could bite us here because we rely on pointer stability of the source data.
-        std::string sourceData;
+        padded_string sourceData;
         std::unique_ptr<SemaContext> context;
         bool openInClient = false;
         std::optional<file_time> lastWriteTime;
@@ -100,7 +100,7 @@ struct Server {
         explicit FileInfo(const path& filePath)
             : filePath(filePath) { }
 
-        void setSource(std::string newSourceData) {
+        void setSource(padded_string newSourceData) {
             if (sourceData != newSourceData) {
                 sourceData = std::move(newSourceData);
                 context.reset();
@@ -136,8 +136,8 @@ struct Server {
 
     FileInfo& fileInfo(const path& filePath);
     void updateSource(FileInfo& info);
-    void clientOpenedFile(const path& filePath, std::string fullSource);
-    void clientChangedFile(const path& filePath, std::string fullSource);
+    void clientOpenedFile(const path& filePath, padded_string fullSource);
+    void clientChangedFile(const path& filePath, padded_string fullSource);
     void clientClosedFile(const path& filePath);
     void ensureContext(FileInfo& info, std::span<const sema::ModuleImport> imports);
 

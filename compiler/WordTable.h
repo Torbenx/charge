@@ -12,26 +12,8 @@
 struct Word {
     static constexpr int ID_BITS = 4;
     static constexpr uint32_t MAX_ID = (1u << ID_BITS) - 1;
-    struct HashState {
-        uint32_t hash = 0;
-        uint32_t latent = 0;
-        HashState() = default;
-    };
-    static constexpr void iterateHash(HashState& state, uint8_t c) {
-        // state.hash = state.hash + (state.hash >> 5) + (state.hash << 7) + (c << 26) + c;
-        uint32_t newHash = state.latent + (state.hash >> 5) + (c << 26);
-        state.latent = state.hash + (state.hash << 7) + c;
-        state.hash = newHash;
-    }
-    static constexpr uint32_t finalizeHash(HashState state, [[maybe_unused]] uint32_t length) {
-        return std::rotr(state.hash + state.latent, length) & ~((1u << Word::ID_BITS) - 1);
-    }
-    static constexpr uint32_t hash(std::string_view str) {
-        HashState hash;
-        for (char c : str)
-            iterateHash(hash, c);
-        return finalizeHash(hash, str.length());
-    }
+
+    static constexpr uint32_t hash(std::string_view str);
 
     uint32_t idBits : ID_BITS = 0;
     uint32_t hashBits : (32 - ID_BITS) = 0;
@@ -51,6 +33,62 @@ struct Word {
     constexpr bool empty() const { return *this == Word(); }
     constexpr uint32_t toUint() const { return id() | hash(); }
 };
+
+struct WordHashState {
+    static constexpr int_t BLOCK_SIZE = 16;
+
+    static constexpr uint32_t hash(std::string_view str) {
+        WordHashState state;
+        int_t offset = 0;
+        while (offset + BLOCK_SIZE <= (int_t)str.size()) {
+            state.iterateHash(std::span<const char, BLOCK_SIZE> { str.begin() + offset, BLOCK_SIZE });
+            offset += BLOCK_SIZE;
+        }
+
+        // Note: This intentionally adds a block of all zeros when the string length is a mutltiple
+        //       of BLOCK_SIZE. Doing so simiplifies the matching vector implementation.
+        std::array<char, BLOCK_SIZE> finalBlock;
+        finalBlock.fill(0);
+        std::copy(str.begin() + offset, str.end(), finalBlock.data());
+        state.iterateHash(finalBlock);
+
+        return state.finalizeHash();
+    }
+
+    constexpr WordHashState()
+        : accumulator(SEED) { }
+
+    constexpr void iterateHash(uint64_t low, uint64_t high) {
+        accumulator = foldedMultiply(low ^ accumulator, high ^ BLOCK_KEY);
+    }
+
+    constexpr void iterateHash(std::span<const char, BLOCK_SIZE> block) {
+        std::array<char, 8> low, high;
+        std::copy_n(block.data(), 8, low.data());
+        std::copy_n(block.data() + 8, 8, high.data());
+        iterateHash(std::bit_cast<uint64_t>(low), std::bit_cast<uint64_t>(high));
+    }
+
+    constexpr uint32_t finalizeHash() const {
+        return static_cast<uint32_t>((accumulator * FINAL_KEY) >> 32) & ~Word::MAX_ID;
+    }
+
+private:
+    // Odd 64 bit constants with a balanced bit population, taken from the
+    // fractional digits of sqrt(2), sqrt(3) and sqrt(5).
+    static constexpr uint64_t SEED = 0x6a09e667f3bcc909ull;
+    static constexpr uint64_t BLOCK_KEY = 0xbb67ae8584caa73bull;
+    static constexpr uint64_t FINAL_KEY = 0x3c6ef372fe94f82bull;
+
+    constexpr uint64_t foldedMultiply(uint64_t a, uint64_t b) {
+        __uint128_t product = static_cast<__uint128_t>(a) * b;
+        return static_cast<uint64_t>(product) ^ static_cast<uint64_t>(product >> 64);
+    }
+
+    uint64_t accumulator;
+};
+
+constexpr uint32_t Word::hash(std::string_view str) { return WordHashState::hash(str); }
 
 struct WordTable;
 struct WordTableView {

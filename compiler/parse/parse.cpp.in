@@ -2,9 +2,17 @@
 #include <parse/keyword_table.h>
 #include <sema/Context.h>
 
+#include <bit>
 #include <bitset>
 #include <concepts>
+#include <random>
 #include <utility>
+
+#if CHARGE_SSE_OPTIMIZATIONS
+#include <immintrin.h>
+#endif
+
+#include <gtest/gtest.h>
 
 #ifdef __GNUC__
 #define LABEL_MAYBE_UNUSED [[maybe_unused]]
@@ -45,10 +53,142 @@ LexerToken lexerToken(TokenKind semToken) {
     VERIFY(expected == LexerToken::Invalid || lexToken == expected);
 }
 
-static constexpr bool isWordBulkCharacter(uint8_t c) {
+// Unused when SIMD optimizations are enabled
+[[maybe_unused]] static constexpr bool isWordBulkCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
+
+#if CHARGE_SSE_OPTIMIZATIONS
+static unsigned nonWordCharacterMask(__m128i characters) {
+    // A character is a word character iff loNibbleClasses[c & 0xf] & hiNibbleClasses[c >> 4] is
+    // non zero. The classes are:
+    //   bit 0: '0'-'9'   bit 1: '$'   bit 2: 'A'-'O' and 'a'-'o'
+    //   bit 3: 'P'-'Z' and 'p'-'z'    bit 4: '_'
+    //
+    // Returns a bit per character of `characters`, set where it is not a word character.
+    const __m128i loNibbleClasses = _mm_setr_epi8(
+        0b01001, 0b01101, 0b01101, 0b01101, 0b01111, 0b01101, 0b01101, 0b01101,
+        0b01101, 0b01101, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b10100);
+    const __m128i hiNibbleClasses = _mm_setr_epi8(
+        0, 0, 0b00010, 0b00001, 0b00100, 0b11000, 0b00100, 0b01000,
+        0, 0, 0, 0, 0, 0, 0, 0);
+    const __m128i lowNibbleMask = _mm_set1_epi8(0xf);
+    __m128i lo = _mm_shuffle_epi8(loNibbleClasses, _mm_and_si128(characters, lowNibbleMask));
+    __m128i hi = _mm_shuffle_epi8(hiNibbleClasses, _mm_and_si128(_mm_srli_epi16(characters, 4), lowNibbleMask));
+    __m128i isWordCharacter = _mm_cmpeq_epi8(_mm_setzero_si128(), _mm_and_si128(lo, hi));
+    return static_cast<unsigned>(_mm_movemask_epi8(isWordCharacter));
+}
+
+static __m128i loadWordBlock(const char* position) {
+    static_assert(PADDED_STRING_PADDING >= 16);
+    return _mm_loadu_si128(reinterpret_cast<const __m128i*>(position));
+}
+
+static const char* skipWordCharacters(const char* position) {
+    while (true) {
+        unsigned nonWordCharacters = nonWordCharacterMask(loadWordBlock(position));
+        if (nonWordCharacters != 0)
+            return position + std::countr_zero(nonWordCharacters);
+        position += 16;
+    }
+}
+
+static __m128i wordPrefixMask(unsigned length) {
+    // 16 set bytes followed by 16 clear ones. Loading 16 bytes at offset `16 - n` gives a vector
+    // whose first n bytes are set, which is how the tail block of a word is cut off at its end.
+    alignas(16) static const unsigned char WORD_PREFIX_MASKS[32] = {
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+
+    return _mm_loadu_si128(reinterpret_cast<const __m128i*>(WORD_PREFIX_MASKS + 16 - length));
+}
+
+static void iterateHash(WordHashState& state, __m128i block) {
+    uint64_t low = static_cast<uint64_t>(_mm_cvtsi128_si64(block));
+    uint64_t high = static_cast<uint64_t>(_mm_extract_epi64(block, 1));
+    state.iterateHash(low, high);
+}
+
+struct ScannedWord {
+    const char* end;
+    uint32_t hash;
+};
+
+[[nodiscard]] [[gnu::noinline]] static ScannedWord scanAndHashLongWord(const char* begin, __m128i block) {
+    WordHashState state;
+    const char* position = begin;
+    uint32_t terminatorMask;
+    do {
+        iterateHash(state, block);
+        position += WordHashState::BLOCK_SIZE;
+        block = loadWordBlock(position);
+        terminatorMask = nonWordCharacterMask(block);
+    } while (terminatorMask == 0);
+
+    int_t tailSize = std::countr_zero(terminatorMask);
+    iterateHash(state, _mm_and_si128(block, wordPrefixMask(tailSize)));
+    return { position + tailSize, state.finalizeHash() };
+}
+
+// Scans the word starting at `begin` and hashes it out of the very vectors the scan loads.
+[[nodiscard]] static ScannedWord scanAndHashWord(const char* begin) {
+    __m128i block = loadWordBlock(begin);
+    unsigned terminators = nonWordCharacterMask(block);
+    if (terminators == 0) [[unlikely]]
+        return scanAndHashLongWord(begin, block);
+
+    int_t length = std::countr_zero(terminators);
+    WordHashState state;
+    iterateHash(state, _mm_and_si128(block, wordPrefixMask(length)));
+    return { begin + length, state.finalizeHash() };
+}
+
+TEST(Parse, WordHashMatchesScan) {
+    auto check = [](std::string_view word, std::string_view trailer) {
+        padded_string buffer(std::string(word) + std::string(trailer));
+        auto scanned = scanAndHashWord(buffer.data());
+        EXPECT_EQ(scanned.end - buffer.data(), word.length()) << word << "|" << trailer;
+        EXPECT_EQ(scanned.hash, Word::hash(word)) << word << "|" << trailer;
+    };
+
+    static constexpr std::string_view TRAILERS[] = { " ", "(", ";", "", "\n", ".x", "+y" };
+    static constexpr std::string_view WORD_CHARACTERS =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$";
+
+    for (std::string_view trailer : TRAILERS) {
+        check("a", trailer);
+        check("$", trailer);
+        // Around and across the 16 byte block boundaries the scan works in.
+        for (size_t length = 1; length <= 40; length++)
+            check(std::string(length - 1, 'x') + "z", trailer);
+    }
+
+    std::mt19937 random(12345);
+    std::uniform_int_distribution<size_t> lengths(1, 48);
+    std::uniform_int_distribution<size_t> characters(0, WORD_CHARACTERS.size() - 1);
+    for (int i = 0; i < 5000; i++) {
+        std::string word;
+        for (size_t length = lengths(random); word.size() < length;)
+            word += WORD_CHARACTERS[characters(random)];
+        check(word, TRAILERS[i % std::size(TRAILERS)]);
+    }
+}
+
+TEST(Parse, WordHashOfKeywords) {
+    words.forEachWord([](Word word, std::string_view text) {
+        if (text.front() == '(') // generated placeholder names, never lexed
+            return;
+        padded_string buffer(text);
+        auto scanned = scanAndHashWord(buffer.data());
+        EXPECT_EQ(scanned.end - buffer.data(), text.length()) << text;
+        EXPECT_EQ(scanned.hash, word.hash()) << text;
+    });
+}
+
+#endif
 
 static bool isWordFirstCharacter(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -192,13 +332,17 @@ struct WordAndPosition {
 };
 [[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, sema::Context& output) {
     const char* wordBegin = position;
-    Word::HashState hashState;
+#if CHARGE_SSE_OPTIMIZATIONS
+    auto [end, hash] = scanAndHashWord(position);
+    position = end;
+#else
     do {
-        Word::iterateHash(hashState, position[0]);
         position += 1;
     } while (isWordBulkCharacter(position[0]));
-    auto hash = Word::finalizeHash(hashState, position - wordBegin);
-    Word word = output.tokenBuffer.wordTable.getWithHash(std::string_view(wordBegin, position), hash);
+    uint32_t hash = Word::hash(std::string_view(wordBegin, position));
+#endif
+    Word word = output.tokenBuffer.wordTable.getWithHash(
+        padded_string_view::from_raw_unsafe({ wordBegin, position }), hash);
     return { position, word };
 }
 static bool isIdentifierKeywordOrSpecial(Word word) {
@@ -251,9 +395,13 @@ struct TokenAndPosition {
 };
 [[nodiscard]] NO_INLINE static TokenAndPosition readWord(const char* position, const NoOutput&) {
     const char* wordBegin = position;
+#if CHARGE_SSE_OPTIMIZATIONS
+    position = skipWordCharacters(position + 1);
+#else
     do {
         position += 1;
     } while (isWordBulkCharacter(position[0]));
+#endif
     const auto* entry = KeywordTable::get(wordBegin, position - wordBegin);
     if (entry == nullptr)
         return { position, LexerToken::Identifier };
@@ -279,18 +427,54 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
 
 // advances offset to the next '*/'
 [[nodiscard]] static const char* skipToEndOfBlockComment(const char* position) {
+#if CHARGE_SSE_OPTIMIZATIONS
+    static_assert(PADDED_STRING_PADDING >= 16);
+    // The terminator is two characters, so pair up each '*' with the '/' one byte further on
+    // by shifting the '/' comparison down through the vector. That drops the pair whose '*'
+    // is the last character of the window, hence the stride of 15 instead of 16. Taking the
+    // '/' from a second load at position + 1 keeps the full stride, but measures the same and
+    // needs a readable byte past the window.
+    const __m128i stars = _mm_set1_epi8('*');
+    const __m128i slashes = _mm_set1_epi8('/');
+    while (true) {
+        __m128i characters = _mm_loadu_si128(reinterpret_cast<const __m128i*>(position));
+        __m128i isSlash = _mm_cmpeq_epi8(characters, slashes);
+        __m128i isTerminator = _mm_and_si128(_mm_cmpeq_epi8(characters, stars), _mm_srli_si128(isSlash, 1));
+        __m128i ends = _mm_or_si128(_mm_cmpeq_epi8(characters, _mm_setzero_si128()), isTerminator);
+        unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(ends));
+        if (mask != 0)
+            return position + std::countr_zero(mask);
+        position += 15;
+    }
+#else
     while (position[0] != '\0' && !(position[0] == '*' && position[1] == '/')) {
         position += 1;
     }
     return position;
+#endif
 };
 
 // advances offset to the next new line character
 [[nodiscard]] static const char* skipToEndOfLine(const char* position) {
+#if CHARGE_SSE_OPTIMIZATIONS
+    static_assert(PADDED_STRING_PADDING >= 16);
+    const __m128i newlines = _mm_set1_epi8('\n');
+    const __m128i returns = _mm_set1_epi8('\r');
+    while (true) {
+        __m128i characters = _mm_loadu_si128(reinterpret_cast<const __m128i*>(position));
+        __m128i ends = _mm_or_si128(_mm_cmpeq_epi8(characters, _mm_setzero_si128()),
+            _mm_or_si128(_mm_cmpeq_epi8(characters, newlines), _mm_cmpeq_epi8(characters, returns)));
+        unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(ends));
+        if (mask != 0)
+            return position + std::countr_zero(mask);
+        position += 16;
+    }
+#else
     while (position[0] != '\0' && position[0] != '\n' && position[0] != '\r') {
         position += 1;
     }
     return position;
+#endif
 }
 
 [[nodiscard]] static const char* skipToEndOfCharacterLiteral(const char* position) {

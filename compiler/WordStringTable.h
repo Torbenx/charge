@@ -1,6 +1,7 @@
 #pragma once
 
 #include <WordTable.h>
+#include <padded_string.h>
 
 template<typename... Ts>
 struct ConstWordStringTable;
@@ -14,7 +15,7 @@ private:
     uint32_t stringStorageOffset = 0;
     uint32_t stringStorageCapacity = 0;
     constexpr uint32_t allocateStorage(std::string_view str);
-    constexpr std::string_view getStorage(uint32_t index) const;
+    constexpr padded_string_view getStorage(uint32_t index) const;
 
     constexpr WordStringTable(std::span<Entry> entries, std::span<char> stringStorage, uint32_t numEntries, uint32_t stringStorageOffset);
     constexpr void clearPointers();
@@ -29,11 +30,11 @@ public:
     using WordTableView::empty;
     using WordTableView::entryCount;
 
-    constexpr Word get(std::string_view str);
-    constexpr Word getWithHash(std::string_view str, uint32_t hash); // hash must match Word::hash()
-    constexpr Word getInIdRange(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId);
-    constexpr Word find(std::string_view str, Word fallback = Word()) const;
-    constexpr Word findWithHash(std::string_view str, uint32_t hash, Word fallback = Word()) const; // hash must match Word::hash()
+    constexpr Word get(StringViewLike auto str);
+    constexpr Word getWithHash(StringViewLike auto str, uint32_t hash); // hash must match Word::hash()
+    constexpr Word getInIdRange(StringViewLike auto str, uint32_t hash, size_t firstValidId, size_t firstInvalidId);
+    constexpr Word find(StringViewLike auto str, Word fallback = Word()) const;
+    constexpr Word findWithHash(StringViewLike auto str, uint32_t hash, Word fallback = Word()) const; // hash must match Word::hash()
 
     constexpr std::string_view view(Word word) const;
 
@@ -69,7 +70,7 @@ public:
 };
 
 // the table must have at least one free slot
-constexpr Word WordStringTable::getInIdRange(std::string_view str, uint32_t hash, size_t firstValidId, size_t firstInvalidId) {
+constexpr Word WordStringTable::getInIdRange(StringViewLike auto str, uint32_t hash, size_t firstValidId, size_t firstInvalidId) {
     if (str.empty())
         return Word();
 
@@ -103,7 +104,8 @@ constexpr Word WordStringTable::getInIdRange(std::string_view str, uint32_t hash
 constexpr uint32_t WordStringTable::allocateStorage(std::string_view string) {
     uint32_t offset = stringStorageOffset;
     VERIFY(offset % 2 == 0);
-    uint32_t requiredCapacity = stringStorageOffset + 2 + string.length();
+    // Every stored string is compared in whole blocks, so the last one needs padding behind it
+    uint32_t requiredCapacity = alignmentCeil(stringStorageOffset + 2 + string.length(), 2) + PADDED_STRING_PADDING;
     if (requiredCapacity > stringStorageCapacity) {
         VERIFY(!std::is_constant_evaluated());
         uint32_t newCapacity = std::bit_ceil(requiredCapacity);
@@ -122,18 +124,19 @@ constexpr uint32_t WordStringTable::allocateStorage(std::string_view string) {
     stringStorageOffset += string.length();
     if (stringStorageOffset % 2 == 1)
         stringStorageOffset += 1;
+    std::fill_n(&stringStorage[stringStorageOffset], PADDED_STRING_PADDING, '\0');
     return offset / 2;
 }
 namespace WordStringTableDetail {
-constexpr std::string_view getStorage(const char* stringStorage, uint32_t index) {
+constexpr padded_string_view getStorage(const char* stringStorage, uint32_t index) {
     uint32_t offset = index * 2;
     std::array<char, 2> lengthBuffer;
     std::copy_n(&stringStorage[offset], 2, lengthBuffer.data());
     auto length = std::bit_cast<uint16_t>(lengthBuffer);
-    return { &stringStorage[offset] + 2, length };
+    return padded_string_view::from_raw_unsafe({ &stringStorage[offset] + 2, length });
 }
 }
-constexpr std::string_view WordStringTable::getStorage(uint32_t index) const {
+constexpr padded_string_view WordStringTable::getStorage(uint32_t index) const {
     return WordStringTableDetail::getStorage(stringStorage, index);
 }
 
@@ -145,6 +148,7 @@ constexpr WordStringTable::WordStringTable(const WordStringTable& other)
         std::allocator<char> allocator;
         stringStorage = allocator.allocate(stringStorageCapacity);
         std::copy_n(other.stringStorage, other.stringStorageOffset, stringStorage);
+        std::fill_n(&stringStorage[other.stringStorageOffset], PADDED_STRING_PADDING, '\0');
     }
 }
 constexpr WordStringTable::WordStringTable(std::span<WordTable::Entry> entries, std::span<char> stringStorage, uint32_t numEntries, uint32_t stringStorageOffset)
@@ -163,10 +167,10 @@ constexpr void WordStringTable::clearPointers() {
     stringStorage = nullptr;
 }
 
-constexpr Word WordStringTable::get(std::string_view str) {
+constexpr Word WordStringTable::get(StringViewLike auto str) {
     return getWithHash(str, Word::hash(str));
 }
-constexpr Word WordStringTable::getWithHash(std::string_view str, uint32_t hash) {
+constexpr Word WordStringTable::getWithHash(StringViewLike auto str, uint32_t hash) {
     if (str.empty())
         return Word();
     return getInIdRange(str, hash, 0, Word::MAX_ID + 1);
@@ -178,10 +182,10 @@ constexpr std::string_view WordStringTable::view(Word word) const {
     VERIFY(result.found);
     return getStorage(entries[result.bucket].payload);
 }
-constexpr Word WordStringTable::find(std::string_view str, Word fallback) const {
+constexpr Word WordStringTable::find(StringViewLike auto str, Word fallback) const {
     return findWithHash(str, Word::hash(str), fallback);
 }
-constexpr Word WordStringTable::findWithHash(std::string_view str, uint32_t hash, Word fallback) const {
+constexpr Word WordStringTable::findWithHash(StringViewLike auto str, uint32_t hash, Word fallback) const {
     if (str.empty())
         return fallback;
 
@@ -235,7 +239,7 @@ struct ConstEntryTrait<ConstEntry<N>> {
 
 template<typename... Ts>
 struct ConstWordStringTableBase {
-    std::array<char, (alignmentCeil(ConstEntryTrait<Ts>::LENGTH, 2) + ...) + 2 * sizeof...(Ts)> stringBuffer = {};
+    std::array<char, (alignmentCeil(ConstEntryTrait<Ts>::LENGTH, 2) + ...) + 2 * sizeof...(Ts) + PADDED_STRING_PADDING> stringBuffer = {};
     std::array<WordTable::Entry, std::bit_ceil(static_cast<size_t>(sizeof...(Ts) / WordTable::MAX_LOAD_RATIO.ratio() + 0.5))> entryBuffer = {};
 };
 
@@ -257,7 +261,7 @@ public:
     constexpr ConstWordStringTable(const Ts&... strs)
         : WordStringTable(this->entryBuffer, this->stringBuffer, 0, 0) {
         (detail::ConstEntryTrait<Ts>::insert(*this, strs), ...);
-        VERIFY(this->stringStorageOffset == this->stringBuffer.size());
+        VERIFY(this->stringStorageOffset == this->stringBuffer.size() - PADDED_STRING_PADDING);
         VERIFY(this->entryCount() == (int_t)sizeof...(Ts));
     }
     consteval Word operator[](std::string_view str) const {

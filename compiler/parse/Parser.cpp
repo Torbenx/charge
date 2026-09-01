@@ -4,19 +4,19 @@
 
 namespace parse {
 
-Parser::Parser(const char* sourcePosition)
+Parser::Parser(padded_string_view source)
     : m_state {
-        .sourcePosition = sourcePosition,
+        .sourcePosition = source.data(),
         .scopePosition = scopeBuffer.buffer,
         .argumentPosition = argumentBuffer.buffer
     } { scopeBuffer.buffer[0] = ScopeKind::Invalid; }
 
 SimpleParser::SimpleParser()
-    : SimpleParser("") { }
+    : SimpleParser(padded_string_view()) { }
 
-SimpleParser::SimpleParser(const char* sourcePosition)
+SimpleParser::SimpleParser(padded_string_view source)
     : m_state {
-        .sourcePosition = sourcePosition,
+        .sourcePosition = source.data(),
         .scopePosition = scopeBuffer.buffer
     } { scopeBuffer.buffer[0] = ScopeKind::Invalid; }
 
@@ -71,7 +71,8 @@ void SimpleParser::copyState(const Parser& parser) {
 }
 
 TEST(Parse, LexEOF) {
-    const char* source = "a\nstatic +";
+    padded_string buffer("a\nstatic +");
+    const char* source = buffer.data();
     EXPECT_EQ(lexToken(source), LexerToken::Identifier);
     EXPECT_EQ(lexToken(source), LexerToken::Static);
     EXPECT_EQ(lexToken(source), LexerToken::Plus);
@@ -79,43 +80,51 @@ TEST(Parse, LexEOF) {
 }
 
 TEST(Parse, StringLiteral) {
-    auto parse = [](const char* source) {
+    struct ParseResult {
+        bool done;
+        bool error;
+    };
+    auto parse = [](std::string_view text) {
+        padded_string source(text);
         SimpleParser parser(source);
         SimpleOutput output(source);
         parser.parse(output);
-        return parser;
+        return ParseResult { parser.done(), parser.error() };
     };
 
-    EXPECT_TRUE(parse("static a = \"\";").done());
-    EXPECT_TRUE(parse("static a = \"abc\";").done());
-    EXPECT_TRUE(parse("static a = \"an escaped quote \\\" does not end it\";").done());
-    EXPECT_TRUE(parse("static a = \"an escaped backslash does \\\\\";").done());
+    EXPECT_TRUE(parse("static a = \"\";").done);
+    EXPECT_TRUE(parse("static a = \"abc\";").done);
+    EXPECT_TRUE(parse("static a = \"an escaped quote \\\" does not end it\";").done);
+    EXPECT_TRUE(parse("static a = \"an escaped backslash does \\\\\";").done);
 
     // Anything outside of the printable ascii range ends the literal and is an error
-    EXPECT_TRUE(parse("static a = \"unterminated\n;").error());
-    EXPECT_TRUE(parse("static a = \"unterminated").error());
-    EXPECT_TRUE(parse("static a = \"a\tb\";").error());
-    EXPECT_TRUE(parse("static a = \"a\x80z\";").error());
+    EXPECT_TRUE(parse("static a = \"unterminated\n;").error);
+    EXPECT_TRUE(parse("static a = \"unterminated").error);
+    EXPECT_TRUE(parse("static a = \"a\tb\";").error);
+    EXPECT_TRUE(parse("static a = \"a\x80z\";").error);
     // The backslash cannot escape a character that may not appear in the literal
-    EXPECT_TRUE(parse("static a = \"trailing backslash \\\n\";").error());
+    EXPECT_TRUE(parse("static a = \"trailing backslash \\\n\";").error);
 }
 
 TEST(Parse, TokenCount) {
     {
-        SimpleParser parser("static a = a;");
-        SimpleOutput output(parser.sourcePosition());
+        padded_string source("static a = a;");
+        SimpleParser parser(source);
+        SimpleOutput output(source);
         parser.parse(output);
         EXPECT_EQ(parser.parsedTokens(), 6); // Includes one EOF token
     }
     {
-        SimpleParser parser("static a = a;");
-        SimpleOutput output(parser.sourcePosition());
+        padded_string source("static a = a;");
+        SimpleParser parser(source);
+        SimpleOutput output(source);
         parser.parse(output, 2);
         EXPECT_EQ(parser.parsedTokens(), 2);
     }
     {
-        SimpleParser parser("static a = ;");
-        SimpleOutput output(parser.sourcePosition());
+        padded_string source("static a = ;");
+        SimpleParser parser(source);
+        SimpleOutput output(source);
         parser.parse(output);
         EXPECT_EQ(parser.parsedTokens(), 3);
     }

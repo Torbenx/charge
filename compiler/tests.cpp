@@ -419,7 +419,7 @@ struct TestInstrumenter : parse::MergedTokenVisitor<TestInstrumenter>, sema::Err
     CommandQueue commandQueue;
     std::optional<SemanticError> firstError;
 
-    TestInstrumenter(std::span<const sema::ModuleImport> imports, std::string_view source)
+    TestInstrumenter(std::span<const sema::ModuleImport> imports, padded_string_view source)
         : context { imports, source } { context.errorHandler = this; }
 
     [[noreturn]] void invalidKey(const Command*, const Pair*) {
@@ -726,7 +726,7 @@ TEST(Charge, DISABLED_BenchmarkSema) {
 
     for (int i = 0; i < 10; i++) {
         sema::Context context({}, sourceBuffer);
-        parse::Parser parser(sourceBuffer.data());
+        parse::Parser parser(sourceBuffer);
         parser.parse(context);
         ASSERT_TRUE(parser.done());
         ASSERT_TRUE(context.m_scopeStack.size() == 1);
@@ -742,7 +742,7 @@ TEST(Charge, DISABLED_BenchmarkSimple) {
 
     for (int i = 0; i < 10; i++) {
         parse::SimpleOutput output(sourceBuffer);
-        parse::SimpleParser parser(sourceBuffer.data());
+        parse::SimpleParser parser(sourceBuffer);
         auto start = Clock::now();
         parser.parse(output);
         auto stop = Clock::now();
@@ -762,7 +762,7 @@ TEST(Charge, DISABLED_BenchmarkNoOutput) {
     for (int i = 0; i < 10; i++) {
 
         parse::NoOutput output;
-        parse::SimpleParser parser(sourceBuffer.data());
+        parse::SimpleParser parser(sourceBuffer);
         auto start = Clock::now();
         parser.parse(output);
         auto stop = Clock::now();

@@ -27,7 +27,8 @@ struct RecoveryElement {
     std::optional<LexerToken> m_token;
 };
 
-static std::string_view exampleString(LexerToken tok) {
+//! A text that lexes as \p tok, empty for the tokens that have no spelling of their own
+static constexpr std::string_view exampleText(LexerToken tok) {
     std::string_view spelling = fixedSpelling(tok);
     if (!spelling.empty())
         return spelling;
@@ -41,10 +42,42 @@ static std::string_view exampleString(LexerToken tok) {
     case LexerToken::StringLiteral:
         return "\"\"";
     default:
-        VERIFY_NOT_REACHED();
+        return {};
     }
-    return spelling;
 }
+
+static std::string_view exampleString(LexerToken tok) {
+    std::string_view text = exampleText(tok);
+    if (text.empty())
+        VERIFY_NOT_REACHED();
+    return text;
+}
+
+//! The example texts in storage the parser may lex from, which requires them to be padded
+struct ExampleSourceTable {
+    static constexpr int_t MAX_LENGTH = 16;
+    static constexpr int_t STRIDE = MAX_LENGTH + PADDED_STRING_PADDING;
+    static constexpr int_t TOKEN_COUNT = std::to_underlying(LexerToken::COUNT);
+
+    constexpr ExampleSourceTable() {
+        for (int_t token = 0; token < TOKEN_COUNT; token++) {
+            std::string_view text = exampleText(static_cast<LexerToken>(token));
+            VERIFY((int_t)text.length() <= MAX_LENGTH);
+            std::copy(text.begin(), text.end(), storage.data() + token * STRIDE);
+        }
+    }
+
+    constexpr padded_string_view operator()(LexerToken tok) const {
+        int_t token = std::to_underlying(tok);
+        VERIFY(token >= 0 && token < TOKEN_COUNT);
+        return padded_string_view::from_raw_unsafe(
+            { storage.data() + token * STRIDE, exampleText(tok).length() });
+    }
+
+    // The unused entries stay empty, they are never reached through a recovery
+    std::array<char, STRIDE * TOKEN_COUNT> storage = {};
+};
+inline constexpr ExampleSourceTable exampleSource;
 
 ReturnStatus SimpleParser::apply(SimpleOutput& output, RecoveryElement e) {
     if (e.isSkip()) {
@@ -52,7 +85,7 @@ ReturnStatus SimpleParser::apply(SimpleOutput& output, RecoveryElement e) {
         m_state.status = skipToken(output) == LexerToken::EOS ? ReturnStatus::UnhandledCase : ReturnStatus::Ready;
     } else {
         const char* sourcePos = sourcePosition();
-        setSourcePosition(exampleString(e.insert()).data());
+        setSourcePosition(exampleSource(e.insert()).data());
         parse(output, 1);
         setSourcePosition(sourcePos);
     }
@@ -65,7 +98,7 @@ ReturnStatus SimpleParser::apply(const NoOutput& output, RecoveryElement e) {
         m_state.status = skipToken(output) == LexerToken::EOS ? ReturnStatus::UnhandledCase : ReturnStatus::Ready;
     } else {
         const char* sourcePos = sourcePosition();
-        setSourcePosition(exampleString(e.insert()).data());
+        setSourcePosition(exampleSource(e.insert()).data());
         parse(output, 1);
         setSourcePosition(sourcePos);
     }
@@ -84,7 +117,7 @@ ReturnStatus Parser::apply(sema::Context& context, RecoveryElement e) {
         int_t oldTokenCount = context.tokenBuffer.tokens.size();
         SourceLocation loc = location(context);
         const char* sourcePos = sourcePosition();
-        m_state.sourcePosition = exampleString(e.insert()).data();
+        m_state.sourcePosition = exampleSource(e.insert()).data();
         parse(context, 1);
         m_state.sourcePosition = sourcePos;
         for (int_t i = oldTokenCount; i < context.tokenBuffer.tokens.size(); i++) {
@@ -524,8 +557,8 @@ struct RecoveryState {
     /*!
     This is required to recover the number tokens parsed along the path.
     */
-    std::vector<ReturnElement> buildPath(std::string_view source, std::span<const EdgeHandle> path) const {
-        SimpleParser parser(source.data());
+    std::vector<ReturnElement> buildPath(padded_string_view source, std::span<const EdgeHandle> path) const {
+        SimpleParser parser(source);
         std::vector<ReturnElement> result;
         uint32_t totalSkippedTokens = 0;
         uint32_t totalInsertedTokens = 0;
@@ -549,9 +582,9 @@ struct RecoveryState {
         return result;
     }
 
-    static std::vector<std::vector<ReturnElement>> recover(std::string_view source, const SavedParserState& errorState) {
+    static std::vector<std::vector<ReturnElement>> recover(padded_string_view source, const SavedParserState& errorState) {
         RecoveryState state;
-        SimpleParser parser(source.data());
+        SimpleParser parser(source);
         // The states the parser passes through before the first error are the roots of the search
         int_t validTokensUntilError = errorState.parsedTokens;
         if (validTokensUntilError > 1) {
@@ -625,7 +658,7 @@ std::vector<RecoveryGroup> buildGroups(std::span<RecoveryState::ReturnElement> i
     return result;
 }
 
-std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const SavedParserState& rootErrorState) {
+std::vector<RecoveredError> recoverAndAnalyze(padded_string_view source, const SavedParserState& rootErrorState) {
     auto ungroupedPaths = RecoveryState::recover(source, rootErrorState);
     VERIFY(!ungroupedPaths.empty());
     std::vector<std::vector<RecoveryGroup>> paths;
@@ -701,8 +734,8 @@ std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const Sav
     return result;
 }
 
-[[maybe_unused]] static std::string buildMockupString(std::string_view source, std::span<const RecoveryState::ReturnElement> path) {
-    SimpleParser parser(source.data());
+[[maybe_unused]] static std::string buildMockupString(padded_string_view source, std::span<const RecoveryState::ReturnElement> path) {
+    SimpleParser parser(source);
     std::string result;
     for (auto elem : path) {
         const char* prev = parser.sourcePosition();
@@ -724,8 +757,8 @@ std::vector<RecoveredError> recoverAndAnalyze(std::string_view source, const Sav
 }
 
 TEST(Parse, RecoveryBasic) {
-    std::string_view source = "fn f(): { return a + a b; }";
-    SimpleParser parser(source.data());
+    padded_string source("fn f(): { return a + a b; }");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -741,8 +774,8 @@ TEST(Parse, RecoveryBasic) {
 }
 
 TEST(Parse, RecoveryBasic2) {
-    std::string_view source = "fn f(): { return (a + ); }";
-    SimpleParser parser(source.data());
+    padded_string source("fn f(): { return (a + ); }");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -753,8 +786,8 @@ TEST(Parse, RecoveryBasic2) {
 }
 
 TEST(Parse, RecoveryBasic12) {
-    std::string_view source = "fn f1(): { return a + a a; } fn f2(): { return (a + ); }";
-    SimpleParser parser(source.data());
+    padded_string source("fn f1(): { return a + a a; } fn f2(): { return (a + ); }");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -767,8 +800,8 @@ TEST(Parse, RecoveryBasic12) {
 }
 
 TEST(Parse, RecoveryUnterminatedScope) {
-    std::string_view source = "namespace n: { ";
-    SimpleParser parser(source.data());
+    padded_string source("namespace n: { ");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -779,8 +812,8 @@ TEST(Parse, RecoveryUnterminatedScope) {
 }
 
 TEST(Parse, RecoveryEOSinExpr) {
-    std::string_view source = "fn f(): { (a + ";
-    SimpleParser parser(source.data());
+    padded_string source("fn f(): { (a + ");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -796,8 +829,8 @@ TEST(Parse, RecoveryEOSinExpr) {
 }
 
 TEST(Parse, RecoveryMissingFunctionParameters) {
-    std::string_view source = "fn f: { }";
-    SimpleParser parser(source.data());
+    padded_string source("fn f: { }");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());
@@ -808,8 +841,8 @@ TEST(Parse, RecoveryMissingFunctionParameters) {
 }
 
 TEST(Parse, DISABLED_RecoveryMockup) {
-    std::string_view source = "struct A: { base ; }";
-    SimpleParser parser(source.data());
+    padded_string source("struct A: { base ; }");
+    SimpleParser parser(source);
     parser.parse(NoOutput());
     EXPECT_FALSE(parser.done());
     auto results = RecoveryState::recover(source, parser.save());

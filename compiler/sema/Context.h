@@ -57,7 +57,7 @@ struct Context {
     std::vector<ScopeStackEntry> m_scopeStack;
     ErrorHandler* errorHandler = nullptr;
 
-    Context(std::span<const ModuleImport> imports, std::string_view source)
+    Context(std::span<const ModuleImport> imports, padded_string_view source)
         : tokenBuffer(source) {
         initialize(imports);
     }

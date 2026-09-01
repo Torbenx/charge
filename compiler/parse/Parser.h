@@ -73,11 +73,11 @@ struct SimpleTokenBuffer {
     PageBumpAllocator<SimpleTokenInfo> tokens;
     PageBumpAllocator<LineInfo> lines;
     PageBumpAllocator<WhitespaceInfo> whitespace;
-    std::string_view source;
+    padded_string_view source;
     SourceLocation lastLineStartLocation;
     const char* lastLineStartPosition = nullptr;
 
-    SimpleTokenBuffer(std::string_view source)
+    SimpleTokenBuffer(padded_string_view source)
         : source(source) {
         reset();
     }
@@ -99,7 +99,7 @@ struct SimpleTokenBuffer {
 struct SimpleOutput {
     SimpleTokenBuffer tokenBuffer;
 
-    SimpleOutput(std::string_view source)
+    SimpleOutput(padded_string_view source)
         : tokenBuffer(source) { }
 
     void reset() { tokenBuffer.reset(); }
@@ -121,7 +121,7 @@ LexerToken lexToken(const char*&);
 struct SimpleParser;
 
 struct Parser {
-    Parser(const char* sourcePosition);
+    Parser(padded_string_view source);
 
     ReturnStatus status() const { return m_state.status; }
     bool done() const { return status() == ReturnStatus::EOS; }
@@ -170,7 +170,7 @@ private:
 
 struct SimpleParser {
     SimpleParser();
-    SimpleParser(const char* sourcePosition);
+    SimpleParser(padded_string_view source);
 
     ReturnStatus status() const { return m_state.status; }
     bool done() const { return status() == ReturnStatus::EOS; }

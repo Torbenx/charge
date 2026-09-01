@@ -7,6 +7,7 @@ target_sources(${PROJECT_NAME}
     IdentifierTable.h
     keyword_table.h
     parse.cpp
+    parse.cpp.in
     Parser.cpp
     Parser.h
     parse_gen.cpp

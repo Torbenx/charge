@@ -271,13 +271,9 @@ void Lexer::lex(const char* source) {
 
 [[gnu::always_inline]] Word Lexer::readWord(const char*& position) {
     const char* begin = position;
-    Word::HashState state;
-    while (isBulkNameCharacter(*position)) {
-        Word::iterateHash(state, *position);
+    while (isBulkNameCharacter(*position))
         position += 1;
-    }
-    auto hash = Word::finalizeHash(state, position - begin);
-    return wordTable.getWithHash({ begin, position }, hash);
+    return wordTable.get(std::string_view(begin, position));
 }
 
 //! A symbol reads as the token the operator it stands for is written with

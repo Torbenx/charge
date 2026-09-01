@@ -21,6 +21,10 @@ add_executable(${PROJECT_NAME}
     log.cpp
     log.h
     main.cpp
+    padded_string.cpp
+    padded_string.h
+    padded_string_compare.cpp
+    padded_string_compare.h
     PageBumpAllocator.h
     ReverseMemberPointer.h
     tests.cpp

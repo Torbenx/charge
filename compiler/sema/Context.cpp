@@ -24,7 +24,7 @@ void Context::initialize(std::span<const ModuleImport> imports) {
         // Words
         WordTranslationTable inputToOutputWords;
         WordTranslationTable outputToInputWords;
-        input.wordTable->forEachWord([this, &inputToOutputWords, &outputToInputWords](Word inputWord, std::string_view string) {
+        input.wordTable->forEachWord([this, &inputToOutputWords, &outputToInputWords](Word inputWord, padded_string_view string) {
             Word outputWord = tokenBuffer.wordTable.getWithHash(string, inputWord.hash());
             inputToOutputWords.insert(inputWord, outputWord);
             outputToInputWords.insert(outputWord, inputWord);

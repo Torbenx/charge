@@ -101,7 +101,7 @@ TEST(Server, LSP) {
     namespace fs = std::filesystem;
     auto lspDir = fs::path(COMPILER_TEST_DIR) / "lsp";
 
-    std::string initMessage = readFile(lspDir / "initialize.json");
+    padded_string initMessage = readFile(lspDir / "initialize.json");
 
     for (const auto& entry : fs::directory_iterator(lspDir)) {
         if (!entry.is_regular_file())
@@ -109,7 +109,7 @@ TEST(Server, LSP) {
         if (!entry.path().string().ends_with(".test.json"))
             continue;
 
-        std::string testFileData = readFile(entry.path());
+        padded_string testFileData = readFile(entry.path());
         TestFile testFile = json::parse<TestFile>(testFileData);
         for (const auto& test : testFile.tests) {
             ServerWrapper server;
