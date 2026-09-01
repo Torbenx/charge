@@ -7,6 +7,7 @@
 #define CLI11_ENABLE_EXTRA_VALIDATORS 1
 
 #include <CLI/CLI.hpp>
+#include <benchmark/benchmark.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -24,6 +25,11 @@
 using Clock = std::chrono::high_resolution_clock;
 
 struct PerfEnable {
+    static bool perfPresent() {
+        PerfEnable enable;
+        return enable.ctlFd != 0;
+    }
+
     PerfEnable() {
         char* ctlFdStr = std::getenv("PERF_CTL_FD");
         char* ackFdStr = std::getenv("PERF_ACK_FD");
@@ -31,7 +37,7 @@ struct PerfEnable {
             ctlFd = std::atoi(ctlFdStr);
             ackFd = std::atoi(ackFdStr);
         }
-        if (ctlFd != 0 && ackFd != 0)  {
+        if (ctlFd != 0 && ackFd != 0) {
             write(ctlFd, "enable", 7);
             std::array<char, 5> result = {};
             VERIFY(read(ackFd, result.data(), 5) == 5);
@@ -53,126 +59,166 @@ struct PerfEnable {
 using LexerOutput = parse::SimpleTokenBuffer<parse::LexerToken>;
 using LexerFunction = const char* (*)(const char* sourcePosition, LexerOutput& output);
 
+template<LexerFunction lexFunc>
+struct Lexer {
+    explicit Lexer(padded_string_view source)
+        : sourcePosition(source.begin()) { }
+
+    void parse(LexerOutput& output) {
+        sourcePosition = lexFunc(sourcePosition, output);
+    }
+    bool done() const { return true; }
+
+    const char* sourcePosition;
+};
+
+struct NoParser {
+    explicit NoParser(padded_string_view) { }
+    void parse(parse::NoOutput&) { }
+    bool done() const { return true; }
+};
+
+enum class MeasurementMethod : uint8_t {
+    Clock,
+    PerfControl,
+    External,
+};
+
+template<typename Output>
+static Output makeOutput(padded_string_view sourceBuffer) {
+    if constexpr (std::same_as<Output, sema::Context>) {
+        return Output({}, sourceBuffer);
+    } else if constexpr (std::same_as<Output, parse::NoOutput>) {
+        return Output();
+    } else {
+        return Output(sourceBuffer);
+    }
+}
+
+template<typename Output>
+static std::string outputString(const Output& output) {
+    if constexpr (std::same_as<Output, sema::Context> || std::same_as<Output, parse::SimpleOutput>)
+        return std::format("{} semantic tokens", output.tokenBuffer.tokens.size());
+    else if constexpr (std::same_as<Output, parse::NoOutput>)
+        return "no output";
+    else
+        return std::format("{} tokens", output.tokens.size());
+}
+
+template<typename Parser, typename Output, MeasurementMethod method>
+struct BenchmarkImpl {
+    bool operator()(padded_string_view sourceBuffer) const {
+        Output output = makeOutput<Output>(sourceBuffer);
+        Parser parser(sourceBuffer);
+        if constexpr (method == MeasurementMethod::Clock) {
+            auto start = Clock::now();
+            parser.parse(output);
+            auto stop = Clock::now();
+            std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
+            std::cout << " and produced " << outputString(output) << "\n";
+        } else if constexpr (method == MeasurementMethod::PerfControl) {
+            PerfEnable enable;
+            parser.parse(output);
+        } else if constexpr (method == MeasurementMethod::External) {
+            parser.parse(output);
+        } else {
+            static_assert(false);
+        }
+        return parser.done();
+    }
+};
+
 namespace parse {
-    const char* lexSwitchAndBranch(const char* sourcePosition, LexerOutput& output);
-    const char* lexTable2Char(const char* sourcePosition, LexerOutput& output);
-    const char* lexSwitchAndPatternTable(const char* sourcePosition, LexerOutput& output);
-    const char* lexPatternTable(const char* sourcePosition, LexerOutput& output);
-    const char* lexTableHybrid(const char* sourcePosition, LexerOutput& output);
-    const char* lexSwitchAndTable(const char* sourcePosition, LexerOutput& output);
+const char* lexSwitchAndBranch(const char* sourcePosition, LexerOutput& output);
+const char* lexTable2Char(const char* sourcePosition, LexerOutput& output);
+const char* lexSwitchAndPatternTable(const char* sourcePosition, LexerOutput& output);
+const char* lexPatternTable(const char* sourcePosition, LexerOutput& output);
+const char* lexTableHybrid(const char* sourcePosition, LexerOutput& output);
+const char* lexSwitchAndTable(const char* sourcePosition, LexerOutput& output);
 }
 
-static void reportDuration(Clock::time_point start, Clock::time_point stop) {
-    std::cout << "Processing took " << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(stop - start);
-}
-
-static int benchmarkSema(const padded_string& sourceBuffer, int repeats) {
-    for (int i = 0; i < repeats; i++) {
-        sema::Context context({}, sourceBuffer);
-        parse::Parser parser(sourceBuffer);
-        auto start = Clock::now();
-        {
-            PerfEnable enable;
-            parser.parse(context);
-        }
-        auto stop = Clock::now();
-        reportDuration(start, stop);
-        std::cout << " and produced " << context.tokenBuffer.tokens.size() << " semantic tokens.\n";
-        if (!parser.done() || context.m_scopeStack.size() != 1) {
-            dbgln("Benchmark failed: the parser did not consume the entire input");
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int benchmarkSimple(const padded_string& sourceBuffer, int repeats) {
-    for (int i = 0; i < repeats; i++) {
-        parse::SimpleOutput output(sourceBuffer);
-        parse::SimpleParser parser(sourceBuffer);
-        auto start = Clock::now();
-        {
-            PerfEnable enable;
-            parser.parse(output);
-        }
-        auto stop = Clock::now();
-        reportDuration(start, stop);
-        std::cout << " and produced " << output.tokenBuffer.tokens.size() << " semantic tokens.\n";
-        if (!parser.done()) {
-            dbgln("Benchmark failed: the parser did not consume the entire input");
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int benchmarkNoOutput(const padded_string& sourceBuffer, int repeats) {
-    for (int i = 0; i < repeats; i++) {
-        parse::NoOutput output;
-        parse::SimpleParser parser(sourceBuffer);
-        auto start = Clock::now();
-        {
-            PerfEnable enable;
-            parser.parse(output);
-        }
-        auto stop = Clock::now();
-        reportDuration(start, stop);
-        std::cout << " and visited " << parser.parsedTokens() << " tokens.\n";
-        if (!parser.done()) {
-            dbgln("Benchmark failed: the parser did not consume the entire input");
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int benchmarkLexer(LexerFunction lexer, const padded_string& sourceBuffer, int repeats) {
-    for (int i = 0; i < repeats; i++) {
-        LexerOutput output(sourceBuffer);
-        auto start = Clock::now();
-        const char* finalPos = nullptr;
-        {
-            PerfEnable enable;
-            finalPos = lexer(sourceBuffer.data(), output);
-        }
-        auto stop = Clock::now();
-        reportDuration(start, stop);
-        std::cout << " and produced " << output.tokens.size() << " tokens.\n";
-        if (finalPos != sourceBuffer.data() + sourceBuffer.size()) {
-            dbgln("Benchmark failed: the lexer did not consume the entire input");
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int runBenchmark(const std::string& impl, const std::string& file, int repeats) {
-    auto sourceBuffer = server::readFile(file);
-
+template<MeasurementMethod method>
+static void withImpl(std::string_view impl, auto callback) {
     if (impl == "sema")
-        return benchmarkSema(sourceBuffer, repeats);
-    if (impl == "simple")
-        return benchmarkSimple(sourceBuffer, repeats);
-    if (impl == "no-output")
-        return benchmarkNoOutput(sourceBuffer, repeats);
-
-    LexerFunction lexer = nullptr;
-    if (impl == "switch-and-branch")
-        lexer = parse::lexSwitchAndBranch;
+        callback(BenchmarkImpl<parse::Parser, sema::Context, method> {});
+    else if (impl == "simple")
+        callback(BenchmarkImpl<parse::SimpleParser, parse::SimpleOutput, method> {});
+    else if (impl == "no-output")
+        callback(BenchmarkImpl<parse::SimpleParser, parse::NoOutput, method> {});
+    else if (impl == "switch-and-branch")
+        callback(BenchmarkImpl<Lexer<parse::lexSwitchAndBranch>, LexerOutput, method> {});
     else if (impl == "switch-and-pattern-table")
-        lexer = parse::lexSwitchAndPatternTable;
+        callback(BenchmarkImpl<Lexer<parse::lexSwitchAndPatternTable>, LexerOutput, method> {});
     else if (impl == "pattern-table")
-        lexer = parse::lexPatternTable;
+        callback(BenchmarkImpl<Lexer<parse::lexPatternTable>, LexerOutput, method> {});
     else if (impl == "table-2char")
-        lexer = parse::lexTable2Char;
+        callback(BenchmarkImpl<Lexer<parse::lexTable2Char>, LexerOutput, method> {});
     else if (impl == "table-hybrid")
-        lexer = parse::lexTableHybrid;
+        callback(BenchmarkImpl<Lexer<parse::lexTableHybrid>, LexerOutput, method> {});
     else if (impl == "switch-and-table")
-        lexer = parse::lexSwitchAndTable;
-
-    VERIFY(lexer != nullptr);
-    return benchmarkLexer(lexer, sourceBuffer, repeats);
+        callback(BenchmarkImpl<Lexer<parse::lexSwitchAndTable>, LexerOutput, method> {});
+    else if (impl == "baseline")
+        callback(BenchmarkImpl<NoParser, parse::NoOutput, method> {});
+    else
+        VERIFY_NOT_REACHED();
 }
+
+int runBenchmark(std::string_view impl, std::string_view file, int repeats) {
+    padded_string source = server::readFile(file);
+    if (PerfEnable::perfPresent()) {
+        withImpl<MeasurementMethod::PerfControl>(impl, [&](auto bench) {
+            for (int i = 0; i < repeats; i++) {
+                bool result = bench(source);
+                VERIFY(result);
+            }
+        });
+    } else {
+        withImpl<MeasurementMethod::Clock>(impl, [&](auto bench) {
+            for (int i = 0; i < repeats; i++) {
+                bool result = bench(source);
+                VERIFY(result);
+            }
+        });
+    }
+    return 0;
+}
+
+void runGoogleBenchmark(benchmark::State& state, std::string_view file) {
+    padded_string source = server::readFile(file);
+
+    std::string name = state.name();
+    std::string_view impl = std::string_view(name).substr(state.name().find('/') + 1);
+    withImpl<MeasurementMethod::External>(impl, [&state, &source](auto bench) {
+        for (auto _ : state) {
+            bool result = bench(source);
+            VERIFY(result);
+        }
+    });
+
+    auto bytes = source.size();
+    LexerOutput output(source);
+    parse::lexSwitchAndBranch(source.data(), output);
+    auto lines = output.lines.size();
+    auto tokens = output.tokens.size();
+
+    state.counters["bytes"] = benchmark::Counter(bytes, benchmark::Counter::kIsIterationInvariantRate);
+    state.counters["lines"] = benchmark::Counter(lines, benchmark::Counter::kIsIterationInvariantRate);
+    state.counters["tokens"] = benchmark::Counter(tokens, benchmark::Counter::kIsIterationInvariantRate);
+}
+
+void benchmarkImpl(benchmark::State& state) {
+    runGoogleBenchmark(state, { COMPILER_TEST_DIR "/../benchmark/benchmark.chrg" });
+}
+
+BENCHMARK_NAMED(benchmarkImpl, no-output);
+BENCHMARK_NAMED(benchmarkImpl, table-hybrid);
+BENCHMARK_NAMED(benchmarkImpl, switch-and-table);
+BENCHMARK_NAMED(benchmarkImpl, switch-and-pattern-table);
+BENCHMARK_NAMED(benchmarkImpl, switch-and-branch);
+BENCHMARK_NAMED(benchmarkImpl, table-2char);
+BENCHMARK_NAMED(benchmarkImpl, simple);
+BENCHMARK_NAMED(benchmarkImpl, pattern-table);
+BENCHMARK_NAMED(benchmarkImpl, sema);
 
 int charge_main(int argc, char** argv) {
     CLI::App app("Charge tool");
@@ -194,7 +240,7 @@ int charge_main(int argc, char** argv) {
     std::string benchmarkImpl;
     benchmark.add_option("impl", benchmarkImpl, "Implementation to benchmark")
         ->required()
-        ->check(CLI::IsMember({ "sema", "simple", "no-output",
+        ->check(CLI::IsMember({ "sema", "simple", "no-output", "baseline",
             "switch-and-branch", "switch-and-pattern-table", "pattern-table",
             "table-2char", "table-hybrid", "switch-and-table" }));
     std::string benchmarkFile;
@@ -204,10 +250,19 @@ int charge_main(int argc, char** argv) {
         ->default_val(1)
         ->check(CLI::PositiveNumber);
 
+    auto& gbench = *app.add_subcommand("gbench", "Invoke google benchmark")->allow_extras(CLI::ExtrasMode::Ignore);
+
     CLI11_PARSE(app, argc, argv);
 
     if (benchmark.parsed())
         return runBenchmark(benchmarkImpl, benchmarkFile, benchmarkRepeats);
+
+    if (gbench.parsed()) {
+        benchmark::Initialize(&argc, argv);
+        benchmark::RunSpecifiedBenchmarks();
+        benchmark::Shutdown();
+        return 0;
+    }
 
     if (syntax_check.parsed()) {
         auto sourceBuffer = server::readFile(syntaxCheckFile);
