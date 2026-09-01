@@ -14,7 +14,6 @@ import sys
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
-GREEN = "\033[32m"
 RED = "\033[31m"
 
 
@@ -39,22 +38,12 @@ def humanCount(value):
     return f"{value:.0f}"
 
 
-def humanTime(nanoseconds):
-    if nanoseconds is None:
-        return "-"
-    for limit, suffix in ((1e9, "s"), (1e6, "ms"), (1e3, "us")):
-        if nanoseconds >= limit:
-            return f"{nanoseconds / limit:.3f}{suffix}"
-    return f"{nanoseconds:.1f}ns"
+def percent(value, digits=2):
+    return "-" if value is None else f"{value:.{digits}f}%"
 
 
-def ratio(value, base):
-    if value is None or base is None or base == 0:
-        return "-"
-    delta = (value / base - 1.0) * 100.0
-    if abs(delta) < 0.005:
-        return "="
-    return f"{delta:+.2f}%"
+def fixed(value, digits=2):
+    return "-" if value is None else f"{value:.{digits}f}"
 
 
 # ---------------------------------------------------------------- input model
@@ -94,14 +83,14 @@ class Result:
     def realTime(self):
         return self.value("real_time")
 
-    @property
-    def cv(self):
+    def relativeStddev(self, field):
+        """Stddev of a field as a percentage of its mean."""
         # google benchmark reports the coefficient of variation as a fraction
-        cv = self.stat("cv", "cpu_time")
+        cv = self.stat("cv", field)
         if cv is not None:
             return cv * 100.0
-        stddev = self.stat("stddev", "cpu_time")
-        mean = self.stat("mean", "cpu_time")
+        stddev = self.stat("stddev", field)
+        mean = self.stat("mean", field)
         if stddev is not None and mean:
             return stddev / mean * 100.0
         return None
@@ -129,12 +118,12 @@ class Result:
             return None
         return misses / branches * 100.0
 
-    def perToken(self, counter):
-        tokens = self.perIteration("tokens")
+    def perLine(self, counter):
+        lines = self.perIteration("lines")
         value = self.counter(counter)
-        if not tokens or value is None:
+        if not lines or value is None:
             return None
-        return value / tokens
+        return value / lines
 
 
 def parseResults(text):
@@ -173,77 +162,53 @@ def stripCommonPrefix(results):
 # ---------------------------------------------------------------- table layout
 
 class Column:
-    def __init__(self, title, render, best=None, align=">"):
+    def __init__(self, title, render, align=">"):
         self.title = title
         self.render = render
-        self.best = best  # min / max / None: which value counts as "best"
         self.align = align
 
 
-def buildColumns(results, baseline):
+def buildColumns(results):
     hasCounters = any(result.counter(name) is not None for result in results for name in COUNTERS)
-    hasTokens = any(result.perIteration("tokens") is not None for result in results)
-    hasBytes = any(result.value("bytes") is not None for result in results)
+    hasLines = any(result.perIteration("lines") is not None for result in results)
 
-    columns = [
-        Column("impl", lambda r: r.name, align="<"),
-        Column("time", lambda r: humanTime(r.cpuTime), best=lambda r: r.cpuTime),
-        Column("cv", lambda r: "-" if r.cv is None else f"{r.cv:.2f}%"),
-    ]
-    if baseline is not None:
-        columns.append(Column(f"vs {baseline.name}", lambda r: ratio(r.cpuTime, baseline.cpuTime)))
-    if hasBytes:
-        columns.append(Column("MB/s", lambda r: humanCount(r.value("bytes") / 1e6) if r.value("bytes") else "-",
-                              best=lambda r: -(r.value("bytes") or 0)))
-    if hasTokens:
-        columns.append(Column("Mtok/s", lambda r: humanCount(r.value("tokens") / 1e6) if r.value("tokens") else "-",
-                              best=lambda r: -(r.value("tokens") or 0)))
-    if hasCounters:
+    columns = [Column("impl", lambda r: r.name, align="<")]
+    if hasLines:
         columns += [
-            Column("cycles", lambda r: humanCount(r.counter("CYCLES")), best=lambda r: r.counter("CYCLES")),
-            Column("instr", lambda r: humanCount(r.counter("INSTRUCTIONS")), best=lambda r: r.counter("INSTRUCTIONS")),
-            Column("IPC", lambda r: "-" if r.ipc is None else f"{r.ipc:.2f}", best=lambda r: -(r.ipc or 0)),
-            Column("branches", lambda r: humanCount(r.counter("BRANCHES")), best=lambda r: r.counter("BRANCHES")),
-            Column("br-miss", lambda r: humanCount(r.counter("BRANCH-MISSES"))),
-            Column("miss%", lambda r: "-" if r.missRate is None else f"{r.missRate:.2f}%",
-                   best=lambda r: r.missRate),
+            Column("lines/s", lambda r: humanCount(r.value("lines"))),
+            Column("lines/s ±%", lambda r: percent(r.relativeStddev("lines"))),
         ]
-        if hasTokens:
-            columns.append(Column("cyc/tok", lambda r: "-" if r.perToken("CYCLES") is None
-                                  else f"{r.perToken('CYCLES'):.1f}", best=lambda r: r.perToken("CYCLES")))
+    if hasCounters:
+        if hasLines:
+            columns += [
+                Column("cyc/line", lambda r: fixed(r.perLine("CYCLES"))),
+                Column("cyc/line ±%", lambda r: percent(r.relativeStddev("CYCLES"))),
+            ]
+        columns += [
+            Column("cycles", lambda r: humanCount(r.counter("CYCLES"))),
+            Column("instr", lambda r: humanCount(r.counter("INSTRUCTIONS"))),
+            Column("branches", lambda r: humanCount(r.counter("BRANCHES"))),
+            Column("br-miss", lambda r: humanCount(r.counter("BRANCH-MISSES"))),
+            Column("miss%", lambda r: percent(r.missRate)),
+            Column("IPC", lambda r: fixed(r.ipc)),
+        ]
     return columns
 
 
 def renderTable(results, columns, style):
     cells = [[column.render(result) for column in columns] for result in results]
 
-    winners = set()
-    for columnIndex, column in enumerate(columns):
-        if column.best is None or len(results) < 2:
-            continue
-        scored = [(column.best(result), row) for row, result in enumerate(results)]
-        scored = [(value, row) for value, row in scored if value is not None]
-        if not scored:
-            continue
-        best = min(scored)[0]
-        for value, row in scored:
-            if value == best:
-                winners.add((row, columnIndex))
-
     widths = [max(len(column.title), *(len(row[i]) for row in cells))
               for i, column in enumerate(columns)]
 
-    def line(values, decorate=None):
-        parts = []
-        for i, (column, text) in enumerate(zip(columns, values)):
-            padded = f"{text:{column.align}{widths[i]}}"
-            parts.append(decorate(i, padded) if decorate else padded)
-        return "  ".join(parts)
+    def line(values):
+        return "  ".join(f"{text:{column.align}{widths[i]}}"
+                         for i, (column, text) in enumerate(zip(columns, values)))
 
     print(style(line([column.title for column in columns]), BOLD))
     print(style("-" * (sum(widths) + 2 * (len(widths) - 1)), DIM))
-    for row, values in enumerate(cells):
-        print(line(values, lambda i, text, row=row: style(text, GREEN) if (row, i) in winners else text))
+    for values in cells:
+        print(line(values))
 
 
 def printContext(context, results, style):
@@ -271,11 +236,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("file", nargs="?", default="-", help="JSON file (default: stdin)")
-    parser.add_argument("-b", "--baseline", metavar="NAME",
-                        help="benchmark to compare against (default: the first one)")
     parser.add_argument("-s", "--sort", choices=("none", "time", "name"), default="none",
                         help="row order (default: order of definition)")
-    parser.add_argument("--no-baseline", action="store_true", help="omit the comparison column")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto")
     arguments = parser.parse_args()
 
@@ -291,23 +253,11 @@ def main():
     elif arguments.sort == "name":
         results.sort(key=lambda result: result.name)
 
-    baseline = None
-    if not arguments.no_baseline and len(results) > 1:
-        if arguments.baseline:
-            matches = [result for result in results if result.name == arguments.baseline]
-            if not matches:
-                matches = [result for result in results if arguments.baseline in result.name]
-            if not matches:
-                sys.exit(f"benchmark-table: no benchmark matching '{arguments.baseline}'")
-            baseline = matches[0]
-        else:
-            baseline = min(results, key=lambda result: result.index)
-
     style = Style(arguments.color == "always" or (arguments.color == "auto" and sys.stdout.isatty()))
 
     printContext(context, results, style)
     print()
-    renderTable(results, buildColumns(results, baseline), style)
+    renderTable(results, buildColumns(results), style)
 
 
 if __name__ == "__main__":
