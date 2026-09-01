@@ -6,6 +6,7 @@ if (NOT MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbmi -mbmi2 -mpopcnt -mlzcnt -msse4")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -falign-functions=64 -falign-loops=32 -mbranches-within-32B-boundaries")
     add_compile_definitions("CHARGE_SSE_OPTIMIZATIONS=1")
 endif()
 
@@ -32,5 +33,13 @@ FetchContent_Declare(
 )
 set(CLI11_PRECOMPILED ON CACHE BOOL "" FORCE) # Build static library instead of header only
 FetchContent_MakeAvailable(cli11_proj)
+
+FetchContent_Declare(
+    googlebenchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        04b5f41ec7e3b68b28a2379bc19804a48953117d # main on Aug 31 2026
+)
+set(BENCHMARK_ENABLE_LIBPFM on) # Enable performance counters
+FetchContent_MakeAvailable(googlebenchmark)
 
 add_subdirectory(compiler)

@@ -1,0 +1,236 @@
+namespace memory: {
+
+// --- Tuning constants ----------------------------------------------------
+
+static PAGE_SIZE: int = 4096;
+static PAGE_SHIFT: int = 12;
+static PAGE_MASK: int = 4095;              // 0xFFF
+static WORD_BITS: int = 64;
+static WORD_SHIFT: int = 6;
+static WORD_MASK: int = 63;                // 0x3F
+static ALL_ONES: int = -1;                 // every bit set
+
+static MIN_ALIGNMENT: int = 8;
+static MAX_ALIGNMENT: int = 4096;
+static MIN_BLOCK_SIZE: int = 16;
+static MAX_SMALL_SIZE: int = 2048;
+
+static SLAB_TARGET_BLOCKS: int = 64;
+static SLAB_MIN_BLOCKS: int = 4;
+static SLAB_MAX_BLOCKS: int = 1024;
+
+static ARENA_INITIAL_PAGES: int = 64;
+static ARENA_GROWTH_NUMERATOR: int = 3;
+static ARENA_GROWTH_DENOMINATOR: int = 2;
+
+// Fixed-point scale for every ratio in this file. A value of 1000 means
+// "1.000", a value of 875 means "0.875". No floating point is used anywhere.
+static PERMILLE: int = 1000;
+
+// A slab is evicted once its occupancy drops below this permille value and
+// the owning cache already holds more than EVICT_KEEP_SLABS partial slabs.
+static EVICT_THRESHOLD_PERMILLE: int = 125;
+static EVICT_KEEP_SLABS: int = 2;
+
+// Poison patterns written over freed payloads when debug fill is enabled.
+static POISON_FREED: int = 221;            // 0xDD
+static POISON_FRESH: int = 205;            // 0xCD
+static GUARD_MAGIC: int = 3735928559;      // 0xDEADBEEF
+
+static INVALID_INDEX: int = -1;
+
+// --- Enumerations --------------------------------------------------------
+
+enum BlockState: {
+    Free;
+    Allocated;
+    Split;
+    Quarantined = 3;
+}
+
+enum SlabState: {
+    Fresh;
+    Partial;
+    Full;
+    Retired = 3;
+}
+
+enum ClassKind: {
+    Tiny;
+    Small;
+    Medium;
+    Large = 3;
+}
+
+enum ValidationCode: {
+    Ok;
+    BitmapCountMismatch;
+    OverlappingBlocks;
+    UnalignedBase;
+    DanglingFreeNode;
+    GuardCorrupted;
+    OccupancyOutOfRange;
+    ClassSizeMismatch = 7;
+}
+
+enum RefillOutcome: {
+    Reused;
+    GrewArena;
+    Failed = 2;
+}
+
+// --- Alignment helpers ---------------------------------------------------
+
+// Round `value` up to the next multiple of `alignment`. The alignment is
+// assumed to be a power of two; callers go through `normalize_alignment`.
+fn align_up(value: int, alignment: int) -> int: {
+    assert alignment > 0;
+    let mask = alignment - 1;
+    return (value + mask) & ~mask;
+}
+
+fn align_down(value: int, alignment: int) -> int: {
+    assert alignment > 0;
+    let mask = alignment - 1;
+    return value & ~mask;
+}
+
+fn is_aligned(value: int, alignment: int) -> bool: {
+    let mask = alignment - 1;
+    return (value & mask) == 0;
+}
+
+fn alignment_mask(alignment: int) => alignment - 1;
+
+fn is_power_of_two(value: int) -> bool: {
+    if value <= 0: {
+        return false;
+    }
+    return (value & (value - 1)) == 0;
+}
+
+// Smallest power of two that is greater than or equal to `value`.
+fn next_power_of_two(value: int) -> int: {
+    var result: int = 1;
+    while result < value: {
+        result <<= 1;
+    }
+    return result;
+}
+
+fn normalize_alignment(requested: int) -> int: {
+    if requested < MIN_ALIGNMENT: {
+        return MIN_ALIGNMENT;
+    }
+    if requested > MAX_ALIGNMENT: {
+        return MAX_ALIGNMENT;
+    }
+    if is_power_of_two(requested): {
+        return requested;
+    }
+    return next_power_of_two(requested);
+}
+
+fn page_of(offset: int) => offset >> PAGE_SHIFT;
+
+fn page_base(offset: int) -> int: {
+    return offset & ~PAGE_MASK;
+}
+
+fn pages_for(bytes: int) -> int: {
+    return (bytes + PAGE_MASK) >> PAGE_SHIFT;
+}
+
+// Fixed-point ratio helper: returns `part / whole` scaled by PERMILLE.
+fn permille_of(part: int, whole: int) -> int: {
+    if whole <= 0: {
+        return 0;
+    }
+    return (part * PERMILLE) / whole;
+}
+
+fn word_index(bit: int) => bit >> WORD_SHIFT;
+
+fn bit_within_word(bit: int) => bit & WORD_MASK;
+
+// Population count over a single machine word, using the classic shift and
+// mask reduction rather than an intrinsic.
+fn popcount_word(word: int) -> int: {
+    var value = word;
+    var count: int = 0;
+    while value != 0: {
+        value &= value - 1;
+        count += 1;
+    }
+    return count;
+}
+
+fn trailing_zeros(word: int) -> int: {
+    if word == 0: {
+        return WORD_BITS;
+    }
+    var value = word;
+    var count: int = 0;
+    while (value & 1) == 0: {
+        value >>= 1;
+        count += 1;
+    }
+    return count;
+}
+
+// --- Size classes --------------------------------------------------------
+
+// One row of the size-class table. `stride` is the distance between two
+// consecutive block starts and already accounts for the header guard, while
+// `payload` is what the caller actually gets to use.
+struct SizeClass: {
+
+    fn stride_of(self: &const shared) -> int: {
+        return .stride;
+    }
+
+    fn payload_of(self: &const shared) -> int: {
+        return .payload;
+    }
+
+    fn waste_per_block(self: &const shared) -> int: {
+        return .stride - .payload;
+    }
+
+    fn waste_permille(self: &const shared) -> int: {
+        return permille_of(.waste_per_block(), .stride);
+    }
+
+    fn slab_bytes(self: &const shared) -> int: {
+        return align_up(.stride * .blocks_per_slab, PAGE_SIZE);
+    }
+
+    fn slab_pages(self: &const shared) -> int: {
+        return pages_for(.stride * .blocks_per_slab);
+    }
+
+    fn accepts(self: &const shared, bytes: int, alignment: int) -> bool: {
+        if bytes > .payload: {
+            return false;
+        }
+        return alignment <= .alignment;
+    }
+
+    fn describe(self: &const shared) -> string: {
+        var text = to_string(.index);
+        text.append(": ");
+        text.append(to_string(.payload));
+        text.append(" bytes, stride ");
+        text.append(to_string(.stride));
+        return text;
+    }
+
+    index: int = 0;
+    payload: int = 0;
+    stride: int = 0;
+    alignment: int = 8;
+    blocks_per_slab: int = 0;
+    kind: ClassKind = ClassKind::Tiny;
+}
+
+}

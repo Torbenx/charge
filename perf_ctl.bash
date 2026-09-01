@@ -14,6 +14,10 @@ mkfifo ${FIFO_PREFIX}.ack
 exec {perf_ctl_fd}<>${FIFO_PREFIX}.ctl
 exec {perf_ack_fd}<>${FIFO_PREFIX}.ack
 
+# fifos can be unlinked immediately
+unlink ${FIFO_PREFIX}.ctl
+unlink ${FIFO_PREFIX}.ack
+
 # set env vars for application
 export PERF_CTL_FD=${perf_ctl_fd}
 export PERF_ACK_FD=${perf_ack_fd}
@@ -21,9 +25,6 @@ export PERF_ACK_FD=${perf_ack_fd}
 # start perf with the associated file descriptors
 perf stat \
     --event=cycles:u,instructions:u,branches:u,branch-misses:u,cpu-clock:u \
-    --delay=-1 --repeat=100 \
+    --delay=-1 --repeat=100 --log-fd=1 \
     --control fd:${perf_ctl_fd},${perf_ack_fd} \
-    -- ./build/charge "$@" > /dev/null
-
-unlink ${FIFO_PREFIX}.ctl
-unlink ${FIFO_PREFIX}.ack
+    -- ./build/charge "$@" 2> /dev/null
