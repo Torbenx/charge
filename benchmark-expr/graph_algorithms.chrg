@@ -1,0 +1,3313 @@
+// A generic graph algorithms library.
+//
+// The library is deliberately organised as a *shallow tower of namespaces*
+// rather than as one enormous container type.  Everything that operates on a
+// graph is a free function, grouped by topic:
+//
+//   * `graph`                  -- the data types themselves plus small helpers,
+//   * `graph::builders`        -- construction, conversion and transformation,
+//   * `graph::traversal`       -- BFS, DFS and the visitor plumbing,
+//   * `graph::connectivity`    -- components, ordering, cycles, cuts,
+//   * `graph::shortest_path`   -- Dijkstra, Bellman-Ford, Floyd-Warshall,
+//   * `graph::spanning`        -- Prim, Kruskal and the union-find they need,
+//   * `graph::matching`        -- bipartite matching and the covers it implies,
+//   * `graph::flow`            -- residual networks and maximum flow.
+//
+// Two storage strategies are provided and they share the same vocabulary:
+//
+//   * `AdjacencyList{V, W}` keeps, for every vertex, a vector of *edge ids*
+//     into a flat `edges` arena.  This is the representation every algorithm
+//     in this file prefers, because iterating the incident edges of a vertex
+//     costs exactly the degree of that vertex.
+//   * `AdjacencyMatrix{V, W, N}` keeps an `N * N` block of cells.  It is the
+//     right shape for Floyd-Warshall and for dense max-flow, and it makes the
+//     "is there an edge between u and v" question a single index.
+//
+// Both are parameterised over `V`, the payload carried by a vertex, and `W`,
+// the payload carried by an edge.  An *unweighted* graph is simply a graph
+// whose edges all carry `UNIT_WEIGHT`; there is no separate type for it, only
+// the `unweighted_*` constructors below.
+//
+// No floating point appears anywhere.  Weights and distances are fixed point
+// integers scaled by `WEIGHT_SCALE`, so a weight of "2.5" is written 2500 and
+// a ratio of "one half" is `WEIGHT_SCALE / 2`.  Every routine that divides
+// documents whether it rounds towards zero.
+
+// --- Sentinels and tuning -------------------------------------------------
+
+// "No such vertex" / "no such edge".  Negative so it can never index a vector.
+
+// Stand-in for +infinity in distance arrays.  Chosen so that adding any two
+// finite distances in this library still fits comfortably in an int.
+
+// Fixed point scale shared by every weight, distance and flow value.
+
+// The weight given to an edge of an unweighted graph.
+
+// Default number of vertices a freshly built graph reserves room for.
+
+// Growth factor for the edge arena, in percent, so no division by a float is
+// ever required.
+
+// Upper bound on the depth of an explicit traversal stack before the
+// iterative variants start reallocating.
+
+// Bellman-Ford gives up after this many relaxation rounds even if the graph
+// claims to be larger; a negative cycle is reported instead.
+
+// Maximum number of augmenting paths a flow routine will look for.  Real
+// Edmonds-Karp terminates in O(V * E) augmentations; this is only a guard.
+
+// --- Enumerations ---------------------------------------------------------
+
+// Whether an edge may be traversed in one direction or in both.
+
+// Whether the edges of a graph carry meaningful weights.  Algorithms use this
+// to pick a cheaper code path, never to change their answer.
+
+// The classic three-colour marking used by depth first search.
+
+// How a visitor wants the traversal to proceed after a hook fires.
+
+// The role an edge plays in a depth first forest.
+
+// The outcome of a topological ordering attempt.
+
+// Which side of a bipartition a vertex landed on.
+
+// --- Edge -----------------------------------------------------------------
+
+// One directed arc of the graph.
+//
+// Undirected graphs store *two* `Edge` records per logical edge, one in each
+// direction, and give them consecutive ids so that `twin_of` can flip between
+// them with a single exclusive-or against 1.  `pair_id` keeps the logical
+// identity so that, for instance, Kruskal never considers the same physical
+// edge twice.
+
+    // The endpoint that is not `endpoint`.  Passing a vertex that is not an
+    // endpoint of this edge returns `tail`, which callers treat as a bug.
+
+        tail == endpoint;
+            head;
+
+        tail;
+
+        tail == vertex || head == vertex;
+
+        tail == head;
+
+        alive && tail != GRAPH_NIL;
+
+        // Ids of the two half-edges of an undirected pair differ only in bit 0.
+
+        id ^ 1;
+
+// --- Vertex ---------------------------------------------------------------
+
+// One vertex plus the bookkeeping every traversal wants to hang off it.
+//
+// The fields after `payload` are scratch space.  Algorithms are expected to
+// reset the ones they use through `reset_marks` before they start; nothing in
+// this file relies on their value surviving between two calls.
+
+        incident_size;
+
+        incident_empty;
+
+        color = ColorMark_White;
+        discovered = GRAPH_NIL;
+        finished = GRAPH_NIL;
+        parent = GRAPH_NIL;
+        component = GRAPH_NIL;
+        side = Side_Unassigned;
+
+// --- Adjacency list -------------------------------------------------------
+
+// The primary representation: a vector of vertices, each holding a vector of
+// edge ids into a shared arena.
+//
+// `direction` decides whether `connect` inserts one arc or two.  Nothing else
+// in the type behaves differently, which is what lets one implementation of
+// BFS serve both the directed and the undirected case.
+
+        vertices_size;
+
+        edges_size;
+
+        // Number of *logical* edges: half the arc count when undirected.
+
+        direction == EdgeDirection_Undirected;
+            edges_size / 2;
+
+        edges_size;
+
+        direction == EdgeDirection_Directed;
+
+        mode == WeightMode_Weighted;
+
+        v >= 0 && v < vertices_size;
+
+        vertices_at , v;
+
+        edges_at , e;
+
+        vertices_at , v_incident;
+
+        vertices_at , v_incident_size;
+
+        direction == EdgeDirection_Undirected;
+            vertices_at , v_incident_size;
+
+        vertices_at , v_incoming_size;
+
+        vertices_at , v_incident_size;
+
+        // Append a fresh isolated vertex and hand back its id.
+
+        id = vertices_size;
+        v = Vertex , V , id , payload;
+        vertices_push_back , move , v;
+        id;
+
+        // Grow to at least `n` vertices, leaving existing ones untouched.
+
+        vertices_reserve , n;
+        vertices_size < n;
+            id = vertices_size;
+            vertices_push_back , Vertex , V , id;
+
+            // The workhorse: insert one arc, and its twin when undirected.
+
+        tail >= 0;
+        head >= 0;
+        first = edges_size;
+        forward = Edge , V , W , tail ,
+                                 head ,
+                                 weight ,
+                                 weight ,
+                                 first ,
+                                 first;
+        edges_push_back , move , forward;
+        vertices_at , tail_incident_push_back , first;
+        direction == EdgeDirection_Undirected;
+            second = edges_size;
+            backward = Edge , V , W , head ,
+                                      tail ,
+                                      weight ,
+                                      weight ,
+                                      second ,
+                                      first;
+            edges_push_back , move , backward;
+            vertices_at , head_incident_push_back , second;
+
+            vertices_at , head_incoming_push_back , first;
+
+        first;
+
+        connect , tail , head , UNIT_WEIGHT;
+
+        // Logical removal: the arc stays in the arena so that ids never shift.
+
+        e < 0 || e >= edges_size;
+            false;
+
+        arc = edges_at , e;
+        arc_alive == false;
+            false;
+
+        arc_alive = false;
+        direction == EdgeDirection_Undirected;
+            twin = edges_at , arc_twin_id;
+            twin_alive = false;
+
+        true;
+
+        e , vertices_at , tail_incident;
+            arc = edges_at , e;
+            arc_alive && arc_head == head;
+                true;
+
+        false;
+
+        e , vertices_at , tail_incident;
+            arc = edges_at , e;
+            arc_alive && arc_head == head;
+                arc_weight;
+
+        GRAPH_INFINITY;
+
+        v , vertices;
+            v_clear_marks;
+
+        vertices_clear;
+        edges_clear;
+
+// --- Adjacency matrix -----------------------------------------------------
+
+// Dense representation with a compile-time side length.
+//
+// `N` being a template parameter means `index_of` is a compile-time affine
+// expression and the whole cell block can live in one allocation.  Absent
+// edges hold `GRAPH_INFINITY` rather than zero so that Floyd-Warshall can run
+// straight over the raw cells.
+
+        N;
+
+        N * N;
+
+        row * N + col;
+
+        cells_at , row * N + col;
+
+        cells_at , row * N + col;
+
+        cells_at , row * N + col = value;
+        direction == EdgeDirection_Undirected;
+            cells_at , col * N + row = value;
+
+        cells_at , row * N + col < GRAPH_INFINITY;
+
+        cells_clear;
+        k = 0;
+        k < N * N;
+            cells_push_back , value;
+            k++;
+
+            // Reset to "no edges anywhere, zero cost to stay put".
+
+        fill , GRAPH_INFINITY;
+        d = 0;
+        d < N;
+            cells_at , d * N + d = 0;
+            ++d;
+
+        total = 0;
+        c = 0;
+        c < N;
+            value = cells_at , row * N + c;
+            value < GRAPH_INFINITY;
+                total += value;
+
+            ++c;
+
+        total;
+
+        r = 0;
+        r < N;
+            c = r + 1;
+            c < N;
+                cells_at , r * N + c != cells_at , c * N + r;
+                    false;
+
+                c++;
+
+            r++;
+
+        true;
+
+// --- Small shared helpers -------------------------------------------------
+
+// A vertex/priority pair, used by every routine that needs an ordered
+// frontier.  Kept at namespace scope so the heap below is not generic over
+// yet another type.
+
+        priority != other_priority;
+            priority < other_priority;
+
+        vertex < other_vertex;
+
+// An explicit binary min-heap.
+//
+// The heap is written by hand rather than reused from the standard library
+// because Dijkstra wants `decrease_key`, and because a lazy variant (pushing
+// duplicates and discarding stale pops) is measurably simpler to prove
+// correct.  Both are supported: `position` is maintained when `tracked` is
+// true and ignored otherwise.
+
+        items_size;
+
+        items_empty;
+
+        i - 1 / 2;
+
+        2 * i + 1;
+
+        2 * i + 2;
+
+        // Move `i` towards the root until the heap property holds above it.
+
+        i = start;
+        i > 0;
+            p = i - 1 / 2;
+            items_at , i_better_than , items_at , p == false;
+
+            swap_slots , i , p;
+            i = p;
+
+        i;
+
+        // Move `i` towards the leaves until the heap property holds below it.
+
+        i = start;
+        n = items_size;
+
+            l = 2 * i + 1;
+            r = 2 * i + 2;
+            best = i;
+            l < n;
+                items_at , l_better_than , items_at , best;
+                    best = l;
+
+            r < n;
+                items_at , r_better_than , items_at , best;
+                    best = r;
+
+            best == i;
+
+            swap_slots , i , best;
+            i = best;
+
+        i;
+
+        swap , items_at , a , items_at , b;
+        tracked;
+            position_at , items_at , a_vertex = a;
+            position_at , items_at , b_vertex = b;
+
+        slot = items_size;
+        items_push_back , HeapEntry , vertex , priority , clock;
+        clock++;
+        tracked;
+            position_at , vertex = slot;
+
+        sift_up , slot;
+
+        items_front;
+
+        top = items_front;
+        last = items_size - 1;
+        swap_slots , 0 , last;
+        items_pop_back;
+        items_empty == false;
+            sift_down , 0;
+
+        tracked;
+            position_at , top_vertex = GRAPH_NIL;
+
+        top;
+
+    // Lower the recorded priority of a vertex already in the heap.  Returns
+    // false when the vertex is absent or the new key is not an improvement.
+
+        tracked == false;
+            push , vertex , priority;
+            true;
+
+        slot = position_at , vertex;
+        slot == GRAPH_NIL;
+            push , vertex , priority;
+            true;
+
+        items_at , slot_priority <= priority;
+            false;
+
+        items_at , slot_priority = priority;
+        sift_up , slot;
+        true;
+
+        tracked == false;
+            false;
+
+        position_at , vertex != GRAPH_NIL;
+
+        items_clear;
+        position_clear;
+        tracked = true;
+        i = 0;
+        i < order;
+            position_push_back , GRAPH_NIL;
+            ++i;
+
+        items_clear;
+        position_clear;
+        clock = 0;
+
+// Disjoint set forest with union by rank and full path compression.
+//
+// Used by Kruskal and by the offline connectivity queries in
+// `graph::connectivity`.  `components` is maintained eagerly so that
+// "is the graph connected" is answered without a scan.
+
+        parent_clear;
+        rank_clear;
+        weight_clear;
+        i = 0;
+        i < order;
+            parent_push_back , i;
+            rank_push_back , 0;
+            weight_push_back , 1;
+            ++i;
+
+        components = order;
+
+        root = x;
+        parent_at , root != root;
+            root = parent_at , root;
+
+        walker = x;
+        walker != root;
+            next = parent_at , walker;
+            parent_at , walker = root;
+            walker = next;
+
+        root;
+
+        find , a == find , b;
+
+        ra = find , a;
+        rb = find , b;
+        ra == rb;
+            false;
+
+        rank_at , ra < rank_at , rb;
+            swap , ra , rb;
+
+        parent_at , rb = ra;
+        weight_at , ra += weight_at , rb;
+        rank_at , ra == rank_at , rb;
+            rank_at , ra += 1;
+
+        components--;
+        components >= 1;
+        true;
+
+        root = find , x;
+        weight_at , root;
+
+        components == 1;
+
+        // Fill `target` with `count` copies of `value`, discarding what was there.
+
+    target_clear;
+    i = 0;
+    i < count;
+        target_push_back , value;
+        i++;
+
+        // Same, for the boolean scratch arrays every traversal needs.
+
+    target_clear;
+    i = 0;
+    i < count;
+        target_push_back , value;
+        ++i;
+
+// Reverse a vector of ids in place; used to turn a "walk back along parents"
+// result into a forward path.
+
+    lo = 0;
+    hi = target_size - 1;
+    lo < hi;
+        swap , target_at , lo , target_at , hi;
+        lo++;
+        --hi;
+
+        // Saturating addition on scaled distances: infinity absorbs everything.
+
+    a >= GRAPH_INFINITY || b >= GRAPH_INFINITY;
+        GRAPH_INFINITY;
+
+    a + b;
+
+    // True when the scaled distance stands for "unreachable".
+
+    d >= GRAPH_INFINITY;
+
+// ==========================================================================
+// graph::builders
+//
+// Construction, conversion and structural transformation.  Nothing here
+// inspects a graph beyond its shape, so this namespace has no dependencies on
+// any of the algorithm namespaces below it.
+// ==========================================================================
+
+// An empty directed graph with `n` isolated vertices.
+
+    g = AdjacencyList , V , W , EdgeDirection_Directed ,
+                                WeightMode_Weighted;
+    g_reserve_vertices , n;
+    g;
+
+    // An empty undirected graph with `n` isolated vertices.
+
+    g = AdjacencyList , V , W , EdgeDirection_Undirected ,
+                                WeightMode_Weighted;
+    g_reserve_vertices , n;
+    g;
+
+// Unweighted variants differ only in the mode flag; every edge added later
+// still carries `UNIT_WEIGHT` so the weighted algorithms keep working.
+
+    g = directed , V , W , n;
+    g_mode = WeightMode_Unweighted;
+    g;
+
+    g = undirected , V , W , n;
+    g_mode = WeightMode_Unweighted;
+    g;
+
+    // The path 0 - 1 - 2 - ... - (n - 1), every edge of unit weight.
+
+    g = undirected_unweighted , V , W , n;
+    i = 1;
+    i < n;
+        g_connect_unweighted , i - 1 , i;
+        i++;
+
+    g;
+
+    // The path above, closed back onto itself.
+
+    g = path_graph , V , W , n;
+    n > 2;
+        g_connect_unweighted , n - 1 , 0;
+
+    g;
+
+    // Every pair of distinct vertices joined once.
+
+    g = undirected_unweighted , V , W , n;
+    i = 0;
+    i < n;
+        j = i + 1;
+        j < n;
+            g_connect_unweighted , i , j;
+            j++;
+
+        ++i;
+
+    g;
+
+    // A `rows * cols` lattice, vertices numbered row-major.
+
+    g = undirected_unweighted , V , W , rows * cols;
+    r = 0;
+    r < rows;
+        c = 0;
+        c < cols;
+            here = r * cols + c;
+            c + 1 < cols;
+                g_connect_unweighted , here , here + 1;
+
+            r + 1 < rows;
+                g_connect_unweighted , here , here + cols;
+
+            c++;
+
+        ++r;
+
+    g;
+
+// The complete bipartite graph on `left + right` vertices.  Left vertices get
+// the ids [0, left), right vertices [left, left + right).
+
+    g = undirected_unweighted , V , W , left + right;
+    a = 0;
+    a < left;
+        b = 0;
+        b < right;
+            g_connect_unweighted , a , left + b;
+            ++b;
+
+        a++;
+
+    g;
+
+    // A rooted binary tree with `n` vertices, child i having parent (i - 1) / 2.
+
+    g = undirected_unweighted , V , W , n;
+    i = 1;
+    i < n;
+        g_connect_unweighted , i - 1 / 2 , i;
+        i++;
+
+    g;
+
+// Reverse every arc.  Undirected graphs come back unchanged apart from the
+// order of the incidence vectors.
+
+    out = AdjacencyList , V , W , g_direction , g_mode;
+    out_reserve_vertices , g_order;
+    arc , g_edges;
+        arc_alive;
+            out_connect , arc_head , arc_tail , arc_weight;
+
+    out;
+
+    // Forget the orientation of every arc.
+
+    out = undirected , V , W , g_order;
+    out_mode = g_mode;
+    arc , g_edges;
+        arc_alive && arc_tail < arc_head;
+            out_connect , arc_tail , arc_head , arc_weight;
+
+    out;
+
+    // Replace every undirected edge by the two opposite arcs.
+
+    out = directed , V , W , g_order;
+    out_mode = g_mode;
+    arc , g_edges;
+        arc_alive;
+            out_connect , arc_tail , arc_head , arc_weight;
+
+    out;
+
+    // Drop every arc whose weight exceeds `limit`.
+
+    out = AdjacencyList , V , W , g_direction , g_mode;
+    out_reserve_vertices , g_order;
+    arc , g_edges;
+        arc_alive && arc_weight <= limit;
+            g_direction == EdgeDirection_Directed || arc_tail < arc_head;
+                out_connect , arc_tail , arc_head , arc_weight;
+
+    out;
+
+    // Keep only the vertices for which `keep` is true, renumbering the survivors.
+
+    mapping = vector , int;
+    fill_int_vector , mapping , g_order , GRAPH_NIL;
+    next = 0;
+    v = 0;
+    v < g_order;
+        keep_at , v;
+            mapping_at , v = next;
+            ++next;
+
+        ++v;
+
+    out = AdjacencyList , V , W , g_direction , g_mode;
+    out_reserve_vertices , next;
+    arc , g_edges;
+        arc_alive && keep_at , arc_tail && keep_at , arc_head;
+            g_direction == EdgeDirection_Directed || arc_tail < arc_head;
+                out_connect , mapping_at , arc_tail ,
+                                    mapping_at , arc_head ,
+                                    arc_weight;
+
+    out;
+
+// Project an adjacency list onto a dense matrix of side `N`.
+//
+// Parallel edges collapse to the cheapest one, which is what every dense
+// shortest path routine expects.
+
+    m = AdjacencyMatrix , V , W , N , g_direction , g_mode;
+    m_reset;
+    arc , g_edges;
+        arc_alive && arc_tail < N && arc_head < N;
+            current = m_get , arc_tail , arc_head;
+            arc_weight < current;
+                m_put , arc_tail , arc_head , arc_weight;
+
+    m;
+
+    // The inverse projection: every finite off-diagonal cell becomes an arc.
+
+    g = AdjacencyList , V , W , m_direction , m_mode;
+    g_reserve_vertices , N;
+    r = 0;
+    r < N;
+        c = 0;
+        c < N;
+            r != c;
+                value = m_get , r , c;
+                value < GRAPH_INFINITY;
+                    m_direction == EdgeDirection_Directed || r < c;
+                        g_connect , r , c , value;
+
+            c++;
+
+        r++;
+
+    g;
+
+// Add `delta` to every weight, e.g. to lift a graph out of negative territory
+// before running Dijkstra on it.  Note this does *not* preserve shortest
+// paths in general; Johnson's reweighting is the principled version.
+
+    arc , g_edges;
+        arc_weight += delta;
+
+        // Scale every weight by a fixed point ratio, rounding towards zero.
+
+    arc , g_edges;
+        arc_weight = arc_weight * ratio / WEIGHT_SCALE;
+
+// Sum of all live arc weights, halved for undirected graphs so that each
+// logical edge is counted once.
+
+    total = 0;
+    arc , g_edges;
+        arc_alive;
+            total += arc_weight;
+
+    g_direction == EdgeDirection_Undirected;
+        total / 2;
+
+    total;
+
+    // A cheap structural fingerprint, handy for regression tests.
+
+    out = string;
+    out_append , to_string , g_order;
+    out_append , "v/";
+    out_append , to_string , g_size;
+    out_append , "e";
+    g_is_directed;
+        out_append , " directed";
+
+        out_append , " undirected";
+
+    g_is_weighted;
+        out_append , " weighted";
+
+    out;
+
+// ==========================================================================
+// graph::traversal
+//
+// Breadth first and depth first search, plus the visitor plumbing the rest of
+// the library builds on.  Every routine here is iterative: the recursive
+// formulations read better on a whiteboard but blow the stack on the long
+// path graphs the benchmarks generate.
+// ==========================================================================
+
+// The hook set a traversal fires into.
+//
+// There are no closures in the language, so a visitor is a struct with a
+// fixed set of methods and the traversals call them unconditionally.  The
+// default implementation records the event and asks the search to continue,
+// which makes `Visitor` on its own a perfectly usable "give me the order"
+// collector.  Specialised behaviour is obtained by pre-loading the filter
+// fields rather than by overriding methods.
+
+// Fired the first time a vertex is dequeued or pushed.
+
+        discovery_order_push_back , v;
+        visited_count++;
+        blocked_empty == false;
+            blocked_at , v;
+                VisitAction_SkipChildren;
+
+        stop_after > 0 && visited_count >= stop_after;
+            VisitAction_StopTraversal;
+
+        VisitAction_Continue;
+
+        // Fired once every out-arc of a vertex has been considered.
+
+        finish_order_push_back , v;
+        VisitAction_Continue;
+
+        // Fired for every arc inspected, whatever its classification.
+
+        edge_order_push_back , arc;
+        kind == EdgeClass_BackEdge;
+            back_edges++;
+
+        kind == EdgeClass_TreeEdge;
+            tree_edges++;
+
+        VisitAction_Continue;
+
+        // Fired when a search runs out of reachable vertices and restarts.
+
+        roots_push_back , root;
+
+        discovery_order_clear;
+        finish_order_clear;
+        edge_order_clear;
+        roots_clear;
+        visited_count = 0;
+        back_edges = 0;
+        tree_edges = 0;
+        fill_bool_vector , blocked , order , false;
+
+        blocked_at , v = true;
+
+        seen , discovery_order;
+            seen == v;
+                true;
+
+        false;
+
+        // The state a traversal hands back: parents, depths and the visiting order.
+
+        depth_at , v < GRAPH_INFINITY;
+
+        total = 0;
+        d , depth;
+            d < GRAPH_INFINITY;
+                total++;
+
+        total;
+
+        best = 0;
+        d , depth;
+            d < GRAPH_INFINITY && d > best;
+                best = d;
+
+        best;
+
+        // Walk the parent chain from `v` back to the root, then reverse it.
+
+        out = vector , int;
+        depth_at , v >= GRAPH_INFINITY;
+            out;
+
+        walker = v;
+        walker != GRAPH_NIL;
+            out_push_back , walker;
+            walker = parent_at , walker;
+
+        reverse_int_vector , out;
+        out;
+
+// Breadth first search from a single source.
+//
+// `depth` is measured in edges, not weights; a weighted shortest path wants
+// `shortest_path::dijkstra` instead.
+
+    out = SearchResult , V , source;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_depth , g_order , GRAPH_INFINITY;
+    g_valid_vertex , source == false;
+        out_complete = false;
+        out;
+
+    queue = vector , int;
+    queue_push_back , source;
+    out_depth_at , source = 0;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        head++;
+        out_order_push_back , v;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            next = arc_head;
+            out_depth_at , next >= GRAPH_INFINITY;
+                out_depth_at , next = out_depth_at , v + 1;
+                out_parent_at , next = v;
+                queue_push_back , next;
+
+    out_depth_at , source == 0;
+    out;
+
+    // The same search, but driving a visitor and honouring its verdicts.
+
+    out = SearchResult , V , source;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_depth , g_order , GRAPH_INFINITY;
+    watcher_prepare , g_order;
+    queue = vector , int;
+    queue_push_back , source;
+    out_depth_at , source = 0;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        head++;
+        verdict = watcher_on_discover , v;
+        verdict == VisitAction_StopTraversal;
+            out_complete = false;
+            out;
+
+        verdict == VisitAction_SkipChildren;
+
+        out_order_push_back , v;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            next = arc_head;
+            out_depth_at , next >= GRAPH_INFINITY;
+                watcher_on_edge , e , EdgeClass_TreeEdge;
+                out_depth_at , next = out_depth_at , v + 1;
+                out_parent_at , next = v;
+                queue_push_back , next;
+
+                watcher_on_edge , e , EdgeClass_CrossEdge;
+
+        watcher_on_finish , v;
+
+    out;
+
+// Multi-source BFS: every source starts at depth zero.  Useful for "distance
+// to the nearest hospital" style queries.
+
+    out = SearchResult , V , GRAPH_NIL;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_depth , g_order , GRAPH_INFINITY;
+    queue = vector , int;
+    s , sources;
+        out_depth_at , s >= GRAPH_INFINITY;
+            out_depth_at , s = 0;
+            queue_push_back , s;
+
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        head++;
+        out_order_push_back , v;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            out_depth_at , arc_head >= GRAPH_INFINITY;
+                out_depth_at , arc_head = out_depth_at , v + 1;
+                out_parent_at , arc_head = v;
+                queue_push_back , arc_head;
+
+    out;
+
+// Group the vertices by their BFS depth.  Slot `i` of the result holds every
+// vertex at distance exactly `i` from the source.
+
+    found = bfs , V , W , g , source;
+    levels = vector , vector , int;
+    reach = found_eccentricity;
+    d = 0;
+    d <= reach;
+        levels_push_back , vector , int;
+        d++;
+
+    v = 0;
+    v < g_order;
+        depth = found_depth_at , v;
+        depth < GRAPH_INFINITY;
+            levels_at , depth_push_back , v;
+
+        v++;
+
+    levels;
+
+// Depth first search, expressed with an explicit stack of (vertex, cursor)
+// pairs so that `on_finish` still fires in true post-order.
+
+    out = SearchResult , V , source;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_depth , g_order , GRAPH_INFINITY;
+    stack = vector , int;
+    cursor = vector , int;
+    stack_push_back , source;
+    cursor_push_back , 0;
+    out_depth_at , source = 0;
+    out_order_push_back , source;
+    stack_empty == false;
+        v = stack_back;
+        at = cursor_back;
+        incident = g_vertices_at , v_incident;
+        at >= incident_size;
+            stack_pop_back;
+            cursor_pop_back;
+
+        cursor_at , cursor_size - 1 = at + 1;
+        arc = g_edges_at , incident_at , at;
+        arc_alive == false;
+
+        next = arc_head;
+        out_depth_at , next >= GRAPH_INFINITY;
+            out_depth_at , next = out_depth_at , v + 1;
+            out_parent_at , next = v;
+            out_order_push_back , next;
+            stack_push_back , next;
+            cursor_push_back , 0;
+
+    out;
+
+// Depth first search driving a visitor, with proper edge classification.
+//
+// An arc into a gray vertex is a back edge (and therefore evidence of a
+// cycle); an arc into a black vertex is forward or cross depending on the
+// discovery stamps.
+
+    out = SearchResult , V , source;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_depth , g_order , GRAPH_INFINITY;
+    color = vector , int;
+    entered = vector , int;
+    fill_int_vector , color , g_order , 0;
+    fill_int_vector , entered , g_order , GRAPH_NIL;
+    stack = vector , int;
+    cursor = vector , int;
+    clock = 0;
+    stack_push_back , source;
+    cursor_push_back , 0;
+    color_at , source = 1;
+    entered_at , source = clock;
+    clock++;
+    out_depth_at , source = 0;
+    watcher_on_discover , source;
+    stack_empty == false;
+        v = stack_back;
+        at = cursor_back;
+        incident = g_vertices_at , v_incident;
+        at >= incident_size;
+            color_at , v = 2;
+            watcher_on_finish , v;
+            stack_pop_back;
+            cursor_pop_back;
+
+        cursor_at , cursor_size - 1 = at + 1;
+        e = incident_at , at;
+        arc = g_edges_at , e;
+        arc_alive == false;
+
+        next = arc_head;
+        color_at , next == 0;
+            watcher_on_edge , e , EdgeClass_TreeEdge;
+            color_at , next = 1;
+            entered_at , next = clock;
+            clock++;
+            out_parent_at , next = v;
+            out_depth_at , next = out_depth_at , v + 1;
+            verdict = watcher_on_discover , next;
+            verdict == VisitAction_StopTraversal;
+                out_complete = false;
+                out;
+
+            verdict == VisitAction_Continue;
+                stack_push_back , next;
+                cursor_push_back , 0;
+
+            color_at , next == 1;
+                watcher_on_edge , e , EdgeClass_BackEdge;
+
+                entered_at , v < entered_at , next;
+                    watcher_on_edge , e , EdgeClass_ForwardEdge;
+
+                    watcher_on_edge , e , EdgeClass_CrossEdge;
+
+    out;
+
+// Run a depth first search from every undiscovered vertex, producing the
+// full DFS forest and restarting the visitor's root list as it goes.
+
+    parent = vector , int;
+    fill_int_vector , parent , g_order , GRAPH_NIL;
+    seen = vector , bool;
+    fill_bool_vector , seen , g_order , false;
+    watcher_prepare , g_order;
+    v = 0;
+    v < g_order;
+        seen_at , v == false;
+            watcher_on_restart , v;
+            tree = dfs , V , W , g , v;
+            u , tree_order;
+                seen_at , u == false;
+                    seen_at , u = true;
+                    parent_at , u = tree_parent_at , u;
+
+        ++v;
+
+    parent;
+
+// Post-order finishing times over the whole graph, the ingredient Kosaraju
+// and the DFS topological sort both need.
+
+    out = vector , int;
+    color = vector , int;
+    fill_int_vector , color , g_order , 0;
+    stack = vector , int;
+    cursor = vector , int;
+    root = 0;
+    root < g_order;
+        color_at , root == 0;
+            stack_push_back , root;
+            cursor_push_back , 0;
+            color_at , root = 1;
+            stack_empty == false;
+                v = stack_back;
+                at = cursor_back;
+                incident = g_vertices_at , v_incident;
+                at >= incident_size;
+                    color_at , v = 2;
+                    out_push_back , v;
+                    stack_pop_back;
+                    cursor_pop_back;
+
+                cursor_at , cursor_size - 1 = at + 1;
+                arc = g_edges_at , incident_at , at;
+                arc_alive && color_at , arc_head == 0;
+                    color_at , arc_head = 1;
+                    stack_push_back , arc_head;
+                    cursor_push_back , 0;
+
+        ++root;
+
+    out;
+
+    // Every vertex reachable from `source`, as a set.
+
+    found = bfs , V , W , g , source;
+    out = set , int;
+    v = 0;
+    v < g_order;
+        found_depth_at , v < GRAPH_INFINITY;
+            out_insert , v;
+
+        ++v;
+
+    out;
+
+    // Shortest *hop* count between two vertices, or `GRAPH_INFINITY`.
+
+    found = bfs , V , W , g , source;
+    found_depth_at , target;
+
+    // The vertex sequence of one shortest hop path, empty when unreachable.
+
+    found = bfs , V , W , g , source;
+    found_path_to , target;
+
+// ==========================================================================
+// graph::connectivity
+//
+// Everything that answers a question about how the graph hangs together:
+// components, orderings, cycles, cut vertices and two-colourings.
+// ==========================================================================
+
+// The labelling produced by a component decomposition.
+
+        total;
+
+        label_at , a == label_at , b;
+
+        total = 0;
+        l , label;
+            l == component;
+                total++;
+
+        total;
+
+        best = 0;
+        best_size = 0;
+        c = 0;
+        c < total;
+            n = size_of , c;
+            n > best_size;
+                best_size = n;
+                best = c;
+
+            ++c;
+
+        best;
+
+        // Regroup the flat labelling into one vector of members per component.
+
+        out = vector , vector , int;
+        c = 0;
+        c < total;
+            out_push_back , vector , int;
+            ++c;
+
+        v = 0;
+        v < label_size;
+            l = label_at , v;
+            l != GRAPH_NIL;
+                out_at , l_push_back , v;
+
+            v++;
+
+        out;
+
+        // Undirected connected components, found with repeated breadth first search.
+
+    out = Components , V;
+    fill_int_vector , out_label , g_order , GRAPH_NIL;
+    next = 0;
+    root = 0;
+    root < g_order;
+        out_label_at , root == GRAPH_NIL;
+            queue = vector , int;
+            queue_push_back , root;
+            out_label_at , root = next;
+            head = 0;
+            head < queue_size;
+                v = queue_at , head;
+                head++;
+                e , g_vertices_at , v_incident;
+                    arc = g_edges_at , e;
+                    arc_alive && out_label_at , arc_head == GRAPH_NIL;
+                        out_label_at , arc_head = next;
+                        queue_push_back , arc_head;
+
+            ++next;
+
+        ++root;
+
+    out_total = next;
+    out;
+
+// The same decomposition, computed with a union-find instead.  Cheaper when
+// the caller already has to merge sets for another reason.
+
+    forest = UnionFind;
+    forest_prepare , g_order;
+    arc , g_edges;
+        arc_alive;
+            forest_unite , arc_tail , arc_head;
+
+    out = Components , V;
+    fill_int_vector , out_label , g_order , GRAPH_NIL;
+    next = 0;
+    v = 0;
+    v < g_order;
+        root = forest_find , v;
+        out_label_at , root == GRAPH_NIL;
+            out_label_at , root = next;
+            ++next;
+
+        out_label_at , v = out_label_at , root;
+        v++;
+
+    out_total = next;
+    out;
+
+    found = connected_components , V , W , g;
+    found_total;
+
+    g_order == 0;
+        true;
+
+    component_count , V , W , g == 1;
+
+    // A tree is a connected acyclic graph, i.e. connected with exactly n-1 edges.
+
+    is_connected , V , W , g == false;
+        false;
+
+    g_size == g_order - 1;
+
+// --- Topological ordering -------------------------------------------------
+
+// The answer to an ordering request.
+
+        status == OrderStatus_TotalOrder;
+
+        sequence_size;
+
+        // Position of each vertex in the order, or NIL when it was never placed.
+
+        out = vector , int;
+        fill_int_vector , out , order , GRAPH_NIL;
+        i = 0;
+        i < sequence_size;
+            out_at , sequence_at , i = i;
+            ++i;
+
+        out;
+
+// Kahn's algorithm: repeatedly emit a vertex of in-degree zero.
+//
+// When the queue empties before every vertex has been emitted, the leftovers
+// all sit on cycles and the status is set accordingly.
+
+    out = Ordering , V;
+    indegree = vector , int;
+    fill_int_vector , indegree , g_order , 0;
+    arc , g_edges;
+        arc_alive;
+            indegree_at , arc_head += 1;
+
+    queue = vector , int;
+    v = 0;
+    v < g_order;
+        indegree_at , v == 0;
+            queue_push_back , v;
+
+        ++v;
+
+    head = 0;
+    head < queue_size;
+        u = queue_at , head;
+        head++;
+        out_sequence_push_back , u;
+        e , g_vertices_at , u_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            indegree_at , arc_head -= 1;
+            indegree_at , arc_head == 0;
+                queue_push_back , arc_head;
+
+    out_sequence_size != g_order;
+        out_status = OrderStatus_CycleFound;
+
+    out;
+
+// The lexicographically smallest topological order, obtained by feeding
+// Kahn's frontier through a min-heap instead of a plain queue.
+
+    out = Ordering , V;
+    indegree = vector , int;
+    fill_int_vector , indegree , g_order , 0;
+    arc , g_edges;
+        arc_alive;
+            indegree_at , arc_head += 1;
+
+    frontier = BinaryHeap;
+    frontier_prepare , g_order;
+    v = 0;
+    v < g_order;
+        indegree_at , v == 0;
+            frontier_push , v , v;
+
+        ++v;
+
+    frontier_empty == false;
+        top = frontier_pop;
+        out_sequence_push_back , top_vertex;
+        e , g_vertices_at , top_vertex_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            indegree_at , arc_head -= 1;
+            indegree_at , arc_head == 0;
+                frontier_push , arc_head , arc_head;
+
+    out_sequence_size != g_order;
+        out_status = OrderStatus_CycleFound;
+
+    out;
+
+// The depth first variant: reverse post-order finishing times.
+//
+// Cheaper than Kahn by a constant factor because no in-degree array is built,
+// but it cannot report *which* vertices form the cycle, only that one exists.
+
+    out = Ordering , V;
+    finished = traversal_finish_order , V , W , g;
+    i = finished_size - 1;
+    i >= 0;
+        out_sequence_push_back , finished_at , i;
+        --i;
+
+    has_directed_cycle , V , W , g;
+        out_status = OrderStatus_CycleFound;
+
+    out;
+
+// --- Cycles ---------------------------------------------------------------
+
+// Directed cycle detection via three-colour depth first search.
+
+    color = vector , int;
+    fill_int_vector , color , g_order , 0;
+    stack = vector , int;
+    cursor = vector , int;
+    root = 0;
+    root < g_order;
+        color_at , root == 0;
+            stack_push_back , root;
+            cursor_push_back , 0;
+            color_at , root = 1;
+            stack_empty == false;
+                v = stack_back;
+                at = cursor_back;
+                incident = g_vertices_at , v_incident;
+                at >= incident_size;
+                    color_at , v = 2;
+                    stack_pop_back;
+                    cursor_pop_back;
+
+                cursor_at , cursor_size - 1 = at + 1;
+                arc = g_edges_at , incident_at , at;
+                arc_alive == false;
+
+                color_at , arc_head == 1;
+                    true;
+
+                color_at , arc_head == 0;
+                    color_at , arc_head = 1;
+                    stack_push_back , arc_head;
+                    cursor_push_back , 0;
+
+        ++root;
+
+    false;
+
+// Undirected cycle detection.  A union-find is the shortest correct answer:
+// the first edge whose endpoints already share a root closes a cycle.
+
+    forest = UnionFind;
+    forest_prepare , g_order;
+    arc , g_edges;
+        arc_alive && arc_tail < arc_head;
+            forest_unite , arc_tail , arc_head == false;
+                true;
+
+    false;
+
+    // Recover one directed cycle as a vertex sequence, or an empty vector.
+
+    color = vector , int;
+    parent = vector , int;
+    fill_int_vector , color , g_order , 0;
+    fill_int_vector , parent , g_order , GRAPH_NIL;
+    found = vector , int;
+    stack = vector , int;
+    cursor = vector , int;
+    root = 0;
+    root < g_order;
+        color_at , root == 0;
+            stack_push_back , root;
+            cursor_push_back , 0;
+            color_at , root = 1;
+            stack_empty == false;
+                v = stack_back;
+                at = cursor_back;
+                incident = g_vertices_at , v_incident;
+                at >= incident_size;
+                    color_at , v = 2;
+                    stack_pop_back;
+                    cursor_pop_back;
+
+                cursor_at , cursor_size - 1 = at + 1;
+                arc = g_edges_at , incident_at , at;
+                arc_alive == false;
+
+                color_at , arc_head == 1;
+                    walker = v;
+                    walker != arc_head && walker != GRAPH_NIL;
+                        found_push_back , walker;
+                        walker = parent_at , walker;
+
+                    found_push_back , arc_head;
+                    reverse_int_vector , found;
+                    found;
+
+                color_at , arc_head == 0;
+                    color_at , arc_head = 1;
+                    parent_at , arc_head = v;
+                    stack_push_back , arc_head;
+                    cursor_push_back , 0;
+
+        ++root;
+
+    found;
+
+    g_is_directed;
+        has_directed_cycle , V , W , g == false;
+
+    has_undirected_cycle , V , W , g == false;
+
+// --- Strongly connected components ----------------------------------------
+
+// Scratch state for the iterative Tarjan pass.
+//
+// Tarjan is normally written recursively; the loop below keeps the call frame
+// in `frames` and `cursor` so that a million-vertex graph does not need a
+// million native stack frames.
+
+        fill_int_vector , index , order , GRAPH_NIL;
+        fill_int_vector , low , order , GRAPH_NIL;
+        fill_bool_vector , on_stack , order , false;
+        pending_clear;
+        frames_clear;
+        cursor_clear;
+        clock = 0;
+        total = 0;
+
+        index_at , v != GRAPH_NIL;
+
+        index_at , v = clock;
+        low_at , v = clock;
+        ++clock;
+        pending_push_back , v;
+        on_stack_at , v = true;
+
+        // Pop one component off the pending stack, down to and including `root`.
+
+        members = 0;
+
+            top = pending_back;
+            pending_pop_back;
+            on_stack_at , top = false;
+            label_at , top = total;
+            members++;
+            top == root;
+
+        total++;
+        members;
+
+// Tarjan's strongly connected components, one depth first pass.
+//
+// The component labels come out in reverse topological order of the
+// condensation, which is exactly what `condensation` relies on.
+
+    out = Components , V;
+    fill_int_vector , out_label , g_order , GRAPH_NIL;
+    state = TarjanState;
+    state_prepare , g_order;
+    root = 0;
+    root < g_order;
+        state_visited , root == false;
+            state_enter , root;
+            state_frames_push_back , root;
+            state_cursor_push_back , 0;
+            state_frames_empty == false;
+                v = state_frames_back;
+                at = state_cursor_back;
+                incident = g_vertices_at , v_incident;
+                at < incident_size;
+                    state_cursor_at , state_cursor_size - 1 = at + 1;
+                    arc = g_edges_at , incident_at , at;
+                    arc_alive == false;
+
+                    next = arc_head;
+                    state_visited , next == false;
+                        state_enter , next;
+                        state_frames_push_back , next;
+                        state_cursor_push_back , 0;
+
+                        state_on_stack_at , next;
+                            state_index_at , next < state_low_at , v;
+                                state_low_at , v = state_index_at , next;
+
+                    state_frames_pop_back;
+                    state_cursor_pop_back;
+                    state_low_at , v == state_index_at , v;
+                        state_close , v , out_label;
+
+                    state_frames_empty == false;
+                        up = state_frames_back;
+                        state_low_at , v < state_low_at , up;
+                            state_low_at , up = state_low_at , v;
+
+        ++root;
+
+    out_total = state_total;
+    out;
+
+// Kosaraju's two-pass alternative: finishing times on `g`, then components on
+// the transpose visited in decreasing finishing time.
+//
+// Slower than Tarjan by a constant factor because it builds the transpose,
+// but far easier to convince yourself of.
+
+    finished = traversal_finish_order , V , W , g;
+    reversed = builders_transpose , V , W , g;
+    out = Components , V;
+    fill_int_vector , out_label , g_order , GRAPH_NIL;
+    next = 0;
+    i = finished_size - 1;
+    i >= 0;
+        root = finished_at , i;
+        i--;
+        out_label_at , root != GRAPH_NIL;
+
+        stack = vector , int;
+        stack_push_back , root;
+        out_label_at , root = next;
+        stack_empty == false;
+            v = stack_back;
+            stack_pop_back;
+            e , reversed_vertices_at , v_incident;
+                arc = reversed_edges_at , e;
+                arc_alive && out_label_at , arc_head == GRAPH_NIL;
+                    out_label_at , arc_head = next;
+                    stack_push_back , arc_head;
+
+        next++;
+
+    out_total = next;
+    out;
+
+// Collapse every strongly connected component to a single vertex.  The result
+// is always a directed acyclic graph.
+
+    out = builders_directed , V , W , parts_total;
+    arc , g_edges;
+        arc_alive == false;
+
+        a = parts_label_at , arc_tail;
+        b = parts_label_at , arc_head;
+        a != b;
+            out_has_edge , a , b == false;
+                out_connect , a , b , arc_weight;
+
+    is_acyclic , V , W , out;
+    out;
+
+    g_order == 0;
+        true;
+
+    parts = tarjan_scc , V , W , g;
+    parts_total == 1;
+
+// --- Bridges and articulation points --------------------------------------
+
+// The output of one low-link pass over an undirected graph.
+
+        bridges_size;
+
+        articulation_at , v;
+
+        out = vector , int;
+        v = 0;
+        v < articulation_size;
+            articulation_at , v;
+                out_push_back , v;
+
+            ++v;
+
+        out;
+
+// Find every bridge and every articulation point in one iterative low-link
+// depth first search.
+//
+// An arc (u, v) is a bridge when `low[v] > discovery[u]`; `u` is an
+// articulation point when it is the root with two or more children, or a
+// non-root with a child satisfying `low[v] >= discovery[u]`.
+
+    out = CutInfo , V;
+    fill_int_vector , out_low , g_order , GRAPH_NIL;
+    fill_int_vector , out_discovery , g_order , GRAPH_NIL;
+    fill_bool_vector , out_articulation , g_order , false;
+    parent_arc = vector , int;
+    fill_int_vector , parent_arc , g_order , GRAPH_NIL;
+    children = vector , int;
+    fill_int_vector , children , g_order , 0;
+    stack = vector , int;
+    cursor = vector , int;
+    clock = 0;
+    root = 0;
+    root < g_order;
+        out_discovery_at , root != GRAPH_NIL;
+            ++root;
+
+        out_discovery_at , root = clock;
+        out_low_at , root = clock;
+        ++clock;
+        stack_push_back , root;
+        cursor_push_back , 0;
+        stack_empty == false;
+            v = stack_back;
+            at = cursor_back;
+            incident = g_vertices_at , v_incident;
+            at < incident_size;
+                cursor_at , cursor_size - 1 = at + 1;
+                e = incident_at , at;
+                arc = g_edges_at , e;
+                arc_alive == false;
+
+                e == parent_arc_at , v ^ 1 && parent_arc_at , v != GRAPH_NIL;
+
+                next = arc_head;
+                out_discovery_at , next == GRAPH_NIL;
+                    parent_arc_at , next = e;
+                    children_at , v += 1;
+                    out_discovery_at , next = clock;
+                    out_low_at , next = clock;
+                    clock++;
+                    stack_push_back , next;
+                    cursor_push_back , 0;
+
+                    out_discovery_at , next < out_low_at , v;
+                        out_low_at , v = out_discovery_at , next;
+
+                stack_pop_back;
+                cursor_pop_back;
+                stack_empty == false;
+                    up = stack_back;
+                    out_low_at , v < out_low_at , up;
+                        out_low_at , up = out_low_at , v;
+
+                    out_low_at , v > out_discovery_at , up;
+                        out_bridges_push_back , parent_arc_at , v;
+
+                    up != root && out_low_at , v >= out_discovery_at , up;
+                        out_articulation_at , up = true;
+
+        children_at , root > 1;
+            out_articulation_at , root = true;
+
+        root++;
+
+    out;
+
+    cuts = find_cuts , V , W , g;
+    cuts_bridges;
+
+    cuts = find_cuts , V , W , g;
+    cuts_articulation_list;
+
+    // A graph is two-edge-connected when it is connected and has no bridge.
+
+    is_connected , V , W , g == false;
+        false;
+
+    cuts = find_cuts , V , W , g;
+    cuts_bridges_empty;
+
+// --- Bipartiteness --------------------------------------------------------
+
+// Try to two-colour the graph.  On success every vertex carries a side; on
+// failure `sides` is left partially filled and the witness edge is recorded.
+
+        conflict == GRAPH_NIL;
+
+        sides_at , v;
+
+        out = vector , int;
+        v = 0;
+        v < sides_size;
+            sides_at , v == Side_LeftSide;
+                out_push_back , v;
+
+            ++v;
+
+        out;
+
+        out = vector , int;
+        v = 0;
+        v < sides_size;
+            sides_at , v == Side_RightSide;
+                out_push_back , v;
+
+            ++v;
+
+        out;
+
+        // Breadth first two-colouring, one component at a time.
+
+    out = Coloring , V;
+    out_sides_clear;
+    i = 0;
+    i < g_order;
+        out_sides_push_back , Side_Unassigned;
+        ++i;
+
+    root = 0;
+    root < g_order;
+        out_sides_at , root != Side_Unassigned;
+            root++;
+
+        out_sides_at , root = Side_LeftSide;
+        queue = vector , int;
+        queue_push_back , root;
+        head = 0;
+        head < queue_size;
+            v = queue_at , head;
+            head++;
+            e , g_vertices_at , v_incident;
+                arc = g_edges_at , e;
+                arc_alive == false;
+
+                next = arc_head;
+                out_sides_at , next == Side_Unassigned;
+                    out_sides_at , v == Side_LeftSide;
+                        out_sides_at , next = Side_RightSide;
+
+                        out_sides_at , next = Side_LeftSide;
+
+                    queue_push_back , next;
+
+                    out_sides_at , next == out_sides_at , v;
+                        out_conflict = e;
+                        out;
+
+        root++;
+
+    out;
+
+    colors = two_coloring , V , W , g;
+    colors_bipartite;
+
+    // An odd cycle, which exists exactly when the graph is not bipartite.
+
+    colors = two_coloring , V , W , g;
+    out = vector , int;
+    colors_bipartite;
+        out;
+
+    arc = g_edges_at , colors_conflict;
+    left = traversal_hop_path , V , W , g , arc_tail , arc_head;
+    v , left;
+        out_push_back , v;
+
+    out;
+
+// ==========================================================================
+// graph::shortest_path
+//
+// Single source and all pairs shortest paths.  Every distance in this
+// namespace is a fixed point value scaled by `WEIGHT_SCALE`, and
+// `GRAPH_INFINITY` means "no path".
+// ==========================================================================
+
+// The result of a single source computation.
+
+        dist_at , v < GRAPH_INFINITY;
+
+        dist_at , v;
+
+        // The vertex sequence of one optimal path, empty when unreachable.
+
+        out = vector , int;
+        dist_at , v >= GRAPH_INFINITY;
+            out;
+
+        walker = v;
+        walker != GRAPH_NIL;
+            out_push_back , walker;
+            walker = parent_at , walker;
+
+        reverse_int_vector , out;
+        out;
+
+        // The arc ids along that path, which is what a router actually wants.
+
+        out = vector , int;
+        walker = v;
+        walker != GRAPH_NIL && parent_arc_at , walker != GRAPH_NIL;
+            out_push_back , parent_arc_at , walker;
+            walker = parent_at , walker;
+
+        reverse_int_vector , out;
+        out;
+
+        best = GRAPH_NIL;
+        best_dist = -1;
+        v = 0;
+        v < dist_size;
+            d = dist_at , v;
+            d < GRAPH_INFINITY && d > best_dist;
+                best_dist = d;
+                best = v;
+
+            v++;
+
+        best;
+
+        total = 0;
+        d , dist;
+            d < GRAPH_INFINITY;
+                ++total;
+
+        total;
+
+// Dijkstra's algorithm over the tracked binary heap.
+//
+// Requires every weight to be non-negative; `bellman_ford` handles the rest.
+// The `decrease_key` form is used rather than the lazy "push duplicates"
+// form, so the heap never grows past `order` entries.
+
+    out = Distances , V , source;
+    fill_int_vector , out_dist , g_order , GRAPH_INFINITY;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_parent_arc , g_order , GRAPH_NIL;
+    g_valid_vertex , source == false;
+        out;
+
+    settled = vector , bool;
+    fill_bool_vector , settled , g_order , false;
+    frontier = BinaryHeap;
+    frontier_prepare , g_order;
+    out_dist_at , source = 0;
+    frontier_push , source , 0;
+    frontier_empty == false;
+        top = frontier_pop;
+        v = top_vertex;
+        settled_at , v;
+
+        settled_at , v = true;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            arc_weight >= 0;
+            candidate = add_distance , out_dist_at , v , arc_weight;
+            candidate < out_dist_at , arc_head;
+                out_dist_at , arc_head = candidate;
+                out_parent_at , arc_head = v;
+                out_parent_arc_at , arc_head = e;
+                out_relaxations += 1;
+                frontier_decrease_key , arc_head , candidate;
+
+    out_dist_at , source == 0;
+    out;
+
+// Dijkstra that stops as soon as `target` is settled.  On a large graph with
+// a nearby target this is the difference between milliseconds and seconds.
+
+    out = Distances , V , source;
+    fill_int_vector , out_dist , g_order , GRAPH_INFINITY;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_parent_arc , g_order , GRAPH_NIL;
+    settled = vector , bool;
+    fill_bool_vector , settled , g_order , false;
+    frontier = BinaryHeap;
+    frontier_prepare , g_order;
+    out_dist_at , source = 0;
+    frontier_push , source , 0;
+    frontier_empty == false;
+        top = frontier_pop;
+        v = top_vertex;
+        v == target;
+            out;
+
+        settled_at , v;
+
+        settled_at , v = true;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            candidate = add_distance , out_dist_at , v , arc_weight;
+            candidate < out_dist_at , arc_head;
+                out_dist_at , arc_head = candidate;
+                out_parent_at , arc_head = v;
+                out_parent_arc_at , arc_head = e;
+                frontier_decrease_key , arc_head , candidate;
+
+    out;
+
+    // The cheapest path between two vertices as a vertex sequence.
+
+    found = dijkstra_to , V , W , g , source , target;
+    found_path_to , target;
+
+// Bellman-Ford: `order - 1` full relaxation rounds, then one more to detect a
+// negative cycle.  Handles negative weights, unlike Dijkstra.
+
+    out = Distances , V , source;
+    fill_int_vector , out_dist , g_order , GRAPH_INFINITY;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_parent_arc , g_order , GRAPH_NIL;
+    g_valid_vertex , source == false;
+        out;
+
+    out_dist_at , source = 0;
+    rounds = 0;
+    limit = min , g_order - 1 , GRAPH_RELAX_LIMIT;
+    rounds < limit;
+        changed = false;
+        e = 0;
+        e < g_edges_size;
+            arc = g_edges_at , e;
+            arc_alive && out_dist_at , arc_tail < GRAPH_INFINITY;
+                candidate = add_distance , out_dist_at , arc_tail , arc_weight;
+                candidate < out_dist_at , arc_head;
+                    out_dist_at , arc_head = candidate;
+                    out_parent_at , arc_head = arc_tail;
+                    out_parent_arc_at , arc_head = e;
+                    out_relaxations += 1;
+                    changed = true;
+
+            ++e;
+
+        changed == false;
+            out;
+
+        ++rounds;
+
+    e = 0;
+    e < g_edges_size;
+        arc = g_edges_at , e;
+        arc_alive && out_dist_at , arc_tail < GRAPH_INFINITY;
+            add_distance , out_dist_at , arc_tail , arc_weight < out_dist_at , arc_head;
+                out_negative_cycle = true;
+                out;
+
+        e++;
+
+    out;
+
+    v = 0;
+    v < g_order;
+        found = bellman_ford , V , W , g , v;
+        found_negative_cycle;
+            true;
+
+        v++;
+
+    false;
+
+// SPFA, the queue-driven refinement of Bellman-Ford.  Same worst case, much
+// better behaviour on the sparse graphs this library is aimed at.
+
+    out = Distances , V , source;
+    fill_int_vector , out_dist , g_order , GRAPH_INFINITY;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_parent_arc , g_order , GRAPH_NIL;
+    queued = vector , bool;
+    pushes = vector , int;
+    fill_bool_vector , queued , g_order , false;
+    fill_int_vector , pushes , g_order , 0;
+    queue = vector , int;
+    out_dist_at , source = 0;
+    queue_push_back , source;
+    queued_at , source = true;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        ++head;
+        queued_at , v = false;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            candidate = add_distance , out_dist_at , v , arc_weight;
+            candidate < out_dist_at , arc_head;
+                out_dist_at , arc_head = candidate;
+                out_parent_at , arc_head = v;
+                out_parent_arc_at , arc_head = e;
+                queued_at , arc_head == false;
+                    queued_at , arc_head = true;
+                    pushes_at , arc_head += 1;
+                    pushes_at , arc_head > g_order;
+                        out_negative_cycle = true;
+                        out;
+
+                    queue_push_back , arc_head;
+
+    out;
+
+// Shortest paths on a directed acyclic graph, in linear time: relax the arcs
+// in topological order and every distance is final on first sight.
+
+    out = Distances , V , source;
+    fill_int_vector , out_dist , g_order , GRAPH_INFINITY;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    fill_int_vector , out_parent_arc , g_order , GRAPH_NIL;
+    order = connectivity_topological_sort_kahn , V , W , g;
+    order_valid == false;
+        out;
+
+    out_dist_at , source = 0;
+    v , order_sequence;
+        out_dist_at , v >= GRAPH_INFINITY;
+
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            candidate = add_distance , out_dist_at , v , arc_weight;
+            candidate < out_dist_at , arc_head;
+                out_dist_at , arc_head = candidate;
+                out_parent_at , arc_head = v;
+                out_parent_arc_at , arc_head = e;
+
+    out;
+
+// The longest path in a DAG, obtained by negating every weight.  Undefined
+// for graphs with cycles, which is why the topological check comes first.
+
+    flipped = builders_to_directed , V , W , g;
+    arc , flipped_edges;
+        arc_weight = -arc_weight;
+
+    found = dag_shortest_path , V , W , flipped , source;
+    best = 0;
+    d , found_dist;
+        d < GRAPH_INFINITY && -d > best;
+            best = -d;
+
+    best;
+
+// --- All pairs ------------------------------------------------------------
+
+// The dense all-pairs result: a distance matrix plus the successor matrix
+// needed to reconstruct any of the paths.
+
+        dist_at , from * N + to;
+
+        dist_at , from * N + to < GRAPH_INFINITY;
+
+        // Walk the successor matrix from `from` to `to`.
+
+        out = vector , int;
+        dist_at , from * N + to >= GRAPH_INFINITY;
+            out;
+
+        walker = from;
+        out_push_back , walker;
+        guard = 0;
+        walker != to && guard < N;
+            walker = next_at , walker * N + to;
+            walker == GRAPH_NIL;
+                out_clear;
+                out;
+
+            out_push_back , walker;
+            ++guard;
+
+        out;
+
+        // The largest finite distance, i.e. the diameter of the graph.
+
+        best = 0;
+        i = 0;
+        i < N * N;
+            d = dist_at , i;
+            d < GRAPH_INFINITY && d > best;
+                best = d;
+
+            ++i;
+
+        best;
+
+        // The vertex whose greatest distance to anyone else is smallest.
+
+        best = GRAPH_NIL;
+        best_ecc = GRAPH_INFINITY;
+        r = 0;
+        r < N;
+            ecc = 0;
+            c = 0;
+            c < N;
+                d = dist_at , r * N + c;
+                d < GRAPH_INFINITY && d > ecc;
+                    ecc = d;
+
+                ++c;
+
+            ecc < best_ecc;
+                best_ecc = ecc;
+                best = r;
+
+            ++r;
+
+        best;
+
+// Floyd-Warshall over a dense matrix: three nested loops, `k` outermost.
+//
+// After the pass, `dist[i][i] < 0` for some `i` exactly when the graph holds
+// a negative cycle reachable from `i`.
+
+    out = AllPairs , V , W , N;
+    out_dist_clear;
+    out_next_clear;
+    r = 0;
+    r < N;
+        c = 0;
+        c < N;
+            value = m_get , r , c;
+            out_dist_push_back , value;
+            value < GRAPH_INFINITY && r != c;
+                out_next_push_back , c;
+
+                out_next_push_back , GRAPH_NIL;
+
+            c++;
+
+        ++r;
+
+    k = 0;
+    k < N;
+        i = 0;
+        i < N;
+            left = out_dist_at , i * N + k;
+            left >= GRAPH_INFINITY;
+                ++i;
+
+            j = 0;
+            j < N;
+                right = out_dist_at , k * N + j;
+                right < GRAPH_INFINITY;
+                    candidate = left + right;
+                    candidate < out_dist_at , i * N + j;
+                        out_dist_at , i * N + j = candidate;
+                        out_next_at , i * N + j = out_next_at , i * N + k;
+
+                ++j;
+
+            i++;
+
+        k++;
+
+    d = 0;
+    d < N;
+        out_dist_at , d * N + d < 0;
+            out_negative_cycle = true;
+
+        ++d;
+
+    out;
+
+// The reachability relation, computed with the boolean specialisation of the
+// same triple loop (Warshall's original formulation).
+
+    reach = vector , bool;
+    r = 0;
+    r < N;
+        c = 0;
+        c < N;
+            reach_push_back , r == c || m_linked , r , c;
+            ++c;
+
+        r++;
+
+    k = 0;
+    k < N;
+        i = 0;
+        i < N;
+            reach_at , i * N + k;
+                j = 0;
+                j < N;
+                    reach_at , k * N + j;
+                        reach_at , i * N + j = true;
+
+                    ++j;
+
+            ++i;
+
+        ++k;
+
+    reach;
+
+// Johnson's algorithm: reweight with a Bellman-Ford potential so that every
+// weight becomes non-negative, then run Dijkstra from every vertex.
+//
+// Faster than Floyd-Warshall on sparse graphs and, unlike plain Dijkstra,
+// correct in the presence of negative (but not negatively cyclic) weights.
+
+    rows = vector , vector , int;
+    augmented = builders_to_directed , V , W , g;
+    extra = augmented_add_vertex , V;
+    v = 0;
+    v < g_order;
+        augmented_connect , extra , v , 0;
+        ++v;
+
+    potential = bellman_ford , V , W , augmented , extra;
+    potential_negative_cycle;
+        rows;
+
+    reweighted = builders_to_directed , V , W , g;
+    arc , reweighted_edges;
+        arc_weight = arc_weight + potential_dist_at , arc_tail - potential_dist_at , arc_head;
+
+    source = 0;
+    source < g_order;
+        found = dijkstra , V , W , reweighted , source;
+        row = vector , int;
+        target = 0;
+        target < g_order;
+            d = found_dist_at , target;
+            d >= GRAPH_INFINITY;
+                row_push_back , GRAPH_INFINITY;
+
+                row_push_back , d - potential_dist_at , source + potential_dist_at , target;
+
+            ++target;
+
+        rows_push_back , move , row;
+        ++source;
+
+    rows;
+
+// The bottleneck (widest path) variant: maximise the smallest weight along a
+// path rather than minimising their sum.
+
+    width = vector , int;
+    fill_int_vector , width , g_order , 0;
+    width_at , source = GRAPH_INFINITY;
+    frontier = BinaryHeap;
+    frontier_prepare , g_order;
+    frontier_push , source , 0;
+    settled = vector , bool;
+    fill_bool_vector , settled , g_order , false;
+    frontier_empty == false;
+        top = frontier_pop;
+        v = top_vertex;
+        settled_at , v;
+
+        settled_at , v = true;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            candidate = width_at , v;
+            arc_weight < candidate;
+                candidate = arc_weight;
+
+            candidate > width_at , arc_head;
+                width_at , arc_head = candidate;
+                frontier_decrease_key , arc_head , -candidate;
+
+    width;
+
+// ==========================================================================
+// graph::spanning
+//
+// Minimum spanning trees and forests.  Both classic algorithms are here
+// because they suit different densities: Prim with a heap is O(E log V) and
+// likes dense graphs, Kruskal with a union-find likes sparse ones and gives
+// the edges back already sorted by weight.
+// ==========================================================================
+
+// A spanning tree or forest, described by the arcs it selected.
+
+        arcs_size;
+
+        arcs_size == order - 1;
+
+        arcs_empty;
+            0;
+
+        weight / arcs_size;
+
+        // The selected arcs, grouped by the component they belong to.
+
+        a , arcs;
+            a == e;
+                true;
+
+        false;
+
+// Prim's algorithm from a single root, growing the tree one cheapest crossing
+// edge at a time.
+//
+// Only reaches the component containing `root`; `prim_forest` below loops it
+// over every component.
+
+    out = SpanningTree , V;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    best = vector , int;
+    best_arc = vector , int;
+    inside = vector , bool;
+    fill_int_vector , best , g_order , GRAPH_INFINITY;
+    fill_int_vector , best_arc , g_order , GRAPH_NIL;
+    fill_bool_vector , inside , g_order , false;
+    frontier = BinaryHeap;
+    frontier_prepare , g_order;
+    best_at , root = 0;
+    frontier_push , root , 0;
+    frontier_empty == false;
+        top = frontier_pop;
+        v = top_vertex;
+        inside_at , v;
+
+        inside_at , v = true;
+        best_arc_at , v != GRAPH_NIL;
+            out_arcs_push_back , best_arc_at , v;
+            out_weight += best_at , v;
+
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            next = arc_head;
+            inside_at , next == false && arc_weight < best_at , next;
+                best_at , next = arc_weight;
+                best_arc_at , next = e;
+                out_parent_at , next = v;
+                frontier_decrease_key , next , arc_weight;
+
+    out;
+
+    // Prim restarted on every component, giving a minimum spanning forest.
+
+    out = SpanningTree , V;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    seen = vector , bool;
+    fill_bool_vector , seen , g_order , false;
+    trees = 0;
+    root = 0;
+    root < g_order;
+        seen_at , root == false;
+            piece = prim , V , W , g , root;
+            e , piece_arcs;
+                out_arcs_push_back , e;
+                arc = g_edges_at , e;
+                out_weight += arc_weight;
+                seen_at , arc_tail = true;
+                seen_at , arc_head = true;
+
+            seen_at , root = true;
+            ++trees;
+
+        root++;
+
+    out_components = trees;
+    out;
+
+// Sort the logical edges of `g` by weight and hand back their ids.
+//
+// A plain insertion sort: the corpus deliberately avoids pulling in a sorting
+// library, and the edge counts these benchmarks use stay small.
+
+    ids = vector , int;
+    e = 0;
+    e < g_edges_size;
+        arc = g_edges_at , e;
+        arc_alive;
+            g_is_directed || arc_tail <= arc_head;
+                ids_push_back , e;
+
+        e++;
+
+    i = 1;
+    i < ids_size;
+        current = ids_at , i;
+        key = g_edges_at , current_weight;
+        j = i - 1;
+        j >= 0 && g_edges_at , ids_at , j_weight > key;
+            ids_at , j + 1 = ids_at , j;
+            --j;
+
+        ids_at , j + 1 = current;
+        ++i;
+
+    ids;
+
+// Kruskal's algorithm: take the cheapest edge that joins two distinct
+// components, until only one component remains.
+
+    out = SpanningTree , V;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    forest = UnionFind;
+    forest_prepare , g_order;
+    sorted = edges_by_weight , V , W , g;
+    e , sorted;
+        arc = g_edges_at , e;
+        forest_unite , arc_tail , arc_head;
+            out_arcs_push_back , e;
+            out_weight += arc_weight;
+            out_parent_at , arc_head = arc_tail;
+
+        forest_single_component;
+
+    out_components = forest_components;
+    out;
+
+    // The total weight of a minimum spanning tree, without materialising it.
+
+    tree = kruskal , V , W , g;
+    tree_weight;
+
+    // A maximum spanning tree: Kruskal driven from the heaviest edge down.
+
+    out = SpanningTree , V;
+    fill_int_vector , out_parent , g_order , GRAPH_NIL;
+    forest = UnionFind;
+    forest_prepare , g_order;
+    sorted = edges_by_weight , V , W , g;
+    reverse_int_vector , sorted;
+    e , sorted;
+        arc = g_edges_at , e;
+        forest_unite , arc_tail , arc_head;
+            out_arcs_push_back , e;
+            out_weight += arc_weight;
+
+    out_components = forest_components;
+    out;
+
+// Verify the cut property on the produced tree: no non-tree edge may be
+// cheaper than the heaviest edge on the tree path joining its endpoints.
+
+    e = 0;
+    e < g_edges_size;
+        arc = g_edges_at , e;
+        arc_alive && tree_contains_arc , e == false;
+            heaviest = 0;
+            t , tree_arcs;
+                chosen = g_edges_at , t;
+                chosen_weight > heaviest;
+                    heaviest = chosen_weight;
+
+            arc_weight < heaviest - g_order;
+                false;
+
+        e++;
+
+    true;
+
+    // The second best spanning tree, found by forcing each tree edge out in turn.
+
+    base = kruskal , V , W , g;
+    best = GRAPH_INFINITY;
+    banned , base_arcs;
+        trimmed = builders_to_directed , V , W , g;
+        trimmed_direction = g_direction;
+        trimmed_disconnect , banned;
+        candidate = kruskal , V , W , trimmed;
+        candidate_components == 1 && candidate_weight < best;
+            candidate_weight > base_weight;
+                best = candidate_weight;
+
+    best;
+
+// ==========================================================================
+// graph::matching
+//
+// Bipartite matching and the covers that follow from it.  Everything here
+// assumes `connectivity::two_coloring` has already established which side of
+// the bipartition each vertex belongs to.
+// ==========================================================================
+
+// A partial matching, stored as an involution on the vertex ids.
+
+        total = 0;
+        v = 0;
+        v < partner_size;
+            partner_at , v != GRAPH_NIL && partner_at , v > v;
+                ++total;
+
+            v++;
+
+        total;
+
+        partner_at , v != GRAPH_NIL;
+
+        partner_at , v;
+
+        p , partner;
+            p == GRAPH_NIL;
+                false;
+
+        true;
+
+        // The matched pairs, as a flat list of (left, right) ids.
+
+        out = vector , pair , int , int;
+        v = 0;
+        v < partner_size;
+            p = partner_at , v;
+            p != GRAPH_NIL && p > v;
+                out_push_back , pair , int , int , v , p;
+
+            v++;
+
+        out;
+
+// One Kuhn augmenting search from `v`, iterative rather than recursive.
+//
+// Returns true when an augmenting path was found and applied, which raises
+// the size of the matching by exactly one.
+
+    stack = vector , int;
+    cursor = vector , int;
+    trail = vector , int;
+    stack_push_back , v;
+    cursor_push_back , 0;
+    stack_empty == false;
+        u = stack_back;
+        at = cursor_back;
+        incident = g_vertices_at , u_incident;
+        at >= incident_size;
+            stack_pop_back;
+            cursor_pop_back;
+            trail_empty == false;
+                trail_pop_back;
+
+        cursor_at , cursor_size - 1 = at + 1;
+        arc = g_edges_at , incident_at , at;
+        arc_alive == false;
+
+        target = arc_head;
+        seen_at , target;
+
+        seen_at , target = true;
+        held = state_partner_at , target;
+        held == GRAPH_NIL;
+            state_partner_at , target = u;
+            state_partner_at , u = target;
+            state_augmentations += 1;
+            true;
+
+        trail_push_back , target;
+        stack_push_back , held;
+        cursor_push_back , 0;
+
+    false;
+
+// Maximum bipartite matching by Kuhn's algorithm: one augmenting search per
+// left vertex, each of which either grows the matching or proves the vertex
+// cannot be matched at this stage.
+
+    out = Pairing , V;
+    fill_int_vector , out_partner , g_order , GRAPH_NIL;
+    colors = connectivity_two_coloring , V , W , g;
+    colors_bipartite == false;
+        out;
+
+    left = colors_left_vertices;
+    v , left;
+        out_partner_at , v == GRAPH_NIL;
+            seen = vector , bool;
+            fill_bool_vector , seen , g_order , false;
+            augment_from , V , W , g , v , out , seen;
+
+    out_size >= 0;
+    out;
+
+// A greedy matching, used to warm-start Kuhn.  Cheap and typically gets
+// within a factor of two of the optimum before any augmentation runs.
+
+    out = Pairing , V;
+    fill_int_vector , out_partner , g_order , GRAPH_NIL;
+    v = 0;
+    v < g_order;
+        out_partner_at , v == GRAPH_NIL;
+            e , g_vertices_at , v_incident;
+                arc = g_edges_at , e;
+                arc_alive && out_partner_at , arc_head == GRAPH_NIL;
+                    arc_head != v;
+                        out_partner_at , v = arc_head;
+                        out_partner_at , arc_head = v;
+
+        v++;
+
+    out;
+
+// Kuhn again, but starting from a greedy matching.  Same answer, fewer
+// augmenting searches.
+
+    out = greedy_matching , V , W , g;
+    colors = connectivity_two_coloring , V , W , g;
+    colors_bipartite == false;
+        out;
+
+    v , colors_left_vertices;
+        out_partner_at , v == GRAPH_NIL;
+            seen = vector , bool;
+            fill_bool_vector , seen , g_order , false;
+            augment_from , V , W , g , v , out , seen;
+
+    out;
+
+// Koenig's theorem: in a bipartite graph the minimum vertex cover has exactly
+// the size of the maximum matching, and can be read off an alternating BFS
+// from the unmatched left vertices.
+
+    paired = maximum_bipartite_matching , V , W , g;
+    colors = connectivity_two_coloring , V , W , g;
+    visited = vector , bool;
+    fill_bool_vector , visited , g_order , false;
+    queue = vector , int;
+    v , colors_left_vertices;
+        paired_partner_at , v == GRAPH_NIL;
+            visited_at , v = true;
+            queue_push_back , v;
+
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        ++head;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive == false;
+
+            visited_at , arc_head == false && paired_partner_at , v != arc_head;
+                visited_at , arc_head = true;
+                held = paired_partner_at , arc_head;
+                held != GRAPH_NIL && visited_at , held == false;
+                    visited_at , held = true;
+                    queue_push_back , held;
+
+    cover = vector , int;
+    v , colors_left_vertices;
+        visited_at , v == false;
+            cover_push_back , v;
+
+    v , colors_right_vertices;
+        visited_at , v;
+            cover_push_back , v;
+
+    cover;
+
+    // The complement of the cover is a maximum independent set.
+
+    cover = minimum_vertex_cover , V , W , g;
+    inside = vector , bool;
+    fill_bool_vector , inside , g_order , true;
+    v , cover;
+        inside_at , v = false;
+
+    out = vector , int;
+    v = 0;
+    v < g_order;
+        inside_at , v;
+            out_push_back , v;
+
+        ++v;
+
+    out;
+
+// Hall's condition, checked directly: every subset of the left side must have
+// at least as many distinct neighbours as it has members.  Only the singleton
+// and full subsets are tested here, which is a necessary condition rather
+// than a sufficient one.
+
+    colors = connectivity_two_coloring , V , W , g;
+    left = colors_left_vertices;
+    neighbours = set , int;
+    v , left;
+        g_degree , v == 0;
+            false;
+
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive;
+                neighbours_insert , arc_head;
+
+    neighbours_size >= left_size;
+
+// ==========================================================================
+// graph::flow
+//
+// Residual networks and maximum flow.  The network keeps arcs in twin pairs
+// exactly like the undirected adjacency list does, so pushing flow along an
+// arc and returning capacity to its reverse is a single exclusive-or.
+// ==========================================================================
+
+// One residual arc.
+
+        capacity - flow;
+
+        capacity - flow <= 0;
+
+        id ^ 1;
+
+// A flow network: vertices with incidence lists over a flat arc arena.
+//
+// Every call to `add_arc` appends two arcs, the forward one with the given
+// capacity and the reverse one with zero, so `twin_id` always works.
+
+        incident_size;
+
+        arcs_size;
+
+        incident_clear;
+        arcs_clear;
+        i = 0;
+        i < order;
+            incident_push_back , vector , int;
+            ++i;
+
+        total_flow = 0;
+
+        forward = arcs_size;
+        arcs_push_back , FlowArc , tail ,
+                                head ,
+                                capacity ,
+                                forward;
+        incident_at , tail_push_back , forward;
+        backward = arcs_size;
+        arcs_push_back , FlowArc , head ,
+                                tail ,
+                                0 ,
+                                backward;
+        incident_at , head_push_back , backward;
+        forward;
+
+        // An arc that can carry flow in both directions at full capacity.
+
+        first = add_arc , a , b , capacity;
+        arcs_at , first ^ 1 , capacity = capacity;
+        first;
+
+        arcs_at , arc_flow += amount;
+        arcs_at , arc ^ 1 , flow -= amount;
+
+        arcs_at , arc_capacity - arcs_at , arc_flow;
+
+        a , arcs;
+            a_flow = 0;
+
+        total_flow = 0;
+
+    // Total flow leaving `source`, which must equal `total_flow` once a
+    // maximum flow computation has converged.
+
+        total = 0;
+        e , incident_at , source;
+            a = arcs_at , e;
+            a_flow > 0;
+                total += a_flow;
+
+        total;
+
+        // Build a flow network from a weighted directed graph, weights as capacities.
+
+    net = FlowNetwork;
+    net_prepare , g_order;
+    arc , g_edges;
+        arc_alive;
+            g_is_directed;
+                net_add_arc , arc_tail , arc_head , arc_weight;
+
+                arc_tail < arc_head;
+                    net_add_bidirectional , arc_tail , arc_head , arc_weight;
+
+    net;
+
+// One breadth first search over the residual network, recording the arc used
+// to reach each vertex.  Returns the bottleneck of the found path, or zero.
+
+    fill_int_vector , used , net_order , GRAPH_NIL;
+    queue = vector , int;
+    queue_push_back , source;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        head++;
+        v == sink;
+
+        e , net_incident_at , v;
+            a = net_arcs_at , e;
+            a_capacity - a_flow <= 0;
+
+            a_head != source && used_at , a_head == GRAPH_NIL;
+                used_at , a_head = e;
+                queue_push_back , a_head;
+
+    used_at , sink == GRAPH_NIL;
+        0;
+
+    bottleneck = GRAPH_INFINITY;
+    walker = sink;
+    walker != source;
+        e = used_at , walker;
+        slack = net_residual_of , e;
+        slack < bottleneck;
+            bottleneck = slack;
+
+        walker = net_arcs_at , e_tail;
+
+    bottleneck;
+
+// Edmonds-Karp: repeatedly augment along a shortest residual path.
+//
+// Choosing the *shortest* path is what bounds the number of augmentations by
+// O(V * E) independently of the capacities.
+
+    net_reset_flow;
+    used = vector , int;
+    total = 0;
+    rounds = 0;
+    rounds < GRAPH_AUGMENT_LIMIT;
+        bottleneck = find_augmenting_path , net , source , sink , used;
+        bottleneck <= 0;
+
+        walker = sink;
+        walker != source;
+            e = used_at , walker;
+            net_push , e , bottleneck;
+            walker = net_arcs_at , e_tail;
+
+        total += bottleneck;
+        rounds++;
+
+    net_total_flow = total;
+    total >= 0;
+    total;
+
+// Depth first blocking flow, the inner loop of Dinic's algorithm.  Kept
+// iterative for the same stack-depth reason as everything else here.
+
+    pushed = 0;
+    cursor = vector , int;
+    fill_int_vector , cursor , net_order , 0;
+
+        trail = vector , int;
+        v = source;
+        blocked = false;
+        v != sink && blocked == false;
+            advanced = false;
+            cursor_at , v < net_incident_at , v_size && advanced == false;
+                e = net_incident_at , v_at , cursor_at , v;
+                a = net_arcs_at , e;
+                a_capacity - a_flow > 0 && level_at , a_head == level_at , v + 1;
+                    trail_push_back , e;
+                    v = a_head;
+                    advanced = true;
+
+                    cursor_at , v += 1;
+
+            advanced == false;
+                trail_empty;
+                    blocked = true;
+
+                    last = trail_back;
+                    trail_pop_back;
+                    v = net_arcs_at , last_tail;
+                    cursor_at , v += 1;
+
+        blocked;
+
+        bottleneck = GRAPH_INFINITY;
+        e , trail;
+            slack = net_residual_of , e;
+            slack < bottleneck;
+                bottleneck = slack;
+
+        e , trail;
+            net_push , e , bottleneck;
+
+        pushed += bottleneck;
+
+    pushed;
+
+    // The level graph used by Dinic: BFS distances in the residual network.
+
+    level = vector , int;
+    fill_int_vector , level , net_order , GRAPH_NIL;
+    queue = vector , int;
+    level_at , source = 0;
+    queue_push_back , source;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        head++;
+        e , net_incident_at , v;
+            a = net_arcs_at , e;
+            a_capacity - a_flow > 0 && level_at , a_head == GRAPH_NIL;
+                level_at , a_head = level_at , v + 1;
+                queue_push_back , a_head;
+
+    level;
+
+    // Dinic's algorithm: alternate level graph construction with blocking flow.
+
+    net_reset_flow;
+    total = 0;
+    phases = 0;
+    phases < net_order + 1;
+        level = level_graph , net , source;
+        level_at , sink == GRAPH_NIL;
+
+        pushed = blocking_flow , net , level , source , sink;
+        pushed <= 0;
+
+        total += pushed;
+        phases++;
+
+    net_total_flow = total;
+    total;
+
+// The source side of a minimum cut: every vertex still reachable from the
+// source in the residual network once the flow is maximal.
+
+    side = vector , bool;
+    fill_bool_vector , side , net_order , false;
+    queue = vector , int;
+    side_at , source = true;
+    queue_push_back , source;
+    head = 0;
+    head < queue_size;
+        v = queue_at , head;
+        ++head;
+        e , net_incident_at , v;
+            a = net_arcs_at , e;
+            a_capacity - a_flow > 0 && side_at , a_head == false;
+                side_at , a_head = true;
+                queue_push_back , a_head;
+
+    side;
+
+    // The arcs crossing the minimum cut, whose capacities sum to the max flow.
+
+    side = min_cut_side , net , source;
+    out = vector , int;
+    e = 0;
+    e < net_arcs_size;
+        a = net_arcs_at , e;
+        a_capacity > 0 && side_at , a_tail && side_at , a_head == false;
+            out_push_back , e;
+
+        ++e;
+
+    out;
+
+// Max-flow min-cut, restated as an assertion: the capacity crossing the cut
+// equals the flow value.
+
+    crossing = min_cut_arcs , net , source;
+    total = 0;
+    e , crossing;
+        total += net_arcs_at , e_capacity;
+
+    total;
+
+// Maximum bipartite matching expressed as a unit-capacity flow problem.
+// Slower than Kuhn in practice but a useful cross-check in the tests.
+
+    colors = connectivity_two_coloring , V , W , g;
+    colors_bipartite == false;
+        0;
+
+    net = FlowNetwork;
+    super_source = g_order;
+    super_sink = g_order + 1;
+    net_prepare , g_order + 2;
+    v , colors_left_vertices;
+        net_add_arc , super_source , v , 1;
+        e , g_vertices_at , v_incident;
+            arc = g_edges_at , e;
+            arc_alive;
+                net_add_arc , v , arc_head , 1;
+
+    v , colors_right_vertices;
+        net_add_arc , v , super_sink , 1;
+
+    max_flow , net , super_source , super_sink;
+
+// Edge connectivity between two vertices: the number of arc-disjoint paths,
+// which by Menger's theorem is the unit-capacity max flow.
+
+    net = FlowNetwork;
+    net_prepare , g_order;
+    arc , g_edges;
+        arc_alive;
+            net_add_arc , arc_tail , arc_head , 1;
+
+    max_flow , net , source , sink;
+
+// The global minimum cut, obtained by fixing vertex zero and running a max
+// flow to every other vertex in turn.
+
+    g_order < 2;
+        0;
+
+    best = GRAPH_INFINITY;
+    sink = 1;
+    sink < g_order;
+        net = network_from , V , W , g;
+        value = max_flow , net , 0 , sink;
+        value < best;
+            best = value;
+
+        ++sink;
+
+    best;
+
+// ==========================================================================
+// Top level convenience wrappers
+//
+// The entry points a caller is most likely to reach for, hoisted out of the
+// nested namespaces so that the common cases read as one-liners.
+// ==========================================================================
+
+// Shortest hop path between two vertices of an unweighted graph.
+
+    traversal_hop_distance , V , W , g , source , target;
+
+    // Cheapest route in a weighted graph, as a vertex sequence.
+
+    shortest_path_shortest_route , V , W , g , source , target;
+
+    // True when every vertex can reach every other vertex.
+
+    g_is_directed;
+        connectivity_is_strongly_connected , V , W , g;
+
+    connectivity_is_connected , V , W , g;
+
+// A one-line health check used by the test suite: run every major algorithm
+// and confirm none of them contradicts another.
+
+    by_bfs = connectivity_connected_components , V , W , g;
+    by_union = connectivity_components_by_union , V , W , g;
+    by_bfs_total != by_union_total;
+        false;
+
+    tarjan = connectivity_tarjan_scc , V , W , g;
+    kosaraju = connectivity_kosaraju_scc , V , W , g;
+    tarjan_total != kosaraju_total;
+        false;
+
+    prim_tree = spanning_prim , V , W , g , 0;
+    kruskal_tree = spanning_kruskal , V , W , g;
+    by_bfs_total == 1 && prim_tree_weight != kruskal_tree_weight;
+        false;
+
+    true;
+
+    // A compact textual summary of everything this library can say about a graph.
+
+    out = string;
+    out_append , builders_describe , V , W , g;
+    out_append , " components=";
+    out_append , to_string , connectivity_component_count , V , W , g;
+    out_append , " acyclic=";
+    connectivity_is_acyclic , V , W , g;
+        out_append , "yes";
+
+        out_append , "no";
+
+    out_append , " bipartite=";
+    connectivity_is_bipartite , V , W , g;
+        out_append , "yes";
+
+        out_append , "no";
+
+    out_append , " mst=";
+    out_append , to_string , spanning_mst_weight , V , W , g;
+    out;
+
+// --- Demonstration --------------------------------------------------------
+
+// Exercise the traversal namespace on a small grid.
+
+    grid = builders_grid_graph , int , int , 4 , 4;
+    found = traversal_bfs , int , int , grid , 0;
+    println , to_string , found_reached_count;
+    println , to_string , found_eccentricity;
+    watcher = traversal_Visitor , int , int;
+    watcher_stop_after = 8;
+    limited = traversal_bfs_visit , int , int , grid , 0 , watcher;
+    limited_complete == false;
+    levels = traversal_bfs_levels , int , int , grid , 0;
+    level , levels;
+        println , to_string , level_size;
+
+        // Build a small weighted DAG and run every ordering and distance routine.
+
+    dag = builders_directed , int , int , 6;
+    dag_connect , 0 , 1 , 2000;
+    dag_connect , 0 , 2 , 4000;
+    dag_connect , 1 , 2 , 1000;
+    dag_connect , 1 , 3 , 7000;
+    dag_connect , 2 , 4 , 3000;
+    dag_connect , 3 , 5 , 1000;
+    dag_connect , 4 , 3 , 2000;
+    dag_connect , 4 , 5 , 5000;
+
+    kahn = connectivity_topological_sort_kahn , int , int , dag;
+    kahn_valid;
+    by_dfs = connectivity_topological_sort_dfs , int , int , dag;
+    by_dfs_length == kahn_length;
+
+    quick = shortest_path_dijkstra , int , int , dag , 0;
+    careful = shortest_path_bellman_ford , int , int , dag , 0;
+    v = 0;
+    v < dag_order;
+        quick_dist_at , v == careful_dist_at , v;
+        ++v;
+
+    careful_negative_cycle == false;
+
+    linear = shortest_path_dag_shortest_path , int , int , dag , 0;
+    println , to_string , linear_to , 5;
+    route = shortest_path_shortest_route , int , int , dag , 0 , 5;
+    println , to_string , route_size;
+
+    dense = builders_densify , int , int , 6 , dag;
+    pairs = shortest_path_floyd_warshall , int , int , 6 , dense;
+    println , to_string , pairs_diameter;
+    println , to_string , pairs_center;
+    shortest_path_transitive_closure , int , int , 6 , dense;
+
+    // Spanning trees over an undirected weighted graph.
+
+    net = builders_undirected , int , int , 6;
+    net_connect , 0 , 1 , 4000;
+    net_connect , 0 , 2 , 3000;
+    net_connect , 1 , 2 , 1000;
+    net_connect , 1 , 3 , 2000;
+    net_connect , 2 , 3 , 4000;
+    net_connect , 3 , 4 , 2000;
+    net_connect , 4 , 5 , 6000;
+
+    grown = spanning_prim , int , int , net , 0;
+    sorted = spanning_kruskal , int , int , net;
+    grown_weight == sorted_weight;
+    sorted_spans , net_order;
+    println , to_string , sorted_average_weight;
+    heaviest = spanning_maximum_spanning_tree , int , int , net;
+    heaviest_weight >= sorted_weight;
+    spanning_verify_minimality , int , int , net , sorted;
+
+    // Components, cuts and colourings.
+
+    web = builders_directed , int , int , 8;
+    web_connect_unweighted , 0 , 1;
+    web_connect_unweighted , 1 , 2;
+    web_connect_unweighted , 2 , 0;
+    web_connect_unweighted , 2 , 3;
+    web_connect_unweighted , 3 , 4;
+    web_connect_unweighted , 4 , 5;
+    web_connect_unweighted , 5 , 3;
+    web_connect_unweighted , 6 , 7;
+
+    strong = connectivity_tarjan_scc , int , int , web;
+    also_strong = connectivity_kosaraju_scc , int , int , web;
+    strong_total == also_strong_total;
+    collapsed = connectivity_condensation , int , int , web , strong;
+    connectivity_is_acyclic , int , int , collapsed;
+    bucket , strong_buckets;
+        println , to_string , bucket_size;
+
+    ring = builders_cycle_graph , int , int , 7;
+    connectivity_has_undirected_cycle , int , int , ring;
+    connectivity_is_bipartite , int , int , ring == false;
+    even_ring = builders_cycle_graph , int , int , 8;
+    connectivity_is_bipartite , int , int , even_ring;
+
+    chain = builders_path_graph , int , int , 6;
+    cuts = connectivity_find_cuts , int , int , chain;
+    println , to_string , cuts_bridge_count;
+    println , to_string , cuts_articulation_list_size;
+
+    // Matching and flow on the same bipartite instance.
+
+    jobs = builders_complete_bipartite , int , int , 3 , 4;
+    paired = matching_maximum_bipartite_matching , int , int , jobs;
+    warm = matching_matching_with_warm_start , int , int , jobs;
+    paired_size == warm_size;
+    by_flow = flow_matching_by_flow , int , int , jobs;
+    by_flow == paired_size;
+    entry , paired_pairs;
+        println , to_string , entry_first;
+        println , to_string , entry_second;
+
+    cover = matching_minimum_vertex_cover , int , int , jobs;
+    cover_size == paired_size;
+    matching_maximum_independent_set , int , int , jobs;
+    matching_hall_condition_holds , int , int , jobs;
+
+    pipes = FlowNetwork;
+    pipes_prepare , 6;
+    pipes_add_arc , 0 , 1 , 16000;
+    pipes_add_arc , 0 , 2 , 13000;
+    pipes_add_arc , 1 , 3 , 12000;
+    pipes_add_arc , 2 , 1 , 4000;
+    pipes_add_arc , 2 , 4 , 14000;
+    pipes_add_arc , 3 , 2 , 9000;
+    pipes_add_arc , 3 , 5 , 20000;
+    pipes_add_arc , 4 , 3 , 7000;
+    pipes_add_arc , 4 , 5 , 4000;
+
+    value = flow_max_flow , pipes , 0 , 5;
+    value == pipes_outflow , 0;
+    value == flow_cut_capacity , pipes , 0;
+    fast = flow_dinic_max_flow , pipes , 0 , 5;
+    fast == value;
+    crossing = flow_min_cut_arcs , pipes , 0;
+    println , to_string , crossing_size;
+
+    // The whole library, in the order the chapters of a textbook would use it.
+
+    demo_traversal;
+    demo_shortest_paths;
+    demo_spanning;
+    demo_connectivity;
+    demo_matching_and_flow;
+
+    sample = builders_complete_graph , int , int , 5;
+    println , report , int , int , sample;
+    cross_check , int , int , sample;
+    fully_connected , int , int , sample;
+    println , to_string , cheapest_route , int , int , sample , 0 , 4 , size;
+    println , to_string , shortest_hops , int , int , sample , 0 , 4;

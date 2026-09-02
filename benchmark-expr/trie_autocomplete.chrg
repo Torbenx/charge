@@ -1,0 +1,3855 @@
+// Prefix-tree text index.
+//
+// This file collects the four data structures that a practical text index is
+// usually built out of, plus the query layers that sit on top of them:
+//
+//   * `Trie{V, ALPHABET}`        -- a classic array-mapped trie.  Every node
+//                                   owns a dense child slot table of exactly
+//                                   `ALPHABET` entries plus a sparse
+//                                   `map{char, int}` overflow map for symbols
+//                                   that fall outside the dense alphabet.
+//   * `RadixTree{V, ALPHABET}`   -- the path-compressed (Patricia) variant.
+//                                   Each edge carries a whole label rather
+//                                   than a single character, so insertion has
+//                                   to split labels and deletion has to merge
+//                                   them back together again.
+//   * `TernaryTree{V}`           -- a ternary search tree, which trades the
+//                                   fan-out of a trie for three-way branching
+//                                   and a much smaller memory footprint.
+//   * `Autocomplete{V, ALPHABET}`-- the ranking layer.  Completions are drawn
+//                                   from a trie, scored by a stored weight,
+//                                   and reduced to the best `k` by a bounded
+//                                   selection pass.
+//
+// Every structure is arena based: nodes live in a flat
+// `vector{TrieNode{V, ALPHABET}}` and every link is an integer index into that
+// arena, with `TRIE_NIL` (-1) standing for "no such node".  Index links keep
+// the whole index relocatable, which is what makes the flat-array
+// serialisation at the bottom of the file a straight copy rather than a
+// pointer fix-up pass.
+//
+// Two parameters are threaded through nearly every declaration:
+//
+//   * `V`        -- the payload type stored at terminal nodes,
+//   * `ALPHABET` -- a non-type parameter giving the width of the dense child
+//                   table.  26 indexes lowercase ASCII, 128 indexes the whole
+//                   ASCII range, and 256 indexes raw bytes.
+//
+// Weights and scores are fixed-point integers scaled by `WEIGHT_SCALE`
+// (1000), so a weight of `2500` means 2.5.  No floating point appears
+// anywhere in this file.
+
+// --- Enumerations ---------------------------------------------------------
+
+// What an insertion did to the index.
+
+// The role a node plays in the structure it belongs to.
+
+// What happened to an edge label during a radix-tree mutation.
+
+// How a query result was obtained.
+
+// Ordering applied by the ranking layer before top-k selection.
+
+// Record tags used by the flat-array serialisation.
+
+// Result of a visitor callback during a traversal.
+
+// Which of the three ternary-search-tree links to follow next.
+
+// --- Tuning constants -----------------------------------------------------
+
+// Sentinel index meaning "no node".  Negative so it can never index an arena.
+
+// Dense alphabet widths that the file instantiates.
+
+// Arena capacity used when an index is built without a size hint.
+
+// Growth factor for the node arena, as a percentage, so no floating point is
+// required to resize.
+
+// Hard cap on how deep any walk is allowed to go.  Traversal stacks are sized
+// from this up front so they never reallocate mid-walk.
+
+// Longest key the index will accept.  Keys past this are rejected rather than
+// silently truncated.
+
+// Fixed-point scale for weights and scores: a stored weight of 1000 is 1.0.
+
+// Default weight given to a key inserted without one.
+
+// Weight floor, so a decayed entry never becomes exactly zero and drops out
+// of the ranking entirely.
+
+// Percentage of its weight an entry keeps when the whole index is decayed.
+
+// Bonus, in scaled units, applied to a completion that matched exactly.
+
+// Penalty, in scaled units, charged per edit in a fuzzy match.
+
+// Penalty per character of unmatched suffix, so short completions rank above
+// long ones when the weights tie.
+
+// Default number of completions returned by the ranking layer.
+
+// Upper bound on `k` regardless of what the caller asks for.
+
+// Default edit-distance budget for the fuzzy walk.
+
+// Hard cap on the edit budget; beyond this the walk degenerates into a full
+// scan and the ranking is meaningless.
+
+// Number of sampled completions the statistics pass is allowed to retain.
+
+// Radix labels shorter than this are never split further; the child is
+// adopted wholesale instead.
+
+// Histogram bucket count for the fan-out distribution.
+
+// --- Character constants --------------------------------------------------
+
+// Character-level code compares raw symbols on nearly every line, so each
+// significant character is named once here and referred to by name below.
+
+// The apostrophe has to be spelled as a one-character string: the escaped
+// character literal form is not accepted by the lexer.
+
+// Sentinel appended to a key before it is written into the flat serialised
+// form, marking the end of one record.
+
+// --- Character classification ---------------------------------------------
+
+// True for the 26 lowercase ASCII letters, which is the dense alphabet used
+// by every `ALPHABET_LOWER` instantiation.
+
+    c >= CHAR_LOWER_A && c <= CHAR_LOWER_Z;
+
+    c >= CHAR_UPPER_A && c <= CHAR_UPPER_Z;
+
+    c >= CHAR_ZERO && c <= CHAR_NINE;
+
+    is_lower , c || is_upper , c;
+
+    // Word characters are what the tokeniser keeps; everything else is a break.
+
+    is_letter , c;
+        true;
+
+    is_digit , c;
+        true;
+
+    c == CHAR_UNDERSCORE;
+        true;
+
+    c == CHAR_MINUS;
+        true;
+
+    false;
+
+    c == CHAR_SPACE;
+        true;
+
+    c == CHAR_TAB;
+        true;
+
+    c == CHAR_NEWLINE;
+        true;
+
+    c == CHAR_RETURN;
+        true;
+
+    false;
+
+    // Case folding.  Only ASCII is handled; anything else passes through.
+
+    is_upper , c;
+        c + CHAR_LOWER_A - CHAR_UPPER_A;
+
+    c;
+
+    is_lower , c;
+        c - CHAR_LOWER_A - CHAR_UPPER_A;
+
+    c;
+
+// --- Alphabet mapping -----------------------------------------------------
+
+// Maps a character onto a dense child slot, or `TRIE_NIL` when the character
+// falls outside the dense range and has to live in the sparse overflow map.
+//
+// The mapping depends on the alphabet width, which is why it is a template
+// over the non-type parameter rather than a plain function.
+
+    ALPHABET == 26;
+        is_lower , c;
+            c - CHAR_LOWER_A;
+
+        is_upper , c;
+            to_lower , c - CHAR_LOWER_A;
+
+        TRIE_NIL;
+
+    c < 0;
+        TRIE_NIL;
+
+    c >= ALPHABET;
+        TRIE_NIL;
+
+    c;
+
+// Inverse of `slot_of`: turns a dense slot back into the character it stands
+// for.  Used by every routine that has to rebuild a key from a path.
+
+    ALPHABET == 26;
+        CHAR_LOWER_A + slot;
+
+    slot;
+
+    // True when `c` can be stored in a dense slot at this alphabet width.
+
+    slot_of , ALPHABET , c != TRIE_NIL;
+
+// Normalises a whole key: case folded, with every character outside the
+// alphabet dropped.  Returns the folded key and the number of characters that
+// were discarded.
+
+    out = string;
+    dropped = 0;
+    index = 0;
+    index < key_size;
+        c = to_lower , key_at , index;
+        in_alphabet , ALPHABET , c;
+            out_push_back , c;
+
+            dropped++;
+
+        ++index;
+
+    pair , string , int , out , dropped;
+
+// --- String helpers -------------------------------------------------------
+
+// Length of the longest common prefix of two strings, in characters.
+
+    index = 0;
+    limit = min , a_size , b_size;
+    index < limit;
+        a_at , index != b_at , index;
+            index;
+
+        ++index;
+
+    limit;
+
+    // True when `whole` begins with `prefix`.
+
+    prefix_size > whole_size;
+        false;
+
+    common_prefix_length , whole , prefix == prefix_size;
+
+// Lexicographic three-way comparison, so the ranking layer has a total order
+// to fall back on when two weights tie.
+
+    shared_len = common_prefix_length , a , b;
+    shared_len < a_size && shared_len < b_size;
+        a_at , shared_len < b_at , shared_len;
+            -1;
+
+        1;
+
+    a_size < b_size;
+        -1;
+
+    a_size > b_size;
+        1;
+
+    0;
+
+    // Concatenation that does not disturb either operand.
+
+    out = string;
+    out_append , a;
+    out_append , b;
+    out;
+
+    // `text` with one character appended, returned by value.
+
+    out = string;
+    out_append , text;
+    out_push_back , c;
+    out;
+
+// Splits `text` on every run of non-word characters, which is how a document
+// is turned into the key stream an index is built from.
+
+    out = vector , string;
+    current = string;
+    index = 0;
+    index < text_size;
+        c = to_lower , text_at , index;
+        is_word_char , c;
+            current_push_back , c;
+
+            current_size > 0;
+                out_push_back , current;
+                current_clear;
+
+        index++;
+
+    current_size > 0;
+        out_push_back , current;
+
+    current;
+    out;
+
+// --- Trie node ------------------------------------------------------------
+
+// One node of the array-mapped trie.
+//
+// The dense `children` vector always has exactly `ALPHABET` entries, each of
+// them a node index or `TRIE_NIL`.  Characters that do not map into the dense
+// range go into `overflow`, a `map{char, int}` that is empty for the vast
+// majority of nodes.  Keeping both means the structure stays exact for
+// arbitrary input without paying 256 slots per node when the input happens to
+// be lowercase words.
+
+// --- Capacity ---------------------------------------------------------
+
+        ALPHABET;
+
+        terminal;
+
+        degree == 0;
+
+        // Number of dense slots that are occupied.
+
+        found = 0;
+        slot = 0;
+        slot < ALPHABET;
+            children , slot != TRIE_NIL;
+                found++;
+
+            slot++;
+
+        found;
+
+        overflow_size;
+
+        dense_degree + sparse_degree;
+
+        // A node can be pruned once it holds no payload and has no children left.
+
+        terminal;
+            false;
+
+        degree == 0;
+
+    // --- Child access -----------------------------------------------------
+
+    // Child reached by following `c`, or `TRIE_NIL`.  Dense slots are checked
+    // first because that is the overwhelmingly common case.
+
+        slot = slot_of , ALPHABET , c;
+        slot != TRIE_NIL;
+            children , slot;
+
+        overflow_contains , c;
+            overflow_at , c;
+
+        TRIE_NIL;
+
+        slot < 0;
+            TRIE_NIL;
+
+        slot >= ALPHABET;
+            TRIE_NIL;
+
+        children , slot;
+
+    // Installs `node` as the child reached by `c`, routing through whichever
+    // of the two tables can hold it.
+
+        slot = slot_of , ALPHABET , c;
+        slot != TRIE_NIL;
+            existed = children , slot != TRIE_NIL;
+            children , slot = node;
+            !existed;
+                ++live_children;
+
+            !existed;
+
+        fresh = !overflow_contains , c;
+        overflow_insert , c , node;
+        fresh;
+            ++live_children;
+
+        fresh;
+
+        // Removes the link for `c` without touching the child node itself.
+
+        slot = slot_of , ALPHABET , c;
+        slot != TRIE_NIL;
+            children , slot == TRIE_NIL;
+                false;
+
+            children , slot = TRIE_NIL;
+            live_children--;
+            true;
+
+        !overflow_contains , c;
+            false;
+
+        overflow_erase , c;
+        live_children--;
+        true;
+
+    // Every outgoing edge as a (character, node index) pair, dense slots in
+    // alphabet order first and overflow entries after them.
+
+        out = vector , pair , char , int;
+        slot = 0;
+        slot < ALPHABET;
+            children , slot != TRIE_NIL;
+                out_push_back , pair , char , int , char_of_slot , ALPHABET , slot ,
+                                              children , slot;
+
+            ++slot;
+
+        entry , overflow;
+            out_push_back , pair , char , int , entry_first , entry_second;
+
+        out;
+
+        // First occupied dense slot at or after `from`, or `TRIE_NIL`.
+
+        slot = from;
+        slot < ALPHABET;
+            children , slot != TRIE_NIL;
+                slot;
+
+            slot++;
+
+        TRIE_NIL;
+
+    // --- Bookkeeping ------------------------------------------------------
+
+    // Returns the node to its post-construction state, keeping the dense
+    // table allocated so a recycled node does not have to resize it again.
+
+        slot = 0;
+        slot < ALPHABET;
+            children , slot = TRIE_NIL;
+            ++slot;
+
+        overflow_clear;
+        terminal = false;
+        weight = 0;
+        subtree_weight = 0;
+        subtree_keys = 0;
+        live_children = 0;
+        parent = TRIE_NIL;
+        edge_char = CHAR_NUL;
+        depth = 0;
+        kind = NodeKind_Branch;
+
+    // Grows the dense table to the full alphabet width.  Called once when a
+    // node is handed out by the arena.
+
+        children_resize , ALPHABET;
+        slot = 0;
+        slot < ALPHABET;
+            children , slot = TRIE_NIL;
+            slot++;
+
+        parent = parent;
+        edge_char = edge;
+        depth = depth;
+        kind = NodeKind_Branch;
+        live = true;
+
+        payload = value;
+        weight = weight;
+        terminal = true;
+        kind = NodeKind_Terminal;
+
+        terminal = false;
+        weight = 0;
+        kind = NodeKind_Branch;
+
+    // Dense child slots.  Always exactly `ALPHABET` entries once initialised.
+
+    // Sparse spill-over for characters outside the dense alphabet.
+
+    // Payload, meaningful only when `terminal` is set.
+
+    // Scaled weight of this key, and the aggregate weight of the subtree
+    // rooted here.  The aggregate is what the ranking layer prunes against.
+
+// --- Query results --------------------------------------------------------
+
+// One completion produced by a prefix or fuzzy query, before ranking.
+
+        score != other_score;
+            score > other_score;
+
+        compare_strings , key , other_key < 0;
+
+        text = string;
+        text_append , key;
+        text_append , " score=";
+        text_append , to_string , score;
+        text_append , " edits=";
+        text_append , to_string , edits;
+        text;
+
+        // Result of walking a key as far as the index allows.
+
+        consumed == requested;
+
+        text = string;
+        text_append , "consumed=";
+        text_append , to_string , consumed;
+        text_append , " of ";
+        text_append , to_string , requested;
+        text;
+
+        // Payload of the deepest terminal the walk passed through.
+
+// --- The trie -------------------------------------------------------------
+
+// Array-mapped trie mapping `string` keys onto `V` payloads.
+//
+// The arena is a `vector{TrieNode{V, ALPHABET}}`; node zero is the root and is
+// never released.  Freed nodes are threaded onto `free_list` through their
+// `parent` field so that a long-lived index does not grow without bound as
+// keys come and go.
+
+// --- Basic accessors --------------------------------------------------
+
+        count;
+
+        count == 0;
+
+        nodes_size - free_count;
+
+        ALPHABET;
+
+        root;
+
+    // Borrowed view of one node, so callers can inspect fan-out without
+    // copying the dense child table.
+
+        nodes , index;
+
+        // --- Arena ------------------------------------------------------------
+
+        nodes_reserve , capacity;
+
+    // Makes sure the root exists.  Every mutating entry point calls this
+    // first, so a default-constructed index is usable straight away.
+
+        root != TRIE_NIL;
+
+        nodes_push_back , TrieNode , V , ALPHABET;
+        root = nodes_size - 1;
+        nodes , root_initialize , TRIE_NIL , CHAR_NUL , 0;
+
+        // Hands out a node, recycling from the free list when possible.
+
+        free_list != TRIE_NIL;
+            recycled = free_list;
+            free_list = nodes , recycled_parent;
+            free_count--;
+            nodes , recycled_reset;
+            nodes , recycled_initialize , parent , edge , depth;
+            ++allocations;
+            recycled;
+
+        nodes_push_back , TrieNode , V , ALPHABET;
+        fresh = nodes_size - 1;
+        nodes , fresh_initialize , parent , edge , depth;
+        allocations++;
+        fresh;
+
+    // Returns a node to the free list.  The caller is responsible for having
+    // already detached it from its parent.
+
+        index == root;
+
+        nodes , index_reset;
+        nodes , index_live = false;
+        nodes , index_kind = NodeKind_Pruned;
+        nodes , index_parent = free_list;
+        free_list = index;
+        ++free_count;
+        ++releases;
+
+    // --- Insertion --------------------------------------------------------
+
+    // Inserts `key`, creating any missing nodes along the way.
+    //
+    // Returns `Inserted` for a new key, `Replaced` when an existing payload
+    // was overwritten, and `Rejected` when the key was empty or too long.
+
+        key_size == 0;
+            TrieOutcome_Rejected;
+
+        key_size > TRIE_MAX_KEY_LENGTH;
+            TrieOutcome_Rejected;
+
+        ensure_root;
+
+        current = root;
+        index = 0;
+        index < key_size;
+            c = key_at , index;
+            next = nodes , current_child_for , c;
+            next == TRIE_NIL;
+                next = allocate_node , current , c , index + 1;
+                nodes , current_attach , c , next;
+                edges_created++;
+
+            current = next;
+            index++;
+
+        was_terminal = nodes , current_terminal;
+        nodes , current_mark_terminal , value , weight;
+        was_terminal;
+            ++replacements;
+            refresh_path , current;
+            TrieOutcome_Replaced;
+
+        ++count;
+        refresh_path , current;
+        TrieOutcome_Inserted;
+
+        // Convenience overload spelling: insert with the default weight.
+
+        insert , key , value , WEIGHT_DEFAULT;
+
+    // Bulk insertion from a `vector{pair{string, V}}` run.  Returns how many
+    // keys were genuinely new.
+
+        added = 0;
+        entry , entries;
+            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
+                added++;
+
+        added;
+
+    // Bulk insertion from a weighted run, which is the shape the autocomplete
+    // layer feeds in.
+
+        added = 0;
+        entry , entries;
+            outcome = insert , entry_first , entry_second_first , entry_second_second;
+            outcome == TrieOutcome_Inserted;
+                added++;
+
+        added;
+
+    // Recomputes the aggregate weight and key count on the path from `node`
+    // back to the root.  Called after every mutation so the ranking layer can
+    // prune subtrees by their best possible score.
+
+        current = node;
+        guard = 0;
+        current != TRIE_NIL && guard < TRIE_MAX_DEPTH;
+            recompute_node , current;
+            current = nodes , current_parent;
+            guard++;
+
+            // Aggregate of one node from its own payload plus its children.
+
+        best = 0;
+        keys = 0;
+        nodes , node_terminal;
+            best = nodes , node_weight;
+            keys = 1;
+
+        edges = nodes , node_edges;
+        edge , edges;
+            child = edge_second;
+            nodes , child_subtree_weight > best;
+                best = nodes , child_subtree_weight;
+
+            keys += nodes , child_subtree_keys;
+
+        edges;
+        nodes , node_subtree_weight = best;
+        nodes , node_subtree_keys = keys;
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Walks `key` as far as the structure allows, recording the deepest
+    // terminal node seen on the way.  Every other query is phrased in terms
+    // of this one walk.
+
+        result = WalkResult , V;
+        result_requested = key_size;
+        root == TRIE_NIL;
+            result;
+
+        current = root;
+        index = 0;
+        index < key_size;
+            next = nodes , current_child_for , key_at , index;
+            next == TRIE_NIL;
+                result_node = current;
+                result_consumed = index;
+                result_kind = MatchKind_NoMatch;
+                result;
+
+            current = next;
+            index++;
+            nodes , current_terminal;
+                result_last_terminal = current;
+                result_last_terminal_length = index;
+
+        result_node = current;
+        result_consumed = key_size;
+        nodes , current_terminal;
+            result_kind = MatchKind_ExactMatch;
+            result_payload = nodes , current_payload;
+
+            result_kind = MatchKind_PrefixMatch;
+
+        result;
+
+        // Node reached by following the whole of `key`, or `TRIE_NIL`.
+
+        result = walk , key;
+        result_consumed != key_size;
+            TRIE_NIL;
+
+        result_node;
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        nodes , node_terminal;
+
+        // True when any stored key begins with `prefix`.
+
+        find_node , prefix != TRIE_NIL;
+
+    // Borrowed payload for `key`, falling back to the shared `missing` value
+    // so the signature stays total.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            missing;
+
+        !nodes , node_terminal;
+            missing;
+
+        nodes , node_payload;
+
+        // Stored weight of `key`, or zero.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            0;
+
+        nodes , node_weight;
+
+        // Bumps the weight of an existing key, saturating at the scaled maximum.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        !nodes , node_terminal;
+            false;
+
+        nodes , node_weight += delta;
+        nodes , node_weight < WEIGHT_FLOOR;
+            nodes , node_weight = WEIGHT_FLOOR;
+
+        refresh_path , node;
+        true;
+
+    // --- Prefix queries ---------------------------------------------------
+
+    // Longest stored key that is a prefix of `text`.  This is the query a
+    // dictionary-based tokeniser runs on every position of its input.
+
+        result = walk , text;
+        result_last_terminal == TRIE_NIL;
+            pair , string , int , string , 0;
+
+        pair , string , int , text_substr , 0 , result_last_terminal_length ,
+                                 result_last_terminal;
+
+    // Longest common prefix shared by every key in the index.  Walks down
+    // while each node has exactly one edge and holds no payload of its own.
+
+        out = string;
+        root == TRIE_NIL;
+            out;
+
+        current = root;
+        guard = 0;
+        guard < TRIE_MAX_DEPTH;
+            nodes , current_terminal;
+                out;
+
+            edges = nodes , current_edges;
+            edges_size != 1;
+                edges;
+                out;
+
+            out_push_back , edges , 0 , first;
+            current = edges , 0 , second;
+            edges;
+            guard++;
+
+        out;
+
+    // Longest common prefix of the keys stored under `prefix`, which is what
+    // an editor uses to complete as far as it unambiguously can.
+
+        out = string;
+        out_append , prefix;
+        start = find_node , prefix;
+        start == TRIE_NIL;
+            out;
+
+        current = start;
+        guard = 0;
+        guard < TRIE_MAX_DEPTH;
+            nodes , current_terminal;
+                out;
+
+            edges = nodes , current_edges;
+            edges_size != 1;
+                edges;
+                out;
+
+            out_push_back , edges , 0 , first;
+            current = edges , 0 , second;
+            edges;
+            guard++;
+
+        out;
+
+    // Every key stored beneath `node`, with `prefix` already prepended.  The
+    // walk is iterative over an explicit stack of
+    // `pair{int, string}` frames rather than recursive, so a pathological key
+    // length cannot blow the machine stack.
+
+        out = vector , pair , string , V;
+        node == TRIE_NIL;
+            out;
+
+        stack = vector , pair , int , string;
+        stack_reserve , TRIE_MAX_DEPTH;
+        stack_push_back , pair , int , string , node , prefix;
+
+        stack_size > 0;
+            frame = stack_back;
+            here = frame_first;
+            path = frame_second;
+            stack_pop_back;
+
+            nodes , here_terminal;
+                out_push_back , pair , string , V , path , nodes , here_payload;
+                limit > 0 && out_size >= limit;
+                    stack;
+                    path;
+                    out;
+
+            // Push in reverse alphabet order so the pops come out ascending.
+            edges = nodes , here_edges;
+            index = edges_size - 1;
+            index >= 0;
+                child_path = push_char , path , edges , index_first;
+                stack_push_back , pair , int , string , edges , index_second ,
+                                                  child_path;
+                child_path;
+                index--;
+
+            edges;
+            path;
+
+        stack;
+        out;
+
+        // Every key beginning with `prefix`.
+
+        start = find_node , prefix;
+        collect_under , start , prefix , limit;
+
+    // Same query, but keeping the stored weight alongside the payload.  The
+    // nested pair is what the ranking layer consumes directly.
+
+        out = vector , pair , string , pair , V , int;
+        plain = keys_with_prefix , prefix , 0;
+        entry , plain;
+            w = weight_of , entry_first;
+            boxed = pair , V , int , entry_second , w;
+            out_push_back , pair , string , pair , V , int , entry_first , boxed;
+            boxed;
+
+        plain;
+        out;
+
+        // Every key in the index, in lexicographic order.
+
+        empty_prefix = string;
+        out = collect_under , root , empty_prefix , 0;
+        empty_prefix;
+        out;
+
+    // Keys grouped by their first character.  The deeply nested return type
+    // is exactly what a per-letter completion cache wants.
+
+        groups = map , char , vector , pair , string , V;
+        entries = to_pairs;
+        entry , entries;
+            entry_first_size == 0;
+                entry;
+
+                initial = entry_first_at , 0;
+                !groups_contains , initial;
+                    bucket = vector , pair , string , V;
+                    groups_insert , initial , bucket;
+                    bucket;
+
+                groups_at , initial_push_back , entry;
+
+        entries;
+        groups;
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Removes `key` and prunes every node that the removal made redundant.
+    //
+    // Pruning walks back towards the root and stops at the first node that is
+    // either terminal in its own right or still has another child, because
+    // that node is still needed by some other key.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        !nodes , node_terminal;
+            false;
+
+        nodes , node_clear_terminal;
+        count--;
+        prune_from , node;
+        true;
+
+        // Releases `start` and as many of its ancestors as have become useless.
+
+        current = start;
+        pruned = 0;
+        guard = 0;
+        current != TRIE_NIL && guard < TRIE_MAX_DEPTH;
+            current == root;
+                recompute_node , current;
+                pruned;
+
+            !nodes , current_prunable;
+                refresh_path , current;
+                pruned;
+
+            parent = nodes , current_parent;
+            edge = nodes , current_edge_char;
+            nodes , parent_detach , edge;
+            release_node , current;
+            pruned++;
+            current = parent;
+            guard++;
+
+        pruned;
+
+    // Removes every key beginning with `prefix`.  The whole subtree below the
+    // prefix node is released in one pass and only then is the spine pruned.
+
+        start = find_node , prefix;
+        start == TRIE_NIL;
+            0;
+
+        removed = release_subtree , start;
+        count -= removed;
+
+        start == root;
+            recompute_node , root;
+            removed;
+
+        parent = nodes , start_parent;
+        edge = nodes , start_edge_char;
+        nodes , parent_detach , edge;
+        release_node , start;
+        prune_from , parent;
+        removed;
+
+    // Releases everything strictly below `start`, returning the number of
+    // stored keys that went with it.  `start` itself survives.
+
+        removed = 0;
+        stack = vector , int;
+        stack_reserve , TRIE_MAX_DEPTH;
+
+        seed = nodes , start_edges;
+        edge , seed;
+            stack_push_back , edge_second;
+
+        seed;
+
+        stack_size > 0;
+            here = stack_back;
+            stack_pop_back;
+            nodes , here_terminal;
+                removed++;
+
+            edges = nodes , here_edges;
+            edge , edges;
+                stack_push_back , edge_second;
+
+            edges;
+            release_node , here;
+
+        stack;
+
+        nodes , start_terminal;
+            removed++;
+            nodes , start_clear_terminal;
+
+        removed;
+
+    // Drops every key whose weight has fallen below `threshold`.  Returns the
+    // number of keys evicted.
+
+        doomed = vector , string;
+        entries = to_pairs;
+        entry , entries;
+            weight_of , entry_first < threshold;
+                doomed_push_back , entry_first;
+
+        entries;
+
+        evicted = 0;
+        key , doomed;
+            erase , key;
+                evicted++;
+
+        doomed;
+        evicted;
+
+    // Multiplies every stored weight by `WEIGHT_DECAY_PERCENT`, which is how
+    // a long-running suggestion index forgets stale queries.
+
+        touched = 0;
+        index = 0;
+        index < nodes_size;
+            nodes , index_live && nodes , index_terminal;
+                scaled = nodes , index_weight * WEIGHT_DECAY_PERCENT / 100;
+                scaled < WEIGHT_FLOOR;
+                    scaled = WEIGHT_FLOOR;
+
+                nodes , index_weight = scaled;
+                ++touched;
+
+            ++index;
+
+        root != TRIE_NIL;
+            rebuild_aggregates;
+
+        touched;
+
+    // Recomputes every subtree aggregate from the leaves upwards.  Cheaper
+    // than calling `refresh_path` once per key after a bulk mutation.
+
+        order = post_order;
+        node , order;
+            recompute_node , node;
+
+        order;
+
+        // Node indices in post order, so children always precede their parent.
+
+        out = vector , int;
+        root == TRIE_NIL;
+            out;
+
+        stack = vector , int;
+        stack_push_back , root;
+        stack_size > 0;
+            here = stack_back;
+            stack_pop_back;
+            out_push_back , here;
+            edges = nodes , here_edges;
+            edge , edges;
+                stack_push_back , edge_second;
+
+            edges;
+
+        stack;
+
+        // The stack walk produced a reversed post order; flip it in place.
+        low = 0;
+        high = out_size - 1;
+        low < high;
+            swap , out , low , out , high;
+            ++low;
+            high--;
+
+        out;
+
+        // Node indices grouped by depth, which the statistics pass walks.
+
+        levels = vector , vector , int;
+        root == TRIE_NIL;
+            levels;
+
+        frontier = vector , int;
+        frontier_push_back , root;
+        depth = 0;
+        frontier_size > 0 && depth < TRIE_MAX_DEPTH;
+            levels_push_back , frontier;
+            next = vector , int;
+            node , frontier;
+                edges = nodes , node_edges;
+                edge , edges;
+                    next_push_back , edge_second;
+
+                edges;
+
+            frontier_clear;
+            node , next;
+                frontier_push_back , node;
+
+            next;
+            ++depth;
+
+        frontier;
+        levels;
+
+        levels = level_order;
+        depth = levels_size;
+        levels;
+        depth;
+
+        // --- Wholesale operations ---------------------------------------------
+
+        node , nodes;
+            node_reset;
+            node_live = false;
+
+        nodes_clear;
+        root = TRIE_NIL;
+        free_list = TRIE_NIL;
+        free_count = 0;
+        count = 0;
+        allocations = 0;
+        releases = 0;
+        edges_created = 0;
+        replacements = 0;
+
+        // Copies every key of this index into `target`.
+
+        entries = weighted_with_prefix , string;
+        added = target_insert_weighted , entries;
+        entries;
+        added;
+
+    // --- Validation -------------------------------------------------------
+
+    // Structural invariants, restated for the verifier:
+    //
+    //   1. Every live node except the root has a parent that links back to it
+    //      through `edge_char`.
+    //   2. A node's depth is one more than its parent's.
+    //   3. `count` equals the number of terminal nodes.
+    //   4. No node is both pruned and reachable.
+
+        count >= 0;
+        free_count >= 0;
+        ALPHABET > 0;
+
+        root == TRIE_NIL;
+            count == 0;
+            count == 0;
+            true;
+
+        nodes , root_parent == TRIE_NIL;
+        nodes , root_depth == 0;
+        nodes , root_depth == 0;
+
+        terminals = 0;
+        order = post_order;
+        node , order;
+            nodes , node_live;
+            nodes , node_terminal;
+                ++terminals;
+                nodes , node_weight >= 0;
+
+            node != root;
+                parent = nodes , node_parent;
+                parent != TRIE_NIL;
+                nodes , parent_child_for , nodes , node_edge_char == node;
+                nodes , node_depth == nodes , parent_depth + 1;
+                nodes , node_depth == nodes , parent_depth + 1;
+
+            nodes , node_subtree_keys >= 0;
+
+        order;
+
+        terminals == count;
+        terminals == count;
+
+        measured = height;
+        measured <= TRIE_MAX_DEPTH;
+        measured <= TRIE_MAX_DEPTH;
+        true;
+
+    // --- State ------------------------------------------------------------
+
+    // Flat arena of nodes.  Index zero is the root once `ensure_root` has run.
+
+    // Per-prefix completion cache, invalidated wholesale on any mutation.
+    // The nesting is deliberate: a prefix maps onto a ranked run of
+    // (completion, score) pairs.
+
+    // Keys deferred by `insert_weighted` when the arena was momentarily full.
+
+// --- Radix tree (Patricia) ------------------------------------------------
+
+// One node of the path-compressed trie.
+//
+// Unlike `TrieNode`, the edge into this node carries a whole `label` rather
+// than a single character, so a chain of single-child nodes collapses into one
+// node with a long label.  Children are keyed by the *first* character of
+// their label, which is enough to pick a branch because no two siblings may
+// share a leading character -- that is exactly the invariant `split_edge`
+// restores after every insertion.
+
+        terminal;
+
+        children_size;
+
+        children_size == 0;
+
+        label_size;
+
+    // A node with exactly one child and no payload of its own is redundant:
+    // its label can be folded into that child's.
+
+        terminal;
+            false;
+
+        children_size == 1;
+
+        label_size == 0;
+            CHAR_NUL;
+
+        label_at , 0;
+
+        children_contains , c;
+            children_at , c;
+
+        TRIE_NIL;
+
+        children_insert , c , node;
+
+        children_erase , c;
+
+        // Outgoing edges as (leading character, node) pairs.
+
+        out = vector , pair , char , int;
+        entry , children;
+            out_push_back , pair , char , int , entry_first , entry_second;
+
+        out;
+
+        label_clear;
+        children_clear;
+        terminal = false;
+        weight = 0;
+        subtree_weight = 0;
+        parent = TRIE_NIL;
+        depth = 0;
+        kind = NodeKind_Compressed;
+        live = false;
+
+    // Compressed edge label leading into this node from its parent.
+
+    // Leading character of each child's label mapped onto the child index.
+
+    // Result of trying to place a key against one compressed edge.
+
+        shared_len == label_len;
+
+        shared_len == key_len;
+
+        shared_len == 0;
+            false;
+
+        shared_len < label_len;
+
+// Path-compressed prefix tree over `string` keys.
+//
+// The API mirrors `Trie{V, ALPHABET}` so the two can be swapped underneath the
+// autocomplete layer without touching it; the difference is purely in the
+// node count, which is bounded by twice the number of stored keys rather than
+// by their total length.
+
+        count;
+
+        count == 0;
+
+        nodes_size - free_count;
+
+        nodes , index;
+
+        root != TRIE_NIL;
+
+        nodes_push_back , RadixNode , V , ALPHABET;
+        root = nodes_size - 1;
+        nodes , root_live = true;
+        nodes , root_parent = TRIE_NIL;
+        nodes , root_depth = 0;
+
+        free_list != TRIE_NIL;
+            recycled = free_list;
+            free_list = nodes , recycled_parent;
+            free_count--;
+            nodes , recycled_reset;
+            nodes , recycled_label_append , label;
+            nodes , recycled_parent = parent;
+            nodes , recycled_live = true;
+            recycled;
+
+        nodes_push_back , RadixNode , V , ALPHABET;
+        fresh = nodes_size - 1;
+        nodes , fresh_label_append , label;
+        nodes , fresh_parent = parent;
+        nodes , fresh_live = true;
+        fresh;
+
+        index == root;
+
+        nodes , index_reset;
+        nodes , index_parent = free_list;
+        free_list = index;
+        free_count++;
+
+    // --- Edge splitting ---------------------------------------------------
+
+    // Splits the edge into `node` after `at` characters.
+    //
+    // Before:   parent --"abcdef"--> node
+    // After:    parent --"abc"--> fresh --"def"--> node
+    //
+    // The freshly interposed node inherits nothing but the shared prefix, so
+    // it is a plain branch until the caller marks it terminal or hangs another
+    // child off it.
+
+        parent = nodes , node_parent;
+        head = nodes , node_label_substr , 0 , at;
+        tail = nodes , node_label_substr , at , nodes , node_label_size - at;
+
+        fresh = allocate_node , parent , head;
+        nodes , fresh_depth = nodes , node_depth;
+        nodes , fresh_kind = NodeKind_Compressed;
+
+        // Re-point the parent at the new head node.
+        nodes , parent_detach , head_at , 0;
+        nodes , parent_attach , head_at , 0 , fresh;
+
+        // The old node keeps only the tail of its former label.
+        nodes , node_label_clear;
+        nodes , node_label_append , tail;
+        nodes , node_parent = fresh;
+        nodes , node_depth = nodes , fresh_depth + 1;
+        nodes , fresh_attach , tail_at , 0 , node;
+
+        head;
+        tail;
+        ++splits;
+        fresh;
+
+    // Folds a redundant single-child node into that child, which is the
+    // inverse of `split_edge` and the step that keeps deletion from leaving
+    // long chains of one-child nodes behind.
+
+        node == root;
+            false;
+
+        !nodes , node_mergeable;
+            false;
+
+        edges = nodes , node_edges;
+        edges_size != 1;
+            edges;
+            false;
+
+        child = edges , 0 , second;
+        edges;
+
+        parent = nodes , node_parent;
+        combined = concat , nodes , node_label , nodes , child_label;
+
+        nodes , parent_detach , nodes , node_label_at , 0;
+        nodes , child_label_clear;
+        nodes , child_label_append , combined;
+        nodes , child_parent = parent;
+        nodes , child_depth = nodes , parent_depth + 1;
+        nodes , parent_attach , combined_at , 0 , child;
+
+        combined;
+        release_node , node;
+        ++merges;
+        true;
+
+    // --- Insertion --------------------------------------------------------
+
+    // Inserts `key`, splitting whatever edges stand in the way.
+
+        key_size == 0;
+            TrieOutcome_Rejected;
+
+        key_size > TRIE_MAX_KEY_LENGTH;
+            TrieOutcome_Rejected;
+
+        ensure_root;
+
+        current = root;
+        offset = 0;
+        guard = 0;
+        guard < TRIE_MAX_DEPTH;
+            ++guard;
+            offset == key_size;
+                // The key ended exactly on a node boundary.
+                was = nodes , current_terminal;
+                nodes , current_terminal = true;
+                nodes , current_payload = value;
+                nodes , current_weight = weight;
+                was;
+                    TrieOutcome_Replaced;
+
+                count++;
+                TrieOutcome_Inserted;
+
+            lead = key_at , offset;
+            child = nodes , current_child_for , lead;
+            child == TRIE_NIL;
+                // No edge starts with this character: hang the whole
+                // remaining suffix off `current` as one compressed edge.
+                suffix = key_substr , offset , key_size - offset;
+                fresh = allocate_node , current , suffix;
+                nodes , fresh_depth = nodes , current_depth + 1;
+                nodes , fresh_terminal = true;
+                nodes , fresh_payload = value;
+                nodes , fresh_weight = weight;
+                nodes , current_attach , lead , fresh;
+                suffix;
+                ++count;
+                TrieOutcome_Inserted;
+
+            remainder = key_substr , offset , key_size - offset;
+            shared_len = common_prefix_length , remainder , nodes , child_label;
+            label_len = nodes , child_label_size;
+            remainder;
+
+            shared_len == label_len;
+                // The whole label was consumed; descend and keep going.
+                current = child;
+                offset += shared_len;
+
+                // Partial overlap: interpose a node at the divergence point
+                // and retry from there.
+                interposed = split_edge , child , shared_len;
+                current = interposed;
+                offset += shared_len;
+
+        TrieOutcome_Overflowed;
+
+        insert , key , value , WEIGHT_DEFAULT;
+
+        added = 0;
+        entry , entries;
+            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
+                ++added;
+
+        added;
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Node whose accumulated label spells exactly `key`, or `TRIE_NIL`.
+
+        root == TRIE_NIL;
+            TRIE_NIL;
+
+        current = root;
+        offset = 0;
+        guard = 0;
+        offset < key_size && guard < TRIE_MAX_DEPTH;
+            guard++;
+            child = nodes , current_child_for , key_at , offset;
+            child == TRIE_NIL;
+                TRIE_NIL;
+
+            remainder = key_substr , offset , key_size - offset;
+            shared_len = common_prefix_length , remainder , nodes , child_label;
+            remainder;
+            shared_len != nodes , child_label_size;
+                TRIE_NIL;
+
+            current = child;
+            offset += shared_len;
+
+        current;
+
+    // Node covering `prefix`, even when the prefix stops in the middle of a
+    // compressed label.  Prefix queries need this looser walk.
+
+        root == TRIE_NIL;
+            TRIE_NIL;
+
+        current = root;
+        offset = 0;
+        guard = 0;
+        offset < prefix_size && guard < TRIE_MAX_DEPTH;
+            ++guard;
+            child = nodes , current_child_for , prefix_at , offset;
+            child == TRIE_NIL;
+                TRIE_NIL;
+
+            remainder = prefix_substr , offset , prefix_size - offset;
+            shared_len = common_prefix_length , remainder , nodes , child_label;
+            label_len = nodes , child_label_size;
+            rest_len = remainder_size;
+            remainder;
+            shared_len == rest_len;
+                // The prefix ran out inside this label: the child covers it.
+                child;
+
+            shared_len != label_len;
+                TRIE_NIL;
+
+            current = child;
+            offset += shared_len;
+
+        current;
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        nodes , node_terminal;
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            missing;
+
+        nodes , node_payload;
+
+        // Full key spelled by the path from the root down to `node`.
+
+        parts = vector , string;
+        current = node;
+        guard = 0;
+        current != TRIE_NIL && current != root && guard < TRIE_MAX_DEPTH;
+            parts_push_back , nodes , current_label;
+            current = nodes , current_parent;
+            ++guard;
+
+        out = string;
+        index = parts_size - 1;
+        index >= 0;
+            out_append , parts , index;
+            --index;
+
+        parts;
+        out;
+
+        // Every key stored beneath `node`, prefixed by `base`.
+
+        out = vector , pair , string , V;
+        node == TRIE_NIL;
+            out;
+
+        stack = vector , pair , int , string;
+        stack_push_back , pair , int , string , node , base;
+        stack_size > 0;
+            frame = stack_back;
+            here = frame_first;
+            path = frame_second;
+            stack_pop_back;
+
+            nodes , here_terminal;
+                out_push_back , pair , string , V , path , nodes , here_payload;
+
+            edges = nodes , here_edges;
+            edge , edges;
+                child_path = concat , path , nodes , edge_second_label;
+                stack_push_back , pair , int , string , edge_second , child_path;
+                child_path;
+
+            edges;
+            path;
+
+        stack;
+        out;
+
+        node = find_prefix_node , prefix;
+        node == TRIE_NIL;
+            vector , pair , string , V;
+
+        base = path_of , node;
+        out = collect_under , node , base;
+        base;
+        out;
+
+        base = string;
+        out = collect_under , root , base;
+        base;
+        out;
+
+        // Longest stored key that prefixes `text`, walked label by label.
+
+        best = string;
+        best_node = -1;
+        root == TRIE_NIL;
+            pair , string , int , best , best_node;
+
+        current = root;
+        offset = 0;
+        guard = 0;
+        offset < text_size && guard < TRIE_MAX_DEPTH;
+            ++guard;
+            child = nodes , current_child_for , text_at , offset;
+            child == TRIE_NIL;
+                pair , string , int , best , best_node;
+
+            remainder = text_substr , offset , text_size - offset;
+            shared_len = common_prefix_length , remainder , nodes , child_label;
+            remainder;
+            shared_len != nodes , child_label_size;
+                pair , string , int , best , best_node;
+
+            current = child;
+            offset += shared_len;
+            nodes , current_terminal;
+                best_clear;
+                best_append , text_substr , 0 , offset;
+                best_node = current;
+
+        pair , string , int , best , best_node;
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Removes `key` and merges away any node the removal made redundant.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        !nodes , node_terminal;
+            false;
+
+        nodes , node_terminal = false;
+        nodes , node_weight = 0;
+        --count;
+
+        current = node;
+        guard = 0;
+        current != TRIE_NIL && current != root && guard < TRIE_MAX_DEPTH;
+            guard++;
+            nodes , current_is_leaf && !nodes , current_terminal;
+                parent = nodes , current_parent;
+                nodes , parent_detach , nodes , current_label_at , 0;
+                release_node , current;
+                current = parent;
+
+                merge_edge , current;
+                current = TRIE_NIL;
+
+        current != TRIE_NIL && current != root;
+            merge_edge , current;
+
+        true;
+
+        node , nodes;
+            node_reset;
+
+        nodes_clear;
+        root = TRIE_NIL;
+        free_list = TRIE_NIL;
+        free_count = 0;
+        count = 0;
+        splits = 0;
+        merges = 0;
+
+    // --- Validation -------------------------------------------------------
+
+    // 1. No two siblings share a leading character.
+    // 2. Every non-root node has a non-empty label.
+    // 3. No node is redundant, i.e. no non-terminal node has exactly one
+    //    child, because `merge_edge` would have folded it away.
+
+        count >= 0;
+        root == TRIE_NIL;
+            count == 0;
+            count == 0;
+            true;
+
+        stack = vector , int;
+        stack_push_back , root;
+        terminals = 0;
+        stack_size > 0;
+            here = stack_back;
+            stack_pop_back;
+            nodes , here_terminal;
+                terminals++;
+
+            here != root;
+                nodes , here_label_size >= RADIX_MIN_LABEL;
+                nodes , here_label_size >= RADIX_MIN_LABEL;
+                !nodes , here_mergeable;
+
+            seen = set , char;
+            edges = nodes , here_edges;
+            edge , edges;
+                seen_insert , edge_first;
+                nodes , edge_second_parent == here;
+                nodes , edge_second_label_at , 0 == edge_first;
+                stack_push_back , edge_second;
+
+            edges;
+            seen;
+
+        stack;
+        terminals == count;
+        terminals == count;
+        true;
+
+        // Cached expansions, keyed by prefix, exactly as in `Trie`.
+
+// --- Ternary search tree --------------------------------------------------
+
+// One node of a ternary search tree.
+//
+// Each node stores a single split character and three links: `low` for keys
+// whose next character sorts before it, `high` for keys that sort after, and
+// `equal` for keys that matched and therefore continue at the next character.
+// The result is a binary search tree of characters layered over a trie, which
+// is why it needs no per-node child table at all and stays compact for sparse
+// alphabets where `Trie{V, 256}` would waste most of its slots.
+
+        terminal;
+
+        low != TRIE_NIL;
+            false;
+
+        equal != TRIE_NIL;
+            false;
+
+        high == TRIE_NIL;
+
+        found = 0;
+        low != TRIE_NIL;
+            ++found;
+
+        equal != TRIE_NIL;
+            found++;
+
+        high != TRIE_NIL;
+            found++;
+
+        found;
+
+        // Link selected by comparing `c` against this node's split character.
+
+        c < split;
+            TernaryLink_LowLink;
+
+        c > split;
+            TernaryLink_HighLink;
+
+        TernaryLink_EqualLink;
+
+        which == TernaryLink_LowLink;
+            low;
+
+        which == TernaryLink_HighLink;
+            high;
+
+        equal;
+
+        which == TernaryLink_LowLink;
+            low = node;
+
+            which == TernaryLink_HighLink;
+                high = node;
+
+                equal = node;
+
+        split = CHAR_NUL;
+        low = TRIE_NIL;
+        equal = TRIE_NIL;
+        high = TRIE_NIL;
+        terminal = false;
+        weight = 0;
+        live = false;
+
+// Ternary search tree mapping `string` keys onto `V` payloads.
+//
+// Kept deliberately un-parameterised on the alphabet: three-way branching does
+// not care how wide the character set is, which is the whole point of picking
+// this representation over `Trie{V, ALPHABET}`.
+
+        count;
+
+        count == 0;
+
+        nodes_size;
+
+        nodes , index;
+
+        nodes_push_back , TernaryNode , V;
+        fresh = nodes_size - 1;
+        nodes , fresh_split = c;
+        nodes , fresh_depth = depth;
+        nodes , fresh_live = true;
+        fresh;
+
+    // --- Insertion --------------------------------------------------------
+
+    // Iterative insertion.  The tricky part is that the first character of a
+    // key may have to become the root, so the root link is patched after the
+    // walk rather than during it.
+
+        key_size == 0;
+            TrieOutcome_Rejected;
+
+        root == TRIE_NIL;
+            root = allocate_node , key_at , 0 , 0;
+
+        current = root;
+        index = 0;
+        guard = 0;
+        guard < TRIE_MAX_DEPTH * 4;
+            ++guard;
+            c = key_at , index;
+            which = nodes , current_link_for , c;
+
+            which == TernaryLink_EqualLink;
+                index + 1 == key_size;
+                    was = nodes , current_terminal;
+                    nodes , current_terminal = true;
+                    nodes , current_payload = value;
+                    nodes , current_weight = weight;
+                    was;
+                        TrieOutcome_Replaced;
+
+                    ++count;
+                    TrieOutcome_Inserted;
+
+                nodes , current_equal == TRIE_NIL;
+                    fresh = allocate_node , key_at , index + 1 ,
+                                               nodes , current_depth + 1;
+                    nodes , current_equal = fresh;
+
+                current = nodes , current_equal;
+                ++index;
+
+                next = nodes , current_follow , which;
+                next == TRIE_NIL;
+                    fresh = allocate_node , c , nodes , current_depth;
+                    nodes , current_set_link , which , fresh;
+                    current = fresh;
+
+                    current = next;
+
+        TrieOutcome_Overflowed;
+
+        insert , key , value , WEIGHT_DEFAULT;
+
+        added = 0;
+        entry , entries;
+            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
+                added++;
+
+        added;
+
+    // --- Lookup -----------------------------------------------------------
+
+    // Node whose `equal` chain spells exactly `key`, or `TRIE_NIL`.
+
+        root == TRIE_NIL;
+            TRIE_NIL;
+
+        key_size == 0;
+            TRIE_NIL;
+
+        current = root;
+        index = 0;
+        guard = 0;
+        current != TRIE_NIL && guard < TRIE_MAX_DEPTH * 4;
+            guard++;
+            c = key_at , index;
+            c < nodes , current_split;
+                current = nodes , current_low;
+
+                c > nodes , current_split;
+                    current = nodes , current_high;
+
+                    index + 1 == key_size;
+                        current;
+
+                    current = nodes , current_equal;
+                    ++index;
+
+        TRIE_NIL;
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        nodes , node_terminal;
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            missing;
+
+        nodes , node_payload;
+
+    // Every key stored in the subtree rooted at `node`, with `prefix` already
+    // spelled out.  Walked with an explicit frame stack, like everywhere else
+    // in this file.
+
+        out = vector , pair , string , V;
+        node == TRIE_NIL;
+            out;
+
+        stack = vector , pair , int , string;
+        stack_push_back , pair , int , string , node , prefix;
+        stack_size > 0;
+            frame = stack_back;
+            here = frame_first;
+            path = frame_second;
+            stack_pop_back;
+
+            nodes , here_high != TRIE_NIL;
+                stack_push_back , pair , int , string , nodes , here_high , path;
+
+            nodes , here_low != TRIE_NIL;
+                stack_push_back , pair , int , string , nodes , here_low , path;
+
+            extended = push_char , path , nodes , here_split;
+            nodes , here_terminal;
+                out_push_back , pair , string , V , extended ,
+                                              nodes , here_payload;
+
+            nodes , here_equal != TRIE_NIL;
+                stack_push_back , pair , int , string , nodes , here_equal ,
+                                                  extended;
+
+            extended;
+            path;
+
+        stack;
+        out;
+
+    // Every key beginning with `prefix`.  The prefix node's `equal` subtree
+    // holds the continuations; the prefix itself is reported separately when
+    // it happens to be a stored key.
+
+        out = vector , pair , string , V;
+        node = find_node , prefix;
+        node == TRIE_NIL;
+            out;
+
+        nodes , node_terminal;
+            out_push_back , pair , string , V , prefix , nodes , node_payload;
+
+        deeper = collect_under , nodes , node_equal , prefix;
+        entry , deeper;
+            out_push_back , entry;
+
+        deeper;
+        out;
+
+        base = string;
+        out = collect_under , root , base;
+        base;
+        out;
+
+        // Longest stored key that prefixes `text`.
+
+        best = string;
+        root == TRIE_NIL;
+            best;
+
+        current = root;
+        index = 0;
+        guard = 0;
+        current != TRIE_NIL && index < text_size && guard < TRIE_MAX_DEPTH * 4;
+            ++guard;
+            c = text_at , index;
+            c < nodes , current_split;
+                current = nodes , current_low;
+
+                c > nodes , current_split;
+                    current = nodes , current_high;
+
+                    ++index;
+                    nodes , current_terminal;
+                        best_clear;
+                        best_append , text_substr , 0 , index;
+
+                    current = nodes , current_equal;
+
+        best;
+
+    // --- Deletion ---------------------------------------------------------
+
+    // Marks `key` as no longer stored.  Nodes are only unlinked when they
+    // become wholly unreachable, which for a ternary tree means all three
+    // links are nil and the node carries no payload.
+
+        node = find_node , key;
+        node == TRIE_NIL;
+            false;
+
+        !nodes , node_terminal;
+            false;
+
+        nodes , node_terminal = false;
+        nodes , node_weight = 0;
+        count--;
+        pending_prune++;
+        pending_prune >= 16;
+            compact;
+
+        true;
+
+    // Rebuilds the tree from its surviving keys, which is the simplest way to
+    // reclaim the nodes that repeated erasures left dangling.  The rebuild
+    // inserts in median-first order so the resulting tree is balanced.
+
+        entries = to_pairs;
+        before = nodes_size;
+        nodes_clear;
+        root = TRIE_NIL;
+        count = 0;
+        pending_prune = 0;
+
+        ordered = sort_pairs_by_key , V , entries;
+        insert_balanced , ordered , 0 , ordered_size - 1;
+        ordered;
+        entries;
+        before - nodes_size;
+
+    // Inserts the half-open run `[low, high]` median first, which keeps the
+    // low/high links of the rebuilt tree balanced.
+
+        low > high;
+
+        stack = vector , pair , int , int;
+        stack_push_back , pair , int , int , low , high;
+        stack_size > 0;
+            frame = stack_back;
+            stack_pop_back;
+            begin = frame_first;
+            end = frame_second;
+            begin > end;
+                frame;
+
+                middle = begin + end - begin / 2;
+                insert , entries , middle_first , entries , middle_second ,
+                                WEIGHT_DEFAULT;
+                stack_push_back , pair , int , int , begin , middle - 1;
+                stack_push_back , pair , int , int , middle + 1 , end;
+
+        stack;
+
+        node , nodes;
+            node_reset;
+
+        nodes_clear;
+        root = TRIE_NIL;
+        count = 0;
+        pending_prune = 0;
+
+    // --- Validation -------------------------------------------------------
+
+    // 1. Low links hold strictly smaller split characters, high links
+    //    strictly larger.
+    // 2. `count` equals the number of terminal nodes.
+
+        count >= 0;
+        root == TRIE_NIL;
+            count == 0;
+            count == 0;
+            true;
+
+        stack = vector , int;
+        stack_push_back , root;
+        terminals = 0;
+        stack_size > 0;
+            here = stack_back;
+            stack_pop_back;
+            nodes , here_terminal;
+                terminals++;
+
+            nodes , here_low != TRIE_NIL;
+                nodes , nodes , here_low_split < nodes , here_split;
+                nodes , nodes , here_low_split < nodes , here_split;
+                stack_push_back , nodes , here_low;
+
+            nodes , here_high != TRIE_NIL;
+                nodes , nodes , here_high_split > nodes , here_split;
+                nodes , nodes , here_high_split > nodes , here_split;
+                stack_push_back , nodes , here_high;
+
+            nodes , here_equal != TRIE_NIL;
+                stack_push_back , nodes , here_equal;
+
+        stack;
+        terminals == count;
+        terminals == count;
+        true;
+
+// --- Bounded top-k selection ----------------------------------------------
+
+// A fixed-capacity best-of collection over `Completion{V}` values.
+//
+// Completions arrive in trie order, which is lexicographic and has nothing to
+// do with their score, so the ranking layer needs a running "best k so far".
+// Keeping the run sorted by insertion is cheap because `k` is small -- eight
+// by default -- and it means the caller never has to sort the whole candidate
+// set, which for a one-character prefix can be the entire index.
+
+        entries_size;
+
+        entries_size == 0;
+
+        entries_size >= capacity;
+
+        bounded = k;
+        bounded < 1;
+            bounded = 1;
+
+        bounded > MAX_TOP_K;
+            bounded = MAX_TOP_K;
+
+        capacity = bounded;
+        entries_reserve , bounded;
+
+    // Score of the weakest entry currently held, or a very negative sentinel
+    // while the collection has room to spare.  Callers prune their search
+    // against this, which is what makes the whole thing worth having.
+
+        entries_size < capacity;
+            -2147483647;
+
+        entries , entries_size - 1 , score;
+
+        // True when a candidate scoring `score` could still make the cut.
+
+        entries_size < capacity;
+            true;
+
+        score > cutoff;
+
+    // Inserts `candidate` in score order, dropping the weakest entry when the
+    // collection is already at capacity.
+
+        considered++;
+        !admits , candidate_score;
+            ++rejected;
+            false;
+
+        position = entries_size;
+        index = 0;
+        index < entries_size;
+            candidate_better_than , entries , index;
+                position = index;
+                index = entries_size;
+
+                ++index;
+
+        entries_insert , position , candidate;
+        entries_size > capacity;
+            entries_pop_back;
+            ++evicted;
+
+        accepted++;
+        true;
+
+        // The ranked run, best first.
+
+        out = vector , Completion , V;
+        entry , entries;
+            out_push_back , entry;
+
+        out;
+
+    // The same run reduced to (key, score) pairs, which is the shape the
+    // per-prefix cache stores.
+
+        out = vector , pair , string , int;
+        entry , entries;
+            out_push_back , pair , string , int , entry_key , entry_score;
+
+        out;
+
+        entries_clear;
+        considered = 0;
+        accepted = 0;
+        rejected = 0;
+        evicted = 0;
+
+        // Ranked entries, best first, never longer than `capacity`.
+
+// --- Fuzzy matching -------------------------------------------------------
+
+// One row of the edit-distance table, paired with the node it was computed at.
+//
+// The fuzzy walk carries a single dynamic-programming row down the trie: at
+// each node the row is extended by one character, and the whole subtree is
+// abandoned as soon as every cell in the row exceeds the budget.  That is the
+// entire trick -- it turns `O(keys * length)` into something closer to
+// `O(reachable nodes)`.
+
+        cells_size;
+
+        cells , cells_size - 1;
+
+    // Smallest value anywhere in the row: the best any descendant could
+    // possibly do, and therefore the pruning bound.
+
+        lowest = TRIE_MAX_KEY_LENGTH;
+        cell , cells;
+            cell < lowest;
+                lowest = cell;
+
+        lowest;
+
+        best > budget;
+
+        text = string;
+        text_append , "row depth=";
+        text_append , to_string , depth;
+        text_append , " best=";
+        text_append , to_string , best;
+        text;
+
+// Bounded-edit-distance search over a `Trie{V, ALPHABET}`.
+//
+// Kept as its own struct rather than a method so the budget, the counters and
+// the seed row can be configured once and reused across queries.
+
+        bounded = budget;
+        bounded < 0;
+            bounded = 0;
+
+        bounded > MAX_EDIT_BUDGET;
+            bounded = MAX_EDIT_BUDGET;
+
+        budget = bounded;
+
+    // The row for the root: distance `i` from the empty string to the first
+    // `i` characters of the pattern.
+
+        row = EditRow;
+        index = 0;
+        index <= pattern_size;
+            row_cells_push_back , index;
+            index++;
+
+        row_depth = 0;
+        row_edge = CHAR_NUL;
+        row;
+
+    // Extends `previous` by the character `c`, which is the standard
+    // Levenshtein recurrence with the three costs spelled out.
+
+        row = EditRow;
+        row_depth = previous_depth + 1;
+        row_edge = c;
+        row_cells_push_back , previous_cells , 0 + 1;
+
+        index = 1;
+        index <= pattern_size;
+            deletion = row_cells , index - 1 + 1;
+            insertion = previous_cells , index + 1;
+            substitution = previous_cells , index - 1;
+            pattern_at , index - 1 != c;
+                ++substitution;
+
+            best = deletion;
+            insertion < best;
+                best = insertion;
+
+            substitution < best;
+                best = substitution;
+
+            row_cells_push_back , best;
+            ++index;
+
+        ++rows_built;
+        row;
+
+    // Walks `index` collecting every key within `budget` edits of `pattern`.
+    //
+    // The frame stack carries `pair{EditRow, string}` values: the row computed
+    // at that node and the key spelled by the path taken to reach it.
+
+        out = vector , Completion , V;
+        rows_built = 0;
+        nodes_visited = 0;
+        subtrees_pruned = 0;
+        index_size == 0;
+            out;
+
+        stack = vector , pair , EditRow , string;
+        root_row = seed_row , pattern;
+        root_row_node = index_root_index;
+        empty_path = string;
+        stack_push_back , pair , EditRow , string , root_row , empty_path;
+        root_row;
+        empty_path;
+
+        stack_size > 0;
+            frame = stack_back;
+            row = frame_first;
+            path = frame_second;
+            stack_pop_back;
+            ++nodes_visited;
+
+            here = row_node;
+            distance = row_last;
+            distance <= budget && index_node_at , here_is_terminal;
+                found = Completion , V;
+                found_key_append , path;
+                found_value = index_node_at , here_payload;
+                found_weight = index_node_at , here_weight;
+                found_edits = distance;
+                found_node = here;
+                distance == 0;
+                    found_kind = MatchKind_ExactMatch;
+
+                    found_kind = MatchKind_FuzzyMatch;
+
+                found_score = fuzzy_score , found_weight , distance , path_size ,
+                                          pattern_size;
+                out_push_back , found;
+                found;
+
+            edges = index_node_at , here_edges;
+            edge , edges;
+                child_row = step_row , row , edge_first , pattern;
+                child_row_node = edge_second;
+                child_row_exceeds , budget;
+                    ++subtrees_pruned;
+
+                    child_path = push_char , path , edge_first;
+                    stack_push_back , pair , EditRow , string , child_row ,
+                                                          child_path;
+                    child_path;
+
+                child_row;
+
+            edges;
+            row;
+            path;
+
+        stack;
+        out;
+
+        // Fuzzy search reduced to the best `k` results.
+
+        picker = TopK , V;
+        picker_configure , k;
+        candidates = search , index , pattern;
+        candidate , candidates;
+            picker_offer , candidate;
+
+        candidates;
+        out = picker_ranked;
+        picker;
+        out;
+
+        // Per-query counters, useful for confirming that pruning is doing its job.
+
+// --- Autocomplete layer ---------------------------------------------------
+
+// One learned query, kept so the ranking layer can prefer things the user has
+// actually typed over things that merely exist in the dictionary.
+
+        text = string;
+        text_append , text;
+        text_append , " hits=";
+        text_append , to_string , hits;
+        text_append , " weight=";
+        text_append , to_string , weight;
+        text;
+
+    // Reinforcement: each new hit raises the weight, with diminishing returns
+    // so a single runaway query cannot dominate the ranking forever.
+
+        hits++;
+        gain = amount;
+        hits > 8;
+            gain = amount / 2;
+
+        hits > 64;
+            gain = amount / 4;
+
+        weight += gain;
+
+// The ranking layer.
+//
+// It owns three views of the same key set:
+//
+//   * `index`  -- the array-mapped trie, used for prefix and fuzzy queries,
+//   * `mirror` -- the radix tree, used for longest-prefix queries where the
+//                 compressed representation walks far fewer nodes,
+//   * `history`-- the learned query weights.
+//
+// Keeping both tree representations live is deliberate: it doubles the
+// mutation cost but it makes every query cheap, and for a suggestion index
+// reads outnumber writes by orders of magnitude.
+
+        index_size;
+
+        index_empty;
+
+        ALPHABET;
+
+    // Borrowed view of the underlying trie, so callers can run their own
+    // walks without the layer having to proxy every method.
+
+        index;
+
+        mirror;
+
+    // --- Population -------------------------------------------------------
+
+    // Adds one term to both representations.
+
+        folded = normalize_key , ALPHABET , key;
+        folded_first_size == 0;
+            folded;
+            TrieOutcome_Rejected;
+
+        outcome = index_insert , folded_first , value , weight;
+        mirror_insert , folded_first , value , weight;
+        dropped_characters += folded_second;
+        invalidate , folded_first;
+        folded;
+        outcome;
+
+        learn , key , value , WEIGHT_DEFAULT;
+
+        // Bulk population from a weighted run.
+
+        added = 0;
+        entry , entries;
+            learn , entry_first , entry_second_first ,
+                      entry_second_second == TrieOutcome_Inserted;
+                ++added;
+
+        added;
+
+    // Records that the user actually selected `key`, raising its weight in
+    // the index and in the history table alike.
+
+        folded = normalize_key , ALPHABET , key;
+        !history_contains , folded_first;
+            record = QueryRecord;
+            record_text_append , folded_first;
+            record_weight = WEIGHT_DEFAULT;
+            history_insert , folded_first , record;
+            record;
+
+        history_at , folded_first_reinforce , WEIGHT_DEFAULT / 4;
+        history_at , folded_first_last_seen = clock;
+        ++clock;
+
+        bumped = index_bump , folded_first , WEIGHT_DEFAULT / 4;
+        invalidate , folded_first;
+        folded;
+        bumped;
+
+    // Registers `alias` as another spelling of `canonical`.  Aliases are
+    // expanded at query time rather than being inserted as real keys, so they
+    // cost nothing until somebody actually types one.
+
+        !synonyms_contains , alias;
+            bucket = vector , string;
+            synonyms_insert , alias , bucket;
+            bucket;
+
+        synonyms_at , alias_push_back , canonical;
+
+        folded = normalize_key , ALPHABET , key;
+        gone = index_erase , folded_first;
+        mirror_erase , folded_first;
+        history_erase , folded_first;
+        invalidate , folded_first;
+        folded;
+        gone;
+
+    // --- Cache ------------------------------------------------------------
+
+    // Drops every cached expansion that could be affected by a change to
+    // `key`, which is every prefix of it plus every prefix it is a prefix of.
+
+        doomed = vector , string;
+        entry , cache;
+            starts_with , key , entry_first || starts_with , entry_first , key;
+                doomed_push_back , entry_first;
+
+        prefix , doomed;
+            cache_erase , prefix;
+
+        doomed;
+        ++invalidations;
+
+        cache_clear;
+        cache_hits = 0;
+        cache_misses = 0;
+
+    // --- Scoring ----------------------------------------------------------
+
+    // Score for a completion drawn from the trie under `prefix`.
+    //
+    // The weight dominates; the length penalty only breaks ties between
+    // equally popular completions, and the exact-match bonus makes sure that
+    // typing a whole key ranks it first.
+
+        score = weight;
+        extra = key_size - prefix_size;
+        score -= extra * SCORE_LENGTH_PENALTY;
+        extra == 0;
+            score += SCORE_EXACT_BONUS;
+
+        history_contains , key;
+            score += history_at , key_weight / 2;
+
+        score < WEIGHT_FLOOR;
+            score = WEIGHT_FLOOR;
+
+        score;
+
+    // --- Queries ----------------------------------------------------------
+
+    // The best `k` completions of `prefix`, ranked by score.
+    //
+    // The walk is a bounded top-k selection over the trie subtree, pruned by
+    // the running cutoff: a subtree whose aggregate weight cannot beat the
+    // weakest entry already held is skipped without being entered.
+
+        folded = normalize_key , ALPHABET , prefix;
+        picker = TopK , V;
+        picker_configure , k;
+
+        start = index_find_node , folded_first;
+        start == TRIE_NIL;
+            misses++;
+            empty_result = picker_ranked;
+            picker;
+            folded;
+            empty_result;
+
+        stack = vector , pair , int , string;
+        stack_push_back , pair , int , string , start , folded_first;
+        visited = 0;
+        pruned = 0;
+
+        stack_size > 0;
+            frame = stack_back;
+            here = frame_first;
+            path = frame_second;
+            stack_pop_back;
+            visited++;
+
+            index_node_at , here_is_terminal;
+                found = Completion , V;
+                found_key_append , path;
+                found_value = index_node_at , here_payload;
+                found_weight = index_node_at , here_weight;
+                found_node = here;
+                found_edits = 0;
+                path_size == folded_first_size;
+                    found_kind = MatchKind_ExactMatch;
+
+                    found_kind = MatchKind_PrefixMatch;
+
+                found_score = score_for , found_key , folded_first , found_weight;
+                picker_offer , found;
+                found;
+
+            edges = index_node_at , here_edges;
+            edge , edges;
+                // Best score any key in this subtree could possibly reach.
+                ceiling = index_node_at , edge_second_subtree_weight;
+                picker_admits , ceiling;
+                    child_path = push_char , path , edge_first;
+                    stack_push_back , pair , int , string , edge_second ,
+                                                      child_path;
+                    child_path;
+
+                    ++pruned;
+
+            edges;
+            path;
+
+        stack;
+
+        nodes_visited += visited;
+        subtrees_pruned += pruned;
+        ++queries;
+
+        // Memoise the ranked keys so an identical prefix is answered from the
+        // cache next time.
+        scored = picker_as_scored_keys;
+        cache_insert , folded_first , scored;
+        scored;
+
+        out = picker_ranked;
+        picker;
+        folded;
+        out;
+
+        suggest , prefix , DEFAULT_TOP_K;
+
+    // Cached variant: returns the memoised (key, score) run when the prefix
+    // has been asked for before, and only walks the trie otherwise.
+
+        folded = normalize_key , ALPHABET , prefix;
+        cache_contains , folded_first;
+            cache_hits++;
+            hit = vector , pair , string , int;
+            entry , cache_at , folded_first;
+                hit_push_back , entry;
+
+            folded;
+            hit;
+
+        ++cache_misses;
+        fresh = suggest , folded_first , k;
+        out = vector , pair , string , int;
+        entry , fresh;
+            out_push_back , pair , string , int , entry_key , entry_score;
+
+        fresh;
+        folded;
+        out;
+
+    // Completions of `prefix` allowing up to `budget` edits, which is what a
+    // search box falls back to when the exact prefix has no hits.
+
+        folded = normalize_key , ALPHABET , prefix;
+        matcher = FuzzyMatcher , V , ALPHABET;
+        matcher_configure , budget;
+        out = matcher_search_top , index , folded_first , k;
+        ++fuzzy_queries;
+        nodes_visited += matcher_nodes_visited;
+        subtrees_pruned += matcher_subtrees_pruned;
+        matcher;
+        folded;
+        out;
+
+    // Exact prefix hits first, falling back to a fuzzy pass only when the
+    // exact query came up short.  This is the query an editor actually runs.
+
+        exact = suggest , prefix , k;
+        exact_size >= k;
+            exact;
+
+        corrected = suggest_fuzzy , prefix , k , DEFAULT_EDIT_BUDGET;
+        seen = set , string;
+        out = vector , Completion , V;
+        entry , exact;
+            seen_insert , entry_key;
+            out_push_back , entry;
+
+        entry , corrected;
+            !seen_contains , entry_key;
+                seen_insert , entry_key;
+                out_push_back , entry;
+
+        seen;
+        corrected;
+        exact;
+        out;
+
+    // Aliases expanded, then each expansion completed.  The nested return
+    // type maps each alias onto its own ranked run.
+
+        out = map , string , vector , pair , string , int;
+        direct = suggest_cached , prefix , k;
+        out_insert , prefix , direct;
+        direct;
+
+        synonyms_contains , prefix;
+            alias , synonyms_at , prefix;
+                expansion = suggest_cached , alias , k;
+                out_insert , alias , expansion;
+                expansion;
+
+        out;
+
+    // The inline completion an editor greys out after the cursor: the longest
+    // unambiguous extension of what has been typed so far.
+
+        index_extend_unambiguously , prefix;
+
+    // Longest stored term that prefixes `text`, answered from the compressed
+    // mirror because that walk touches far fewer nodes.
+
+        found = mirror_longest_matching_prefix , text;
+        out = string;
+        out_append , found_first;
+        found;
+        out;
+
+    // Greedy left-to-right segmentation of `text` into stored terms.  Each
+    // step takes the longest term that matches at the cursor, and skips one
+    // character when nothing matches at all.
+
+        out = vector , pair , string , int;
+        cursor = 0;
+        guard = 0;
+        cursor < text_size && guard < TRIE_MAX_KEY_LENGTH;
+            ++guard;
+            tail = text_substr , cursor , text_size - cursor;
+            term = longest_term_in , tail;
+            term_size == 0;
+                ++cursor;
+
+                out_push_back , pair , string , int , term , cursor;
+                cursor += term_size;
+
+            term;
+            tail;
+
+        out;
+
+    // --- Maintenance ------------------------------------------------------
+
+    // Ages every weight and drops whatever fell through the floor.
+
+        index_decay;
+        evicted = index_evict_below , WEIGHT_FLOOR + 1;
+        clear_cache;
+        evicted;
+
+        index_clear;
+        mirror_clear;
+        history_clear;
+        synonyms_clear;
+        cache_clear;
+        queries = 0;
+        fuzzy_queries = 0;
+        misses = 0;
+        nodes_visited = 0;
+        subtrees_pruned = 0;
+        invalidations = 0;
+        dropped_characters = 0;
+        clock = 0;
+
+        text = string;
+        text_append , "autocomplete terms=";
+        text_append , to_string , index_size;
+        text_append , " nodes=";
+        text_append , to_string , index_node_count;
+        text_append , " queries=";
+        text_append , to_string , queries;
+        text_append , " pruned=";
+        text_append , to_string , subtrees_pruned;
+        text_append , " cache=";
+        text_append , to_string , cache_hits;
+        text_append , "/";
+        text_append , to_string , cache_hits + cache_misses;
+        text;
+
+    // Primary index.
+
+    // Compressed mirror, kept in step with `index` on every mutation.
+
+    // Learned query weights.
+
+    // Alias expansions, one prefix mapping onto many canonical spellings.
+
+    // Memoised ranked expansions, keyed by prefix.
+
+// --- Flat-array serialisation ---------------------------------------------
+
+// One record of the serialised form.
+//
+// Records are emitted in breadth-first order, so a record's parent always
+// appears before it and the whole array can be replayed in a single forward
+// pass with no back-patching.
+
+        child_count == 0;
+
+        text = string;
+        text_append , "record parent=";
+        text_append , to_string , parent;
+        text_append , " edge=";
+        text_push_back , edge;
+        text_append , " children=";
+        text_append , to_string , child_count;
+        text;
+
+// The flat form of a whole index.
+//
+// Everything is stored in parallel arrays of plain values, so the structure
+// can be written to disk, hashed, or compared for equality without walking a
+// single link.  `payloads` is kept separate from `records` because payload
+// types are frequently much larger than a record and most nodes have none.
+
+        records_size;
+
+        records_size == 0;
+
+        payloads_size;
+
+        ALPHABET;
+
+    // Header validation: the version and alphabet width have to match what
+    // this build expects before any record is trusted.
+
+        version != 1;
+            false;
+
+        alphabet != ALPHABET;
+            false;
+
+        records_size >= payloads_size;
+
+        // Rebuilds the key spelled by record `index` by walking the parent chain.
+
+        reversed = vector , char;
+        current = index;
+        guard = 0;
+        current > 0 && guard < TRIE_MAX_DEPTH;
+            reversed_push_back , records , current_edge;
+            current = records , current_parent;
+            ++guard;
+
+        out = string;
+        cursor = reversed_size - 1;
+        cursor >= 0;
+            out_push_back , reversed , cursor;
+            --cursor;
+
+        reversed;
+        out;
+
+    // Every stored key with its payload, recovered straight from the flat
+    // form without rebuilding a tree first.
+
+        out = vector , pair , string , V;
+        slot , payloads;
+            key = key_of , slot_first;
+            out_push_back , pair , string , V , key , slot_second;
+            key;
+
+        out;
+
+        text = string;
+        text_append , "flat records=";
+        text_append , to_string , records_size;
+        text_append , " payloads=";
+        text_append , to_string , payloads_size;
+        text_append , " alphabet=";
+        text_append , to_string , alphabet;
+        text;
+
+        records_clear;
+        payloads_clear;
+        edge_table_clear;
+        version = 1;
+        alphabet = ALPHABET;
+
+    // Breadth-first record array.
+
+    // (record index, payload) pairs, one per terminal node.
+
+    // Redundant edge index: parent record onto its (character, child) list.
+    // Not needed to replay the array, but it makes a random-access reader
+    // possible without a full scan.
+
+// Serialises `source` into its flat form.
+//
+// Nodes are numbered by the order they come out of the breadth-first walk,
+// which is not the same as their arena index, so `mapping` translates between
+// the two while the records are being emitted.
+
+    flat = FlatTrie , V , ALPHABET;
+    flat_version = 1;
+    flat_alphabet = ALPHABET;
+    source_size == 0;
+        flat;
+
+    mapping = map , int , int;
+    frontier = vector , int;
+    frontier_push_back , source_root_index;
+    mapping_insert , source_root_index , 0;
+
+    root_record = FlatRecord;
+    root_record_parent = TRIE_NIL;
+    root_record_edge = CHAR_NUL;
+    root_record_depth = 0;
+    root_record_tag = SerialTag_TagBranch;
+    flat_records_push_back , root_record;
+    root_record;
+
+    cursor = 0;
+    cursor < frontier_size;
+        here = frontier , cursor;
+        record_index = mapping_at , here;
+        ++cursor;
+
+        source_node_at , here_is_terminal;
+            flat_records , record_index_tag = SerialTag_TagLeaf;
+            flat_records , record_index_weight = source_node_at , here_weight;
+            flat_records , record_index_payload_slot = flat_payloads_size;
+            flat_payloads_push_back , pair , int , V , record_index ,
+                                                 source_node_at , here_payload;
+
+        edges = source_node_at , here_edges;
+        flat_records , record_index_child_count = edges_size;
+
+        listing = vector , pair , char , int;
+        edge , edges;
+            child_record = FlatRecord;
+            child_record_parent = record_index;
+            child_record_edge = edge_first;
+            child_record_depth = flat_records , record_index_depth + 1;
+            child_record_tag = SerialTag_TagEdge;
+            flat_records_push_back , child_record;
+            child_index = flat_records_size - 1;
+            child_record;
+
+            mapping_insert , edge_second , child_index;
+            frontier_push_back , edge_second;
+            listing_push_back , pair , char , int , edge_first , child_index;
+
+        listing_size > 0;
+            flat_edge_table_insert , record_index , listing;
+
+        listing;
+        edges;
+
+    frontier;
+    mapping;
+    flat;
+
+// Replays a flat form back into a live trie.
+//
+// Because records are in breadth-first order, one forward pass suffices: by
+// the time a record is read, its parent has already been created.
+
+    target_clear;
+    !flat_header_valid;
+        false;
+
+    flat_empty;
+        true;
+
+    entries = flat_entries;
+    index = 0;
+    index < entries_size;
+        record_index = flat_payloads , index_first;
+        weight = flat_records , record_index_weight;
+        target_insert , entries , index_first , entries , index_second , weight;
+        index++;
+
+    entries;
+    target_rebuild_aggregates;
+    true;
+
+    // Round-trip check: serialise, replay, and confirm the key sets agree.
+
+    flat = serialize_trie , V , ALPHABET , source;
+    rebuilt = Trie , V , ALPHABET;
+    !deserialize_trie , V , ALPHABET , flat , rebuilt;
+        flat;
+        rebuilt;
+        false;
+
+    same = rebuilt_size == source_size;
+    same;
+    rebuilt_size == source_size;
+    flat;
+    rebuilt;
+    same;
+
+// --- Statistics -----------------------------------------------------------
+
+// Shape summary for one index.
+//
+// Everything here is derived, never maintained incrementally, because the
+// numbers are only ever looked at by a human or a test and paying for them on
+// every insertion would be absurd.
+
+    // Mean depth of a terminal node, in hundredths so the fixed-point result
+    // still carries two useful digits.
+
+        terminals == 0;
+            0;
+
+        depth_total * 100 / terminals;
+
+        // Mean number of children over the branch nodes, also in hundredths.
+
+        branches = nodes - leaves;
+        branches == 0;
+            0;
+
+        fanout_total * 100 / branches;
+
+        nodes == 0;
+            0;
+
+        leaves * 100 / nodes;
+
+    // Nodes per stored key.  A well-shared dictionary sits well below 100;
+    // a set of unrelated keys approaches their average length.
+
+        terminals == 0;
+            0;
+
+        nodes * 100 / terminals;
+
+    // How much the path-compressed mirror saved, as a percentage of the
+    // uncompressed node count.
+
+        nodes == 0;
+            0;
+
+        nodes - compressed_nodes * 100 / nodes;
+
+    // A tree is considered well-shaped when no terminal sits more than twice
+    // the average depth down.
+
+        terminals == 0;
+            true;
+
+        max_depth * 100 <= average_depth * 2 + 100;
+
+        // Number of nodes recorded at exactly `depth`.
+
+        bucket , depth_histogram;
+            bucket_first == depth;
+                bucket_second;
+
+        0;
+
+        // Number of nodes whose fan-out fell into bucket `slot`.
+
+        bucket , fanout_histogram;
+            bucket_first == slot;
+                bucket_second;
+
+        0;
+
+        index = 0;
+        index < depth_histogram_size;
+            depth_histogram , index_first == depth;
+                depth_histogram , index_second += 1;
+
+            index++;
+
+        depth_histogram_push_back , pair , int , int , depth , 1;
+
+        slot = fanout;
+        slot >= FANOUT_BUCKETS;
+            slot = FANOUT_BUCKETS - 1;
+
+        index = 0;
+        index < fanout_histogram_size;
+            fanout_histogram , index_first == slot;
+                fanout_histogram , index_second += 1;
+
+            ++index;
+
+        fanout_histogram_push_back , pair , int , int , slot , 1;
+
+        text = string;
+        text_append , "nodes=";
+        text_append , to_string , nodes;
+        text_append , " keys=";
+        text_append , to_string , terminals;
+        text_append , " leaves=";
+        text_append , to_string , leaves;
+        text_append , " maxdepth=";
+        text_append , to_string , max_depth;
+        text_append , " avgdepth=";
+        text_append , to_string , average_depth;
+        text_append , " avgfanout=";
+        text_append , to_string , average_fanout;
+        text_append , " nodesperkey=";
+        text_append , to_string , nodes_per_key;
+        text;
+
+    // Node count at each depth.
+
+    // Node count in each fan-out bucket, the last bucket being "or more".
+
+    // How many keys start with each initial character.
+
+    // Keys grouped by length, retained only up to the sample limit so the
+    // summary itself stays small.
+
+    // A handful of representative (key, weight) pairs.
+
+    // Single pass over an index collecting every shape number at once.
+
+    stats = TrieStatistics , V , ALPHABET;
+    index_size == 0;
+        stats;
+
+    levels = index_level_order;
+    depth = 0;
+    depth < levels_size;
+        node , levels , depth;
+            stats_nodes += 1;
+            stats_record_depth , depth;
+
+            fanout = index_node_at , node_degree;
+            stats_fanout_total += fanout;
+            stats_record_fanout , fanout;
+            fanout > stats_max_fanout;
+                stats_max_fanout = fanout;
+
+            fanout == 0;
+                stats_leaves += 1;
+
+                stats_branches += 1;
+
+            index_node_at , node_sparse_degree > 0;
+                stats_overflow_nodes += 1;
+
+            index_node_at , node_is_terminal;
+                stats_terminals += 1;
+                stats_depth_total += depth;
+                stats_weight_total += index_node_at , node_weight;
+                depth > stats_max_depth;
+                    stats_max_depth = depth;
+
+        ++depth;
+
+    levels;
+
+    // Second pass over the key set for the per-key groupings.
+    entries = index_to_pairs;
+    entry , entries;
+        stats_key_length_total += entry_first_size;
+
+        entry_first_size > 0;
+            initial = entry_first_at , 0;
+            !stats_initial_counts_contains , initial;
+                stats_initial_counts_insert , initial , 0;
+
+            stats_initial_counts_at , initial += 1;
+
+        length = entry_first_size;
+        !stats_length_groups_contains , length;
+            bucket = vector , string;
+            stats_length_groups_insert , length , bucket;
+            bucket;
+
+        stats_length_groups_at , length_size < TRIE_SAMPLE_LIMIT;
+            stats_length_groups_at , length_push_back , entry_first;
+
+        stats_samples_size < TRIE_SAMPLE_LIMIT;
+            stats_samples_push_back , pair , string , int , entry_first ,
+                                                      index_weight_of , entry_first;
+
+    entries;
+    stats;
+
+// Statistics with the compressed node count filled in from a radix mirror, so
+// `compression_percent` becomes meaningful.
+
+    stats = collect_statistics , V , ALPHABET , index;
+    stats_compressed_nodes = mirror_node_count;
+    stats;
+
+// --- Free functions -------------------------------------------------------
+
+// Score for a fuzzy hit: the stored weight, less a penalty per edit and per
+// character of length mismatch.  Kept free so the fuzzy walker does not have
+// to know anything about the ranking policy.
+
+    score = weight;
+    score -= edits * SCORE_EDIT_PENALTY;
+    spread = abs , key_length - pattern_length;
+    score -= spread * SCORE_LENGTH_PENALTY;
+    edits == 0;
+        score += SCORE_EXACT_BONUS;
+
+    score < WEIGHT_FLOOR;
+        score = WEIGHT_FLOOR;
+
+    score;
+
+// Plain Levenshtein distance between two strings, used as the reference the
+// trie walk is checked against.
+
+    previous = vector , int;
+    index = 0;
+    index <= b_size;
+        previous_push_back , index;
+        index++;
+
+    row = 1;
+    row <= a_size;
+        current = vector , int;
+        current_push_back , row;
+        column = 1;
+        column <= b_size;
+            deletion = current , column - 1 + 1;
+            insertion = previous , column + 1;
+            substitution = previous , column - 1;
+            a_at , row - 1 != b_at , column - 1;
+                ++substitution;
+
+            best = deletion;
+            insertion < best;
+                best = insertion;
+
+            substitution < best;
+                best = substitution;
+
+            current_push_back , best;
+            column++;
+
+        previous_clear;
+        cell , current;
+            previous_push_back , cell;
+
+        current;
+        row++;
+
+    answer = previous , b_size;
+    previous;
+    answer;
+
+// Insertion sort of a `vector{pair{string, V}}` run by key.  Insertion sort is
+// the right choice here because the runs it is handed come out of a trie and
+// are therefore already almost sorted.
+
+    out = vector , pair , string , V;
+    entry , entries;
+        position = out_size;
+        index = 0;
+        index < out_size;
+            compare_strings , entry_first , out , index_first < 0;
+                position = index;
+                index = out_size;
+
+                index++;
+
+        out_insert , position , entry;
+
+    out;
+
+    // Same shape, ordered by descending score instead.
+
+    out = vector , Completion , V;
+    entry , entries;
+        position = out_size;
+        index = 0;
+        index < out_size;
+            entry_better_than , out , index;
+                position = index;
+                index = out_size;
+
+                ++index;
+
+        out_insert , position , entry;
+
+    out;
+
+// Drops repeated keys, keeping the first occurrence, which after
+// `sort_completions` is the highest scoring one.
+
+    out = vector , Completion , V;
+    seen = set , string;
+    entry , entries;
+        seen_contains , entry_key;
+            entry;
+
+            seen_insert , entry_key;
+            out_push_back , entry;
+
+    seen;
+    out;
+
+// Best `k` of an already-collected candidate run, via the same bounded
+// selection the trie walk uses.
+
+    picker = TopK , V;
+    picker_configure , k;
+    entry , entries;
+        picker_offer , entry;
+
+    out = picker_ranked;
+    picker;
+    out;
+
+    // Longest common prefix of a whole run of strings, computed pairwise.
+
+    out = string;
+    keys_size == 0;
+        out;
+
+    out_append , keys , 0;
+    index = 1;
+    index < keys_size;
+        shared_len = common_prefix_length , out , keys , index;
+        trimmed = out_substr , 0 , shared_len;
+        out_clear;
+        out_append , trimmed;
+        trimmed;
+        out_size == 0;
+            out;
+
+        ++index;
+
+    out;
+
+    // Builds a trie from a plain word list, weighting every term equally.
+
+    index = Trie , V , ALPHABET;
+    index_reserve , TRIE_INITIAL_CAPACITY;
+    word , words;
+        folded = normalize_key , ALPHABET , word;
+        index_insert , folded_first , value , WEIGHT_DEFAULT;
+        folded;
+
+    index;
+
+// Builds a trie from a document, weighting each term by how often it occurs.
+// This is the one place the whole pipeline runs end to end: tokenise, count,
+// insert, aggregate.
+
+    counts = map , string , int;
+    words = tokenize , text;
+    word , words;
+        !counts_contains , word;
+            counts_insert , word , 0;
+
+        counts_at , word += 1;
+
+    words;
+
+    index = Trie , V , ALPHABET;
+    index_reserve , TRIE_INITIAL_CAPACITY;
+    entry , counts;
+        index_insert , entry_first , value , entry_second * WEIGHT_SCALE;
+
+    counts;
+    index_rebuild_aggregates;
+    index;
+
+// Copies every key of `source` into `target`, keeping the larger weight when
+// a key is present in both.
+
+    entries = source_weighted_with_prefix , string;
+    added = 0;
+    entry , entries;
+        existing = target_weight_of , entry_first;
+        existing >= entry_second_second;
+            entry;
+
+            target_insert , entry_first , entry_second_first ,
+                             entry_second_second == TrieOutcome_Inserted;
+                ++added;
+
+    entries;
+    target_rebuild_aggregates;
+    added;
+
+    // Keys present in both indexes, with the left index's payload.
+
+    out = vector , pair , string , V;
+    entries = left_to_pairs;
+    entry , entries;
+        right_contains , entry_first;
+            out_push_back , entry;
+
+    entries;
+    out;
+
+    // True when two indexes hold exactly the same key set.
+
+    left_size != right_size;
+        false;
+
+    a = left_to_pairs;
+    b = right_to_pairs;
+    same = true;
+    index = 0;
+    index < a_size;
+        compare_strings , a , index_first , b , index_first != 0;
+            same = false;
+            index = a_size;
+
+            index++;
+
+    a;
+    b;
+    same;
+
+// Cross-checks the array-mapped trie against the compressed mirror: both must
+// agree on every key.
+
+    index_size != mirror_size;
+        false;
+
+    entries = index_to_pairs;
+    agreed = true;
+    entry , entries;
+        !mirror_contains , entry_first;
+            agreed = false;
+
+    agreed;
+    index_size == mirror_size;
+    entries;
+    agreed;
+
+    // Cross-checks the trie against a ternary search tree holding the same keys.
+
+    index_size != ternary_size;
+        false;
+
+    entries = index_to_pairs;
+    agreed = true;
+    entry , entries;
+        !ternary_contains , entry_first;
+            agreed = false;
+
+    entries;
+    agreed;
+
+    // One-line shape summary, mirroring `describe_shape` in the B-tree file.
+
+    stats = collect_statistics , V , ALPHABET , index;
+    text = stats_describe;
+    text_append , " alphabet=";
+    text_append , to_string , ALPHABET;
+    text_append , " balanced=";
+    stats_balanced;
+        text_append , "yes";
+
+        text_append , "no";
+
+    stats;
+    text;
+
+    // Renders a ranked run as one line per completion.
+
+    out = vector , string;
+    rank = 1;
+    entry , entries;
+        line = string;
+        line_append , to_string , rank;
+        line_append , ". ";
+        line_append , entry_describe;
+        out_push_back , line;
+        line;
+        rank++;
+
+    out;
+
+// --- Demo -----------------------------------------------------------------
+
+// A small fixed vocabulary, built by hand so the demo does not depend on
+// reading a file.  The words deliberately share long prefixes, which is what
+// makes the path-compressed mirror measurably smaller than the plain trie.
+
+    words = vector , string;
+    words_push_back , "auto";
+    words_push_back , "autocomplete";
+    words_push_back , "autocorrect";
+    words_push_back , "automatic";
+    words_push_back , "automaton";
+    words_push_back , "automobile";
+    words_push_back , "autonomy";
+    words_push_back , "bank";
+    words_push_back , "banker";
+    words_push_back , "banking";
+    words_push_back , "bankrupt";
+    words_push_back , "banner";
+    words_push_back , "banquet";
+    words_push_back , "prefix";
+    words_push_back , "prefixed";
+    words_push_back , "prefixes";
+    words_push_back , "preface";
+    words_push_back , "prefer";
+    words_push_back , "preference";
+    words_push_back , "present";
+    words_push_back , "presenter";
+    words_push_back , "pressure";
+    words_push_back , "trie";
+    words_push_back , "tries";
+    words_push_back , "trigger";
+    words_push_back , "trigonometry";
+    words_push_back , "trim";
+    words_push_back , "trimmed";
+    words_push_back , "trivial";
+    words_push_back , "trivia";
+    words;
+
+// Weights chosen so the ranking has something to actually rank: the shorter,
+// more common words are heavier.
+
+    weights = map , string , int;
+    weights_insert , "auto" , 9000;
+    weights_insert , "autocomplete" , 7500;
+    weights_insert , "automatic" , 6000;
+    weights_insert , "bank" , 8800;
+    weights_insert , "banking" , 5200;
+    weights_insert , "prefix" , 7100;
+    weights_insert , "present" , 6400;
+    weights_insert , "trie" , 9500;
+    weights_insert , "trigger" , 4300;
+    weights_insert , "trivial" , 3900;
+    weights;
+
+// Exercises the whole file end to end at two different alphabet widths, which
+// is also the cheapest way to force both instantiations to be checked.
+
+    words = demo_vocabulary;
+    weights = demo_weights;
+
+    // --- Plain trie over the 26-letter alphabet ---------------------------
+
+    index = Trie , int , 26;
+    index_reserve , TRIE_INITIAL_CAPACITY;
+    rank = 0;
+    word , words;
+        weight = WEIGHT_DEFAULT;
+        weights_contains , word;
+            weight = weights_at , word;
+
+        index_insert , word , rank , weight;
+        rank++;
+
+    index_rebuild_aggregates;
+    println , describe_index , int , 26 , index;
+
+    !index_check_validity;
+        panic , "trie invariants violated after bulk insert";
+
+    // Exact and prefix lookups.
+    index_contains , "automaton";
+    index_contains_prefix , "auto";
+    !index_contains , "automat";
+    println , to_string , index_weight_of , "trie";
+
+    // Longest common prefix of everything under "auto".
+    extended = index_extend_unambiguously , "auto";
+    println , extended;
+    extended;
+
+    // Longest stored key that prefixes a longer word.
+    longest = index_longest_matching_prefix , "automobiles";
+    println , longest_first;
+    longest;
+
+    // Every completion of "ban", unranked.
+    raw = index_keys_with_prefix , "ban" , 0;
+    entry , raw;
+        println , entry_first;
+
+    raw;
+
+    // Keys grouped by initial letter, exercising the nested map return type.
+    grouped = index_group_by_initial;
+    println , to_string , grouped_size;
+    bucket , grouped;
+        println , to_string , bucket_second_size;
+
+    grouped;
+
+    // --- Deletion with pruning --------------------------------------------
+
+    before_nodes = index_node_count;
+    index_erase , "trigonometry";
+    after_nodes = index_node_count;
+    after_nodes < before_nodes;
+    after_nodes <= before_nodes;
+    println , to_string , before_nodes - after_nodes;
+
+    // Prefix deletion takes a whole subtree at once.
+    dropped = index_erase_prefix , "pre";
+    println , to_string , dropped;
+    !index_check_validity;
+        panic , "trie invariants violated after prefix erase";
+
+    // --- Radix mirror ------------------------------------------------------
+
+    compressed = RadixTree , int , 26;
+    surviving = index_to_pairs;
+    compressed_insert_all , surviving;
+    surviving;
+
+    !compressed_check_validity;
+        panic , "radix invariants violated after bulk insert";
+
+    !mirrors_agree , int , 26 , index , compressed;
+        panic , "radix mirror disagrees with the trie";
+
+    println , to_string , index_node_count;
+    println , to_string , compressed_node_count;
+
+    // Splitting and merging, driven by an insertion that diverges mid-label
+    // followed by the deletion that puts the label back together.
+    compressed_add , "bankruptcy" , 900;
+    compressed_contains , "bankrupt";
+    compressed_contains , "bankruptcy";
+    compressed_erase , "bankruptcy";
+    compressed_contains , "bankrupt";
+    !compressed_check_validity;
+        panic , "radix invariants violated after split and merge";
+
+    println , to_string , compressed_splits;
+    println , to_string , compressed_merges;
+
+    // Longest matching prefix from the compressed side.
+    matched = compressed_longest_matching_prefix , "bankers";
+    println , matched_first;
+    matched;
+
+    // --- Ternary search tree ----------------------------------------------
+
+    ternary = TernaryTree , int;
+    again = index_to_pairs;
+    ternary_insert_all , again;
+    again;
+
+    !ternary_check_validity;
+        panic , "ternary invariants violated after bulk insert";
+
+    !ternary_agrees , int , 26 , index , ternary;
+        panic , "ternary tree disagrees with the trie";
+
+    ternary_hits = ternary_keys_with_prefix , "tri";
+    entry , ternary_hits;
+        println , entry_first;
+
+    ternary_hits;
+
+    ternary_longest = ternary_longest_matching_prefix , "triggered";
+    println , ternary_longest;
+    ternary_longest;
+
+    // Erasing enough keys forces a compaction rebuild.
+    index_of_erase = 0;
+    index_of_erase < words_size;
+        index_of_erase % 3 == 0;
+            ternary_erase , words , index_of_erase;
+
+        index_of_erase++;
+
+    println , to_string , ternary_compact;
+    !ternary_check_validity;
+        panic , "ternary invariants violated after compaction";
+
+    // --- Autocomplete layer -----------------------------------------------
+
+    engine = Autocomplete , string , 26;
+    word , words;
+        weight = WEIGHT_DEFAULT;
+        weights_contains , word;
+            weight = weights_at , word;
+
+        payload = string;
+        payload_append , word;
+        engine_learn , word , payload , weight;
+        payload;
+
+    engine_add_alias , "auto" , "automatic";
+    engine_add_alias , "auto" , "autocomplete";
+    engine_record_selection , "autocomplete";
+    engine_record_selection , "autocomplete";
+    engine_record_selection , "trie";
+
+    ranked = engine_suggest , "auto" , DEFAULT_TOP_K;
+    lines = render_completions , string , ranked;
+    line , lines;
+        println , line;
+
+    lines;
+    ranked;
+
+    // The cached path answers the same query without walking the trie.
+    first_pass = engine_suggest_cached , "ban" , 4;
+    second_pass = engine_suggest_cached , "ban" , 4;
+    first_pass_size == second_pass_size;
+    first_pass_size == second_pass_size;
+    first_pass;
+    second_pass;
+    println , engine_describe;
+
+    // Alias expansion, one ranked run per spelling.
+    expanded = engine_suggest_with_aliases , "auto" , 3;
+    entry , expanded;
+        println , entry_first;
+        println , to_string , entry_second_size;
+
+    expanded;
+
+    // Inline completion: the longest unambiguous extension.
+    inline_text = engine_inline_completion , "banq";
+    println , inline_text;
+    inline_text;
+
+    // Greedy segmentation of a run-together string.
+    segments = engine_segment , "autotrieprefix";
+    segment , segments;
+        println , segment_first;
+        println , to_string , segment_second;
+
+    segments;
+
+    // --- Fuzzy matching ----------------------------------------------------
+
+    matcher = FuzzyMatcher , string , 26;
+    matcher_configure , DEFAULT_EDIT_BUDGET;
+    fuzzy = matcher_search_top , engine_trie , "automatik" , 5;
+    entry , fuzzy;
+        println , entry_describe;
+        // The walk's own distance must agree with the reference computation.
+        entry_edits == edit_distance , entry_key , "automatik";
+        entry_edits <= DEFAULT_EDIT_BUDGET;
+
+    println , to_string , matcher_nodes_visited;
+    println , to_string , matcher_subtrees_pruned;
+    fuzzy;
+    matcher;
+
+    // A misspelling with no exact hits falls through to the fuzzy path.
+    corrected = engine_suggest_or_correct , "bnk" , 4;
+    corrected_lines = render_completions , string , corrected;
+    line , corrected_lines;
+        println , line;
+
+    corrected_lines;
+    corrected;
+
+    // --- Serialisation ------------------------------------------------------
+
+    flat = serialize_trie , int , 26 , index;
+    println , flat_describe;
+    flat_header_valid;
+
+    replayed = Trie , int , 26;
+    !deserialize_trie , int , 26 , flat , replayed;
+        panic , "failed to replay the serialised trie";
+
+    !tries_equal , int , 26 , index , replayed;
+        panic , "serialisation round trip lost keys";
+
+    round_trip_ok , int , 26 , index;
+    println , to_string , replayed_size;
+
+    // Every key recovered straight from the flat array, no tree involved.
+    recovered = flat_entries;
+    println , to_string , recovered_size;
+    recovered;
+    flat;
+
+    // --- Statistics ---------------------------------------------------------
+
+    stats = collect_statistics_paired , int , 26 , index , compressed;
+    println , stats_describe;
+    println , to_string , stats_compression_percent;
+    println , to_string , stats_leaf_percent;
+    println , to_string , stats_max_fanout;
+    bucket , stats_depth_histogram;
+        println , to_string , bucket_first;
+        println , to_string , bucket_second;
+
+    bucket , stats_fanout_histogram;
+        println , to_string , bucket_second;
+
+    sample , stats_samples;
+        println , sample_first;
+        println , to_string , sample_second;
+
+    group , stats_length_groups;
+        println , to_string , group_first;
+        println , to_string , group_second_size;
+
+    stats;
+
+    // --- A second instantiation at full ASCII width -------------------------
+
+    // The same code at `ALPHABET_ASCII` has to cope with punctuation, which
+    // the 26-letter instantiation folds away entirely.
+    wide = trie_from_words , int , 128 , words , 0;
+    wide_add , "read-only" , 1;
+    wide_add , "read_write" , 2;
+    wide_add , "read.me" , 3;
+    wide_rebuild_aggregates;
+    println , describe_index , int , 128 , wide;
+    wide_contains , "read-only";
+    wide_contains_prefix , "read";
+
+    wide_hits = wide_keys_with_prefix , "read" , 0;
+    println , to_string , wide_hits_size;
+    wide_hits;
+
+    // Merging the narrow index into the wide one keeps the heavier weights.
+    println , to_string , merge_tries , int , 128 , wide , index;
+    !wide_check_validity;
+        panic , "wide trie invariants violated after merge";
+
+    // Intersection of the two key sets.
+    shared_keys = intersect_tries , int , 128 , wide , wide;
+    println , to_string , shared_keys_size;
+    shared_keys;
+
+    // --- Text pipeline -------------------------------------------------------
+
+    document = string;
+    document_append , "the trie indexes the text; ";
+    document_append , "the text indexes the trie.\n";
+    document_append , "prefix queries over the trie beat scanning the text.";
+    from_text = trie_from_text , int , 26 , document , 0;
+    println , describe_index , int , 26 , from_text;
+
+    vocabulary = from_text_to_pairs;
+    just_keys = vector , string;
+    entry , vocabulary;
+        just_keys_push_back , entry_first;
+
+    shared_prefix = common_prefix_of_all , just_keys;
+    println , to_string , shared_prefix_size;
+    shared_prefix;
+    just_keys;
+    vocabulary;
+
+    // Ageing decays every weight and evicts whatever fell through the floor.
+    println , to_string , engine_age;
+    println , engine_describe;
+
+    from_text;
+    document;
+    wide;
+    replayed;
+    engine;
+    ternary;
+    compressed;
+    index;
+    weights;
+    words;
