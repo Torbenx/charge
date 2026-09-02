@@ -8,8 +8,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
         const char* tokBegin = sourcePosition;
         Token tok = Token::Invalid;
 
-        char c0 = sourcePosition[0];
-        switch (c0) {
+        switch (sourcePosition[0]) {
         case '\0':
             output.tokens.push_back({ Token::EOS, locationInCurrentLine(sourcePosition, output) });
             return sourcePosition;
@@ -63,18 +62,16 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         case '<': {
-            char c1 = sourcePosition[1];
-            char c2 = sourcePosition[2];
-            if (c1 == '=') {
-                if (c2 == '>') {
+            if (sourcePosition[1] == '=') {
+                if (sourcePosition[2] == '>') {
                     tok = Token::LessEqualGreater;
                     sourcePosition += 3;
                 } else {
                     tok = Token::LessEqual;
                     sourcePosition += 2;
                 }
-            } else if (c1 == '<') {
-                if (c2 == '=') {
+            } else if (sourcePosition[1] == '<') {
+                if (sourcePosition[2] == '=') {
                     tok = Token::LessLessEqual;
                     sourcePosition += 3;
                 } else {
@@ -99,6 +96,7 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
+            // clang-format on
             tok = Token::NumericLiteral;
             // TODO: implement parsing num literals
             for (;;) {
@@ -111,38 +109,158 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         // always one character punctuations
-        case '(': { tok = Token::LeftParen;   sourcePosition += 1; break; }
-        case ')': { tok = Token::RightParen;  sourcePosition += 1; break; }
-        case '[': { tok = Token::LeftSquare;  sourcePosition += 1; break; }
-        case ']': { tok = Token::RightSquare; sourcePosition += 1; break; }
-        case '{': { tok = Token::LeftBrace;   sourcePosition += 1; break; }
-        case '}': { tok = Token::RightBrace;  sourcePosition += 1; break; }
-        case ',': { tok = Token::Comma;       sourcePosition += 1; break; }
-        case '.': { tok = Token::Point;       sourcePosition += 1; break; }
-        case '~': { tok = Token::Tilde;       sourcePosition += 1; break; }
-        case ';': { tok = Token::SemiColon;   sourcePosition += 1; break; }
+        case '(': {
+            tok = Token::LeftParen;
+            sourcePosition += 1;
+            break;
+        }
+        case ')': {
+            tok = Token::RightParen;
+            sourcePosition += 1;
+            break;
+        }
+        case '[': {
+            tok = Token::LeftSquare;
+            sourcePosition += 1;
+            break;
+        }
+        case ']': {
+            tok = Token::RightSquare;
+            sourcePosition += 1;
+            break;
+        }
+        case '{': {
+            tok = Token::LeftBrace;
+            sourcePosition += 1;
+            break;
+        }
+        case '}': {
+            tok = Token::RightBrace;
+            sourcePosition += 1;
+            break;
+        }
+        case ',': {
+            tok = Token::Comma;
+            sourcePosition += 1;
+            break;
+        }
+        case '.': {
+            tok = Token::Point;
+            sourcePosition += 1;
+            break;
+        }
+        case '~': {
+            tok = Token::Tilde;
+            sourcePosition += 1;
+            break;
+        }
+        case ';': {
+            tok = Token::SemiColon;
+            sourcePosition += 1;
+            break;
+        }
         // only followed by equal
-        case '!': { if (sourcePosition[1] == '=') { tok = Token::ExclaimEqual; sourcePosition += 2; } else { tok = Token::Exclaim; sourcePosition += 1; } break; }
-        case '*': { if (sourcePosition[1] == '=') { tok = Token::StarEqual;    sourcePosition += 2; } else { tok = Token::Star;    sourcePosition += 1; } break; }
-        case '^': { if (sourcePosition[1] == '=') { tok = Token::HatEqual;     sourcePosition += 2; } else { tok = Token::Hat;     sourcePosition += 1; } break; }
-        case '%': { if (sourcePosition[1] == '=') { tok = Token::PercentEqual; sourcePosition += 2; } else { tok = Token::Percent; sourcePosition += 1; } break; }
+        case '!': {
+            if (sourcePosition[1] == '=') {
+                tok = Token::ExclaimEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Exclaim;
+                sourcePosition += 1;
+            }
+            break;
+        }
+        case '*': {
+            if (sourcePosition[1] == '=') {
+                tok = Token::StarEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Star;
+                sourcePosition += 1;
+            }
+            break;
+        }
+        case '^': {
+            if (sourcePosition[1] == '=') {
+                tok = Token::HatEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Hat;
+                sourcePosition += 1;
+            }
+            break;
+        }
+        case '%': {
+            if (sourcePosition[1] == '=') {
+                tok = Token::PercentEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Percent;
+                sourcePosition += 1;
+            }
+            break;
+        }
         // & | >
-        case '&': { char c1 = sourcePosition[1]; char c2 = sourcePosition[2];
-                    if (c1 == '&') { if (c2 == '=') { tok = Token::AmpAmpEqual;         sourcePosition += 3; } else { tok = Token::AmpAmp;         sourcePosition += 2; } }
-                                else if (c1 == '=') { tok = Token::AmpEqual;            sourcePosition += 2; } else { tok = Token::Amp;            sourcePosition += 1; } break; }
-        case '|': { char c1 = sourcePosition[1]; char c2 = sourcePosition[2];
-                    if (c1 == '|') { if (c2 == '=') { tok = Token::VertVertEqual;       sourcePosition += 3; } else { tok = Token::VertVert;       sourcePosition += 2; } }
-                                else if (c1 == '=') { tok = Token::VertEqual;           sourcePosition += 2; } else { tok = Token::Vert;           sourcePosition += 1; } break; }
-        case '>': { char c1 = sourcePosition[1]; char c2 = sourcePosition[2];
-                    if (c1 == '>') { if (c2 == '=') { tok = Token::GreaterGreaterEqual; sourcePosition += 3; } else { tok = Token::GreaterGreater; sourcePosition += 2; } }
-                                else if (c1 == '=') { tok = Token::GreaterEqual;        sourcePosition += 2; } else { tok = Token::Greater;        sourcePosition += 1; } break; }
-        // clang-format on
+        case '&': {
+            if (sourcePosition[1] == '&') {
+                if (sourcePosition[2] == '=') {
+                    tok = Token::AmpAmpEqual;
+                    sourcePosition += 3;
+                } else {
+                    tok = Token::AmpAmp;
+                    sourcePosition += 2;
+                }
+            } else if (sourcePosition[1] == '=') {
+                tok = Token::AmpEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Amp;
+                sourcePosition += 1;
+            }
+            break;
+        }
+        case '|': {
+            if (sourcePosition[1] == '|') {
+                if (sourcePosition[2] == '=') {
+                    tok = Token::VertVertEqual;
+                    sourcePosition += 3;
+                } else {
+                    tok = Token::VertVert;
+                    sourcePosition += 2;
+                }
+            } else if (sourcePosition[1] == '=') {
+                tok = Token::VertEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Vert;
+                sourcePosition += 1;
+            }
+            break;
+        }
+        case '>': {
+            if (sourcePosition[1] == '>') {
+                if (sourcePosition[2] == '=') {
+                    tok = Token::GreaterGreaterEqual;
+                    sourcePosition += 3;
+                } else {
+                    tok = Token::GreaterGreater;
+                    sourcePosition += 2;
+                }
+            } else if (sourcePosition[1] == '=') {
+                tok = Token::GreaterEqual;
+                sourcePosition += 2;
+            } else {
+                tok = Token::Greater;
+                sourcePosition += 1;
+            }
+            break;
+        }
+
         case '+': {
-            char c1 = sourcePosition[1];
-            if (c1 == '+') {
+            if (sourcePosition[1] == '+') {
                 tok = Token::PlusPlus;
                 sourcePosition += 2;
-            } else if (c1 == '=') {
+            } else if (sourcePosition[1] == '=') {
                 tok = Token::PlusEqual;
                 sourcePosition += 2;
             } else {
@@ -152,14 +270,13 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         case '-': {
-            char c1 = sourcePosition[1];
-            if (c1 == '-') {
+            if (sourcePosition[1] == '-') {
                 tok = Token::MinusMinus;
                 sourcePosition += 2;
-            } else if (c1 == '=') {
+            } else if (sourcePosition[1] == '=') {
                 tok = Token::MinusEqual;
                 sourcePosition += 2;
-            } else if (c1 == '>') {
+            } else if (sourcePosition[1] == '>') {
                 tok = Token::MinusGreater;
                 sourcePosition += 2;
             } else {
@@ -169,11 +286,10 @@ const char* lexSwitchAndBranch(const char* sourcePosition, SimpleTokenBuffer<Lex
             break;
         }
         case '=': {
-            char c1 = sourcePosition[1];
-            if (c1 == '=') {
+            if (sourcePosition[1] == '=') {
                 tok = Token::EqualEqual;
                 sourcePosition += 2;
-            } else if (c1 == '>') {
+            } else if (sourcePosition[1] == '>') {
                 tok = Token::EqualGreater;
                 sourcePosition += 2;
             } else {
