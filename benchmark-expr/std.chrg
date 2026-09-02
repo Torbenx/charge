@@ -1,0 +1,21 @@
+// Shared standard-library surface for the benchmark corpus.
+//
+// This is a stub: bodies are empty and it is not expected to pass semantic
+// analysis. Its purpose is to give every generated benchmark file one
+// consistent set of names to call, so the corpus reads like a single codebase.
+
+// --- Core scalar aliases -------------------------------------------------
+
+// --- Utility -------------------------------------------------------------
+
+// --- vector --------------------------------------------------------------
+
+// --- string --------------------------------------------------------------
+
+// --- map / set -----------------------------------------------------------
+
+// --- pair ----------------------------------------------------------------
+
+// --- memory --------------------------------------------------------------
+
+// --- io ------------------------------------------------------------------

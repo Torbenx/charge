@@ -1,0 +1,4419 @@
+// A complete regular expression engine: pattern lexer, recursive descent
+// pattern parser, Thompson NFA construction, NFA simulation over a state set,
+// a backtracking matcher with capture groups, a compiled instruction program
+// with a small optimiser, and the user facing match/search/replace/split API.
+//
+// The engine works on `string` values and addresses them by integer offsets.
+// Every structure that would normally hold pointers instead holds indices into
+// a flat arena, so patterns are trivially copyable and can be serialised.
+//
+// Supported syntax:
+//
+//     literal        a  b  \+  \{
+//     any            .
+//     class          [abc]  [^abc]  [a-z0-9_]  [[:alpha:]]
+//     shorthand      \d \D \w \W \s \S \h \v
+//     group          (...)  (?:...)  (?<name>...)
+//     alternation    a|b|c
+//     repetition     a*  a+  a?  a{2}  a{2,}  a{2,5}  and lazy forms a*?
+//     anchors        ^  $  \b  \B  \A  \z
+//     backreference  \1 .. \9  \k<name>
+//
+// Nothing here needs floating point: all counters, bounds and scores are plain
+// integers, and where a fraction is required it is expressed in per-mille.
+
+// --- Character constants -------------------------------------------------
+//
+// The lexer and the class parser compare raw characters on almost every line,
+// so each significant character is given a name once and referred to by that
+// name afterwards.  Spelling them out at every use site would make the
+// character-level logic below far harder to read.
+
+// Metacharacters.
+
+// Digits and the letter ranges, used by the classification helpers.
+
+// The apostrophe cannot be written as a character escape in this dialect, so
+// it is kept as a one character string and read out of it when needed.
+
+    TEXT_APOSTROPHE_at , 0;
+
+// --- Numeric limits ------------------------------------------------------
+
+// Character codes are treated as a byte alphabet.
+
+// Sentinel used wherever "no such index" must be expressed.
+
+// The largest repetition count a `{n,m}` bound may name.  Larger bounds are
+// rejected by the parser rather than expanded, because expansion is linear in
+// the bound and a hostile pattern could otherwise blow up the program.
+
+// Upper bound on the number of nested groups the recursive descent parser
+// will accept.  This keeps the recursion depth, and therefore the native
+// stack usage, bounded for arbitrary input.
+
+// Capture groups are numbered from 1; group 0 is the whole match.
+
+// Budget for the backtracking matcher, counted in step units.  A pathological
+// pattern such as (a+)+$ against a long run of a's will exhaust it and the
+// matcher reports MatchStatus::Exhausted instead of running forever.
+
+// The optimiser gives up on a pass once it has rewritten this many
+// instructions, so compilation stays linear even for very large programs.
+
+// --- Text constants ------------------------------------------------------
+
+// Escape spellings.  The doubled backslash in the source produces a single
+// real backslash in the value.
+
+// POSIX style class names, spelled without their bracket-colon wrapper.
+
+// Diagnostic message texts.
+
+// --- Character classification -------------------------------------------
+//
+// Everything downstream of the lexer asks these questions constantly, so they
+// live as free functions rather than as methods on some helper object.  They
+// are written as explicit range tests instead of table lookups because the
+// alphabet is small and the branch layout is what the compiler benchmark is
+// actually meant to measure.
+
+    c < CHAR_ZERO;
+        false;
+
+    c > CHAR_NINE;
+        false;
+
+    true;
+
+    c < CHAR_ZERO;
+        false;
+
+    c > CHAR_SEVEN;
+        false;
+
+    true;
+
+    c < CHAR_LOWER_A;
+        false;
+
+    c > CHAR_LOWER_Z;
+        false;
+
+    true;
+
+    c < CHAR_UPPER_A;
+        false;
+
+    c > CHAR_UPPER_Z;
+        false;
+
+    true;
+
+    is_lower , c;
+        true;
+
+    is_upper , c;
+        true;
+
+    false;
+
+    is_alpha , c;
+        true;
+
+    is_digit , c;
+
+    // The word alphabet is the one \w selects: letters, digits and underscore.
+
+    is_alnum , c;
+        true;
+
+    c == CHAR_UNDERSCORE;
+        true;
+
+    false;
+
+    is_digit , c;
+        true;
+
+    c >= CHAR_LOWER_A && c <= CHAR_LOWER_F;
+        true;
+
+    c >= CHAR_UPPER_A && c <= CHAR_UPPER_F;
+        true;
+
+    false;
+
+    // Horizontal whitespace only: space and tab.
+
+    c == CHAR_SPACE;
+        true;
+
+    c == CHAR_TAB;
+        true;
+
+    false;
+
+    // Vertical whitespace: the line terminators plus form feed.
+
+    c == CHAR_NEWLINE;
+        true;
+
+    c == CHAR_RETURN;
+        true;
+
+    c == CHAR_FORMFEED;
+        true;
+
+    false;
+
+    is_horizontal_space , c;
+        true;
+
+    is_vertical_space , c;
+        true;
+
+    false;
+
+    // Control characters are everything below space, plus the delete code.
+
+    code = char_code , c;
+    code < 32;
+        true;
+
+    code == 127;
+        true;
+
+    false;
+
+    code = char_code , c;
+    code < 32;
+        false;
+
+    code > 126;
+        false;
+
+    true;
+
+    // Graphic characters are the printable ones minus the space itself.
+
+    !is_printable , c;
+        false;
+
+    c != CHAR_SPACE;
+
+    !is_graphic , c;
+        false;
+
+    is_alnum , c;
+        false;
+
+    true;
+
+    // The characters that carry a special meaning outside a bracket expression.
+
+    c == CHAR_BACKSLASH;
+        true;
+
+    c == CHAR_CARET;
+        true;
+
+    c == CHAR_DOLLAR;
+        true;
+
+    c == CHAR_DOT;
+        true;
+
+    c == CHAR_STAR;
+        true;
+
+    c == CHAR_PLUS;
+        true;
+
+    c == CHAR_QUESTION;
+        true;
+
+    c == CHAR_PIPE;
+        true;
+
+    c == CHAR_LPAREN;
+        true;
+
+    c == CHAR_RPAREN;
+        true;
+
+    c == CHAR_LBRACKET;
+        true;
+
+    c == CHAR_RBRACKET;
+        true;
+
+    c == CHAR_LBRACE;
+        true;
+
+    c == CHAR_RBRACE;
+        true;
+
+    false;
+
+    // Inside a bracket expression only a handful of characters keep a meaning.
+
+    c == CHAR_BACKSLASH;
+        true;
+
+    c == CHAR_RBRACKET;
+        true;
+
+    c == CHAR_MINUS;
+        true;
+
+    c == CHAR_CARET;
+        true;
+
+    c == CHAR_LBRACKET;
+        true;
+
+    false;
+
+    // --- Case and code conversions ------------------------------------------
+
+    is_upper , c;
+        code_char , char_code , c + 32;
+
+    c;
+
+    is_lower , c;
+        code_char , char_code , c - 32;
+
+    c;
+
+    // Numeric value of a hexadecimal digit, or NONE when the character is not one.
+
+    is_digit , c;
+        char_code , c - char_code , CHAR_ZERO;
+
+    c >= CHAR_LOWER_A && c <= CHAR_LOWER_F;
+        10 + char_code , c - char_code , CHAR_LOWER_A;
+
+    c >= CHAR_UPPER_A && c <= CHAR_UPPER_F;
+        10 + char_code , c - char_code , CHAR_UPPER_A;
+
+    NONE;
+
+    !is_digit , c;
+        NONE;
+
+    char_code , c - char_code , CHAR_ZERO;
+
+    // The two bridges between the character and integer views of the alphabet.
+
+    code = 0;
+    code = c;
+    code;
+
+    c = CHAR_NUL;
+    c = code;
+    c;
+
+// Case-insensitive comparison of two characters, used when the
+// MatchFlags::IgnoreCase flag is set on a compiled program.
+
+    a == b;
+        true;
+
+    to_lower , a == to_lower , b;
+
+// --- Pattern tokens ------------------------------------------------------
+//
+// The lexer turns the raw pattern text into a token stream.  It deliberately
+// does *not* understand bracket expressions: a `[` produces a single
+// ClassOpen token and the parser then drives the lexer character by character
+// until the matching `]`.  Bracket expressions have their own tiny grammar in
+// which almost nothing is a metacharacter, and folding it into the main token
+// rules would make both harder to follow.
+
+                // an ordinary character, or an escaped one
+                // .
+                // |
+                // ( or (?: or (?<name>
+                // )
+                // [ or [^
+                // ]
+                   // *
+                   // +
+                   // ?
+                   // {n} {n,} {n,m}
+                   // ^
+                   // $
+                   // \A
+                   // \z
+                   // \b
+                   // \B
+                   // \d \D \w \W \s \S \h \v
+                   // \1 .. \9 or \k<name>
+
+// Which shorthand a ShorthandClass token stands for.
+
+// How a group opening was spelled.
+
+// (
+// (?:
+// (?<name>
+// (?>
+
+        kind == TokenKind_EndOfPattern;
+
+        kind == TokenKind_Literal;
+
+    // Quantifiers all bind to the preceding atom, so the parser asks this
+    // question rather than testing three kinds at every call site.
+
+        kind == TokenKind_Star;
+            true;
+
+        kind == TokenKind_Plus;
+            true;
+
+        kind == TokenKind_Question;
+            true;
+
+        kind == TokenKind_RepeatOpen;
+            true;
+
+        false;
+
+        kind == TokenKind_CaretAnchor;
+            true;
+
+        kind == TokenKind_DollarAnchor;
+            true;
+
+        kind == TokenKind_TextStartAnchor;
+            true;
+
+        kind == TokenKind_TextEndAnchor;
+            true;
+
+        kind == TokenKind_WordBoundary;
+            true;
+
+        kind == TokenKind_NotWordBoundary;
+            true;
+
+        false;
+
+    // True when the token can begin an atom.  Used for error recovery and by
+    // the optimiser when it scans for a literal prefix.
+
+        is_literal;
+            true;
+
+        kind == TokenKind_AnyChar;
+            true;
+
+        kind == TokenKind_ClassOpen;
+            true;
+
+        kind == TokenKind_GroupOpen;
+            true;
+
+        kind == TokenKind_ShorthandClass;
+            true;
+
+        kind == TokenKind_Backreference;
+            true;
+
+        is_anchor;
+
+    // Set when the character came from an escape, so `\*` is a literal star
+    // rather than a quantifier even though the value is identical.
+
+    // --- Pattern lexer -------------------------------------------------------
+
+        pos >= source_size;
+
+        source_size - pos;
+
+        at_end;
+            CHAR_NUL;
+
+        source_at , pos;
+
+        index = pos + offset;
+        index < 0;
+            CHAR_NUL;
+
+        index >= source_size;
+            CHAR_NUL;
+
+        source_at , index;
+
+        at_end;
+            CHAR_NUL;
+
+        c = source_at , pos;
+        pos++;
+        c;
+
+        peek != expected;
+            false;
+
+        ++pos;
+        true;
+
+        ok;
+            ok = false;
+            error = message;
+            error_position = pos;
+
+            // --- Token construction ----------------------------------------------
+
+        t = Token , kind , at;
+        t;
+
+        t = Token , TokenKind_Literal , c , at;
+        t_escaped = escaped;
+        t;
+
+        t = Token , TokenKind_ShorthandClass , at;
+        t_shorthand = which;
+        t;
+
+        // --- Driving loop -----------------------------------------------------
+
+        tokens_clear;
+        pos = 0;
+        ok = true;
+        error = ERROR_NONE;
+        !at_end;
+            t = next_token;
+            !ok;
+                false;
+
+            tokens_push_back , t;
+
+        tokens_push_back , make_token , TokenKind_EndOfPattern , source_size;
+        true;
+
+    // One token.  The big branch tree below is the heart of the lexer: each
+    // metacharacter is checked in turn and anything that survives is an
+    // ordinary literal.
+
+        at = pos;
+        c = advance;
+        c == CHAR_BACKSLASH;
+            lex_escape , at;
+
+        c == CHAR_DOT;
+            make_token , TokenKind_AnyChar , at;
+
+        c == CHAR_PIPE;
+            make_token , TokenKind_AlternationBar , at;
+
+        c == CHAR_LPAREN;
+            lex_group_open , at;
+
+        c == CHAR_RPAREN;
+            make_token , TokenKind_GroupClose , at;
+
+        c == CHAR_LBRACKET;
+            make_token , TokenKind_ClassOpen , at;
+
+        c == CHAR_RBRACKET;
+            // A stray `]` outside a bracket expression is an ordinary
+            // character; only the class parser gives it a meaning.
+            make_literal , c , at , false;
+
+        c == CHAR_STAR;
+            make_token , TokenKind_Star , at;
+
+        c == CHAR_PLUS;
+            make_token , TokenKind_Plus , at;
+
+        c == CHAR_QUESTION;
+            make_token , TokenKind_Question , at;
+
+        c == CHAR_LBRACE;
+            lex_repeat_bound , at;
+
+        c == CHAR_RBRACE;
+            make_literal , c , at , false;
+
+        c == CHAR_CARET;
+            make_token , TokenKind_CaretAnchor , at;
+
+        c == CHAR_DOLLAR;
+            make_token , TokenKind_DollarAnchor , at;
+
+        make_literal , c , at , false;
+
+    // --- Escapes ----------------------------------------------------------
+    //
+    // Called with the backslash already consumed.  Escapes fall into four
+    // families: shorthand classes, anchors, backreferences and single
+    // character substitutions.
+
+        at_end;
+            fail , ERROR_TRAILING_BACKSLASH;
+            make_token , TokenKind_Invalid , at;
+
+        c = advance;
+        c == CHAR_LOWER_D;
+            make_shorthand , Shorthand_ShortDigit , at;
+
+        c == CHAR_UPPER_D;
+            make_shorthand , Shorthand_ShortNotDigit , at;
+
+        c == CHAR_LOWER_W;
+            make_shorthand , Shorthand_ShortWord , at;
+
+        c == CHAR_UPPER_W;
+            make_shorthand , Shorthand_ShortNotWord , at;
+
+        c == CHAR_LOWER_S;
+            make_shorthand , Shorthand_ShortSpace , at;
+
+        c == CHAR_UPPER_S;
+            make_shorthand , Shorthand_ShortNotSpace , at;
+
+        c == CHAR_LOWER_H;
+            make_shorthand , Shorthand_ShortHorizontal , at;
+
+        c == CHAR_LOWER_V;
+            make_shorthand , Shorthand_ShortVertical , at;
+
+        c == CHAR_LOWER_B;
+            make_token , TokenKind_WordBoundary , at;
+
+        c == CHAR_UPPER_B;
+            make_token , TokenKind_NotWordBoundary , at;
+
+        c == CHAR_UPPER_A;
+            make_token , TokenKind_TextStartAnchor , at;
+
+        c == CHAR_LOWER_Z;
+            make_token , TokenKind_TextEndAnchor , at;
+
+        c == CHAR_LOWER_K;
+            lex_named_backreference , at;
+
+        is_digit , c && c != CHAR_ZERO;
+            lex_numeric_backreference , c , at;
+
+        c == CHAR_LOWER_X;
+            lex_hex_escape , at;
+
+        make_literal , decode_escape , c , at , true;
+
+    // \k<name> refers to a named group.  The name is stored on the token and
+    // resolved to an index by the parser, which owns the name table.
+
+        t = make_token , TokenKind_Backreference , at;
+        !accept , CHAR_LESS;
+            fail , ERROR_BAD_BACKREF;
+            make_token , TokenKind_Invalid , at;
+
+        name = TEXT_EMPTY;
+        !at_end;
+            c = peek;
+            c == CHAR_GREATER;
+
+            !is_word_char , c;
+                fail , ERROR_BAD_BACKREF;
+                make_token , TokenKind_Invalid , at;
+
+            name_push_back , c;
+            ++pos;
+
+        !accept , CHAR_GREATER;
+            fail , ERROR_BAD_BACKREF;
+            make_token , TokenKind_Invalid , at;
+
+        name_empty;
+            fail , ERROR_BAD_BACKREF;
+            make_token , TokenKind_Invalid , at;
+
+        t_text = name;
+        t_lower = NONE;
+        t;
+
+    // \1 .. \9, and multi-digit forms such as \12 when that many groups are
+    // plausible.  The parser rejects references past the group count.
+
+        value = digit_value , first;
+        !at_end;
+            c = peek;
+            !is_digit , c;
+
+            next = value * 10 + digit_value , c;
+            next >= MAX_CAPTURES;
+
+            value = next;
+            pos++;
+
+        t = make_token , TokenKind_Backreference , at;
+        t_lower = value;
+        t;
+
+    // \xNN.  Exactly two hexadecimal digits; anything else is an error rather
+    // than a silent fallback, because a typo there is almost never intended.
+
+        remaining < 2;
+            fail , ERROR_BAD_ESCAPE;
+            make_token , TokenKind_Invalid , at;
+
+        high = advance;
+        low = advance;
+        !is_hex_digit , high;
+            fail , ERROR_BAD_ESCAPE;
+            make_token , TokenKind_Invalid , at;
+
+        !is_hex_digit , low;
+            fail , ERROR_BAD_ESCAPE;
+            make_token , TokenKind_Invalid , at;
+
+        code = hex_value , high * 16 + hex_value , low;
+        make_literal , code_char , code , at , true;
+
+        // --- Group openings ---------------------------------------------------
+
+        t = make_token , TokenKind_GroupOpen , at;
+        peek != CHAR_QUESTION;
+            t_group_kind = GroupKind_Capturing;
+            t;
+
+        pos++;
+        c = advance;
+        c == CHAR_COLON;
+            t_group_kind = GroupKind_NonCapturing;
+            t;
+
+        c == CHAR_GREATER;
+            t_group_kind = GroupKind_Atomic;
+            t;
+
+        c == CHAR_LESS;
+            name = TEXT_EMPTY;
+            !at_end;
+                n = peek;
+                n == CHAR_GREATER;
+
+                !is_word_char , n;
+                    fail , ERROR_BAD_GROUP;
+                    make_token , TokenKind_Invalid , at;
+
+                name_push_back , n;
+                pos++;
+
+            !accept , CHAR_GREATER;
+                fail , ERROR_BAD_GROUP;
+                make_token , TokenKind_Invalid , at;
+
+            name_empty;
+                fail , ERROR_BAD_GROUP;
+                make_token , TokenKind_Invalid , at;
+
+            t_group_kind = GroupKind_Named;
+            t_text = name;
+            t;
+
+        fail , ERROR_BAD_GROUP;
+        make_token , TokenKind_Invalid , at;
+
+    // --- Repetition bounds ------------------------------------------------
+    //
+    // Called with the `{` consumed.  A brace that does not open a well formed
+    // bound is treated as a literal brace, which is what every practical
+    // engine does; only a bound that parses but is out of range is an error.
+
+        save = pos;
+        !is_digit , peek;
+            pos = save;
+            make_literal , CHAR_LBRACE , at , false;
+
+        lower = 0;
+        digits = 0;
+        is_digit , peek;
+            lower = lower * 10 + digit_value , peek;
+            ++digits;
+            ++pos;
+            lower > MAX_REPEAT;
+                fail , ERROR_REPEAT_TOO_LARGE;
+                make_token , TokenKind_Invalid , at;
+
+        t = make_token , TokenKind_RepeatOpen , at;
+        t_lower = lower;
+        accept , CHAR_RBRACE;
+            t_upper = lower;
+            t;
+
+        !accept , CHAR_COMMA;
+            pos = save;
+            make_literal , CHAR_LBRACE , at , false;
+
+        accept , CHAR_RBRACE;
+            // `{n,}` is an open ended bound.
+            t_upper = NONE;
+            t;
+
+        !is_digit , peek;
+            pos = save;
+            make_literal , CHAR_LBRACE , at , false;
+
+        upper = 0;
+        is_digit , peek;
+            upper = upper * 10 + digit_value , peek;
+            pos++;
+            upper > MAX_REPEAT;
+                fail , ERROR_REPEAT_TOO_LARGE;
+                make_token , TokenKind_Invalid , at;
+
+        !accept , CHAR_RBRACE;
+            pos = save;
+            make_literal , CHAR_LBRACE , at , false;
+
+        upper < lower;
+            fail , ERROR_BAD_REPEAT;
+            make_token , TokenKind_Invalid , at;
+
+        t_upper = upper;
+        t;
+
+// Single character escapes that stand for a control character.  Anything not
+// listed keeps its own value, so `\+` is a plus and `\/` is a slash.
+
+    marker == CHAR_LOWER_N;
+        CHAR_NEWLINE;
+
+    marker == CHAR_LOWER_T;
+        CHAR_TAB;
+
+    marker == CHAR_LOWER_R;
+        CHAR_RETURN;
+
+    marker == CHAR_LOWER_F;
+        CHAR_FORMFEED;
+
+    marker == CHAR_ZERO;
+        CHAR_NUL;
+
+    marker == CHAR_LOWER_E;
+        code_char , 27;
+
+    marker;
+
+    // The inverse mapping, used when a pattern is printed back out.
+
+    c == CHAR_NEWLINE;
+        ESCAPE_NEWLINE;
+
+    c == CHAR_TAB;
+        ESCAPE_TAB;
+
+    c == CHAR_RETURN;
+        ESCAPE_RETURN;
+
+    c == CHAR_FORMFEED;
+        ESCAPE_FORMFEED;
+
+    c == CHAR_BACKSLASH;
+        ESCAPE_BACKSLASH;
+
+    out = TEXT_EMPTY;
+    is_metacharacter , c;
+        out_push_back , CHAR_BACKSLASH;
+
+    out_push_back , c;
+    out;
+
+// --- Character classes ---------------------------------------------------
+//
+// A class is stored as a sorted list of inclusive code ranges plus a negation
+// flag.  Ranges are kept normalised - sorted by low bound, non-overlapping and
+// non-adjacent - which makes membership a short scan and lets the optimiser
+// merge two classes by concatenating and re-normalising.
+
+        code < low;
+            false;
+
+        code > high;
+            false;
+
+        true;
+
+        high - low + 1;
+
+        low == high;
+
+        // Two ranges may be fused when they overlap or merely touch.
+
+        other_low > high + 1;
+            false;
+
+        low > other_high + 1;
+            false;
+
+        true;
+
+        other_low < low;
+            low = other_low;
+
+        other_high > high;
+            high = other_high;
+
+    r = ClassRange , low , high;
+    high < low;
+        r_low = high;
+        r_high = low;
+
+    r;
+
+    code = char_code , c;
+    make_range , code , code;
+
+        ranges_empty;
+
+        ranges_size;
+
+        ranges_push_back , make_range , low , high;
+        normalised = false;
+
+        code = char_code , c;
+        add_range , code , code;
+
+        add_range , char_code , low , char_code , high;
+
+    // Pull every range of `other` in.  Used both by the class parser, when it
+    // expands a shorthand inside brackets, and by the optimiser when it merges
+    // sibling classes under an alternation.
+
+        r , other_ranges;
+            add_range , r_low , r_high;
+
+        normalised = false;
+
+        negated = !negated;
+
+    // Insertion sort over the range list.  Classes are tiny - a dozen ranges
+    // at the very worst - so the quadratic bound never matters and the code
+    // stays obvious.
+
+        i = 1;
+        i < ranges_size;
+            j = i;
+            j > 0;
+                left = ranges , j - 1;
+                right = ranges , j;
+                left_low <= right_low;
+
+                swap , ranges , j - 1 , ranges , j;
+                j--;
+
+            ++i;
+
+    // Sort, then fuse every pair that touches.  Afterwards the list is a
+    // canonical description of the set, so two classes are equal exactly when
+    // their range lists are.
+
+        normalised;
+
+        ranges_empty;
+            normalised = true;
+
+        sort_ranges;
+        merged = vector , ClassRange;
+        merged_push_back , ranges , 0;
+        i = 1;
+        i < ranges_size;
+            next = ranges , i;
+            last = merged_back;
+            last_touches , next;
+                last_fuse , next;
+
+                merged_push_back , next;
+
+            i++;
+
+        ranges = move , merged;
+        normalised = true;
+
+        found = false;
+        r , ranges;
+            r_contains , code;
+                found = true;
+
+        negated;
+            !found;
+
+        found;
+
+        contains_code , char_code , c;
+
+    // Case-insensitive membership: try the character as written and then its
+    // opposite case.  Folding the class itself would be faster but would lose
+    // the original spelling, which the printer wants.
+
+        matches , c;
+            true;
+
+        is_lower , c;
+            matches , to_upper , c;
+
+        is_upper , c;
+            matches , to_lower , c;
+
+        false;
+
+    // How many distinct codes the class accepts.  The optimiser uses this to
+    // decide whether a class is worth turning into a single-character test.
+
+        total = 0;
+        r , ranges;
+            total += r_width;
+
+        negated;
+            ALPHABET_SIZE - total;
+
+        total;
+
+        negated;
+            false;
+
+        ranges_size != 1;
+            false;
+
+        only = ranges , 0;
+        only_is_single;
+
+        only = ranges , 0;
+        code_char , only_low;
+
+        negated != other_negated;
+            false;
+
+        ranges_size != other_ranges_size;
+            false;
+
+        i = 0;
+        i < ranges_size;
+            a = ranges , i;
+            b = other_ranges , i;
+            a_low != b_low;
+                false;
+
+            a_high != b_high;
+                false;
+
+            ++i;
+
+        true;
+
+        // Render the class back into bracket notation.
+
+        out = TEXT_LBRACKET;
+        negated;
+            out_push_back , CHAR_CARET;
+
+        r , ranges;
+            out_append , escape_spelling , code_char , r_low;
+            !r_is_single;
+                out_push_back , CHAR_MINUS;
+                out_append , escape_spelling , code_char , r_high;
+
+        out_append , TEXT_RBRACKET;
+        out;
+
+// --- Shorthand and POSIX class tables ------------------------------------
+//
+// Both families are built from the same primitive: fill a class with ranges
+// and optionally flip its negation flag.
+
+    c = CharClass;
+    c_add_char_range , CHAR_ZERO , CHAR_NINE;
+    c;
+
+    c = CharClass;
+    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
+    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
+    c_add_char_range , CHAR_ZERO , CHAR_NINE;
+    c_add_char , CHAR_UNDERSCORE;
+    c;
+
+    c = CharClass;
+    c_add_char , CHAR_SPACE;
+    c_add_char , CHAR_TAB;
+    c_add_char , CHAR_NEWLINE;
+    c_add_char , CHAR_RETURN;
+    c_add_char , CHAR_FORMFEED;
+    c_add_char , code_char , 11;
+    c;
+
+    c = CharClass;
+    c_add_char , CHAR_SPACE;
+    c_add_char , CHAR_TAB;
+    c;
+
+    c = CharClass;
+    c_add_char , CHAR_NEWLINE;
+    c_add_char , CHAR_RETURN;
+    c_add_char , CHAR_FORMFEED;
+    c_add_char , code_char , 11;
+    c;
+
+    c = CharClass;
+    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
+    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
+    c;
+
+    c = class_of_alpha;
+    c_add_char_range , CHAR_ZERO , CHAR_NINE;
+    c;
+
+    c = CharClass;
+    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
+    c;
+
+    c = CharClass;
+    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
+    c;
+
+    c = class_of_digits;
+    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_F;
+    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_F;
+    c;
+
+    c = CharClass;
+    c_add_range , 33 , 47;
+    c_add_range , 58 , 64;
+    c_add_range , 91 , 96;
+    c_add_range , 123 , 126;
+    c;
+
+    c = CharClass;
+    c_add_range , 32 , 126;
+    c;
+
+    c = CharClass;
+    c_add_range , 33 , 126;
+    c;
+
+    c = CharClass;
+    c_add_range , 0 , 31;
+    c_add_range , 127 , 127;
+    c;
+
+    c = CharClass;
+    dot_matches_newline;
+        c_add_range , CODE_MIN , CODE_MAX;
+        c;
+
+    c_add_char , CHAR_NEWLINE;
+    c_negate;
+    c;
+
+// Expand `\d`, `\W` and friends.  Negated shorthands are the positive class
+// with the flag flipped, which keeps the two spellings in step.
+
+    which == Shorthand_ShortDigit;
+        class_of_digits;
+
+    which == Shorthand_ShortNotDigit;
+        c = class_of_digits;
+        c_negate;
+        c;
+
+    which == Shorthand_ShortWord;
+        class_of_word;
+
+    which == Shorthand_ShortNotWord;
+        c = class_of_word;
+        c_negate;
+        c;
+
+    which == Shorthand_ShortSpace;
+        class_of_space;
+
+    which == Shorthand_ShortNotSpace;
+        c = class_of_space;
+        c_negate;
+        c;
+
+    which == Shorthand_ShortHorizontal;
+        class_of_horizontal;
+
+    which == Shorthand_ShortVertical;
+        class_of_vertical;
+
+    CharClass;
+
+// `[[:name:]]`.  `found` is set to false when the name is not one of the
+// thirteen POSIX classes, and the caller raises ERROR_UNKNOWN_CLASS.
+
+    found = true;
+    name_compare , POSIX_ALPHA == 0;
+        class_of_alpha;
+
+    name_compare , POSIX_DIGIT == 0;
+        class_of_digits;
+
+    name_compare , POSIX_ALNUM == 0;
+        class_of_alnum;
+
+    name_compare , POSIX_UPPER == 0;
+        class_of_upper;
+
+    name_compare , POSIX_LOWER == 0;
+        class_of_lower;
+
+    name_compare , POSIX_SPACE == 0;
+        class_of_space;
+
+    name_compare , POSIX_BLANK == 0;
+        class_of_horizontal;
+
+    name_compare , POSIX_PUNCT == 0;
+        class_of_punct;
+
+    name_compare , POSIX_PRINT == 0;
+        class_of_print;
+
+    name_compare , POSIX_GRAPH == 0;
+        class_of_graph;
+
+    name_compare , POSIX_CNTRL == 0;
+        class_of_cntrl;
+
+    name_compare , POSIX_XDIGIT == 0;
+        class_of_xdigit;
+
+    name_compare , POSIX_WORD == 0;
+        class_of_word;
+
+    found = false;
+    CharClass;
+
+// --- Abstract syntax tree ------------------------------------------------
+//
+// Nodes live in a flat arena on the parser and refer to each other by index.
+// A node keeps at most two direct children plus a list, which covers every
+// shape the grammar can produce: concatenation and alternation use the list,
+// repetition uses `first`, and the leaves use neither.
+
+// matches the empty string
+// one character
+// a run of characters, produced by the optimiser
+// .
+// [...] or a shorthand
+// e1 e2 ...
+// e1 | e2 | ...
+// e{lower,upper}
+// ( e )
+// ^ $ \b \B \A \z
+// \1 or \k<name>
+
+// Whether a quantifier prefers to consume or to stop.
+
+        kind == NodeKind_NodeLiteral;
+            true;
+
+        kind == NodeKind_NodeString;
+            true;
+
+        kind == NodeKind_NodeAny;
+            true;
+
+        kind == NodeKind_NodeClass;
+            true;
+
+        kind == NodeKind_NodeAnchor;
+            true;
+
+        kind == NodeKind_NodeBackreference;
+            true;
+
+        kind == NodeKind_NodeEmpty;
+            true;
+
+        false;
+
+        !children_empty;
+            true;
+
+        first != NONE;
+
+        first != NONE;
+            1;
+
+        children_size;
+
+    // An anchor consumes nothing, and neither does an empty node or a
+    // repetition whose lower bound is zero.
+
+        kind == NodeKind_NodeAnchor;
+            true;
+
+        kind == NodeKind_NodeEmpty;
+            true;
+
+        false;
+
+        upper == NONE;
+
+        lower == 0;
+
+// --- Recursive descent pattern parser ------------------------------------
+//
+// The grammar the parser implements, in the order the functions appear:
+//
+//     alternation   := concatenation ( '|' concatenation )*
+//     concatenation := quantified*
+//     quantified    := atom quantifier*
+//     quantifier    := ( '*' | '+' | '?' | '{' bound '}' ) '?'?
+//     atom          := literal | '.' | class | group | shorthand
+//                    | anchor | backreference
+//     group         := '(' alternation ')'
+//
+// `parse_alternation` and `parse_atom` are mutually recursive through
+// `parse_group`, which is what gives the parser its depth; `depth` is tracked
+// explicitly so a pattern of ten thousand nested groups fails cleanly rather
+// than exhausting the native stack.
+//
+// Bracket expressions are not tokenised in advance.  When the token stream
+// offers a ClassOpen the parser drops to character mode over the original
+// source text, parses the bracket expression there, and then resynchronises
+// the token index to the offset it stopped at.  Bracket expressions have
+// their own rules for `-`, `^` and `]`, and running them through the outer
+// lexer would mean undoing half of its work.
+
+// --- Token stream helpers ---------------------------------------------
+
+        tokens_size;
+
+        index >= tokens_size;
+            true;
+
+        t = tokens , index;
+        t_is_end;
+
+        tokens , index;
+
+        index >= tokens_size;
+            TokenKind_EndOfPattern;
+
+        t = tokens , index;
+        t_kind;
+
+        at = index + offset;
+        at >= tokens_size;
+            TokenKind_EndOfPattern;
+
+        t = tokens , at;
+        t_kind;
+
+        index >= tokens_size;
+            source_size;
+
+        t = tokens , index;
+        t_position;
+
+        index < tokens_size;
+            index++;
+
+        current_kind != kind;
+            false;
+
+        step;
+        true;
+
+    // Skip forward until the token stream is positioned at or after `offset`.
+    // Called after the character-mode class parser has consumed a stretch of
+    // the source that the lexer had already turned into tokens.
+
+        index < tokens_size;
+            t = tokens , index;
+            t_position >= offset;
+
+            t_is_end;
+
+            index++;
+
+        ok;
+            ok = false;
+            error = message;
+            error_position = current_offset;
+
+        NONE;
+
+        // --- Arena ------------------------------------------------------------
+
+        nodes_size;
+
+        nodes , index;
+
+        index = nodes_size;
+        n = Node , kind;
+        n_position = current_offset;
+        nodes_push_back , n;
+        index;
+
+        index = new_node , NodeKind_NodeLiteral;
+        n = nodes , index;
+        n_value = c;
+        n_charclass_add_char , c;
+        index;
+
+        index = new_node , NodeKind_NodeClass;
+        n = nodes , index;
+        n_charclass = cls;
+        n_charclass_normalise;
+        index;
+
+        index = new_node , NodeKind_NodeAnchor;
+        n = nodes , index;
+        n_anchor = which;
+        index;
+
+        // --- Group name table -------------------------------------------------
+
+        entry , names;
+            entry_name_compare , name == 0;
+                entry_index;
+
+        NONE;
+
+        entry = GroupName , index;
+        entry_name = name;
+        names_push_back , entry;
+
+        // --- Entry point ------------------------------------------------------
+
+        source = pattern;
+        nodes_clear;
+        names_clear;
+        index = 0;
+        depth = 0;
+        group_count = 0;
+        ok = true;
+        error = ERROR_NONE;
+
+        lexer = PatternLexer;
+        lexer_source = pattern;
+        !lexer_tokenize;
+            ok = false;
+            error = lexer_error;
+            error_position = lexer_error_position;
+            NONE;
+
+        tokens = move , lexer_tokens;
+
+        root = parse_alternation;
+        !ok;
+            NONE;
+
+        !at_end;
+            // The only way to stop early with tokens left is a `)` with no
+            // matching `(`, because every other token starts an atom.
+            fail , ERROR_UNBALANCED_PAREN;
+
+        root = root;
+        root;
+
+        // --- alternation := concatenation ( '|' concatenation )* --------------
+
+        first = parse_concatenation;
+        !ok;
+            NONE;
+
+        current_kind != TokenKind_AlternationBar;
+            first;
+
+        index = new_node , NodeKind_NodeAlternate;
+        branches = vector , int;
+        branches_push_back , first;
+        accept_kind , TokenKind_AlternationBar;
+            branch = parse_concatenation;
+            !ok;
+                NONE;
+
+            branches_push_back , branch;
+
+        n = nodes , index;
+        n_children = move , branches;
+        index;
+
+    // --- concatenation := quantified* -------------------------------------
+    //
+    // Stops at `|`, at `)` and at the end of the token stream.  An empty
+    // concatenation is legal - it is how `(|a)` and `a||b` get their empty
+    // branches - and yields a NodeEmpty.
+
+        items = vector , int;
+
+            at_end;
+
+            current_kind == TokenKind_AlternationBar;
+
+            current_kind == TokenKind_GroupClose;
+
+            item = parse_quantified;
+            !ok;
+                NONE;
+
+            item == NONE;
+
+            items_push_back , item;
+
+        items_empty;
+            new_node , NodeKind_NodeEmpty;
+
+        items_size == 1;
+            items , 0;
+
+        index = new_node , NodeKind_NodeConcat;
+        n = nodes , index;
+        n_children = move , items;
+        index;
+
+    // --- quantified := atom quantifier* -----------------------------------
+    //
+    // Quantifiers are applied left to right, so `a*+` is `(a*)+`.  Each one
+    // wraps the node produced so far in a fresh NodeRepeat.
+
+        atom = parse_atom;
+        !ok;
+            NONE;
+
+        atom == NONE;
+            NONE;
+
+            t = tokens , index;
+            !t_is_quantifier;
+
+            inner = nodes , atom;
+            inner_kind == NodeKind_NodeAnchor;
+                // `^*` is meaningless and almost always a typo.
+                fail , ERROR_NOTHING_TO_REPEAT;
+
+            atom = parse_quantifier , atom;
+            !ok;
+                NONE;
+
+        atom;
+
+    // Consume one quantifier token and wrap `target` in the repetition it
+    // describes.  A trailing `?` makes the repetition lazy; a trailing `+`
+    // makes it possessive, which the backtracking matcher honours by
+    // discarding the alternatives it would otherwise keep.
+
+        kind = current_kind;
+        lower = 0;
+        upper = NONE;
+        kind == TokenKind_Star;
+            lower = 0;
+            upper = NONE;
+
+            kind == TokenKind_Plus;
+                lower = 1;
+                upper = NONE;
+
+                kind == TokenKind_Question;
+                    lower = 0;
+                    upper = 1;
+
+                    t = tokens , index;
+                    lower = t_lower;
+                    upper = t_upper;
+                    upper != NONE && upper < lower;
+                        fail , ERROR_BAD_REPEAT;
+
+                    lower > MAX_REPEAT;
+                        fail , ERROR_REPEAT_TOO_LARGE;
+
+        step;
+        greed = Greediness_Greedy;
+        current_kind == TokenKind_Question;
+            greed = Greediness_Lazy;
+            step;
+
+            current_kind == TokenKind_Plus;
+                greed = Greediness_Possessive;
+                step;
+
+        index = new_node , NodeKind_NodeRepeat;
+        n = nodes , index;
+        n_first = target;
+        n_lower = lower;
+        n_upper = upper;
+        n_greed = greed;
+        index;
+
+    // --- atom -------------------------------------------------------------
+    //
+    // The dispatch point of the parser.  Every branch either produces a node
+    // or reports an error; returning NONE without an error set means "this
+    // token does not begin an atom", which only `)` can do.
+
+        at_end;
+            NONE;
+
+        kind = current_kind;
+        kind == TokenKind_Literal;
+            t = tokens , index;
+            c = t_value;
+            step;
+            new_literal , c;
+
+        kind == TokenKind_AnyChar;
+            step;
+            index = new_node , NodeKind_NodeAny;
+            n = nodes , index;
+            n_charclass = class_of_any , dot_matches_newline;
+            index;
+
+        kind == TokenKind_ShorthandClass;
+            t = tokens , index;
+            which = t_shorthand;
+            step;
+            new_class , class_of_shorthand , which;
+
+        kind == TokenKind_ClassOpen;
+            parse_class;
+
+        kind == TokenKind_GroupOpen;
+            parse_group;
+
+        kind == TokenKind_Backreference;
+            parse_backreference;
+
+        kind == TokenKind_CaretAnchor;
+            step;
+            new_anchor , AnchorKind_AnchorLineStart;
+
+        kind == TokenKind_DollarAnchor;
+            step;
+            new_anchor , AnchorKind_AnchorLineEnd;
+
+        kind == TokenKind_TextStartAnchor;
+            step;
+            new_anchor , AnchorKind_AnchorTextStart;
+
+        kind == TokenKind_TextEndAnchor;
+            step;
+            new_anchor , AnchorKind_AnchorTextEnd;
+
+        kind == TokenKind_WordBoundary;
+            step;
+            new_anchor , AnchorKind_AnchorWordBoundary;
+
+        kind == TokenKind_NotWordBoundary;
+            step;
+            new_anchor , AnchorKind_AnchorNotWordBoundary;
+
+        kind == TokenKind_Star;
+            fail , ERROR_NOTHING_TO_REPEAT;
+
+        kind == TokenKind_Plus;
+            fail , ERROR_NOTHING_TO_REPEAT;
+
+        kind == TokenKind_RepeatOpen;
+            fail , ERROR_NOTHING_TO_REPEAT;
+
+        kind == TokenKind_Invalid;
+            fail , ERROR_BAD_ESCAPE;
+
+        NONE;
+
+    // --- group := '(' alternation ')' -------------------------------------
+    //
+    // The recursive step.  Capturing groups take the next free index before
+    // their body is parsed, so `(a(b))` numbers the outer group 1 and the
+    // inner group 2 - the order the spelling suggests.
+
+        t = tokens , index;
+        group_kind = t_group_kind;
+        name = t_text;
+        step;
+        ++depth;
+        depth > MAX_GROUP_DEPTH;
+            depth--;
+            fail , ERROR_DEPTH_EXCEEDED;
+
+        number = NONE;
+        group_kind == GroupKind_Capturing;
+            ++group_count;
+            number = group_count;
+
+        group_kind == GroupKind_Named;
+            ++group_count;
+            number = group_count;
+            register_group_name , name , number;
+
+        body = parse_alternation;
+        !ok;
+            depth--;
+            NONE;
+
+        !accept_kind , TokenKind_GroupClose;
+            depth--;
+            fail , ERROR_UNBALANCED_PAREN;
+
+        --depth;
+        index = new_node , NodeKind_NodeGroup;
+        n = nodes , index;
+        n_first = body;
+        n_group_kind = group_kind;
+        n_group_index = number;
+        n_text = name;
+        index;
+
+        // --- backreference ----------------------------------------------------
+
+        t = tokens , index;
+        target = t_lower;
+        target == NONE;
+            target = find_group_named , t_text;
+            target == NONE;
+                fail , ERROR_BAD_BACKREF;
+
+        target > group_count;
+            // Forward references are rejected: a group can only be recalled
+            // once it has been opened, and a group that is still open has no
+            // captured text yet.
+            fail , ERROR_BAD_BACKREF;
+
+        step;
+        index = new_node , NodeKind_NodeBackreference;
+        n = nodes , index;
+        n_reference = target;
+        index;
+
+    // --- Bracket expressions ----------------------------------------------
+    //
+    // Character mode.  On entry the token stream sits on the ClassOpen token
+    // and `offset` addresses the `[` itself in the source text.  The routine
+    // walks the source directly and resynchronises the token index on the way
+    // out.
+    //
+    // The rules a bracket expression obeys:
+    //   * a leading `^` negates the whole class
+    //   * a `]` in first position - after any `^` - is an ordinary character
+    //   * `-` is a range operator except in first or last position
+    //   * `[:name:]` names a POSIX class, but a bare `[` is just a bracket
+    //   * a shorthand such as `\d` contributes all of its ranges
+
+        open = current_offset;
+        at = open + 1;
+        cls = CharClass;
+        at < source_size;
+            source_at , at == CHAR_CARET;
+                cls_negate;
+                ++at;
+
+        first = true;
+        closed = false;
+
+            at >= source_size;
+
+            c = source_at , at;
+            c == CHAR_RBRACKET && !first;
+                at++;
+                closed = true;
+
+            first = false;
+            c == CHAR_RBRACKET;
+                // Leading `]`: an ordinary member of the class.
+                cls_add_char , c;
+                at++;
+
+            c == CHAR_LBRACKET && looks_like_posix , at;
+                at = parse_posix_class , at , cls;
+                !ok;
+                    NONE;
+
+            c == CHAR_BACKSLASH;
+                at = parse_class_escape , at , cls;
+                !ok;
+                    NONE;
+
+            // An ordinary character.  It may be the low end of a range, which
+            // is decided by what follows it.
+            low = c;
+            at++;
+            !class_range_follows , at;
+                cls_add_char , low;
+
+            // Step over the hyphen and read the upper bound.
+            at++;
+            high_char = source_at , at;
+            high_char == CHAR_BACKSLASH;
+                scratch = CharClass;
+                after = parse_class_escape , at , scratch;
+                !ok;
+                    NONE;
+
+                !scratch_is_single_char;
+                    // `a-\d` has no sensible reading; treat the three parts
+                    // as separate members instead of guessing.
+                    cls_add_char , low;
+                    cls_add_char , CHAR_MINUS;
+                    cls_add_class , scratch;
+                    at = after;
+
+                high = scratch_single_char;
+                char_code , high < char_code , low;
+                    fail , ERROR_BAD_RANGE;
+
+                cls_add_char_range , low , high;
+                at = after;
+
+            char_code , high_char < char_code , low;
+                fail , ERROR_BAD_RANGE;
+
+            cls_add_char_range , low , high_char;
+            at++;
+
+        !closed;
+            fail , ERROR_UNCLOSED_CLASS;
+
+        sync_to_offset , at;
+        cls_normalise;
+        new_class , cls;
+
+    // True when a `-` at `at` really is a range operator: it must exist, and
+    // it must not be the last character before the closing bracket.
+
+        at >= source_size;
+            false;
+
+        source_at , at != CHAR_MINUS;
+            false;
+
+        next = at + 1;
+        next >= source_size;
+            false;
+
+        source_at , next == CHAR_RBRACKET;
+            false;
+
+        true;
+
+    // A `[` inside a class opens a POSIX name only when it is followed by a
+    // colon and a closing `:]` appears before the class ends.
+
+        colon = at + 1;
+        colon >= source_size;
+            false;
+
+        source_at , colon != CHAR_COLON;
+            false;
+
+        scan = colon + 1;
+        scan < source_size;
+            source_at , scan == CHAR_CARET;
+                scan++;
+
+        scan < source_size;
+            c = source_at , scan;
+            c == CHAR_COLON;
+                close = scan + 1;
+                close >= source_size;
+                    false;
+
+                source_at , close == CHAR_RBRACKET;
+
+            !is_alpha , c;
+                false;
+
+            scan++;
+
+        false;
+
+    // Consume `[:name:]` and add its ranges to `into`.  `[:^name:]` adds the
+    // complement, which is spelled by expanding the class and inverting each
+    // gap rather than by flipping the whole class - the surrounding class may
+    // already carry a negation of its own.
+
+        scan = at + 2;
+        complement = false;
+        scan < source_size;
+            source_at , scan == CHAR_CARET;
+                complement = true;
+                scan++;
+
+        name = TEXT_EMPTY;
+        scan < source_size;
+            c = source_at , scan;
+            c == CHAR_COLON;
+
+            name_push_back , c;
+            scan++;
+
+        // Step over the `:]` pair.
+        scan += 2;
+        known = false;
+        expanded = class_of_posix_name , name , known;
+        !known;
+            fail , ERROR_UNKNOWN_CLASS;
+            scan;
+
+        complement;
+            expanded_normalise;
+            inverted = complement_of , expanded;
+            into_add_class , inverted;
+            scan;
+
+        into_add_class , expanded;
+        scan;
+
+    // Consume one `\x` sequence inside a bracket expression and add whatever
+    // it denotes to `into`.  Shorthands contribute their ranges; everything
+    // else contributes a single character.
+
+        marker_at = at + 1;
+        marker_at >= source_size;
+            fail , ERROR_TRAILING_BACKSLASH;
+            source_size;
+
+        marker = source_at , marker_at;
+        marker == CHAR_LOWER_D;
+            into_add_class , class_of_digits;
+            marker_at + 1;
+
+        marker == CHAR_UPPER_D;
+            into_add_class , complement_of , class_of_digits;
+            marker_at + 1;
+
+        marker == CHAR_LOWER_W;
+            into_add_class , class_of_word;
+            marker_at + 1;
+
+        marker == CHAR_UPPER_W;
+            into_add_class , complement_of , class_of_word;
+            marker_at + 1;
+
+        marker == CHAR_LOWER_S;
+            into_add_class , class_of_space;
+            marker_at + 1;
+
+        marker == CHAR_UPPER_S;
+            into_add_class , complement_of , class_of_space;
+            marker_at + 1;
+
+        marker == CHAR_LOWER_H;
+            into_add_class , class_of_horizontal;
+            marker_at + 1;
+
+        marker == CHAR_LOWER_V;
+            into_add_class , class_of_vertical;
+            marker_at + 1;
+
+        marker == CHAR_LOWER_X;
+            high_at = marker_at + 1;
+            low_at = marker_at + 2;
+            low_at >= source_size;
+                fail , ERROR_BAD_ESCAPE;
+                source_size;
+
+            high = source_at , high_at;
+            low = source_at , low_at;
+            !is_hex_digit , high || !is_hex_digit , low;
+                fail , ERROR_BAD_ESCAPE;
+                low_at + 1;
+
+            into_add_range , hex_value , high * 16 + hex_value , low , hex_value , high * 16 + hex_value , low;
+            low_at + 1;
+
+        marker == CHAR_LOWER_B;
+            // `\b` is a backspace inside a class, not a word boundary.
+            into_add_char , CHAR_BACKSPACE;
+            marker_at + 1;
+
+        into_add_char , decode_escape , marker;
+        marker_at + 1;
+
+// Build the set complement of a normalised class as an explicit range list.
+// Flipping the `negated` flag would be cheaper, but a complement built this
+// way can be unioned with other classes, which the bracket parser needs.
+
+    source = cls;
+    source_normalise;
+    out = CharClass;
+    cursor = CODE_MIN;
+    r , source_ranges;
+        r_low > cursor;
+            out_add_range , cursor , r_low - 1;
+
+        r_high + 1 > cursor;
+            cursor = r_high + 1;
+
+    cursor <= CODE_MAX;
+        out_add_range , cursor , CODE_MAX;
+
+    out_normalise;
+    out;
+
+// --- Thompson NFA construction -------------------------------------------
+//
+// Every AST node is turned into a fragment: a start state plus a list of
+// dangling exits that the caller patches to whatever comes next.  The
+// construction is the classical one, so the resulting automaton has at most
+// two transitions out of any state and no more states than the pattern has
+// characters.
+//
+// Backreferences have no NFA form - they are not regular - so the builder
+// emits a Backref state that only the backtracking matcher understands.  A
+// program containing one is marked `has_backreference` and the simulator
+// refuses to run it.
+
+// consume one character from a class
+// epsilon to both `out` and `alternate`
+              // epsilon to `out`
+              // record the current offset in capture slot `slot`
+              // zero width assertion
+              // re-match the text captured by a group
+              // accept
+
+        kind == StateKind_StateChar;
+
+        kind == StateKind_StateSplit;
+            true;
+
+        kind == StateKind_StateJump;
+            true;
+
+        kind == StateKind_StateSave;
+            true;
+
+        kind == StateKind_StateAssert;
+            true;
+
+        false;
+
+        kind == StateKind_StateMatch;
+
+        kind != StateKind_StateChar;
+            false;
+
+        folded;
+            charclass_matches_folded , c;
+
+        charclass_matches , c;
+
+// A dangling exit: state `state`, and which of its two out edges is unset.
+
+// A partially built automaton.
+
+        start != NONE;
+
+        exits_size;
+
+        p , other_exits;
+            exits_push_back , p;
+
+        states_size;
+
+        index = states_size;
+        states_push_back , NfaState , kind;
+        index;
+
+        // Point every exit of `frag` at `target`.
+
+        p , frag_exits;
+            s = states , p_state;
+            p_second;
+                s_alternate = target;
+
+                s_out = target;
+
+        frag = Fragment , state;
+        frag_exits_push_back , Patch , state , second;
+        frag;
+
+        // --- Entry point ------------------------------------------------------
+
+        states_clear;
+        has_backreference = false;
+        ok = true;
+        frag = build_node , parser , root;
+        !ok;
+            false;
+
+        accept = new_state , StateKind_StateMatch;
+        patch , frag , accept;
+        start = frag_start;
+        accept = accept;
+        true;
+
+        // --- The recursive core -----------------------------------------------
+
+        index == NONE;
+            build_empty;
+
+        n = parser_nodes , index;
+        n_kind == NodeKind_NodeEmpty;
+            build_empty;
+
+        n_kind == NodeKind_NodeLiteral;
+            build_class , n_charclass;
+
+        n_kind == NodeKind_NodeAny;
+            build_class , n_charclass;
+
+        n_kind == NodeKind_NodeClass;
+            build_class , n_charclass;
+
+        n_kind == NodeKind_NodeString;
+            build_string , n_text;
+
+        n_kind == NodeKind_NodeAnchor;
+            build_anchor , n_anchor;
+
+        n_kind == NodeKind_NodeBackreference;
+            build_backreference , n_reference;
+
+        n_kind == NodeKind_NodeConcat;
+            build_concat , parser , index;
+
+        n_kind == NodeKind_NodeAlternate;
+            build_alternate , parser , index;
+
+        n_kind == NodeKind_NodeRepeat;
+            build_repeat , parser , index;
+
+        n_kind == NodeKind_NodeGroup;
+            build_group , parser , index;
+
+        ok = false;
+        Fragment;
+
+        s = new_state , StateKind_StateJump;
+        single_exit , s , false;
+
+        s = new_state , StateKind_StateChar;
+        state = states , s;
+        state_charclass = cls;
+        state_charclass_normalise;
+        single_exit , s , false;
+
+    // A literal run compiles to a chain of single character states.  The
+    // simulator has no special case for it, but the compiled program does.
+
+        text_empty;
+            build_empty;
+
+        head = NONE;
+        previous = NONE;
+        i = 0;
+        i < text_size;
+            s = new_state , StateKind_StateChar;
+            state = states , s;
+            state_charclass_add_char , text_at , i;
+            head == NONE;
+                head = s;
+
+                prior = states , previous;
+                prior_out = s;
+
+            previous = s;
+            i++;
+
+        frag = Fragment , head;
+        frag_exits_push_back , Patch , previous , false;
+        frag;
+
+        s = new_state , StateKind_StateAssert;
+        state = states , s;
+        state_anchor = which;
+        single_exit , s , false;
+
+        has_backreference = true;
+        s = new_state , StateKind_StateBackref;
+        state = states , s;
+        state_reference = group;
+        single_exit , s , false;
+
+    // e1 e2 ... : chain the fragments, patching each one's exits to the next
+    // fragment's start.  The exits of the last fragment become the exits of
+    // the whole.
+
+        n = parser_nodes , index;
+        result = Fragment;
+        started = false;
+        child , n_children;
+            piece = build_node , parser , child;
+            !ok;
+                Fragment;
+
+            !started;
+                result = piece;
+                started = true;
+
+                patch , result , piece_start;
+                result_exits_clear;
+                result_absorb , piece;
+
+        !started;
+            build_empty;
+
+        result;
+
+    // e1 | e2 | ... : a chain of Split states, each preferring its left
+    // branch.  The last branch takes the final split's alternate edge, so no
+    // split is ever left with a dangling second edge.
+
+        n = parser_nodes , index;
+        result = Fragment;
+        previous_split = NONE;
+        count = 0;
+        total = n_children_size;
+        child , n_children;
+            piece = build_node , parser , child;
+            !ok;
+                Fragment;
+
+            count++;
+            count == total;
+                previous_split == NONE;
+                    piece;
+
+                split = states , previous_split;
+                split_alternate = piece_start;
+                result_absorb , piece;
+                result;
+
+            split = new_state , StateKind_StateSplit;
+            s = states , split;
+            s_out = piece_start;
+            previous_split == NONE;
+                result_start = split;
+
+                prior = states , previous_split;
+                prior_alternate = split;
+
+            result_absorb , piece;
+            previous_split = split;
+
+        result;
+
+        n = parser_nodes , index;
+        group = n_group_index;
+        group == NONE;
+            build_node , parser , n_first;
+
+        open = new_state , StateKind_StateSave;
+        open_state = states , open;
+        open_state_slot = group * 2;
+        body = build_node , parser , n_first;
+        !ok;
+            Fragment;
+
+        open_state_out = body_start;
+        close = new_state , StateKind_StateSave;
+        close_state = states , close;
+        close_state_slot = group * 2 + 1;
+        patch , body , close;
+        single_exit_from , open , close;
+
+        // Helper for fragments whose start and exit are different states.
+
+        frag = Fragment , start;
+        frag_exits_push_back , Patch , exit , false;
+        frag;
+
+    // --- Repetition -------------------------------------------------------
+    //
+    // `e{lower,upper}` is expanded into copies of `e`: `lower` mandatory ones
+    // followed by either an unbounded star, when `upper` is NONE, or by
+    // `upper - lower` optional ones.  Expansion keeps the automaton a plain
+    // Thompson NFA with no counters, at the cost of size - which is why the
+    // parser caps the bound at MAX_REPEAT.
+
+        n = parser_nodes , index;
+        lower = n_lower;
+        upper = n_upper;
+        body = n_first;
+        lazy = n_greed == Greediness_Lazy;
+        lower == 0 && upper == NONE;
+            build_star , parser , body , lazy;
+
+        lower == 1 && upper == NONE;
+            build_plus , parser , body , lazy;
+
+        lower == 0 && upper == 1;
+            build_optional , parser , body , lazy;
+
+        result = Fragment;
+        started = false;
+        i = 0;
+        i < lower;
+            piece = build_node , parser , body;
+            !ok;
+                Fragment;
+
+            !started;
+                result = piece;
+                started = true;
+
+                patch , result , piece_start;
+                result_exits_clear;
+                result_absorb , piece;
+
+            i++;
+
+        upper == NONE;
+            tail = build_star , parser , body , lazy;
+            !started;
+                tail;
+
+            patch , result , tail_start;
+            result_exits_clear;
+            result_absorb , tail;
+            result;
+
+        extra = upper - lower;
+        extra > 0;
+            piece = build_optional , parser , body , lazy;
+            !ok;
+                Fragment;
+
+            !started;
+                result = piece;
+                started = true;
+
+                patch , result , piece_start;
+                result_exits_clear;
+                result_absorb , piece;
+
+            extra--;
+
+        !started;
+            build_empty;
+
+        result;
+
+    // e* : a split that either enters the body - which loops back - or skips
+    // it.  A lazy star simply swaps the two edges so the skip is preferred.
+
+        split = new_state , StateKind_StateSplit;
+        piece = build_node , parser , body;
+        !ok;
+            Fragment;
+
+        patch , piece , split;
+        s = states , split;
+        lazy;
+            s_alternate = piece_start;
+            single_exit , split , false;
+
+        s_out = piece_start;
+        single_exit , split , true;
+
+        // e+ : the body first, then a split that loops back or falls through.
+
+        piece = build_node , parser , body;
+        !ok;
+            Fragment;
+
+        split = new_state , StateKind_StateSplit;
+        patch , piece , split;
+        s = states , split;
+        lazy;
+            s_alternate = piece_start;
+            single_exit_from , piece_start , split;
+
+        s_out = piece_start;
+        frag = Fragment , piece_start;
+        frag_exits_push_back , Patch , split , true;
+        frag;
+
+        // e? : one split, no loop.
+
+        split = new_state , StateKind_StateSplit;
+        piece = build_node , parser , body;
+        !ok;
+            Fragment;
+
+        s = states , split;
+        frag = Fragment , split;
+        lazy;
+            s_alternate = piece_start;
+            frag_exits_push_back , Patch , split , false;
+
+            s_out = piece_start;
+            frag_exits_push_back , Patch , split , true;
+
+        frag_absorb , piece;
+        frag;
+
+// --- NFA simulation ------------------------------------------------------
+//
+// The simulator runs every alternative at once: it keeps a set of NFA states
+// and advances the whole set one input character at a time.  That gives a
+// running time of O(text * states) with no backtracking at all, which is the
+// point of the construction - but it cannot report capture groups, and it
+// cannot handle backreferences, so the backtracking matcher below still earns
+// its keep.
+//
+// The state set is a sparse set: `dense` lists the members in insertion order
+// and `stamp` records, per state, the generation in which it was added.
+// Clearing the set is then a single increment.
+
+        dense_size;
+
+        dense_empty;
+
+        stamp_resize , capacity;
+        generation = 1;
+        i = 0;
+        i < capacity;
+            stamp , i = 0;
+            ++i;
+
+        dense_clear;
+
+        ++generation;
+        dense_clear;
+
+        state < 0;
+            false;
+
+        state >= stamp_size;
+            false;
+
+        stamp , state == generation;
+
+    // Returns false when the state was already present, which is what stops
+    // the epsilon closure below from looping forever.
+
+        contains , state;
+            false;
+
+        stamp , state = generation;
+        dense_push_back , state;
+        true;
+
+        dense , i;
+
+        // The zero width assertions, evaluated against a position in the subject.
+
+    which == AnchorKind_AnchorTextStart;
+        pos == 0;
+
+    which == AnchorKind_AnchorTextEnd;
+        pos == text_size;
+
+    which == AnchorKind_AnchorLineStart;
+        pos == 0;
+            true;
+
+        !multiline;
+            false;
+
+        text_at , pos - 1 == CHAR_NEWLINE;
+
+    which == AnchorKind_AnchorLineEnd;
+        pos == text_size;
+            true;
+
+        !multiline;
+            false;
+
+        text_at , pos == CHAR_NEWLINE;
+
+    before = word_char_before , text , pos;
+    after = word_char_at , text , pos;
+    which == AnchorKind_AnchorWordBoundary;
+        before != after;
+
+    before == after;
+
+    pos <= 0;
+        false;
+
+    is_word_char , text_at , pos - 1;
+
+    pos >= text_size;
+        false;
+
+    is_word_char , text_at , pos;
+
+        states_empty;
+            false;
+
+        start != NONE;
+
+        states = builder_states;
+        start = builder_start;
+        accept = builder_accept;
+        current_prepare , states_size;
+        next_prepare , states_size;
+
+    // Add `state` and everything reachable from it without consuming input.
+    // Splits fan out, jumps and saves fall through, and assertions are
+    // evaluated on the spot against `pos`.
+
+        state == NONE;
+
+        !set_insert , state;
+
+        s = states , state;
+        s_kind == StateKind_StateSplit;
+            add_state , set , s_out , pos;
+            add_state , set , s_alternate , pos;
+
+        s_kind == StateKind_StateJump;
+            add_state , set , s_out , pos;
+
+        s_kind == StateKind_StateSave;
+            // The simulator does not record captures, so a save is a jump.
+            add_state , set , s_out , pos;
+
+        s_kind == StateKind_StateAssert;
+            assertion_holds , s_anchor , text , pos , multiline;
+                add_state , set , s_out , pos;
+
+        i = 0;
+        i < set_size;
+            index = set_at , i;
+            s = states , index;
+            s_is_accepting;
+                true;
+
+            ++i;
+
+        false;
+
+        // Advance the whole set across one character.
+
+        next_clear;
+        i = 0;
+        i < current_size;
+            index = current_at , i;
+            s = states , index;
+            s_consumes;
+                s_accepts , c , ignore_case;
+                    add_state , next , s_out , pos + 1;
+
+            i++;
+
+        swap , current , next;
+
+    // Run from `from` and report the offset just past the longest match that
+    // begins there, or NONE when nothing matches.
+
+        current_clear;
+        add_state , current , start , from;
+        best = NONE;
+        set_contains_accept , current;
+            best = from;
+
+        pos = from;
+        pos < text_size;
+            current_empty;
+
+            step , text_at , pos , pos;
+            ++pos;
+            set_contains_accept , current;
+                best = pos;
+
+            ++steps;
+
+        best;
+
+    // Leftmost match: try every starting offset in turn.  A pattern anchored
+    // at the text start could skip the loop entirely, and the optimiser marks
+    // such programs so the API can do exactly that.
+
+        start = from;
+        start <= text_size;
+            end = run_from , start;
+            end != NONE;
+                match_begin = start;
+                match_end = end;
+                true;
+
+            start++;
+
+        match_begin = NONE;
+        match_end = NONE;
+        false;
+
+        end = run_from , 0;
+        end == NONE;
+            false;
+
+        end == text_size;
+
+// --- Backtracking matcher ------------------------------------------------
+//
+// The simulator above is the fast path, but it reports only where a match
+// ended.  This matcher walks the AST directly, keeps a capture table, honours
+// greedy, lazy and possessive quantifiers, and can re-match captured text for
+// a backreference.  In exchange it can backtrack exponentially, so every step
+// is counted against a budget.
+//
+// Continuations are explicit.  Rather than passing a closure - which the
+// language has no form for - the matcher stores frames in a list and passes
+// the index of the head.  A frame says what is still to be matched after the
+// current node succeeds, so `run_continuation` is the "what comes next" half
+// of the recursion and `match_node` is the "what is here" half.  The two call
+// each other, which is exactly the shape a continuation passing matcher has
+// in any language.
+
+// match `node`, then continue with `next`
+// close capture group `slot`, then continue
+// resume a repetition at iteration `count`
+// the whole pattern has been matched
+
+        begin < 0;
+            false;
+
+        end >= begin;
+
+        !valid;
+            0;
+
+        end - begin;
+
+        !valid;
+            TEXT_EMPTY;
+
+        subject_substr , begin , length;
+
+        // --- Set up -----------------------------------------------------------
+
+        nodes = parser_nodes;
+        root = parser_root;
+        group_count = parser_group_count;
+        names = parser_names;
+
+        frames_clear;
+        steps = 0;
+        status = MatchStatus_NoMatch;
+        captures_clear;
+        i = 0;
+        i <= group_count;
+            captures_push_back , Capture;
+            i++;
+
+        captures_size;
+
+        captures , index;
+
+        entry , names;
+            entry_name_compare , name == 0;
+                entry_index;
+
+        NONE;
+
+    // Charge every recursive step so a runaway pattern stops rather than
+    // hanging.  `spend` returns false once the budget is gone, and every
+    // caller treats that as an immediate failure.
+
+        ++steps;
+        steps > budget;
+            status = MatchStatus_Exhausted;
+            false;
+
+        true;
+
+        status == MatchStatus_Exhausted;
+
+        // --- Frame allocation -------------------------------------------------
+
+        index = frames_size;
+        frames_push_back , frame;
+        index;
+
+        f = ContFrame , ContKind_ContNode , node , next;
+        push_frame , f;
+
+        f = ContFrame , ContKind_ContGroupEnd , next;
+        f_slot = slot;
+        f_mark = mark;
+        push_frame , f;
+
+        f = ContFrame , ContKind_ContRepeat , node , next;
+        f_count = count;
+        f_mark = mark;
+        push_frame , f;
+
+    // --- The continuation half --------------------------------------------
+    //
+    // Returns the offset the whole match reached, or NONE on failure.
+
+        !spend;
+            NONE;
+
+        cont == NONE;
+            // Nothing left to match: the pattern has succeeded here.
+            pos;
+
+        kind = frames , cont_kind;
+        kind == ContKind_ContDone;
+            pos;
+
+        kind == ContKind_ContNode;
+            node = frames , cont_node;
+            next = frames , cont_next;
+            match_node , node , pos , next;
+
+        kind == ContKind_ContGroupEnd;
+            slot = frames , cont_slot;
+            mark = frames , cont_mark;
+            next = frames , cont_next;
+            saved_begin = NONE;
+            saved_end = NONE;
+            slot < captures_size;
+                existing = captures , slot;
+                saved_begin = existing_begin;
+                saved_end = existing_end;
+                cap = captures , slot;
+                cap_begin = mark;
+                cap_end = pos;
+
+            result = run_continuation , next , pos;
+            result == NONE;
+                // Undo the capture: a group that took part in a failed
+                // attempt must not leak its text into the final table.
+                slot < captures_size;
+                    cap = captures , slot;
+                    cap_begin = saved_begin;
+                    cap_end = saved_end;
+
+            result;
+
+        node = frames , cont_node;
+        count = frames , cont_count;
+        mark = frames , cont_mark;
+        next = frames , cont_next;
+        pos == mark;
+            // The body matched the empty string.  Repeating it again would
+            // never terminate, so the repetition ends here.
+            n = nodes , node;
+            count >= n_lower;
+                run_continuation , next , pos;
+
+            NONE;
+
+        match_repeat , node , pos , count , next;
+
+        // --- The node half ----------------------------------------------------
+
+        !spend;
+            NONE;
+
+        node == NONE;
+            run_continuation , cont , pos;
+
+        kind = nodes , node_kind;
+        kind == NodeKind_NodeEmpty;
+            run_continuation , cont , pos;
+
+        kind == NodeKind_NodeLiteral;
+            match_literal , node , pos , cont;
+
+        kind == NodeKind_NodeString;
+            match_string , node , pos , cont;
+
+        kind == NodeKind_NodeAny;
+            match_class , node , pos , cont;
+
+        kind == NodeKind_NodeClass;
+            match_class , node , pos , cont;
+
+        kind == NodeKind_NodeAnchor;
+            match_anchor , node , pos , cont;
+
+        kind == NodeKind_NodeBackreference;
+            match_backreference , node , pos , cont;
+
+        kind == NodeKind_NodeConcat;
+            match_concat , node , pos , cont;
+
+        kind == NodeKind_NodeAlternate;
+            match_alternate , node , pos , cont;
+
+        kind == NodeKind_NodeGroup;
+            match_group , node , pos , cont;
+
+        kind == NodeKind_NodeRepeat;
+            match_repeat , node , pos , 0 , cont;
+
+        NONE;
+
+        pos >= text_size;
+            NONE;
+
+        expected = nodes , node_value;
+        actual = text_at , pos;
+        ignore_case;
+            !same_char_folded , expected , actual;
+                NONE;
+
+            expected != actual;
+                NONE;
+
+        run_continuation , cont , pos + 1;
+
+    // A literal run, produced by the optimiser when it fuses adjacent
+    // literals.  Matching it in one go saves a continuation hop per
+    // character, which is the whole reason the optimisation exists.
+
+        text = nodes , node_text;
+        pos + text_size > text_size;
+            NONE;
+
+        i = 0;
+        i < text_size;
+            expected = text_at , i;
+            actual = text_at , pos + i;
+            ignore_case;
+                !same_char_folded , expected , actual;
+                    NONE;
+
+                expected != actual;
+                    NONE;
+
+            ++i;
+
+        run_continuation , cont , pos + text_size;
+
+        pos >= text_size;
+            NONE;
+
+        c = text_at , pos;
+        cls = nodes , node_charclass;
+        hit = false;
+        ignore_case;
+            hit = cls_matches_folded , c;
+
+            hit = cls_matches , c;
+
+        !hit;
+            NONE;
+
+        run_continuation , cont , pos + 1;
+
+        which = nodes , node_anchor;
+        !assertion_holds , which , text , pos , multiline;
+            NONE;
+
+        run_continuation , cont , pos;
+
+    // Re-match the exact text a group captured earlier.  An unset group
+    // matches the empty string, which is what most engines do.
+
+        group = nodes , node_reference;
+        group >= captures_size;
+            NONE;
+
+        cap = captures , group;
+        !cap_valid;
+            run_continuation , cont , pos;
+
+        length = cap_length;
+        pos + length > text_size;
+            NONE;
+
+        i = 0;
+        i < length;
+            expected = text_at , cap_begin + i;
+            actual = text_at , pos + i;
+            ignore_case;
+                !same_char_folded , expected , actual;
+                    NONE;
+
+                expected != actual;
+                    NONE;
+
+            ++i;
+
+        run_continuation , cont , pos + length;
+
+    // Chain the children onto the continuation from the right, so the first
+    // child is matched first and every later child is waiting in a frame.
+
+        count = nodes , node_children_size;
+        count == 0;
+            run_continuation , cont , pos;
+
+        chain = cont;
+        i = count - 1;
+        i >= 0;
+            child = nodes , node_children , i;
+            chain = push_node , child , chain;
+            i--;
+
+        run_continuation , chain , pos;
+
+    // Try each branch in order with the same continuation.  Ordering is what
+    // makes alternation leftmost-biased, so `a|ab` matches just `a`.
+
+        count = nodes , node_children_size;
+        i = 0;
+        i < count;
+            child = nodes , node_children , i;
+            result = match_node , child , pos , cont;
+            result != NONE;
+                result;
+
+            exhausted;
+                NONE;
+
+            ++i;
+
+        NONE;
+
+        body = nodes , node_first;
+        group = nodes , node_group_index;
+        group == NONE;
+            match_node , body , pos , cont;
+
+        closing = push_group_end , group , pos , cont;
+        match_node , body , pos , closing;
+
+    // --- Repetition -------------------------------------------------------
+    //
+    // `count` is how many iterations have already succeeded.  A greedy
+    // repetition tries one more iteration before it tries the continuation; a
+    // lazy one tries the continuation first.  A possessive repetition takes
+    // as many iterations as it can and never gives one back.
+
+        !spend;
+            NONE;
+
+        lower = nodes , node_lower;
+        upper = nodes , node_upper;
+        body = nodes , node_first;
+        greed = nodes , node_greed;
+        may_continue = count >= lower;
+        may_repeat = true;
+        upper != NONE;
+            count >= upper;
+                may_repeat = false;
+
+        greed == Greediness_Possessive;
+            match_possessive , node , pos , count , cont;
+
+        greed == Greediness_Lazy;
+            may_continue;
+                stop = run_continuation , cont , pos;
+                stop != NONE;
+                    stop;
+
+                exhausted;
+                    NONE;
+
+            !may_repeat;
+                NONE;
+
+            resume = push_repeat , node , count + 1 , pos , cont;
+            match_node , body , pos , resume;
+
+        may_repeat;
+            resume = push_repeat , node , count + 1 , pos , cont;
+            more = match_node , body , pos , resume;
+            more != NONE;
+                more;
+
+            exhausted;
+                NONE;
+
+        may_continue;
+            run_continuation , cont , pos;
+
+        NONE;
+
+    // Consume iterations with an empty continuation until the body stops
+    // matching, then hand the final position to the real continuation.  No
+    // iteration is ever undone, which is the defining property.
+
+        lower = nodes , node_lower;
+        upper = nodes , node_upper;
+        body = nodes , node_first;
+        taken = count;
+        cursor = pos;
+
+            upper != NONE;
+                taken >= upper;
+
+            advanced = match_node , body , cursor , NONE;
+            advanced == NONE;
+
+            advanced == cursor;
+            // An empty iteration adds nothing and would loop forever.
+
+            cursor = advanced;
+            ++taken;
+            exhausted;
+                NONE;
+
+        taken < lower;
+            NONE;
+
+        run_continuation , cont , cursor;
+
+        // --- Public entry points ----------------------------------------------
+
+        reset;
+        end = match_node , root , start , NONE;
+        end == NONE;
+            !exhausted;
+                status = MatchStatus_NoMatch;
+
+            false;
+
+        status = MatchStatus_Matched;
+        whole = captures , 0;
+        whole_begin = start;
+        whole_end = end;
+        true;
+
+        start = from;
+        start <= text_size;
+            match_at , start;
+                true;
+
+            exhausted;
+                false;
+
+            start++;
+
+        false;
+
+        !match_at , 0;
+            false;
+
+        whole = captures , 0;
+        whole_end == text_size;
+
+// --- Compiled program ----------------------------------------------------
+//
+// The third representation, after the AST and the NFA.  A program is a flat
+// instruction array in which control flow is expressed by absolute indices,
+// which makes it cheap to store, cheap to copy and easy to rewrite - the
+// optimiser below works on programs, not on trees.
+//
+// The instruction set is deliberately small.  OpString and OpClassSet do not
+// add expressive power; they exist so the optimiser has something to fuse
+// runs of OpChar and adjacent OpClass instructions into.
+
+// consume one specific character
+// consume a fixed run of characters
+// consume one character of a class
+// consume any character
+// try `x`, then `y`
+                 // continue at `x`
+                 // record the offset in capture slot `slot`
+                 // zero width assertion
+                 // re-match capture group `slot`
+                 // accept
+                 // never matches; left behind by the optimiser
+
+        op == OpCode_OpChar;
+            true;
+
+        op == OpCode_OpString;
+            true;
+
+        op == OpCode_OpClass;
+            true;
+
+        op == OpCode_OpAny;
+            true;
+
+        false;
+
+        op == OpCode_OpSplit;
+            true;
+
+        op == OpCode_OpJump;
+            true;
+
+        false;
+
+        op == OpCode_OpMatch;
+            true;
+
+        op == OpCode_OpFail;
+
+    // How much input the instruction always consumes.  OpString reports its
+    // whole length, which is what the prefix scanner wants.
+
+        op == OpCode_OpString;
+            text_size;
+
+        consumes_input;
+            1;
+
+        0;
+
+        code_size;
+
+        code_empty;
+
+        code , pc;
+
+        pc < 0;
+            OpCode_OpFail;
+
+        pc >= code_size;
+            OpCode_OpFail;
+
+        code , pc_op;
+
+        at = code_size;
+        code_push_back , inst;
+        at;
+
+        emit , Instruction , op;
+
+        inst = Instruction , OpCode_OpChar , c;
+        inst_charclass_add_char , c;
+        emit , inst;
+
+        inst = Instruction , OpCode_OpClass;
+        inst_charclass = cls;
+        inst_charclass_normalise;
+        emit , inst;
+
+        inst = Instruction , OpCode_OpSave;
+        inst_slot = slot;
+        emit , inst;
+
+        inst = Instruction , OpCode_OpAssert;
+        inst_anchor = which;
+        emit , inst;
+
+        inst = Instruction , OpCode_OpBackref;
+        inst_slot = slot;
+        emit , inst;
+
+        inst = code , pc;
+        inst_x = target;
+
+        inst = code , pc;
+        inst_y = target;
+
+        total = 0;
+        inst , code;
+            inst_op == op;
+                ++total;
+
+        total;
+
+    // Shortest possible match, used to reject subjects that are too short
+    // before any real work happens.  Splits take the smaller of the two
+    // arms, which is a lower bound and therefore always safe.
+
+        total = 0;
+        inst , code;
+            inst_op == OpCode_OpSplit;
+                total;
+
+            total += inst_minimum_width;
+            inst_op == OpCode_OpMatch;
+
+        total;
+
+        out = TEXT_EMPTY;
+        pc = 0;
+        pc < code_size;
+            inst = code , pc;
+            out_append , to_string , pc;
+            out_append , TEXT_SPACE_ARROW;
+            out_append , opcode_name , inst_op;
+            inst_op == OpCode_OpChar;
+                out_append , TEXT_SPACE;
+                out_append , escape_spelling , inst_value;
+
+            inst_op == OpCode_OpString;
+                out_append , TEXT_SPACE;
+                out_append , inst_text;
+
+            inst_op == OpCode_OpClass;
+                out_append , TEXT_SPACE;
+                out_append , inst_charclass_spell;
+
+            inst_is_branch;
+                out_append , TEXT_SPACE;
+                out_append , to_string , inst_x;
+
+            inst_op == OpCode_OpSplit;
+                out_append , TEXT_COMMA_SPACE;
+                out_append , to_string , inst_y;
+
+            out_append , TEXT_NEWLINE;
+            ++pc;
+
+        out;
+
+    op == OpCode_OpChar;
+        "char";
+
+    op == OpCode_OpString;
+        "string";
+
+    op == OpCode_OpClass;
+        "class";
+
+    op == OpCode_OpAny;
+        "any";
+
+    op == OpCode_OpSplit;
+        "split";
+
+    op == OpCode_OpJump;
+        "jump";
+
+    op == OpCode_OpSave;
+        "save";
+
+    op == OpCode_OpAssert;
+        "assert_at";
+
+    op == OpCode_OpBackref;
+        "backref";
+
+    op == OpCode_OpMatch;
+        "match";
+
+    "fail";
+
+// --- Compiler ------------------------------------------------------------
+//
+// A straight recursive walk of the AST, emitting instructions as it goes.
+// Because targets are absolute indices and a forward branch does not know
+// where it lands, the compiler emits a placeholder and patches it once the
+// destination is known - the same hole-and-patch discipline the NFA builder
+// uses, expressed in indices instead of exit lists.
+
+        program = Program;
+        nodes = parser_nodes;
+        program_group_count = parser_group_count;
+        program_names = parser_names;
+        ok = true;
+        program_emit_save , 0;
+        compile_node , parser_root;
+        !ok;
+            false;
+
+        program_emit_save , 1;
+        program_emit_op , OpCode_OpMatch;
+        program_anchored = starts_anchored , parser_root;
+        true;
+
+        program_code_size;
+
+        index == NONE;
+
+        !ok;
+
+        kind = nodes , index_kind;
+        kind == NodeKind_NodeEmpty;
+
+        kind == NodeKind_NodeLiteral;
+            program_emit_char , nodes , index_value;
+
+        kind == NodeKind_NodeString;
+            inst = Instruction , OpCode_OpString;
+            inst_text = nodes , index_text;
+            program_emit , inst;
+
+        kind == NodeKind_NodeAny;
+            program_emit_class , nodes , index_charclass;
+
+        kind == NodeKind_NodeClass;
+            program_emit_class , nodes , index_charclass;
+
+        kind == NodeKind_NodeAnchor;
+            program_emit_assert , nodes , index_anchor;
+
+        kind == NodeKind_NodeBackreference;
+            program_has_backreference = true;
+            program_emit_backref , nodes , index_reference;
+
+        kind == NodeKind_NodeConcat;
+            compile_concat , index;
+
+        kind == NodeKind_NodeAlternate;
+            compile_alternate , index;
+
+        kind == NodeKind_NodeGroup;
+            compile_group , index;
+
+        kind == NodeKind_NodeRepeat;
+            compile_repeat , index;
+
+        ok = false;
+
+        count = nodes , index_children_size;
+        i = 0;
+        i < count;
+            compile_node , nodes , index_children , i;
+            !ok;
+
+            ++i;
+
+    // Each branch but the last is guarded by a split and followed by a jump
+    // to the join point.  The jumps are collected and patched together once
+    // the last branch has been emitted.
+
+        count = nodes , index_children_size;
+        count == 0;
+
+        jumps = vector , int;
+        i = 0;
+        i < count;
+            child = nodes , index_children , i;
+            i + 1 == count;
+                compile_node , child;
+                ++i;
+
+            split = program_emit_op , OpCode_OpSplit;
+            program_set_target , split , here;
+            compile_node , child;
+            !ok;
+
+            jump = program_emit_op , OpCode_OpJump;
+            jumps_push_back , jump;
+            program_set_alternate , split , here;
+            ++i;
+
+        join = here;
+        jump , jumps;
+            program_set_target , jump , join;
+
+        group = nodes , index_group_index;
+        group == NONE;
+            compile_node , nodes , index_first;
+
+        program_emit_save , group * 2;
+        compile_node , nodes , index_first;
+        !ok;
+
+        program_emit_save , group * 2 + 1;
+
+        lower = nodes , index_lower;
+        upper = nodes , index_upper;
+        body = nodes , index_first;
+        lazy = nodes , index_greed == Greediness_Lazy;
+        i = 0;
+        i < lower;
+            compile_node , body;
+            !ok;
+
+            i++;
+
+        upper == NONE;
+            compile_star , body , lazy;
+
+        extra = upper - lower;
+        splits = vector , int;
+        extra > 0;
+            split = program_emit_op , OpCode_OpSplit;
+            splits_push_back , split;
+            lazy;
+                program_set_alternate , split , here;
+
+                program_set_target , split , here;
+
+            compile_node , body;
+            !ok;
+
+            extra--;
+
+        after = here;
+        split , splits;
+            lazy;
+                program_set_target , split , after;
+
+                program_set_alternate , split , after;
+
+    // The star loop: split, body, jump back, and the split's other arm points
+    // past the jump.  Swapping the arms turns the loop lazy.
+
+        split = program_emit_op , OpCode_OpSplit;
+        body_at = here;
+        compile_node , body;
+        !ok;
+
+        jump = program_emit_op , OpCode_OpJump;
+        program_set_target , jump , split;
+        after = here;
+        lazy;
+            program_set_target , split , after;
+            program_set_alternate , split , body_at;
+
+            program_set_target , split , body_at;
+            program_set_alternate , split , after;
+
+    // True when every path through the pattern begins with an anchor that
+    // pins it to the start of the subject.  Such a program never needs to be
+    // retried at later offsets.
+
+        index == NONE;
+            false;
+
+        kind = nodes , index_kind;
+        kind == NodeKind_NodeAnchor;
+            which = nodes , index_anchor;
+            which == AnchorKind_AnchorTextStart;
+                true;
+
+            which == AnchorKind_AnchorLineStart;
+
+        kind == NodeKind_NodeGroup;
+            starts_anchored , nodes , index_first;
+
+        kind == NodeKind_NodeConcat;
+            nodes , index_children_empty;
+                false;
+
+            starts_anchored , nodes , index_children , 0;
+
+        kind == NodeKind_NodeAlternate;
+            // Every branch must be anchored, or the pattern can still match
+            // somewhere in the middle of the subject.
+            nodes , index_children_empty;
+                false;
+
+            child , nodes , index_children;
+                !starts_anchored , child;
+                    false;
+
+            true;
+
+        false;
+
+// --- Optimiser -----------------------------------------------------------
+//
+// Two families of rewrites, both optional: nothing here changes what a
+// pattern matches, only how much work matching it costs.
+//
+// On the tree:
+//   * runs of adjacent literals become one NodeString
+//   * an alternation of single character branches becomes one NodeClass
+//   * degenerate repetitions - {1,1}, {0,0} - collapse
+//
+// On the program:
+//   * a jump to a jump is threaded through to its final destination
+//   * instructions no branch can reach are replaced with OpFail
+//
+// Every pass reports how many rewrites it made, and the driver repeats the
+// set until a round changes nothing or the budget runs out.
+
+        sum = literal_runs + merged_classes;
+        sum += collapsed_repeats;
+        sum += threaded_jumps;
+        sum += dead_instructions;
+        sum;
+
+        out = TEXT_EMPTY;
+        out_append , "literal runs: ";
+        out_append , to_string , literal_runs;
+        out_append , TEXT_COMMA_SPACE;
+        out_append , "merged classes: ";
+        out_append , to_string , merged_classes;
+        out_append , TEXT_COMMA_SPACE;
+        out_append , "collapsed repeats: ";
+        out_append , to_string , collapsed_repeats;
+        out_append , TEXT_COMMA_SPACE;
+        out_append , "threaded jumps: ";
+        out_append , to_string , threaded_jumps;
+        out_append , TEXT_COMMA_SPACE;
+        out_append , "dead instructions: ";
+        out_append , to_string , dead_instructions;
+        out;
+
+        rewrites > 0;
+
+        ++work;
+        work <= OPTIMISER_BUDGET;
+
+        // --- Tree passes ------------------------------------------------------
+
+        rewrites = 0;
+        round = 0;
+        round < 4;
+            before = rewrites;
+            fuse_literals , parser , parser_root;
+            merge_alternate_classes , parser , parser_root;
+            collapse_repeats , parser , parser_root;
+            stats_rounds += 1;
+            rewrites == before;
+
+            round++;
+
+        rewrites;
+
+    // Walk the tree bottom up, replacing every run of two or more adjacent
+    // NodeLiteral children of a concatenation with a single NodeString.  A
+    // run of one is left alone: OpChar is already the cheapest form.
+
+        index == NONE;
+
+        !spend;
+
+        kind = parser_nodes , index_kind;
+        kind == NodeKind_NodeRepeat;
+            fuse_literals , parser , parser_nodes , index_first;
+
+        kind == NodeKind_NodeGroup;
+            fuse_literals , parser , parser_nodes , index_first;
+
+        kind == NodeKind_NodeAlternate;
+            count = parser_nodes , index_children_size;
+            i = 0;
+            i < count;
+                fuse_literals , parser , parser_nodes , index_children , i;
+                i++;
+
+        kind != NodeKind_NodeConcat;
+
+        count = parser_nodes , index_children_size;
+        i = 0;
+        i < count;
+            fuse_literals , parser , parser_nodes , index_children , i;
+            ++i;
+
+        rebuilt = vector , int;
+        run = TEXT_EMPTY;
+        run_start = NONE;
+        i = 0;
+        i < count;
+            child = parser_nodes , index_children , i;
+            child_kind = parser_nodes , child_kind;
+            literal = child_kind == NodeKind_NodeLiteral;
+            literal && i + 1 < count;
+                // A literal followed by a quantifier must stay separate: the
+                // quantifier binds to that one character, not to the run.
+                next = parser_nodes , index_children , i + 1;
+                parser_nodes , next_kind == NodeKind_NodeRepeat;
+                    parser_nodes , next_first == child;
+                        literal = false;
+
+            literal;
+                run_start == NONE;
+                    run_start = child;
+
+                run_push_back , parser_nodes , child_value;
+
+                run_size >= 2;
+                    fused = make_string_node , parser , run;
+                    rebuilt_push_back , fused;
+                    ++rewrites;
+                    stats_literal_runs += 1;
+
+                    run_start != NONE;
+                        rebuilt_push_back , run_start;
+
+                run = TEXT_EMPTY;
+                run_start = NONE;
+                rebuilt_push_back , child;
+
+            ++i;
+
+        run_size >= 2;
+            fused = make_string_node , parser , run;
+            rebuilt_push_back , fused;
+            rewrites++;
+            stats_literal_runs += 1;
+
+            run_start != NONE;
+                rebuilt_push_back , run_start;
+
+        n = parser_nodes , index;
+        n_children = move , rebuilt;
+
+        index = parser_nodes_size;
+        n = Node , NodeKind_NodeString;
+        n_text = text;
+        parser_nodes_push_back , n;
+        index;
+
+    // `a|b|c` and `[ab]|[cd]` both describe a set of single characters, and a
+    // single class test is far cheaper than a chain of splits.  The rewrite
+    // only fires when *every* branch is a single character or a class, since
+    // a mixed alternation still needs its control flow.
+
+        index == NONE;
+
+        !spend;
+
+        kind = parser_nodes , index_kind;
+        kind == NodeKind_NodeRepeat;
+            merge_alternate_classes , parser , parser_nodes , index_first;
+
+        kind == NodeKind_NodeGroup;
+            merge_alternate_classes , parser , parser_nodes , index_first;
+
+        kind == NodeKind_NodeConcat;
+            count = parser_nodes , index_children_size;
+            i = 0;
+            i < count;
+                merge_alternate_classes , parser , parser_nodes , index_children , i;
+                i++;
+
+        kind != NodeKind_NodeAlternate;
+
+        count = parser_nodes , index_children_size;
+        i = 0;
+        i < count;
+            merge_alternate_classes , parser , parser_nodes , index_children , i;
+            ++i;
+
+        count < 2;
+
+        mergeable = true;
+        i = 0;
+        i < count;
+            child = parser_nodes , index_children , i;
+            child_kind = parser_nodes , child_kind;
+            fine = false;
+            child_kind == NodeKind_NodeLiteral;
+                fine = true;
+
+            child_kind == NodeKind_NodeClass;
+                // A negated class cannot be unioned by concatenating ranges;
+                // it would have to be complemented first, and that is not
+                // worth doing inside a pass meant to be cheap.
+                !parser_nodes , child_charclass_negated;
+                    fine = true;
+
+            !fine;
+                mergeable = false;
+
+            ++i;
+
+        !mergeable;
+
+        merged = CharClass;
+        i = 0;
+        i < count;
+            child = parser_nodes , index_children , i;
+            merged_add_class , parser_nodes , child_charclass;
+            ++i;
+
+        merged_normalise;
+        n = parser_nodes , index;
+        n_kind = NodeKind_NodeClass;
+        n_charclass = merged;
+        n_children_clear;
+        rewrites++;
+        stats_merged_classes += 1;
+
+    // `e{1,1}` is `e`, and `e{0,0}` is the empty string.  Both turn up
+    // constantly in generated patterns.
+
+        index == NONE;
+
+        !spend;
+
+        kind = parser_nodes , index_kind;
+        kind == NodeKind_NodeConcat;
+            count = parser_nodes , index_children_size;
+            i = 0;
+            i < count;
+                collapse_repeats , parser , parser_nodes , index_children , i;
+                i++;
+
+        kind == NodeKind_NodeAlternate;
+            count = parser_nodes , index_children_size;
+            i = 0;
+            i < count;
+                collapse_repeats , parser , parser_nodes , index_children , i;
+                i++;
+
+        kind == NodeKind_NodeGroup;
+            collapse_repeats , parser , parser_nodes , index_first;
+
+        kind != NodeKind_NodeRepeat;
+
+        collapse_repeats , parser , parser_nodes , index_first;
+        lower = parser_nodes , index_lower;
+        upper = parser_nodes , index_upper;
+        lower == 0 && upper == 0;
+            n = parser_nodes , index;
+            n_kind = NodeKind_NodeEmpty;
+            n_first = NONE;
+            rewrites++;
+            stats_collapsed_repeats += 1;
+
+        lower == 1 && upper == 1;
+            body = parser_nodes , index_first;
+            source = parser_nodes , body;
+            copy = source;
+            n = parser_nodes , index;
+            n_kind = copy_kind;
+            n_value = copy_value;
+            n_text = copy_text;
+            n_charclass = copy_charclass;
+            n_anchor = copy_anchor;
+            n_group_kind = copy_group_kind;
+            n_group_index = copy_group_index;
+            n_reference = copy_reference;
+            n_lower = copy_lower;
+            n_upper = copy_upper;
+            n_first = copy_first;
+            n_children = copy_children;
+            ++rewrites;
+            stats_collapsed_repeats += 1;
+
+    // --- Literal prefix extraction ----------------------------------------
+    //
+    // Walk the front of the pattern collecting characters that every match
+    // must begin with.  A search can then skip to the next occurrence of that
+    // prefix instead of retrying the whole machine at every offset, which is
+    // the single most valuable optimisation for patterns like `error: .*`.
+
+        out = TEXT_EMPTY;
+        collect_prefix , parser , index , out;
+        out;
+
+        index == NONE;
+
+        !spend;
+
+        kind = parser_nodes , index_kind;
+        kind == NodeKind_NodeLiteral;
+            out_push_back , parser_nodes , index_value;
+
+        kind == NodeKind_NodeString;
+            out_append , parser_nodes , index_text;
+
+        kind == NodeKind_NodeGroup;
+            parser_nodes , index_group_kind == GroupKind_NonCapturing;
+                collect_prefix , parser , parser_nodes , index_first , out;
+
+        kind == NodeKind_NodeAnchor;
+        // Anchors consume nothing, so the prefix continues past them.
+
+        kind == NodeKind_NodeRepeat;
+            parser_nodes , index_lower >= 1;
+                // The first mandatory iteration contributes its own prefix,
+                // but nothing after it is certain.
+                inner = TEXT_EMPTY;
+                collect_prefix , parser , parser_nodes , index_first , inner;
+                out_append , inner;
+
+        kind != NodeKind_NodeConcat;
+
+        count = parser_nodes , index_children_size;
+        i = 0;
+        i < count;
+            child = parser_nodes , index_children , i;
+            child_kind = parser_nodes , child_kind;
+            child_kind == NodeKind_NodeLiteral;
+                out_push_back , parser_nodes , child_value;
+                ++i;
+
+            child_kind == NodeKind_NodeString;
+                out_append , parser_nodes , child_text;
+                ++i;
+
+            child_kind == NodeKind_NodeAnchor;
+                i++;
+
+                // --- Program passes ---------------------------------------------------
+
+        rewrites = 0;
+        round = 0;
+        round < 3;
+            before = rewrites;
+            thread_jumps , program;
+            mark_dead , program;
+            rewrites == before;
+
+            round++;
+
+        rewrites;
+
+    // A branch that lands on an unconditional jump can point at the jump's
+    // own destination instead.  Chains are followed with a hop limit so a
+    // loop of jumps - which the compiler cannot emit, but a rewritten program
+    // might - cannot spin forever.
+
+        pc = 0;
+        pc < program_code_size;
+            !spend;
+
+            inst = program_code , pc;
+            inst_is_branch;
+                target = final_target , program , inst_x;
+                target != inst_x;
+                    program_set_target , pc , target;
+                    ++rewrites;
+                    stats_threaded_jumps += 1;
+
+            again = program_code , pc;
+            again_op == OpCode_OpSplit;
+                target = final_target , program , again_y;
+                target != again_y;
+                    program_set_alternate , pc , target;
+                    ++rewrites;
+                    stats_threaded_jumps += 1;
+
+            ++pc;
+
+        target = start;
+        hops = 0;
+        hops < 32;
+            target < 0;
+                start;
+
+            target >= program_code_size;
+                start;
+
+            inst = program_code , target;
+            inst_op != OpCode_OpJump;
+                target;
+
+            inst_x == target;
+                target;
+
+            target = inst_x;
+            ++hops;
+
+        target;
+
+    // Reachability from the entry point.  Anything unvisited is replaced with
+    // OpFail, which keeps the indices stable - renumbering would mean
+    // rewriting every branch in the program.
+
+        reachable = vector , bool;
+        reachable_resize , program_code_size;
+        i = 0;
+        i < program_code_size;
+            reachable , i = false;
+            ++i;
+
+        stack = vector , int;
+        stack_push_back , program_start;
+        !stack_empty;
+            !spend;
+
+            pc = stack_back;
+            stack_pop_back;
+            pc < 0;
+
+            pc >= program_code_size;
+
+            reachable , pc;
+
+            reachable , pc = true;
+            inst = program_code , pc;
+            inst_op == OpCode_OpMatch;
+
+            inst_op == OpCode_OpFail;
+
+            inst_op == OpCode_OpJump;
+                stack_push_back , inst_x;
+
+            inst_op == OpCode_OpSplit;
+                stack_push_back , inst_x;
+                stack_push_back , inst_y;
+
+            stack_push_back , pc + 1;
+
+        i = 0;
+        i < program_code_size;
+            !reachable , i;
+                inst = program_code , i;
+                inst_op != OpCode_OpFail;
+                    inst_op = OpCode_OpFail;
+                    rewrites++;
+                    stats_dead_instructions += 1;
+
+            ++i;
+
+            // --- Match results -------------------------------------------------------
+
+        found;
+
+        whole = groups , 0;
+        whole_begin;
+
+        whole = groups , 0;
+        whole_end;
+
+        end - begin;
+
+        groups_size;
+
+        index < 0;
+            TEXT_EMPTY;
+
+        index >= groups_size;
+            TEXT_EMPTY;
+
+        cap = groups , index;
+        cap_text_of , subject;
+
+        index >= groups_size;
+            NONE;
+
+        cap = groups , index;
+        cap_begin;
+
+        index >= groups_size;
+            false;
+
+        cap = groups , index;
+        cap_valid;
+
+        group , 0;
+
+        subject_substr , 0 , begin;
+
+        from = end;
+        subject_substr , from , subject_size - from;
+
+    r = MatchResult;
+    r_subject = subject;
+    r_groups_push_back , Capture;
+    r;
+
+// --- The engine facade ---------------------------------------------------
+//
+// `Regex` owns every representation at once: the AST for the backtracker, the
+// NFA for the simulator and the compiled program for inspection.  Which one
+// runs is decided per call - a pattern with a backreference or a capture
+// request has to backtrack, anything else can be simulated in linear time.
+
+        ok;
+
+        error;
+
+        error_position;
+
+        parser_group_count;
+
+        pattern;
+
+        compiler_program_size;
+
+        builder_state_count;
+
+        prefix;
+
+        // --- Compilation ------------------------------------------------------
+
+        pattern = pattern;
+        ok = true;
+        error = ERROR_NONE;
+        parser = PatternParser;
+        parser_dot_matches_newline = dot_matches_newline;
+        parser_ignore_case = ignore_case;
+        root = parser_parse , pattern;
+        root == NONE;
+            ok = false;
+            error = parser_error;
+            error_position = parser_error_position;
+            false;
+
+        optimiser = Optimiser;
+        optimiser_optimise_tree , parser;
+        prefix = optimiser_extract_prefix , parser , parser_root;
+        !builder_build , parser , parser_root;
+            ok = false;
+            error = ERROR_BAD_GROUP;
+            false;
+
+        !compiler_compile , parser;
+            ok = false;
+            error = ERROR_BAD_GROUP;
+            false;
+
+        optimiser_optimise_program , compiler_program;
+        compiler_program_prefix = prefix;
+        compiler_program_ignore_case = ignore_case;
+        compiler_program_multiline = multiline;
+        anchored = compiler_program_anchored;
+        true;
+
+        matcher = BacktrackMatcher;
+        matcher_load , parser;
+        matcher_text = subject;
+        matcher_ignore_case = ignore_case;
+        matcher_multiline = multiline;
+        matcher_budget = BACKTRACK_BUDGET;
+
+        simulator = NfaSimulator;
+        simulator_load , builder;
+        simulator_text = subject;
+        simulator_ignore_case = ignore_case;
+        simulator_multiline = multiline;
+
+    // The simulator is only usable when the caller does not need captures and
+    // the pattern has no backreference.
+
+        engine == EngineChoice_ForceBacktrack;
+            false;
+
+        engine == EngineChoice_ForceSimulation;
+            true;
+
+        builder_has_backreference;
+            false;
+
+        want_captures;
+            false;
+
+        true;
+
+    // --- Prefix acceleration ----------------------------------------------
+    //
+    // Find the next offset at or after `from` where the literal prefix occurs.
+    // With no prefix every offset qualifies, so the scan degenerates to the
+    // naive one.
+
+        prefix_empty;
+            from;
+
+        start = from;
+        limit = subject_size - prefix_size;
+        start <= limit;
+            i = 0;
+            hit = true;
+            i < prefix_size;
+                expected = prefix_at , i;
+                actual = subject_at , start + i;
+                ignore_case;
+                    !same_char_folded , expected , actual;
+                        hit = false;
+
+                    expected != actual;
+                        hit = false;
+
+                ++i;
+
+            hit;
+                start;
+
+            ++start;
+
+        NONE;
+
+    // --- match ------------------------------------------------------------
+    //
+    // Anchored at both ends: the pattern must describe the whole subject.
+
+        result = empty_result , subject;
+        !ok;
+            result;
+
+        prepare_backtracker , subject;
+        !matcher_match_whole;
+            result_status = matcher_status;
+            result_steps = matcher_steps;
+            result;
+
+        result_found = true;
+        result_groups = matcher_captures;
+        result_names = parser_names;
+        result_steps = matcher_steps;
+        result_status = MatchStatus_Matched;
+        result;
+
+    // --- search -----------------------------------------------------------
+    //
+    // Leftmost match anywhere in the subject.
+
+        search_from , subject , 0;
+
+        result = empty_result , subject;
+        !ok;
+            result;
+
+        from > subject_size;
+            result;
+
+        prepare_backtracker , subject;
+        start = from;
+
+            start > subject_size;
+
+            candidate = next_candidate , subject , start;
+            candidate == NONE;
+
+            matcher_match_at , candidate;
+                result_found = true;
+                result_groups = matcher_captures;
+                result_names = parser_names;
+                result_steps = matcher_steps;
+                result_status = MatchStatus_Matched;
+                result;
+
+            matcher_exhausted;
+                result_status = MatchStatus_Exhausted;
+                result;
+
+            anchored;
+                // An anchored pattern that failed at the first candidate can
+                // never succeed later, unless multiline mode makes every line
+                // start a candidate.
+                !multiline;
+
+            start = candidate + 1;
+
+        result_steps = matcher_steps;
+        result;
+
+    // Linear time containment test: does the pattern occur at all?  Uses the
+    // simulator when it can, because that is where the asymptotic win is.
+
+        !ok;
+            false;
+
+        may_simulate , false;
+            prepare_simulator , subject;
+            simulator_search_from , 0;
+
+        found = search , subject;
+        found_matched;
+
+    // --- find_all ---------------------------------------------------------
+    //
+    // Every non-overlapping match, left to right.  An empty match advances
+    // the cursor by one so the loop always terminates.
+
+        out = vector , MatchResult;
+        !ok;
+            out;
+
+        cursor = 0;
+        guard = 0;
+        cursor <= subject_size;
+            guard++;
+            guard > subject_size + 2;
+
+            hit = search_from , subject , cursor;
+            !hit_matched;
+
+            stop = hit_end;
+            begin = hit_begin;
+            out_push_back , hit;
+            stop == begin;
+                cursor = stop + 1;
+
+                cursor = stop;
+
+        out;
+
+        all = find_all , subject;
+        all_size;
+
+    // --- replace ----------------------------------------------------------
+    //
+    // The replacement text may contain `$0` .. `$9`, which stand for the
+    // corresponding capture group, and `$$` for a literal dollar.
+
+        out = TEXT_EMPTY;
+        !ok;
+            subject;
+
+        hit = search , subject;
+        !hit_matched;
+            subject;
+
+        out_append , subject_substr , 0 , hit_begin;
+        out_append , expand_replacement , replacement , hit;
+        tail = hit_end;
+        out_append , subject_substr , tail , subject_size - tail;
+        out;
+
+        out = TEXT_EMPTY;
+        !ok;
+            subject;
+
+        cursor = 0;
+        guard = 0;
+        cursor <= subject_size;
+            guard++;
+            guard > subject_size + 2;
+
+            hit = search_from , subject , cursor;
+            !hit_matched;
+
+            begin = hit_begin;
+            stop = hit_end;
+            out_append , subject_substr , cursor , begin - cursor;
+            out_append , expand_replacement , replacement , hit;
+            stop == begin;
+                begin < subject_size;
+                    out_push_back , subject_at , begin;
+
+                cursor = begin + 1;
+
+                cursor = stop;
+
+        cursor < subject_size;
+            out_append , subject_substr , cursor , subject_size - cursor;
+
+        out;
+
+    // --- split ------------------------------------------------------------
+    //
+    // Cut the subject at every match.  A limit of zero means "no limit"; any
+    // other value caps the number of pieces, with the remainder of the
+    // subject forming the last one.
+
+        out = vector , string;
+        !ok;
+            out_push_back , subject;
+            out;
+
+        cursor = 0;
+        guard = 0;
+        cursor <= subject_size;
+            ++guard;
+            guard > subject_size + 2;
+
+            limit > 0;
+                out_size + 1 >= limit;
+
+            hit = search_from , subject , cursor;
+            !hit_matched;
+
+            begin = hit_begin;
+            stop = hit_end;
+            stop == begin;
+                // A zero width separator would split between every pair of
+                // characters; step over one character instead.
+                begin >= subject_size;
+
+                out_push_back , subject_substr , cursor , begin + 1 - cursor;
+                cursor = begin + 1;
+
+            out_push_back , subject_substr , cursor , begin - cursor;
+            cursor = stop;
+
+        out_push_back , subject_substr , cursor , subject_size - cursor;
+        out;
+
+    // Split and keep only the pieces that are not empty, which is what most
+    // tokenising callers actually want.
+
+        pieces = split , subject , limit;
+        out = vector , string;
+        piece , pieces;
+            !piece_empty;
+                out_push_back , piece;
+
+        out;
+
+        // --- Diagnostics ------------------------------------------------------
+
+        out = TEXT_EMPTY;
+        out_append , "pattern ";
+        out_append , pattern;
+        out_append , TEXT_NEWLINE;
+        !ok;
+            out_append , "error: ";
+            out_append , error;
+            out_append , " at ";
+            out_append , to_string , error_position;
+            out_append , TEXT_NEWLINE;
+            out;
+
+        out_append , "groups: ";
+        out_append , to_string , parser_group_count;
+        out_append , TEXT_NEWLINE;
+        out_append , "nfa states: ";
+        out_append , to_string , builder_state_count;
+        out_append , TEXT_NEWLINE;
+        out_append , "program: ";
+        out_append , to_string , compiler_program_size;
+        out_append , TEXT_NEWLINE;
+        out_append , "prefix: ";
+        out_append , prefix;
+        out_append , TEXT_NEWLINE;
+        out_append , optimiser_stats_describe;
+        out_append , TEXT_NEWLINE;
+        out;
+
+        // Substitute `$n` references in a replacement template.
+
+    out = TEXT_EMPTY;
+    i = 0;
+    i < template_text_size;
+        c = template_text_at , i;
+        c != CHAR_DOLLAR;
+            out_push_back , c;
+            ++i;
+
+        next = i + 1;
+        next >= template_text_size;
+            out_push_back , c;
+            i++;
+
+        marker = template_text_at , next;
+        marker == CHAR_DOLLAR;
+            out_push_back , CHAR_DOLLAR;
+            i += 2;
+
+        is_digit , marker;
+            out_append , hit_group , digit_value , marker;
+            i += 2;
+
+        marker == CHAR_LBRACE;
+            // `${name}` refers to a named group.
+            scan = next + 1;
+            name = TEXT_EMPTY;
+            scan < template_text_size;
+                n = template_text_at , scan;
+                n == CHAR_RBRACE;
+
+                name_push_back , n;
+                ++scan;
+
+            index = NONE;
+            entry , hit_names;
+                entry_name_compare , name == 0;
+                    index = entry_index;
+
+            index != NONE;
+                out_append , hit_group , index;
+
+            i = scan + 1;
+
+        out_push_back , c;
+        ++i;
+
+    out;
+
+// --- Convenience wrappers ------------------------------------------------
+//
+// One shot helpers for callers that do not want to keep a compiled pattern
+// around.  Each of them pays for compilation, so a loop should build a
+// `Regex` once instead.
+
+    re = Regex;
+    !re_compile , pattern;
+        false;
+
+    hit = re_match_text , subject;
+    hit_matched;
+
+    re = Regex;
+    !re_compile , pattern;
+        false;
+
+    re_contains , subject;
+
+    re = Regex;
+    !re_compile , pattern;
+        subject;
+
+    re_replace_all , subject , replacement;
+
+    re = Regex;
+    out = vector , string;
+    !re_compile , pattern;
+        out_push_back , subject;
+        out;
+
+    re_split , subject , 0;
+
+    // Escape every metacharacter in `text` so the result matches it literally.
+
+    out = TEXT_EMPTY;
+    i = 0;
+    i < text_size;
+        c = text_at , i;
+        is_metacharacter , c;
+            out_push_back , CHAR_BACKSLASH;
+
+        out_push_back , c;
+        ++i;
+
+    out;
+
+// --- Worked examples -----------------------------------------------------
+//
+// These are not tests - nothing here asserts - but they pin down what the API
+// is meant to look like from the outside, and they exercise every entry point
+// at least once.
+
+    re = Regex;
+    !re_compile , "[a-zA-Z_][a-zA-Z_0-9]*";
+        vector , string;
+
+    out = vector , string;
+    hits = re_find_all , subject;
+    hit , hits;
+        out_push_back , hit_text;
+
+    out;
+
+    re = Regex;
+    !re_compile , "//[^\n]*";
+        subject;
+
+    re_replace_all , subject , TEXT_EMPTY;
+
+    out = vector , int;
+    re = Regex;
+    !re_compile , "(\\d{4})-(\\d{2})-(\\d{2})";
+        out;
+
+    hit = re_match_text , subject;
+    !hit_matched;
+        out;
+
+    out_push_back , parse_int , hit_group , 1;
+    out_push_back , parse_int , hit_group , 2;
+    out_push_back , parse_int , hit_group , 3;
+    out;
+
+    re = Regex;
+    !re_compile , "(?<key>\\w+)\\s*=\\s*(?<value>[^;]+);";
+        TEXT_EMPTY;
+
+    re_replace_all , subject , "${value} -> ${key}\n";
+
+    quick_split , ",\\s*" , subject;
+
+    re = Regex;
+    // A backreference, so this one has to run on the backtracking matcher.
+    !re_compile , "\\b(\\w+)\\s+\\1\\b";
+        false;
+
+    re_contains , subject;
+
+    re = Regex;
+    !re_compile , pattern;
+        println , re_error_text;
+
+    println , re_describe;
+    println , re_compiler_program_disassemble;
+
+// A rough sanity sweep over the whole engine, written as a function so the
+// benchmark corpus contains at least one caller of everything above.
+
+    re = Regex;
+    !re_compile , "^(a|b)+c{2,4}[[:digit:]]*$";
+        panic , re_error_text;
+
+    re_group_count == 1;
+    re_program_size > 0;
+    re_state_count > 0;
+
+    hit = re_match_text , "abbacc42";
+    hit_matched;
+        println , hit_text;
+
+    pieces = quick_split , "\\s+" , "one two   three";
+    piece , pieces;
+        println , piece;
+
+    println , quick_replace , "[aeiou]" , "regular expressions" , "*";
+    quick_match , "\\d+" , "12345";
+        println , "all digits";
+
+    example_repeated_word , "the the end";
+        println , "repeated word found";
+
+    println , quote_literal , "1 + 2 * (3 - 4)";

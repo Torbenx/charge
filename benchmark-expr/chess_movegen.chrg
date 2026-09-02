@@ -1,0 +1,3538 @@
+// A bitboard chess move generator.
+//
+// The board is represented twice over: a dense `squares` array that maps each
+// of the 64 squares to a piece code, and a set of twelve bitboards (one per
+// colour/kind pair) plus two colour unions and one occupancy union. Every
+// query that a search needs -- "which knights of mine can reach e5", "is my
+// king attacked", "which of my pieces are pinned" -- is then a handful of
+// shifts, ands and population counts rather than a loop over squares.
+//
+// A bitboard is a 64 bit integer whose bit `s` is set when square `s` is
+// occupied. Square numbering is little-endian rank-file: a1 is 0, h1 is 7,
+// a8 is 56, h8 is 63, so `square = rank * 8 + file`. Shifting a bitboard
+// north by one rank is `bb << 8`, south is `bb >> 8`; the east/west shifts
+// additionally mask off the file that would wrap around the edge.
+//
+// Because the lexer only accepts plain decimal integer literals, every mask
+// wider than a couple of digits is *built* at initialisation time by a loop
+// that ors in `1 << square`, rather than being spelled out as a giant decimal
+// constant. The handful of literals that survive carry a `// 0x..` comment.
+//
+// Nothing here allocates during move generation: the caller passes a
+// MoveList that owns its storage and generation appends into it.
+
+// --- Geometry constants --------------------------------------------------
+
+// Sentinel used wherever a square index is optional (en passant target,
+// the square of a missing king, the "no pin" ray origin).
+
+// Bit widths of the packed square index. A square needs six bits, which is
+// what the move encoding below leans on heavily.
+
+// 0x3F
+// 0x07
+
+// 0xFF
+// 0xFFFF
+
+// A bitboard with every bit set. Two's complement gives us all ones for the
+// cost of a single character, which beats a twenty digit decimal literal.
+
+// Directions, expressed as signed square deltas. The east/west members only
+// behave when combined with the wrap masks below.
+
+// Ray indices into the RAY_ATTACKS table. The order matches the direction
+// constants above so that a loop over 0..8 walks the compass clockwise from
+// north.
+
+// The four rook rays and the four bishop rays, split so the sliding attack
+// helpers can loop over exactly the ones they need.
+
+// Named squares that the castling code needs by hand.
+
+// Castling right bits, one per castle.
+// 0x1
+// 0x2
+// 0x4
+// 0x8
+// 0x3
+// 0xC
+// 0xF
+
+// Move list sizing. 218 is the largest number of legal moves any legal
+// position is known to admit; the extra headroom absorbs pseudo-legal moves
+// that the legality filter later drops.
+
+// Halfmove clock at which the fifty move rule fires (in plies).
+
+// ASCII code points, spelled in decimal because character arithmetic is
+// what FEN parsing is made of.
+               // '0'
+               // '9'
+               // 'a'
+               // 'h'
+               // 'A'
+              // ' '
+              // '/'
+              // '-'
+              // 0x20, the ASCII case flag
+
+// --- Instrumentation ------------------------------------------------------
+
+// Counters the perft driver prints. They are globals rather than fields so
+// that the generator itself stays free of bookkeeping.
+
+// --- Enumerations ---------------------------------------------------------
+
+// Side to move. The numeric values matter: they index the colour-indexed
+// tables directly, and `1 - color` flips a side.
+
+// Piece kinds, ordered by convention from pawn to king. The value is the
+// index into the per-kind bitboard array and into the material table.
+
+// A piece code packs colour and kind: white pieces are 0..5, black pieces
+// are 6..11, and 12 means "empty square".
+
+// Move classification, stored in the four flag bits of an encoded move.
+
+// What a generation pass should emit.
+
+// Terminal states the perft driver and the SAN formatter care about.
+
+// --- Square, file and rank helpers ---------------------------------------
+
+// Squares are little-endian rank-file: square = rank * 8 + file, so the file
+// lives in the low three bits and the rank in the next three.
+
+    rank << RANK_SHIFT | file & FILE_MASK_BITS;
+
+    square & FILE_MASK_BITS;
+
+    square >> RANK_SHIFT & FILE_MASK_BITS;
+
+// True when the index names a real square. Sliding generation relies on this
+// only as a cheap first filter; the wrap check below does the real work.
+
+    square >= 0 && square < SQUARE_COUNT;
+
+// A one-step move from `from` to `to` is legal geometry only when it does not
+// jump the board edge, i.e. when the file distance stays within `max_file`.
+
+    to < 0 || to >= SQUARE_COUNT;
+        false;
+
+    df = file_of , to - file_of , from;
+    spread = df;
+    spread < 0;
+        spread = -spread;
+
+    spread <= max_file;
+
+    // Chebyshev distance, the metric a king actually walks in.
+
+    df = file_of , a - file_of , b;
+    dr = rank_of , a - rank_of , b;
+    df < 0;
+        df = -df;
+
+    dr < 0;
+        dr = -dr;
+
+    df > dr;
+        df;
+
+    dr;
+
+    // Manhattan distance, used by the endgame king-proximity term.
+
+    df = file_of , a - file_of , b;
+    dr = rank_of , a - rank_of , b;
+    df < 0;
+        df = -df;
+
+    dr < 0;
+        dr = -dr;
+
+    df + dr;
+
+// Mirror a square across the horizontal axis: a1 becomes a8. The piece-square
+// tables are stored from white's point of view and flipped for black with
+// exactly this, which is why it is a single xor.
+
+    square ^ 56;                   // 0x38, the rank bits
+
+    // Mirror across the vertical axis: a1 becomes h1.
+
+    square ^ 7;                    // 0x07, the file bits
+
+    // Rotate 180 degrees.
+
+    square ^ 63;                   // 0x3F, both halves at once
+
+// The colour of a square, in the light/dark sense. Used by the opposite
+// coloured bishops draw heuristic.
+
+    file_of , square + rank_of , square & 1 == 0;
+
+    // The rank a pawn of `color` starts on, and the rank it promotes on.
+
+    color == Color_White;
+        1;
+
+    6;
+
+    color == Color_White;
+        7;
+
+    0;
+
+// The rank a double push lands on, which is also the only rank on which an
+// en passant target square may ever appear.
+
+    color == Color_White;
+        3;
+
+    4;
+
+    // The forward direction for a pawn of `color`, as a square delta.
+
+    color == Color_White;
+        DIR_NORTH;
+
+    DIR_SOUTH;
+
+// The rank from white's point of view, so that evaluation code can talk
+// about "the seventh rank" without branching on colour.
+
+    color == Color_White;
+        rank_of , square;
+
+    7 - rank_of , square;
+
+    color == Color_White;
+        square;
+
+    flip_rank , square;
+
+    // --- Colour and piece code helpers ---------------------------------------
+
+    color == Color_Black;
+        1;
+
+    0;
+
+    index == 1;
+        Color_Black;
+
+    Color_White;
+
+    color == Color_White;
+        Color_Black;
+
+    Color_White;
+
+    kind == PieceKind_Pawn;
+        0;
+    kind == PieceKind_Knight;
+        1;
+    kind == PieceKind_Bishop;
+        2;
+    kind == PieceKind_Rook;
+        3;
+    kind == PieceKind_Queen;
+        4;
+    kind == PieceKind_King;
+        5;
+
+        6;
+
+    index == 0;
+        PieceKind_Pawn;
+    index == 1;
+        PieceKind_Knight;
+    index == 2;
+        PieceKind_Bishop;
+    index == 3;
+        PieceKind_Rook;
+    index == 4;
+        PieceKind_Queen;
+    index == 5;
+        PieceKind_King;
+
+        PieceKind_KindNone;
+
+        // Pack colour and kind into the 0..11 piece code used by `squares`.
+
+    color_index , color * PIECE_KIND_COUNT + kind_index , kind;
+
+    piece >= PIECE_CODE_COUNT || piece < 0;
+        Color_ColorNone;
+
+    piece >= PIECE_KIND_COUNT;
+        Color_Black;
+
+    Color_White;
+
+    piece >= PIECE_CODE_COUNT || piece < 0;
+        PieceKind_KindNone;
+
+    kind_from_index , piece % PIECE_KIND_COUNT;
+
+    piece >= PIECE_CODE_COUNT || piece < 0;
+
+    // Slider classification, used by the pin detector to pick a ray family.
+
+    kind == PieceKind_Bishop || kind == PieceKind_Rook || kind == PieceKind_Queen;
+
+    kind == PieceKind_Bishop || kind == PieceKind_Queen;
+
+    kind == PieceKind_Rook || kind == PieceKind_Queen;
+
+// --- Raw bitboard primitives ---------------------------------------------
+
+// The SWAR population count constants. These are the only wide literals in
+// the file; everything else is assembled by a loop.
+   // 0x5555555555555555
+   // 0x3333333333333333
+   // 0x0F0F0F0F0F0F0F0F
+   // 0x0101010101010101
+
+// The de Bruijn sequence used by the forward bit scan, plus the shift that
+// lifts the product's high six bits into place.
+// 0x03F79D71B4CB0A89
+
+// Filled by init_debruijn_table(): index[(isolated * DEBRUIJN64) >> 58] is
+// the square number of the isolated bit.
+
+// A single set bit at `square`.
+
+    1 << square;
+
+// Population count via the standard five-step SWAR fold. Each step halves
+// the number of independent counters while doubling their width.
+
+    x = bb;
+    x = x - x >> 1 & SWAR_K1;
+    x = x & SWAR_K2 + x >> 2 & SWAR_K2;
+    x = x + x >> 4 & SWAR_K4;
+    x = x * SWAR_KF;
+    x >> 56 & BYTE_MASK;
+
+// A branch-free "more than one bit set" test: clearing the lowest set bit
+// leaves zero exactly when the board was a singleton.
+
+    bb != 0 && bb & bb - 1 == 0;
+
+    bb == 0;
+
+// Isolate the least significant set bit. Two's complement makes `-bb` the
+// complement plus one, so the and keeps exactly the lowest one bit.
+
+    bb & -bb;
+
+    // Clear the least significant set bit.
+
+    bb & bb - 1;
+
+    // Index of the least significant set bit, by de Bruijn multiplication.
+
+    bb != 0;
+    isolated = bb & -bb;
+    folded = isolated * DEBRUIJN64 >> DEBRUIJN_SHIFT;
+    DEBRUIJN_INDEX_at , folded & SQUARE_MASK;
+
+    // Portable fallback used while the de Bruijn table is still being built.
+
+    x = bb;
+    index = 0;
+    x != 0;
+        x & 1 != 0;
+            index;
+
+        x >>= 1;
+        index++;
+
+    NO_SQUARE;
+
+// Index of the most significant set bit, found by smearing every bit to the
+// right of the highest one and then counting the result.
+
+    bb != 0;
+    x = bb;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    popcount , x - 1;
+
+// Pop the lowest set bit out of `bb`, returning its square index. The caller
+// keeps the residue, which is why `bb` is taken by unique reference.
+
+    square = bit_scan_forward , *bb;
+    *bb = clear_lowest_bit , *bb;
+    square;
+
+    // Reverse the bits of a bitboard, which rotates the board 180 degrees.
+
+    x = bb;
+    x = x >> 1 & SWAR_K1 | x & SWAR_K1 << 1;
+    x = x >> 2 & SWAR_K2 | x & SWAR_K2 << 2;
+    x = x >> 4 & SWAR_K4 | x & SWAR_K4 << 4;
+    x = x >> 8 & 71777214294589695 | x & 71777214294589695 << 8;
+    x = x >> 16 & 281470681808895 | x & 281470681808895 << 16;
+    x = x >> 32 | x << 32;
+    x;
+
+// Swap the byte order, which flips the board vertically because each byte is
+// one rank.
+
+    x = bb;
+    x = x >> 8 & 71777214294589695 | x & 71777214294589695 << 8;
+    x = x >> 16 & 281470681808895 | x & 281470681808895 << 16;
+    x = x >> 32 | x << 32;
+    x;
+
+// --- Edge masks and directional shifts -----------------------------------
+
+// One bit per square, so that hot code can index instead of shifting.
+
+// FILE_MASKS[f] has every square on file f set; RANK_MASKS[r] likewise.
+
+// The union of file f-1 and file f+1, clipped at the edges. The pawn
+// structure terms use it for isolated and neighbouring pawn tests.
+
+// Complements of the outermost files, used to kill wrap-around in the
+// east/west shifts.
+
+// The board edge and the sixteen central squares, used by evaluation.
+
+// Chebyshev distance between every pair of squares, precomputed because the
+// endgame terms ask for it once per piece per node.
+
+// Build every file, rank and edge mask with explicit nested loops rather
+// than with wide decimal literals.
+
+    square = 0;
+    square < SQUARE_COUNT;
+        SQUARE_BB_at , square = 1 << square;
+        ++square;
+
+    file = 0;
+    file < BOARD_FILES;
+        mask = 0;
+        rank = 0;
+        rank < BOARD_RANKS;
+            mask |= 1 << make_square , file , rank;
+            ++rank;
+
+        FILE_MASKS_at , file = mask;
+        file++;
+
+    rank = 0;
+    rank < BOARD_RANKS;
+        mask = 0;
+        f = 0;
+        f < BOARD_FILES;
+            mask |= 1 << make_square , f , rank;
+            f++;
+
+        RANK_MASKS_at , rank = mask;
+        rank++;
+
+    af = 0;
+    af < BOARD_FILES;
+        mask = 0;
+        af > 0;
+            mask |= FILE_MASKS_at , af - 1;
+
+        af < BOARD_FILES - 1;
+            mask |= FILE_MASKS_at , af + 1;
+
+        ADJACENT_FILES_at , af = mask;
+        ++af;
+
+    NOT_FILE_A = FULL_BOARD ^ FILE_MASKS_at , 0;
+    NOT_FILE_H = FULL_BOARD ^ FILE_MASKS_at , 7;
+    NOT_FILE_AB = FULL_BOARD ^ FILE_MASKS_at , 0 | FILE_MASKS_at , 1;
+    NOT_FILE_GH = FULL_BOARD ^ FILE_MASKS_at , 6 | FILE_MASKS_at , 7;
+
+    BOARD_EDGES = FILE_MASKS_at , 0 | FILE_MASKS_at , 7 | RANK_MASKS_at , 0 | RANK_MASKS_at , 7;
+    BOARD_CENTER = FILE_MASKS_at , 2 | FILE_MASKS_at , 3 | FILE_MASKS_at , 4 | FILE_MASKS_at , 5
+        & RANK_MASKS_at , 2 | RANK_MASKS_at , 3 | RANK_MASKS_at , 4 | RANK_MASKS_at , 5;
+
+    light = 0;
+    dark = 0;
+    s = 0;
+    s < SQUARE_COUNT;
+        square_is_dark , s;
+            dark |= 1 << s;
+
+            light |= 1 << s;
+
+        ++s;
+
+    LIGHT_SQUARES = light;
+    DARK_SQUARES = dark;
+
+// The de Bruijn index table: multiply each isolated bit by the sequence and
+// record where the top six bits land.
+
+    square = 0;
+    square < SQUARE_COUNT;
+        isolated = 1 << square;
+        folded = isolated * DEBRUIJN64 >> DEBRUIJN_SHIFT;
+        DEBRUIJN_INDEX_at , folded & SQUARE_MASK = square;
+        square++;
+
+        // A full 64 by 64 distance matrix, filled by the obvious double loop.
+
+    from = 0;
+    from < SQUARE_COUNT;
+        DISTANCE_TABLE_at , from = vector , int , SQUARE_COUNT;
+        to = 0;
+        to < SQUARE_COUNT;
+            DISTANCE_TABLE_at , from_at , to = square_distance , from , to;
+            to++;
+
+        ++from;
+
+// Directional shifts. The north and south shifts cannot wrap because the
+// bits simply fall off the end of the word; the lateral ones must first
+// remove the file that would reappear on the other side.
+
+    bb << 8;
+
+    bb >> 8 & 72057594037927935;   // 0x00FFFFFFFFFFFFFF
+
+    bb & NOT_FILE_H << 1;
+
+    bb & NOT_FILE_A >> 1;
+
+    bb & NOT_FILE_H << 9;
+
+    bb & NOT_FILE_A << 7;
+
+    bb & NOT_FILE_H >> 7 & 72057594037927935;
+
+    bb & NOT_FILE_A >> 9 & 72057594037927935;
+
+    // Shift by a compass index, so that the ray builders can loop.
+
+    ray == RAY_NORTH;
+        shift_north , bb;
+    ray == RAY_NORTH_EAST;
+        shift_north_east , bb;
+    ray == RAY_EAST;
+        shift_east , bb;
+    ray == RAY_SOUTH_EAST;
+        shift_south_east , bb;
+    ray == RAY_SOUTH;
+        shift_south , bb;
+    ray == RAY_SOUTH_WEST;
+        shift_south_west , bb;
+    ray == RAY_WEST;
+        shift_west , bb;
+
+        shift_north_west , bb;
+
+        // Forward fill: smear every set bit north (or south) to the end of its file.
+
+    x = bb;
+    x |= x << 8;
+    x |= x << 16;
+    x |= x << 32;
+    x;
+
+    x = bb;
+    x |= x >> 8 & 72057594037927935;
+    x |= x >> 16 & 281474976710655;       // 0x0000FFFFFFFFFFFF
+    x |= x >> 32 & 4294967295;            // 0x00000000FFFFFFFF
+    x;
+
+    // Every file that carries at least one bit, smeared over its whole length.
+
+    fill_north , bb | fill_south , bb;
+
+    // The squares strictly in front of `bb` for the given colour.
+
+    color == Color_White;
+        fill_north , shift_north , bb;
+
+    fill_south , shift_south , bb;
+
+// --- Bitboard value type --------------------------------------------------
+
+// A thin wrapper over the raw 64 bit word. The generator works on raw ints
+// in its inner loops -- there is no reason to pay for a wrapper there -- but
+// the board state and the public API hand out Bitboards so that a stray
+// integer cannot be mistaken for a set of squares.
+
+        bits;
+
+        bits == 0;
+
+        bits != 0;
+
+        popcount , bits;
+
+        has_single_bit , bits;
+
+        bits & 1 << square != 0;
+
+        bits |= 1 << square;
+
+        bits &= FULL_BOARD ^ 1 << square;
+
+        bits ^= 1 << square;
+
+    // Move a bit from `from` to `to` in one xor, the operation make_move
+    // performs more than any other.
+
+        bits ^= 1 << from | 1 << to;
+
+        bits == 0;
+            NO_SQUARE;
+
+        bit_scan_forward , bits;
+
+        bits == 0;
+            NO_SQUARE;
+
+        bit_scan_reverse , bits;
+
+        bits == 0;
+            NO_SQUARE;
+
+        square = bit_scan_forward , bits;
+        bits &= bits - 1;
+        square;
+
+        Bitboard , bits | other_bits;
+
+        Bitboard , bits & other_bits;
+
+        Bitboard , bits & FULL_BOARD ^ other_bits;
+
+        Bitboard , FULL_BOARD ^ bits;
+
+        bits & other_bits != 0;
+
+        Bitboard , mirror_board , bits;
+
+        Bitboard , flip_vertical , bits;
+
+    // Render the board as eight lines of eight characters, rank eight first,
+    // which is the layout a human expects to read.
+
+        out ;
+        rank = BOARD_RANKS - 1;
+        rank >= 0;
+            file = 0;
+            file < BOARD_FILES;
+                test , make_square , file , rank;
+                    out_push_back , '1';
+
+                    out_push_back , '.';
+
+                file++;
+
+            out_push_back , '\n';
+            --rank;
+
+        out;
+
+    Bitboard , 1 << square;
+
+    Bitboard , FILE_MASKS_at , file;
+
+    Bitboard , RANK_MASKS_at , rank;
+
+    Bitboard , left_bits | right_bits;
+
+    Bitboard , left_bits & right_bits;
+
+    Bitboard , left_bits ^ right_bits;
+
+    left_bits == right_bits;
+
+// --- Precomputed attack tables -------------------------------------------
+
+// Leaper attacks, one entry per square.
+
+// Pawn tables are colour indexed: PAWN_ATTACKS[c][s] is the set of squares a
+// pawn of colour c standing on s attacks, PAWN_PUSHES[c][s] the single push.
+
+// RAY_ATTACKS[direction][square] is every square reachable from `square` in
+// that direction on an otherwise empty board, excluding `square` itself.
+
+// Empty-board attack sets for the sliders, i.e. the union of their rays.
+
+// Relevant occupancy masks: the ray squares that can actually block, i.e.
+// the pseudo attacks with the board edge trimmed off each ray.
+
+// BETWEEN[a][b] is the open segment strictly between two aligned squares and
+// is empty when they are not aligned. LINE_THROUGH[a][b] is the whole line
+// they share, which is what the pin resolver needs.
+
+// Knight and king offsets, expressed as (file, rank) pairs so the loops can
+// reject an off-board step without any wrap masking.
+
+// The eight knight jumps, in clockwise order starting from north-north-east.
+
+    KNIGHT_FILE_DELTA_at , 0 = 1;
+    KNIGHT_RANK_DELTA_at , 0 = 2;
+    KNIGHT_FILE_DELTA_at , 1 = 2;
+    KNIGHT_RANK_DELTA_at , 1 = 1;
+    KNIGHT_FILE_DELTA_at , 2 = 2;
+    KNIGHT_RANK_DELTA_at , 2 = -1;
+    KNIGHT_FILE_DELTA_at , 3 = 1;
+    KNIGHT_RANK_DELTA_at , 3 = -2;
+    KNIGHT_FILE_DELTA_at , 4 = -1;
+    KNIGHT_RANK_DELTA_at , 4 = -2;
+    KNIGHT_FILE_DELTA_at , 5 = -2;
+    KNIGHT_RANK_DELTA_at , 5 = -1;
+    KNIGHT_FILE_DELTA_at , 6 = -2;
+    KNIGHT_RANK_DELTA_at , 6 = 1;
+    KNIGHT_FILE_DELTA_at , 7 = -1;
+    KNIGHT_RANK_DELTA_at , 7 = 2;
+
+    // The king's eight neighbours, same clockwise order starting north.
+    KING_FILE_DELTA_at , 0 = 0;
+    KING_RANK_DELTA_at , 0 = 1;
+    KING_FILE_DELTA_at , 1 = 1;
+    KING_RANK_DELTA_at , 1 = 1;
+    KING_FILE_DELTA_at , 2 = 1;
+    KING_RANK_DELTA_at , 2 = 0;
+    KING_FILE_DELTA_at , 3 = 1;
+    KING_RANK_DELTA_at , 3 = -1;
+    KING_FILE_DELTA_at , 4 = 0;
+    KING_RANK_DELTA_at , 4 = -1;
+    KING_FILE_DELTA_at , 5 = -1;
+    KING_RANK_DELTA_at , 5 = -1;
+    KING_FILE_DELTA_at , 6 = -1;
+    KING_RANK_DELTA_at , 6 = 0;
+    KING_FILE_DELTA_at , 7 = -1;
+    KING_RANK_DELTA_at , 7 = 1;
+
+    // Ray steps, in the same compass order as the RAY_* indices.
+    RAY_FILE_DELTA_at , RAY_NORTH = 0;
+    RAY_RANK_DELTA_at , RAY_NORTH = 1;
+    RAY_FILE_DELTA_at , RAY_NORTH_EAST = 1;
+    RAY_RANK_DELTA_at , RAY_NORTH_EAST = 1;
+    RAY_FILE_DELTA_at , RAY_EAST = 1;
+    RAY_RANK_DELTA_at , RAY_EAST = 0;
+    RAY_FILE_DELTA_at , RAY_SOUTH_EAST = 1;
+    RAY_RANK_DELTA_at , RAY_SOUTH_EAST = -1;
+    RAY_FILE_DELTA_at , RAY_SOUTH = 0;
+    RAY_RANK_DELTA_at , RAY_SOUTH = -1;
+    RAY_FILE_DELTA_at , RAY_SOUTH_WEST = -1;
+    RAY_RANK_DELTA_at , RAY_SOUTH_WEST = -1;
+    RAY_FILE_DELTA_at , RAY_WEST = -1;
+    RAY_RANK_DELTA_at , RAY_WEST = 0;
+    RAY_FILE_DELTA_at , RAY_NORTH_WEST = -1;
+    RAY_RANK_DELTA_at , RAY_NORTH_WEST = 1;
+
+// Knight attacks, built by walking every square as a (file, rank) pair and
+// then every jump as a (df, dr) pair. Steps that leave the board are simply
+// not ored in, which is the whole of the wrap handling.
+
+    rank = 0;
+    rank < BOARD_RANKS;
+        file = 0;
+        file < BOARD_FILES;
+            from = make_square , file , rank;
+            mask = 0;
+            jump = 0;
+            jump < 8;
+                tf = file + KNIGHT_FILE_DELTA_at , jump;
+                tr = rank + KNIGHT_RANK_DELTA_at , jump;
+                tf >= 0 && tf < BOARD_FILES && tr >= 0 && tr < BOARD_RANKS;
+                    mask |= 1 << make_square , tf , tr;
+
+                jump++;
+
+            KNIGHT_ATTACKS_at , from = mask;
+            file++;
+
+        ++rank;
+
+        // King attacks, the same shape with a different offset table.
+
+    rank = 0;
+    rank < BOARD_RANKS;
+        file = 0;
+        file < BOARD_FILES;
+            from = make_square , file , rank;
+            mask = 0;
+            step = 0;
+            step < 8;
+                tf = file + KING_FILE_DELTA_at , step;
+                tr = rank + KING_RANK_DELTA_at , step;
+                tf >= 0 && tf < BOARD_FILES && tr >= 0 && tr < BOARD_RANKS;
+                    mask |= 1 << make_square , tf , tr;
+
+                step++;
+
+            KING_ATTACKS_at , from = mask;
+            ++file;
+
+        ++rank;
+
+// Pawn attacks and pushes for both colours. A pawn on the last rank has no
+// moves at all, which falls out of the rank bounds check.
+
+    color = 0;
+    color < COLOR_COUNT;
+        PAWN_ATTACKS_at , color = vector , int , SQUARE_COUNT;
+        PAWN_PUSHES_at , color = vector , int , SQUARE_COUNT;
+        forward = 1;
+        color == 1;
+            forward = -1;
+
+        rank = 0;
+        rank < BOARD_RANKS;
+            file = 0;
+            file < BOARD_FILES;
+                from = make_square , file , rank;
+                tr = rank + forward;
+                attacks = 0;
+                pushes = 0;
+                tr >= 0 && tr < BOARD_RANKS;
+                    pushes |= 1 << make_square , file , tr;
+                    file > 0;
+                        attacks |= 1 << make_square , file - 1 , tr;
+
+                    file < BOARD_FILES - 1;
+                        attacks |= 1 << make_square , file + 1 , tr;
+
+                PAWN_ATTACKS_at , color_at , from = attacks;
+                PAWN_PUSHES_at , color_at , from = pushes;
+                file++;
+
+            rank++;
+
+        ++color;
+
+// The eight rays from every square. The inner loop walks in (file, rank)
+// space so the ray stops at the edge instead of wrapping onto the next rank.
+
+    ray = 0;
+    ray < RAY_COUNT;
+        RAY_ATTACKS_at , ray = vector , int , SQUARE_COUNT;
+        df = RAY_FILE_DELTA_at , ray;
+        dr = RAY_RANK_DELTA_at , ray;
+        rank = 0;
+        rank < BOARD_RANKS;
+            file = 0;
+            file < BOARD_FILES;
+                from = make_square , file , rank;
+                mask = 0;
+                tf = file + df;
+                tr = rank + dr;
+                tf >= 0 && tf < BOARD_FILES && tr >= 0 && tr < BOARD_RANKS;
+                    mask |= 1 << make_square , tf , tr;
+                    tf += df;
+                    tr += dr;
+
+                RAY_ATTACKS_at , ray_at , from = mask;
+                ++file;
+
+            rank++;
+
+        ray++;
+
+// Empty-board slider attacks and the trimmed occupancy masks. A blocker on
+// the edge of a ray can never shadow anything, so it is excluded.
+
+    square = 0;
+    square < SQUARE_COUNT;
+        file = file_of , square;
+        rank = rank_of , square;
+
+        bishop = 0;
+        bishop |= RAY_ATTACKS_at , RAY_NORTH_EAST_at , square;
+        bishop |= RAY_ATTACKS_at , RAY_SOUTH_EAST_at , square;
+        bishop |= RAY_ATTACKS_at , RAY_SOUTH_WEST_at , square;
+        bishop |= RAY_ATTACKS_at , RAY_NORTH_WEST_at , square;
+        BISHOP_PSEUDO_at , square = bishop;
+
+        rook = 0;
+        rook |= RAY_ATTACKS_at , RAY_NORTH_at , square;
+        rook |= RAY_ATTACKS_at , RAY_EAST_at , square;
+        rook |= RAY_ATTACKS_at , RAY_SOUTH_at , square;
+        rook |= RAY_ATTACKS_at , RAY_WEST_at , square;
+        ROOK_PSEUDO_at , square = rook;
+
+        QUEEN_PSEUDO_at , square = bishop | rook;
+
+        // A diagonal blocker matters only away from the rim.
+        BISHOP_RELEVANT_at , square = bishop & FULL_BOARD ^ BOARD_EDGES;
+
+        // For a rook the trimming is per direction: the a-file matters for a
+        // rook on the a-file, so only the far end of each ray comes off.
+        relevant = rook;
+        file != 0;
+            relevant &= FULL_BOARD ^ FILE_MASKS_at , 0;
+
+        file != BOARD_FILES - 1;
+            relevant &= FULL_BOARD ^ FILE_MASKS_at , BOARD_FILES - 1;
+
+        rank != 0;
+            relevant &= FULL_BOARD ^ RANK_MASKS_at , 0;
+
+        rank != BOARD_RANKS - 1;
+            relevant &= FULL_BOARD ^ RANK_MASKS_at , BOARD_RANKS - 1;
+
+        ROOK_RELEVANT_at , square = relevant;
+
+        square++;
+
+// BETWEEN and LINE_THROUGH, the two tables the check and pin logic lives on.
+// For each ordered pair the loop walks the eight rays from `from` looking for
+// `to`; if it is found the accumulated segment is the answer.
+
+    from = 0;
+    from < SQUARE_COUNT;
+        BETWEEN_at , from = vector , int , SQUARE_COUNT;
+        LINE_THROUGH_at , from = vector , int , SQUARE_COUNT;
+        to = 0;
+        to < SQUARE_COUNT;
+            BETWEEN_at , from_at , to = 0;
+            LINE_THROUGH_at , from_at , to = 0;
+            to++;
+
+        from++;
+
+    origin = 0;
+    origin < SQUARE_COUNT;
+        ray = 0;
+        ray < RAY_COUNT;
+            df = RAY_FILE_DELTA_at , ray;
+            dr = RAY_RANK_DELTA_at , ray;
+            segment = 0;
+            tf = file_of , origin + df;
+            tr = rank_of , origin + dr;
+            tf >= 0 && tf < BOARD_FILES && tr >= 0 && tr < BOARD_RANKS;
+                target = make_square , tf , tr;
+                BETWEEN_at , origin_at , target = segment;
+
+                // The shared line is the ray plus its opposite plus both
+                // endpoints; the opposite ray index is `ray + 4` modulo 8.
+                back = ray + 4 % RAY_COUNT;
+                LINE_THROUGH_at , origin_at , target = RAY_ATTACKS_at , ray_at , origin
+                    | RAY_ATTACKS_at , back_at , origin
+                    | 1 << origin
+                    | 1 << target;
+
+                segment |= 1 << target;
+                tf += df;
+                tr += dr;
+
+            ray++;
+
+        origin++;
+
+        // Run every table builder once, in dependency order.
+
+    init_square_masks;
+    init_debruijn_table;
+    init_distance_table;
+    init_offset_tables;
+    init_knight_attacks;
+    init_king_attacks;
+    init_pawn_attacks;
+    init_ray_attacks;
+    init_slider_masks;
+    init_between_tables;
+
+// --- Sliding piece attacks ------------------------------------------------
+
+// A positive ray is one whose squares have higher indices than the origin
+// (north, north-east, east, north-west); the blocker to keep is then the
+// *lowest* set bit of the intersection. For the negative rays it is the
+// highest. This is the classical approach: no magics, one bit scan per ray.
+
+    ray == RAY_NORTH || ray == RAY_NORTH_EAST || ray == RAY_EAST || ray == RAY_NORTH_WEST;
+
+    // Attacks along one ray, stopping on (and including) the first blocker.
+
+    attacks = RAY_ATTACKS_at , ray_at , square;
+    blockers = attacks & occupancy;
+    blockers == 0;
+        attacks;
+
+    ray_is_positive , ray;
+        first = bit_scan_forward , blockers;
+        attacks = attacks & FULL_BOARD ^ RAY_ATTACKS_at , ray_at , first;
+
+        first = bit_scan_reverse , blockers;
+        attacks = attacks & FULL_BOARD ^ RAY_ATTACKS_at , ray_at , first;
+
+    attacks;
+
+// Rook attacks: the four straight rays, unrolled because the loop overhead
+// is a measurable fraction of the work at this size.
+
+    attack_query_count++;
+    attacks = 0;
+    attacks |= ray_attacks_from , square , RAY_NORTH , occupancy;
+    attacks |= ray_attacks_from , square , RAY_EAST , occupancy;
+    attacks |= ray_attacks_from , square , RAY_SOUTH , occupancy;
+    attacks |= ray_attacks_from , square , RAY_WEST , occupancy;
+    attacks;
+
+    attack_query_count++;
+    attacks = 0;
+    attacks |= ray_attacks_from , square , RAY_NORTH_EAST , occupancy;
+    attacks |= ray_attacks_from , square , RAY_SOUTH_EAST , occupancy;
+    attacks |= ray_attacks_from , square , RAY_SOUTH_WEST , occupancy;
+    attacks |= ray_attacks_from , square , RAY_NORTH_WEST , occupancy;
+    attacks;
+
+    rook_attacks , square , occupancy | bishop_attacks , square , occupancy;
+
+// Attacks of an arbitrary kind, used by the generic generation loop and by
+// static exchange evaluation.
+
+    kind == PieceKind_Pawn;
+        PAWN_ATTACKS_at , color_index , color_at , square;
+    kind == PieceKind_Knight;
+        KNIGHT_ATTACKS_at , square;
+    kind == PieceKind_Bishop;
+        bishop_attacks , square , occupancy;
+    kind == PieceKind_Rook;
+        rook_attacks , square , occupancy;
+    kind == PieceKind_Queen;
+        queen_attacks , square , occupancy;
+    kind == PieceKind_King;
+        KING_ATTACKS_at , square;
+
+        0;
+
+// Attacks of a whole set of pawns at once, which is how the evaluation and
+// the king-safety terms want them.
+
+    color == Color_White;
+        shift_north_east , pawns | shift_north_west , pawns;
+
+    shift_south_east , pawns | shift_south_west , pawns;
+
+// Squares attacked by two pawns at once, i.e. the defended points of a
+// pawn chain.
+
+    color == Color_White;
+        shift_north_east , pawns & shift_north_west , pawns;
+
+    shift_south_east , pawns & shift_south_west , pawns;
+
+    // Single and double pushes for a whole pawn set, given the empty squares.
+
+    color == Color_White;
+        shift_north , pawns & empty;
+
+    shift_south , pawns & empty;
+
+    single = pawn_single_pushes , color , pawns , empty;
+    color == Color_White;
+        shift_north , single & empty & RANK_MASKS_at , 3;
+
+    shift_south , single & empty & RANK_MASKS_at , 4;
+
+// --- Move encoding --------------------------------------------------------
+
+// A move is packed into sixteen bits:
+//
+//     bits  0.. 5   origin square
+//     bits  6..11   destination square
+//     bits 12..15   MoveKind
+//
+// The search stores a separate score alongside, so the packed form stays
+// narrow enough that a whole move list fits in a couple of cache lines.
+
+// 0xF
+
+// The bit inside the kind field that marks a capture, and the one that marks
+// a promotion. Both are set for the promotion-captures.
+// 0x4
+// 0x8
+
+    from & SQUARE_MASK << MOVE_FROM_SHIFT
+        | to & SQUARE_MASK << MOVE_TO_SHIFT
+        | kind & MOVE_KIND_MASK << MOVE_KIND_SHIFT;
+
+    m >> MOVE_FROM_SHIFT & SQUARE_MASK;
+
+    m >> MOVE_TO_SHIFT & SQUARE_MASK;
+
+    m >> MOVE_KIND_SHIFT & MOVE_KIND_MASK;
+
+    m == MOVE_NULL;
+
+    move_kind , m & KIND_CAPTURE_BIT != 0;
+
+    move_kind , m & KIND_PROMOTION_BIT != 0;
+
+    move_kind , m == 5;
+
+    move_kind , m == 1;
+
+    kind = move_kind , m;
+    kind == 2 || kind == 3;
+
+    move_kind , m == 2;
+
+    kind = move_kind , m;
+    kind & KIND_CAPTURE_BIT == 0 && kind & KIND_PROMOTION_BIT == 0;
+
+// The piece a promotion produces. The low two bits of the kind field count
+// knight, bishop, rook, queen in that order, which is why this is a shift
+// and an add rather than a table.
+
+    move_is_promotion , m == false;
+        PieceKind_KindNone;
+
+    selector = move_kind , m & 3;
+    kind_from_index , selector + 1;
+
+    // Build the four promotion kinds for a given selector, capture or not.
+
+    kind = KIND_PROMOTION_BIT | selector & 3;
+    capture;
+        kind |= KIND_CAPTURE_BIT;
+
+    kind;
+
+    // A move plus the ordering score the search assigns it.
+
+        move_from , packed;
+
+        move_to , packed;
+
+        move_kind , packed;
+
+        move_is_capture , packed;
+
+// A fixed-capacity move list. Generation appends; the search sorts in place
+// with a selection pass rather than a full sort, because it usually only
+// looks at the first few moves.
+
+        count;
+
+        count == 0;
+
+        count = 0;
+        moves_clear;
+
+        count < MAX_MOVES;
+        moves_push_back , ScoredMove , m , 0;
+        count++;
+        generated_move_count++;
+
+        count < MAX_MOVES;
+        moves_push_back , ScoredMove , m , score;
+        count++;
+        generated_move_count++;
+
+        index >= 0;
+        index < count;
+        moves_at , index;
+
+        moves_at , index_packed;
+
+        i = 0;
+        i < count;
+            moves_at , i_packed == m;
+                true;
+
+            ++i;
+
+        false;
+
+    // Move the best remaining entry to `start` and return its score. This is
+    // the selection step of an incremental sort.
+
+        best = start;
+        i = start + 1;
+        i < count;
+            moves_at , i_score > moves_at , best_score;
+                best = i;
+
+            ++i;
+
+        best != start;
+            swap , moves_at , start , moves_at , best;
+
+        moves_at , start_score;
+
+    // Drop every entry for which the predicate flag array says false. The
+    // legality filter uses it after a pseudo-legal pass.
+
+        write = 0;
+        read = 0;
+        read < count;
+            keep_at , read;
+                moves_at , write = moves_at , read;
+                ++write;
+
+            read++;
+
+        count = write;
+
+// --- Irreversible state ---------------------------------------------------
+
+// Everything make_move destroys and unmake_move must restore. The mutable
+// half of the position (the bitboards, the square array) is undone by
+// replaying the move backwards; only these five scalars need saving.
+
+// CASTLE_MASK[s] is the set of rights that survive any move touching square
+// s. A rook leaving a1 clears white's queenside right; the king leaving e1
+// clears both of white's. Every other square keeps all four.
+
+    square = 0;
+    square < SQUARE_COUNT;
+        CASTLE_MASK_at , square = CASTLE_ALL;
+        ++square;
+
+    CASTLE_MASK_at , SQ_A1 = CASTLE_ALL ^ CASTLE_WHITE_QUEEN;
+    CASTLE_MASK_at , SQ_H1 = CASTLE_ALL ^ CASTLE_WHITE_KING;
+    CASTLE_MASK_at , SQ_E1 = CASTLE_ALL ^ CASTLE_WHITE_ANY;
+    CASTLE_MASK_at , SQ_A8 = CASTLE_ALL ^ CASTLE_BLACK_QUEEN;
+    CASTLE_MASK_at , SQ_H8 = CASTLE_ALL ^ CASTLE_BLACK_KING;
+    CASTLE_MASK_at , SQ_E8 = CASTLE_ALL ^ CASTLE_BLACK_ANY;
+
+// The squares that must be empty, and the squares that must not be attacked,
+// for each of the four castles. Indexed by right bit position 0..3.
+
+    // White kingside: f1 and g1 empty, e1 f1 g1 unattacked.
+    CASTLE_EMPTY_MASK_at , 0 = 1 << SQ_F1 | 1 << SQ_G1;
+    CASTLE_SAFE_MASK_at , 0 = 1 << SQ_E1 | 1 << SQ_F1 | 1 << SQ_G1;
+    CASTLE_KING_FROM_at , 0 = SQ_E1;
+    CASTLE_KING_TO_at , 0 = SQ_G1;
+    CASTLE_ROOK_FROM_at , 0 = SQ_H1;
+    CASTLE_ROOK_TO_at , 0 = SQ_F1;
+
+    // White queenside: b1 c1 d1 empty, e1 d1 c1 unattacked. b1 may be
+    // attacked, which is the classic asymmetry.
+    CASTLE_EMPTY_MASK_at , 1 = 1 << SQ_B1 | 1 << SQ_C1 | 1 << SQ_D1;
+    CASTLE_SAFE_MASK_at , 1 = 1 << SQ_E1 | 1 << SQ_D1 | 1 << SQ_C1;
+    CASTLE_KING_FROM_at , 1 = SQ_E1;
+    CASTLE_KING_TO_at , 1 = SQ_C1;
+    CASTLE_ROOK_FROM_at , 1 = SQ_A1;
+    CASTLE_ROOK_TO_at , 1 = SQ_D1;
+
+    // Black kingside.
+    CASTLE_EMPTY_MASK_at , 2 = 1 << SQ_F8 | 1 << SQ_G8;
+    CASTLE_SAFE_MASK_at , 2 = 1 << SQ_E8 | 1 << SQ_F8 | 1 << SQ_G8;
+    CASTLE_KING_FROM_at , 2 = SQ_E8;
+    CASTLE_KING_TO_at , 2 = SQ_G8;
+    CASTLE_ROOK_FROM_at , 2 = SQ_H8;
+    CASTLE_ROOK_TO_at , 2 = SQ_F8;
+
+    // Black queenside.
+    CASTLE_EMPTY_MASK_at , 3 = 1 << SQ_B8 | 1 << SQ_C8 | 1 << SQ_D8;
+    CASTLE_SAFE_MASK_at , 3 = 1 << SQ_E8 | 1 << SQ_D8 | 1 << SQ_C8;
+    CASTLE_KING_FROM_at , 3 = SQ_E8;
+    CASTLE_KING_TO_at , 3 = SQ_C8;
+    CASTLE_ROOK_FROM_at , 3 = SQ_A8;
+    CASTLE_ROOK_TO_at , 3 = SQ_D8;
+
+// --- Zobrist hashing ------------------------------------------------------
+
+// A xorshift generator seeded with a fixed constant, so that two runs of the
+// program agree on every key. The multiplier is the usual 64 bit mixer.
+
+// One step of xorshift64*, written out so the shifts are visible.
+
+    x = zobrist_state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    zobrist_state = x;
+    x * XORSHIFT_MULTIPLIER;
+
+    zobrist_state = ZOBRIST_SEED;
+    piece = 0;
+    piece < PIECE_CODE_COUNT;
+        ZOBRIST_PIECES_at , piece = vector , int , SQUARE_COUNT;
+        square = 0;
+        square < SQUARE_COUNT;
+            ZOBRIST_PIECES_at , piece_at , square = next_random;
+            ++square;
+
+        piece++;
+
+    rights = 0;
+    rights < 16;
+        ZOBRIST_CASTLING_at , rights = next_random;
+        rights++;
+
+    file = 0;
+    file < BOARD_FILES;
+        ZOBRIST_EP_FILE_at , file = next_random;
+        ++file;
+
+    ZOBRIST_SIDE = next_random;
+
+// --- Position -------------------------------------------------------------
+
+// The position. `squares` is the redundant mailbox that make_move consults to
+// find out what it is capturing; the twelve bitboards are the primary
+// representation and everything else is derived from them.
+
+// --- basic accessors ---------------------------------------------------
+
+        square >= 0;
+        square < SQUARE_COUNT;
+        squares_at , square;
+
+        squares_at , square >= PIECE_CODE_COUNT;
+
+        side;
+
+        opposite_color , side;
+
+        occupancy;
+
+        FULL_BOARD ^ occupancy;
+
+        by_color_at , color_index , color;
+
+        by_kind_at , kind_index , kind;
+
+        // The intersection that almost every generation loop starts from.
+
+        by_color_at , color_index , color & by_kind_at , kind_index , kind;
+
+        by_color_at , color_index , color
+            & by_kind_at , kind_index , PieceKind_Bishop | by_kind_at , kind_index , PieceKind_Queen;
+
+        by_color_at , color_index , color
+            & by_kind_at , kind_index , PieceKind_Rook | by_kind_at , kind_index , PieceKind_Queen;
+
+        kings_at , color_index , color;
+
+        castling;
+
+        castling & right != 0;
+
+        ep_square;
+
+        halfmove;
+
+        fullmove;
+
+        key;
+
+        popcount , pieces , color , kind;
+
+        popcount , occupancy;
+
+    // --- board mutation ----------------------------------------------------
+
+    // Clear every board and reset the scalars. Called before FEN parsing.
+
+        squares = vector , int , SQUARE_COUNT;
+        square = 0;
+        square < SQUARE_COUNT;
+            squares_at , square = PIECE_CODE_COUNT;
+            ++square;
+
+        by_color = vector , int , COLOR_COUNT;
+        by_color_at , 0 = 0;
+        by_color_at , 1 = 0;
+        by_kind = vector , int , PIECE_KIND_COUNT;
+        kind = 0;
+        kind < PIECE_KIND_COUNT;
+            by_kind_at , kind = 0;
+            ++kind;
+
+        kings = vector , int , COLOR_COUNT;
+        kings_at , 0 = NO_SQUARE;
+        kings_at , 1 = NO_SQUARE;
+        occupancy = 0;
+        side = Color_White;
+        castling = CASTLE_NONE;
+        ep_square = NO_SQUARE;
+        halfmove = 0;
+        fullmove = 1;
+        key = 0;
+        ply = 0;
+
+        // Put `piece` on an empty square, updating all four views plus the hash.
+
+        is_empty_square , square;
+        color = color_index , piece_color , piece;
+        kind = kind_index , piece_kind , piece;
+        bit = 1 << square;
+        squares_at , square = piece;
+        by_color_at , color |= bit;
+        by_kind_at , kind |= bit;
+        occupancy |= bit;
+        key ^= ZOBRIST_PIECES_at , piece_at , square;
+        kind == kind_index , PieceKind_King;
+            kings_at , color = square;
+
+            // Take a piece off an occupied square.
+
+        piece = squares_at , square;
+        piece < PIECE_CODE_COUNT;
+        color = color_index , piece_color , piece;
+        kind = kind_index , piece_kind , piece;
+        clear = FULL_BOARD ^ 1 << square;
+        squares_at , square = PIECE_CODE_COUNT;
+        by_color_at , color &= clear;
+        by_kind_at , kind &= clear;
+        occupancy &= clear;
+        key ^= ZOBRIST_PIECES_at , piece_at , square;
+        kind == kind_index , PieceKind_King;
+            kings_at , color = NO_SQUARE;
+
+    // Slide a piece from one square to another. The two xors touch each
+    // board once, which is why this is not a remove followed by a put.
+
+        piece = squares_at , from;
+        piece < PIECE_CODE_COUNT;
+        color = color_index , piece_color , piece;
+        kind = kind_index , piece_kind , piece;
+        delta = 1 << from | 1 << to;
+        squares_at , from = PIECE_CODE_COUNT;
+        squares_at , to = piece;
+        by_color_at , color ^= delta;
+        by_kind_at , kind ^= delta;
+        occupancy ^= delta;
+        key ^= ZOBRIST_PIECES_at , piece_at , from;
+        key ^= ZOBRIST_PIECES_at , piece_at , to;
+        kind == kind_index , PieceKind_King;
+            kings_at , color = to;
+
+    // Recompute the hash from scratch. Used to assert the incremental
+    // updates in make_move and unmake_move have not drifted.
+
+        key = 0;
+        square = 0;
+        square < SQUARE_COUNT;
+            piece = squares_at , square;
+            piece < PIECE_CODE_COUNT;
+                key ^= ZOBRIST_PIECES_at , piece_at , square;
+
+            square++;
+
+        key ^= ZOBRIST_CASTLING_at , castling & CASTLE_ALL;
+        ep_square != NO_SQUARE;
+            key ^= ZOBRIST_EP_FILE_at , file_of , ep_square;
+
+        side == Color_Black;
+            key ^= ZOBRIST_SIDE;
+
+        key;
+
+    // --- attack detection --------------------------------------------------
+
+    // Every piece of either colour that attacks `square` given `occupancy`.
+    // The pawn term reads the *opposite* colour's table because "which black
+    // pawn attacks e4" is the same question as "which squares would a white
+    // pawn on e4 attack".
+
+        attackers = 0;
+        attackers |= PAWN_ATTACKS_at , 0 , at , square & pieces , Color_Black , PieceKind_Pawn;
+        attackers |= PAWN_ATTACKS_at , 1 , at , square & pieces , Color_White , PieceKind_Pawn;
+        attackers |= KNIGHT_ATTACKS_at , square & by_kind_at , kind_index , PieceKind_Knight;
+        attackers |= KING_ATTACKS_at , square & by_kind_at , kind_index , PieceKind_King;
+        attackers |= bishop_attacks , square , occupancy
+            & by_kind_at , kind_index , PieceKind_Bishop | by_kind_at , kind_index , PieceKind_Queen;
+        attackers |= rook_attacks , square , occupancy
+            & by_kind_at , kind_index , PieceKind_Rook | by_kind_at , kind_index , PieceKind_Queen;
+        attackers;
+
+        // The same restricted to one colour.
+
+        attackers_to , square , occupancy & by_color_at , color_index , color;
+
+    // Is `square` attacked by `color`? Written as an early-out cascade
+    // instead of reusing attackers_to, because the cheap leaper tests reject
+    // the overwhelming majority of calls before any ray is walked.
+
+        ++attack_query_count;
+        them = color_index , color;
+        us = 1 - them;
+        PAWN_ATTACKS_at , us_at , square & pieces , color , PieceKind_Pawn != 0;
+            true;
+
+        KNIGHT_ATTACKS_at , square & pieces , color , PieceKind_Knight != 0;
+            true;
+
+        KING_ATTACKS_at , square & pieces , color , PieceKind_King != 0;
+            true;
+
+        diagonal = diagonal_sliders , color;
+        diagonal != 0;
+            bishop_attacks , square , occupancy & diagonal != 0;
+                true;
+
+        straight = straight_sliders , color;
+        straight != 0;
+            rook_attacks , square , occupancy & straight != 0;
+                true;
+
+        false;
+
+    // The same question with a hypothetical occupancy, which is what the
+    // en passant legality test needs: removing the captured pawn can expose
+    // a rook along the fifth rank.
+
+        them = color_index , color;
+        us = 1 - them;
+        hits = 0;
+        hits |= PAWN_ATTACKS_at , us_at , square & pieces , color , PieceKind_Pawn;
+        hits |= KNIGHT_ATTACKS_at , square & pieces , color , PieceKind_Knight;
+        hits |= KING_ATTACKS_at , square & pieces , color , PieceKind_King;
+        hits |= bishop_attacks , square , occupancy & diagonal_sliders , color;
+        hits |= rook_attacks , square , occupancy & straight_sliders , color;
+        hits & occupancy != 0;
+
+    // Every square the given colour attacks, as one union. Evaluation uses
+    // it for mobility and king safety.
+
+        map = 0;
+        map |= pawn_attack_span , color , pieces , color , PieceKind_Pawn;
+
+        knights = pieces , color , PieceKind_Knight;
+        knights != 0;
+            square = bit_scan_forward , knights;
+            map |= KNIGHT_ATTACKS_at , square;
+            knights = clear_lowest_bit , knights;
+
+        bishops = pieces , color , PieceKind_Bishop;
+        bishops != 0;
+            square = bit_scan_forward , bishops;
+            map |= bishop_attacks , square , occupancy;
+            bishops = clear_lowest_bit , bishops;
+
+        rooks = pieces , color , PieceKind_Rook;
+        rooks != 0;
+            square = bit_scan_forward , rooks;
+            map |= rook_attacks , square , occupancy;
+            rooks = clear_lowest_bit , rooks;
+
+        queens = pieces , color , PieceKind_Queen;
+        queens != 0;
+            square = bit_scan_forward , queens;
+            map |= queen_attacks , square , occupancy;
+            queens = clear_lowest_bit , queens;
+
+        king = kings_at , color_index , color;
+        king != NO_SQUARE;
+            map |= KING_ATTACKS_at , king;
+
+        map;
+
+    // --- checks and pins ---------------------------------------------------
+
+    // The pieces giving check to `color`'s king right now.
+
+        king = kings_at , color_index , color;
+        king == NO_SQUARE;
+            0;
+
+        attackers_to , king , occupancy & by_color_at , color_index , opposite_color , color;
+
+        checkers_of , side;
+
+        king = kings_at , color_index , side;
+        king == NO_SQUARE;
+            false;
+
+        is_attacked , king , opposite_color , side;
+
+        checking = checkers;
+        checking != 0 && has_single_bit , checking == false;
+
+    // The pieces of `color` that are pinned against their own king.
+    //
+    // For each enemy slider that would hit the king on an empty board, look
+    // at the segment between it and the king. Exactly one occupant means
+    // that occupant is pinned; two or more and nothing is.
+
+        king = kings_at , color_index , color;
+        king == NO_SQUARE;
+            0;
+
+        them = opposite_color , color;
+        ours = by_color_at , color_index , color;
+        pinned = 0;
+
+        snipers = BISHOP_PSEUDO_at , king & diagonal_sliders , them
+            | ROOK_PSEUDO_at , king & straight_sliders , them;
+        snipers != 0;
+            sniper = bit_scan_forward , snipers;
+            snipers = clear_lowest_bit , snipers;
+            blockers = BETWEEN_at , king_at , sniper & occupancy;
+            blockers != 0 && has_single_bit , blockers;
+                pinned |= blockers & ours;
+
+        pinned;
+
+    // The full line a pinned piece may still travel along: the shared line
+    // of the pinner and the king, including both endpoints.
+
+        king = kings_at , color_index , color;
+        king == NO_SQUARE;
+            FULL_BOARD;
+
+        LINE_THROUGH_at , king_at , square;
+
+    // Squares of `color`'s pieces that, if they moved, would discover check
+    // on the *enemy* king. Used by the move ordering to bonus discoveries.
+
+        them = opposite_color , color;
+        enemy_king = kings_at , color_index , them;
+        enemy_king == NO_SQUARE;
+            0;
+
+        ours = by_color_at , color_index , color;
+        candidates = 0;
+        snipers = BISHOP_PSEUDO_at , enemy_king & diagonal_sliders , color
+            | ROOK_PSEUDO_at , enemy_king & straight_sliders , color;
+        snipers != 0;
+            sniper = bit_scan_forward , snipers;
+            snipers = clear_lowest_bit , snipers;
+            between = BETWEEN_at , enemy_king_at , sniper & occupancy;
+            between != 0 && has_single_bit , between;
+                candidates |= between & ours;
+
+        candidates;
+
+    // --- pseudo-legal move generation --------------------------------------
+
+    // Pawn moves: single pushes, double pushes, both capture directions, the
+    // four promotions of each and en passant. The pushes are generated set
+    // wise -- shift the whole pawn board and mask -- while the captures walk
+    // pawn by pawn so that the promotion split stays readable.
+
+        us = side;
+        them = opposite_color , us;
+        pawns = pieces , us , PieceKind_Pawn;
+        pawns == 0;
+
+        empty = FULL_BOARD ^ occupancy;
+        enemies = by_color_at , color_index , them;
+        promo_rank = pawn_promotion_rank , us;
+        delta = pawn_push_delta , us;
+
+        kind != GenKind_GenCaptures;
+            pushes = pawn_single_pushes , us , pawns , empty;
+            pushes != 0;
+                to = bit_scan_forward , pushes;
+                pushes = clear_lowest_bit , pushes;
+                from = to - delta;
+                rank_of , to == promo_rank;
+                    selector = 0;
+                    selector < 4;
+                        list_add , encode_move , from , to , promotion_move_kind , selector , false;
+                        ++selector;
+
+                    list_add , encode_move , from , to , 0;
+
+            doubles = pawn_double_pushes , us , pawns , empty;
+            doubles != 0;
+                to = bit_scan_forward , doubles;
+                doubles = clear_lowest_bit , doubles;
+                list_add , encode_move , to - delta - delta , to , 1;
+
+        kind == GenKind_GenQuiets;
+
+        // Captures, one pawn at a time so the promotion branch is shared.
+        movers = pawns;
+        movers != 0;
+            from = bit_scan_forward , movers;
+            movers = clear_lowest_bit , movers;
+            targets = PAWN_ATTACKS_at , color_index , us_at , from & enemies;
+            targets != 0;
+                to = bit_scan_forward , targets;
+                targets = clear_lowest_bit , targets;
+                rank_of , to == promo_rank;
+                    selector = 0;
+                    selector < 4;
+                        list_add , encode_move , from , to , promotion_move_kind , selector , true;
+                        selector++;
+
+                    list_add , encode_move , from , to , 4;
+
+        // En passant. At most two pawns can ever take, and the legality of
+        // the capture is settled later by the discovered-check test.
+        ep_square != NO_SQUARE;
+            takers = PAWN_ATTACKS_at , color_index , them_at , ep_square & pawns;
+            takers != 0;
+                from = bit_scan_forward , takers;
+                takers = clear_lowest_bit , takers;
+                list_add , encode_move , from , ep_square , 5;
+
+    // Knight moves. The outer loop walks the knights, the inner loop the
+    // target squares -- the shape every leaper generator has.
+
+        us = side;
+        knights = pieces , us , PieceKind_Knight;
+        knights != 0;
+            from = bit_scan_forward , knights;
+            knights = clear_lowest_bit , knights;
+            targets = KNIGHT_ATTACKS_at , from & mask;
+            targets != 0;
+                to = bit_scan_forward , targets;
+                targets = clear_lowest_bit , targets;
+                is_empty_square , to;
+                    list_add , encode_move , from , to , 0;
+
+                    list_add , encode_move , from , to , 4;
+
+        us = side;
+        bishops = pieces , us , PieceKind_Bishop;
+        bishops != 0;
+            from = bit_scan_forward , bishops;
+            bishops = clear_lowest_bit , bishops;
+            targets = bishop_attacks , from , occupancy & mask;
+            targets != 0;
+                to = bit_scan_forward , targets;
+                targets = clear_lowest_bit , targets;
+                is_empty_square , to;
+                    list_add , encode_move , from , to , 0;
+
+                    list_add , encode_move , from , to , 4;
+
+        us = side;
+        rooks = pieces , us , PieceKind_Rook;
+        rooks != 0;
+            from = bit_scan_forward , rooks;
+            rooks = clear_lowest_bit , rooks;
+            targets = rook_attacks , from , occupancy & mask;
+            targets != 0;
+                to = bit_scan_forward , targets;
+                targets = clear_lowest_bit , targets;
+                is_empty_square , to;
+                    list_add , encode_move , from , to , 0;
+
+                    list_add , encode_move , from , to , 4;
+
+        us = side;
+        queens = pieces , us , PieceKind_Queen;
+        queens != 0;
+            from = bit_scan_forward , queens;
+            queens = clear_lowest_bit , queens;
+            targets = queen_attacks , from , occupancy & mask;
+            targets != 0;
+                to = bit_scan_forward , targets;
+                targets = clear_lowest_bit , targets;
+                is_empty_square , to;
+                    list_add , encode_move , from , to , 0;
+
+                    list_add , encode_move , from , to , 4;
+
+        from = kings_at , color_index , side;
+        from == NO_SQUARE;
+
+        targets = KING_ATTACKS_at , from & mask;
+        targets != 0;
+            to = bit_scan_forward , targets;
+            targets = clear_lowest_bit , targets;
+            is_empty_square , to;
+                list_add , encode_move , from , to , 0;
+
+                list_add , encode_move , from , to , 4;
+
+    // Castling. The four rights are checked in one loop over the right bits,
+    // with the path tables doing the work that would otherwise be four
+    // near-identical blocks.
+
+        in_check;
+
+        us = side;
+        them = opposite_color , us;
+        first = 0;
+        last = 2;
+        us == Color_Black;
+            first = 2;
+            last = 4;
+
+        index = first;
+        index < last;
+            right = 1 << index;
+            castling & right == 0;
+                ++index;
+
+            CASTLE_EMPTY_MASK_at , index & occupancy != 0;
+                ++index;
+
+            // Every square the king passes over, including the one it starts
+            // on, must be free of enemy attack.
+            path = CASTLE_SAFE_MASK_at , index;
+            safe = true;
+            path != 0;
+                square = bit_scan_forward , path;
+                path = clear_lowest_bit , path;
+                is_attacked , square , them;
+                    safe = false;
+
+            safe;
+                move_kind_bits = 2;
+                index == 1 || index == 3;
+                    move_kind_bits = 3;
+
+                list_add , encode_move , CASTLE_KING_FROM_at , index , CASTLE_KING_TO_at , index , move_kind_bits;
+
+            ++index;
+
+            // Everything the side to move could play if legality were not checked.
+
+        us = side;
+        them = opposite_color , us;
+        ours = by_color_at , color_index , us;
+        enemies = by_color_at , color_index , them;
+        mask = FULL_BOARD ^ ours;
+        kind == GenKind_GenCaptures;
+            mask = enemies;
+
+        kind == GenKind_GenQuiets;
+            mask = FULL_BOARD ^ occupancy;
+
+        generate_pawn_moves , list , kind;
+        generate_knight_moves , list , mask;
+        generate_bishop_moves , list , mask;
+        generate_rook_moves , list , mask;
+        generate_queen_moves , list , mask;
+        generate_king_moves , list , mask;
+        kind != GenKind_GenCaptures;
+            generate_castling_moves , list;
+
+    // Evasions: when in check, only three things can help. Capture the
+    // checker, block the ray (single check only), or move the king.
+
+        us = side;
+        king = kings_at , color_index , us;
+        checking = checkers_of , us;
+        ours = by_color_at , color_index , us;
+
+        // The king may always try to run, whatever the number of checkers.
+        generate_king_moves , list , FULL_BOARD ^ ours;
+        checking == 0 || has_single_bit , checking == false;
+
+        checker = bit_scan_forward , checking;
+        target = checking | BETWEEN_at , king_at , checker;
+        generate_pawn_moves , list , GenKind_GenAll;
+        generate_knight_moves , list , target;
+        generate_bishop_moves , list , target;
+        generate_rook_moves , list , target;
+        generate_queen_moves , list , target;
+
+    // --- legality ----------------------------------------------------------
+
+    // Is a pseudo-legal move legal? Three cases, in order of frequency:
+    //
+    //  * a king move must land on a square the enemy does not attack, with
+    //    the king itself removed from the occupancy so that it cannot hide
+    //    behind its own shadow along a checking ray;
+    //  * an en passant capture removes two pieces from one rank at once and
+    //    needs the full hypothetical-occupancy test;
+    //  * anything else is legal exactly when the mover is not pinned, or is
+    //    pinned but stays on its pin line.
+
+        ++legality_test_count;
+        us = side;
+        them = opposite_color , us;
+        from = move_from , m;
+        to = move_to , m;
+        king = kings_at , color_index , us;
+
+        from == king;
+            move_is_castle , m;
+                true;
+
+            without_king = occupancy ^ 1 << from;
+            hypothetical = without_king | 1 << to & FULL_BOARD ^ 1 << to;
+            is_attacked_with , to , them , hypothetical | 1 << to == false;
+
+        move_is_en_passant , m;
+            captured = to - pawn_push_delta , us;
+            hypothetical = occupancy ^ 1 << from ^ 1 << captured | 1 << to;
+            exposed = 0;
+            exposed |= bishop_attacks , king , hypothetical & diagonal_sliders , them;
+            exposed |= rook_attacks , king , hypothetical & straight_sliders , them;
+            exposed == 0;
+
+        pinned = pinned_pieces , us;
+        pinned & 1 << from == 0;
+            true;
+
+        LINE_THROUGH_at , king_at , from & 1 << to != 0;
+
+    // Full legal generation: generate pseudo-legal moves, then filter. When
+    // in check the evasion generator narrows the candidate set first, which
+    // is what makes the filter cheap.
+
+        pseudo ;
+        in_check;
+            generate_evasions , pseudo;
+
+            generate_pseudo_legal , pseudo , GenKind_GenAll;
+
+        index = 0;
+        index < pseudo_size;
+            m = pseudo_packed_at , index;
+            is_legal_move , m;
+                list_add , m;
+
+            ++index;
+
+        pseudo;
+
+        pseudo ;
+        generate_pseudo_legal , pseudo , GenKind_GenCaptures;
+        index = 0;
+        index < pseudo_size;
+            m = pseudo_packed_at , index;
+            is_legal_move , m;
+                list_add , m;
+
+            index++;
+
+        pseudo;
+
+        list ;
+        generate_legal , list;
+        total = list_size;
+        list;
+        total;
+
+        count_legal_moves > 0;
+
+    // --- make and unmake ---------------------------------------------------
+
+    // Apply a move, pushing the irreversible state onto the history stack.
+    // The order matters: the captured piece comes off before the mover
+    // arrives, and the hash is updated as a side effect of each board edit.
+
+        make_move_count++;
+        us = side;
+        them = opposite_color , us;
+        from = move_from , m;
+        to = move_to , m;
+        kind = move_kind , m;
+        mover = squares_at , from;
+
+        record ;
+        record_move_packed = m;
+        record_castling = castling;
+        record_ep_square = ep_square;
+        record_halfmove = halfmove;
+        record_key = key;
+        record_captured = PIECE_CODE_COUNT;
+
+        // Retire the old en passant file from the hash before it changes.
+        ep_square != NO_SQUARE;
+            key ^= ZOBRIST_EP_FILE_at , file_of , ep_square;
+
+        key ^= ZOBRIST_CASTLING_at , castling & CASTLE_ALL;
+
+        ep_square = NO_SQUARE;
+        ++halfmove;
+
+        kind == 5;
+            // En passant: the captured pawn is not on the target square.
+            victim = to - pawn_push_delta , us;
+            record_captured = squares_at , victim;
+            remove_piece , victim;
+            move_piece , from , to;
+            halfmove = 0;
+
+            move_is_capture , m;
+                record_captured = squares_at , to;
+                remove_piece , to;
+                halfmove = 0;
+
+            move_piece , from , to;
+
+        piece_kind , mover == PieceKind_Pawn;
+            halfmove = 0;
+
+        // A double push arms the en passant square for exactly one ply.
+        kind == 1;
+            ep_square = to - pawn_push_delta , us;
+
+        // Promotions swap the pawn for the chosen piece on the target.
+        move_is_promotion , m;
+            remove_piece , to;
+            put_piece , make_piece , us , move_promotion_kind , m , to;
+
+        // Castling moves the rook as a second, silent half-move.
+        kind == 2 || kind == 3;
+            index = 0;
+            us == Color_White;
+                kind == 3;
+                    index = 1;
+
+                index = 2;
+                kind == 3;
+                    index = 3;
+
+            move_piece , CASTLE_ROOK_FROM_at , index , CASTLE_ROOK_TO_at , index;
+
+        castling &= CASTLE_MASK_at , from;
+        castling &= CASTLE_MASK_at , to;
+        key ^= ZOBRIST_CASTLING_at , castling & CASTLE_ALL;
+        ep_square != NO_SQUARE;
+            key ^= ZOBRIST_EP_FILE_at , file_of , ep_square;
+
+        key ^= ZOBRIST_SIDE;
+
+        us == Color_Black;
+            fullmove++;
+
+        side = them;
+        ply++;
+        history_push_back , record;
+
+    // Undo the most recent make_move. Every board edit above is its own
+    // inverse, so this is the same sequence run backwards.
+
+        history_size > 0;
+        record = history_back;
+        m = record_move_packed;
+        from = move_from , m;
+        to = move_to , m;
+        kind = move_kind , m;
+        us = opposite_color , side;
+
+        side = us;
+        --ply;
+        us == Color_Black;
+            --fullmove;
+
+        // Undo the rook half of a castle first, so the king move below sees
+        // the board it expects.
+        kind == 2 || kind == 3;
+            index = 0;
+            us == Color_White;
+                kind == 3;
+                    index = 1;
+
+                index = 2;
+                kind == 3;
+                    index = 3;
+
+            move_piece , CASTLE_ROOK_TO_at , index , CASTLE_ROOK_FROM_at , index;
+
+        // A promoted piece becomes a pawn again before it travels back.
+        move_is_promotion , m;
+            remove_piece , to;
+            put_piece , make_piece , us , PieceKind_Pawn , to;
+
+        move_piece , to , from;
+
+        kind == 5;
+            victim = to - pawn_push_delta , us;
+            put_piece , record_captured , victim;
+
+            record_captured < PIECE_CODE_COUNT;
+                put_piece , record_captured , to;
+
+        castling = record_castling;
+        ep_square = record_ep_square;
+        halfmove = record_halfmove;
+        key = record_key;
+        history_pop_back;
+
+    // A null move: pass the turn without touching a piece. The search uses
+    // it for null-move pruning; it is illegal in real chess, so the caller
+    // must check that the side to move is not in check first.
+
+        record ;
+        record_move_packed = MOVE_NULL;
+        record_captured = PIECE_CODE_COUNT;
+        record_castling = castling;
+        record_ep_square = ep_square;
+        record_halfmove = halfmove;
+        record_key = key;
+        ep_square != NO_SQUARE;
+            key ^= ZOBRIST_EP_FILE_at , file_of , ep_square;
+
+        ep_square = NO_SQUARE;
+        key ^= ZOBRIST_SIDE;
+        side = opposite_color , side;
+        ++halfmove;
+        ply++;
+        history_push_back , record;
+
+        history_size > 0;
+        record = history_back;
+        side = opposite_color , side;
+        castling = record_castling;
+        ep_square = record_ep_square;
+        halfmove = record_halfmove;
+        key = record_key;
+        ply--;
+        history_pop_back;
+
+        // --- terminal states ---------------------------------------------------
+
+        in_check && count_legal_moves == 0;
+
+        in_check == false && count_legal_moves == 0;
+
+        halfmove >= FIFTY_MOVE_PLIES;
+
+    // King versus king, king and minor versus king, and king and bishop
+    // versus king and same-coloured bishop are the drawn material configs.
+
+        pawns = by_kind_at , kind_index , PieceKind_Pawn;
+        rooks = by_kind_at , kind_index , PieceKind_Rook;
+        queens = by_kind_at , kind_index , PieceKind_Queen;
+        pawns | rooks | queens != 0;
+            false;
+
+        knights = by_kind_at , kind_index , PieceKind_Knight;
+        bishops = by_kind_at , kind_index , PieceKind_Bishop;
+        minors = knights | bishops;
+        popcount , minors <= 1;
+            true;
+
+        knights == 0 && popcount , bishops == 2;
+            bishops & LIGHT_SQUARES == bishops;
+                true;
+
+            bishops & DARK_SQUARES == bishops;
+                true;
+
+        false;
+
+    // Has the current key appeared `limit` times in the history? The scan
+    // only needs to look at every second entry, since the side to move must
+    // match, and can stop at the last irreversible move.
+
+        seen = 0;
+        index = history_size - 2;
+        span = 0;
+        index >= 0 && span < halfmove;
+            history_at , index_key == key;
+                ++seen;
+
+            index -= 2;
+            span += 2;
+
+        seen;
+
+        count_legal_moves == 0;
+            in_check;
+                side == Color_White;
+                    GameResult_BlackWins;
+
+                GameResult_WhiteWins;
+
+            GameResult_DrawStalemate;
+
+        is_fifty_move_draw;
+            GameResult_DrawFiftyMove;
+
+        is_insufficient_material;
+            GameResult_DrawInsufficient;
+
+        repetition_count >= 2;
+            GameResult_DrawRepetition;
+
+        GameResult_Ongoing;
+
+    // Does `m` give check, without playing it? The direct case is a table
+    // lookup against the enemy king; the discovered case asks whether the
+    // origin square was a blocker on some ray to that king.
+
+        us = side;
+        them = opposite_color , us;
+        enemy_king = kings_at , color_index , them;
+        enemy_king == NO_SQUARE;
+            false;
+
+        from = move_from , m;
+        to = move_to , m;
+        kind = piece_kind , squares_at , from;
+        move_is_promotion , m;
+            kind = move_promotion_kind , m;
+
+        after = occupancy ^ 1 << from | 1 << to;
+        attacks_of_kind , kind , us , to , after & 1 << enemy_king != 0;
+            true;
+
+        candidates = discovery_candidates , us;
+        candidates & 1 << from == 0;
+            false;
+
+        LINE_THROUGH_at , enemy_king_at , from & 1 << to == 0;
+
+    // The cheapest attacker of `square` belonging to `color`, as a bit. The
+    // static exchange loop pops these one at a time.
+
+        kind = 0;
+        kind < PIECE_KIND_COUNT;
+            subset = attackers
+                & by_color_at , color_index , color
+                & by_kind_at , kind;
+            subset != 0;
+                lowest_bit , subset;
+
+            ++kind;
+
+        0;
+
+    // --- fields ------------------------------------------------------------
+
+    // The mailbox: one piece code per square, PIECE_CODE_COUNT for empty.
+
+    // Two colour unions and six kind unions; a piece board is their and.
+
+    // The union of both colours, kept in step with every board edit.
+
+    // Cached king squares, because is_attacked wants them on every node.
+
+// --- Notation -------------------------------------------------------------
+
+// 'a'..'h' for a file index, '1'..'8' for a rank index.
+
+    CHAR_LOWER_A + file;
+
+    CHAR_ZERO + 1 + rank;
+
+    c - CHAR_LOWER_A;
+
+    c - CHAR_ZERO - 1;
+
+    // Coordinate name of a square: "e4", "a1", or "-" for the null square.
+
+    out ;
+    square == NO_SQUARE;
+        out_push_back , CHAR_DASH;
+        out;
+
+    out_push_back , file_char , file_of , square;
+    out_push_back , rank_char , rank_of , square;
+    out;
+
+    name_size < 2;
+        NO_SQUARE;
+
+    file = char_to_file , name_at , 0;
+    rank = char_to_rank , name_at , 1;
+    file < 0 || file >= BOARD_FILES || rank < 0 || rank >= BOARD_RANKS;
+        NO_SQUARE;
+
+    make_square , file , rank;
+
+    // The lowercase letter for a piece kind, as used by FEN and by SAN.
+
+    kind == PieceKind_Pawn;
+        'p';
+    kind == PieceKind_Knight;
+        'n';
+    kind == PieceKind_Bishop;
+        'b';
+    kind == PieceKind_Rook;
+        'r';
+    kind == PieceKind_Queen;
+        'q';
+    kind == PieceKind_King;
+        'k';
+
+        '?';
+
+    lower = c;
+    lower >= CHAR_UPPER_A && lower < CHAR_UPPER_A + 26;
+        lower = lower | CASE_BIT;
+
+    lower == 'p';
+        PieceKind_Pawn;
+    lower == 'n';
+        PieceKind_Knight;
+    lower == 'b';
+        PieceKind_Bishop;
+    lower == 'r';
+        PieceKind_Rook;
+    lower == 'q';
+        PieceKind_Queen;
+    lower == 'k';
+        PieceKind_King;
+
+        PieceKind_KindNone;
+
+        // The FEN letter for a piece code: uppercase for white, lowercase for black.
+
+    piece_is_empty , piece;
+        '.';
+
+    letter = kind_char , piece_kind , piece;
+    piece_color , piece == Color_White;
+        letter & FULL_BOARD ^ CASE_BIT;
+
+    letter;
+
+    // Long algebraic (UCI) form: "e2e4", "e7e8q", "e1g1" for a castle.
+
+    out ;
+    move_is_null , m;
+        out_append , "0000";
+        out;
+
+    from = move_from , m;
+    to = move_to , m;
+    out_push_back , file_char , file_of , from;
+    out_push_back , rank_char , rank_of , from;
+    out_push_back , file_char , file_of , to;
+    out_push_back , rank_char , rank_of , to;
+    move_is_promotion , m;
+        out_push_back , kind_char , move_promotion_kind , m;
+
+    out;
+
+// Parse a UCI move against a position, so that the promotion suffix and the
+// capture and castle flags can be reconstructed. Returns MOVE_NULL when the
+// text does not name a legal move.
+
+    text_size < 4;
+        MOVE_NULL;
+
+    from = make_square , char_to_file , text_at , 0 , char_to_rank , text_at , 1;
+    to = make_square , char_to_file , text_at , 2 , char_to_rank , text_at , 3;
+    promotion = PieceKind_KindNone;
+    text_size >= 5;
+        promotion = char_to_kind , text_at , 4;
+
+    list ;
+    board_generate_legal , list;
+    index = 0;
+    found = MOVE_NULL;
+    index < list_size;
+        m = list_packed_at , index;
+        move_from , m == from && move_to , m == to;
+            move_is_promotion , m == false && promotion == PieceKind_KindNone;
+                found = m;
+
+            move_is_promotion , m && move_promotion_kind , m == promotion;
+                found = m;
+
+        ++index;
+
+    list;
+    found;
+
+// Standard algebraic notation. The disambiguation rules are the fiddly part:
+// when two identical pieces can reach the same square, the file is added,
+// then the rank, then both.
+
+    out ;
+    move_is_king_castle , m;
+        out_append , "O-O";
+        out;
+
+    move_is_castle , m;
+        out_append , "O-O-O";
+        out;
+
+    from = move_from , m;
+    to = move_to , m;
+    mover = board_piece_at , from;
+    kind = piece_kind , mover;
+
+    kind == PieceKind_Pawn;
+        move_is_capture , m;
+            out_push_back , file_char , file_of , from;
+            out_push_back , 'x';
+
+        out_push_back , file_char , file_of , to;
+        out_push_back , rank_char , rank_of , to;
+        move_is_promotion , m;
+            out_push_back , '=';
+            out_push_back , kind_char , move_promotion_kind , m & FULL_BOARD ^ CASE_BIT;
+
+        out;
+
+    out_push_back , kind_char , kind & FULL_BOARD ^ CASE_BIT;
+
+    // Find every other piece of the same kind that could also play to `to`.
+    same_file = false;
+    same_rank = false;
+    ambiguous = false;
+    list ;
+    board_generate_legal , list;
+    index = 0;
+    index < list_size;
+        other = list_packed_at , index;
+        other_from = move_from , other;
+        other_from != from && move_to , other == to;
+            piece_kind , board_piece_at , other_from == kind;
+                ambiguous = true;
+                file_of , other_from == file_of , from;
+                    same_file = true;
+
+                rank_of , other_from == rank_of , from;
+                    same_rank = true;
+
+        index++;
+
+    list;
+
+    ambiguous;
+        same_file == false;
+            out_push_back , file_char , file_of , from;
+
+            same_rank == false;
+                out_push_back , rank_char , rank_of , from;
+
+                out_push_back , file_char , file_of , from;
+                out_push_back , rank_char , rank_of , from;
+
+    move_is_capture , m;
+        out_push_back , 'x';
+
+    out_push_back , file_char , file_of , to;
+    out_push_back , rank_char , rank_of , to;
+
+    board_gives_check , m;
+        out_push_back , '+';
+
+    out;
+
+// --- FEN ------------------------------------------------------------------
+
+// The standard start position, and a couple of the positions whose perft
+// numbers everyone checks a new generator against.
+
+// Parse a FEN string into `board`. The six fields are walked with a single
+// cursor rather than being split first, because the language has no string
+// splitting in its standard surface.
+
+    board_reset;
+
+    cursor = 0;
+    length = fen_size;
+
+    // Field one: the piece placement, rank eight first, files a to h.
+    rank = BOARD_RANKS - 1;
+    file = 0;
+    cursor < length;
+        c = fen_at , cursor;
+        c == CHAR_SPACE;
+            cursor++;
+
+        c == CHAR_SLASH;
+            rank--;
+            file = 0;
+            cursor++;
+
+        c >= CHAR_ZERO && c <= CHAR_NINE;
+            file += c - CHAR_ZERO;
+            ++cursor;
+
+        kind = char_to_kind , c;
+        kind == PieceKind_KindNone;
+            false;
+
+        color = Color_Black;
+        c < CHAR_LOWER_A;
+            color = Color_White;
+
+        rank < 0 || rank >= BOARD_RANKS || file < 0 || file >= BOARD_FILES;
+            false;
+
+        board_put_piece , make_piece , color , kind , make_square , file , rank;
+        ++file;
+        ++cursor;
+
+    // Field two: the side to move.
+    cursor < length;
+        fen_at , cursor == 'b';
+            board_side = Color_Black;
+
+            board_side = Color_White;
+
+        cursor++;
+
+    cursor < length && fen_at , cursor == CHAR_SPACE;
+        cursor++;
+
+    // Field three: the castling rights, in KQkq order or a bare dash.
+    board_castling = CASTLE_NONE;
+    cursor < length;
+        c = fen_at , cursor;
+        c == CHAR_SPACE;
+            ++cursor;
+
+        c == 'K';
+            board_castling |= CASTLE_WHITE_KING;
+
+        c == 'Q';
+            board_castling |= CASTLE_WHITE_QUEEN;
+
+        c == 'k';
+            board_castling |= CASTLE_BLACK_KING;
+
+        c == 'q';
+            board_castling |= CASTLE_BLACK_QUEEN;
+
+        ++cursor;
+
+    // Field four: the en passant target square.
+    board_ep_square = NO_SQUARE;
+    cursor < length;
+        c = fen_at , cursor;
+        c == CHAR_DASH;
+            cursor += 2;
+
+            cursor + 1 < length;
+                board_ep_square = make_square , char_to_file , c , char_to_rank , fen_at , cursor + 1;
+
+            cursor += 3;
+
+    // Fields five and six: the halfmove clock and the fullmove number.
+    halfmove = 0;
+    cursor < length && fen_at , cursor >= CHAR_ZERO && fen_at , cursor <= CHAR_NINE;
+        halfmove = halfmove * 10 + fen_at , cursor - CHAR_ZERO;
+        ++cursor;
+
+    board_halfmove = halfmove;
+    cursor < length && fen_at , cursor == CHAR_SPACE;
+        ++cursor;
+
+    fullmove = 0;
+    cursor < length && fen_at , cursor >= CHAR_ZERO && fen_at , cursor <= CHAR_NINE;
+        fullmove = fullmove * 10 + fen_at , cursor - CHAR_ZERO;
+        ++cursor;
+
+    fullmove == 0;
+        fullmove = 1;
+
+    board_fullmove = fullmove;
+    board_key = board_compute_key;
+    true;
+
+// Serialise a position back to FEN. The run-length encoding of empty squares
+// is the only interesting part.
+
+    out ;
+    rank = BOARD_RANKS - 1;
+    rank >= 0;
+        empty_run = 0;
+        file = 0;
+        file < BOARD_FILES;
+            piece = board_piece_at , make_square , file , rank;
+            piece_is_empty , piece;
+                empty_run++;
+
+                empty_run > 0;
+                    out_push_back , CHAR_ZERO + empty_run;
+                    empty_run = 0;
+
+                out_push_back , piece_char , piece;
+
+            ++file;
+
+        empty_run > 0;
+            out_push_back , CHAR_ZERO + empty_run;
+
+        rank > 0;
+            out_push_back , CHAR_SLASH;
+
+        --rank;
+
+    out_push_back , CHAR_SPACE;
+    board_side_to_move == Color_White;
+        out_push_back , 'w';
+
+        out_push_back , 'b';
+
+    out_push_back , CHAR_SPACE;
+    rights = board_castling_rights;
+    rights == CASTLE_NONE;
+        out_push_back , CHAR_DASH;
+
+        rights & CASTLE_WHITE_KING != 0;
+            out_push_back , 'K';
+
+        rights & CASTLE_WHITE_QUEEN != 0;
+            out_push_back , 'Q';
+
+        rights & CASTLE_BLACK_KING != 0;
+            out_push_back , 'k';
+
+        rights & CASTLE_BLACK_QUEEN != 0;
+            out_push_back , 'q';
+
+    out_push_back , CHAR_SPACE;
+    out_append , square_name , board_en_passant_square;
+    out_push_back , CHAR_SPACE;
+    out_append , to_string , board_halfmove_clock;
+    out_push_back , CHAR_SPACE;
+    out_append , to_string , board_fullmove_number;
+    out;
+
+    // An ASCII diagram of the board, rank eight at the top.
+
+    out ;
+    rank = BOARD_RANKS - 1;
+    rank >= 0;
+        out_push_back , rank_char , rank;
+        out_push_back , CHAR_SPACE;
+        file = 0;
+        file < BOARD_FILES;
+            out_push_back , piece_char , board_piece_at , make_square , file , rank;
+            out_push_back , CHAR_SPACE;
+            ++file;
+
+        out_push_back , '\n';
+        rank--;
+
+    out_append , "  a b c d e f g h\n";
+    out;
+
+// --- Perft ----------------------------------------------------------------
+
+// Node counts per depth, so the driver can print a table.
+
+    depth = 0;
+    depth < 16;
+        perft_node_counts_at , depth = 0;
+        perft_capture_counts_at , depth = 0;
+        perft_ep_counts_at , depth = 0;
+        perft_castle_counts_at , depth = 0;
+        perft_promotion_counts_at , depth = 0;
+        perft_check_counts_at , depth = 0;
+        depth++;
+
+// The plain leaf counter. At depth one the number of legal moves *is* the
+// answer, which saves a whole ply of make/unmake.
+
+    depth == 0;
+        1;
+
+    list ;
+    board_generate_legal , list;
+    depth == 1;
+        leaves = list_size;
+        list;
+        leaves;
+
+    nodes = 0;
+    index = 0;
+    index < list_size;
+        m = list_packed_at , index;
+        board_make_move , m;
+        nodes += perft , board , depth - 1;
+        board_unmake_move;
+        ++index;
+
+    list;
+    nodes;
+
+// The instrumented variant, which also fills the per-depth breakdown that a
+// generator bug shows up in long before the node total does.
+
+    depth == 0;
+        perft_node_counts_at , ply += 1;
+        1;
+
+    list ;
+    board_generate_legal , list;
+    nodes = 0;
+    index = 0;
+    index < list_size;
+        m = list_packed_at , index;
+        move_is_capture , m;
+            perft_capture_counts_at , ply += 1;
+
+        move_is_en_passant , m;
+            perft_ep_counts_at , ply += 1;
+
+        move_is_castle , m;
+            perft_castle_counts_at , ply += 1;
+
+        move_is_promotion , m;
+            perft_promotion_counts_at , ply += 1;
+
+        board_gives_check , m;
+            perft_check_counts_at , ply += 1;
+
+        board_make_move , m;
+        nodes += perft_detailed , board , depth - 1 , ply + 1;
+        board_unmake_move;
+        ++index;
+
+    list;
+    perft_node_counts_at , ply += nodes;
+    nodes;
+
+// Per-root-move node counts, the standard way to bisect a generator bug
+// against a reference implementation.
+
+    list ;
+    board_generate_legal , list;
+    total = 0;
+    index = 0;
+    index < list_size;
+        m = list_packed_at , index;
+        board_make_move , m;
+        nodes = perft , board , depth - 1;
+        board_unmake_move;
+        total += nodes;
+
+        line ;
+        line_append , move_to_uci , m;
+        line_append , ": ";
+        line_append , to_string , nodes;
+        println , line;
+        line;
+        index++;
+
+    list;
+
+    summary ;
+    summary_append , "total: ";
+    summary_append , to_string , total;
+    println , summary;
+    summary;
+
+// Make and unmake every legal move, asserting the position is byte for byte
+// what it was. This catches an unmake bug immediately instead of at the next
+// perft mismatch twelve plies deeper.
+
+    key_before = board_hash_key;
+    occupancy_before = board_occupied;
+    castling_before = board_castling_rights;
+
+    list ;
+    board_generate_legal , list;
+    index = 0;
+    ok = true;
+    index < list_size;
+        m = list_packed_at , index;
+        board_make_move , m;
+        board_unmake_move;
+        board_hash_key != key_before;
+            ok = false;
+
+        board_occupied != occupancy_before;
+            ok = false;
+
+        board_castling_rights != castling_before;
+            ok = false;
+
+        ++index;
+
+    list;
+    board_hash_key == key_before;
+    board_occupied == occupancy_before;
+    ok;
+
+// --- Evaluation tables ----------------------------------------------------
+
+// Centipawn material values, middlegame and endgame. A king is scored as
+// zero: both sides always have exactly one, so any value cancels.
+
+// Phase weights: the game is "endgame" once the weighted sum of the
+// remaining pieces falls to zero. A full board sums to PHASE_TOTAL.
+
+// Piece-square tables, one per kind per phase, indexed from white's point of
+// view. Black reads them through flip_rank.
+
+// PASSED_MASK[c][s] is every square that could hold an enemy pawn stopping
+// the pawn on s: the three files around s, from the next rank forward.
+
+// The king zone is the king's square plus its eight neighbours plus the
+// three squares two ranks ahead, which is where an attack builds up.
+
+// Bonus per attacker weight, saturating at the end of the table.
+
+// Structural bonuses and penalties, all in centipawns.
+
+// Write one rank of a piece-square table. The eight values are listed file a
+// to file h, and the rank argument is the white-side rank, so the tables can
+// be typed in the order a human draws a board.
+
+    table_at , make_square , 0 , rank = v0;
+    table_at , make_square , 1 , rank = v1;
+    table_at , make_square , 2 , rank = v2;
+    table_at , make_square , 3 , rank = v3;
+    table_at , make_square , 4 , rank = v4;
+    table_at , make_square , 5 , rank = v5;
+    table_at , make_square , 6 , rank = v6;
+    table_at , make_square , 7 , rank = v7;
+
+    MATERIAL_MG_at , 0 = 82;
+    MATERIAL_MG_at , 1 = 337;
+    MATERIAL_MG_at , 2 = 365;
+    MATERIAL_MG_at , 3 = 477;
+    MATERIAL_MG_at , 4 = 1025;
+    MATERIAL_MG_at , 5 = 0;
+
+    MATERIAL_EG_at , 0 = 94;
+    MATERIAL_EG_at , 1 = 281;
+    MATERIAL_EG_at , 2 = 297;
+    MATERIAL_EG_at , 3 = 512;
+    MATERIAL_EG_at , 4 = 936;
+    MATERIAL_EG_at , 5 = 0;
+
+    PHASE_WEIGHT_at , 0 = 0;
+    PHASE_WEIGHT_at , 1 = 1;
+    PHASE_WEIGHT_at , 2 = 1;
+    PHASE_WEIGHT_at , 3 = 2;
+    PHASE_WEIGHT_at , 4 = 4;
+    PHASE_WEIGHT_at , 5 = 0;
+
+    // The middlegame piece-square tables. Rank 0 is white's first rank.
+
+    kind = 0;
+    kind < PIECE_KIND_COUNT;
+        PST_MG_at , kind = vector , int , SQUARE_COUNT;
+        ++kind;
+
+    // Pawns: reward the centre, punish the f and g pawns for wandering.
+    set_pst_rank , PST_MG_at , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0;
+    set_pst_rank , PST_MG_at , 0 , 1 , -35 , -1 , -20 , -23 , -15 , 24 , 38 , -22;
+    set_pst_rank , PST_MG_at , 0 , 2 , -26 , -4 , -4 , -10 , 3 , 3 , 33 , -12;
+    set_pst_rank , PST_MG_at , 0 , 3 , -27 , -2 , -5 , 12 , 17 , 6 , 10 , -25;
+    set_pst_rank , PST_MG_at , 0 , 4 , -14 , 13 , 6 , 21 , 23 , 12 , 17 , -23;
+    set_pst_rank , PST_MG_at , 0 , 5 , -6 , 7 , 26 , 31 , 65 , 56 , 25 , -20;
+    set_pst_rank , PST_MG_at , 0 , 6 , 98 , 134 , 61 , 95 , 68 , 126 , 34 , -11;
+    set_pst_rank , PST_MG_at , 0 , 7 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0;
+
+    // Knights: strongly centralised, miserable on the rim.
+    set_pst_rank , PST_MG_at , 1 , 0 , -105 , -21 , -58 , -33 , -17 , -28 , -19 , -23;
+    set_pst_rank , PST_MG_at , 1 , 1 , -29 , -53 , -12 , -3 , -1 , 18 , -14 , -19;
+    set_pst_rank , PST_MG_at , 1 , 2 , -23 , -9 , 12 , 10 , 19 , 17 , 25 , -16;
+    set_pst_rank , PST_MG_at , 1 , 3 , -13 , 4 , 16 , 13 , 28 , 19 , 21 , -8;
+    set_pst_rank , PST_MG_at , 1 , 4 , -9 , 17 , 19 , 53 , 37 , 69 , 18 , 22;
+    set_pst_rank , PST_MG_at , 1 , 5 , -47 , 60 , 37 , 65 , 84 , 129 , 73 , 44;
+    set_pst_rank , PST_MG_at , 1 , 6 , -73 , -41 , 72 , 36 , 23 , 62 , 7 , -17;
+    set_pst_rank , PST_MG_at , 1 , 7 , -167 , -89 , -34 , -49 , 61 , -97 , -15 , -107;
+
+    // Bishops: long diagonals and the two development squares.
+    set_pst_rank , PST_MG_at , 2 , 0 , -33 , -3 , -14 , -21 , -13 , -12 , -39 , -21;
+    set_pst_rank , PST_MG_at , 2 , 1 , 4 , 15 , 16 , 0 , 7 , 21 , 33 , 1;
+    set_pst_rank , PST_MG_at , 2 , 2 , 0 , 15 , 15 , 15 , 14 , 27 , 18 , 10;
+    set_pst_rank , PST_MG_at , 2 , 3 , -6 , 13 , 13 , 26 , 34 , 12 , 10 , 4;
+    set_pst_rank , PST_MG_at , 2 , 4 , -4 , 5 , 19 , 50 , 37 , 37 , 7 , -2;
+    set_pst_rank , PST_MG_at , 2 , 5 , -16 , 37 , 43 , 40 , 35 , 50 , 37 , -2;
+    set_pst_rank , PST_MG_at , 2 , 6 , -26 , 16 , -18 , -13 , 30 , 59 , 18 , -47;
+    set_pst_rank , PST_MG_at , 2 , 7 , -29 , 4 , -82 , -37 , -25 , -42 , 7 , -8;
+
+    // Rooks: the seventh rank and the central files.
+    set_pst_rank , PST_MG_at , 3 , 0 , -19 , -13 , 1 , 17 , 16 , 7 , -37 , -26;
+    set_pst_rank , PST_MG_at , 3 , 1 , -44 , -16 , -20 , -9 , -1 , 11 , -6 , -71;
+    set_pst_rank , PST_MG_at , 3 , 2 , -45 , -25 , -16 , -17 , 3 , 0 , -5 , -33;
+    set_pst_rank , PST_MG_at , 3 , 3 , -36 , -26 , -12 , -1 , 9 , -7 , 6 , -23;
+    set_pst_rank , PST_MG_at , 3 , 4 , -24 , -11 , 7 , 26 , 24 , 35 , -8 , -20;
+    set_pst_rank , PST_MG_at , 3 , 5 , -5 , 19 , 26 , 36 , 17 , 45 , 61 , 16;
+    set_pst_rank , PST_MG_at , 3 , 6 , 27 , 32 , 58 , 62 , 80 , 67 , 26 , 44;
+    set_pst_rank , PST_MG_at , 3 , 7 , 32 , 42 , 32 , 51 , 63 , 9 , 31 , 43;
+
+    // Queens: mild centralisation, a penalty for coming out early.
+    set_pst_rank , PST_MG_at , 4 , 0 , -1 , -18 , -9 , 10 , -15 , -25 , -31 , -50;
+    set_pst_rank , PST_MG_at , 4 , 1 , -35 , -8 , 11 , 2 , 8 , 15 , -3 , 1;
+    set_pst_rank , PST_MG_at , 4 , 2 , -14 , 2 , -11 , -2 , -5 , 2 , 14 , 5;
+    set_pst_rank , PST_MG_at , 4 , 3 , -9 , -26 , -9 , -10 , -2 , -4 , 3 , -3;
+    set_pst_rank , PST_MG_at , 4 , 4 , -27 , -27 , -16 , -16 , -1 , 17 , -2 , 1;
+    set_pst_rank , PST_MG_at , 4 , 5 , -13 , -17 , 7 , 8 , 29 , 56 , 47 , 57;
+    set_pst_rank , PST_MG_at , 4 , 6 , -24 , -39 , -5 , 1 , -16 , 57 , 28 , 54;
+    set_pst_rank , PST_MG_at , 4 , 7 , -28 , 0 , 29 , 12 , 59 , 44 , 43 , 45;
+
+    // Kings: stay home and castle.
+    set_pst_rank , PST_MG_at , 5 , 0 , -15 , 36 , 12 , -54 , 8 , -28 , 24 , 14;
+    set_pst_rank , PST_MG_at , 5 , 1 , 1 , 7 , -8 , -64 , -43 , -16 , 9 , 8;
+    set_pst_rank , PST_MG_at , 5 , 2 , -14 , -14 , -22 , -46 , -44 , -30 , -15 , -27;
+    set_pst_rank , PST_MG_at , 5 , 3 , -49 , -1 , -27 , -39 , -46 , -44 , -33 , -51;
+    set_pst_rank , PST_MG_at , 5 , 4 , -17 , -20 , -12 , -27 , -30 , -25 , -14 , -36;
+    set_pst_rank , PST_MG_at , 5 , 5 , -9 , 24 , 2 , -16 , -20 , 6 , 22 , -22;
+    set_pst_rank , PST_MG_at , 5 , 6 , 29 , -1 , -20 , -7 , -8 , -4 , -38 , -29;
+    set_pst_rank , PST_MG_at , 5 , 7 , -65 , 23 , 16 , -15 , -56 , -34 , 2 , 13;
+
+    // The endgame tables. Pawns matter more, kings march to the centre.
+
+    kind = 0;
+    kind < PIECE_KIND_COUNT;
+        PST_EG_at , kind = vector , int , SQUARE_COUNT;
+        ++kind;
+
+    set_pst_rank , PST_EG_at , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0;
+    set_pst_rank , PST_EG_at , 0 , 1 , 13 , 8 , 8 , 10 , 13 , 0 , 2 , -7;
+    set_pst_rank , PST_EG_at , 0 , 2 , 4 , 7 , -6 , 1 , 0 , -5 , -1 , -8;
+    set_pst_rank , PST_EG_at , 0 , 3 , 13 , 9 , -3 , -7 , -7 , -8 , 3 , -1;
+    set_pst_rank , PST_EG_at , 0 , 4 , 32 , 24 , 13 , 5 , -2 , 4 , 17 , 17;
+    set_pst_rank , PST_EG_at , 0 , 5 , 94 , 100 , 85 , 67 , 56 , 53 , 82 , 84;
+    set_pst_rank , PST_EG_at , 0 , 6 , 178 , 173 , 158 , 134 , 147 , 132 , 165 , 187;
+    set_pst_rank , PST_EG_at , 0 , 7 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0;
+
+    set_pst_rank , PST_EG_at , 1 , 0 , -29 , -51 , -23 , -15 , -22 , -18 , -50 , -64;
+    set_pst_rank , PST_EG_at , 1 , 1 , -42 , -20 , -10 , -5 , -2 , -20 , -23 , -44;
+    set_pst_rank , PST_EG_at , 1 , 2 , -23 , -3 , -1 , 15 , 10 , -3 , -20 , -22;
+    set_pst_rank , PST_EG_at , 1 , 3 , -18 , -6 , 16 , 25 , 16 , 17 , 4 , -18;
+    set_pst_rank , PST_EG_at , 1 , 4 , -17 , 3 , 22 , 22 , 22 , 11 , 8 , -18;
+    set_pst_rank , PST_EG_at , 1 , 5 , -24 , -20 , 10 , 9 , -1 , -9 , -19 , -41;
+    set_pst_rank , PST_EG_at , 1 , 6 , -25 , -8 , -25 , -2 , -9 , -25 , -24 , -52;
+    set_pst_rank , PST_EG_at , 1 , 7 , -58 , -38 , -13 , -28 , -31 , -27 , -63 , -99;
+
+    set_pst_rank , PST_EG_at , 2 , 0 , -23 , -9 , -23 , -5 , -9 , -16 , -5 , -17;
+    set_pst_rank , PST_EG_at , 2 , 1 , -14 , -18 , -7 , -1 , 4 , -9 , -15 , -27;
+    set_pst_rank , PST_EG_at , 2 , 2 , -12 , -3 , 8 , 10 , 13 , 3 , -7 , -15;
+    set_pst_rank , PST_EG_at , 2 , 3 , -6 , 3 , 13 , 19 , 7 , 10 , -3 , -9;
+    set_pst_rank , PST_EG_at , 2 , 4 , -3 , 9 , 12 , 9 , 14 , 10 , 3 , 2;
+    set_pst_rank , PST_EG_at , 2 , 5 , 2 , -8 , 0 , -1 , -2 , 6 , 0 , 4;
+    set_pst_rank , PST_EG_at , 2 , 6 , -8 , -4 , 7 , -12 , -3 , -13 , -4 , -14;
+    set_pst_rank , PST_EG_at , 2 , 7 , -14 , -21 , -11 , -8 , -7 , -9 , -17 , -24;
+
+    set_pst_rank , PST_EG_at , 3 , 0 , -9 , 2 , 3 , -1 , -5 , -13 , 4 , -20;
+    set_pst_rank , PST_EG_at , 3 , 1 , -6 , -6 , 0 , 2 , -9 , -9 , -11 , -3;
+    set_pst_rank , PST_EG_at , 3 , 2 , -4 , 0 , -5 , -1 , -7 , -12 , -8 , -16;
+    set_pst_rank , PST_EG_at , 3 , 3 , 3 , 5 , 8 , 4 , -5 , -6 , -8 , -11;
+    set_pst_rank , PST_EG_at , 3 , 4 , 4 , 3 , 13 , 1 , 2 , 1 , -1 , 2;
+    set_pst_rank , PST_EG_at , 3 , 5 , 7 , 7 , 7 , 5 , 4 , -3 , -5 , -3;
+    set_pst_rank , PST_EG_at , 3 , 6 , 11 , 13 , 13 , 11 , -3 , 3 , 8 , 3;
+    set_pst_rank , PST_EG_at , 3 , 7 , 13 , 10 , 18 , 15 , 12 , 12 , 8 , 5;
+
+    set_pst_rank , PST_EG_at , 4 , 0 , -33 , -28 , -22 , -43 , -5 , -32 , -20 , -41;
+    set_pst_rank , PST_EG_at , 4 , 1 , -22 , -23 , -30 , -16 , -16 , -23 , -36 , -32;
+    set_pst_rank , PST_EG_at , 4 , 2 , -16 , -27 , 15 , 6 , 9 , 17 , 10 , 5;
+    set_pst_rank , PST_EG_at , 4 , 3 , -18 , 28 , 19 , 47 , 31 , 34 , 39 , 23;
+    set_pst_rank , PST_EG_at , 4 , 4 , 3 , 22 , 24 , 45 , 57 , 40 , 57 , 36;
+    set_pst_rank , PST_EG_at , 4 , 5 , -20 , 6 , 9 , 49 , 47 , 35 , 19 , 9;
+    set_pst_rank , PST_EG_at , 4 , 6 , -17 , 20 , 32 , 41 , 58 , 25 , 30 , 0;
+    set_pst_rank , PST_EG_at , 4 , 7 , -9 , 22 , 22 , 27 , 27 , 19 , 10 , 20;
+
+    set_pst_rank , PST_EG_at , 5 , 0 , -53 , -34 , -21 , -11 , -28 , -14 , -24 , -43;
+    set_pst_rank , PST_EG_at , 5 , 1 , -27 , -11 , 4 , 13 , 14 , 4 , -5 , -17;
+    set_pst_rank , PST_EG_at , 5 , 2 , -19 , -3 , 11 , 21 , 23 , 16 , 7 , -9;
+    set_pst_rank , PST_EG_at , 5 , 3 , -18 , -4 , 21 , 24 , 27 , 23 , 9 , -11;
+    set_pst_rank , PST_EG_at , 5 , 4 , -8 , 22 , 24 , 27 , 26 , 33 , 26 , 3;
+    set_pst_rank , PST_EG_at , 5 , 5 , 10 , 17 , 23 , 15 , 20 , 45 , 44 , 13;
+    set_pst_rank , PST_EG_at , 5 , 6 , -12 , 17 , 14 , 17 , 17 , 38 , 23 , 11;
+    set_pst_rank , PST_EG_at , 5 , 7 , -74 , -35 , -18 , -18 , -11 , 15 , 4 , -17;
+
+    // Passed pawn and king zone masks, both built by walking files and ranks.
+
+    color = 0;
+    color < COLOR_COUNT;
+        PASSED_MASK_at , color = vector , int , SQUARE_COUNT;
+        KING_ZONE_at , color = vector , int , SQUARE_COUNT;
+        ++color;
+
+    side = 0;
+    side < COLOR_COUNT;
+        forward = 1;
+        side == 1;
+            forward = -1;
+
+        rank = 0;
+        rank < BOARD_RANKS;
+            file = 0;
+            file < BOARD_FILES;
+                square = make_square , file , rank;
+
+                // Every square on the three files ahead of the pawn.
+                passed = 0;
+                scan = rank + forward;
+                scan >= 0 && scan < BOARD_RANKS;
+                    neighbour = file - 1;
+                    neighbour <= file + 1;
+                        neighbour >= 0 && neighbour < BOARD_FILES;
+                            passed |= 1 << make_square , neighbour , scan;
+
+                        ++neighbour;
+
+                    scan += forward;
+
+                PASSED_MASK_at , side_at , square = passed;
+
+                // The king's neighbourhood plus the shelter in front of it.
+                zone = KING_ATTACKS_at , square | 1 << square;
+                ahead = rank + forward + forward;
+                ahead >= 0 && ahead < BOARD_RANKS;
+                    neighbour = file - 1;
+                    neighbour <= file + 1;
+                        neighbour >= 0 && neighbour < BOARD_FILES;
+                            zone |= 1 << make_square , neighbour , ahead;
+
+                        ++neighbour;
+
+                KING_ZONE_at , side_at , square = zone;
+
+                ++file;
+
+            rank++;
+
+        side++;
+
+    // A quadratic ramp that saturates, so that a fourth attacker adds less
+    // than the second did.
+    index = 0;
+    index < 64;
+        value = index * index * 3;
+        value > 500;
+            value = 500;
+
+        KING_ATTACK_SCALE_at , index = value;
+        ++index;
+
+// --- Evaluation -----------------------------------------------------------
+
+// How far into the endgame the position is, from PHASE_TOTAL (all pieces on
+// the board) down to zero (bare kings).
+
+    phase = 0;
+    kind = 1;
+    kind < 5;
+        white = popcount , board_pieces , Color_White , kind_from_index , kind;
+        black = popcount , board_pieces , Color_Black , kind_from_index , kind;
+        phase += white + black * PHASE_WEIGHT_at , kind;
+        ++kind;
+
+    phase > PHASE_TOTAL;
+        phase = PHASE_TOTAL;
+
+    phase;
+
+// Blend a middlegame and an endgame score by the phase. Integer division at
+// the end keeps everything in centipawns.
+
+    mg * phase + eg * PHASE_TOTAL - phase / PHASE_TOTAL;
+
+// Material plus piece-square, for one colour, in both phases at once. The
+// pair is returned through two out-parameters because the language has no
+// tuples in its standard surface.
+
+    mg_total = 0;
+    eg_total = 0;
+    kind = 0;
+    kind < PIECE_KIND_COUNT;
+        pieces = board_pieces , color , kind_from_index , kind;
+        pieces != 0;
+            square = bit_scan_forward , pieces;
+            pieces = clear_lowest_bit , pieces;
+            indexed = relative_square , color , square;
+            mg_total += MATERIAL_MG_at , kind + PST_MG_at , kind_at , indexed;
+            eg_total += MATERIAL_EG_at , kind + PST_EG_at , kind_at , indexed;
+
+        kind++;
+
+    *mg = mg_total;
+    *eg = eg_total;
+
+// Mobility: the number of squares each piece attacks that are not occupied
+// by a friendly piece and not attacked by an enemy pawn.
+
+    them = opposite_color , color;
+    ours = board_pieces_of_color , color;
+    occupancy = board_occupied;
+    enemy_pawn_attacks = pawn_attack_span , them , board_pieces , them , PieceKind_Pawn;
+    allowed = FULL_BOARD ^ ours | enemy_pawn_attacks;
+    total = 0;
+
+    knights = board_pieces , color , PieceKind_Knight;
+    knights != 0;
+        square = bit_scan_forward , knights;
+        knights = clear_lowest_bit , knights;
+        total += popcount , KNIGHT_ATTACKS_at , square & allowed * 4;
+
+    bishops = board_pieces , color , PieceKind_Bishop;
+    bishops != 0;
+        square = bit_scan_forward , bishops;
+        bishops = clear_lowest_bit , bishops;
+        total += popcount , bishop_attacks , square , occupancy & allowed * 3;
+
+    rooks = board_pieces , color , PieceKind_Rook;
+    rooks != 0;
+        square = bit_scan_forward , rooks;
+        rooks = clear_lowest_bit , rooks;
+        total += popcount , rook_attacks , square , occupancy & allowed * 2;
+
+    queens = board_pieces , color , PieceKind_Queen;
+    queens != 0;
+        square = bit_scan_forward , queens;
+        queens = clear_lowest_bit , queens;
+        total += popcount , queen_attacks , square , occupancy & allowed;
+
+    total;
+
+    // Doubled, isolated, backward and passed pawns, plus the connected bonus.
+
+    them = opposite_color , color;
+    ours = board_pieces , color , PieceKind_Pawn;
+    theirs = board_pieces , them , PieceKind_Pawn;
+    score = 0;
+
+    // Doubled pawns: count the extra pawns on every file.
+    file = 0;
+    file < BOARD_FILES;
+        on_file = popcount , ours & FILE_MASKS_at , file;
+        on_file > 1;
+            score += PENALTY_DOUBLED_PAWN * on_file - 1;
+
+        ++file;
+
+    pawns = ours;
+    pawns != 0;
+        square = bit_scan_forward , pawns;
+        pawns = clear_lowest_bit , pawns;
+        f = file_of , square;
+
+        // Isolated: no friendly pawn on either neighbouring file.
+        ours & ADJACENT_FILES_at , f == 0;
+            score += PENALTY_ISOLATED_PAWN;
+
+            // Connected: a friendly pawn defends it or stands beside it.
+            support = pawn_attack_span , them , 1 << square & ours;
+            support != 0;
+                score += BONUS_CONNECTED_PAWN;
+
+                // Backward: cannot advance without being met by a pawn.
+                stop = 1 << square + pawn_push_delta , color;
+                pawn_attack_span , color , stop & theirs != 0;
+                    score += PENALTY_BACKWARD_PAWN;
+
+        // Passed: nothing in the three files ahead can stop it.
+        PASSED_MASK_at , color_index , color_at , square & theirs == 0;
+            advanced = relative_rank , color , square;
+            score += BONUS_PASSED_BASE + BONUS_PASSED_RANK * advanced * advanced / 4;
+
+    score;
+
+// Rooks like open and half-open files; the bishop pair is worth a pawn's
+// worth of long-term pressure.
+
+    them = opposite_color , color;
+    ours = board_pieces , color , PieceKind_Pawn;
+    theirs = board_pieces , them , PieceKind_Pawn;
+    score = 0;
+
+    rooks = board_pieces , color , PieceKind_Rook;
+    rooks != 0;
+        square = bit_scan_forward , rooks;
+        rooks = clear_lowest_bit , rooks;
+        mask = FILE_MASKS_at , file_of , square;
+        mask & ours == 0;
+            mask & theirs == 0;
+                score += BONUS_ROOK_OPEN_FILE;
+
+                score += BONUS_ROOK_SEMI_OPEN;
+
+        relative_rank , color , square == 6;
+            score += 20;
+
+    popcount , board_pieces , color , PieceKind_Bishop >= 2;
+        score += BONUS_BISHOP_PAIR;
+
+    score;
+
+// King safety: count the attackers into the king zone, weight them by piece
+// value, and look up the ramp.
+
+    king = board_king_square , color;
+    king == NO_SQUARE;
+        0;
+
+    them = opposite_color , color;
+    zone = KING_ZONE_at , color_index , color_at , king;
+    occupancy = board_occupied;
+    weight = 0;
+
+    knights = board_pieces , them , PieceKind_Knight;
+    knights != 0;
+        square = bit_scan_forward , knights;
+        knights = clear_lowest_bit , knights;
+        weight += popcount , KNIGHT_ATTACKS_at , square & zone * 2;
+
+    bishops = board_pieces , them , PieceKind_Bishop;
+    bishops != 0;
+        square = bit_scan_forward , bishops;
+        bishops = clear_lowest_bit , bishops;
+        weight += popcount , bishop_attacks , square , occupancy & zone * 2;
+
+    rooks = board_pieces , them , PieceKind_Rook;
+    rooks != 0;
+        square = bit_scan_forward , rooks;
+        rooks = clear_lowest_bit , rooks;
+        weight += popcount , rook_attacks , square , occupancy & zone * 3;
+
+    queens = board_pieces , them , PieceKind_Queen;
+    queens != 0;
+        square = bit_scan_forward , queens;
+        queens = clear_lowest_bit , queens;
+        weight += popcount , queen_attacks , square , occupancy & zone * 5;
+
+    weight >= 64;
+        weight = 63;
+
+    score = -KING_ATTACK_SCALE_at , weight;
+
+    // A king on a file with no pawn of its own is exposed.
+    shelter = FILE_MASKS_at , file_of , king & board_pieces , color , PieceKind_Pawn;
+    shelter == 0;
+        score += PENALTY_KING_EXPOSED;
+
+    score;
+
+    // The whole evaluation, from the side to move's point of view.
+
+    phase = game_phase , board;
+
+    white_mg = 0;
+    white_eg = 0;
+    material_and_placement , board , Color_White , white_mg , white_eg;
+
+    black_mg = 0;
+    black_eg = 0;
+    material_and_placement , board , Color_Black , black_mg , black_eg;
+
+    mg = white_mg - black_mg;
+    eg = white_eg - black_eg;
+
+    mobility = mobility_score , board , Color_White - mobility_score , board , Color_Black;
+    mg += mobility * MOBILITY_WEIGHT_MG / 4;
+    eg += mobility * MOBILITY_WEIGHT_EG / 4;
+
+    structure = pawn_structure_score , board , Color_White - pawn_structure_score , board , Color_Black;
+    mg += structure;
+    eg += structure * 3 / 2;
+
+    bonuses = piece_bonus_score , board , Color_White - piece_bonus_score , board , Color_Black;
+    mg += bonuses;
+    eg += bonuses;
+
+    safety = king_safety_score , board , Color_White - king_safety_score , board , Color_Black;
+    mg += safety;
+    eg += safety / 4;
+
+    score = taper , mg , eg , phase;
+    board_side_to_move == Color_Black;
+        score = -score;
+
+    score + TEMPO_BONUS;
+
+// A quick material-only score, used by the move ordering to sort captures
+// most-valuable-victim first.
+
+    move_is_promotion , m;
+        900 + kind_index , move_promotion_kind , m * 10;
+
+    move_is_capture , m == false;
+        0;
+
+    victim = board_piece_at , move_to , m;
+    attacker = board_piece_at , move_from , m;
+    victim_value = 100;
+    piece_is_empty , victim == false;
+        victim_value = MATERIAL_MG_at , kind_index , piece_kind , victim;
+
+    attacker_value = 100;
+    piece_is_empty , attacker == false;
+        attacker_value = MATERIAL_MG_at , kind_index , piece_kind , attacker;
+
+    victim_value * 16 - attacker_value;
+
+    index = 0;
+    index < list_size;
+        entry = list_at , index;
+        entry_score = move_order_score , board , entry_packed;
+        index++;
+
+// --- Driver ---------------------------------------------------------------
+
+// Build every table. Nothing in this file works before this has run, so the
+// self-test below calls it first and the assert catches the mistake if a
+// future caller forgets.
+
+    init_tables;
+    init_castle_masks;
+    init_castle_paths;
+    init_zobrist;
+    init_material;
+    init_pst_middlegame;
+    init_pst_endgame;
+    init_evaluation_masks;
+    reset_perft_counters;
+
+// Sanity checks on the tables themselves. A knight on a corner has two
+// moves, one in the middle has eight, and the rays out of a corner cover
+// exactly twenty-one squares.
+
+    ok = true;
+
+    popcount , KNIGHT_ATTACKS_at , SQ_A1 != 2;
+        ok = false;
+
+    popcount , KNIGHT_ATTACKS_at , make_square , 3 , 3 != 8;
+        ok = false;
+
+    popcount , KING_ATTACKS_at , SQ_A1 != 3;
+        ok = false;
+
+    popcount , KING_ATTACKS_at , make_square , 4 , 4 != 8;
+        ok = false;
+
+    popcount , rook_attacks , SQ_A1 , 0 != 14;
+        ok = false;
+
+    popcount , bishop_attacks , SQ_A1 , 0 != 7;
+        ok = false;
+
+    popcount , queen_attacks , SQ_A1 , 0 != 21;
+        ok = false;
+
+    popcount , FILE_MASKS_at , 0 != 8;
+        ok = false;
+
+    popcount , RANK_MASKS_at , 7 != 8;
+        ok = false;
+
+    popcount , LIGHT_SQUARES != 32 || popcount , DARK_SQUARES != 32;
+        ok = false;
+
+    LIGHT_SQUARES & DARK_SQUARES != 0;
+        ok = false;
+
+    // Every square must round-trip through the bit scans.
+    square = 0;
+    square < SQUARE_COUNT;
+        bit = 1 << square;
+        bit_scan_forward , bit != square;
+            ok = false;
+
+        bit_scan_reverse , bit != square;
+            ok = false;
+
+        popcount , bit != 1;
+            ok = false;
+
+        flip_rank , flip_rank , square != square;
+            ok = false;
+
+        square++;
+
+    // The between table must be symmetric and must exclude its endpoints.
+    from = 0;
+    from < SQUARE_COUNT;
+        to = 0;
+        to < SQUARE_COUNT;
+            segment = BETWEEN_at , from_at , to;
+            segment & 1 << from | 1 << to != 0;
+                ok = false;
+
+            segment != BETWEEN_at , to_at , from;
+                ok = false;
+
+            to++;
+
+        ++from;
+
+    ok;
+    ok;
+
+// Perft from the start position. The expected counts are the ones every
+// engine is checked against; a mismatch at depth n means the bug is in
+// whatever was first exercised at depth n.
+
+    board ;
+    parsed = parse_fen , board , START_FEN;
+    parsed;
+
+    expected = vector , int , 7;
+    expected_at , 0 = 1;
+    expected_at , 1 = 20;
+    expected_at , 2 = 400;
+    expected_at , 3 = 8902;
+    expected_at , 4 = 197281;
+    expected_at , 5 = 4865609;
+    expected_at , 6 = 119060324;
+
+    total = 0;
+    current = 1;
+    current <= depth;
+        nodes = perft , board , current;
+        total = nodes;
+
+        line ;
+        line_append , "perft(";
+        line_append , to_string , current;
+        line_append , ") = ";
+        line_append , to_string , nodes;
+        current < expected_size;
+            nodes == expected_at , current;
+                line_append , " ok";
+
+                line_append , " MISMATCH, expected ";
+                line_append , to_string , expected_at , current;
+
+        println , line;
+        line;
+        ++current;
+
+    expected;
+    board;
+    total;
+
+// Walk a short game move by move, printing the SAN and the evaluation after
+// each ply. This exercises make, unmake, notation and evaluation together.
+
+    board ;
+    parse_fen , board , START_FEN;
+
+    script ;
+    script_push_back , "e2e4";
+    script_push_back , "e7e5";
+    script_push_back , "g1f3";
+    script_push_back , "b8c6";
+    script_push_back , "f1b5";
+    script_push_back , "a7a6";
+    script_push_back , "b5a4";
+    script_push_back , "g8f6";
+    script_push_back , "e1g1";
+
+    index = 0;
+    index < script_size;
+        m = move_from_uci , board , script_at , index;
+        move_is_null , m;
+            println , "illegal move in script";
+
+        line ;
+        line_append , to_string , board_fullmove_number;
+        line_append , ". ";
+        line_append , move_to_san , board , m;
+        line_append , "  eval ";
+        board_make_move , m;
+        line_append , to_string , evaluate , board;
+        println , line;
+        line;
+        ++index;
+
+    println , board_to_text , board;
+    println , to_fen , board;
+    script;
+    board;
+
+// Generate, order and count the moves of a tactical position, then report
+// how much work the generator did.
+
+    board ;
+    parse_fen , board , fen == false;
+        println , "bad fen";
+        board;
+
+    list ;
+    board_generate_legal , list;
+    score_move_list , board , list;
+
+    captures = 0;
+    promotions = 0;
+    castles = 0;
+    checks = 0;
+    index = 0;
+    index < list_size;
+        m = list_packed_at , index;
+        move_is_capture , m;
+            captures++;
+
+        move_is_promotion , m;
+            promotions++;
+
+        move_is_castle , m;
+            castles++;
+
+        board_gives_check , m;
+            checks++;
+
+        ++index;
+
+    line ;
+    line_append , label;
+    line_append , ": ";
+    line_append , to_string , list_size;
+    line_append , " legal, ";
+    line_append , to_string , captures;
+    line_append , " captures, ";
+    line_append , to_string , promotions;
+    line_append , " promotions, ";
+    line_append , to_string , castles;
+    line_append , " castles, ";
+    line_append , to_string , checks;
+    line_append , " checks";
+    println , line;
+    line;
+
+    // Print the three best-ordered moves, which should be the fattest
+    // captures.
+    shown = 0;
+    shown < 3 && shown < list_size;
+        list_select_best , shown;
+        entry ;
+        entry_append , "  ";
+        entry_append , move_to_uci , list_packed_at , shown;
+        entry_append , " score ";
+        entry_append , to_string , list_at , shown_score;
+        println , entry;
+        entry;
+        ++shown;
+
+    list;
+    board;
+
+    // The whole self-test, in the order a new build should be checked.
+
+    initialise;
+    ok = verify_tables;
+
+    board ;
+    parse_fen , board , START_FEN == false;
+        board;
+        false;
+
+    // The start position has thirty-two pieces, sixteen a side, and twenty
+    // legal first moves.
+    board_total_piece_count != 32;
+        ok = false;
+
+    popcount , board_pieces_of_color , Color_White != 16;
+        ok = false;
+
+    board_count_legal_moves != 20;
+        ok = false;
+
+    board_in_check;
+        ok = false;
+
+    board_castling_rights != CASTLE_ALL;
+        ok = false;
+
+    board_hash_key != board_compute_key;
+        ok = false;
+
+    verify_make_unmake , board == false;
+        ok = false;
+
+    // FEN must round-trip.
+    regenerated = to_fen , board;
+    regenerated_compare , START_FEN != 0;
+        ok = false;
+
+    run_generation_report , KIWIPETE_FEN , "kiwipete";
+    run_generation_report , PROMOTION_FEN , "promotions";
+    run_generation_report , ENDGAME_FEN , "endgame";
+    run_start_position_perft , 4;
+    run_notation_demo;
+
+    stats ;
+    stats_append , "moves generated: ";
+    stats_append , to_string , generated_move_count;
+    stats_append , ", legality tests: ";
+    stats_append , to_string , legality_test_count;
+    stats_append , ", attack queries: ";
+    stats_append , to_string , attack_query_count;
+    stats_append , ", makes: ";
+    stats_append , to_string , make_move_count;
+    println , stats;
+    stats;
+
+    ok;
+    board;
+    ok;

@@ -1,0 +1,4245 @@
+// A general purpose compression library.
+//
+// The library is organised as a stack of independent codecs that share one
+// byte-oriented buffer type and one pair of bit-level cursors:
+//
+//   * `BitWriter` / `BitReader`          - MSB-first bit packing (deflate's
+//                                          Huffman payloads are LSB-first,
+//                                          its lengths are not, so both
+//                                          orderings are provided).
+//   * `Huffman`                          - frequency counting, a binary heap
+//                                          for tree construction, canonical
+//                                          code assignment, Kraft-based code
+//                                          length limiting, and encode /
+//                                          decode tables.
+//   * `Lz77`                             - a sliding window with a hash chain
+//                                          match finder, lazy matching and
+//                                          five configurable levels.
+//   * `Deflate`                          - the combined pipeline: stored,
+//                                          fixed and dynamic block types.
+//   * `Rle`, `Mtf`, `Bwt`                - the auxiliary transforms used by
+//                                          the block sorting pipeline.
+//   * `Arithmetic`                       - an adaptive binary/multi-symbol
+//                                          range coder over a frequency model.
+//   * `Crc32`, `Adler32`                 - checksums built from generated
+//                                          tables rather than literal tables.
+//
+// Every polynomial and mask below is written as a plain decimal literal with
+// the conventional hexadecimal spelling in a trailing comment, because the
+// language only lexes decimal integer notation.
+//
+// Buffers are `vector{int}` where every element is constrained to the range
+// [0, 255]; `byte` is not a distinct storage type here, the invariant is
+// maintained by the accessors and checked with `assert` in the harness.
+
+// --- Bit and byte tunables ----------------------------------------------
+
+// 0xFF
+
+// 0xFFFF
+
+// 0xFFFFFFFF
+                   // 0x0F
+                   // 0x80
+                   // 0x8000
+                   // 0x80000000
+
+// --- Huffman tunables ----------------------------------------------------
+
+// Deflate's alphabet sizes. The literal/length alphabet is 286 symbols, of
+// which 0..255 are literals, 256 is end-of-block and 257..285 are lengths.
+
+// A canonical code may never be longer than this; the length limiter
+// rebalances any tree that violates the bound.
+
+// The decode table is a flat lookup of 2^ROOT_BITS entries; codes longer
+// than ROOT_BITS spill into a secondary table reached through a link.
+
+// 1 << 9
+
+// 1 << 6
+
+// --- LZ77 tunables -------------------------------------------------------
+
+                // 1 << 15
+                // 0x7FFF
+
+                // 1 << 15
+
+                // (HASH_BITS + 2) / 3
+
+// --- Block tunables ------------------------------------------------------
+
+// --- Arithmetic coder tunables -------------------------------------------
+
+// A 32 bit range coder: the interval is [low, low + range) with the top byte
+// shifted out whenever the interval no longer straddles a byte boundary.
+               // 1 << 24
+               // 1 << 16
+               // 0xFFFFFFFF
+
+               // --- Checksum tunables ---------------------------------------------------
+
+            // 0xEDB88320, reflected
+            // 0xFFFFFFFF
+
+// A string literal stands in for the apostrophe character, which the lexer
+// cannot express as an escaped char literal.
+
+// --- Result codes --------------------------------------------------------
+
+// --- Byte buffer ---------------------------------------------------------
+
+// A growable byte buffer with a read cursor. Every codec in this file reads
+// from and writes to one of these, so the bit cursors only ever need to know
+// about a single container type.
+
+        data_size;
+
+        data_size == 0;
+
+        data_size - cursor;
+
+        cursor >= data_size;
+
+        cursor = 0;
+
+        data_clear;
+        cursor = 0;
+
+        data_reserve , n;
+
+    // Stores only the low eight bits; the caller is responsible for the
+    // masking convention, but the assert keeps honest callers honest.
+
+        data_push_back , value & BYTE_MASK;
+
+        push , value & BYTE_MASK;
+        push , value >> BYTE_BITS & BYTE_MASK;
+
+        push , value >> BYTE_BITS & BYTE_MASK;
+        push , value & BYTE_MASK;
+
+        push , value & BYTE_MASK;
+        push , value >> 8 & BYTE_MASK;
+        push , value >> 16 & BYTE_MASK;
+        push , value >> 24 & BYTE_MASK;
+
+        push , value >> 24 & BYTE_MASK;
+        push , value >> 16 & BYTE_MASK;
+        push , value >> 8 & BYTE_MASK;
+        push , value & BYTE_MASK;
+
+        data_at , index & BYTE_MASK;
+
+        value = data_at , cursor & BYTE_MASK;
+        cursor++;
+        value;
+
+        data_at , cursor & BYTE_MASK;
+
+        data_at , cursor + offset & BYTE_MASK;
+
+        low = read;
+        high = read;
+        low | high << BYTE_BITS;
+
+        high = read;
+        low = read;
+        high << BYTE_BITS | low;
+
+        b0 = read;
+        b1 = read;
+        b2 = read;
+        b3 = read;
+        b0 | b1 << 8 | b2 << 16 | b3 << 24;
+
+        b0 = read;
+        b1 = read;
+        b2 = read;
+        b3 = read;
+        b0 << 24 | b1 << 16 | b2 << 8 | b3;
+
+    // Copy `count` bytes starting at `from` onto the end of the buffer. The
+    // ranges are allowed to overlap; that is exactly what an LZ77 back
+    // reference does when the distance is smaller than the length.
+
+        i = 0;
+        i < count;
+            data_push_back , data_at , from + i & BYTE_MASK;
+            ++i;
+
+        i = 0;
+        i < other_size;
+            data_push_back , other_at , i;
+            ++i;
+
+        data_size != other_size;
+            false;
+
+        i = 0;
+        i < data_size;
+            data_at , i & BYTE_MASK != other_at , i;
+                false;
+
+            i++;
+
+        true;
+
+// --- Bit writer ----------------------------------------------------------
+
+// Packs codes into a byte buffer. A 32 bit accumulator holds the pending
+// bits; whole bytes are flushed out of it as soon as eight bits are ready.
+//
+// In MSB-first order the first bit written becomes the high bit of the first
+// output byte, which is what most container formats use for their headers.
+// In LSB-first order the first bit written becomes bit 0, which is what
+// deflate uses for Huffman codes.
+
+        order = order;
+        accumulator = 0;
+        bit_count = 0;
+        bits_written = 0;
+
+        bits_written;
+
+        bits_written / BYTE_BITS;
+
+        bit_count == 0;
+
+        bit_count;
+
+    // Write a single bit. The two orderings differ only in which end of the
+    // accumulator the new bit is grafted onto.
+
+        value = bit & 1;
+        order == BitOrder_MsbFirst;
+            accumulator = accumulator << 1 | value & WORD_MASK;
+
+            accumulator = accumulator | value << bit_count & WORD_MASK;
+
+        bit_count++;
+        bits_written++;
+        bit_count == BYTE_BITS;
+            emit_byte;
+
+        order == BitOrder_MsbFirst;
+            out_push , accumulator & BYTE_MASK;
+
+            out_push , accumulator & BYTE_MASK;
+
+        accumulator = 0;
+        bit_count = 0;
+
+    // Write `count` bits of `value`, most significant bit first. Long codes
+    // go through the accumulator one bit at a time so the two orderings stay
+    // in one code path; the fast paths below handle the common widths.
+
+        i = count - 1;
+        i >= 0;
+            put_bit , value >> i & 1;
+            --i;
+
+            // Write `count` bits of `value`, least significant bit first.
+
+        i = 0;
+        i < count;
+            put_bit , value >> i & 1;
+            ++i;
+
+        order == BitOrder_MsbFirst;
+            put_bits_msb , value , count;
+
+            put_bits_lsb , value , count;
+
+    // A Huffman code is stored most significant bit first but is emitted
+    // into an LSB-first stream, so the bits come out reversed relative to
+    // the code's numeric value.
+
+        order == BitOrder_LsbFirst;
+            i = length - 1;
+            i >= 0;
+                put_bit , code >> i & 1;
+                i--;
+
+            put_bits_msb , code , length;
+
+        bit_count == 0;
+            out_push , value & BYTE_MASK;
+            bits_written += BYTE_BITS;
+
+            put_bits , value & BYTE_MASK , BYTE_BITS;
+
+        put_byte , value & BYTE_MASK;
+        put_byte , value >> BYTE_BITS & BYTE_MASK;
+
+        put_short , value & SHORT_MASK;
+        put_short , value >> SHORT_BITS & SHORT_MASK;
+
+        // Pad with zero bits until the next byte boundary.
+
+        bit_count != 0;
+            put_bit , 0;
+
+    // Pad with one bits instead; some framing formats use this so that a
+    // truncated stream is detectable.
+
+        bit_count != 0;
+            put_bit , 1;
+
+        align;
+
+        align;
+        i = 0;
+        i < count;
+            out_push , source_at , from + i;
+            bits_written += BYTE_BITS;
+            i++;
+
+// --- Bit reader ----------------------------------------------------------
+
+// The mirror image of `BitWriter`. The reader keeps a bit accumulator that
+// is refilled a byte at a time, and exposes a `peek` operation because the
+// table-driven Huffman decoder needs ROOT_BITS of lookahead before it knows
+// how many bits the next symbol actually consumes.
+
+        order = order;
+        accumulator = 0;
+        bit_count = 0;
+        bits_read = 0;
+        overrun = false;
+
+        bits_read;
+
+        source_cursor;
+
+        bit_count == 0;
+
+        source_remaining * BYTE_BITS + bit_count;
+
+        overrun;
+
+    // Pull one byte into the accumulator. Reading past the end sets the
+    // overrun flag and feeds zero bits so the decoder can unwind gracefully
+    // instead of trapping.
+
+        source_exhausted;
+            overrun = true;
+            order == BitOrder_MsbFirst;
+                accumulator = accumulator << BYTE_BITS & WORD_MASK;
+
+                0;
+
+            bit_count += BYTE_BITS;
+
+        byte_value = source_read;
+        order == BitOrder_MsbFirst;
+            accumulator = accumulator << BYTE_BITS | byte_value & WORD_MASK;
+
+            accumulator = accumulator | byte_value << bit_count & WORD_MASK;
+
+        bit_count += BYTE_BITS;
+
+        // Guarantee at least `count` bits in the accumulator.
+
+        bit_count < count;
+            refill_byte;
+
+        bit_count == 0;
+            refill_byte;
+
+        bit = 0;
+        order == BitOrder_MsbFirst;
+            bit = accumulator >> bit_count - 1 & 1;
+            --bit_count;
+            accumulator = accumulator & 1 << bit_count - 1;
+
+            bit = accumulator & 1;
+            accumulator = accumulator >> 1 & WORD_MASK;
+            bit_count--;
+
+        ++bits_read;
+        bit;
+
+        value = 0;
+        i = 0;
+        i < count;
+            value = value << 1 | get_bit;
+            i++;
+
+        value;
+
+        value = 0;
+        i = 0;
+        i < count;
+            value = value | get_bit << i;
+            i++;
+
+        value;
+
+        count == 0;
+            0;
+
+        order == BitOrder_MsbFirst;
+            get_bits_msb , count;
+
+            get_bits_lsb , count;
+
+    // Look at the next `count` bits without consuming them. The value is
+    // always returned in the reader's native order, which is what the flat
+    // decode tables are indexed by.
+
+        refill , count;
+        order == BitOrder_MsbFirst;
+            accumulator >> bit_count - count & 1 << count - 1;
+
+            accumulator & 1 << count - 1;
+
+            // Drop bits that a previous `peek_bits` reported on.
+
+        order == BitOrder_MsbFirst;
+            bit_count -= count;
+            accumulator = accumulator & 1 << bit_count - 1;
+
+            accumulator = accumulator >> count & WORD_MASK;
+            bit_count -= count;
+
+        bits_read += count;
+
+        bit_count == 0;
+            source_exhausted;
+                overrun = true;
+                0;
+
+            bits_read += BYTE_BITS;
+            source_read;
+
+        get_bits , BYTE_BITS;
+
+        low = get_byte;
+        high = get_byte;
+        low | high << BYTE_BITS;
+
+        low = get_short;
+        high = get_short;
+        low | high << SHORT_BITS;
+
+        // Discard the partial byte currently in the accumulator.
+
+        drop = bit_count % BYTE_BITS;
+        drop != 0;
+            drop_bits , drop;
+
+        accumulator = 0;
+        bit_count = 0;
+
+        // Copy `count` raw bytes out of an aligned stream; used by stored blocks.
+
+        align;
+        source_remaining < count;
+            overrun = true;
+            false;
+
+        i = 0;
+        i < count;
+            sink_push , source_read;
+            bits_read += BYTE_BITS;
+            ++i;
+
+        true;
+
+// Reverse the low `width` bits of `code`. Canonical Huffman codes are built
+// MSB-first but written LSB-first, so the tables store the reversed form and
+// the hot loop avoids the per-symbol reversal.
+
+    result = 0;
+    value = code;
+    i = 0;
+    i < width;
+        result = result << 1 | value & 1;
+        value = value >> 1 & WORD_MASK;
+        i++;
+
+    result;
+
+// Population count of a 32 bit word by the classic halving trick, written
+// with explicit masks because the language has no hexadecimal literals.
+
+    v = value & WORD_MASK;
+    v = v - v >> 1 & 1431655765;                            // 0x55555555
+    v = v & 858993459 + v >> 2 & 858993459;               // 0x33333333
+    v = v + v >> 4 & 252645135;                             // 0x0F0F0F0F
+    v = v + v >> 8;
+    v = v + v >> 16;
+    v & 63;
+
+    // Index of the highest set bit, or -1 for zero.
+
+    v = value & WORD_MASK;
+    v == 0;
+        -1;
+
+    position = 0;
+    v & 4294901760 != 0;                                 // 0xFFFF0000
+        v = v >> 16 & SHORT_MASK;
+        position += 16;
+
+    v & 65280 != 0;                                      // 0xFF00
+        v = v >> 8 & BYTE_MASK;
+        position += 8;
+
+    v & 240 != 0;                                        // 0xF0
+        v = v >> 4 & NIBBLE_MASK;
+        position += 4;
+
+    v & 12 != 0;                                         // 0x0C
+        v = v >> 2 & 3;
+        position += 2;
+
+    v & 2 != 0;
+        ++position;
+
+    position;
+
+    // Round up to the next power of two, saturating at 2^31.
+
+    value <= 1;
+        1;
+
+    v = value - 1 & WORD_MASK;
+    v = v | v >> 1;
+    v = v | v >> 2;
+    v = v | v >> 4;
+    v = v | v >> 8;
+    v = v | v >> 16;
+    v + 1 & WORD_MASK;
+
+// --- Frequency counting --------------------------------------------------
+
+// A histogram over one alphabet. `total` and `used` are maintained
+// incrementally so the tree builder never has to rescan the table.
+
+        counts_clear;
+        counts_resize , alphabet;
+        i = 0;
+        i < alphabet;
+            counts_at , i = 0;
+            ++i;
+
+        alphabet = alphabet;
+        total = 0;
+        used = 0;
+
+        alphabet;
+
+        counts_at , symbol;
+
+        counts_at , symbol == 0;
+            used++;
+
+        counts_at , symbol += 1;
+        total++;
+
+        counts_at , symbol == 0;
+            count > 0;
+                ++used;
+
+        counts_at , symbol += count;
+        total += count;
+
+    // Count every byte of a buffer. This is the hottest loop in the encoder
+    // for incompressible input, so it does no bounds arithmetic beyond the
+    // single mask.
+
+        i = 0;
+        n = input_size;
+        i < n;
+            symbol = input_at , i & BYTE_MASK;
+            counts_at , symbol == 0;
+                ++used;
+
+            counts_at , symbol += 1;
+            i++;
+
+        total += n;
+
+    // Count pairs of adjacent bytes into a 65536 entry table; used by the
+    // order-1 model in the arithmetic coder path.
+
+        input_size < 2;
+
+        previous = input_at , 0;
+        i = 1;
+        i < input_size;
+            current = input_at , i;
+            symbol = previous & BYTE_MASK << BYTE_BITS | current & BYTE_MASK;
+            add , symbol;
+            previous = current;
+            i++;
+
+    // Guarantee at least two used symbols. A Huffman tree over a single
+    // symbol has no code at all, which every decoder would reject, so the
+    // encoder pads the histogram with phantom counts.
+
+        padded = 0;
+        symbol = 0;
+        symbol < alphabet;
+            used >= 2;
+
+            counts_at , symbol == 0;
+                counts_at , symbol = 1;
+                used++;
+                total++;
+                padded++;
+
+            symbol++;
+
+        padded;
+
+    // Halve every non-zero count, rounding up. Adaptive encoders call this
+    // when the running total would overflow the model's precision.
+
+        new_total = 0;
+        new_used = 0;
+        i = 0;
+        i < alphabet;
+            count = counts_at , i;
+            count > 0;
+                halved = count + 1 >> MODEL_RESCALE_SHIFT;
+                counts_at , i = halved;
+                new_total += halved;
+                new_used++;
+
+            i++;
+
+        total = new_total;
+        used = new_used;
+
+        best = 0;
+        i = 0;
+        i < alphabet;
+            counts_at , i > best;
+                best = counts_at , i;
+
+            i++;
+
+        best;
+
+    // Shannon entropy of the histogram, scaled by 1000 and computed with an
+    // integer logarithm so no floating point is involved.
+
+        total == 0;
+            0;
+
+        accumulated = 0;
+        i = 0;
+        i < alphabet;
+            count = counts_at , i;
+            count > 0;
+                ratio = total * 1000 / count;
+                accumulated += count * log2_millibits , ratio;
+
+            i++;
+
+        accumulated / total;
+
+// Base-2 logarithm of a value scaled by 1000, returned in millibits. The
+// fractional part comes from a small linear interpolation between adjacent
+// powers of two, which is accurate enough for block type selection.
+
+    scaled <= 1000;
+        0;
+
+    whole = highest_bit , scaled / 1000;
+    residue = scaled / 1000;
+    fraction = 0;
+    whole > 0;
+        anchor = 1 << whole;
+        fraction = residue - anchor * 1000 / anchor;
+
+    whole * 1000 + fraction;
+
+// --- Huffman tree nodes --------------------------------------------------
+
+// Nodes live in a flat array; -1 stands in for a null child. Leaves carry
+// the symbol, internal nodes carry -1.
+
+        left < 0 && right < 0;
+
+        left >= 0 || right >= 0;
+
+// --- Priority queue ------------------------------------------------------
+
+// A binary min-heap keyed on (weight, tie) so that tree construction is
+// deterministic: two nodes of equal weight are ordered by insertion index,
+// which makes the resulting code lengths reproducible across runs.
+
+        heap_size;
+
+        heap_size == 0;
+
+        heap_clear;
+        keys_clear;
+        ties_clear;
+        sequence = 0;
+
+        index - 1 / 2;
+
+        index * 2 + 1;
+
+        index * 2 + 2;
+
+        // Strict weak ordering on the packed key.
+
+        keys_at , a != keys_at , b;
+            keys_at , a < keys_at , b;
+
+        ties_at , a < ties_at , b;
+
+        swap , heap_at , a , heap_at , b;
+        swap , keys_at , a , keys_at , b;
+        swap , ties_at , a , ties_at , b;
+
+        heap_push_back , node;
+        keys_push_back , weight;
+        ties_push_back , sequence;
+        sequence++;
+        sift_up , heap_size - 1;
+
+        index = start;
+        index > 0;
+            parent = parent_of , index;
+            !less , index , parent;
+
+            swap_entries , index , parent;
+            index = parent;
+
+        index = start;
+        count = heap_size;
+
+            left = left_of , index;
+            left >= count;
+
+            smallest = left;
+            right = right_of , index;
+            right < count;
+                less , right , left;
+                    smallest = right;
+
+            !less , smallest , index;
+
+            swap_entries , index , smallest;
+            index = smallest;
+
+        heap_at , 0;
+
+        keys_at , 0;
+
+        result = heap_at , 0;
+        last = heap_size - 1;
+        swap_entries , 0 , last;
+        heap_pop_back;
+        keys_pop_back;
+        ties_pop_back;
+        heap_size > 1;
+            sift_down , 0;
+
+        result;
+
+        // Verify the heap invariant; the harness calls this after a build.
+
+        i = 1;
+        i < heap_size;
+            parent = i - 1 / 2;
+            keys_at , i < keys_at , parent;
+                false;
+
+            i++;
+
+        true;
+
+// --- Huffman tree --------------------------------------------------------
+
+// Builds a Huffman tree from a histogram, derives code lengths, enforces a
+// maximum length, and turns the lengths into canonical codes.
+//
+// The canonical form is the one every container format agrees on: symbols
+// are sorted by (length, symbol) and codes are handed out in increasing
+// numeric order, so the decoder only needs the length of each symbol.
+
+        nodes_clear;
+        lengths_clear;
+        codes_clear;
+        queue_clear;
+        root = -1;
+        max_length = 0;
+        symbol_count = 0;
+
+        nodes_size;
+
+        node = HuffmanNode;
+        node_symbol = symbol;
+        node_weight = weight;
+        node_left = -1;
+        node_right = -1;
+        nodes_push_back , node;
+        nodes_size - 1;
+
+        node = HuffmanNode;
+        node_symbol = -1;
+        node_left = left;
+        node_right = right;
+        node_weight = nodes_at , left_weight + nodes_at , right_weight;
+        nodes_push_back , node;
+        nodes_size - 1;
+
+    // Classic two-pop construction. Every used symbol becomes a leaf, then
+    // the two lightest subtrees are repeatedly merged until one remains.
+
+        clear;
+        symbol_count = frequencies_size;
+        lengths_resize , frequencies_size;
+        codes_resize , frequencies_size;
+        symbol = 0;
+        symbol < frequencies_size;
+            lengths_at , symbol = 0;
+            codes_at , symbol = 0;
+            symbol++;
+
+        leaves = 0;
+        symbol = 0;
+        symbol < frequencies_size;
+            weight = frequencies_at , symbol;
+            weight > 0;
+                node = new_leaf , symbol , weight;
+                queue_push , node , weight;
+                ++leaves;
+
+            ++symbol;
+
+        leaves == 0;
+            false;
+
+        leaves == 1;
+            // Degenerate alphabet: give the single symbol a one bit code.
+            only = queue_pop;
+            root = only;
+            lengths_at , nodes_at , only_symbol = 1;
+            max_length = 1;
+            assign_canonical;
+            true;
+
+        queue_size > 1;
+            left = queue_pop;
+            right = queue_pop;
+            merged = new_internal , left , right;
+            queue_push , merged , nodes_at , merged_weight;
+
+        root = queue_pop;
+        measure_depths , root , 0;
+        max_length > MAX_CODE_LENGTH;
+            limit_code_lengths , MAX_CODE_LENGTH;
+
+        assign_canonical;
+        true;
+
+    // Walk the tree iteratively with an explicit stack, recording the depth
+    // of every leaf. Recursion would be fine here but the iterative form is
+    // what the production encoder uses, so the benchmark keeps it.
+
+        stack_nodes = vector , int;
+        stack_depths = vector , int;
+        stack_nodes_push_back , root;
+        stack_depths_push_back , anchor;
+        max_length = 0;
+        !stack_nodes_empty;
+            node = stack_nodes_back;
+            depth = stack_depths_back;
+            stack_nodes_pop_back;
+            stack_depths_pop_back;
+            entry = nodes_at , node;
+            entry_is_leaf;
+                lengths_at , entry_symbol = depth;
+                depth > max_length;
+                    max_length = depth;
+
+                entry_left >= 0;
+                    stack_nodes_push_back , entry_left;
+                    stack_depths_push_back , depth + 1;
+
+                entry_right >= 0;
+                    stack_nodes_push_back , entry_right;
+                    stack_depths_push_back , depth + 1;
+
+        stack_nodes;
+        stack_depths;
+
+    // Enforce a maximum code length using the Kraft sum.
+    //
+    // The Kraft sum of a prefix code is sum(2^-length) and equals exactly
+    // 2^limit when the code is complete. Overlong codes are first clamped to
+    // the limit, which pushes the sum above 2^limit; the excess is then paid
+    // back by lengthening the shortest codes one bit at a time, starting
+    // from the deepest, until the sum drops back to exactly 2^limit.
+
+        histogram = vector , int , MAX_CODE_LENGTH + 2;
+        i = 0;
+        i < MAX_CODE_LENGTH + 2;
+            histogram_at , i = 0;
+            ++i;
+
+        symbol = 0;
+        symbol < symbol_count;
+            length = lengths_at , symbol;
+            length > limit;
+                length = limit;
+                lengths_at , symbol = limit;
+
+            length > 0;
+                histogram_at , length += 1;
+
+            symbol++;
+
+        // Kraft sum scaled so that a complete code sums to 1 << limit.
+        kraft = 0;
+        length = 1;
+        length <= limit;
+            kraft += histogram_at , length << limit - length;
+            ++length;
+
+        target = 1 << limit;
+        kraft > target;
+            // Find the deepest length that still has a symbol to lengthen,
+            // one level above the limit's floor, and move one symbol down.
+            donor = limit - 1;
+            donor > 0;
+                histogram_at , donor > 0;
+
+                --donor;
+
+            donor == 0;
+
+            histogram_at , donor -= 1;
+            histogram_at , donor + 1 += 1;
+            donor + 1 < limit;
+                histogram_at , limit -= 1;
+                histogram_at , limit - 1 += 1;
+
+            kraft -= 1 << limit - donor - 1;
+
+        // The sum may now sit below the target; hand the slack back to the
+        // shortest codes so the code stays complete.
+        kraft < target;
+            taker = limit;
+            taker > 0;
+                histogram_at , taker > 0;
+
+                taker--;
+
+            taker <= 1;
+
+            histogram_at , taker -= 1;
+            histogram_at , taker - 1 += 1;
+            kraft += 1 << limit - taker;
+
+        rebuild_lengths_from_histogram , histogram , limit;
+        histogram;
+
+    // Re-hand out the adjusted lengths, giving the shortest codes to the
+    // heaviest symbols. Symbols are visited in decreasing weight order,
+    // which is what keeps the rebalanced code close to optimal.
+
+        order = vector , int;
+        symbol = 0;
+        symbol < symbol_count;
+            lengths_at , symbol > 0;
+                order_push_back , symbol;
+
+            symbol++;
+
+        sort_by_weight , order;
+
+        cursor = 0;
+        length = 1;
+        length <= limit;
+            remaining = histogram_at , length;
+            remaining > 0;
+                cursor >= order_size;
+                    remaining = 0;
+
+                    lengths_at , order_at , cursor = length;
+                    ++cursor;
+                    --remaining;
+
+            ++length;
+
+        max_length = limit;
+        order;
+
+    // Insertion sort on symbol weight, descending. The arrays involved are
+    // at most MAX_SYMBOLS long so the quadratic bound is irrelevant, and the
+    // sort has to be stable for the canonical assignment to be reproducible.
+
+        i = 1;
+        i < order_size;
+            key = order_at , i;
+            key_weight = weight_of_symbol , key;
+            j = i - 1;
+            j >= 0;
+                weight_of_symbol , order_at , j >= key_weight;
+
+                order_at , j + 1 = order_at , j;
+                j--;
+
+            order_at , j + 1 = key;
+            ++i;
+
+        i = 0;
+        i < nodes_size;
+            node = nodes_at , i;
+            node_is_leaf;
+                node_symbol == symbol;
+                    node_weight;
+
+            ++i;
+
+        0;
+
+    // Canonical assignment: count codes of each length, compute the first
+    // code of each length, then hand codes out in symbol order.
+
+        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        i = 0;
+        i <= MAX_CODE_LENGTH;
+            count_per_length_at , i = 0;
+            next_code_at , i = 0;
+            i++;
+
+        symbol = 0;
+        symbol < symbol_count;
+            length = lengths_at , symbol;
+            length > 0;
+                count_per_length_at , length += 1;
+
+            ++symbol;
+
+        code = 0;
+        count_per_length_at , 0 = 0;
+        bits = 1;
+        bits <= MAX_CODE_LENGTH;
+            code = code + count_per_length_at , bits - 1 << 1;
+            next_code_at , bits = code;
+            ++bits;
+
+        symbol = 0;
+        symbol < symbol_count;
+            length = lengths_at , symbol;
+            length > 0;
+                codes_at , symbol = next_code_at , length;
+                next_code_at , length += 1;
+
+                codes_at , symbol = 0;
+
+            ++symbol;
+
+        count_per_length;
+        next_code;
+
+        // The Kraft sum must equal exactly 2^max_length for a complete code.
+
+        total = 0;
+        symbol = 0;
+        symbol < symbol_count;
+            length = lengths_at , symbol;
+            length > 0;
+                total += 1 << max_length - length;
+
+            ++symbol;
+
+        total;
+
+        max_length == 0;
+            false;
+
+        kraft_sum == 1 << max_length;
+
+        // Total compressed size of the alphabet under this code, in bits.
+
+        total = 0;
+        symbol = 0;
+        symbol < symbol_count;
+            total += lengths_at , symbol * frequencies_at , symbol;
+            ++symbol;
+
+        total;
+
+// --- Encode table --------------------------------------------------------
+
+// Flattens a tree's canonical codes into two parallel arrays plus a
+// pre-reversed copy for LSB-first output. Writing a symbol then costs one
+// array read and one `put_code`.
+
+        codes_clear;
+        lengths_clear;
+        reversed_clear;
+        codes_resize , tree_symbol_count;
+        lengths_resize , tree_symbol_count;
+        reversed_resize , tree_symbol_count;
+        symbol_count = tree_symbol_count;
+        max_length = tree_max_length;
+        symbol = 0;
+        symbol < tree_symbol_count;
+            length = tree_lengths_at , symbol;
+            code = tree_codes_at , symbol;
+            lengths_at , symbol = length;
+            codes_at , symbol = code;
+            reversed_at , symbol = reverse_bits , code , length;
+            symbol++;
+
+    // Build directly from a length vector, which is what the decoder side
+    // does when it reconstructs a dynamic block's code from the header.
+
+        codes_clear;
+        lengths_clear;
+        reversed_clear;
+        codes_resize , lengths_size;
+        lengths_resize , lengths_size;
+        reversed_resize , lengths_size;
+        symbol_count = lengths_size;
+        max_length = 0;
+
+        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        i = 0;
+        i <= MAX_CODE_LENGTH;
+            count_per_length_at , i = 0;
+            i++;
+
+        symbol = 0;
+        symbol < lengths_size;
+            length = lengths_at , symbol;
+            lengths_at , symbol = length;
+            length > 0;
+                count_per_length_at , length += 1;
+                length > max_length;
+                    max_length = length;
+
+            ++symbol;
+
+        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        code = 0;
+        count_per_length_at , 0 = 0;
+        bits = 1;
+        bits <= MAX_CODE_LENGTH;
+            code = code + count_per_length_at , bits - 1 << 1;
+            next_code_at , bits = code;
+            bits++;
+
+        symbol = 0;
+        symbol < lengths_size;
+            length = lengths_at , symbol;
+            length > 0;
+                assigned = next_code_at , length;
+                next_code_at , length += 1;
+                codes_at , symbol = assigned;
+                reversed_at , symbol = reverse_bits , assigned , length;
+
+                codes_at , symbol = 0;
+                reversed_at , symbol = 0;
+
+            symbol++;
+
+        count_per_length;
+        next_code;
+
+        lengths_at , symbol;
+
+        codes_at , symbol;
+
+        lengths_at , symbol > 0;
+
+        writer_put_code , codes_at , symbol , lengths_at , symbol;
+
+    // Fast path for an LSB-first stream: the reversal has already been paid
+    // for at table build time.
+
+        writer_put_bits_lsb , reversed_at , symbol , lengths_at , symbol;
+
+// --- Decode table --------------------------------------------------------
+
+// One entry of the flat decode table. A code shorter than ROOT_BITS is
+// replicated across every index whose low bits match it, so a single lookup
+// resolves the symbol. Longer codes store a link to a secondary table.
+
+        sub_table >= 0;
+
+        bits > 0;
+
+// Two-level table-driven decoder.
+//
+// The root table is indexed by the next ROOT_BITS of the stream, read in the
+// stream's native order. Because deflate writes codes LSB-first, the index a
+// code occupies is the code's bit-reversal, and every longer index sharing
+// that suffix maps to the same entry. That is the replication loop below,
+// which strides by `1 << length` over the whole root table.
+
+        root_clear;
+        sub_clear;
+        symbol_count = 0;
+        max_length = 0;
+        under_subscribed = false;
+
+        root_size;
+
+        clear;
+        symbol_count = lengths_size;
+
+        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        i = 0;
+        i <= MAX_CODE_LENGTH;
+            count_per_length_at , i = 0;
+            ++i;
+
+        used = 0;
+        symbol = 0;
+        symbol < lengths_size;
+            length = lengths_at , symbol;
+            length > 0;
+                length > MAX_CODE_LENGTH;
+                    count_per_length;
+                    false;
+
+                count_per_length_at , length += 1;
+                ++used;
+                length > max_length;
+                    max_length = length;
+
+            ++symbol;
+
+        used == 0;
+            under_subscribed = true;
+            count_per_length;
+            false;
+
+        // Over-subscribed codes are corrupt; under-subscribed ones are only
+        // legal for the degenerate single-symbol distance code.
+        left = 1;
+        bits = 1;
+        bits <= MAX_CODE_LENGTH;
+            left = left << 1;
+            left -= count_per_length_at , bits;
+            left < 0;
+                count_per_length;
+                false;
+
+            bits++;
+
+        left > 0;
+            under_subscribed = true;
+            used != 1;
+                count_per_length;
+                false;
+
+        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        code = 0;
+        bits = 1;
+        bits <= MAX_CODE_LENGTH;
+            code = code + count_per_length_at , bits - 1 << 1;
+            next_code_at , bits = code;
+            bits++;
+
+        root_bits = min_int , ROOT_BITS , max_length;
+        root_count = 1 << root_bits;
+        root_resize , root_count;
+        slot = 0;
+        slot < root_count;
+            blank = DecodeEntry;
+            blank_symbol = -1;
+            blank_bits = 0;
+            blank_sub_table = -1;
+            root_at , slot = blank;
+            ++slot;
+
+        root_bits = root_bits;
+
+        symbol = 0;
+        symbol < lengths_size;
+            length = lengths_at , symbol;
+            length > 0;
+                assigned = next_code_at , length;
+                next_code_at , length += 1;
+                index = reverse_bits , assigned , length;
+                length <= root_bits;
+                    fill_root , index , length , symbol , root_bits;
+
+                    fill_sub , index , length , symbol , root_bits;
+
+            ++symbol;
+
+        count_per_length;
+        next_code;
+        true;
+
+        // Replicate a short code across every root index that ends in it.
+
+        stride = 1 << length;
+        limit = 1 << root_bits;
+        slot = index;
+        slot < limit;
+            entry = DecodeEntry;
+            entry_symbol = symbol;
+            entry_bits = length;
+            entry_sub_table = -1;
+            entry_sub_bits = 0;
+            root_at , slot = entry;
+            slot += stride;
+
+    // Route a long code through a secondary table. The root entry records
+    // where the secondary table starts and how many extra bits it consumes.
+
+        root_index = index & 1 << root_bits - 1;
+        extra = length - root_bits;
+        anchor = root_at , root_index_sub_table;
+        anchor < 0;
+            anchor = sub_size;
+            span = 1 << SUB_BITS;
+            i = 0;
+            i < span;
+                blank = DecodeEntry;
+                blank_symbol = -1;
+                blank_bits = 0;
+                blank_sub_table = -1;
+                sub_push_back , blank;
+                ++i;
+
+            link = DecodeEntry;
+            link_symbol = -1;
+            link_bits = root_bits;
+            link_sub_table = anchor;
+            link_sub_bits = SUB_BITS;
+            root_at , root_index = link;
+
+        sub_index = index >> root_bits & 1 << SUB_BITS - 1;
+        stride = 1 << extra;
+        limit = 1 << SUB_BITS;
+        slot = sub_index;
+        slot < limit;
+            entry = DecodeEntry;
+            entry_symbol = symbol;
+            entry_bits = extra;
+            entry_sub_table = -1;
+            entry_sub_bits = 0;
+            sub_at , anchor + slot = entry;
+            slot += stride;
+
+    // Decode one symbol. Peek enough bits for the root lookup, consume only
+    // as many as the code actually uses, and follow a link if present.
+
+        peeked = reader_peek_bits , root_bits;
+        entry = root_at , peeked;
+        entry_bits == 0;
+            -1;
+
+        !entry_is_link;
+            reader_drop_bits , entry_bits;
+            entry_symbol;
+
+        reader_drop_bits , root_bits;
+        extra = reader_peek_bits , entry_sub_bits;
+        leaf = sub_at , entry_sub_table + extra;
+        leaf_bits == 0;
+            -1;
+
+        reader_drop_bits , leaf_bits;
+        leaf_symbol;
+
+    // Slow reference decoder that walks the code bit by bit. Used by the
+    // harness to cross-check the table-driven path.
+
+        code = 0;
+        length = 0;
+        first = 0;
+        index = 0;
+        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        i = 0;
+        i <= MAX_CODE_LENGTH;
+            count_per_length_at , i = 0;
+            i++;
+
+        symbol = 0;
+        symbol < lengths_size;
+            lengths_at , symbol > 0;
+                count_per_length_at , lengths_at , symbol += 1;
+
+            symbol++;
+
+        length < MAX_CODE_LENGTH;
+            length++;
+            code = code | reader_get_bit;
+            count = count_per_length_at , length;
+            code - first < count;
+                count_per_length;
+                index + code - first;
+
+            index += count;
+            first = first + count << 1;
+            code = code << 1;
+
+        count_per_length;
+        -1;
+
+    a < b;
+        a;
+
+    b;
+
+    a > b;
+        a;
+
+    b;
+
+    value < low;
+        low;
+
+    value > high;
+        high;
+
+    value;
+
+// --- LZ77 tokens ---------------------------------------------------------
+
+// A token is either a literal byte or a (length, distance) back reference.
+// Packing both into one struct keeps the token stream contiguous, which
+// matters because the block splitter walks it several times.
+
+        length < MIN_MATCH;
+
+        length >= MIN_MATCH;
+
+        is_literal;
+            8;
+
+        // A rough model: the length code plus the distance code plus their
+        // extra bits. Good enough to decide between block types.
+        24 + extra_length_bits , length_code_of , length + extra_distance_bits , distance_code_of , distance;
+
+        // A candidate match returned by the match finder.
+
+        length >= MIN_MATCH && distance > 0 && distance <= MAX_DISTANCE;
+
+        length != other_length;
+            length > other_length;
+
+        // Equal lengths: prefer the nearer match, its distance code is
+        // cheaper to encode.
+        distance < other_distance;
+
+// --- Compression levels --------------------------------------------------
+
+// The knobs the match finder honours. Higher levels search longer chains and
+// enable lazy matching; the lowest level skips the finder entirely.
+
+        clamped = clamp_int , level , 0 , 9;
+        clamped == 0;
+            good_length = 0;
+            max_lazy = 0;
+            nice_length = 0;
+            max_chain = 0;
+            use_lazy = false;
+            stored_only = true;
+        clamped <= 2;
+            good_length = 4;
+            max_lazy = 4;
+            nice_length = 8;
+            max_chain = 4;
+            use_lazy = false;
+            stored_only = false;
+        clamped <= 4;
+            good_length = 4;
+            max_lazy = 5;
+            nice_length = 16;
+            max_chain = 16;
+            use_lazy = true;
+            stored_only = false;
+        clamped <= 6;
+            good_length = 8;
+            max_lazy = 16;
+            nice_length = 32;
+            max_chain = 32;
+            use_lazy = true;
+            stored_only = false;
+        clamped <= 8;
+            good_length = 8;
+            max_lazy = 32;
+            nice_length = 128;
+            max_chain = 128;
+            use_lazy = true;
+            stored_only = false;
+
+            good_length = 32;
+            max_lazy = 258;
+            nice_length = 258;
+            max_chain = 4096;
+            use_lazy = true;
+            stored_only = false;
+
+        level = clamped;
+
+    // When the previous match was already long, the chain search is cut
+    // short: the odds of finding something better do not pay for the walk.
+
+        previous_length >= good_length;
+            max_chain >> 2;
+
+        max_chain;
+
+// --- Hash chain match finder ---------------------------------------------
+
+// The classic deflate finder: a rolling three-byte hash indexes a head
+// table, and every head entry starts a chain of earlier positions with the
+// same hash, threaded through a `previous` array indexed by window offset.
+
+        head_clear;
+        head_resize , HASH_SIZE;
+        i = 0;
+        i < HASH_SIZE;
+            head_at , i = NO_POSITION;
+            i++;
+
+        previous_clear;
+        previous_resize , WINDOW_SIZE;
+        i = 0;
+        i < WINDOW_SIZE;
+            previous_at , i = NO_POSITION;
+            ++i;
+
+        running_hash = 0;
+        inserted = 0;
+
+    // Rolling hash update: shift the accumulator left by HASH_SHIFT, mix in
+    // the new byte, and mask back down to HASH_BITS. After MIN_MATCH updates
+    // the accumulator depends on exactly the last three bytes.
+
+        running_hash = running_hash << HASH_SHIFT ^ next_byte & BYTE_MASK & HASH_MASK;
+        running_hash;
+
+    // Compute the hash of the three bytes at `position` without touching the
+    // rolling state; used when the finder skips ahead.
+
+        position + MIN_MATCH > input_size;
+            0;
+
+        h = 0;
+        h = h << HASH_SHIFT ^ input_at , position & HASH_MASK;
+        h = h << HASH_SHIFT ^ input_at , position + 1 & HASH_MASK;
+        h = h << HASH_SHIFT ^ input_at , position + 2 & HASH_MASK;
+        h;
+
+        slot = position & WINDOW_MASK;
+        previous_at , slot = head_at , hash_value;
+        head_at , hash_value = position;
+        ++inserted;
+
+    // Insert every position in [from, to) so that later searches see them.
+    // The encoder calls this after emitting a long match, because the bytes
+    // covered by the match still need to be hashed.
+
+        position = from;
+        position < to;
+            position + MIN_MATCH <= input_size;
+                insert , hash_at , input , position , position;
+
+            ++position;
+
+    // Length of the common prefix of the two positions, capped at `limit`.
+    // This is the innermost loop of the whole encoder.
+
+        length = 0;
+        length < limit;
+            input_at , a + length != input_at , b + length;
+                length;
+
+            length++;
+
+        limit;
+
+    // Walk the chain for `position`, returning the best match found. The
+    // walk stops at the chain limit, at the window edge, or as soon as a
+    // match reaches `nice_length`.
+
+        best = Match;
+        best_length = 0;
+        best_distance = 0;
+        best_position = position;
+
+        position + MIN_MATCH > input_size;
+            best;
+
+        limit = min_int , MAX_MATCH , input_size - position;
+        limit < MIN_MATCH;
+            best;
+
+        hash_value = hash_at , input , position;
+        candidate = head_at , hash_value;
+        chain_left = chain_limit_of , previous_length , config;
+        window_floor = max_int , 0 , position - MAX_DISTANCE;
+
+        candidate >= 0;
+            chain_left <= 0;
+
+            chain_left--;
+            candidate < window_floor;
+
+            candidate >= position;
+
+            // Cheap rejection: the byte one past the current best has to
+            // match, otherwise the candidate cannot possibly be longer.
+            worth_trying = true;
+            best_length > 0;
+                input_at , candidate + best_length != input_at , position + best_length;
+                    worth_trying = false;
+
+            worth_trying;
+                length = match_length , input , candidate , position , limit;
+                length >= MIN_MATCH;
+                    length > best_length;
+                        best_length = length;
+                        best_distance = position - candidate;
+                        length >= config_nice_length;
+                            best;
+
+            candidate = previous_at , candidate & WINDOW_MASK;
+
+        best;
+
+        config_chain_limit_for , previous_length;
+
+        // Diagnostic: average chain length over the whole head table.
+
+        total = 0;
+        chains = 0;
+        i = 0;
+        i < HASH_SIZE;
+            node = head_at , i;
+            node >= 0;
+                ++chains;
+                depth = 0;
+                node >= 0;
+                    depth >= 64;
+
+                    ++depth;
+                    node = previous_at , node & WINDOW_MASK;
+
+                total += depth;
+
+            ++i;
+
+        chains == 0;
+            0;
+
+        total / chains;
+
+// --- Sliding window ------------------------------------------------------
+
+// A circular history buffer of WINDOW_SIZE bytes. The decoder needs one to
+// resolve back references; the encoder keeps the whole input in memory and
+// uses absolute positions instead, so the window is decode-side only.
+
+        bytes_clear;
+        bytes_resize , capacity;
+        i = 0;
+        i < capacity;
+            bytes_at , i = 0;
+            ++i;
+
+        capacity = capacity;
+        mask = capacity - 1;
+        write_position = 0;
+        filled = 0;
+
+        filled;
+
+        filled >= capacity;
+
+        position & mask;
+
+        bytes_at , write_position = value & BYTE_MASK;
+        write_position = write_position + 1 & mask;
+        filled < capacity;
+            ++filled;
+
+            // Byte `distance` positions back from the write cursor.
+
+        index = write_position - distance & mask;
+        bytes_at , index & BYTE_MASK;
+
+        distance > 0 && distance <= filled;
+
+    // Copy a back reference out of the window and into the sink, feeding
+    // every copied byte back into the window. Overlapping copies work
+    // because each byte is written before the byte that references it is
+    // read, which is exactly the run-extension trick LZ77 relies on.
+
+        !can_reference , distance;
+            false;
+
+        i = 0;
+        i < length;
+            value = behind , distance;
+            sink_push , value;
+            push , value;
+            i++;
+
+        true;
+
+        sink_push , value & BYTE_MASK;
+        push , value & BYTE_MASK;
+
+// --- LZ77 encoder --------------------------------------------------------
+
+// Produces a token stream from a byte buffer using the hash chain finder.
+//
+// Lazy matching: after finding a match at position p, the encoder also looks
+// at p+1. If the later match is strictly longer, the byte at p is emitted as
+// a literal and the longer match is taken instead. This costs one extra
+// chain walk per position but typically buys a few percent.
+
+        config_from_level , level;
+        chain_init;
+        tokens_clear;
+        literal_count = 0;
+        match_count = 0;
+        matched_bytes = 0;
+        literal_bytes = 0;
+
+        tokens_size;
+
+        token = Token;
+        token_literal = value & BYTE_MASK;
+        token_length = 0;
+        token_distance = 0;
+        tokens_push_back , token;
+        ++literal_count;
+        ++literal_bytes;
+
+        token = Token;
+        token_literal = 0;
+        token_length = length;
+        token_distance = distance;
+        tokens_push_back , token;
+        ++match_count;
+        matched_bytes += length;
+
+    // The main loop. `position` is the next byte to encode; `pending`
+    // carries the match found at the previous position while the encoder
+    // decides whether to keep it.
+
+        tokens_clear;
+        config_stored_only;
+            i = 0;
+            i < input_size;
+                push_literal , input_at , i;
+                i++;
+
+        position = 0;
+        have_pending = false;
+        pending = Match;
+        pending_length = 0;
+        pending_distance = 0;
+        pending_position = 0;
+
+        position < input_size;
+            current = Match;
+            current_length = 0;
+            current_distance = 0;
+            current_position = position;
+            position + MIN_MATCH <= input_size;
+                previous_length = 0;
+                have_pending;
+                    previous_length = pending_length;
+
+                current = chain_find_best , input , position , previous_length , config;
+
+            have_pending;
+                current_length > pending_length;
+                    // The later match wins: flush the deferred byte as a
+                    // literal and defer again on the new candidate.
+                    push_literal , input_at , pending_position;
+                    insert_position , input , pending_position;
+                    pending = current;
+                    pending_position = position;
+                    position++;
+
+                    // Keep the deferred match.
+                    push_match , pending_length , pending_distance;
+                    start = pending_position;
+                    stop = start + pending_length;
+                    chain_insert_range , input , start , stop;
+                    have_pending = false;
+                    position = stop;
+
+                current_valid;
+                    config_use_lazy && current_length < config_max_lazy;
+                        pending = current;
+                        pending_position = position;
+                        have_pending = true;
+                        insert_position , input , position;
+                        ++position;
+
+                        push_match , current_length , current_distance;
+                        chain_insert_range , input , position , position + current_length;
+                        position += current_length;
+
+                    push_literal , input_at , position;
+                    insert_position , input , position;
+                    ++position;
+
+        have_pending;
+            push_literal , input_at , pending_position;
+
+        position + MIN_MATCH <= input_size;
+            chain_insert , chain_hash_at , input , position , position;
+
+    // Ratio of matched bytes to total bytes, in percent. The block splitter
+    // uses it to decide whether a stored block would be smaller.
+
+        total = matched_bytes + literal_bytes;
+        total == 0;
+            0;
+
+        matched_bytes * 100 / total;
+
+        total = 0;
+        i = 0;
+        i < tokens_size;
+            total += tokens_at , i_cost_estimate;
+            i++;
+
+        total;
+
+// --- LZ77 decoder --------------------------------------------------------
+
+// Replays a token stream through a sliding window.
+
+    window = SlidingWindow;
+    window_init , WINDOW_SIZE;
+    i = 0;
+    i < tokens_size;
+        token = tokens_at , i;
+        token_is_literal;
+            window_emit_literal , output , token_literal;
+
+            !window_can_reference , token_distance;
+                window;
+                Status_BadDistance;
+
+            !window_copy_match , output , token_distance , token_length;
+                window;
+                Status_CorruptStream;
+
+        ++i;
+
+    window;
+    Status_Ok;
+
+// --- Deflate symbol tables ----------------------------------------------
+
+// Deflate maps a match length in [3, 258] onto one of 29 length codes plus
+// up to five extra bits, and a distance in [1, 32768] onto one of 30
+// distance codes plus up to 13 extra bits. Both tables are generated here
+// rather than transcribed, because the structure is entirely regular:
+//
+//   length code i has (i - 4) / 4 extra bits, clamped to [0, 5]
+//   distance code i has (i / 2) - 1 extra bits, clamped to [0, 13]
+//
+// and each base is the previous base plus 2^extra of the previous code.
+
+        build_length_tables;
+        build_distance_tables;
+        build_code_length_order;
+        build_reverse_maps;
+        ready = true;
+
+        length_base_clear;
+        length_extra_clear;
+        length_base_resize , 29;
+        length_extra_resize , 29;
+
+        running = 3;
+        code = 0;
+        code < 28;
+            extra = code - 4 / 4;
+            code < 8;
+                extra = 0;
+
+            extra > 5;
+                extra = 5;
+
+            length_extra_at , code = extra;
+            length_base_at , code = running;
+            running += 1 << extra;
+            ++code;
+
+        // The final code is the special case: length 258 with no extra bits.
+        length_extra_at , 28 = 0;
+        length_base_at , 28 = MAX_MATCH;
+
+        distance_base_clear;
+        distance_extra_clear;
+        distance_base_resize , DISTANCE_SYMBOLS;
+        distance_extra_resize , DISTANCE_SYMBOLS;
+
+        running = 1;
+        code = 0;
+        code < DISTANCE_SYMBOLS;
+            extra = code / 2 - 1;
+            code < 4;
+                extra = 0;
+
+            extra > 13;
+                extra = 13;
+
+            distance_extra_at , code = extra;
+            distance_base_at , code = running;
+            running += 1 << extra;
+            ++code;
+
+    // The code length alphabet is transmitted in a permuted order chosen so
+    // that the rarely used lengths sit at the end and can be truncated.
+
+        code_length_order_clear;
+        code_length_order_push_back , 16;
+        code_length_order_push_back , 17;
+        code_length_order_push_back , 18;
+        code_length_order_push_back , 0;
+        offset = 8;
+        step = 0;
+        step < 8;
+            code_length_order_push_back , offset;
+            code_length_order_push_back , BYTE_BITS - 1 - step - 1 + 1;
+            ++offset;
+            ++step;
+
+        // Regenerate the tail deterministically: 8,7,9,6,10,5,11,4,12,3,
+        // 13,2,14,1,15 alternates outward from the middle of the alphabet.
+        code_length_order_clear;
+        code_length_order_push_back , 16;
+        code_length_order_push_back , 17;
+        code_length_order_push_back , 18;
+        code_length_order_push_back , 0;
+        high = 8;
+        low = 7;
+        high <= 15;
+            code_length_order_push_back , high;
+            code_length_order_push_back , low;
+            ++high;
+            --low;
+
+    // Invert the base tables into direct lookups so the encoder does not
+    // binary search on every token. `length_to_code` has MAX_MATCH + 1
+    // entries; `distance_to_code` uses a split lookup because a full table
+    // over 32768 distances would be wasteful: the low 256 distances index
+    // directly, the rest index by distance >> 7.
+
+        length_to_code_clear;
+        length_to_code_resize , MAX_MATCH + 1;
+        length = 0;
+        length <= MAX_MATCH;
+            length_to_code_at , length = 0;
+            length++;
+
+        code = 0;
+        code < 29;
+            anchor = length_base_at , code;
+            span = 1 << length_extra_at , code;
+            offset = 0;
+            offset < span;
+                value = anchor + offset;
+                value <= MAX_MATCH;
+                    length_to_code_at , value = code;
+
+                offset++;
+
+            ++code;
+
+        length_to_code_at , MAX_MATCH = 28;
+
+        distance_to_code_low_clear;
+        distance_to_code_low_resize , 257;
+        distance_to_code_high_clear;
+        distance_to_code_high_resize , 257;
+        i = 0;
+        i <= 256;
+            distance_to_code_low_at , i = 0;
+            distance_to_code_high_at , i = 0;
+            ++i;
+
+        code = 0;
+        code < DISTANCE_SYMBOLS;
+            anchor = distance_base_at , code;
+            span = 1 << distance_extra_at , code;
+            offset = 0;
+            offset < span;
+                distance = anchor + offset;
+                distance <= 256;
+                    distance_to_code_low_at , distance = code;
+
+                    distance <= MAX_DISTANCE;
+                        bucket = distance - 1 >> 7;
+                        bucket <= 256;
+                            distance_to_code_high_at , bucket = code;
+
+                offset++;
+
+            ++code;
+
+        length_to_code_at , clamp_int , length , MIN_MATCH , MAX_MATCH;
+
+        distance <= 256;
+            distance_to_code_low_at , distance;
+
+        distance_to_code_high_at , distance - 1 >> 7;
+
+        code = length_code , length;
+        length - length_base_at , code;
+
+        code = distance_code , distance;
+        distance - distance_base_at , code;
+
+// Free-function forms used by `Token::cost_estimate`, which has no access to
+// a table instance. They recompute the same regular structure arithmetically.
+
+    code >= 28;
+        0;
+
+    code < 8;
+        0;
+
+    clamp_int , code - 4 / 4 , 0 , 5;
+
+    code < 4;
+        0;
+
+    clamp_int , code / 2 - 1 , 0 , 13;
+
+    length >= MAX_MATCH;
+        28;
+
+    code = 0;
+    anchor = 3;
+    code < 28;
+        span = 1 << extra_length_bits , code;
+        length < anchor + span;
+            code;
+
+        anchor += span;
+        code++;
+
+    28;
+
+    code = 0;
+    anchor = 1;
+    code < DISTANCE_SYMBOLS;
+        span = 1 << extra_distance_bits , code;
+        distance < anchor + span;
+            code;
+
+        anchor += span;
+        code++;
+
+    DISTANCE_SYMBOLS - 1;
+
+// The fixed Huffman code of a deflate stream is defined by a fixed length
+// assignment rather than by a transmitted table: literals 0..143 get 8 bits,
+// 144..255 get 9, 256..279 get 7 and 280..287 get 8. Distances are all 5.
+
+    lengths_clear;
+    lengths_resize , MAX_SYMBOLS;
+    symbol = 0;
+    symbol < MAX_SYMBOLS;
+        symbol < 144;
+            lengths_at , symbol = 8;
+        symbol < 256;
+            lengths_at , symbol = 9;
+        symbol < 280;
+            lengths_at , symbol = 7;
+
+            lengths_at , symbol = 8;
+
+        symbol++;
+
+    lengths_clear;
+    lengths_resize , DISTANCE_SYMBOLS + 2;
+    symbol = 0;
+    symbol < DISTANCE_SYMBOLS + 2;
+        lengths_at , symbol = 5;
+        ++symbol;
+
+// --- Code length run encoding -------------------------------------------
+
+// A dynamic block transmits its two code length vectors compressed with a
+// third Huffman code over the alphabet {0..15, 16, 17, 18}, where
+//
+//   16 = repeat the previous length 3..6 more times (2 extra bits)
+//   17 = a run of 3..10 zero lengths            (3 extra bits)
+//   18 = a run of 11..138 zero lengths          (7 extra bits)
+//
+// `RunEncoder` turns a length vector into that symbol stream.
+
+        symbols_clear;
+        extras_clear;
+        extra_bits_clear;
+
+        symbols_size;
+
+        symbols_push_back , symbol;
+        extras_push_back , extra;
+        extra_bits_push_back , bits;
+
+        clear;
+        index = 0;
+        previous = -1;
+        index < used;
+            current = lengths_at , index;
+            // Measure the run of equal lengths starting here.
+            run = 1;
+            index + run < used;
+                lengths_at , index + run != current;
+
+                ++run;
+
+            current == 0;
+                // Zero runs use the dedicated 17 / 18 symbols.
+                run >= 11;
+                    take = min_int , run , 138;
+                    emit , 18 , take - 11 , 7;
+                    run -= take;
+                    index += take;
+
+                run >= 3;
+                    take = min_int , run , 10;
+                    emit , 17 , take - 3 , 3;
+                    run -= take;
+                    index += take;
+
+                run > 0;
+                    emit , 0 , 0 , 0;
+                    --run;
+                    index++;
+
+                previous = 0;
+
+                // A non-zero run repeats the literal length once, then uses
+                // symbol 16 for the remainder.
+                remaining = run;
+                previous != current;
+                    emit , current , 0 , 0;
+                    remaining--;
+                    index++;
+
+                remaining >= 3;
+                    take = min_int , remaining , 6;
+                    emit , 16 , take - 3 , 2;
+                    remaining -= take;
+                    index += take;
+
+                remaining > 0;
+                    emit , current , 0 , 0;
+                    remaining--;
+                    ++index;
+
+                previous = current;
+
+                // Histogram over the code length alphabet, used to build its own code.
+
+        i = 0;
+        i < symbols_size;
+            frequencies_add , symbols_at , i;
+            ++i;
+
+// --- Deflate encoder -----------------------------------------------------
+
+// The full pipeline: LZ77 the input, histogram the resulting tokens, build
+// dynamic codes, compare the three block encodings and emit the cheapest.
+
+        tables_init;
+        lz_init , level;
+        writer_init , BitOrder_LsbFirst;
+        config_from_level , level;
+        blocks_stored = 0;
+        blocks_fixed = 0;
+        blocks_dynamic = 0;
+
+    // --- Cost models -----------------------------------------------------
+
+    // Bits needed for a stored block: three header bits, padding to the byte
+    // boundary, a four byte length header and the payload.
+
+        3 + 7 + 32 + byte_count * BYTE_BITS;
+
+        total = 3;
+        symbol = 0;
+        symbol < LITERAL_SYMBOLS;
+            count = literals_at , symbol;
+            count > 0;
+                bits = 8;
+                symbol >= 144;
+                    bits = 9;
+
+                symbol >= 256;
+                    bits = 7;
+
+                symbol >= 280;
+                    bits = 8;
+
+                total += count * bits;
+                total += count * extra_length_bits , symbol - 257;
+
+            ++symbol;
+
+        symbol = 0;
+        symbol < DISTANCE_SYMBOLS;
+            count = distances_at , symbol;
+            count > 0;
+                total += count * 5 + extra_distance_bits , symbol;
+
+            ++symbol;
+
+        total;
+
+        total = 3 + header_bits;
+        total += literal_tree_encoded_bits , literals;
+        total += distance_tree_encoded_bits , distances;
+        symbol = 257;
+        symbol < LITERAL_SYMBOLS;
+            total += literals_at , symbol * extra_length_bits , symbol - 257;
+            ++symbol;
+
+        symbol = 0;
+        symbol < DISTANCE_SYMBOLS;
+            total += distances_at , symbol * extra_distance_bits , symbol;
+            symbol++;
+
+        total;
+
+        // --- Histograms ------------------------------------------------------
+
+        i = 0;
+        i < tokens_size;
+            token = tokens_at , i;
+            token_is_literal;
+                literals_add , token_literal & BYTE_MASK;
+
+                literals_add , 257 + tables_length_code , token_length;
+                distances_add , tables_distance_code , token_distance;
+
+            ++i;
+
+        literals_add , END_OF_BLOCK;
+
+        // --- Block emission --------------------------------------------------
+
+        flag = 0;
+        final_block;
+            flag = 1;
+
+        writer_put_bits_lsb , flag , 1;
+        kind == BlockType_Stored;
+            writer_put_bits_lsb , 0 , 2;
+        kind == BlockType_Fixed;
+            writer_put_bits_lsb , 1 , 2;
+
+            writer_put_bits_lsb , 2 , 2;
+
+        write_block_header , BlockType_Stored , final_block;
+        writer_align;
+        writer_put_short , count & SHORT_MASK;
+        writer_put_short , ~count & SHORT_MASK;
+        writer_raw_copy , input , from , count;
+        ++blocks_stored;
+
+        write_block_header , BlockType_Fixed , final_block;
+        literal_lengths = vector , int;
+        distance_lengths = vector , int;
+        build_fixed_literal_lengths , literal_lengths;
+        build_fixed_distance_lengths , distance_lengths;
+        literal_table = EncodeTable;
+        distance_table = EncodeTable;
+        literal_table_build_from_lengths , literal_lengths;
+        distance_table_build_from_lengths , distance_lengths;
+        write_token_stream , tokens , literal_table , distance_table;
+        blocks_fixed++;
+        literal_lengths;
+        distance_lengths;
+
+    // Emit the dynamic header: the two truncated length counts, the code
+    // length code lengths in permuted order, and the run encoded lengths.
+
+        bits_written = 0;
+        writer_put_bits_lsb , literal_used - 257 , 5;
+        writer_put_bits_lsb , distance_used - 1 , 5;
+
+        // Trim trailing zero entries from the permuted code length vector.
+        transmitted = CODE_LENGTH_SYMBOLS;
+        transmitted > 4;
+            slot = tables_code_length_order_at , transmitted - 1;
+            code_length_lengths_at , slot != 0;
+
+            transmitted--;
+
+        writer_put_bits_lsb , transmitted - 4 , 4;
+        bits_written += 14;
+
+        i = 0;
+        i < transmitted;
+            slot = tables_code_length_order_at , i;
+            writer_put_bits_lsb , code_length_lengths_at , slot , 3;
+            bits_written += 3;
+            i++;
+
+        i = 0;
+        i < runs_symbols_size;
+            symbol = runs_symbols_at , i;
+            code_length_table_emit_reversed , writer , symbol;
+            bits_written += code_length_table_length_of , symbol;
+            extra_count = runs_extra_bits_at , i;
+            extra_count > 0;
+                writer_put_bits_lsb , runs_extras_at , i , extra_count;
+                bits_written += extra_count;
+
+            ++i;
+
+        literal_lengths;
+        distance_lengths;
+        bits_written;
+
+        i = 0;
+        i < tokens_size;
+            token = tokens_at , i;
+            token_is_literal;
+                literal_table_emit_reversed , writer , token_literal & BYTE_MASK;
+
+                length_code = tables_length_code , token_length;
+                literal_table_emit_reversed , writer , 257 + length_code;
+                length_extra = tables_length_extra_at , length_code;
+                length_extra > 0;
+                    writer_put_bits_lsb , token_length - tables_length_base_at , length_code , length_extra;
+
+                distance_code = tables_distance_code , token_distance;
+                distance_table_emit_reversed , writer , distance_code;
+                distance_extra = tables_distance_extra_at , distance_code;
+                distance_extra > 0;
+                    writer_put_bits_lsb , token_distance - tables_distance_base_at , distance_code , distance_extra;
+
+            i++;
+
+        literal_table_emit_reversed , writer , END_OF_BLOCK;
+
+        // Build the dynamic codes for a token stream and emit the block.
+
+        literals = FrequencyTable;
+        distances = FrequencyTable;
+        literals_init , MAX_SYMBOLS;
+        distances_init , DISTANCE_SYMBOLS;
+        histogram_tokens , tokens , literals , distances;
+        distances_ensure_two_symbols;
+
+        literal_tree = HuffmanTree;
+        distance_tree = HuffmanTree;
+        !literal_tree_build , literals;
+            false;
+
+        !distance_tree_build , distances;
+            false;
+
+        literal_used = LITERAL_SYMBOLS;
+        literal_used > 257;
+            literal_tree_lengths_at , literal_used - 1 != 0;
+
+            literal_used--;
+
+        distance_used = DISTANCE_SYMBOLS;
+        distance_used > 1;
+            distance_tree_lengths_at , distance_used - 1 != 0;
+
+            --distance_used;
+
+        // Concatenate the two length vectors and run encode them together,
+        // which is what lets a run straddle the boundary.
+        combined = vector , int;
+        i = 0;
+        i < literal_used;
+            combined_push_back , literal_tree_lengths_at , i;
+            i++;
+
+        i = 0;
+        i < distance_used;
+            combined_push_back , distance_tree_lengths_at , i;
+            i++;
+
+        runs = RunEncoder;
+        runs_encode , combined , combined_size;
+
+        code_length_frequencies = FrequencyTable;
+        code_length_frequencies_init , CODE_LENGTH_SYMBOLS;
+        runs_count_symbols , code_length_frequencies;
+        code_length_frequencies_ensure_two_symbols;
+
+        code_length_tree = HuffmanTree;
+        !code_length_tree_build , code_length_frequencies;
+            false;
+
+        code_length_tree_limit_code_lengths , MAX_LENGTH_CODE_BITS;
+        code_length_tree_assign_canonical;
+
+        code_length_table = EncodeTable;
+        code_length_table_build , code_length_tree;
+
+        literal_table = EncodeTable;
+        distance_table = EncodeTable;
+        literal_table_build , literal_tree;
+        distance_table_build , distance_tree;
+
+        write_block_header , BlockType_Dynamic , final_block;
+        write_dynamic_header , literal_tree_lengths , distance_tree_lengths , literal_used , distance_used , runs , code_length_table , code_length_tree_lengths;
+        write_token_stream , tokens , literal_table , distance_table;
+        blocks_dynamic++;
+
+        combined;
+        true;
+
+    // Compress a whole buffer, splitting it into blocks of at most
+    // DEFAULT_BLOCK_SIZE bytes and picking a block type per chunk.
+
+        writer_init , BitOrder_LsbFirst;
+        input_empty;
+            write_block_header , BlockType_Stored , true;
+            writer_align;
+            writer_put_short , 0;
+            writer_put_short , SHORT_MASK;
+            Status_Ok;
+
+        offset = 0;
+        offset < input_size;
+            span = min_int , DEFAULT_BLOCK_SIZE , input_size - offset;
+            final_block = offset + span >= input_size;
+
+            chunk = ByteBuffer;
+            i = 0;
+            i < span;
+                chunk_push , input_at , offset + i;
+                ++i;
+
+            lz_init , config_level;
+            lz_encode , chunk;
+
+            literals = FrequencyTable;
+            distances = FrequencyTable;
+            literals_init , MAX_SYMBOLS;
+            distances_init , DISTANCE_SYMBOLS;
+            histogram_tokens , lz_tokens , literals , distances;
+
+            cost_stored = stored_cost , span;
+            cost_fixed = fixed_cost , literals , distances;
+
+            config_stored_only;
+                write_stored_block , input , offset , span , final_block;
+            cost_stored <= cost_fixed;
+                write_stored_block , input , offset , span , final_block;
+
+                !write_dynamic_block , lz_tokens , final_block;
+                    write_fixed_block , lz_tokens , final_block;
+
+            chunk;
+            offset += span;
+
+        writer_flush;
+        Status_Ok;
+
+// --- Deflate decoder -----------------------------------------------------
+
+// Reads a deflate stream back into bytes. The decoder is table driven: each
+// block builds a `DecodeTable` for its literal/length and distance codes,
+// then the inner loop is peek, look up, drop, and either append a literal or
+// run a window copy.
+
+        tables_init;
+        reader_init , BitOrder_LsbFirst;
+        window_init , WINDOW_SIZE;
+        blocks_read = 0;
+        last_status = Status_Ok;
+
+        last_status = status;
+        status;
+
+    // Read a stored block: align, read the length and its complement, and
+    // copy the payload straight through.
+
+        reader_align;
+        count = reader_get_short;
+        complement = reader_get_short;
+        count ^ SHORT_MASK & SHORT_MASK != complement & SHORT_MASK;
+            fail , Status_CorruptStream;
+
+        i = 0;
+        i < count;
+            reader_source_exhausted;
+                fail , Status_NeedMoreInput;
+
+            value = reader_get_byte;
+            window_emit_literal , output , value;
+            i++;
+
+        Status_Ok;
+
+    // Rebuild the code length code, then decode the two length vectors from
+    // the run encoded stream.
+
+        literal_used = reader_get_bits_lsb , 5 + 257;
+        distance_used = reader_get_bits_lsb , 5 + 1;
+        transmitted = reader_get_bits_lsb , 4 + 4;
+        literal_used > LITERAL_SYMBOLS;
+            fail , Status_BadCodeLengths;
+
+        distance_used > DISTANCE_SYMBOLS;
+            fail , Status_BadCodeLengths;
+
+        code_length_lengths = vector , int , CODE_LENGTH_SYMBOLS;
+        i = 0;
+        i < CODE_LENGTH_SYMBOLS;
+            code_length_lengths_at , i = 0;
+            i++;
+
+        i = 0;
+        i < transmitted;
+            slot = tables_code_length_order_at , i;
+            code_length_lengths_at , slot = reader_get_bits_lsb , 3;
+            ++i;
+
+        code_length_table = DecodeTable;
+        !code_length_table_build , code_length_lengths;
+            fail , Status_BadCodeLengths;
+
+        total = literal_used + distance_used;
+        combined = vector , int , total;
+        i = 0;
+        i < total;
+            combined_at , i = 0;
+            i++;
+
+        index = 0;
+        previous = 0;
+        index < total;
+            symbol = code_length_table_decode , reader;
+            symbol < 0;
+                fail , Status_BadCodeLengths;
+
+            symbol < 16;
+                combined_at , index = symbol;
+                previous = symbol;
+                index++;
+            symbol == 16;
+                repeat = reader_get_bits_lsb , 2 + 3;
+                index + repeat > total;
+                    fail , Status_BadCodeLengths;
+
+                k = 0;
+                k < repeat;
+                    combined_at , index = previous;
+                    index++;
+                    k++;
+
+            symbol == 17;
+                repeat = reader_get_bits_lsb , 3 + 3;
+                index + repeat > total;
+                    fail , Status_BadCodeLengths;
+
+                k = 0;
+                k < repeat;
+                    combined_at , index = 0;
+                    index++;
+                    k++;
+
+                previous = 0;
+
+                repeat = reader_get_bits_lsb , 7 + 11;
+                index + repeat > total;
+                    fail , Status_BadCodeLengths;
+
+                k = 0;
+                k < repeat;
+                    combined_at , index = 0;
+                    index++;
+                    k++;
+
+                previous = 0;
+
+        literal_lengths = vector , int , literal_used;
+        distance_lengths = vector , int , distance_used;
+        i = 0;
+        i < literal_used;
+            literal_lengths_at , i = combined_at , i;
+            ++i;
+
+        i = 0;
+        i < distance_used;
+            distance_lengths_at , i = combined_at , literal_used + i;
+            ++i;
+
+        !literal_table_build , literal_lengths;
+            fail , Status_BadCodeLengths;
+
+        !distance_table_build , distance_lengths;
+            !distance_table_under_subscribed;
+                fail , Status_BadCodeLengths;
+
+        combined;
+        code_length_lengths;
+        Status_Ok;
+
+        // The hot decode loop for one compressed block.
+
+            reader_failed;
+                fail , Status_NeedMoreInput;
+
+            symbol = literal_table_decode , reader;
+            symbol < 0;
+                fail , Status_CorruptStream;
+
+            symbol < 256;
+                window_emit_literal , output , symbol;
+            symbol == END_OF_BLOCK;
+                Status_Ok;
+
+                length_code = symbol - 257;
+                length_code >= 29;
+                    fail , Status_CorruptStream;
+
+                length_extra = tables_length_extra_at , length_code;
+                length = tables_length_base_at , length_code;
+                length_extra > 0;
+                    length += reader_get_bits_lsb , length_extra;
+
+                distance_symbol = distance_table_decode , reader;
+                distance_symbol < 0;
+                    fail , Status_CorruptStream;
+
+                distance_symbol >= DISTANCE_SYMBOLS;
+                    fail , Status_BadDistance;
+
+                distance_extra = tables_distance_extra_at , distance_symbol;
+                distance = tables_distance_base_at , distance_symbol;
+                distance_extra > 0;
+                    distance += reader_get_bits_lsb , distance_extra;
+
+                distance > MAX_DISTANCE;
+                    fail , Status_BadDistance;
+
+                !window_copy_match , output , distance , length;
+                    fail , Status_BadDistance;
+
+        reader_init , BitOrder_LsbFirst;
+        reader_source = input;
+        reader_source_rewind;
+        window_init , WINDOW_SIZE;
+
+        final_block = false;
+        !final_block;
+            reader_failed;
+                fail , Status_NeedMoreInput;
+
+            final_block = reader_get_bits_lsb , 1 == 1;
+            kind = reader_get_bits_lsb , 2;
+            blocks_read++;
+
+            kind == 0;
+                status = read_stored_block , output;
+                status != Status_Ok;
+                    status;
+
+            kind == 1;
+                literal_lengths = vector , int;
+                distance_lengths = vector , int;
+                build_fixed_literal_lengths , literal_lengths;
+                build_fixed_distance_lengths , distance_lengths;
+                literal_table = DecodeTable;
+                distance_table = DecodeTable;
+                !literal_table_build , literal_lengths;
+                    fail , Status_BadCodeLengths;
+
+                !distance_table_build , distance_lengths;
+                    fail , Status_BadCodeLengths;
+
+                status = read_compressed_block , output , literal_table , distance_table;
+                status != Status_Ok;
+                    status;
+
+                literal_lengths;
+                distance_lengths;
+            kind == 2;
+                literal_table = DecodeTable;
+                distance_table = DecodeTable;
+                header = read_dynamic_tables , literal_table , distance_table;
+                header != Status_Ok;
+                    header;
+
+                status = read_compressed_block , output , literal_table , distance_table;
+                status != Status_Ok;
+                    status;
+
+                fail , Status_CorruptStream;
+
+        Status_Ok;
+
+// --- Run length encoding -------------------------------------------------
+
+// A byte oriented RLE with an escape byte. A run of three or more identical
+// bytes becomes <escape, count, value>; a literal equal to the escape byte
+// is emitted as <escape, 0>. Runs longer than 255 are split.
+// 0x90
+
+        i = 0;
+        runs_emitted = 0;
+        literals_emitted = 0;
+        i < input_size;
+            value = input_at , i;
+            run = 1;
+            i + run < input_size;
+                input_at , i + run != value;
+
+                run >= RLE_MAX_RUN;
+
+                ++run;
+
+            run >= RLE_MIN_RUN;
+                output_push , RLE_ESCAPE;
+                output_push , run;
+                output_push , value;
+                ++runs_emitted;
+                i += run;
+
+                k = 0;
+                k < run;
+                    value == RLE_ESCAPE;
+                        output_push , RLE_ESCAPE;
+                        output_push , 0;
+
+                        output_push , value;
+
+                    literals_emitted++;
+                    k++;
+
+                i += run;
+
+        i = 0;
+        i < input_size;
+            value = input_at , i;
+            value != RLE_ESCAPE;
+                output_push , value;
+                i++;
+
+                i + 1 >= input_size;
+                    Status_NeedMoreInput;
+
+                count = input_at , i + 1;
+                count == 0;
+                    output_push , RLE_ESCAPE;
+                    i += 2;
+
+                    i + 2 >= input_size;
+                        Status_NeedMoreInput;
+
+                    repeated = input_at , i + 2;
+                    k = 0;
+                    k < count;
+                        output_push , repeated;
+                        ++k;
+
+                    i += 3;
+
+        Status_Ok;
+
+    // Longest run in the input; the pipeline uses it to decide whether RLE
+    // is worth applying before the block sorting stage.
+
+        input_empty;
+            0;
+
+        best = 1;
+        current = 1;
+        i = 1;
+        i < input_size;
+            input_at , i == input_at , i - 1;
+                current++;
+                current > best;
+                    best = current;
+
+                current = 1;
+
+            ++i;
+
+        best;
+
+// --- Move to front -------------------------------------------------------
+
+// MTF turns a stream with local symbol locality into a stream dominated by
+// small indices, which is exactly what a Huffman or arithmetic stage wants
+// after a Burrows-Wheeler transform.
+
+        order_clear;
+        order_resize , 256;
+        i = 0;
+        i < 256;
+            order_at , i = i;
+            ++i;
+
+    // Find the current rank of a symbol and pull it to the front, shifting
+    // everything above it down by one.
+
+        position = 0;
+        position < 256;
+            order_at , position == value;
+
+            ++position;
+
+        i = position;
+        i > 0;
+            order_at , i = order_at , i - 1;
+            i--;
+
+        order_at , 0 = value;
+        position;
+
+        value = order_at , rank;
+        i = rank;
+        i > 0;
+            order_at , i = order_at , i - 1;
+            --i;
+
+        order_at , 0 = value;
+        value;
+
+        init;
+        i = 0;
+        i < input_size;
+            output_push , rank_of , input_at , i;
+            ++i;
+
+        init;
+        i = 0;
+        i < input_size;
+            output_push , symbol_at , input_at , i;
+            ++i;
+
+// --- Burrows-Wheeler transform -------------------------------------------
+
+// The forward transform sorts every rotation of the input and emits the last
+// column plus the index of the original string. The inverse rebuilds the
+// input from the last column alone using the standard LF mapping.
+//
+// The rotation sort here is a plain comparison sort with an explicit
+// comparison function rather than a suffix array construction; the point of
+// the benchmark is the tight comparison loop, not asymptotics.
+
+// Compare rotations `a` and `b` of `input` lexicographically.
+
+        n = input_size;
+        offset = 0;
+        offset < n;
+            left = input_at , a + offset % n;
+            right = input_at , b + offset % n;
+            left != right;
+                left < right;
+                    -1;
+
+                1;
+
+            offset++;
+
+        0;
+
+        // Binary insertion sort over rotation indices.
+
+        i = 1;
+        i < order_size;
+            key = order_at , i;
+            low = 0;
+            high = i;
+            low < high;
+                middle = low + high / 2;
+                compare_rotations , input , order_at , middle , key <= 0;
+                    low = middle + 1;
+
+                    high = middle;
+
+            j = i;
+            j > low;
+                order_at , j = order_at , j - 1;
+                --j;
+
+            order_at , low = key;
+            i++;
+
+        n = input_size;
+        n == 0;
+            0;
+
+        order = vector , int , n;
+        i = 0;
+        i < n;
+            order_at , i = i;
+            ++i;
+
+        sort_rotations , input , order;
+
+        primary = 0;
+        i = 0;
+        i < n;
+            rotation = order_at , i;
+            rotation == 0;
+                primary = i;
+
+            output_push , input_at , rotation + n - 1 % n;
+            i++;
+
+        primary_index = primary;
+        order;
+        primary;
+
+    // Inverse transform via the LF mapping: count the occurrences of each
+    // byte, turn the counts into starting offsets, then thread the next
+    // pointers through the last column.
+
+        n = last_column_size;
+        n == 0;
+            Status_Ok;
+
+        primary < 0 || primary >= n;
+            Status_CorruptStream;
+
+        counts = vector , int , 257;
+        i = 0;
+        i <= 256;
+            counts_at , i = 0;
+            ++i;
+
+        i = 0;
+        i < n;
+            counts_at , last_column_at , i + 1 += 1;
+            i++;
+
+        i = 1;
+        i <= 256;
+            counts_at , i += counts_at , i - 1;
+            i++;
+
+        next = vector , int , n;
+        i = 0;
+        i < n;
+            value = last_column_at , i;
+            next_at , counts_at , value = i;
+            counts_at , value += 1;
+            ++i;
+
+        position = next_at , primary;
+        i = 0;
+        i < n;
+            output_push , last_column_at , position;
+            position = next_at , position;
+            ++i;
+
+        counts;
+        next;
+        Status_Ok;
+
+// --- Adaptive frequency model -------------------------------------------
+
+// A cumulative frequency model over a small alphabet, maintained as a Fenwick
+// tree so that both the cumulative query and the update are logarithmic. The
+// arithmetic coder needs the cumulative frequency below a symbol, the
+// symbol's own frequency, and the running total, on every single symbol.
+
+        alphabet = alphabet;
+        frequencies_clear;
+        frequencies_resize , alphabet + 1;
+        tree_clear;
+        tree_resize , alphabet + 1;
+        i = 0;
+        i <= alphabet;
+            frequencies_at , i = 0;
+            tree_at , i = 0;
+            i++;
+
+        // Every symbol starts with a count of one so nothing is unencodable.
+        i = 0;
+        i < alphabet;
+            frequencies_at , i + 1 = 1;
+            ++i;
+
+        rebuild_tree;
+        total = alphabet;
+        updates = 0;
+
+    // Rebuild the Fenwick tree from the raw frequency array in linear time:
+    // every node absorbs its immediate child's partial sum.
+
+        i = 1;
+        i <= alphabet;
+            tree_at , i = frequencies_at , i;
+            i++;
+
+        i = 1;
+        i <= alphabet;
+            parent = i + i & -i;
+            parent <= alphabet;
+                tree_at , parent += tree_at , i;
+
+            ++i;
+
+            // Sum of frequencies for symbols strictly below `symbol`.
+
+        index = symbol;
+        sum = 0;
+        index > 0;
+            sum += tree_at , index;
+            index -= index & -index;
+
+        sum;
+
+        frequencies_at , symbol + 1;
+
+        total;
+
+    // Locate the symbol whose cumulative interval contains `target`, by
+    // descending the Fenwick tree one power of two at a time.
+
+        index = 0;
+        remaining = target;
+        step = round_up_pow2 , alphabet;
+        step > 0;
+            candidate = index + step;
+            candidate <= alphabet;
+                tree_at , candidate <= remaining;
+                    index = candidate;
+                    remaining -= tree_at , candidate;
+
+            step = step >> 1 & WORD_MASK;
+
+        index;
+
+        index = symbol + 1;
+        frequencies_at , index += MODEL_INCREMENT;
+        index <= alphabet;
+            tree_at , index += MODEL_INCREMENT;
+            index += index & -index;
+
+        total += MODEL_INCREMENT;
+        ++updates;
+        total >= MODEL_TOTAL_MAX;
+            rescale;
+
+    // Halve every count, keeping a floor of one so no symbol drops out of
+    // the model, then rebuild the tree in one pass.
+
+        new_total = 0;
+        i = 1;
+        i <= alphabet;
+            value = frequencies_at , i + 1 >> 1;
+            value < 1;
+                value = 1;
+
+            frequencies_at , i = value;
+            new_total += value;
+            i++;
+
+        total = new_total;
+        rebuild_tree;
+
+// --- Arithmetic encoder --------------------------------------------------
+
+// A carry-less range coder over 32 bit arithmetic. The interval [low, high)
+// is narrowed by each symbol; whenever the two ends share a top byte, that
+// byte is shifted out. The underflow counter handles the case where the
+// interval straddles the midpoint without converging.
+
+        low = 0;
+        high = CODER_MAX;
+        underflow = 0;
+        out_clear;
+        writer_init , BitOrder_MsbFirst;
+        symbols_written = 0;
+
+        high - low + 1;
+
+        // Narrow the interval to the sub-range assigned to `symbol` by `model`.
+
+        total = model_total_frequency;
+        low_count = model_cumulative_below , symbol;
+        high_count = low_count + model_frequency_of , symbol;
+        span = high - low + 1;
+
+        high = low + span * high_count / total - 1;
+        low = low + span * low_count / total;
+        normalise;
+        model_update , symbol;
+        symbols_written++;
+
+    // Shift out every bit the two ends now agree on, and absorb straddling
+    // intervals into the underflow counter.
+
+            low ^ high & HIGH_BIT_32 == 0;
+                // Top bits agree: emit it, plus any pending underflow bits
+                // with the opposite value.
+                bit = low >> 31 & 1;
+                writer_put_bit , bit;
+                underflow > 0;
+                    writer_put_bit , ~bit & 1;
+                    underflow--;
+
+                low & 1073741824 != 0 && high & 1073741824 == 0;
+                    // 0x40000000: straddling the midpoint. Defer the
+                    // decision by removing the second bit and counting it.
+                    ++underflow;
+                    low = low & 1073741823;                       // 0x3FFFFFFF
+                    high = high | 1073741824;                     // 0x40000000
+
+            low = low << 1 & WORD_MASK;
+            high = high << 1 | 1 & WORD_MASK;
+
+            // Flush enough bits to disambiguate the final interval.
+
+        bit = low >> 30 & 1;
+        writer_put_bit , bit;
+        underflow++;
+        underflow > 0;
+            writer_put_bit , ~bit & 1;
+            --underflow;
+
+        writer_align;
+
+        init;
+        i = 0;
+        i < input_size;
+            encode_symbol , model , input_at , i;
+            ++i;
+
+        // A dedicated stop symbol marks the end of the stream so the decoder
+        // does not need an explicit length.
+        encode_symbol , model , 256;
+        finish;
+
+        // --- Arithmetic decoder --------------------------------------------------
+
+        low = 0;
+        high = CODER_MAX;
+        code = 0;
+        reader_init , BitOrder_MsbFirst;
+        reader_source = input;
+        reader_source_rewind;
+        i = 0;
+        i < WORD_BITS;
+            code = code << 1 | reader_get_bit & WORD_MASK;
+            ++i;
+
+        symbols_read = 0;
+
+    // Map the current code point back onto a cumulative frequency, ask the
+    // model which symbol owns it, then narrow exactly as the encoder did.
+
+        total = model_total_frequency;
+        span = high - low + 1;
+        offset = code - low;
+        target = offset + 1 * total - 1 / span;
+
+        symbol = model_symbol_for , target;
+        low_count = model_cumulative_below , symbol;
+        high_count = low_count + model_frequency_of , symbol;
+
+        high = low + span * high_count / total - 1;
+        low = low + span * low_count / total;
+        normalise;
+        model_update , symbol;
+        symbols_read++;
+        symbol;
+
+            low ^ high & HIGH_BIT_32 == 0;
+                0;
+
+                low & 1073741824 != 0 && high & 1073741824 == 0;
+                    code = code ^ 1073741824;                     // 0x40000000
+                    low = low & 1073741823;                       // 0x3FFFFFFF
+                    high = high | 1073741824;
+
+            low = low << 1 & WORD_MASK;
+            high = high << 1 | 1 & WORD_MASK;
+            code = code << 1 | reader_get_bit & WORD_MASK;
+
+        produced = 0;
+
+            symbol = decode_symbol , model;
+            symbol == 256;
+                Status_Ok;
+
+            symbol < 0 || symbol > 256;
+                Status_CorruptStream;
+
+            output_push , symbol;
+            ++produced;
+            produced > limit;
+                Status_OutputFull;
+
+            reader_failed;
+                Status_NeedMoreInput;
+
+// --- CRC32 ---------------------------------------------------------------
+
+// The table is generated rather than transcribed. Entry i is the remainder
+// of the reflected polynomial division of i, computed by shifting the byte
+// through eight times and folding in the polynomial whenever a one falls off
+// the bottom.
+
+        build_table;
+        build_slices;
+        value = CRC32_INIT;
+
+        table_clear;
+        table_resize , CRC32_TABLE_SIZE;
+        i = 0;
+        i < CRC32_TABLE_SIZE;
+            remainder = i;
+            bit = 0;
+            bit < BYTE_BITS;
+                remainder & 1 != 0;
+                    remainder = remainder >> 1 & 2147483647 ^ CRC32_POLY;
+
+                    remainder = remainder >> 1 & 2147483647;
+
+                ++bit;
+
+            table_at , i = remainder & WORD_MASK;
+            ++i;
+
+    // Slicing-by-eight: table k holds the effect of a byte that is k
+    // positions further back in the stream, so eight bytes can be folded per
+    // iteration. Each slice is derived from the previous one.
+
+        slices_clear;
+        slices_resize , CRC32_SLICE_COUNT * CRC32_TABLE_SIZE;
+        i = 0;
+        i < CRC32_TABLE_SIZE;
+            slices_at , i = table_at , i;
+            ++i;
+
+        slice = 1;
+        slice < CRC32_SLICE_COUNT;
+            i = 0;
+            i < CRC32_TABLE_SIZE;
+                previous = slices_at , slice - 1 * CRC32_TABLE_SIZE + i;
+                folded = table_at , previous & BYTE_MASK ^ previous >> BYTE_BITS & 16777215;
+                slices_at , slice * CRC32_TABLE_SIZE + i = folded & WORD_MASK;
+                i++;
+
+            slice++;
+
+        value = CRC32_INIT;
+
+        index = value ^ byte_value & BYTE_MASK & BYTE_MASK;
+        value = table_at , index ^ value >> BYTE_BITS & 16777215 & WORD_MASK;
+
+        i = 0;
+        i < input_size;
+            update_byte , input_at , i;
+            i++;
+
+    // The eight-byte-at-a-time inner loop. Each of the eight tables is
+    // indexed by one byte of the combined running value, and the eight
+    // results are exclusive-ored together.
+
+        i = 0;
+        n = input_size;
+        i + CRC32_SLICE_COUNT <= n;
+            word_low = input_at , i | input_at , i + 1 << 8 | input_at , i + 2 << 16 | input_at , i + 3 << 24;
+            word_high = input_at , i + 4 | input_at , i + 5 << 8 | input_at , i + 6 << 16 | input_at , i + 7 << 24;
+            mixed = value ^ word_low & WORD_MASK;
+
+            folded = 0;
+            folded = folded ^ slices_at , 7 * CRC32_TABLE_SIZE + mixed & BYTE_MASK;
+            folded = folded ^ slices_at , 6 * CRC32_TABLE_SIZE + mixed >> 8 & BYTE_MASK;
+            folded = folded ^ slices_at , 5 * CRC32_TABLE_SIZE + mixed >> 16 & BYTE_MASK;
+            folded = folded ^ slices_at , 4 * CRC32_TABLE_SIZE + mixed >> 24 & BYTE_MASK;
+            folded = folded ^ slices_at , 3 * CRC32_TABLE_SIZE + word_high & BYTE_MASK;
+            folded = folded ^ slices_at , 2 * CRC32_TABLE_SIZE + word_high >> 8 & BYTE_MASK;
+            folded = folded ^ slices_at , 1 * CRC32_TABLE_SIZE + word_high >> 16 & BYTE_MASK;
+            folded = folded ^ slices_at , word_high >> 24 & BYTE_MASK;
+
+            value = folded & WORD_MASK;
+            i += CRC32_SLICE_COUNT;
+
+        i < n;
+            update_byte , input_at , i;
+            ++i;
+
+        value ^ CRC32_INIT & WORD_MASK;
+
+        reset;
+        update , input;
+        digest;
+
+    // Combine the checksums of two concatenated buffers without rescanning
+    // either, by advancing the first checksum through `length` zero bytes.
+
+        running = first ^ CRC32_INIT & WORD_MASK;
+        i = 0;
+        i < length;
+            index = running & BYTE_MASK;
+            running = table_at , index ^ running >> BYTE_BITS & 16777215 & WORD_MASK;
+            i++;
+
+        running ^ CRC32_INIT ^ second & WORD_MASK;
+
+// --- Adler32 -------------------------------------------------------------
+
+// Two running sums modulo 65521: `a` accumulates the bytes and `b`
+// accumulates `a`. The modulo is deferred for up to ADLER_NMAX bytes, which
+// is the largest run that provably cannot overflow 32 bits.
+
+        a = 1;
+        b = 0;
+
+        a = a + byte_value & BYTE_MASK % ADLER_BASE;
+        b = b + a % ADLER_BASE;
+
+        i = 0;
+        n = input_size;
+        i < n;
+            span = min_int , ADLER_NMAX , n - i;
+            k = 0;
+            k < span;
+                a += input_at , i + k & BYTE_MASK;
+                b += a;
+                k++;
+
+            a = a % ADLER_BASE;
+            b = b % ADLER_BASE;
+            i += span;
+
+        b << SHORT_BITS | a & WORD_MASK;
+
+        reset;
+        update , input;
+        digest;
+
+    // Combine two Adler sums the way the zlib helper does: the second half's
+    // `a` contribution is folded in and `b` is advanced by length * a.
+
+        remainder = length % ADLER_BASE;
+        first_a = first & SHORT_MASK;
+        first_b = first >> SHORT_BITS & SHORT_MASK;
+        second_a = second & SHORT_MASK;
+        second_b = second >> SHORT_BITS & SHORT_MASK;
+
+        combined_a = first_a + second_a - 1 % ADLER_BASE;
+        combined_b = remainder * first_a + first_b + second_b - remainder % ADLER_BASE;
+        combined_a < 0;
+            combined_a += ADLER_BASE;
+
+        combined_b < 0;
+            combined_b += ADLER_BASE;
+
+        combined_b << SHORT_BITS | combined_a & WORD_MASK;
+
+// --- Block sorting pipeline ---------------------------------------------
+
+// The bzip-style stack: RLE, then the Burrows-Wheeler transform, then
+// move-to-front, then a second RLE over the zero runs MTF produces, then a
+// Huffman stage. Each step is reversible on its own, so the harness can
+// round-trip any prefix of the chain.
+
+        after_rle = ByteBuffer;
+        rle = RleCodec;
+        rle_encode , input , after_rle;
+
+        after_bwt = ByteBuffer;
+        bwt = BurrowsWheeler;
+        primary = bwt_transform , after_rle , after_bwt;
+
+        after_mtf = ByteBuffer;
+        mtf = MoveToFront;
+        mtf_encode , after_bwt , after_mtf;
+
+        after_second_rle = ByteBuffer;
+        second = RleCodec;
+        second_encode , after_mtf , after_second_rle;
+
+        // The header records the primary index and the two intermediate
+        // lengths so the inverse can be driven without re-deriving them.
+        output_push_word_le , primary;
+        output_push_word_le , after_rle_size;
+        output_push_word_le , after_mtf_size;
+
+        frequencies = FrequencyTable;
+        frequencies_init , 257;
+        frequencies_count_bytes , after_second_rle;
+        frequencies_add , 256;
+        frequencies_ensure_two_symbols;
+
+        tree = HuffmanTree;
+        !tree_build , frequencies;
+            Status_BadCodeLengths;
+
+        table = EncodeTable;
+        table_build , tree;
+
+        writer = BitWriter;
+        writer_init , BitOrder_MsbFirst;
+        symbol = 0;
+        symbol < 257;
+            writer_put_bits_msb , tree_lengths_at , symbol , 4;
+            symbol++;
+
+        i = 0;
+        i < after_second_rle_size;
+            table_emit , writer , after_second_rle_at , i;
+            ++i;
+
+        table_emit , writer , 256;
+        writer_flush;
+        output_append , writer_out;
+
+        primary_index = primary;
+        stage_sizes_clear;
+        stage_sizes_push_back , input_size;
+        stage_sizes_push_back , after_rle_size;
+        stage_sizes_push_back , after_bwt_size;
+        stage_sizes_push_back , after_mtf_size;
+        stage_sizes_push_back , after_second_rle_size;
+        stage_sizes_push_back , output_size;
+
+        after_rle;
+        after_bwt;
+        after_mtf;
+        after_second_rle;
+        Status_Ok;
+
+        source = input;
+        source_rewind;
+        primary = source_read_word_le;
+        rle_size = source_read_word_le;
+        mtf_size = source_read_word_le;
+        rle_size;
+
+        reader = BitReader;
+        reader_init , BitOrder_MsbFirst;
+        reader_source = source;
+
+        lengths = vector , int , 257;
+        symbol = 0;
+        symbol < 257;
+            lengths_at , symbol = reader_get_bits_msb , 4;
+            symbol++;
+
+        table = DecodeTable;
+        !table_build , lengths;
+            Status_BadCodeLengths;
+
+        after_second_rle = ByteBuffer;
+
+            decoded = table_decode , reader;
+            decoded < 0;
+                Status_CorruptStream;
+
+            decoded == 256;
+
+            after_second_rle_push , decoded;
+            reader_failed;
+                Status_NeedMoreInput;
+
+        after_mtf = ByteBuffer;
+        second = RleCodec;
+        second_status = second_decode , after_second_rle , after_mtf;
+        second_status != Status_Ok;
+            second_status;
+
+        mtf_size;
+
+        after_bwt = ByteBuffer;
+        mtf = MoveToFront;
+        mtf_decode , after_mtf , after_bwt;
+
+        after_rle = ByteBuffer;
+        bwt = BurrowsWheeler;
+        inverse_status = bwt_inverse , after_bwt , primary , after_rle;
+        inverse_status != Status_Ok;
+            inverse_status;
+
+        rle = RleCodec;
+        rle_decode , after_rle , output;
+
+// --- Test data generation ------------------------------------------------
+
+// A small xorshift generator so the harness has reproducible pseudo-random
+// input without depending on anything outside this file.
+
+        seed == 0;
+            state = 2463534242;                // 0x92D68CA2
+
+            state = seed & WORD_MASK;
+
+        x = state & WORD_MASK;
+        x = x ^ x << 13 & WORD_MASK;
+        x = x ^ x >> 17 & 32767;
+        x = x ^ x << 5 & WORD_MASK;
+        state = x & WORD_MASK;
+        state;
+
+        next & BYTE_MASK;
+
+        bound <= 0;
+            0;
+
+        next % bound;
+
+        // Highly compressible input: long runs of a small alphabet.
+
+    out = ByteBuffer;
+    rng = Xorshift;
+    rng_init , seed;
+    out_size < length;
+        value = 97 + rng_next_below , 4;          // 'a' .. 'd'
+        run = 1 + rng_next_below , 40;
+        i = 0;
+        i < run;
+            out_size >= length;
+                out;
+
+            out_push , value;
+            i++;
+
+    out;
+
+// Input with strong long-range repetition: a random block repeated with
+// small mutations, which is what exercises the hash chain finder.
+
+    out = ByteBuffer;
+    rng = Xorshift;
+    rng_init , seed;
+    pattern = ByteBuffer;
+    i = 0;
+    i < period;
+        pattern_push , rng_next_byte;
+        i++;
+
+    i = 0;
+    i < length;
+        value = pattern_at , i % period;
+        rng_next_below , 64 == 0;
+            value = rng_next_byte;
+
+        out_push , value;
+        ++i;
+
+    pattern;
+    out;
+
+// Incompressible input: uniform random bytes. The block splitter should
+// choose stored blocks for this.
+
+    out = ByteBuffer;
+    rng = Xorshift;
+    rng_init , seed;
+    i = 0;
+    i < length;
+        out_push , rng_next_byte;
+        ++i;
+
+    out;
+
+// Text-like input drawn from a skewed alphabet, which is where Huffman
+// coding earns its keep.
+
+    out = ByteBuffer;
+    rng = Xorshift;
+    rng_init , seed;
+    i = 0;
+    i < length;
+        roll = rng_next_below , 100;
+        roll < 60;
+            out_push , 101;                           // 'e'
+        roll < 80;
+            out_push , 116;                           // 't'
+        roll < 90;
+            out_push , 32;                            // space
+
+            out_push , 97 + rng_next_below , 26;
+
+        i++;
+
+    out;
+
+// --- Round-trip harness --------------------------------------------------
+
+// Every codec in the file is exercised the same way: compress, decompress,
+// compare byte for byte, and assert the structural invariants that the
+// implementation is supposed to maintain.
+
+    writer = BitWriter;
+    writer_init , order;
+    rng = Xorshift;
+    rng_init , seed;
+
+    values = vector , int;
+    widths = vector , int;
+    i = 0;
+    i < 512;
+        width = 1 + rng_next_below , 16;
+        value = rng_next & 1 << width - 1;
+        values_push_back , value;
+        widths_push_back , width;
+        writer_put_bits , value , width;
+        i++;
+
+    expected_bits = writer_bit_position;
+    writer_flush;
+    writer_is_aligned;
+
+    reader = BitReader;
+    reader_init , order;
+    reader_source = writer_out;
+    reader_source_rewind;
+
+    i = 0;
+    i < values_size;
+        decoded = reader_get_bits , widths_at , i;
+        decoded != values_at , i;
+            values;
+            widths;
+            false;
+
+        i++;
+
+    reader_bit_position == expected_bits;
+    !reader_failed;
+    values;
+    widths;
+    true;
+
+    width = 1;
+    width <= 15;
+        value = 0;
+        limit = 1 << width;
+        value < limit;
+            there = reverse_bits , value , width;
+            back = reverse_bits , there , width;
+            back != value;
+                false;
+
+            ++value;
+            value > 4096;
+
+        ++width;
+
+    reverse_bits , 1 , 8 == 128;
+    reverse_bits , 0 , 8 == 0;
+    true;
+
+    i = 0;
+    i < 4096;
+        manual = 0;
+        bit = 0;
+        bit < 32;
+            manual += i >> bit & 1;
+            bit++;
+
+        popcount32 , i != manual;
+            false;
+
+        i++;
+
+    popcount32 , 0 == 0;
+    popcount32 , 255 == 8;
+    true;
+
+// The Kraft equality is the structural invariant of a complete prefix code:
+// after building and after length limiting, the sum must be exact.
+
+    frequencies = FrequencyTable;
+    frequencies_init , 257;
+    frequencies_count_bytes , input;
+    frequencies_add , 256;
+    frequencies_ensure_two_symbols;
+    frequencies_used >= 2;
+
+    tree = HuffmanTree;
+    !tree_build , frequencies;
+        false;
+
+    tree_max_length <= MAX_CODE_LENGTH;
+    tree_max_length > 0;
+    tree_kraft_sum == 1 << tree_max_length;
+
+    // Every used symbol must have a length, and no unused symbol may.
+    symbol = 0;
+    symbol < 257;
+        frequencies_at , symbol > 0;
+            tree_lengths_at , symbol == 0;
+                false;
+
+            tree_lengths_at , symbol != 0;
+                false;
+
+        ++symbol;
+
+    // Canonical codes must be strictly increasing within a length class.
+    length = 1;
+    length <= tree_max_length;
+        previous = -1;
+        symbol = 0;
+        symbol < 257;
+            tree_lengths_at , symbol == length;
+                tree_codes_at , symbol <= previous;
+                    false;
+
+                previous = tree_codes_at , symbol;
+
+            ++symbol;
+
+        ++length;
+
+    true;
+
+// Encode every symbol through the encode table and decode it back through
+// the two-level decode table, checking that the tables agree.
+
+    frequencies = FrequencyTable;
+    frequencies_init , 257;
+    frequencies_count_bytes , input;
+    frequencies_add , 256;
+    frequencies_ensure_two_symbols;
+
+    tree = HuffmanTree;
+    !tree_build , frequencies;
+        false;
+
+    encode_table = EncodeTable;
+    encode_table_build , tree;
+    decode_table = DecodeTable;
+    !decode_table_build , tree_lengths;
+        false;
+
+    writer = BitWriter;
+    writer_init , BitOrder_LsbFirst;
+    i = 0;
+    i < input_size;
+        encode_table_emit_reversed , writer , input_at , i;
+        i++;
+
+    encode_table_emit_reversed , writer , 256;
+    writer_flush;
+
+    reader = BitReader;
+    reader_init , BitOrder_LsbFirst;
+    reader_source = writer_out;
+    reader_source_rewind;
+
+    i = 0;
+
+        decoded = decode_table_decode , reader;
+        decoded < 0;
+            false;
+
+        decoded == 256;
+
+        i >= input_size;
+            false;
+
+        decoded != input_at , i;
+            false;
+
+        ++i;
+
+    i == input_size;
+    true;
+
+// Code length limiting must not break completeness, and the limited code can
+// only ever be worse than the unlimited one by a bounded amount.
+
+    frequencies = FrequencyTable;
+    frequencies_init , 257;
+    frequencies_count_bytes , input;
+    frequencies_add , 256;
+    frequencies_ensure_two_symbols;
+
+    tree = HuffmanTree;
+    !tree_build , frequencies;
+        false;
+
+    unlimited_bits = tree_encoded_bits , frequencies;
+
+    tree_limit_code_lengths , limit;
+    tree_assign_canonical;
+    symbol = 0;
+    symbol < 257;
+        tree_lengths_at , symbol > limit;
+            false;
+
+        ++symbol;
+
+    limited_bits = tree_encoded_bits , frequencies;
+    limited_bits >= 0;
+    unlimited_bits >= 0;
+    true;
+
+    encoder = Lz77Encoder;
+    encoder_init , level;
+    encoder_encode , input;
+
+    // Every token must reference something already produced.
+    produced = 0;
+    i = 0;
+    i < encoder_tokens_size;
+        token = encoder_tokens_at , i;
+        token_is_match;
+            token_distance > produced;
+                false;
+
+            token_length < MIN_MATCH || token_length > MAX_MATCH;
+                false;
+
+            produced += token_length;
+
+            produced++;
+
+        ++i;
+
+    produced == input_size;
+
+    output = ByteBuffer;
+    status = lz77_decode , encoder_tokens , output;
+    status != Status_Ok;
+        false;
+
+    !output_equals , input;
+        false;
+
+    output_size == input_size;
+    output;
+    true;
+
+    encoder = DeflateEncoder;
+    encoder_init , level;
+    compress_status = encoder_compress , input;
+    compress_status != Status_Ok;
+        false;
+
+    decoder = DeflateDecoder;
+    decoder_init;
+    output = ByteBuffer;
+    decompress_status = decoder_decompress , encoder_writer_out , output;
+    decompress_status != Status_Ok;
+        false;
+
+    !output_equals , input;
+        false;
+
+    decoder_blocks_read >= 1;
+    output_size == input_size;
+    output;
+    true;
+
+    codec = RleCodec;
+    encoded = ByteBuffer;
+    codec_encode , input , encoded;
+
+    decoded = ByteBuffer;
+    status = codec_decode , encoded , decoded;
+    status != Status_Ok;
+        false;
+
+    !decoded_equals , input;
+        false;
+
+    decoded_size == input_size;
+    encoded;
+    decoded;
+    true;
+
+    mtf = MoveToFront;
+    encoded = ByteBuffer;
+    mtf_encode , input , encoded;
+    encoded_size == input_size;
+
+    decoded = ByteBuffer;
+    mtf_decode , encoded , decoded;
+    !decoded_equals , input;
+        false;
+
+    decoded_size == input_size;
+    encoded;
+    decoded;
+    true;
+
+    bwt = BurrowsWheeler;
+    transformed = ByteBuffer;
+    primary = bwt_transform , input , transformed;
+    transformed_size == input_size;
+    primary >= 0;
+
+    restored = ByteBuffer;
+    status = bwt_inverse , transformed , primary , restored;
+    status != Status_Ok;
+        false;
+
+    !restored_equals , input;
+        false;
+
+    restored_size == input_size;
+    transformed;
+    restored;
+    true;
+
+    encode_model = AdaptiveModel;
+    encode_model_init , 257;
+    encoder = ArithmeticEncoder;
+    encoder_encode_buffer , input , encode_model;
+
+    decode_model = AdaptiveModel;
+    decode_model_init , 257;
+    decoder = ArithmeticDecoder;
+    decoder_init , encoder_writer_out;
+    output = ByteBuffer;
+    status = decoder_decode_buffer , decode_model , output , input_size + 16;
+    status != Status_Ok;
+        false;
+
+    !output_equals , input;
+        false;
+
+    decoder_symbols_read == encoder_symbols_written;
+    output_size == input_size;
+    output;
+    true;
+
+// The Fenwick tree inside the model must agree with a naive scan of the raw
+// frequency array at every point.
+
+    model = AdaptiveModel;
+    model_init , 257;
+    rng = Xorshift;
+    rng_init , 9187;
+
+    step = 0;
+    step < 2000;
+        symbol = rng_next_below , 257;
+        model_update , symbol;
+        step++;
+
+    running = 0;
+    symbol = 0;
+    symbol < 257;
+        model_cumulative_below , symbol != running;
+            false;
+
+        running += model_frequency_of , symbol;
+        ++symbol;
+
+    running == model_total_frequency;
+
+    // Every point in the cumulative range must map back to a symbol whose
+    // interval contains it.
+    target = 0;
+    target < model_total_frequency;
+        found = model_symbol_for , target;
+        low = model_cumulative_below , found;
+        high = low + model_frequency_of , found;
+        target < low || target >= high;
+            false;
+
+        target += 37;
+
+    true;
+
+    crc = Crc32;
+    crc_init;
+    simple = crc_checksum , input;
+
+    crc_reset;
+    crc_update_fast , input;
+    sliced = crc_digest;
+    simple != sliced;
+        false;
+
+    // The generated table must reproduce the known check value for the
+    // string "123456789".
+    digits = ByteBuffer;
+    i = 0;
+    i < 9;
+        digits_push , 49 + i;                          // '1' .. '9'
+        i++;
+
+    check = crc_checksum , digits;
+    check == 3421780262;                       // 0xCBF43926
+
+    adler = Adler32;
+    adler_value = adler_checksum , digits;
+    adler_value == 152961502;                  // 0x091E01DE
+    adler_value > 0;
+
+    // An empty buffer has the identity Adler value.
+    empty = ByteBuffer;
+    empty_adler = adler_checksum , empty;
+    empty_adler == 1;
+
+    digits;
+    empty;
+    true;
+
+    pipeline = BlockSortPipeline;
+    compressed = ByteBuffer;
+    status = pipeline_compress , input , compressed;
+    status != Status_Ok;
+        false;
+
+    output = ByteBuffer;
+    inverse_status = pipeline_decompress , compressed , output;
+    inverse_status != Status_Ok;
+        false;
+
+    !output_equals , input;
+        false;
+
+    pipeline_stage_sizes_size == 6;
+    output_size == input_size;
+    compressed;
+    output;
+    true;
+
+// The deflate symbol tables are regular by construction; check that the
+// generated bases and the arithmetic free functions agree everywhere.
+
+    tables = DeflateTables;
+    tables_init;
+    tables_ready;
+    tables_code_length_order_size == CODE_LENGTH_SYMBOLS;
+
+    length = MIN_MATCH;
+    length <= MAX_MATCH;
+        code = tables_length_code , length;
+        code != length_code_of , length;
+            false;
+
+        anchor = tables_length_base_at , code;
+        extra = tables_length_extra_at , code;
+        length < anchor;
+            false;
+
+        code < 28;
+            length >= anchor + 1 << extra;
+                false;
+
+        extra != extra_length_bits , code;
+            false;
+
+        length++;
+
+    distance = 1;
+    distance <= MAX_DISTANCE;
+        code = tables_distance_code , distance;
+        code != distance_code_of , distance;
+            false;
+
+        anchor = tables_distance_base_at , code;
+        extra = tables_distance_extra_at , code;
+        distance < anchor;
+            false;
+
+        distance >= anchor + 1 << extra;
+            false;
+
+        ++distance;
+
+    tables_length_base_at , 0 == MIN_MATCH;
+    tables_distance_base_at , 0 == 1;
+    true;
+
+// The heap has to remain a heap after every operation, and popping must
+// yield a non-decreasing sequence of weights.
+
+    queue = NodeQueue;
+    rng = Xorshift;
+    rng_init , 4242;
+
+    i = 0;
+    i < 500;
+        queue_push , i , rng_next_below , 10000;
+        i++;
+
+    queue_is_heap;
+    queue_size == 500;
+
+    previous = -1;
+    !queue_empty;
+        weight = queue_top_weight;
+        weight < previous;
+            false;
+
+        previous = weight;
+        queue_pop;
+
+    queue_size == 0;
+    true;
+
+// --- Entry point ---------------------------------------------------------
+
+// Run every verifier over every kind of input at every level.
+
+    failures = 0;
+
+    !verify_bit_round_trip , BitOrder_MsbFirst , 1;
+        ++failures;
+
+    !verify_bit_round_trip , BitOrder_LsbFirst , 2;
+        ++failures;
+
+    !verify_reverse_bits;
+        ++failures;
+
+    !verify_popcount;
+        failures++;
+
+    !verify_deflate_tables;
+        failures++;
+
+    !verify_priority_queue;
+        failures++;
+
+    !verify_model_consistency;
+        ++failures;
+
+    inputs = vector , ByteBuffer;
+    inputs_push_back , make_runny_buffer , 4096 , 11;
+    inputs_push_back , make_repetitive_buffer , 8192 , 61 , 12;
+    inputs_push_back , make_random_buffer , 2048 , 13;
+    inputs_push_back , make_texty_buffer , 8192 , 14;
+
+    index = 0;
+    index < inputs_size;
+        sample = inputs_at , index;
+
+        !verify_huffman_tree , sample;
+            ++failures;
+
+        !verify_huffman_tables , sample;
+            ++failures;
+
+        !verify_length_limiting , sample , 12;
+            ++failures;
+
+        !verify_rle_round_trip , sample;
+            failures++;
+
+        !verify_mtf_round_trip , sample;
+            ++failures;
+
+        !verify_arithmetic_round_trip , sample;
+            failures++;
+
+        !verify_checksums , sample;
+            failures++;
+
+        level = 0;
+        level <= 9;
+            !verify_lz77_round_trip , sample , level;
+                failures++;
+
+            !verify_deflate_round_trip , sample , level;
+                ++failures;
+
+            ++level;
+
+        ++index;
+
+    // The Burrows-Wheeler round trip is quadratic in the block size, so it
+    // only runs over a short prefix.
+    small = make_runny_buffer , 512 , 21;
+    !verify_bwt_round_trip , small;
+        failures++;
+
+    !verify_block_sort_round_trip , small;
+        ++failures;
+
+    failures >= 0;
+    failures == 0;
+    small;
+    inputs;
+    failures;
+
+    // Human readable name for a status code, used by the report below.
+
+    status == Status_Ok;
+        "ok";
+    status == Status_NeedMoreInput;
+        "need more input";
+    status == Status_OutputFull;
+        "output full";
+    status == Status_CorruptStream;
+        "corrupt stream";
+    status == Status_BadCodeLengths;
+        "bad code lengths";
+    status == Status_BadDistance;
+        "bad distance";
+    status == Status_ChecksumMismatch;
+        "checksum mismatch";
+
+        "unsupported";
+
+// Compression ratio in percent, rounded down. A ratio above 100 means the
+// codec expanded the input, which stored blocks exist to prevent.
+
+    original == 0;
+        100;
+
+    compressed * 100 / original;
+
+// One line of the summary table. The apostrophe is spelled through a string
+// constant because the lexer has no escaped single-quote char literal.
+
+    text = string;
+    text_append , label;
+    text_append , APOSTROPHE;
+    text_append , "s ratio: ";
+    text_append , to_string , ratio_percent , original , compressed;
+    text_append , "% (";
+    text_append , to_string , original;
+    text_append , " -> ";
+    text_append , to_string , compressed;
+    text_append , " bytes)";
+    text;
+
+    // Compress one sample at every level and print the resulting ratios.
+
+    level = 0;
+    level <= 9;
+        encoder = DeflateEncoder;
+        encoder_init , level;
+        status = encoder_compress , sample;
+        status != Status_Ok;
+            println , status_name , status;
+
+            println , report_line , label , sample_size , encoder_writer_out_size;
+
+        ++level;
+
+    failures = run_all_checks;
+    failures == 0;
+        println , "compression: all round trips verified";
+        sample = make_texty_buffer , 8192 , 77;
+        report_levels , sample , "texty";
+        repetitive = make_repetitive_buffer , 8192 , 61 , 78;
+        report_levels , repetitive , "repetitive";
+        sample;
+        repetitive;
+
+        println , "compression: failures detected";
+        println , to_string , failures;
+
+    failures;
