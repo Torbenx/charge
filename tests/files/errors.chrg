@@ -66,6 +66,26 @@ fn f1() -> return_type: { }
 
 }
 
+struct ReferenceReturnType: {
+
+// expect-error ReferenceReturnTypeNotSupported
+// expect-return-type X
+fn f1() -> &unique X: { }
+
+// expect-error ReferenceReturnTypeNotSupported
+// expect-return-type X
+fn f2(self: &unique) -> &unique[self] X: { }
+
+// expect-error ReferenceReturnTypeNotSupported
+// expect-return-type X
+fn f3(self: &unique) -> &shared[unique self] X: { }
+
+// expect-error ReferenceReturnTypeNotSupported
+// expect-return-type X
+fn f4() -> &(expression_category::unique_ref) X: { }
+
+}
+
 namespace StructImpl: {
 
 struct base: { x: X; }

@@ -208,12 +208,16 @@ SwitchState after_expression() then error
             next after_impl_expression
         ifScope ScopeKind::GenericCategoryExpression
             popScope ScopeKind::GenericCategoryExpression
-            next after_variable_modifier
+            next after_reference_modifier
         popScope ScopeKind::Paren
         endCall
         emitToken TokenKind::EmptyNode
         next after_expression
     punctuation ]
+        ifScope ScopeKind::BorrowList
+            popScope ScopeKind::BorrowList
+            emitToken TokenKind::EmptyNode
+            next expression
         popScope ScopeKind::Square
         endCall
         emitToken TokenKind::EmptyNode
@@ -230,6 +234,8 @@ SwitchState after_expression() then error
         next after_expression
 
     punctuation ,
+        ifScope ScopeKind::BorrowList
+            next borrow
         ifScope ScopeKind::VariableType
             popScope ScopeKind::VariableType
             popScope ScopeKind::Parameter
@@ -497,6 +503,10 @@ LinearState reference_modifier() then error
         pushScope ScopeKind::GenericCategoryExpression
         emitToken TokenKind::VariableGenericCategory
         next expression
+LinearState after_reference_modifier() then after_variable_modifier
+    then
+        ifScope ScopeKind::ReturnType
+            then after_return_type_modifier
 LinearState after_variable_modifier() then expression
     punctuation =
         pushScope ScopeKind::RightExpr
@@ -516,20 +526,37 @@ LinearState after_variable_modifier() then expression
         next after_parameters
     then
         pushScope ScopeKind::VariableType
-LinearState after_variable_unique_modifier() then after_variable_modifier
+LinearState after_variable_unique_modifier() then after_reference_modifier
     keyword const
         updateData sema::VariableKind::ConstUniqueReference
-        next after_variable_modifier
-LinearState after_variable_shared_modifier() then after_variable_modifier
+        next after_reference_modifier
+LinearState after_variable_shared_modifier() then after_reference_modifier
     keyword const
         updateData sema::VariableKind::ConstSharedReference
-        next after_variable_modifier
-LinearState after_variable_const_modifier() then after_variable_modifier
+        next after_reference_modifier
+LinearState after_variable_const_modifier() then after_reference_modifier
     keyword shared
-        next after_variable_modifier
+        next after_reference_modifier
     keyword unique
         updateData sema::VariableKind::ConstUniqueReference
-        next after_variable_modifier
+        next after_reference_modifier
+
+# --- Return type
+
+LinearState return_type() then expression
+    punctuation &
+        next reference_modifier
+LinearState after_return_type_modifier() then expression
+    punctuation [
+        pushScope ScopeKind::BorrowList
+        emitToken TokenKind::BorrowList
+        next borrow
+LinearState borrow() then expression
+    keyword unique
+        emitToken TokenKind::UniqueBorrow
+        next expression
+    then
+        emitToken TokenKind::Borrow
 
 # --- Parameters
 
@@ -699,8 +726,8 @@ LinearState after_function_parameters() then error
         next statement
     punctuation ->
         pushScope ScopeKind::ReturnType
-        emitToken TokenKind::ReturnType
-        next expression
+        emitToken TokenKind::ReturnType, sema::VariableKind::Let
+        next return_type
     punctuation =>
         pushScope ScopeKind::FunctionBody
         pushScope ScopeKind::RightExpr

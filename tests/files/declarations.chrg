@@ -50,6 +50,46 @@ fn f5(x: type, var y): { }
 // expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
 fn f6() -> type: { }
 
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType; expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6a() -> &unique type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType; expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6b() -> &const shared type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType
+// expect-token VariableGenericCategory; expect-token IdentifierExpr; expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6c() -> &(category) type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType
+// expect-token BorrowList; expect-token Borrow; expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6d() -> &unique[self] type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType
+// expect-token BorrowList; expect-token UniqueBorrow; expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6e() -> &shared[unique self] type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType
+// expect-token BorrowList
+// expect-token Borrow; expect-token IdentifierExpr; expect-token MemberAccessExpr
+// expect-token UniqueBorrow; expect-token IdentifierExpr
+// expect-token EmptyNode; expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6f() -> &unique const[self.member, unique other] type: { }
+
+// expect-token FunctionDecl; expect-token EmptyNode; expect-token ReturnType
+// expect-token VariableGenericCategory; expect-token IdentifierExpr
+// expect-token BorrowList; expect-token Borrow; expect-token IdentifierExpr; expect-token EmptyNode
+// expect-token IdentifierExpr
+// expect-token FunctionBody; expect-token CompoundStmt; expect-token EmptyNode
+fn f6g() -> &(category)[self] type: { }
+
 // expect-token FunctionDecl; expect-token EmptyNode; expect-token BodyExpr; expect-token IdentifierExpr; expect-token ExpressionStmt;
 fn g1() => value;
 

@@ -71,6 +71,7 @@ inline bool isVariableDecl(TokenKind kind) {
     SCOPE(EnumImplExpression)        \
     SCOPE(GlobalImplExpression)      \
     SCOPE(GenericCategoryExpression) \
+    SCOPE(BorrowList)                \
     SCOPE(ContextFunction)
 
 enum class ScopeKind : uint8_t {

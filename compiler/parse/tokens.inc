@@ -19,7 +19,7 @@ DATAKIND(sema::DeclarationValue, DeclarationValue)
 DATAKIND(uint32_t, DeclIndex)
 
 TOKEN(FunctionBody, Colon, None, None)
-TOKEN(ReturnType, MinusGreater, None, Expression)
+TOKEN(ReturnType, MinusGreater, VariableKind, Expression)
 TOKEN(BodyExpr, EqualGreater, None, Expression)
 
 TOKEN(EmptyNode, Invalid, None, None)
@@ -134,7 +134,11 @@ TOKEN(LetValueDecl, Identifier, Word, Expression)
 MARKER(VariableDeclsEnd)
 
 TOKEN(VariableType, Colon, VariableKind, Expression)
-TOKEN(VariableGenericCategory, Less, None, Expression)
+TOKEN(VariableGenericCategory, LeftParen, None, Expression)
+
+TOKEN(BorrowList, LeftSquare, None, None)
+TOKEN(Borrow, Invalid, None, None)
+TOKEN(UniqueBorrow, Unique, None, None)
 
 TOKEN(TemplateAttribute, Template, None, None)
 TOKEN(IncompleteAttribute, Incomplete, None, None)

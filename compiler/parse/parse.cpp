@@ -982,14 +982,22 @@ template<typename ParseOutput>
         goto variable_type$no_emit;
     case State::ReferenceModifier:
         goto reference_modifier$no_emit;
+    case State::AfterReferenceModifier:
+        goto after_reference_modifier$no_emit;
     case State::AfterVariableModifier:
-        goto after_variable_modifier$no_emit;
+        VERIFY_NOT_REACHED();
     case State::AfterVariableUniqueModifier:
         goto after_variable_unique_modifier$no_emit;
     case State::AfterVariableSharedModifier:
         goto after_variable_shared_modifier$no_emit;
     case State::AfterVariableConstModifier:
         goto after_variable_const_modifier$no_emit;
+    case State::ReturnType:
+        goto return_type$no_emit;
+    case State::AfterReturnTypeModifier:
+        VERIFY_NOT_REACHED();
+    case State::Borrow:
+        goto borrow$no_emit;
     case State::AfterParameters:
         goto after_parameters$no_emit;
     case State::FirstParameter:
@@ -1720,8 +1728,8 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
                 }
                 scopePosition = result;
             }
-            // next after_variable_modifier
-            goto after_variable_modifier$no_emit;
+            // next after_reference_modifier
+            goto after_reference_modifier$no_emit;
         }
         // popScope ScopeKind::Paren
         {
@@ -1803,6 +1811,11 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
     }
     case ',': {
         tokEnd += 1;
+        // ifScope ScopeKind::BorrowList
+        if (scopePosition[0] == ScopeKind::BorrowList) {
+            // next borrow
+            goto borrow$no_emit;
+        }
         // ifScope ScopeKind::VariableType
         if (scopePosition[0] == ScopeKind::VariableType) {
             // popScope ScopeKind::VariableType
@@ -2220,6 +2233,22 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
     }
     case ']': {
         tokEnd += 1;
+        // ifScope ScopeKind::BorrowList
+        if (scopePosition[0] == ScopeKind::BorrowList) {
+            // popScope ScopeKind::BorrowList
+            {
+                auto result = popScope(scopePosition, ScopeKind::BorrowList);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // emitToken TokenKind::EmptyNode
+            carriedEmitTokenKind = TokenKind::EmptyNode;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        }
         // popScope ScopeKind::Square
         {
             auto result = popScope(scopePosition, ScopeKind::Square);
@@ -3989,14 +4018,24 @@ LABEL_MAYBE_UNUSED reference_modifier$as_then:
     // then error
     goto error$as_then;
 
-    // LinearState after_variable_modifier
-after_variable_modifier$no_emit:
-    parseState = State::AfterVariableModifier;
+    // LinearState after_reference_modifier
+after_reference_modifier$no_emit:
+    parseState = State::AfterReferenceModifier;
     if (tokenLimit == 0)
         goto reached_token_limit;
     tokenLimit -= 1;
     tokEnd = inlineAdvancer(tokEnd, output);
     tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_reference_modifier$as_then:
+    // ifScope ScopeKind::ReturnType
+    if (scopePosition[0] == ScopeKind::ReturnType) {
+        // then after_return_type_modifier
+        goto after_return_type_modifier$as_then;
+    }
+    // then after_variable_modifier
+    goto after_variable_modifier$as_then;
+
+    // LinearState after_variable_modifier
 LABEL_MAYBE_UNUSED after_variable_modifier$as_then:
     if (std::string_view(tokEnd, 1) == "="sv) {
         char next = tokEnd[1];
@@ -4080,9 +4119,19 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
             case toCaseValue<identifier_t>(LexerToken::Const, "const"):
                 // updateData sema::VariableKind::ConstUniqueReference
                 setBackData1(output, sema::VariableKind::ConstUniqueReference);
-                // next after_variable_modifier
-                goto after_variable_modifier$no_emit;
+                // next after_reference_modifier
+                goto after_reference_modifier$no_emit;
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // pushScope ScopeKind::IfExpr
+                    scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+                    // next expression
+                    goto expression$no_emit;
+                }
                 // -> after_variable_modifier
                 // pushScope ScopeKind::VariableType
                 scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -4098,6 +4147,17 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
                 break;
             }
         }
+        // -> after_reference_modifier
+        // ifScope ScopeKind::ReturnType
+        if (scopePosition[0] == ScopeKind::ReturnType) {
+            // then after_return_type_modifier
+            // -> expression
+            // emitToken TokenKind::IdentifierExpr
+            carriedEmitTokenKind = TokenKind::IdentifierExpr;
+            carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+            // next after_expression
+            goto after_expression$with_emit;
+        }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -4108,8 +4168,8 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
         // next after_expression
         goto after_expression$with_emit;
     }
-    // then after_variable_modifier
-    goto after_variable_modifier$as_then;
+    // then after_reference_modifier
+    goto after_reference_modifier$as_then;
 
     // LinearState after_variable_shared_modifier
 after_variable_shared_modifier$no_emit:
@@ -4133,9 +4193,19 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
             case toCaseValue<identifier_t>(LexerToken::Const, "const"):
                 // updateData sema::VariableKind::ConstSharedReference
                 setBackData1(output, sema::VariableKind::ConstSharedReference);
-                // next after_variable_modifier
-                goto after_variable_modifier$no_emit;
+                // next after_reference_modifier
+                goto after_reference_modifier$no_emit;
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // pushScope ScopeKind::IfExpr
+                    scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+                    // next expression
+                    goto expression$no_emit;
+                }
                 // -> after_variable_modifier
                 // pushScope ScopeKind::VariableType
                 scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -4151,6 +4221,17 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
                 break;
             }
         }
+        // -> after_reference_modifier
+        // ifScope ScopeKind::ReturnType
+        if (scopePosition[0] == ScopeKind::ReturnType) {
+            // then after_return_type_modifier
+            // -> expression
+            // emitToken TokenKind::IdentifierExpr
+            carriedEmitTokenKind = TokenKind::IdentifierExpr;
+            carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+            // next after_expression
+            goto after_expression$with_emit;
+        }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
         scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -4161,8 +4242,8 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
         // next after_expression
         goto after_expression$with_emit;
     }
-    // then after_variable_modifier
-    goto after_variable_modifier$as_then;
+    // then after_reference_modifier
+    goto after_reference_modifier$as_then;
 
     // LinearState after_variable_const_modifier
 after_variable_const_modifier$no_emit:
@@ -4184,6 +4265,16 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
         if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // pushScope ScopeKind::IfExpr
+                    scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+                    // next expression
+                    goto expression$no_emit;
+                }
                 // -> after_variable_modifier
                 // pushScope ScopeKind::VariableType
                 scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
@@ -4193,19 +4284,30 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
                 // next expression
                 goto expression$no_emit;
             case toCaseValue<identifier_t>(LexerToken::Shared, "shared"):
-                // next after_variable_modifier
-                goto after_variable_modifier$no_emit;
+                // next after_reference_modifier
+                goto after_reference_modifier$no_emit;
             case toCaseValue<identifier_t>(LexerToken::Unique, "unique"):
                 // updateData sema::VariableKind::ConstUniqueReference
                 setBackData1(output, sema::VariableKind::ConstUniqueReference);
-                // next after_variable_modifier
-                goto after_variable_modifier$no_emit;
+                // next after_reference_modifier
+                goto after_reference_modifier$no_emit;
             default:
                 if (isKeyword(this_identifier)) {
                     goto error$as_then;
                 }
                 break;
             }
+        }
+        // -> after_reference_modifier
+        // ifScope ScopeKind::ReturnType
+        if (scopePosition[0] == ScopeKind::ReturnType) {
+            // then after_return_type_modifier
+            // -> expression
+            // emitToken TokenKind::IdentifierExpr
+            carriedEmitTokenKind = TokenKind::IdentifierExpr;
+            carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+            // next after_expression
+            goto after_expression$with_emit;
         }
         // -> after_variable_modifier
         // pushScope ScopeKind::VariableType
@@ -4217,8 +4319,101 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
         // next after_expression
         goto after_expression$with_emit;
     }
-    // then after_variable_modifier
-    goto after_variable_modifier$as_then;
+    // then after_reference_modifier
+    goto after_reference_modifier$as_then;
+
+    // LinearState return_type
+return_type$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+return_type$no_emit:
+    parseState = State::ReturnType;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED return_type$as_then:
+    if (std::string_view(tokEnd, 1) == "&"sv) {
+        char next = tokEnd[1];
+        if (next != '&' && next != '=') {
+            tokEnd += 1;
+            // next reference_modifier
+            goto reference_modifier$no_emit;
+        }
+    }
+    // then expression
+    goto expression$as_then;
+
+    // LinearState after_return_type_modifier
+LABEL_MAYBE_UNUSED after_return_type_modifier$as_then:
+    if (std::string_view(tokEnd, 1) == "["sv) {
+        tokEnd += 1;
+        // pushScope ScopeKind::BorrowList
+        scopePosition = pushScope(scopePosition, ScopeKind::BorrowList);
+        // emitToken TokenKind::BorrowList
+        carriedEmitTokenKind = TokenKind::BorrowList;
+        carriedEmitTokenData = 0;
+        // next borrow
+        goto borrow$with_emit;
+    }
+    // then expression
+    goto expression$as_then;
+
+    // LinearState borrow
+borrow$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+borrow$no_emit:
+    parseState = State::Borrow;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED borrow$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED borrow$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED borrow$word_case:
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // emitToken TokenKind::Borrow
+                emitToken(TokenKind::Borrow, tokBegin, 0, output);
+                // -> expression
+                // pushScope ScopeKind::IfExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+                // next expression
+                goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Unique, "unique"):
+                // emitToken TokenKind::UniqueBorrow
+                carriedEmitTokenKind = TokenKind::UniqueBorrow;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // emitToken TokenKind::Borrow
+        emitToken(TokenKind::Borrow, tokBegin, 0, output);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    // emitToken TokenKind::Borrow
+    emitToken(TokenKind::Borrow, tokBegin, 0, output);
+    // then expression
+    goto expression$as_then;
 
     // LinearState after_parameters
 after_parameters$with_emit:
@@ -4981,11 +5176,11 @@ LABEL_MAYBE_UNUSED after_function_parameters$as_then:
         tokEnd += 2;
         // pushScope ScopeKind::ReturnType
         scopePosition = pushScope(scopePosition, ScopeKind::ReturnType);
-        // emitToken TokenKind::ReturnType
+        // emitToken TokenKind::ReturnType, sema::VariableKind::Let
         carriedEmitTokenKind = TokenKind::ReturnType;
-        carriedEmitTokenData = 0;
-        // next expression
-        goto expression$with_emit;
+        carriedEmitTokenData = packData1(TokenKind::ReturnType, sema::VariableKind::Let);
+        // next return_type
+        goto return_type$with_emit;
     }
     if (std::string_view(tokEnd, 2) == "=>"sv) {
         tokEnd += 2;

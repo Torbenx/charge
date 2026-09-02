@@ -235,6 +235,8 @@ std::string_view nameString(State state) {
         return "VariableType";
     case State::ReferenceModifier:
         return "ReferenceModifier";
+    case State::AfterReferenceModifier:
+        return "AfterReferenceModifier";
     case State::AfterVariableModifier:
         return "AfterVariableModifier";
     case State::AfterVariableUniqueModifier:
@@ -243,6 +245,12 @@ std::string_view nameString(State state) {
         return "AfterVariableSharedModifier";
     case State::AfterVariableConstModifier:
         return "AfterVariableConstModifier";
+    case State::ReturnType:
+        return "ReturnType";
+    case State::AfterReturnTypeModifier:
+        return "AfterReturnTypeModifier";
+    case State::Borrow:
+        return "Borrow";
     case State::AfterParameters:
         return "AfterParameters";
     case State::FirstParameter:
@@ -413,6 +421,9 @@ std::span<const LexerToken> possibleTokens(State state) {
         static constexpr std::array r = { LexerToken::Unique, LexerToken::Shared, LexerToken::Const, LexerToken::LeftParen };
         return r;
     }
+    case State::AfterReferenceModifier: {
+        return {};
+    }
     case State::AfterVariableModifier: {
         static constexpr std::array r = { LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen };
         return r;
@@ -427,6 +438,18 @@ std::span<const LexerToken> possibleTokens(State state) {
     }
     case State::AfterVariableConstModifier: {
         static constexpr std::array r = { LexerToken::Shared, LexerToken::Unique };
+        return r;
+    }
+    case State::ReturnType: {
+        static constexpr std::array r = { LexerToken::Amp };
+        return r;
+    }
+    case State::AfterReturnTypeModifier: {
+        static constexpr std::array r = { LexerToken::LeftSquare };
+        return r;
+    }
+    case State::Borrow: {
+        static constexpr std::array r = { LexerToken::Unique };
         return r;
     }
     case State::AfterParameters: {
@@ -661,20 +684,36 @@ std::span<const State> thenStates(State state) {
         static constexpr std::array r = { State::Error };
         return r;
     }
+    case State::AfterReferenceModifier: {
+        static constexpr std::array r = { State::AfterReturnTypeModifier, State::AfterVariableModifier, State::Error, State::Expression };
+        return r;
+    }
     case State::AfterVariableModifier: {
         static constexpr std::array r = { State::Error, State::Expression };
         return r;
     }
     case State::AfterVariableUniqueModifier: {
-        static constexpr std::array r = { State::AfterVariableModifier, State::Error, State::Expression };
+        static constexpr std::array r = { State::AfterReferenceModifier, State::AfterReturnTypeModifier, State::AfterVariableModifier, State::Error, State::Expression };
         return r;
     }
     case State::AfterVariableSharedModifier: {
-        static constexpr std::array r = { State::AfterVariableModifier, State::Error, State::Expression };
+        static constexpr std::array r = { State::AfterReferenceModifier, State::AfterReturnTypeModifier, State::AfterVariableModifier, State::Error, State::Expression };
         return r;
     }
     case State::AfterVariableConstModifier: {
-        static constexpr std::array r = { State::AfterVariableModifier, State::Error, State::Expression };
+        static constexpr std::array r = { State::AfterReferenceModifier, State::AfterReturnTypeModifier, State::AfterVariableModifier, State::Error, State::Expression };
+        return r;
+    }
+    case State::ReturnType: {
+        static constexpr std::array r = { State::Error, State::Expression };
+        return r;
+    }
+    case State::AfterReturnTypeModifier: {
+        static constexpr std::array r = { State::Error, State::Expression };
+        return r;
+    }
+    case State::Borrow: {
+        static constexpr std::array r = { State::Error, State::Expression };
         return r;
     }
     case State::AfterParameters: {

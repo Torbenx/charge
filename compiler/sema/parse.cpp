@@ -189,6 +189,26 @@ VariableCategory Generator::visitVariableTypeToken(bool isVar) {
     return VariableCategory(expressionToConstant(genericCategoryToken));
 }
 
+void Generator::dropReturnTypeCategory(VariableKind kind) {
+    if (kind == VariableKind::Generic) {
+        VERIFY(tok->kind() == Token::VariableGenericCategory);
+        advance();
+        visitExpression();
+        dropTopExpression();
+    }
+
+    if (tok->kind() != Token::BorrowList)
+        return;
+    advance();
+    while (tok->kind() != Token::EmptyNode) {
+        VERIFY(tok->kind() == Token::Borrow || tok->kind() == Token::UniqueBorrow);
+        advance();
+        visitExpression();
+        dropTopExpression();
+    }
+    advance();
+}
+
 Generator::VariableTypeAndInitializer Generator::visitVariableTypeAndInitializer(ImplicitParameterMode parameterMode, bool isVar) {
     std::optional<Type> variableType;
     VERIFY(parameterTypes.size() == program->parameters.size()); // TODO: visitVariableExpressionCategory() may have already added parameters
@@ -496,7 +516,13 @@ void Generator::visitFunctionParametersAndBody() {
     } else {
         if (tok->kind() == Token::ReturnType) {
             TokenInfo* arrowToken = tok;
+            VariableKind category = tok->data1<parse::DataKind::VariableKind>();
             advance();
+            // TODO: Support returning references and the borrows they hold.
+            if (category != VariableKind::Let)
+                error<errors::ReferenceReturnTypeNotSupported>();
+            // Recovery: Drop the category and its borrows and return by value
+            dropReturnTypeCategory(category);
             if (tok->kind() == Token::IdentifierExpr && tok->data1<parse::DataKind::Word>() == parse::words["return_type"]) {
                 advance();
                 VERIFY(tok->kind() == Token::FunctionBody);

@@ -315,6 +315,7 @@ struct Generator : Util {
         bool hasInitializer;
     };
     VariableCategory visitVariableTypeToken(bool isVar);
+    void dropReturnTypeCategory(VariableKind kind);
     VariableTypeAndInitializer visitVariableTypeAndInitializer(ImplicitParameterMode parameterMode, bool isVar);
     struct VariableDeclaration : VariableTypeAndInitializer {
         TokenInfo* declaringToken = nullptr;
