@@ -6645,3 +6645,4 @@ SourceLocation Parser::location(sema::Context& context) const {
 #include "lexer_hybrid.cpp"
 #include "lexer_switchAndTable.cpp"
 #include "lexer_expr1state.cpp"
+#include "lexer_expr2state.cpp"
