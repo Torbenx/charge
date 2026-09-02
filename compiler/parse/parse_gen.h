@@ -123,6 +123,7 @@ enum class LexerToken : uint8_t {
     LessEqualGreater, // <=>
     MinusGreater, // ->
     CharacterLiteral,
+    StringLiteral,
     NumericLiteral,
     Identifier,
     Assert, // assert

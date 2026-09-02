@@ -9,6 +9,16 @@ fn test(): {
 /* expect-token IdentifierExpr */ a;
 /* expect-token NumericLiteralExpr */ 1;
 /* expect-token CharacterLiteralExpr */ 'a';
+/* expect-token StringLiteralExpr */ "";
+/* expect-token StringLiteralExpr */ "abc";
+/* expect-token StringLiteralExpr */ " \t is a tab escape, not a tab ";
+/* expect-token StringLiteralExpr */ "'a' is not a character literal";
+/* expect-token StringLiteralExpr */ "// not a comment /* either */";
+/* expect-token StringLiteralExpr */ "an escaped quote \" does not end it";
+/* expect-token StringLiteralExpr */ "an escaped backslash does \\";
+/* expect-token StringLiteralExpr; expect-token ExpressionStmt; expect-token StringLiteralExpr */ "two"; "strings";
+/* expect-token IdentifierExpr; expect-token CallExpr; expect-token CallArgument; expect-token StringLiteralExpr; expect-token EmptyNode */ a("s");
+/* expect-token StringLiteralExpr; expect-token AdditionExpr; expect-token StringLiteralExpr */ "a" + "b";
 
 /* expect-token ImplicitSelfReference; expect-token MemberAccessExpr */ .a;
 /* expect-token ImplicitSelfReference; expect-token MemberAccessExpr */ ./**/a;

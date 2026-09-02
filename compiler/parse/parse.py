@@ -116,6 +116,9 @@ def characterLiteralCppName():
 def numericLiteralCppName():
     return "NumericLiteral"
 
+def stringLiteralCppName():
+    return "StringLiteral"
+
 indentationStep = ' ' * 4
 
 currentDir = pathlib.Path(__file__).parent.resolve()
@@ -168,6 +171,12 @@ class NumericLiteralCase(Case):
         super().__init__(instructions)
     def cppName(self):
         return numericLiteralCppName()
+
+class StringLiteralCase(Case):
+    def __init__(self, instructions):
+        super().__init__(instructions)
+    def cppName(self):
+        return stringLiteralCppName()
 
 class ThenCase(Case):
     def __init__(self, instructions):
@@ -387,6 +396,12 @@ class State:
                 return c
         return None
 
+    def stringLiteralCase(self) -> StringLiteralCase | None:
+        for c in self.cases:
+            if type(c) is StringLiteralCase:
+                return c
+        return None
+
     def thenCase(self) -> ThenCase | None:
         for c in self.cases:
             if type(c) is ThenCase:
@@ -518,6 +533,10 @@ class Parser:
                 self.advanceLine()
                 instructions = self.parseInstructions()
                 cases.append(NumericLiteralCase(instructions))
+            elif caseKind == "stringLiteral":
+                self.advanceLine()
+                instructions = self.parseInstructions()
+                cases.append(StringLiteralCase(instructions))
             elif caseKind == "then":
                 self.advanceLine()
                 instructions = self.parseInstructions()
@@ -948,6 +967,18 @@ def generateSwitchState(state):
         recurse(state, lambda s: s.characterLiteralCase(), lambda case: generateCaseBody(case))
     line("}")
 
+    # string literal
+    line("case '\"': {")
+    with indent():
+        line("tokEnd = skipToEndOfStringLiteral(tokEnd);")
+        line("if (tokEnd[0] != '\"') {")
+        with indent():
+            line("goto error$as_then;")
+        line("}")
+        line("tokEnd += 1;")
+        recurse(state, lambda s: s.stringLiteralCase(), lambda case: generateCaseBody(case))
+    line("}")
+
     # end
     line ("case '\\0':")
     with indent():
@@ -1189,7 +1220,7 @@ generatedLines = []
 allCases  = [PunctuationCase(p, [LexTokenInstruction()]) for p in punctuations]
 allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in keywords]
 allCases += [KeywordCase(k, [LexTokenInstruction()]) for k in specialIdentifiers]
-allCases += [IdentifierCase([LexTokenInstruction()]), CharacterLiteralCase([LexTokenInstruction()]), NumericLiteralCase([LexTokenInstruction()])]
+allCases += [IdentifierCase([LexTokenInstruction()]), CharacterLiteralCase([LexTokenInstruction()]), NumericLiteralCase([LexTokenInstruction()]), StringLiteralCase([LexTokenInstruction()])]
 allCases += [EndCase([LexTokenInstruction()])]
 lexState = State("SwitchState", "lex", "error", [], allCases)
 lexState.origins = [NextInstruction("blub")]
@@ -1266,6 +1297,7 @@ with indent():
     for punc in punctuationTokens:
         line(punctuationCppName(punc) + ", // " + punc)
     line(characterLiteralCppName() + ",")
+    line(stringLiteralCppName() + ",")
     line(numericLiteralCppName() + ",")
     line(identifierCppName() + ",")
     for keyword in keywords + specialIdentifiers:
@@ -1353,6 +1385,9 @@ with indent():
     line("case LexerToken::" + characterLiteralCppName() + ":")
     with indent():
         line("return \"" + characterLiteralCppName() + "\";")
+    line("case LexerToken::" + stringLiteralCppName() + ":")
+    with indent():
+        line("return \"" + stringLiteralCppName() + "\";")
     line("case LexerToken::" + numericLiteralCppName() + ":")
     with indent():
         line("return \"" + numericLiteralCppName() + "\";")

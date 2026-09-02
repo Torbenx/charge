@@ -48,6 +48,9 @@ SwitchState expression() then error
     characterLiteral
         emitToken TokenKind::CharacterLiteralExpr
         next after_expression
+    stringLiteral
+        emitToken TokenKind::StringLiteralExpr
+        next after_expression
     numericLiteral
         emitToken TokenKind::NumericLiteralExpr
         next after_expression

@@ -298,6 +298,23 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
     return position;
 };
 
+static constexpr bool isStringLiteralCharacter(uint8_t c) {
+    return c >= 0x20 && c < 0x7f;
+}
+
+[[nodiscard]] static const char* skipToEndOfStringLiteral(const char* position) {
+    position += 1;
+    while (isStringLiteralCharacter(position[0])) {
+        if (position[0] == '"')
+            return position;
+        // A backslash escapes the next character, so \" does not terminate the literal
+        if (position[0] == '\\' && isStringLiteralCharacter(position[1]))
+            position += 1;
+        position += 1;
+    }
+    return position;
+};
+
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, sema::Context& output) {
     output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }

@@ -298,6 +298,23 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
     return position;
 };
 
+static constexpr bool isStringLiteralCharacter(uint8_t c) {
+    return c >= 0x20 && c < 0x7f;
+}
+
+[[nodiscard]] static const char* skipToEndOfStringLiteral(const char* position) {
+    position += 1;
+    while (isStringLiteralCharacter(position[0])) {
+        if (position[0] == '"')
+            return position;
+        // A backslash escapes the next character, so \" does not terminate the literal
+        if (position[0] == '\\' && isStringLiteralCharacter(position[1]))
+            position += 1;
+        position += 1;
+    }
+    return position;
+};
+
 NO_INLINE static void emitWhitespace(WhitespaceKind kind, const char* begin, const char* end, sema::Context& output) {
     output.tokenBuffer.whitespace.push_back({ { kind, locationInCurrentLine(begin, output) }, (uint32_t)(end - begin) });
 }
@@ -729,6 +746,15 @@ lex$retry:
         tokEnd += 1;
         // lexToken
         return LexerToken::CharacterLiteral;
+    }
+    case '"': {
+        tokEnd = skipToEndOfStringLiteral(tokEnd);
+        if (tokEnd[0] != '"') {
+            goto error$as_then;
+        }
+        tokEnd += 1;
+        // lexToken
+        return LexerToken::StringLiteral;
     }
     case '\0':
         // lexToken
@@ -1446,6 +1472,18 @@ LABEL_MAYBE_UNUSED expression$as_then:
         tokEnd += 1;
         // emitToken TokenKind::CharacterLiteralExpr
         carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
+        carriedEmitTokenData = 0;
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    case '"': {
+        tokEnd = skipToEndOfStringLiteral(tokEnd);
+        if (tokEnd[0] != '"') {
+            goto error$as_then;
+        }
+        tokEnd += 1;
+        // emitToken TokenKind::StringLiteralExpr
+        carriedEmitTokenKind = TokenKind::StringLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;
@@ -2483,6 +2521,15 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
     case '\'': {
         tokEnd = skipToEndOfCharacterLiteral(tokEnd);
         VERIFY(tokEnd[0] == '\'');
+        tokEnd += 1;
+        // -> error
+        goto error$as_then;
+    }
+    case '"': {
+        tokEnd = skipToEndOfStringLiteral(tokEnd);
+        if (tokEnd[0] != '"') {
+            goto error$as_then;
+        }
         tokEnd += 1;
         // -> error
         goto error$as_then;
@@ -3623,6 +3670,21 @@ LABEL_MAYBE_UNUSED statement$as_then:
         // -> expression
         // emitToken TokenKind::CharacterLiteralExpr
         carriedEmitTokenKind = TokenKind::CharacterLiteralExpr;
+        carriedEmitTokenData = 0;
+        // next after_expression
+        goto after_expression$with_emit;
+    }
+    case '"': {
+        tokEnd = skipToEndOfStringLiteral(tokEnd);
+        if (tokEnd[0] != '"') {
+            goto error$as_then;
+        }
+        tokEnd += 1;
+        // pushScope ScopeKind::LeftExpr
+        scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
+        // -> expression
+        // emitToken TokenKind::StringLiteralExpr
+        carriedEmitTokenKind = TokenKind::StringLiteralExpr;
         carriedEmitTokenData = 0;
         // next after_expression
         goto after_expression$with_emit;

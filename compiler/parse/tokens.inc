@@ -28,6 +28,7 @@ TOKEN(EOS, EOS, None, None)
 // ------ expressions ------
 MARKER(ExpressionsBegin)
 TOKEN(CharacterLiteralExpr, CharacterLiteral, None, None)
+TOKEN(StringLiteralExpr, StringLiteral, None, None)
 TOKEN(NumericLiteralExpr, NumericLiteral, None, None)
 TOKEN(IdentifierExpr, Identifier, Word, Expression)
 TOKEN(ParenthesizedExpr, LeftParen, CallArguments, Expression)

@@ -29,11 +29,19 @@ struct RecoveryElement {
 
 static std::string_view exampleString(LexerToken tok) {
     std::string_view spelling = fixedSpelling(tok);
-    if (spelling.empty()) {
-        if (tok == LexerToken::Identifier)
-            return "x";
-        else
-            VERIFY_NOT_REACHED();
+    if (!spelling.empty())
+        return spelling;
+    switch (tok) {
+    case LexerToken::Identifier:
+        return "x";
+    case LexerToken::CharacterLiteral:
+        return "'x'";
+    case LexerToken::NumericLiteral:
+        return "0";
+    case LexerToken::StringLiteral:
+        return "\"\"";
+    default:
+        VERIFY_NOT_REACHED();
     }
     return spelling;
 }

@@ -78,6 +78,28 @@ TEST(Parse, LexEOF) {
     EXPECT_EQ(lexToken(source), LexerToken::EOS);
 }
 
+TEST(Parse, StringLiteral) {
+    auto parse = [](const char* source) {
+        SimpleParser parser(source);
+        SimpleOutput output;
+        parser.parse(output);
+        return parser;
+    };
+
+    EXPECT_TRUE(parse("static a = \"\";").done());
+    EXPECT_TRUE(parse("static a = \"abc\";").done());
+    EXPECT_TRUE(parse("static a = \"an escaped quote \\\" does not end it\";").done());
+    EXPECT_TRUE(parse("static a = \"an escaped backslash does \\\\\";").done());
+
+    // Anything outside of the printable ascii range ends the literal and is an error
+    EXPECT_TRUE(parse("static a = \"unterminated\n;").error());
+    EXPECT_TRUE(parse("static a = \"unterminated").error());
+    EXPECT_TRUE(parse("static a = \"a\tb\";").error());
+    EXPECT_TRUE(parse("static a = \"a\x80z\";").error());
+    // The backslash cannot escape a character that may not appear in the literal
+    EXPECT_TRUE(parse("static a = \"trailing backslash \\\n\";").error());
+}
+
 TEST(Parse, TokenCount) {
     {
         SimpleParser parser("static a = a;");
